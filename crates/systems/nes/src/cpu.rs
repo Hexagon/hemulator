@@ -90,6 +90,37 @@ impl NesCpu {
     }
 
     #[inline]
+    fn addr_zero_page_y(&mut self) -> u16 {
+        let zp = self.fetch_u8();
+        zp.wrapping_add(self.y) as u16
+    }
+
+    #[inline]
+    fn addr_absolute_y(&mut self) -> u16 {
+        let base = self.fetch_u16();
+        base.wrapping_add(self.y as u16)
+    }
+
+    /// (Indirect,X) addressing: take zero-page operand, add X, then read 16-bit address from that page.
+    #[inline]
+    fn addr_indirect_x(&mut self) -> u16 {
+        let zp = self.fetch_u8().wrapping_add(self.x);
+        let lo = self.read(zp as u16) as u16;
+        let hi = self.read(zp.wrapping_add(1) as u16) as u16;
+        (hi << 8) | lo
+    }
+
+    /// (Indirect),Y addressing: take zero-page operand, read 16-bit base from page, add Y.
+    #[inline]
+    fn addr_indirect_y(&mut self) -> u16 {
+        let zp = self.fetch_u8();
+        let lo = self.read(zp as u16) as u16;
+        let hi = self.read(zp.wrapping_add(1) as u16) as u16;
+        let base = (hi << 8) | lo;
+        base.wrapping_add(self.y as u16)
+    }
+
+    #[inline]
     fn push_u8(&mut self, v: u8) {
         let addr = 0x0100u16.wrapping_add(self.sp as u16);
         self.write(addr, v);
@@ -179,6 +210,15 @@ impl NesCpu {
                 self.cycles += 3;
                 3
             }
+            0xB5 => {
+                // LDA zero page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 4;
+                4
+            }
             0x65 => {
                 // ADC zero page
                 let zp = self.fetch_u8() as u16;
@@ -209,6 +249,42 @@ impl NesCpu {
                 self.set_zero_and_negative(self.a);
                 self.cycles += 4;
                 4
+            }
+            0xBD => {
+                // LDA absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 4;
+                4
+            }
+            0xB9 => {
+                // LDA absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 4;
+                4
+            }
+            0xA1 => {
+                // LDA (indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0xB1 => {
+                // LDA (indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 5;
+                5
             }
             0x6D => {
                 // ADC absolute
@@ -245,6 +321,41 @@ impl NesCpu {
                 self.write(addr, self.a);
                 self.cycles += 4;
                 4
+            }
+            0x95 => {
+                // STA zero page,X
+                let addr = self.addr_zero_page_x();
+                self.write(addr, self.a);
+                self.cycles += 4;
+                4
+            }
+            0x9D => {
+                // STA absolute,X
+                let addr = self.addr_absolute_x();
+                self.write(addr, self.a);
+                self.cycles += 5;
+                5
+            }
+            0x99 => {
+                // STA absolute,Y
+                let addr = self.addr_absolute_y();
+                self.write(addr, self.a);
+                self.cycles += 5;
+                5
+            }
+            0x81 => {
+                // STA (indirect,X)
+                let addr = self.addr_indirect_x();
+                self.write(addr, self.a);
+                self.cycles += 6;
+                6
+            }
+            0x91 => {
+                // STA (indirect),Y
+                let addr = self.addr_indirect_y();
+                self.write(addr, self.a);
+                self.cycles += 6;
+                6
             }
             0xAA => {
                 // TAX
@@ -450,6 +561,32 @@ mod tests {
             assert_eq!(cpu.a, 0x42);
             assert_eq!(cpu.step(), 3); // STA stores A into $0010
             assert_eq!(cpu.read(0x0010), 0x42);
+        }
+
+        #[test]
+        fn lda_indirect_x_and_indirect_y() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // set up pointer table in zero page: at $20 store pointer to $2000
+            cpu.write(0x0020, 0x00);
+            cpu.write(0x0021, 0x20);
+            // place value at $2000
+            cpu.write(0x2000, 0xAB);
+            // place operand for (indirect,X) at $10 such that (10 + X) -> 20
+            // set X = 0x06, operand = 0x0A -> 0x0A + 0x06 = 0x10 -> pointer at 0x10
+            cpu.write(0x0010, 0x00);
+            cpu.write(0x0011, 0x20);
+            // test (indirect,X): set X then LDA (zp,X)
+            cpu.x = 6;
+            cpu.load_program(0x8000, &[0xA1, 0x0A]);
+            assert_eq!(cpu.step(), 6);
+            assert_eq!(cpu.a, 0xAB);
+
+            // test (indirect),Y: pointer at $20 points to 0x2000, Y = 0
+            cpu.load_program(0x8000, &[0xB1, 0x20]);
+            cpu.y = 0;
+            assert_eq!(cpu.step(), 5);
+            assert_eq!(cpu.a, 0xAB);
         }
 
         #[test]

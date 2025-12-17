@@ -24,6 +24,9 @@ fn main() -> Result<()> {
     match args.system.as_str() {
         "nes" => {
             let mut sys = emu_nes::NesSystem::default();
+            if let Some(rom) = args.rom.as_ref() {
+                sys.load_rom_from_path(rom)?;
+            }
             let frame = sys.step_frame()?;
             println!("Produced frame {}x{}", frame.width, frame.height);
             let state = sys.save_state();
