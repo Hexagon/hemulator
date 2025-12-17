@@ -357,6 +357,126 @@ impl NesCpu {
                 self.cycles += 2;
                 2
             }
+            0x2A | 0x26 | 0x2E => {
+                // ROL accumulator / ROL zp / ROL abs
+                if op == 0x2A {
+                    let old = self.a;
+                    let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                    let carry_out = (old & 0x80) != 0;
+                    let res = ((old << 1) | carry_in) as u8;
+                    self.a = res;
+                    if carry_out { self.status |= 0x01 } else { self.status &= !0x01 }
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 2;
+                    2
+                } else {
+                    let addr = if op == 0x26 { self.fetch_u8() as u16 } else { self.fetch_u16() };
+                    let old = self.read(addr);
+                    let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                    let carry_out = (old & 0x80) != 0;
+                    let res = ((old << 1) | carry_in) as u8;
+                    self.write(addr, res);
+                    if carry_out { self.status |= 0x01 } else { self.status &= !0x01 }
+                    self.set_zero_and_negative(res);
+                    self.cycles += if op == 0x26 { 5 } else { 6 };
+                    if op == 0x26 { 5 } else { 6 }
+                }
+            }
+            0x6A | 0x66 | 0x6E => {
+                // ROR accumulator / ROR zp / ROR abs
+                if op == 0x6A {
+                    let old = self.a;
+                    let carry_in = if (self.status & 0x01) != 0 { 0x80 } else { 0 };
+                    let carry_out = (old & 0x01) != 0;
+                    let res = (old >> 1) | carry_in;
+                    self.a = res;
+                    if carry_out { self.status |= 0x01 } else { self.status &= !0x01 }
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 2;
+                    2
+                } else {
+                    let addr = if op == 0x66 { self.fetch_u8() as u16 } else { self.fetch_u16() };
+                    let old = self.read(addr);
+                    let carry_in = if (self.status & 0x01) != 0 { 0x80 } else { 0 };
+                    let carry_out = (old & 0x01) != 0;
+                    let res = (old >> 1) | carry_in;
+                    self.write(addr, res);
+                    if carry_out { self.status |= 0x01 } else { self.status &= !0x01 }
+                    self.set_zero_and_negative(res);
+                    self.cycles += if op == 0x66 { 5 } else { 6 };
+                    if op == 0x66 { 5 } else { 6 }
+                }
+            }
+            0xE9 | 0xE5 | 0xED | 0xE1 | 0xF1 => {
+                // SBC variants (immediate, zp, abs, (ind,X), (ind),Y)
+                // Implement using ADC on one's complement: A = A - M - (1 - C)
+                let m = match op {
+                    0xE9 => { let v = self.fetch_u8(); v }
+                    0xE5 => { let zp = self.fetch_u8() as u16; self.read(zp) }
+                    0xED => { let a = self.fetch_u16(); self.read(a) }
+                    0xE1 => { let a = self.addr_indirect_x(); self.read(a) }
+                    0xF1 => { let a = self.addr_indirect_y(); self.read(a) }
+                    _ => 0
+                } as i16;
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = (m ^ 0xFF) as i16; // one's complement
+                let sum = (self.a as i16) + value + (carry as i16);
+                let result = (sum & 0xFF) as u8;
+                // set carry if result didn't borrow (i.e., sum >= 0)
+                if sum >= 0 { self.status |= 0x01 } else { self.status &= !0x01 }
+                // overflow detection similar to ADC
+                if (((!(self.a ^ (m as u8)) ) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 2;
+                2
+            }
+            0xE0 | 0xE4 | 0xEC => {
+                // CPX immediate/zp/abs
+                let val = if op == 0xE0 { let v = self.fetch_u8(); v } else if op == 0xE4 { let zp = self.fetch_u8() as u16; self.read(zp) } else { let a = self.fetch_u16(); self.read(a) };
+                let res = self.x.wrapping_sub(val);
+                if (self.x as u16) >= (val as u16) { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(res);
+                self.cycles += if op == 0xE0 { 2 } else if op == 0xE4 { 3 } else { 4 };
+                if op == 0xE0 { 2 } else if op == 0xE4 { 3 } else { 4 }
+            }
+            0xC0 | 0xC4 | 0xCC => {
+                // CPY immediate/zp/abs
+                let val = if op == 0xC0 { let v = self.fetch_u8(); v } else if op == 0xC4 { let zp = self.fetch_u8() as u16; self.read(zp) } else { let a = self.fetch_u16(); self.read(a) };
+                let res = self.y.wrapping_sub(val);
+                if (self.y as u16) >= (val as u16) { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(res);
+                self.cycles += if op == 0xC0 { 2 } else if op == 0xC4 { 3 } else { 4 };
+                if op == 0xC0 { 2 } else if op == 0xC4 { 3 } else { 4 }
+            }
+            0x90 | 0xB0 | 0x70 | 0x50 | 0x10 | 0x30 | 0xD0 | 0xF0 => {
+                // Branches: BCC(0x90), BCS(0xB0), BMI(0x30), BPL(0x10), BVC(0x50), BVS(0x70), BNE(0xD0), BEQ(0xF0)
+                let offset = self.fetch_u8() as i8;
+                let cond = match op {
+                    0x90 => (self.status & 0x01) == 0, // BCC
+                    0xB0 => (self.status & 0x01) != 0, // BCS
+                    0x30 => (self.status & 0x80) != 0, // BMI
+                    0x10 => (self.status & 0x80) == 0, // BPL
+                    0x50 => (self.status & 0x40) == 0, // BVC
+                    0x70 => (self.status & 0x40) != 0, // BVS
+                    0xD0 => (self.status & 0x02) == 0, // BNE
+                    0xF0 => (self.status & 0x02) != 0, // BEQ
+                    _ => false
+                };
+                if cond {
+                    let rel = offset as i16 as i32;
+                    self.pc = ((self.pc as i32).wrapping_add(rel)) as u16;
+                    self.cycles += 3;
+                    3
+                } else {
+                    self.cycles += 2;
+                    2
+                }
+            }
             0x46 | 0x4E => {
                 // LSR zp or abs
                 let addr = if op == 0x46 { self.fetch_u8() as u16 } else { self.fetch_u16() };
@@ -822,6 +942,51 @@ mod tests {
             cpu.pc = 0x8100;
             cpu.step();
             assert_eq!(cpu.pc, 0x1234);
+        }
+
+        #[test]
+        fn rol_ror_and_sbc_cpx_cpy_branches() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // ROL accumulator
+            cpu.a = 0x80;
+            cpu.load_program(0x8000, &[0x2A]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x00);
+            assert_eq!(cpu.status & 0x01, 0x01);
+
+            // ROR accumulator
+            cpu.a = 0x01;
+            cpu.status &= !0x01;
+            cpu.load_program(0x8000, &[0x6A]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x00);
+            assert_eq!(cpu.status & 0x01, 0x01);
+
+            // SBC immediate: 0x10 - 0x01 = 0x0F
+            cpu.a = 0x10;
+            cpu.status |= 0x01; // carry set
+            cpu.load_program(0x8000, &[0xE9, 0x01]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x0F);
+
+            // CPX immediate
+            cpu.x = 0x05;
+            cpu.load_program(0x8000, &[0xE0, 0x05]);
+            cpu.step();
+            assert_eq!(cpu.status & 0x02, 0x02);
+
+            // CPY immediate
+            cpu.y = 0x03;
+            cpu.load_program(0x8000, &[0xC0, 0x03]);
+            cpu.step();
+            assert_eq!(cpu.status & 0x02, 0x02);
+
+            // Branch BCS taken
+            cpu.status |= 0x01;
+            cpu.load_program(0x8000, &[0xB0, 0x01, 0xEA, 0xEA]);
+            cpu.step();
+            assert_eq!(cpu.step(), 2); // land on the last NOP
         }
 
         #[test]
