@@ -120,6 +120,15 @@ impl NesCpu {
         base.wrapping_add(self.y as u16)
     }
 
+    /// Read a 16-bit pointer for JMP (indirect) with the 6502 page-wrapping bug.
+    #[inline]
+    fn read_indirect_u16_bug(&self, addr: u16) -> u16 {
+        let lo = self.read(addr) as u16;
+        let hi_addr = (addr & 0xFF00) | ((addr.wrapping_add(1)) & 0x00FF);
+        let hi = self.read(hi_addr) as u16;
+        (hi << 8) | lo
+    }
+
     #[inline]
     fn push_u8(&mut self, v: u8) {
         let addr = 0x0100u16.wrapping_add(self.sp as u16);
@@ -200,6 +209,165 @@ impl NesCpu {
                 self.set_zero_and_negative(self.a);
                 self.cycles += 2;
                 2
+            }
+            0x29 | 0x25 | 0x2D | 0x21 | 0x31 | 0x35 | 0x39 => {
+                // AND variants: immediate/zero/abs/(ind,X)/(ind),Y/zero,X/abs,Y
+                // For simplicity map common encodings to immediate-like behavior where fetch is used.
+                // We'll handle immediate (0x29) here; other encodings should call appropriate addr helpers.
+                if op == 0x29 {
+                    let val = self.fetch_u8();
+                    self.a &= val;
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 2;
+                    2
+                } else {
+                    // handle via reading address depending on opcode
+                    let val = match op {
+                        0x25 => { let zp = self.fetch_u8() as u16; self.read(zp) },
+                        0x2D => { let a = self.fetch_u16(); self.read(a) }
+                        0x21 => { let a = self.addr_indirect_x(); self.read(a) }
+                        0x31 => { let a = self.addr_indirect_y(); self.read(a) }
+                        0x35 => { let a = self.addr_zero_page_x(); self.read(a) }
+                        0x39 => { let a = self.addr_absolute_y(); self.read(a) }
+                        _ => 0,
+                    };
+                    self.a &= val;
+                    self.set_zero_and_negative(self.a);
+                    // cycles conservative
+                    self.cycles += 4;
+                    4
+                }
+            }
+            0x09 | 0x05 | 0x0D | 0x01 | 0x11 | 0x15 | 0x19 => {
+                // ORA variants
+                if op == 0x09 {
+                    let val = self.fetch_u8();
+                    self.a |= val;
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 2;
+                    2
+                } else {
+                    let val = match op {
+                        0x05 => { let zp = self.fetch_u8() as u16; self.read(zp) },
+                        0x0D => { let a = self.fetch_u16(); self.read(a) }
+                        0x01 => { let a = self.addr_indirect_x(); self.read(a) }
+                        0x11 => { let a = self.addr_indirect_y(); self.read(a) }
+                        0x15 => { let a = self.addr_zero_page_x(); self.read(a) }
+                        0x19 => { let a = self.addr_absolute_y(); self.read(a) }
+                        _ => 0,
+                    };
+                    self.a |= val;
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 4;
+                    4
+                }
+            }
+            0x49 | 0x45 | 0x4D | 0x41 | 0x51 | 0x55 | 0x59 => {
+                // EOR variants
+                if op == 0x49 {
+                    let val = self.fetch_u8();
+                    self.a ^= val;
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 2;
+                    2
+                } else {
+                    let val = match op {
+                        0x45 => { let zp = self.fetch_u8() as u16; self.read(zp) },
+                        0x4D => { let a = self.fetch_u16(); self.read(a) }
+                        0x41 => { let a = self.addr_indirect_x(); self.read(a) }
+                        0x51 => { let a = self.addr_indirect_y(); self.read(a) }
+                        0x55 => { let a = self.addr_zero_page_x(); self.read(a) }
+                        0x59 => { let a = self.addr_absolute_y(); self.read(a) }
+                        _ => 0,
+                    };
+                    self.a ^= val;
+                    self.set_zero_and_negative(self.a);
+                    self.cycles += 4;
+                    4
+                }
+            }
+            0xC9 | 0xC5 | 0xCD | 0xC1 | 0xD1 => {
+                // CMP variants (A - M)
+                let val = match op {
+                    0xC9 => { let v = self.fetch_u8(); v }
+                    0xC5 => { let zp = self.fetch_u8() as u16; self.read(zp) },
+                    0xCD => { let a = self.fetch_u16(); self.read(a) }
+                    0xC1 => { let a = self.addr_indirect_x(); self.read(a) }
+                    0xD1 => { let a = self.addr_indirect_y(); self.read(a) }
+                    _ => 0,
+                };
+                let res = (self.a as i16).wrapping_sub(val as i16) as u8;
+                // carry set if A >= M
+                if (self.a as u16) >= (val as u16) {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.set_zero_and_negative(res);
+                self.cycles += 2;
+                2
+            }
+            0x24 | 0x2C => {
+                // BIT zp/abs
+                let val = if op == 0x24 {
+                    let zp = self.fetch_u8() as u16;
+                    self.read(zp)
+                } else {
+                    let a = self.fetch_u16(); self.read(a)
+                };
+                let res = self.a & val;
+                if res == 0 { self.status |= 0x02 } else { self.status &= !0x02 }
+                // set V to bit 6 of M, N to bit 7
+                if (val & 0x40) != 0 { self.status |= 0x40 } else { self.status &= !0x40 }
+                if (val & 0x80) != 0 { self.status |= 0x80 } else { self.status &= !0x80 }
+                self.cycles += if op == 0x24 { 3 } else { 4 };
+                if op == 0x24 { 3 } else { 4 }
+            }
+            0x0A => {
+                // ASL accumulator
+                let old = self.a;
+                let carry = (old & 0x80) != 0;
+                let res = old << 1;
+                self.a = res;
+                if carry { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(self.a);
+                self.cycles += 2;
+                2
+            }
+            0x06 | 0x0E => {
+                // ASL zp or abs
+                let addr = if op == 0x06 { self.fetch_u8() as u16 } else { self.fetch_u16() };
+                let old = self.read(addr);
+                let carry = (old & 0x80) != 0;
+                let res = old << 1;
+                self.write(addr, res);
+                if carry { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(res);
+                self.cycles += if op == 0x06 { 5 } else { 6 };
+                if op == 0x06 { 5 } else { 6 }
+            }
+            0x4A => {
+                // LSR accumulator
+                let old = self.a;
+                let carry = (old & 0x01) != 0;
+                let res = old >> 1;
+                self.a = res;
+                if carry { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(self.a);
+                self.cycles += 2;
+                2
+            }
+            0x46 | 0x4E => {
+                // LSR zp or abs
+                let addr = if op == 0x46 { self.fetch_u8() as u16 } else { self.fetch_u16() };
+                let old = self.read(addr);
+                let carry = (old & 0x01) != 0;
+                let res = old >> 1;
+                self.write(addr, res);
+                if carry { self.status |= 0x01 } else { self.status &= !0x01 }
+                self.set_zero_and_negative(res);
+                self.cycles += if op == 0x46 { 5 } else { 6 };
+                if op == 0x46 { 5 } else { 6 }
             }
             0xA5 => {
                 // LDA zero page
@@ -391,6 +559,14 @@ impl NesCpu {
                 self.pc = addr;
                 self.cycles += 3;
                 3
+            }
+            0x6C => {
+                // JMP indirect (with 6502 page-wrapping bug)
+                let ptr = self.fetch_u16();
+                let addr = self.read_indirect_u16_bug(ptr);
+                self.pc = addr;
+                self.cycles += 5;
+                5
             }
             0xF0 => {
                 // BEQ relative
@@ -587,6 +763,65 @@ mod tests {
             cpu.y = 0;
             assert_eq!(cpu.step(), 5);
             assert_eq!(cpu.a, 0xAB);
+        }
+
+        #[test]
+        fn and_ora_eor_and_cmp_asl_lsr() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // AND immediate
+            cpu.a = 0xF0;
+            cpu.load_program(0x8000, &[0x29, 0x0F]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x00);
+            assert_eq!(cpu.status & 0x02, 0x02); // zero
+
+            // ORA immediate
+            cpu.a = 0x0F;
+            cpu.load_program(0x8000, &[0x09, 0xF0]);
+            cpu.step();
+            assert_eq!(cpu.a, 0xFF);
+
+            // EOR immediate
+            cpu.a = 0xFF;
+            cpu.load_program(0x8000, &[0x49, 0x0F]);
+            cpu.step();
+            assert_eq!(cpu.a, 0xF0);
+
+            // CMP immediate (A >= M)
+            cpu.a = 0x10;
+            cpu.load_program(0x8000, &[0xC9, 0x0F]);
+            cpu.step();
+            assert_eq!(cpu.status & 0x01, 0x01);
+
+            // ASL accumulator
+            cpu.a = 0x80;
+            cpu.load_program(0x8000, &[0x0A]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x00);
+            assert_eq!(cpu.status & 0x01, 0x01); // carry set
+
+            // LSR accumulator
+            cpu.a = 0x01;
+            cpu.load_program(0x8000, &[0x4A]);
+            cpu.step();
+            assert_eq!(cpu.a, 0x00);
+            assert_eq!(cpu.status & 0x01, 0x01);
+        }
+
+        #[test]
+        fn jmp_indirect_page_wrap_bug() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // program: JMP ($80FF) placed at 0x8100 so it doesn't overwrite the pointer bytes
+            cpu.load_program(0x8100, &[0x6C, 0xFF, 0x80]);
+            // place indirect pointer at 0x80FF -> low byte at 0x80FF, high byte should wrap to 0x8000
+            cpu.write(0x80FF, 0x34);
+            cpu.write(0x8000, 0x12); // wrapped high byte
+            // ensure PC points to our program start
+            cpu.pc = 0x8100;
+            cpu.step();
+            assert_eq!(cpu.pc, 0x1234);
         }
 
         #[test]
