@@ -63,6 +63,20 @@ impl NesCpu {
         (hi << 8) | lo
     }
 
+    #[inline]
+    fn fetch_u8(&mut self) -> u8 {
+        let v = self.read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+        v
+    }
+
+    #[inline]
+    fn fetch_u16(&mut self) -> u16 {
+        let lo = self.fetch_u8() as u16;
+        let hi = self.fetch_u8() as u16;
+        (hi << 8) | lo
+    }
+
     fn set_zero_and_negative(&mut self, v: u8) {
         if v == 0 {
             self.status |= 0x02; // Z
@@ -78,8 +92,7 @@ impl NesCpu {
 
     /// Execute one instruction and return cycles used.
     pub fn step(&mut self) -> u32 {
-        let op = self.read(self.pc);
-        self.pc = self.pc.wrapping_add(1);
+        let op = self.fetch_u8();
         match op {
             0xEA => {
                 // NOP
@@ -88,12 +101,78 @@ impl NesCpu {
             }
             0xA9 => {
                 // LDA immediate
-                let val = self.read(self.pc);
-                self.pc = self.pc.wrapping_add(1);
+                let val = self.fetch_u8();
                 self.a = val;
                 self.set_zero_and_negative(self.a);
                 self.cycles += 2;
                 2
+            }
+            0xA5 => {
+                // LDA zero page
+                let zp = self.fetch_u8() as u16;
+                let val = self.read(zp);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 3;
+                3
+            }
+            0xAD => {
+                // LDA absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                self.a = val;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 4;
+                4
+            }
+            0x85 => {
+                // STA zero page
+                let zp = self.fetch_u8() as u16;
+                self.write(zp, self.a);
+                self.cycles += 3;
+                3
+            }
+            0x8D => {
+                // STA absolute
+                let addr = self.fetch_u16();
+                self.write(addr, self.a);
+                self.cycles += 4;
+                4
+            }
+            0xAA => {
+                // TAX
+                self.x = self.a;
+                self.set_zero_and_negative(self.x);
+                self.cycles += 2;
+                2
+            }
+            0x8A => {
+                // TXA
+                self.a = self.x;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 2;
+                2
+            }
+            0xE8 => {
+                // INX
+                self.x = self.x.wrapping_add(1);
+                self.set_zero_and_negative(self.x);
+                self.cycles += 2;
+                2
+            }
+            0xCA => {
+                // DEX
+                self.x = self.x.wrapping_sub(1);
+                self.set_zero_and_negative(self.x);
+                self.cycles += 2;
+                2
+            }
+            0x4C => {
+                // JMP absolute
+                let addr = self.fetch_u16();
+                self.pc = addr;
+                self.cycles += 3;
+                3
             }
             0x00 => {
                 // BRK - treat as NOP for skeleton
@@ -135,4 +214,27 @@ mod tests {
         assert_eq!(cpu.a, 0);
         assert_eq!(cpu.status & 0x02, 0x02);
     }
+
+        #[test]
+        fn lda_zero_page_and_sta_zero_page() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // LDA #$42 ; STA $10
+            cpu.load_program(0x8000, &[0xA9, 0x42, 0x85, 0x10]);
+            assert_eq!(cpu.step(), 2); // A = 0x42
+            assert_eq!(cpu.a, 0x42);
+            assert_eq!(cpu.step(), 3); // STA stores A into $0010
+            assert_eq!(cpu.read(0x0010), 0x42);
+        }
+
+        #[test]
+        fn lda_absolute_reads_memory() {
+            let mut cpu = NesCpu::new();
+            cpu.reset();
+            // Place value at 0x1234, then LDA $1234
+            cpu.write(0x1234, 0x99);
+            cpu.load_program(0x8000, &[0xAD, 0x34, 0x12]);
+            assert_eq!(cpu.step(), 4);
+            assert_eq!(cpu.a, 0x99);
+        }
 }
