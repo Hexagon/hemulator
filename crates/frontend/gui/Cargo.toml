@@ -1,0 +1,13 @@
+[package]
+name = "emu_gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+emu_core = { path = "../../core" }
+emu_nes = { path = "../../systems/nes" }
+emu_gb = { path = "../../systems/gb" }
+minifb = "0.25"
+rodio = "0.17"
+log = "0.4"
+env_logger = "0.10"

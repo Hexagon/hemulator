@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "crates/core",
+  "crates/systems/nes",
+  "crates/systems/gb",
+  "crates/frontend/cli",
+  "crates/frontend/gui",
+]
