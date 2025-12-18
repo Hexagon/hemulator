@@ -1,5 +1,4 @@
-/// Simple text rendering for overlays and default screen
-use std::collections::HashMap;
+//! Simple text rendering for overlays and default screen
 
 const FONT_WIDTH: usize = 8;
 const FONT_HEIGHT: usize = 8;
@@ -88,6 +87,7 @@ fn get_char_bitmap(c: char) -> [u8; 8] {
 }
 
 /// Draw a string on a framebuffer
+#[allow(clippy::too_many_arguments)]
 pub fn draw_text(
     buffer: &mut [u32],
     width: usize,
@@ -108,13 +108,13 @@ pub fn draw_text(
 
         let bitmap = get_char_bitmap(c);
 
-        for row in 0..FONT_HEIGHT {
+        for (row, &bitmap_row) in bitmap.iter().enumerate().take(FONT_HEIGHT) {
             for col in 0..FONT_WIDTH {
                 if cursor_y + row >= height || cursor_x + col >= width {
                     continue;
                 }
 
-                let bit = (bitmap[row] >> (7 - col)) & 1;
+                let bit = (bitmap_row >> (7 - col)) & 1;
                 if bit == 1 {
                     let idx = (cursor_y + row) * width + cursor_x + col;
                     if idx < buffer.len() {
@@ -132,6 +132,7 @@ pub fn draw_text(
 }
 
 /// Draw multiple lines of text
+#[allow(clippy::too_many_arguments)]
 pub fn draw_text_lines(
     buffer: &mut [u32],
     width: usize,

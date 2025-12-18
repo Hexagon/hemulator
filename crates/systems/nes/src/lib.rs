@@ -1,5 +1,10 @@
 //! Minimal NES system skeleton for wiring into the core.
 
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::let_and_return)]
+
 mod apu;
 mod bus;
 mod cartridge;

@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum SystemType {
     NES,
     GameBoy,
@@ -46,7 +47,7 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     }
 
     // Check if it might be a raw binary
-    if data.len() % 1024 == 0 {
+    if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
             reason: "Unrecognized ROM format. Only iNES (.nes) and Game Boy (.gb/.gbc) formats are supported".to_string(),
         });

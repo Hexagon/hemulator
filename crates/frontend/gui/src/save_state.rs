@@ -14,17 +14,9 @@ pub struct SaveSlot {
     pub timestamp: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameSaves {
     pub slots: HashMap<u8, SaveSlot>, // Slots 1-5
-}
-
-impl Default for GameSaves {
-    fn default() -> Self {
-        Self {
-            slots: HashMap::new(),
-        }
-    }
 }
 
 impl GameSaves {
@@ -95,7 +87,7 @@ impl GameSaves {
         data: &[u8],
         rom_hash: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if slot < 1 || slot > MAX_SAVE_SLOTS {
+        if !(1..=MAX_SAVE_SLOTS).contains(&slot) {
             return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
 
@@ -118,7 +110,7 @@ impl GameSaves {
 
     /// Load state data from a specific slot (1-MAX_SAVE_SLOTS)
     pub fn load_slot(&self, slot: u8) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        if slot < 1 || slot > MAX_SAVE_SLOTS {
+        if !(1..=MAX_SAVE_SLOTS).contains(&slot) {
             return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
 
@@ -132,6 +124,7 @@ impl GameSaves {
     }
 
     /// Check if a slot has data
+    #[cfg(test)]
     pub fn has_slot(&self, slot: u8) -> bool {
         self.slots.contains_key(&slot)
     }
@@ -158,7 +151,7 @@ mod tests {
 
         // Create temporary test directory
         let test_dir = std::env::temp_dir().join("hemulator_test_saves");
-        let test_path = test_dir.join(rom_hash).join("states.json");
+        let _test_path = test_dir.join(rom_hash).join("states.json");
 
         // Manually save
         saves

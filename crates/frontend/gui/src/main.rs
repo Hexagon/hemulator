@@ -13,21 +13,6 @@ use std::env;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 
-fn key_to_button(key: Key) -> Option<u8> {
-    // NES controller bit mapping: 0=A,1=B,2=Select,3=Start,4=Up,5=Down,6=Left,7=Right
-    match key {
-        Key::Z => Some(0),         // A
-        Key::X => Some(1),         // B
-        Key::LeftShift => Some(2), // Select
-        Key::Enter => Some(3),     // Start
-        Key::Up => Some(4),
-        Key::Down => Some(5),
-        Key::Left => Some(6),
-        Key::Right => Some(7),
-        _ => None,
-    }
-}
-
 fn string_to_key(s: &str) -> Option<Key> {
     match s {
         "Z" => Some(Key::Z),

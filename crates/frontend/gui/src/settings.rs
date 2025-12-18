@@ -91,15 +91,6 @@ impl Settings {
         fs::write(&path, contents)?;
         Ok(())
     }
-
-    /// Update and save settings atomically
-    pub fn update<F>(&mut self, f: F) -> Result<(), Box<dyn std::error::Error>>
-    where
-        F: FnOnce(&mut Self),
-    {
-        f(self);
-        self.save()
-    }
 }
 
 #[cfg(test)]
@@ -112,7 +103,7 @@ mod tests {
         assert_eq!(settings.keyboard.a, "Z");
         assert_eq!(settings.keyboard.b, "X");
         assert_eq!(settings.scale, 2);
-        assert_eq!(settings.fullscreen, false);
+        assert!(!settings.fullscreen);
         assert_eq!(settings.last_rom_path, None);
     }
 
@@ -135,9 +126,11 @@ mod tests {
         // Override config path for testing
         let test_config = test_dir.join("test_config.json");
 
-        let mut settings = Settings::default();
-        settings.last_rom_path = Some("/test/path/game.nes".to_string());
-        settings.scale = 4;
+        let settings = Settings {
+            last_rom_path: Some("/test/path/game.nes".to_string()),
+            scale: 4,
+            ..Default::default()
+        };
 
         // Manually save to test path
         let contents = serde_json::to_string_pretty(&settings).unwrap();

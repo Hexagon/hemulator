@@ -145,6 +145,7 @@ impl Mmc4 {
     /// Called by PPU when reading from pattern tables
     /// This handles the automatic latch switching
     /// MMC4 uses different addresses than MMC2
+    #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {
             0x0FD8..=0x0FDF => {
