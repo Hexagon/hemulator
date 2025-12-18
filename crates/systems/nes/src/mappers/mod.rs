@@ -5,15 +5,21 @@
 
 mod axrom;
 mod cnrom;
+mod colordreams;
 mod mmc1;
+mod mmc2;
 mod mmc3;
+mod mmc4;
 mod nrom;
 mod uxrom;
 
 pub use axrom::Axrom;
 pub use cnrom::Cnrom;
+pub use colordreams::ColorDreams;
 pub use mmc1::Mmc1;
+pub use mmc2::Mmc2;
 pub use mmc3::Mmc3;
+pub use mmc4::Mmc4;
 pub use nrom::Nrom;
 pub use uxrom::Uxrom;
 
@@ -24,11 +30,14 @@ use crate::ppu::Ppu;
 #[derive(Debug)]
 pub enum Mapper {
     Nrom(Nrom),
-    Mmc3(Mmc3),
     Mmc1(Mmc1),
     Uxrom(Uxrom),
     Cnrom(Cnrom),
+    Mmc3(Mmc3),
     Axrom(Axrom),
+    Mmc2(Mmc2),
+    Mmc4(Mmc4),
+    ColorDreams(ColorDreams),
 }
 
 impl Mapper {
@@ -40,6 +49,9 @@ impl Mapper {
             3 => Mapper::Cnrom(Cnrom::new(cart, ppu)),
             4 => Mapper::Mmc3(Mmc3::new(cart, ppu)),
             7 => Mapper::Axrom(Axrom::new(cart, ppu)),
+            9 => Mapper::Mmc2(Mmc2::new(cart, ppu)),
+            10 => Mapper::Mmc4(Mmc4::new(cart, ppu)),
+            11 => Mapper::ColorDreams(ColorDreams::new(cart, ppu)),
             _ => Mapper::Nrom(Nrom::new(cart)),
         }
     }
@@ -48,11 +60,14 @@ impl Mapper {
     pub fn read_prg(&self, addr: u16) -> u8 {
         match self {
             Mapper::Nrom(m) => m.read_prg(addr),
-            Mapper::Mmc3(m) => m.read_prg(addr),
             Mapper::Mmc1(m) => m.read_prg(addr),
             Mapper::Uxrom(m) => m.read_prg(addr),
             Mapper::Cnrom(m) => m.read_prg(addr),
+            Mapper::Mmc3(m) => m.read_prg(addr),
             Mapper::Axrom(m) => m.read_prg(addr),
+            Mapper::Mmc2(m) => m.read_prg(addr),
+            Mapper::Mmc4(m) => m.read_prg(addr),
+            Mapper::ColorDreams(m) => m.read_prg(addr),
         }
     }
 
@@ -63,11 +78,14 @@ impl Mapper {
                 // NROM ignores PRG writes
                 let _ = (addr, val, ppu);
             }
-            Mapper::Mmc3(m) => m.write_prg(addr, val, ppu),
             Mapper::Mmc1(m) => m.write_prg(addr, val, ppu),
             Mapper::Uxrom(m) => m.write_prg(addr, val, ppu),
             Mapper::Cnrom(m) => m.write_prg(addr, val, ppu),
+            Mapper::Mmc3(m) => m.write_prg(addr, val, ppu),
             Mapper::Axrom(m) => m.write_prg(addr, val, ppu),
+            Mapper::Mmc2(m) => m.write_prg(addr, val, ppu),
+            Mapper::Mmc4(m) => m.write_prg(addr, val, ppu),
+            Mapper::ColorDreams(m) => m.write_prg(addr, val, ppu),
         }
     }
 
@@ -75,11 +93,14 @@ impl Mapper {
     pub fn prg_rom(&self) -> &[u8] {
         match self {
             Mapper::Nrom(m) => m.prg_rom(),
-            Mapper::Mmc3(m) => m.prg_rom(),
             Mapper::Mmc1(m) => m.prg_rom(),
             Mapper::Uxrom(m) => m.prg_rom(),
             Mapper::Cnrom(m) => m.prg_rom(),
+            Mapper::Mmc3(m) => m.prg_rom(),
             Mapper::Axrom(m) => m.prg_rom(),
+            Mapper::Mmc2(m) => m.prg_rom(),
+            Mapper::Mmc4(m) => m.prg_rom(),
+            Mapper::ColorDreams(m) => m.prg_rom(),
         }
     }
 
@@ -87,11 +108,14 @@ impl Mapper {
     pub fn take_irq_pending(&mut self) -> bool {
         match self {
             Mapper::Nrom(_) => false,
-            Mapper::Mmc3(m) => m.take_irq_pending(),
             Mapper::Mmc1(_) => false,
             Mapper::Uxrom(_) => false,
             Mapper::Cnrom(_) => false,
+            Mapper::Mmc3(m) => m.take_irq_pending(),
             Mapper::Axrom(_) => false,
+            Mapper::Mmc2(_) => false,
+            Mapper::Mmc4(_) => false,
+            Mapper::ColorDreams(_) => false,
         }
     }
 
