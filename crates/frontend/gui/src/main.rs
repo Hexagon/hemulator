@@ -244,8 +244,10 @@ fn main() {
     // Timing trackers
     let mut last_frame = Instant::now();
 
-    // Audio: NES runs at ~60 FPS, so generate 44100/60 ≈ 735 samples per frame
-    const SAMPLES_PER_FRAME: usize = 735;
+    // Audio: NES runs at ~60 FPS, generate samples to match
+    const SAMPLE_RATE: usize = 44100;
+    const FRAME_RATE: usize = 60;
+    const SAMPLES_PER_FRAME: usize = SAMPLE_RATE / FRAME_RATE; // ~735 samples per frame
 
     // Load saves for current ROM if available
     let mut game_saves = if let Some(ref hash) = rom_hash {
