@@ -169,7 +169,8 @@ impl Ppu {
                 let addr = self.vram_addr.get() & 0x3FFF;
 
                 // Palette reads return immediately, no buffering.
-                if (0x3F00..=0x3F1F).contains(&addr) {
+                // Palette RAM spans $3F00-$3FFF and mirrors every 32 bytes
+                if addr >= 0x3F00 {
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     let val = self.palette[target];
@@ -237,7 +238,8 @@ impl Ppu {
                     // Nametable VRAM space with mirroring
                     let idx = self.map_nametable_addr(addr);
                     self.vram[idx] = val;
-                } else if addr >= 0x3F00 && addr < 0x3F20 {
+                } else {
+                    // Palette RAM spans $3F00-$3FFF and mirrors every 32 bytes
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     self.palette[target] = val;
@@ -691,5 +693,50 @@ mod tests {
         // Test that only lower 6 bits are used (& 0x3F)
         assert_eq!(nes_palette_rgb(0x4F), nes_palette_rgb(0x0F)); // Same as 0x0F
         assert_eq!(nes_palette_rgb(0xFF), nes_palette_rgb(0x3F)); // Same as 0x3F
+    }
+
+    #[test]
+    fn test_palette_ram_mirrors_throughout_range() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write to $3F00 (universal background)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x0F); // Black
+
+        // Read from $3F20 (should mirror to $3F00)
+        ppu.vram_addr.set(0x3F20);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Read from $3F40 (should also mirror to $3F00)
+        ppu.vram_addr.set(0x3F40);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Write to $3F25 (should mirror to $3F05)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x25);
+        ppu.write_register(7, 0x16); // Red
+
+        // Read from $3F05 directly
+        ppu.vram_addr.set(0x3F05);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x16);
+
+        // Read from $3F45 (should also mirror to $3F05)
+        ppu.vram_addr.set(0x3F45);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x16);
+
+        // Write to $3FF0 (should mirror to $3F10, which mirrors to $3F00)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0xF0);
+        ppu.write_register(7, 0x30); // White
+
+        // Universal background should now be white
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30);
     }
 }
