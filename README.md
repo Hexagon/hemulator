@@ -34,12 +34,16 @@ The NES emulator currently supports the following iNES mappers:
 - **Mapper 0 (NROM)** - Basic mapper with no banking. Used by simple games.
 - **Mapper 1 (MMC1/SxROM)** - Switchable PRG and CHR banks with configurable mirroring. Used by games like Tetris, Metroid, and The Legend of Zelda.
 - **Mapper 2 (UxROM)** - Switchable 16KB PRG banks with fixed last bank. Used by games like Mega Man, Castlevania, and Contra.
+- **Mapper 3 (CNROM)** - Simple CHR bank switching. Used by games like Gradius and Paperboy.
 - **Mapper 4 (MMC3/TxROM)** - Advanced mapper with PRG/CHR banking and scanline IRQ counter. Used by games like Super Mario Bros. 3, Mega Man 3-6, and many others.
+- **Mapper 7 (AxROM)** - 32KB PRG bank switching with single-screen mirroring. Used by games like Battletoads and Marble Madness.
 
 ### Implementation Status
 - All supported mappers handle basic PRG and CHR banking
 - MMC1 implements serial register writes and mirroring control
 - MMC3 implements IRQ generation for raster effects
+- CNROM implements CHR-ROM bank switching
+- AxROM implements single-screen mirroring control
 - CHR-RAM is supported for games without CHR-ROM
 - Comprehensive unit tests verify mapper behavior
 
@@ -51,10 +55,10 @@ The NES emulator currently supports the following iNES mappers:
 - Sprite rendering and background rendering are functional but may have minor visual artifacts in some games
 
 ### Unsupported Mappers
-Games using other mappers (3, 5, 7, 9, 10, 11, etc.) will not work correctly. Common mappers planned for future implementation include:
-- Mapper 3 (CNROM) - Simple CHR banking
-- Mapper 7 (AxROM) - 32KB PRG switching with single-screen mirroring
+Games using other mappers (5, 9, 10, 11, etc.) will not work correctly. With the currently supported mappers (0, 1, 2, 3, 4, 7), approximately 83% of all NES games are compatible. Common mappers planned for future implementation include:
 - Mapper 9/10 (MMC2/MMC4) - Used by Punch-Out!!
+- Mapper 11 (Color Dreams) - Used in unlicensed games
+- Mapper 5 (MMC5) - Advanced features but rare
 
 ## GUI Controls
 
