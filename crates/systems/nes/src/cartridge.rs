@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use emu_core::apu::TimingMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mirroring {
@@ -17,6 +18,7 @@ pub struct Cartridge {
     pub chr_rom: Vec<u8>,
     pub mapper: u8,
     pub mirroring: Mirroring,
+    pub timing: TimingMode,
 }
 
 impl Cartridge {
@@ -50,6 +52,26 @@ impl Cartridge {
             Mirroring::Vertical
         } else {
             Mirroring::Horizontal
+        };
+
+        // Auto-detect PAL/NTSC from iNES 2.0 header (byte 12) or NES 2.0 flags
+        // If byte 7 & 0x0C == 0x08, it's NES 2.0 format
+        let is_nes2 = (header[7] & 0x0C) == 0x08;
+        let timing = if is_nes2 && data.len() > 12 {
+            // NES 2.0: byte 12 bits 0-1 indicate timing
+            // 0 = NTSC, 1 = PAL, 2 = Dual compatible, 3 = Dendy
+            match header[12] & 0x03 {
+                1 => TimingMode::Pal,
+                _ => TimingMode::Ntsc, // Default to NTSC for dual/dendy/ntsc
+            }
+        } else {
+            // iNES 1.0: no timing flag, default to NTSC
+            // Note: Some ROMs use byte 9 bit 0 as PAL flag (unofficial)
+            if header[9] & 0x01 != 0 {
+                TimingMode::Pal
+            } else {
+                TimingMode::Ntsc
+            }
         };
 
         // ignore trainer if present (flag 6 bit 2)
@@ -86,10 +108,11 @@ impl Cartridge {
             chr_rom,
             mapper,
             mirroring,
+            timing,
         })
     }
 
-    /// Very small iNES loader supporting mapper 0 (NROM).
+    /// Very small iNES loader supporting all mappers.
     pub fn from_file<P: AsRef<Path>>(p: P) -> std::io::Result<Self> {
         let mut f = File::open(p)?;
         let mut header = [0u8; 16];
@@ -117,6 +140,23 @@ impl Cartridge {
             Mirroring::Horizontal
         };
 
+        // Auto-detect PAL/NTSC from iNES 2.0 header (byte 12) or NES 2.0 flags
+        let is_nes2 = (header[7] & 0x0C) == 0x08;
+        let timing = if is_nes2 {
+            // NES 2.0: byte 12 bits 0-1 indicate timing (always present in 16-byte header)
+            match header[12] & 0x03 {
+                1 => TimingMode::Pal,
+                _ => TimingMode::Ntsc,
+            }
+        } else {
+            // iNES 1.0: check unofficial PAL flag in byte 9
+            if header[9] & 0x01 != 0 {
+                TimingMode::Pal
+            } else {
+                TimingMode::Ntsc
+            }
+        };
+
         // ignore trainer if present (flag 6 bit 2)
         let has_trainer = (header[6] & 0x04) != 0;
         if has_trainer {
@@ -137,6 +177,7 @@ impl Cartridge {
             chr_rom,
             mapper,
             mirroring,
+            timing,
         })
     }
 }

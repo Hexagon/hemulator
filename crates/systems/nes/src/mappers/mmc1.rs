@@ -1,3 +1,4 @@
+use emu_core::apu::TimingMode;
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
 
@@ -172,6 +173,7 @@ mod tests {
             prg_rom: vec![0; 0x8000], // 2 banks
             chr_rom: vec![0; 0x2000], // 2 banks
             mapper: 1,
+            timing: TimingMode::Ntsc,
             mirroring: Mirroring::Horizontal,
         };
 
@@ -196,6 +198,7 @@ mod tests {
             prg_rom: vec![0; 0x4000],
             chr_rom: vec![],
             mapper: 1,
+            timing: TimingMode::Ntsc,
             mirroring: Mirroring::Horizontal,
         };
 
@@ -226,6 +229,7 @@ mod tests {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 1,
+            timing: TimingMode::Ntsc,
             mirroring: Mirroring::Horizontal,
         };
 

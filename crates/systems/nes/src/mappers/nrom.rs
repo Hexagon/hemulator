@@ -1,3 +1,4 @@
+use emu_core::apu::TimingMode;
 use crate::cartridge::Cartridge;
 
 /// NROM (Mapper 0) - Basic mapper with no banking
@@ -44,6 +45,7 @@ mod tests {
             prg_rom: vec![0x42; 0x4000], // 16KB PRG
             chr_rom: vec![],
             mapper: 0,
+            timing: TimingMode::Ntsc,
             mirroring: Mirroring::Horizontal,
         };
         let nrom = Nrom::new(cart);
@@ -66,6 +68,7 @@ mod tests {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 0,
+            timing: TimingMode::Ntsc,
             mirroring: Mirroring::Horizontal,
         };
         let nrom = Nrom::new(cart);

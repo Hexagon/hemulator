@@ -12,6 +12,12 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
   - Build the workspace (`cargo build --workspace`).
   - Run unit/integration tests (`cargo test`).
   - Optionally run benchmarks in a separate job.
+- **Implementation philosophy**:
+  - **Always prefer full, tested implementations** of each module/component, even if all parts aren't immediately used
+  - **Especially important** when other not-yet-implemented systems will use the features
+  - Example: Implement complete APU with all channels (pulse, triangle, noise, DMC) even if only pulse is currently used, because future systems will need the other channels
+  - Incomplete implementations create technical debt and require refactoring later
+  - Full implementations with comprehensive tests ensure robustness and reusability
 - **Permissions & safety**:
   - Agents must not add or distribute ROMs or other copyrighted game data.
   - Agents may run tests that do not require ROMs; for ROM-based tests, maintainers must provide legal test ROMs off-repo.
@@ -42,6 +48,27 @@ Contains reusable CPU implementations and common traits:
     - Status flags (N, V, B, D, I, Z, C)
   - `ArrayMemory` helper for testing and simple use cases
 
+- **`apu`**: Reusable audio processing unit components
+  - **Core Components** (building blocks for various systems):
+    - `PulseChannel`: Square wave generator with duty cycle control
+    - `TriangleChannel`: Triangle wave generator (32-step)
+    - `NoiseChannel`: Pseudo-random noise with LFSR
+    - `Envelope`: Volume envelope generator with decay
+    - `LengthCounter`: Automatic note duration control
+    - `FrameCounter`: Timing controller for envelope/length/sweep units
+  - **Audio Chip Implementations**:
+    - `Rp2a03Apu`: NES NTSC audio chip (1.789773 MHz)
+    - `Rp2a07Apu`: NES PAL audio chip (1.662607 MHz)
+  - **AudioChip trait**: Common interface for pluggable audio systems
+    - Allows different chips to be swapped (C64 SID, Atari 2600 TIA, ColecoVision SN76489, etc.)
+    - Provides standard methods: `write_register`, `read_register`, `clock`, `reset`, `timing`
+  - **Timing Support**:
+    - `TimingMode` enum for NTSC/PAL configuration
+    - CPU clock frequencies: NTSC 1.789773 MHz, PAL 1.662607 MHz
+    - Frame rates: NTSC ~60.1 Hz, PAL ~50.0 Hz
+    - Frame counter rates: NTSC 240 Hz, PAL 200 Hz
+  - Comprehensive unit tests (40+ tests)
+
 - **`types`**: Common data structures (Frame, AudioSample)
 - **`Cpu` trait**: Generic CPU interface
 - **`System` trait**: High-level system interface
@@ -55,6 +82,11 @@ System-specific implementations that use core components:
   - `NesCpu` wraps `Cpu6502<NesMemory>` to provide NES-specific interface
   - `NesMemory` enum implements `Memory6502` trait for both simple array and full NES bus
   - NES bus includes: PPU, APU, controllers, mappers, RAM, WRAM
+  - **PAL/NTSC Support**:
+    - Auto-detection from iNES/NES 2.0 ROM headers
+    - Timing-aware CPU cycles per frame (NTSC: ~29780, PAL: ~33247)
+    - Timing-aware VBlank cycles (NTSC: 2500, PAL: 2798)
+    - APU configured to match ROM timing mode
   - All existing tests pass (33 mapper and PPU tests)
 
 - **Game Boy (`emu_gb`)**: Skeleton implementation
