@@ -98,6 +98,19 @@ impl NesBus {
         }
     }
 
+    /// Get mapper number for debug info
+    pub fn mapper_number(&self) -> Option<u8> {
+        self.mapper.as_ref().map(|m| m.borrow().mapper_number())
+    }
+
+    /// Get PRG ROM size for debug info
+    pub fn prg_rom_size(&self) -> usize {
+        self.mapper
+            .as_ref()
+            .map(|m| m.borrow().prg_rom().len())
+            .unwrap_or(0)
+    }
+
     /// Set controller state (8 buttons) for controller `idx` (0 or 1).
     pub fn set_controller(&mut self, idx: usize, state: u8) {
         if idx < 2 {

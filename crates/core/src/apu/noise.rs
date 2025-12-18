@@ -3,7 +3,7 @@
 //! The noise channel generates pseudo-random noise for percussion and sound effects.
 
 /// Noise channel that generates pseudo-random noise.
-/// 
+///
 /// The noise channel uses a 15-bit LFSR to generate pseudo-random bit sequences.
 /// It supports:
 /// - Two noise modes (normal and periodic/metallic)

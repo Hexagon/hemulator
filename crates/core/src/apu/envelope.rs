@@ -3,7 +3,7 @@
 //! The envelope generator provides automatic volume fade-out for pulse and noise channels.
 
 /// Envelope generator component.
-/// 
+///
 /// Provides automatic volume control with decay from 15 to 0.
 /// Can also be used for constant volume mode.
 #[derive(Debug, Clone)]
@@ -109,17 +109,17 @@ mod tests {
         env.set_period(0); // Fastest decay
         env.set_loop(true);
         env.restart();
-        
+
         // First clock processes start flag
-        env.clock(); 
+        env.clock();
         assert_eq!(env.level(), 15);
-        
+
         // Decay down to 0 (15 more clocks: 14, 13, ..., 1, 0)
         for expected in (0..15).rev() {
             env.clock();
             assert_eq!(env.level(), expected);
         }
-        
+
         // Next clock should loop back to 15
         env.clock();
         assert_eq!(env.level(), 15);

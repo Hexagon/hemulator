@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// CNROM (Mapper 3) - Simple CHR bank switching
 ///

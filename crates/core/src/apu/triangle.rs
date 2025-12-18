@@ -3,7 +3,7 @@
 //! The triangle channel produces a quantized triangle wave with 32 steps.
 
 /// Triangle channel that generates triangle wave samples.
-/// 
+///
 /// The triangle channel has:
 /// - 32-step triangle wave (no volume control, fixed output)
 /// - Length counter for note duration
@@ -75,8 +75,8 @@ impl TriangleChannel {
         // NES triangle wave: 32 steps, 4-bit output
         // Sequence: 15, 14, 13, ..., 0, 0, 1, 2, ..., 15
         const TRIANGLE_TABLE: [u8; 32] = [
-            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
-            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15,
         ];
         let value = TRIANGLE_TABLE[self.sequence_pos as usize];
         // Convert 4-bit value to signed 16-bit centered around 0

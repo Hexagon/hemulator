@@ -42,8 +42,24 @@ The emulator will remember your last ROM and automatically load it next time you
 | F3 | Open ROM | Browse and load a ROM file |
 | F5 | Save State | Open slot selector (1-5) to save |
 | F6 | Load State | Open slot selector (1-5) to load |
-| F11 | Cycle Scale | Switch between 1x, 2x, 4x, 8x window size |
+| F10 | Debug Info | Show/hide debug information overlay |
 | F12 | Reset System | Restart the current game |
+
+### Window Management
+
+The emulator window can be resized freely by dragging the window edges or maximizing the window. The window maintains the correct aspect ratio while stretching to fill the available space. The window size is automatically remembered between sessions.
+
+## Debug Information (F10)
+
+When a ROM is loaded, press **F10** to display the debug information overlay. This shows:
+
+- **Mapper**: The cartridge mapper number and name
+- **PRG**: Number of PRG ROM banks (16KB each)
+- **CHR**: Number of CHR ROM banks (8KB each) or "RAM" if using CHR-RAM
+- **Timing**: NTSC or PAL timing mode (auto-detected from ROM header)
+- **FPS**: Current frame rate
+
+This information is useful for troubleshooting compatibility issues or understanding ROM specifications.
 
 ## Configuration
 
@@ -63,15 +79,13 @@ Located in the same directory as the executable, this file stores your preferenc
     "left": "Left",
     "right": "Right"
   },
-  "window_width": 256,
-  "window_height": 240,
-  "scale": 2,
-  "fullscreen": false,
+  "window_width": 512,
+  "window_height": 480,
   "last_rom_path": "/path/to/last/rom.nes"
 }
 ```
 
-**Customization**: Edit this file to change key bindings. Changes are automatically saved when you modify settings in-game (e.g., changing window scale with F11).
+**Customization**: Edit this file to change key bindings. The window size is automatically saved when you resize the window.
 
 ### Save States
 
