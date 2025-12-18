@@ -201,8 +201,20 @@ Save states are stored in `/saves/<rom_hash>/states.json` relative to the execut
 - **F5-F9**: Save to slot 1-5
 - **Shift+F5-F9**: Load from slot 1-5
 - **F10**: Toggle debug overlay (shows ROM info, mapper, PAL/NTSC, FPS)
+- **F11**: Cycle CRT filters (None → Scanlines → Phosphor → CRT Monitor → None)
 - **F12**: Reset system
 - **ESC**: Exit emulator
+
+### CRT Filters
+
+The GUI includes software-based CRT filters that can be toggled with F11:
+- **None**: Raw pixel output
+- **Scanlines**: Horizontal dark lines on odd rows (60% brightness)
+- **Phosphor**: Horizontal color bleeding (15% blend with neighbors)
+- **CRT Monitor**: Combined scanlines (70% darkness) + phosphor + brightness boost on even rows
+
+Filters are applied to the frame buffer before display and do not affect overlays (help, debug, slot selector).
+The selected filter persists in config.json.
 
 ### Default Screen
 
