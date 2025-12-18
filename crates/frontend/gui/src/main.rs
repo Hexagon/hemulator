@@ -4,7 +4,7 @@ mod settings;
 mod ui_render;
 
 use emu_core::System;
-use minifb::{Key, Scale, Window, WindowOptions};
+use minifb::{Key, Scale, ScaleMode, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -192,6 +192,8 @@ fn main() {
         width,
         height,
         WindowOptions {
+            resize: true,
+            scale_mode: ScaleMode::AspectRatioStretch,
             scale,
             ..WindowOptions::default()
         },
@@ -326,15 +328,11 @@ fn main() {
             continue;
         }
 
-        // If help is showing, render it and continue
+        // Prepare help overlay buffer when requested; keep processing input so other
+        // keys still work while the overlay is visible.
+        let mut help_overlay: Option<Vec<u32>> = None;
         if show_help {
-            let help_buffer = ui_render::create_help_overlay(width, height, &settings);
-            if let Err(e) = window.update_with_buffer(&help_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
+            help_overlay = Some(ui_render::create_help_overlay(width, height, &settings));
         }
 
         // Check for reset key (F12)
@@ -392,7 +390,8 @@ fn main() {
             }
         }
 
-        // Check for fullscreen/scale toggle (F11)
+        // Check for fullscreen/scale toggle (F11) – fullscreen not available in minifb 0.25,
+        // so we cycle through 1x/2x/4x/8x scales instead.
         if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
             settings.scale = match settings.scale {
                 1 => 2,
@@ -415,6 +414,8 @@ fn main() {
                 width,
                 height,
                 WindowOptions {
+                    resize: true,
+                    scale_mode: ScaleMode::AspectRatioStretch,
                     scale: new_scale,
                     ..WindowOptions::default()
                 },
@@ -447,7 +448,7 @@ fn main() {
         }
 
         // Handle controller input only if ROM is loaded
-        if rom_loaded {
+        if rom_loaded && !show_help {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -491,7 +492,13 @@ fn main() {
             }
         }
 
-        if let Err(e) = window.update_with_buffer(&buffer, width, height) {
+        let frame_to_present: &[u32] = if let Some(ref overlay) = help_overlay {
+            overlay.as_slice()
+        } else {
+            &buffer
+        };
+
+        if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
             eprintln!("Window update error: {}", e);
             break;
         }
