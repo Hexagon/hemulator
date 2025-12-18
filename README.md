@@ -64,7 +64,7 @@ Games using other mappers (3, 5, 7, 9, 10, 11, etc.) will not work correctly. Co
 - **Enter** - Start
 - **Left Shift** - Select
 - **Escape** - Exit emulator
-- **F12** - Reset (if implemented)
+- **F12** - Reset system
 
 ## Contributing
 

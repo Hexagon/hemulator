@@ -48,12 +48,12 @@ impl Mmc1 {
         let prg_count = self.prg_bank_count();
         let last = prg_count.saturating_sub(1);
         let prg_mode = (self.control >> 2) & 0x03;
-        let select = (self.prg_bank & 0x0F) as usize % prg_count;
+        let select = (self.prg_bank as usize) % prg_count;
 
         self.prg_banks = match prg_mode {
             0 | 1 => {
                 // 32KB mode: even bank paired with next bank
-                let even = (self.prg_bank & 0x0E) as usize % prg_count;
+                let even = (self.prg_bank & 0x1E) as usize % prg_count;
                 [even, (even + 1) % prg_count]
             }
             2 => [0, select],    // fix first, swap upper
