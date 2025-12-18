@@ -1,9 +1,12 @@
 mod settings;
 mod save_state;
+mod rom_detect;
+mod ui_render;
 
 use emu_core::System;
 use minifb::{Key, Scale, Window, WindowOptions};
 use rodio::{OutputStream, Source};
+use rom_detect::{detect_rom_type, SystemType};
 use settings::Settings;
 use save_state::GameSaves;
 use std::env;
@@ -153,23 +156,33 @@ fn main() {
     }
 
     let mut sys = emu_nes::NesSystem::default();
-    let mut _rom_data: Option<Vec<u8>> = None;
     let mut rom_hash: Option<String> = None;
+    let mut rom_loaded = false;
 
+    // Try to load ROM if path is available
     if let Some(p) = &rom_path {
         match std::fs::read(p) {
             Ok(data) => {
-                rom_hash = Some(GameSaves::rom_hash(&data));
-                _rom_data = Some(data.clone());
-                if let Err(e) = sys.load_rom(&data) {
-                    eprintln!("Failed to load ROM: {}", e);
-                    rom_hash = None;
-                    _rom_data = None;
-                } else {
-                    // Update settings with last ROM path
-                    settings.last_rom_path = Some(p.clone());
-                    if let Err(e) = settings.save() {
-                        eprintln!("Warning: Failed to save settings: {}", e);
+                match detect_rom_type(&data) {
+                    Ok(SystemType::NES) => {
+                        rom_hash = Some(GameSaves::rom_hash(&data));
+                        if let Err(e) = sys.load_rom(&data) {
+                            eprintln!("Failed to load NES ROM: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            settings.last_rom_path = Some(p.clone());
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
+                            println!("Loaded NES ROM: {}", p);
+                        }
+                    }
+                    Ok(SystemType::GameBoy) => {
+                        eprintln!("Game Boy ROMs are not yet fully implemented");
+                    }
+                    Err(e) => {
+                        eprintln!("Unsupported ROM: {}", e);
                     }
                 }
             }
@@ -179,21 +192,9 @@ fn main() {
         }
     }
 
-    if rom_hash.is_none() {
-        println!("No ROM loaded. Press F3 to open a ROM file.");
-    }
-
-    // Create window using settings or NES resolution
-    let frame = match sys.step_frame() {
-        Ok(f) => f,
-        Err(_) => {
-            eprintln!("Failed to produce initial frame");
-            return;
-        }
-    };
-
-    let width = frame.width as usize;
-    let height = frame.height as usize;
+    // Create window using NES resolution (256x240)
+    let width = 256;
+    let height = 240;
 
     let scale = match settings.scale {
         1 => Scale::X1,
@@ -204,7 +205,7 @@ fn main() {
     };
 
     let mut window = match Window::new(
-        "emu_gui - NES",
+        "Hemulator - Multi-System Emulator",
         width,
         height,
         WindowOptions {
@@ -219,18 +220,15 @@ fn main() {
         }
     };
 
-    // Initialize audio output with a streaming channel-backed source to avoid underruns.
+    // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "Warning: Failed to initialize audio: {}. Audio will be disabled.",
-                e
-            );
+            eprintln!("Warning: Failed to initialize audio: {}. Audio will be disabled.", e);
             return;
         }
     };
-    let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2); // ~2 seconds buffer
+    let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2);
     if let Err(e) = stream_handle.play_raw(
         StreamSource {
             rx: audio_rx,
@@ -238,19 +236,20 @@ fn main() {
         }
         .convert_samples(),
     ) {
-        eprintln!(
-            "Warning: Failed to start audio playback: {}. Audio will be disabled.",
-            e
-        );
+        eprintln!("Warning: Failed to start audio playback: {}", e);
     }
 
-    // controller state: bitfield per controller
-    let mut ctrl0: u8;
+    // Buffer for rendering
+    let mut buffer = if rom_loaded {
+        vec![0; width * height]
+    } else {
+        ui_render::create_default_screen(width, height)
+    };
 
-    // initial buffer
-    let mut buffer = frame.pixels.clone();
+    // Help overlay state
+    let mut show_help = false;
 
-    // timing trackers
+    // Timing trackers
     let mut last_audio = Instant::now();
     let mut last_frame = Instant::now();
 
@@ -262,40 +261,69 @@ fn main() {
     };
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Toggle help overlay (F1)
+        if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
+            show_help = !show_help;
+        }
+
+        // If help is showing, render it and continue
+        if show_help {
+            let help_buffer = ui_render::create_help_overlay(width, height, &settings);
+            if let Err(e) = window.update_with_buffer(&help_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
+        }
+
         // Check for reset key (F12)
-        if window.is_key_down(Key::F12) {
+        if window.is_key_pressed(Key::F12, minifb::KeyRepeat::No) && rom_loaded {
             sys.reset();
+            println!("System reset");
         }
 
         // Check for open ROM dialog (F3)
         if window.is_key_pressed(Key::F3, minifb::KeyRepeat::No) {
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("NES ROM", &["nes"])
+                .add_filter("ROM Files", &["nes", "gb", "gbc"])
                 .pick_file()
             {
                 let path_str = path.to_string_lossy().to_string();
                 match std::fs::read(&path) {
                     Ok(data) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        _rom_data = Some(data.clone());
-                        match sys.load_rom(&data) {
-                            Ok(_) => {
-                                settings.last_rom_path = Some(path_str.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
+                        match detect_rom_type(&data) {
+                            Ok(SystemType::NES) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                match sys.load_rom(&data) {
+                                    Ok(_) => {
+                                        rom_loaded = true;
+                                        settings.last_rom_path = Some(path_str.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        game_saves = if let Some(ref hash) = rom_hash {
+                                            GameSaves::load(hash)
+                                        } else {
+                                            GameSaves::default()
+                                        };
+                                        println!("Loaded NES ROM: {}", path_str);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to load NES ROM: {}", e);
+                                        rom_hash = None;
+                                        rom_loaded = false;
+                                        buffer = ui_render::create_default_screen(width, height);
+                                    }
                                 }
-                                // Load saves for new ROM
-                                game_saves = if let Some(ref hash) = rom_hash {
-                                    GameSaves::load(hash)
-                                } else {
-                                    GameSaves::default()
-                                };
-                                println!("Loaded ROM: {}", path_str);
+                            }
+                            Ok(SystemType::GameBoy) => {
+                                eprintln!("Game Boy ROMs are not yet fully implemented");
+                                buffer = ui_render::create_default_screen(width, height);
                             }
                             Err(e) => {
-                                eprintln!("Failed to load ROM: {}", e);
-                                rom_hash = None;
-                                _rom_data = None;
+                                eprintln!("Unsupported ROM: {}", e);
+                                buffer = ui_render::create_default_screen(width, height);
                             }
                         }
                     }
@@ -308,7 +336,6 @@ fn main() {
 
         // Check for fullscreen/scale toggle (F11)
         if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
-            // Cycle through scales: 1 -> 2 -> 4 -> 8 -> 1
             settings.scale = match settings.scale {
                 1 => 2,
                 2 => 4,
@@ -325,9 +352,8 @@ fn main() {
                 _ => Scale::X2,
             };
 
-            // Recreate window with new scale
             window = match Window::new(
-                "emu_gui - NES",
+                "Hemulator - Multi-System Emulator",
                 width,
                 height,
                 WindowOptions {
@@ -348,92 +374,92 @@ fn main() {
             println!("Scale changed to {}x", settings.scale);
         }
 
-        // Check for save state keys (F5-F9 for save, Shift+F5-F9 for load)
-        let shift_pressed = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-        
-        for (idx, key) in [Key::F5, Key::F6, Key::F7, Key::F8, Key::F9].iter().enumerate() {
-            let slot = (idx + 1) as u8;
+        // Save/Load state keys (F5-F9)
+        if rom_loaded {
+            let shift_pressed = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
             
-            if window.is_key_pressed(*key, minifb::KeyRepeat::No) {
-                if let Some(ref hash) = rom_hash {
-                    if shift_pressed {
-                        // Load state
-                        match game_saves.load_slot(slot) {
-                            Ok(data) => {
-                                match serde_json::from_slice::<serde_json::Value>(&data) {
-                                    Ok(state) => {
-                                        match sys.load_state(&state) {
-                                            Ok(_) => println!("Loaded state from slot {}", slot),
-                                            Err(e) => eprintln!("Failed to load state: {}", e),
+            for (idx, key) in [Key::F5, Key::F6, Key::F7, Key::F8, Key::F9].iter().enumerate() {
+                let slot = (idx + 1) as u8;
+                
+                if window.is_key_pressed(*key, minifb::KeyRepeat::No) {
+                    if let Some(ref hash) = rom_hash {
+                        if shift_pressed {
+                            // Load state
+                            match game_saves.load_slot(slot) {
+                                Ok(data) => {
+                                    match serde_json::from_slice::<serde_json::Value>(&data) {
+                                        Ok(state) => {
+                                            match sys.load_state(&state) {
+                                                Ok(_) => println!("Loaded state from slot {}", slot),
+                                                Err(e) => eprintln!("Failed to load state: {}", e),
+                                            }
                                         }
+                                        Err(e) => eprintln!("Failed to parse save state: {}", e),
                                     }
-                                    Err(e) => eprintln!("Failed to parse save state: {}", e),
                                 }
+                                Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
                             }
-                            Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
-                        }
-                    } else {
-                        // Save state
-                        let state = sys.save_state();
-                        match serde_json::to_vec(&state) {
-                            Ok(data) => {
-                                match game_saves.save_slot(slot, &data, hash) {
-                                    Ok(_) => println!("Saved state to slot {}", slot),
-                                    Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
+                        } else {
+                            // Save state
+                            let state = sys.save_state();
+                            match serde_json::to_vec(&state) {
+                                Ok(data) => {
+                                    match game_saves.save_slot(slot, &data, hash) {
+                                        Ok(_) => println!("Saved state to slot {}", slot),
+                                        Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
+                                    }
                                 }
+                                Err(e) => eprintln!("Failed to serialize state: {}", e),
                             }
-                            Err(e) => eprintln!("Failed to serialize state: {}", e),
                         }
                     }
-                } else {
-                    eprintln!("No ROM loaded - cannot save/load state");
                 }
             }
         }
 
-        // Get all keys for controller mapping
-        let keys_to_check: Vec<Key> = vec![
-            string_to_key(&settings.keyboard.a),
-            string_to_key(&settings.keyboard.b),
-            string_to_key(&settings.keyboard.select),
-            string_to_key(&settings.keyboard.start),
-            string_to_key(&settings.keyboard.up),
-            string_to_key(&settings.keyboard.down),
-            string_to_key(&settings.keyboard.left),
-            string_to_key(&settings.keyboard.right),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        // Handle controller input only if ROM is loaded
+        if rom_loaded {
+            let keys_to_check: Vec<Key> = vec![
+                string_to_key(&settings.keyboard.a),
+                string_to_key(&settings.keyboard.b),
+                string_to_key(&settings.keyboard.select),
+                string_to_key(&settings.keyboard.start),
+                string_to_key(&settings.keyboard.up),
+                string_to_key(&settings.keyboard.down),
+                string_to_key(&settings.keyboard.left),
+                string_to_key(&settings.keyboard.right),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
 
-        // Map pressed keys to controller bits (controller 0 only for now)
-        ctrl0 = 0;
-        for k in keys_to_check.iter() {
-            if window.is_key_down(*k) {
-                if let Some(bit) = key_mapping_to_button(*k, &settings) {
-                    ctrl0 |= 1u8 << bit;
+            let mut ctrl0: u8 = 0;
+            for k in keys_to_check.iter() {
+                if window.is_key_down(*k) {
+                    if let Some(bit) = key_mapping_to_button(*k, &settings) {
+                        ctrl0 |= 1u8 << bit;
+                    }
                 }
             }
-        }
-        sys.set_controller(0, ctrl0);
+            sys.set_controller(0, ctrl0);
 
-        // Step one frame and display
-        match sys.step_frame() {
-            Ok(f) => {
-                buffer = f.pixels.clone();
+            // Step one frame and display
+            match sys.step_frame() {
+                Ok(f) => {
+                    buffer = f.pixels.clone();
 
-                // Audio: generate based on elapsed wall time to avoid gaps when the loop runs slow.
-                let elapsed = last_audio.elapsed();
-                let mut wanted = (elapsed.as_secs_f64() * 44_100.0).round() as usize;
-                // Bound to keep buffers reasonable.
-                wanted = wanted.clamp(400, 2000);
-                let audio_samples = sys.get_audio_samples(wanted);
-                last_audio = Instant::now();
-                for s in audio_samples {
-                    let _ = audio_tx.try_send(s);
+                    // Audio generation
+                    let elapsed = last_audio.elapsed();
+                    let mut wanted = (elapsed.as_secs_f64() * 44_100.0).round() as usize;
+                    wanted = wanted.clamp(400, 2000);
+                    let audio_samples = sys.get_audio_samples(wanted);
+                    last_audio = Instant::now();
+                    for s in audio_samples {
+                        let _ = audio_tx.try_send(s);
+                    }
                 }
+                Err(e) => eprintln!("Frame generation error: {:?}", e),
             }
-            Err(e) => eprintln!("Frame generation error: {:?}", e),
         }
 
         if let Err(e) = window.update_with_buffer(&buffer, width, height) {
@@ -441,7 +467,7 @@ fn main() {
             break;
         }
 
-        // ~60 FPS if ahead; if behind, skip sleep.
+        // ~60 FPS timing
         let frame_dt = last_frame.elapsed();
         if frame_dt < Duration::from_millis(16) {
             std::thread::sleep(Duration::from_millis(16) - frame_dt);

@@ -66,13 +66,35 @@ With the currently supported mappers (0, 1, 2, 3, 4, 7, 9, 10, 11), approximatel
 
 ## GUI Controls
 
-- **Arrow Keys** - D-pad
-- **Z** - A button
-- **X** - B button
-- **Enter** - Start
-- **Left Shift** - Select
-- **Escape** - Exit emulator
+### Controller (Customizable via config.json)
+- **Arrow Keys** - D-pad (default)
+- **Z** - A button (default)
+- **X** - B button (default)
+- **Enter** - Start (default)
+- **Left Shift** - Select (default)
+
+### Function Keys
+- **F1** - Toggle help overlay
+- **F3** - Open ROM file dialog
+- **F5-F9** - Save state to slot 1-5
+- **Shift+F5-F9** - Load state from slot 1-5
+- **F11** - Cycle window scale (1x → 2x → 4x → 8x)
 - **F12** - Reset system
+- **Escape** - Exit emulator
+
+### Settings and Save States
+
+The emulator includes a comprehensive settings system:
+- **Settings**: Stored in `config.json` in the executable directory
+  - Keyboard mappings (customizable)
+  - Window scale preference
+  - Last ROM path (auto-loads on restart)
+- **Save States**: Stored in `saves/<rom_hash>/states.json`
+  - 5 slots per game
+  - Organized by ROM hash
+  - Automatically persisted to disk
+
+ROMs are auto-detected (NES iNES format and Game Boy format supported).
 
 ## Contributing
 
