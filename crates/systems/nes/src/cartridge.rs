@@ -20,6 +20,75 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
+    /// Load iNES ROM from bytes
+    pub fn from_bytes(data: &[u8]) -> std::io::Result<Self> {
+        if data.len() < 16 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Data too small for iNES header",
+            ));
+        }
+        let header = &data[0..16];
+        if &header[0..4] != b"NES\x1A" {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Not iNES file",
+            ));
+        }
+        let prg_size = header[4] as usize * 16 * 1024;
+        let chr_size = header[5] as usize * 8 * 1024;
+        let mapper = (header[6] >> 4) | (header[7] & 0xF0);
+
+        // iNES flags 6:
+        // bit 0 = mirroring (0 horizontal, 1 vertical)
+        // bit 3 = four-screen VRAM
+        let four_screen = (header[6] & 0x08) != 0;
+        let vertical = (header[6] & 0x01) != 0;
+        let mirroring = if four_screen {
+            Mirroring::FourScreen
+        } else if vertical {
+            Mirroring::Vertical
+        } else {
+            Mirroring::Horizontal
+        };
+
+        // ignore trainer if present (flag 6 bit 2)
+        let has_trainer = (header[6] & 0x04) != 0;
+        let mut offset = 16;
+        if has_trainer {
+            offset += 512;
+        }
+
+        if data.len() < offset + prg_size {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Data too small for PRG ROM",
+            ));
+        }
+
+        let prg_rom = data[offset..offset + prg_size].to_vec();
+        offset += prg_size;
+
+        let chr_rom = if chr_size > 0 {
+            if data.len() < offset + chr_size {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Data too small for CHR ROM",
+                ));
+            }
+            data[offset..offset + chr_size].to_vec()
+        } else {
+            vec![]
+        };
+
+        Ok(Self {
+            prg_rom,
+            chr_rom,
+            mapper,
+            mirroring,
+        })
+    }
+
     /// Very small iNES loader supporting mapper 0 (NROM).
     pub fn from_file<P: AsRef<Path>>(p: P) -> std::io::Result<Self> {
         let mut f = File::open(p)?;

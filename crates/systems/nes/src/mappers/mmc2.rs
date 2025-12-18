@@ -145,6 +145,7 @@ impl Mmc2 {
 
     /// Called by PPU when reading from pattern tables
     /// This handles the automatic latch switching
+    #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {
             0x0FD8 => {

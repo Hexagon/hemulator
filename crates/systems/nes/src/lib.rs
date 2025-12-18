@@ -1,5 +1,10 @@
 //! Minimal NES system skeleton for wiring into the core.
 
+#![allow(clippy::upper_case_acronyms)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::let_and_return)]
+
 mod apu;
 mod bus;
 mod cartridge;
@@ -49,13 +54,8 @@ impl Default for NesSystem {
 }
 
 impl NesSystem {
-    /// Load a mapper-0 (NROM) iNES ROM into CPU memory. This writes PRG ROM
-    /// into 0x8000.. and mirrors 16KB banks into 0xC000 when necessary.
-    pub fn load_rom_from_path<P: AsRef<std::path::Path>>(
-        &mut self,
-        path: P,
-    ) -> Result<(), std::io::Error> {
-        let cart = cartridge::Cartridge::from_file(path)?;
+    /// Common cartridge setup logic
+    fn setup_cartridge(&mut self, cart: cartridge::Cartridge) -> Result<(), std::io::Error> {
         // Derive the reset vector from the last PRG bank (mirrors hardware vectors).
         if cart.prg_rom.len() < 0x2000 {
             return Err(std::io::Error::new(
@@ -80,6 +80,22 @@ impl NesSystem {
         nb.install_cart(cart);
         self.cpu.bus = Some(Box::new(nb));
         Ok(())
+    }
+
+    /// Load a ROM from byte data
+    pub fn load_rom(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
+        let cart = cartridge::Cartridge::from_bytes(data)?;
+        self.setup_cartridge(cart)
+    }
+
+    /// Load a mapper-0 (NROM) iNES ROM into CPU memory. This writes PRG ROM
+    /// into 0x8000.. and mirrors 16KB banks into 0xC000 when necessary.
+    pub fn load_rom_from_path<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), std::io::Error> {
+        let cart = cartridge::Cartridge::from_file(path)?;
+        self.setup_cartridge(cart)
     }
 
     /// Return debug information useful for inspecting execution state.
