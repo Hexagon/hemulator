@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build release binary
+        run: cargo build --release -p emu_gui
+
+      - name: Create release package
+        shell: bash
+        run: |
+          mkdir -p release-package
+          cp target/release/hemu.exe release-package/
+          cp LICENSE release-package/
+          cp MANUAL.md release-package/
+
+      - name: Create zip archive
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.release.tag_name }}"
+          Compress-Archive -Path release-package/* -DestinationPath "hemu-$version-windows-x86_64.zip"
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./hemu-${{ github.event.release.tag_name }}-windows-x86_64.zip
+          asset_name: hemu-${{ github.event.release.tag_name }}-windows-x86_64.zip
+          asset_content_type: application/zip
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build release binary
+        run: cargo build --release -p emu_gui
+
+      - name: Create release package (tarball)
+        run: |
+          mkdir -p release-package
+          cp target/release/hemu release-package/
+          cp LICENSE release-package/
+          cp MANUAL.md release-package/
+          tar -czf hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz -C release-package .
+
+      - name: Upload tarball release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+          asset_name: hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Strip binary for deb package
+        run: strip target/release/hemu
+
+      - name: Create Debian package structure
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION_NUM="${VERSION#v}"  # Remove 'v' prefix if present
+          
+          mkdir -p deb-package/DEBIAN
+          mkdir -p deb-package/usr/bin
+          mkdir -p deb-package/usr/share/doc/hemu
+          mkdir -p deb-package/usr/share/licenses/hemu
+          
+          # Copy binary
+          cp target/release/hemu deb-package/usr/bin/
+          
+          # Copy documentation
+          cp MANUAL.md deb-package/usr/share/doc/hemu/
+          cp LICENSE deb-package/usr/share/licenses/hemu/
+          
+          # Create control file
+          cat > deb-package/DEBIAN/control << EOF
+          Package: hemu
+          Version: ${VERSION_NUM}
+          Section: games
+          Priority: optional
+          Architecture: amd64
+          Depends: libasound2 (>= 1.0.16)
+          Maintainer: Hexagon <419737+Hexagon@users.noreply.github.com>
+          Description: Multi-system console emulator
+           A cross-platform, multi-system console emulator written in Rust,
+           focusing on NES and Game Boy emulation with comprehensive save
+           state management and customizable controls.
+           .
+           Supports 86% of NES games through 9 mapper implementations.
+          Homepage: https://github.com/Hexagon/hemulator
+          EOF
+          
+          # Create postinst script for desktop integration (optional)
+          cat > deb-package/DEBIAN/postinst << 'EOF'
+          #!/bin/sh
+          set -e
+          
+          # Set executable permissions
+          chmod +x /usr/bin/hemu
+          
+          exit 0
+          EOF
+          
+          chmod 755 deb-package/DEBIAN/postinst
+          
+          # Build the package
+          dpkg-deb --build deb-package "hemu_${VERSION_NUM}_amd64.deb"
+          
+          # Save version for next step
+          echo "DEB_VERSION=${VERSION_NUM}" >> $GITHUB_ENV
+
+      - name: Upload deb release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./hemu_${{ env.DEB_VERSION }}_amd64.deb
+          asset_name: hemu_${{ env.DEB_VERSION }}_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
