@@ -250,6 +250,7 @@ impl Ppu {
         }
     }
 
+    #[allow(dead_code)]
     pub fn dma_oam(&mut self, page: u8, read_mem: &dyn Fn(u16) -> u8) {
         let base = (page as u16) << 8;
         for i in 0..256u16 {

@@ -52,10 +52,12 @@ impl NesCpu {
         self.in_nmi = false;
     }
 
+    #[allow(dead_code)]
     pub fn is_in_nmi(&self) -> bool {
         self.in_nmi
     }
 
+    #[allow(dead_code)]
     pub fn load_program(&mut self, offset: u16, data: &[u8]) {
         let off = offset as usize;
         self.memory[off..off + data.len()].copy_from_slice(data);

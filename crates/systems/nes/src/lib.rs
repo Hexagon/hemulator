@@ -4,6 +4,7 @@ mod apu;
 mod bus;
 mod cartridge;
 mod cpu;
+mod mappers;
 mod ppu;
 
 use crate::cartridge::Mirroring;
