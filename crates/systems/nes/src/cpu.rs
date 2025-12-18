@@ -72,27 +72,11 @@ impl NesCpu {
 
     /// Set the NES bus (PPU, APU, mappers, etc.)
     pub fn set_bus(&mut self, bus: crate::bus::NesBus) {
-        // Preserve CPU state
-        let a = self.cpu.a;
-        let x = self.cpu.x;
-        let y = self.cpu.y;
-        let sp = self.cpu.sp;
-        let status = self.cpu.status;
-        let pc = self.cpu.pc;
-        let cycles = self.cpu.cycles;
-
-        // Create new CPU with bus
+        // Replace memory while preserving CPU state
         let mem = NesMemory::new_bus(bus);
-        self.cpu = Cpu6502::new(mem);
-
-        // Restore CPU state
-        self.cpu.a = a;
-        self.cpu.x = x;
-        self.cpu.y = y;
-        self.cpu.sp = sp;
-        self.cpu.status = status;
-        self.cpu.pc = pc;
-        self.cpu.cycles = cycles;
+        // Take ownership of cpu, swap memory, put it back
+        let old_cpu = std::mem::replace(&mut self.cpu, Cpu6502::new(NesMemory::new_array()));
+        self.cpu = old_cpu.with_memory(mem);
     }
 
     /// Get reference to bus if available

@@ -79,6 +79,21 @@ impl<M: Memory6502> Cpu6502<M> {
         self.in_nmi = false;
     }
 
+    /// Replace the memory interface while preserving CPU state
+    pub fn with_memory<N: Memory6502>(self, new_memory: N) -> Cpu6502<N> {
+        Cpu6502 {
+            a: self.a,
+            x: self.x,
+            y: self.y,
+            sp: self.sp,
+            status: self.status,
+            pc: self.pc,
+            cycles: self.cycles,
+            memory: new_memory,
+            in_nmi: self.in_nmi,
+        }
+    }
+
     /// Check if currently executing an NMI handler
     #[allow(dead_code)]
     pub fn is_in_nmi(&self) -> bool {
@@ -1421,7 +1436,7 @@ mod tests {
         cpu2.reset();
         cpu2.a = 0xFF;
         cpu2.status |= 0x01; // carry in
-        cpu.pc = 0x8000;
+        cpu2.pc = 0x8000;
         cpu2.memory.load_program(0x8000, &[0x69, 0x01]);
         assert_eq!(cpu2.step(), 2);
         assert_eq!(cpu2.a, 0x01);
