@@ -70,8 +70,8 @@ impl Cnrom {
 
     pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
         if (0x8000..=0xFFFF).contains(&addr) {
-            // Select CHR bank (lower 2 bits typically, but some carts use more)
-            // We'll mask to support up to 256 banks (8 bits)
+            // Select CHR bank (typically 2 bits for 4 banks, but we support up to 8 bits)
+            // This allows compatibility with larger CNROM variants
             self.chr_bank = val;
             self.update_chr_mapping(ppu);
         }
