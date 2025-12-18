@@ -23,7 +23,7 @@ cd hemulator
 # Build the project
 cargo build --release
 
-# Run the GUI
+# Run the emulator
 cargo run --release -p emu_gui
 ```
 
@@ -33,6 +33,8 @@ cargo run --release -p emu_gui
 2. **Load a ROM**: Press `F3` to open the file dialog, or provide a path as an argument:
    ```bash
    cargo run --release -p emu_gui -- path/to/your/game.nes
+   # Or using the built binary (located in target/release/hemu)
+   ./target/release/hemu path/to/your/game.nes
    ```
 3. **View controls**: Press `F1` to see the help overlay with all available keys
 4. **Play**: Use arrow keys for D-pad, Z for A button, X for B button
@@ -175,8 +177,7 @@ hemulator/
 │   │   ├── nes/        # NES emulation (CPU, PPU, APU, mappers)
 │   │   └── gb/         # Game Boy emulation (skeleton)
 │   └── frontend/
-│       ├── gui/        # Main GUI frontend (minifb + rodio)
-│       └── cli/        # CLI runner for testing
+│       └── gui/        # GUI frontend (minifb + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
 └── saves/              # Save state directory (per-ROM)
 ```
@@ -201,20 +202,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Format code
 cargo fmt --all
 ```
-
-### CLI Testing
-
-The project includes a CLI frontend for headless testing:
-
-```bash
-# Run NES system test
-cargo run -p emu_cli -- nes
-
-# Run Game Boy system test
-cargo run -p emu_cli -- gb
-```
-
-This produces a JSON save state at `state.json` for debugging.
 
 ## Troubleshooting
 
