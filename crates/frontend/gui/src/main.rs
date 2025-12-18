@@ -248,6 +248,10 @@ fn main() {
     let mut show_slot_selector = false;
     let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
 
+    // Mount point selector state
+    let mut show_mount_selector = false;
+    let mut selected_mount_point: Option<String> = None;
+
     // Timing trackers
     let mut last_frame = Instant::now();
 
@@ -268,6 +272,7 @@ fn main() {
         if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
+            show_mount_selector = false; // Close mount selector if open
         }
 
         // Handle slot selector
@@ -292,26 +297,35 @@ fn main() {
 
                 if let Some(ref hash) = rom_hash {
                     if slot_selector_mode == "SAVE" {
-                        // Save state
-                        let state = sys.save_state();
-                        match serde_json::to_vec(&state) {
-                            Ok(data) => match game_saves.save_slot(slot, &data, hash) {
-                                Ok(_) => println!("Saved state to slot {}", slot),
-                                Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
-                            },
-                            Err(e) => eprintln!("Failed to serialize state: {}", e),
+                        // Check if system supports save states
+                        if !sys.supports_save_states() {
+                            eprintln!("Save states are not supported for this system");
+                        } else {
+                            // Save state
+                            let state = sys.save_state();
+                            match serde_json::to_vec(&state) {
+                                Ok(data) => match game_saves.save_slot(slot, &data, hash) {
+                                    Ok(_) => println!("Saved state to slot {}", slot),
+                                    Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
+                                },
+                                Err(e) => eprintln!("Failed to serialize state: {}", e),
+                            }
                         }
                     } else {
                         // Load state
-                        match game_saves.load_slot(slot) {
-                            Ok(data) => match serde_json::from_slice::<serde_json::Value>(&data) {
-                                Ok(state) => match sys.load_state(&state) {
-                                    Ok(_) => println!("Loaded state from slot {}", slot),
-                                    Err(e) => eprintln!("Failed to load state: {}", e),
+                        if !sys.supports_save_states() {
+                            eprintln!("Save states are not supported for this system");
+                        } else {
+                            match game_saves.load_slot(slot, hash) {
+                                Ok(data) => match serde_json::from_slice::<serde_json::Value>(&data) {
+                                    Ok(state) => match sys.load_state(&state) {
+                                        Ok(_) => println!("Loaded state from slot {}", slot),
+                                        Err(e) => eprintln!("Failed to load state: {}", e),
+                                    },
+                                    Err(e) => eprintln!("Failed to parse save state: {}", e),
                                 },
-                                Err(e) => eprintln!("Failed to parse save state: {}", e),
-                            },
-                            Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
+                                Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
+                            }
                         }
                     }
                 }
@@ -339,6 +353,94 @@ fn main() {
             continue;
         }
 
+        // Handle mount point selector
+        if show_mount_selector {
+            let mount_points = sys.mount_points();
+            
+            // Check for mount point selection
+            let mut selected_index: Option<usize> = None;
+
+            if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+                selected_index = Some(0);
+            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+                selected_index = Some(1);
+            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+                selected_index = Some(2);
+            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+                selected_index = Some(3);
+            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+                selected_index = Some(4);
+            } else if window.is_key_pressed(Key::Key6, minifb::KeyRepeat::No) {
+                selected_index = Some(5);
+            } else if window.is_key_pressed(Key::Key7, minifb::KeyRepeat::No) {
+                selected_index = Some(6);
+            } else if window.is_key_pressed(Key::Key8, minifb::KeyRepeat::No) {
+                selected_index = Some(7);
+            } else if window.is_key_pressed(Key::Key9, minifb::KeyRepeat::No) {
+                selected_index = Some(8);
+            }
+
+            if let Some(idx) = selected_index {
+                if idx < mount_points.len() {
+                    selected_mount_point = Some(mount_points[idx].id.clone());
+                    show_mount_selector = false;
+                    
+                    // Now show file dialog for the selected mount point
+                    let mp_info = &mount_points[idx];
+                    let extensions: Vec<&str> = mp_info.extensions.iter().map(|s| s.as_str()).collect();
+                    
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("ROM/Media Files", &extensions)
+                        .pick_file()
+                    {
+                        let path_str = path.to_string_lossy().to_string();
+                        match std::fs::read(&path) {
+                            Ok(data) => {
+                                match sys.mount(&mp_info.id, &data) {
+                                    Ok(_) => {
+                                        rom_loaded = true;
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        settings.set_mount_point(&mp_info.id, path_str.clone());
+                                        settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        game_saves = if let Some(ref hash) = rom_hash {
+                                            GameSaves::load(hash)
+                                        } else {
+                                            GameSaves::default()
+                                        };
+                                        println!("Loaded media into {}: {}", mp_info.name, path_str);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
+                                        buffer = ui_render::create_default_screen(width, height);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                    selected_mount_point = None;
+                }
+            }
+
+            // Render mount point selector
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+            );
+            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
+        }
+
         // Prepare help overlay buffer when requested; keep processing input so other
         // keys still work while the overlay is visible.
         let mut help_overlay: Option<Vec<u32>> = None;
@@ -354,23 +456,26 @@ fn main() {
 
         // Check for open ROM dialog (F3)
         if window.is_key_pressed(Key::F3, minifb::KeyRepeat::No) {
-            // For now, NES only has one mount point ("Cartridge"), so we go directly to file dialog
-            // Future enhancement: show mount point selector for systems with multiple mount points
-            let mount_point_id = "Cartridge"; // For NES
+            let mount_points = sys.mount_points();
             
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("ROM Files", &["nes", "gb", "gbc"])
-                .pick_file()
-            {
-                let path_str = path.to_string_lossy().to_string();
-                match std::fs::read(&path) {
-                    Ok(data) => match detect_rom_type(&data) {
-                        Ok(SystemType::NES) => {
-                            rom_hash = Some(GameSaves::rom_hash(&data));
-                            match sys.mount(mount_point_id, &data) {
+            // If system has only one mount point, go directly to file dialog
+            // Otherwise, show mount point selector
+            if mount_points.len() == 1 {
+                let mp_info = &mount_points[0];
+                let extensions: Vec<&str> = mp_info.extensions.iter().map(|s| s.as_str()).collect();
+                
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("ROM/Media Files", &extensions)
+                    .pick_file()
+                {
+                    let path_str = path.to_string_lossy().to_string();
+                    match std::fs::read(&path) {
+                        Ok(data) => {
+                            match sys.mount(&mp_info.id, &data) {
                                 Ok(_) => {
                                     rom_loaded = true;
-                                    settings.set_mount_point(mount_point_id, path_str.clone());
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    settings.set_mount_point(&mp_info.id, path_str.clone());
                                     settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
@@ -380,29 +485,25 @@ fn main() {
                                     } else {
                                         GameSaves::default()
                                     };
-                                    println!("Loaded NES ROM into {}: {}", mount_point_id, path_str);
+                                    println!("Loaded media into {}: {}", mp_info.name, path_str);
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to mount ROM into {}: {}", mount_point_id, e);
+                                    eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
                                     rom_hash = None;
                                     rom_loaded = false;
                                     buffer = ui_render::create_default_screen(width, height);
                                 }
                             }
                         }
-                        Ok(SystemType::GameBoy) => {
-                            eprintln!("Game Boy ROMs are not yet fully implemented");
-                            buffer = ui_render::create_default_screen(width, height);
-                        }
                         Err(e) => {
-                            eprintln!("Unsupported ROM: {}", e);
-                            buffer = ui_render::create_default_screen(width, height);
+                            eprintln!("Failed to read file: {}", e);
                         }
-                    },
-                    Err(e) => {
-                        eprintln!("Failed to read ROM file: {}", e);
                     }
                 }
+            } else if mount_points.len() > 1 {
+                // Show mount point selector for systems with multiple mount points
+                show_mount_selector = true;
+                show_help = false;
             }
         }
 
@@ -451,16 +552,24 @@ fn main() {
 
         // F5 - Show save state slot selector
         if rom_loaded && window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
-            show_slot_selector = true;
-            slot_selector_mode = "SAVE";
-            show_help = false;
+            if sys.supports_save_states() {
+                show_slot_selector = true;
+                slot_selector_mode = "SAVE";
+                show_help = false;
+            } else {
+                eprintln!("Save states are not supported for this system");
+            }
         }
 
         // F6 - Show load state slot selector
         if rom_loaded && window.is_key_pressed(Key::F6, minifb::KeyRepeat::No) {
-            show_slot_selector = true;
-            slot_selector_mode = "LOAD";
-            show_help = false;
+            if sys.supports_save_states() {
+                show_slot_selector = true;
+                slot_selector_mode = "LOAD";
+                show_help = false;
+            } else {
+                eprintln!("Save states are not supported for this system");
+            }
         }
 
         // Handle controller input only if ROM is loaded

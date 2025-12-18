@@ -346,3 +346,45 @@ pub fn create_slot_selector_overlay(
 
     buffer
 }
+
+/// Create a mount point selection overlay
+pub fn create_mount_point_selector(
+    width: usize,
+    height: usize,
+    mount_points: &[emu_core::MountPointInfo],
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let title = "SELECT MOUNT POINT";
+
+    // We need to store the strings so they live long enough
+    let lines_storage: Vec<String> = mount_points
+        .iter()
+        .enumerate()
+        .map(|(i, mp)| format!("  {} - {}", i + 1, mp.name))
+        .collect();
+
+    let mut display_lines: Vec<&str> = vec![title, ""];
+    for line in &lines_storage {
+        display_lines.push(line.as_str());
+    }
+    display_lines.push("");
+    display_lines.push("Press number to select, ESC to cancel");
+
+    let start_x = (width.saturating_sub(30 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &display_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}

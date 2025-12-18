@@ -58,10 +58,18 @@ pub trait System {
     fn step_frame(&mut self) -> Result<types::Frame, Self::Error>;
 
     /// Return a JSON-serializable save state for debugging.
+    /// Note: Save states should NOT include ROM/cartridge data.
+    /// Only save emulator state (CPU, RAM, PPU state, etc.)
     fn save_state(&self) -> Value;
 
     /// Load a JSON save state.
+    /// Returns error if the state is incompatible or requires different mounted media.
     fn load_state(&mut self, v: &Value) -> Result<(), serde_json::Error>;
+
+    /// Check if this system supports save/load state functionality
+    fn supports_save_states(&self) -> bool {
+        false // Default: no save state support
+    }
 
     /// Get the list of mount points this system supports
     fn mount_points(&self) -> Vec<MountPointInfo>;

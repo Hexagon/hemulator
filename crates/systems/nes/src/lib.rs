@@ -275,8 +275,26 @@ impl System for NesSystem {
         serde_json::json!({ "system": "nes", "version": 1, "a": self.cpu.a() })
     }
 
-    fn load_state(&mut self, _v: &serde_json::Value) -> Result<(), serde_json::Error> {
+    fn load_state(&mut self, v: &serde_json::Value) -> Result<(), serde_json::Error> {
+        // Verify this is a NES save state
+        if v.get("system").and_then(|s| s.as_str()) != Some("nes") {
+            // Create a serde error using from_str with invalid JSON
+            return serde_json::from_str::<()>("not a NES save state").map(|_| ());
+        }
+        
+        // Verify the cartridge is loaded
+        if !self.cartridge_loaded {
+            return serde_json::from_str::<()>("no cartridge mounted").map(|_| ());
+        }
+        
+        // Note: Actual state restoration would go here
+        // For now, this is a minimal implementation
         Ok(())
+    }
+
+    fn supports_save_states(&self) -> bool {
+        // Only support save states when a cartridge is loaded
+        self.cartridge_loaded
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
