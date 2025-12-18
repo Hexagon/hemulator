@@ -3,7 +3,9 @@
 Purpose: guidance for automated agents and maintainers about CI, formatting, and safety.
 
 - **Keep track of the work**: Keep a todo in TODO.md
-- **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/*`.
+- **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
+  - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
+  - **CLI removed**: There is no CLI frontend, only the GUI
 - **Agent tasks**:
   - Run `cargo fmt` and `cargo clippy` on PRs.
   - Build the workspace (`cargo build --workspace`).
@@ -13,11 +15,32 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
   - Agents must not add or distribute ROMs or other copyrighted game data.
   - Agents may run tests that do not require ROMs; for ROM-based tests, maintainers must provide legal test ROMs off-repo.
 - **Cross-platform notes**:
-  - Frontends use `minifb` and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
+  - Frontend uses `minifb` and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
   - For macOS specifics, `rodio` may require additional CI setup; document platform checks in CI config.
 - **When to notify maintainers**:
   - Failing build or tests, or lint errors.
   - Long-running benchmark jobs exceeding expected time.
+
+## Documentation Structure
+
+- **README.md**: Developer-focused documentation (building, architecture, contributing)
+- **MANUAL.md**: End-user manual with usage instructions, controls, troubleshooting
+  - Included in all release packages
+  - Keep separate from README to focus on user needs
+  - Update when adding user-facing features or changing controls
+- **AGENTS.md**: This file - guidance for automated agents and CI
+- **TODO.md**: Work tracking and future plans
+
+## Release Packaging
+
+When building release artifacts:
+- **Include**: Executable (`hemu` or `hemu.exe`), `LICENSE`, `MANUAL.md`
+- **Exclude**: All other files (source code, build artifacts, config files, saves)
+- **Platforms**: Windows (.exe), Linux (binary + .deb package)
+- **Naming**: 
+  - Windows: `hemu-{version}-windows-x86_64.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
+  - Linux binary: `hemu-{version}-linux-x86_64.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
+  - Debian package: `hemu_{version}_amd64.deb` with proper packaging structure
 
 ## Settings System
 
