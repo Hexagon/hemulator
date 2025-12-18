@@ -3,11 +3,15 @@
 //! This module contains implementations of various NES cartridge mappers
 //! that handle PRG/CHR banking and other cartridge hardware features.
 
+mod axrom;
+mod cnrom;
 mod mmc1;
 mod mmc3;
 mod nrom;
 mod uxrom;
 
+pub use axrom::Axrom;
+pub use cnrom::Cnrom;
 pub use mmc1::Mmc1;
 pub use mmc3::Mmc3;
 pub use nrom::Nrom;
@@ -23,15 +27,19 @@ pub enum Mapper {
     Mmc3(Mmc3),
     Mmc1(Mmc1),
     Uxrom(Uxrom),
+    Cnrom(Cnrom),
+    Axrom(Axrom),
 }
 
 impl Mapper {
     /// Create a mapper from a cartridge, configuring the PPU as needed
     pub fn from_cart(cart: Cartridge, ppu: &mut Ppu) -> Self {
         match cart.mapper {
-            4 => Mapper::Mmc3(Mmc3::new(cart, ppu)),
             1 => Mapper::Mmc1(Mmc1::new(cart, ppu)),
             2 => Mapper::Uxrom(Uxrom::new(cart, ppu)),
+            3 => Mapper::Cnrom(Cnrom::new(cart, ppu)),
+            4 => Mapper::Mmc3(Mmc3::new(cart, ppu)),
+            7 => Mapper::Axrom(Axrom::new(cart, ppu)),
             _ => Mapper::Nrom(Nrom::new(cart)),
         }
     }
@@ -43,6 +51,8 @@ impl Mapper {
             Mapper::Mmc3(m) => m.read_prg(addr),
             Mapper::Mmc1(m) => m.read_prg(addr),
             Mapper::Uxrom(m) => m.read_prg(addr),
+            Mapper::Cnrom(m) => m.read_prg(addr),
+            Mapper::Axrom(m) => m.read_prg(addr),
         }
     }
 
@@ -56,6 +66,8 @@ impl Mapper {
             Mapper::Mmc3(m) => m.write_prg(addr, val, ppu),
             Mapper::Mmc1(m) => m.write_prg(addr, val, ppu),
             Mapper::Uxrom(m) => m.write_prg(addr, val, ppu),
+            Mapper::Cnrom(m) => m.write_prg(addr, val, ppu),
+            Mapper::Axrom(m) => m.write_prg(addr, val, ppu),
         }
     }
 
@@ -66,6 +78,8 @@ impl Mapper {
             Mapper::Mmc3(m) => m.prg_rom(),
             Mapper::Mmc1(m) => m.prg_rom(),
             Mapper::Uxrom(m) => m.prg_rom(),
+            Mapper::Cnrom(m) => m.prg_rom(),
+            Mapper::Axrom(m) => m.prg_rom(),
         }
     }
 
@@ -76,6 +90,8 @@ impl Mapper {
             Mapper::Mmc3(m) => m.take_irq_pending(),
             Mapper::Mmc1(_) => false,
             Mapper::Uxrom(_) => false,
+            Mapper::Cnrom(_) => false,
+            Mapper::Axrom(_) => false,
         }
     }
 
