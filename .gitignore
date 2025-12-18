@@ -6,3 +6,5 @@ target/
 *.log
 roms/
 .vscode/
+config.json
+saves/

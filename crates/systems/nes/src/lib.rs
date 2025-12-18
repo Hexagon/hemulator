@@ -49,6 +49,35 @@ impl Default for NesSystem {
 }
 
 impl NesSystem {
+    /// Load a ROM from byte data
+    pub fn load_rom(&mut self, data: &[u8]) -> Result<(), std::io::Error> {
+        let cart = cartridge::Cartridge::from_bytes(data)?;
+        // Derive the reset vector from the last PRG bank (mirrors hardware vectors).
+        if cart.prg_rom.len() < 0x2000 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "PRG ROM too small",
+            ));
+        }
+        let last_bank = cart.prg_rom.len() - 0x2000;
+        let reset_lo = cart.prg_rom.get(last_bank + 0x1FFC).copied().unwrap_or(0) as u16;
+        let reset_hi = cart.prg_rom.get(last_bank + 0x1FFD).copied().unwrap_or(0) as u16;
+        self.cpu.pc = (reset_hi << 8) | reset_lo;
+
+        // For mappers with CHR banking (e.g., MMC3), provide a 8KB pattern slot the mapper fills.
+        let chr_backing = if cart.mapper == 4 && !cart.chr_rom.is_empty() {
+            vec![0u8; 0x2000]
+        } else {
+            cart.chr_rom.clone()
+        };
+
+        let ppu = Ppu::new(chr_backing, cart.mirroring);
+        let mut nb = NesBus::new(ppu);
+        nb.install_cart(cart);
+        self.cpu.bus = Some(Box::new(nb));
+        Ok(())
+    }
+
     /// Load a mapper-0 (NROM) iNES ROM into CPU memory. This writes PRG ROM
     /// into 0x8000.. and mirrors 16KB banks into 0xC000 when necessary.
     pub fn load_rom_from_path<P: AsRef<std::path::Path>>(
