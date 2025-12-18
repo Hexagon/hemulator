@@ -37,10 +37,14 @@ When building release artifacts:
 - **Include**: Executable (`hemu` or `hemu.exe`), `LICENSE`, `MANUAL.md`
 - **Exclude**: All other files (source code, build artifacts, config files, saves)
 - **Platforms**: Windows (.exe), Linux (binary + .deb package)
+- **Architectures**: Both 64-bit (x86_64/amd64) and 32-bit (i686/i386)
 - **Naming**: 
-  - Windows: `hemu-{version}-windows-x86_64.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
-  - Linux binary: `hemu-{version}-linux-x86_64.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
-  - Debian package: `hemu_{version}_amd64.deb` with proper packaging structure
+  - Windows 64-bit: `hemu-{version}-windows-x86_64.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
+  - Windows 32-bit: `hemu-{version}-windows-i686.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
+  - Linux 64-bit binary: `hemu-{version}-linux-x86_64.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
+  - Linux 32-bit binary: `hemu-{version}-linux-i686.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
+  - Debian package 64-bit: `hemu_{version}_amd64.deb` with proper packaging structure
+  - Debian package 32-bit: `hemu_{version}_i386.deb` with proper packaging structure
 
 ## Settings System
 

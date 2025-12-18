@@ -10,6 +10,13 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        target:
+          - arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+          - arch: i686
+            rust_target: i686-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
@@ -19,15 +26,16 @@ jobs:
           toolchain: stable
           profile: minimal
           override: true
+          target: ${{ matrix.target.rust_target }}
 
       - name: Build release binary
-        run: cargo build --release -p emu_gui
+        run: cargo build --release -p emu_gui --target ${{ matrix.target.rust_target }}
 
       - name: Create release package
         shell: bash
         run: |
           mkdir -p release-package
-          cp target/release/hemu.exe release-package/
+          cp target/${{ matrix.target.rust_target }}/release/hemu.exe release-package/
           cp LICENSE release-package/
           cp MANUAL.md release-package/
 
@@ -35,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.event.release.tag_name }}"
-          Compress-Archive -Path release-package/* -DestinationPath "hemu-$version-windows-x86_64.zip"
+          Compress-Archive -Path release-package/* -DestinationPath "hemu-$version-windows-${{ matrix.target.arch }}.zip"
 
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
@@ -43,8 +51,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./hemu-${{ github.event.release.tag_name }}-windows-x86_64.zip
-          asset_name: hemu-${{ github.event.release.tag_name }}-windows-x86_64.zip
+          asset_path: ./hemu-${{ github.event.release.tag_name }}-windows-${{ matrix.target.arch }}.zip
+          asset_name: hemu-${{ github.event.release.tag_name }}-windows-${{ matrix.target.arch }}.zip
           asset_content_type: application/zip
 
   build-linux:
@@ -52,6 +60,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        target:
+          - arch: x86_64
+            rust_target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+          - arch: i686
+            rust_target: i686-unknown-linux-gnu
+            deb_arch: i386
     steps:
       - uses: actions/checkout@v4
 
@@ -60,23 +77,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev pkg-config
 
+      - name: Install 32-bit dependencies
+        if: matrix.target.arch == 'i686'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib libasound2-dev:i386
+
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           override: true
+          target: ${{ matrix.target.rust_target }}
 
       - name: Build release binary
-        run: cargo build --release -p emu_gui
+        run: cargo build --release -p emu_gui --target ${{ matrix.target.rust_target }}
 
       - name: Create release package (tarball)
         run: |
           mkdir -p release-package
-          cp target/release/hemu release-package/
+          cp target/${{ matrix.target.rust_target }}/release/hemu release-package/
           cp LICENSE release-package/
           cp MANUAL.md release-package/
-          tar -czf hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz -C release-package .
+          tar -czf hemu-${{ github.event.release.tag_name }}-linux-${{ matrix.target.arch }}.tar.gz -C release-package .
 
       - name: Upload tarball release asset
         uses: actions/upload-release-asset@v1
@@ -84,12 +109,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
-          asset_name: hemu-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+          asset_path: ./hemu-${{ github.event.release.tag_name }}-linux-${{ matrix.target.arch }}.tar.gz
+          asset_name: hemu-${{ github.event.release.tag_name }}-linux-${{ matrix.target.arch }}.tar.gz
           asset_content_type: application/gzip
 
       - name: Strip binary for deb package
-        run: strip target/release/hemu
+        run: strip target/${{ matrix.target.rust_target }}/release/hemu
 
       - name: Create Debian package structure
         run: |
@@ -102,7 +127,7 @@ jobs:
           mkdir -p deb-package/usr/share/licenses/hemu
           
           # Copy binary
-          cp target/release/hemu deb-package/usr/bin/
+          cp target/${{ matrix.target.rust_target }}/release/hemu deb-package/usr/bin/
           
           # Copy documentation
           cp MANUAL.md deb-package/usr/share/doc/hemu/
@@ -114,7 +139,7 @@ jobs:
           Version: ${VERSION_NUM}
           Section: games
           Priority: optional
-          Architecture: amd64
+          Architecture: ${{ matrix.target.deb_arch }}
           Depends: libasound2 (>= 1.0.16)
           Maintainer: Hexagon <419737+Hexagon@users.noreply.github.com>
           Description: Multi-system console emulator
@@ -140,7 +165,7 @@ jobs:
           chmod 755 deb-package/DEBIAN/postinst
           
           # Build the package
-          dpkg-deb --build deb-package "hemu_${VERSION_NUM}_amd64.deb"
+          dpkg-deb --build deb-package "hemu_${VERSION_NUM}_${{ matrix.target.deb_arch }}.deb"
           
           # Save version for next step
           echo "DEB_VERSION=${VERSION_NUM}" >> $GITHUB_ENV
@@ -151,6 +176,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./hemu_${{ env.DEB_VERSION }}_amd64.deb
-          asset_name: hemu_${{ env.DEB_VERSION }}_amd64.deb
+          asset_path: ./hemu_${{ env.DEB_VERSION }}_${{ matrix.target.deb_arch }}.deb
+          asset_name: hemu_${{ env.DEB_VERSION }}_${{ matrix.target.deb_arch }}.deb
           asset_content_type: application/vnd.debian.binary-package
