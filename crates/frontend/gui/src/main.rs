@@ -135,9 +135,15 @@ fn main() {
     // Load settings
     let mut settings = Settings::load();
 
-    // If no ROM path provided via args, try to load from settings
+    // If no ROM path provided via args, try to load from settings (backward compatibility)
     if rom_path.is_none() {
-        rom_path = settings.last_rom_path.clone();
+        // Try new mount_points system first
+        if let Some(cartridge_path) = settings.get_mount_point("Cartridge") {
+            rom_path = Some(cartridge_path.clone());
+        } else if let Some(ref path) = settings.last_rom_path {
+            // Fall back to old last_rom_path for backward compatibility
+            rom_path = Some(path.clone());
+        }
     }
 
     let mut sys = emu_nes::NesSystem::default();
@@ -150,12 +156,13 @@ fn main() {
             Ok(data) => match detect_rom_type(&data) {
                 Ok(SystemType::NES) => {
                     rom_hash = Some(GameSaves::rom_hash(&data));
-                    if let Err(e) = sys.load_rom(&data) {
+                    if let Err(e) = sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load NES ROM: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Cartridge", p.clone());
+                        settings.last_rom_path = Some(p.clone()); // Keep for backward compat
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
@@ -347,6 +354,10 @@ fn main() {
 
         // Check for open ROM dialog (F3)
         if window.is_key_pressed(Key::F3, minifb::KeyRepeat::No) {
+            // For now, NES only has one mount point ("Cartridge"), so we go directly to file dialog
+            // Future enhancement: show mount point selector for systems with multiple mount points
+            let mount_point_id = "Cartridge"; // For NES
+            
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("ROM Files", &["nes", "gb", "gbc"])
                 .pick_file()
@@ -356,10 +367,11 @@ fn main() {
                     Ok(data) => match detect_rom_type(&data) {
                         Ok(SystemType::NES) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
-                            match sys.load_rom(&data) {
+                            match sys.mount(mount_point_id, &data) {
                                 Ok(_) => {
                                     rom_loaded = true;
-                                    settings.last_rom_path = Some(path_str.clone());
+                                    settings.set_mount_point(mount_point_id, path_str.clone());
+                                    settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
                                     }
@@ -368,10 +380,10 @@ fn main() {
                                     } else {
                                         GameSaves::default()
                                     };
-                                    println!("Loaded NES ROM: {}", path_str);
+                                    println!("Loaded NES ROM into {}: {}", mount_point_id, path_str);
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to load NES ROM: {}", e);
+                                    eprintln!("Failed to mount ROM into {}: {}", mount_point_id, e);
                                     rom_hash = None;
                                     rom_loaded = false;
                                     buffer = ui_render::create_default_screen(width, height);

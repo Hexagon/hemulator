@@ -34,6 +34,19 @@ pub trait Cpu {
     fn step(&mut self) -> u32;
 }
 
+/// Description of a mount point (media slot) that a system supports
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountPointInfo {
+    /// Unique identifier for this mount point (e.g., "Cartridge", "BIOS", "Floppy1")
+    pub id: String,
+    /// User-friendly name for display (e.g., "Cartridge Slot", "BIOS ROM")
+    pub name: String,
+    /// File extensions accepted by this mount point (e.g., ["nes", "unf"])
+    pub extensions: Vec<String>,
+    /// Whether this mount point is required for the system to function
+    pub required: bool,
+}
+
 /// A high-level System trait tying components together.
 pub trait System {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -49,6 +62,18 @@ pub trait System {
 
     /// Load a JSON save state.
     fn load_state(&mut self, v: &Value) -> Result<(), serde_json::Error>;
+
+    /// Get the list of mount points this system supports
+    fn mount_points(&self) -> Vec<MountPointInfo>;
+
+    /// Load media into a specific mount point
+    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error>;
+
+    /// Unload media from a specific mount point
+    fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error>;
+
+    /// Check if a mount point has media loaded
+    fn is_mounted(&self, mount_point_id: &str) -> bool;
 }
 
 #[cfg(test)]
@@ -79,6 +104,27 @@ mod tests {
 
         fn load_state(&mut self, _v: &serde_json::Value) -> Result<(), serde_json::Error> {
             Ok(())
+        }
+
+        fn mount_points(&self) -> Vec<MountPointInfo> {
+            vec![MountPointInfo {
+                id: "test".to_string(),
+                name: "Test Slot".to_string(),
+                extensions: vec!["bin".to_string()],
+                required: false,
+            }]
+        }
+
+        fn mount(&mut self, _mount_point_id: &str, _data: &[u8]) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn unmount(&mut self, _mount_point_id: &str) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn is_mounted(&self, _mount_point_id: &str) -> bool {
+            false
         }
     }
 

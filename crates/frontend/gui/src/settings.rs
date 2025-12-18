@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -36,7 +37,10 @@ pub struct Settings {
     pub window_height: usize,
     pub scale: u8,
     pub fullscreen: bool,
-    pub last_rom_path: Option<String>,
+    #[serde(default)]
+    pub last_rom_path: Option<String>, // Kept for backward compatibility
+    #[serde(default)]
+    pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
 }
 
 impl Default for Settings {
@@ -48,6 +52,7 @@ impl Default for Settings {
             scale: 2,
             fullscreen: false,
             last_rom_path: None,
+            mount_points: HashMap::new(),
         }
     }
 }
@@ -90,6 +95,21 @@ impl Settings {
         let contents = serde_json::to_string_pretty(self)?;
         fs::write(&path, contents)?;
         Ok(())
+    }
+
+    /// Set a mount point path
+    pub fn set_mount_point(&mut self, mount_point_id: &str, path: String) {
+        self.mount_points.insert(mount_point_id.to_string(), path);
+    }
+
+    /// Get a mount point path
+    pub fn get_mount_point(&self, mount_point_id: &str) -> Option<&String> {
+        self.mount_points.get(mount_point_id)
+    }
+
+    /// Clear a mount point path
+    pub fn clear_mount_point(&mut self, mount_point_id: &str) {
+        self.mount_points.remove(mount_point_id);
     }
 }
 

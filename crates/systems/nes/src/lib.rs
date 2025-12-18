@@ -15,13 +15,14 @@ mod ppu;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
-use emu_core::{types::Frame, System, apu::TimingMode};
+use emu_core::{types::Frame, System, MountPointInfo, apu::TimingMode};
 use ppu::Ppu;
 
 #[derive(Debug)]
 pub struct NesSystem {
     cpu: NesCpu,
     timing: TimingMode,
+    cartridge_loaded: bool,
 }
 
 impl NesSystem {
@@ -66,6 +67,7 @@ impl Default for NesSystem {
         Self {
             cpu,
             timing: TimingMode::Ntsc,
+            cartridge_loaded: false,
         }
     }
 }
@@ -101,6 +103,7 @@ impl NesSystem {
         nb.apu.set_timing(cart.timing);
         nb.install_cart(cart);
         self.cpu.set_bus(nb);
+        self.cartridge_loaded = true;
         Ok(())
     }
 
@@ -274,5 +277,34 @@ impl System for NesSystem {
 
     fn load_state(&mut self, _v: &serde_json::Value) -> Result<(), serde_json::Error> {
         Ok(())
+    }
+
+    fn mount_points(&self) -> Vec<MountPointInfo> {
+        vec![MountPointInfo {
+            id: "Cartridge".to_string(),
+            name: "Cartridge Slot".to_string(),
+            extensions: vec!["nes".to_string(), "unf".to_string()],
+            required: true,
+        }]
+    }
+
+    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
+        if mount_point_id != "Cartridge" {
+            return Err(NesError);
+        }
+        self.load_rom(data).map_err(|_| NesError)
+    }
+
+    fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
+        if mount_point_id != "Cartridge" {
+            return Err(NesError);
+        }
+        // Reset to default state (no cartridge)
+        *self = Self::default();
+        Ok(())
+    }
+
+    fn is_mounted(&self, mount_point_id: &str) -> bool {
+        mount_point_id == "Cartridge" && self.cartridge_loaded
     }
 }
