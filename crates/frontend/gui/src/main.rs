@@ -150,6 +150,11 @@ fn main() {
     let mut last_frame = Instant::now();
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Check for reset key (F12)
+        if window.is_key_down(Key::F12) {
+            sys.reset();
+        }
+
         // Map pressed keys to controller bits (controller 0 only for now)
         ctrl0 = 0;
         for k in [
