@@ -326,3 +326,59 @@ impl System for NesSystem {
         mount_point_id == "Cartridge" && self.cartridge_loaded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use emu_core::System;
+
+    #[test]
+    fn test_nes_mount_points() {
+        let sys = NesSystem::default();
+        let mount_points = sys.mount_points();
+
+        assert_eq!(mount_points.len(), 1);
+        assert_eq!(mount_points[0].id, "Cartridge");
+        assert_eq!(mount_points[0].name, "Cartridge Slot");
+        assert!(mount_points[0].required);
+        assert!(mount_points[0].extensions.contains(&"nes".to_string()));
+    }
+
+    #[test]
+    fn test_nes_save_state_support() {
+        let mut sys = NesSystem::default();
+        
+        // Should not support save states without a cartridge
+        assert!(!sys.supports_save_states());
+        
+        // After mounting a valid ROM, should support save states
+        // Note: We'd need a valid test ROM to fully test this
+    }
+
+    #[test]
+    fn test_nes_mount_unmount() {
+        let mut sys = NesSystem::default();
+        
+        // Initially not mounted
+        assert!(!sys.is_mounted("Cartridge"));
+        
+        // Trying to mount to wrong mount point should fail
+        assert!(sys.mount("BIOS", &[]).is_err());
+        
+        // Trying to unmount wrong mount point should fail
+        assert!(sys.unmount("BIOS").is_err());
+    }
+
+    #[test]
+    fn test_nes_load_state_validation() {
+        let mut sys = NesSystem::default();
+        
+        // Should fail to load state without cartridge
+        let state = serde_json::json!({"system": "nes", "version": 1});
+        assert!(sys.load_state(&state).is_err());
+        
+        // Should fail with wrong system type
+        let wrong_state = serde_json::json!({"system": "gb", "version": 1});
+        assert!(sys.load_state(&wrong_state).is_err());
+    }
+}

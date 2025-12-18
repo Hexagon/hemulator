@@ -145,4 +145,51 @@ mod tests {
         let mut sys2 = MockSystem;
         assert!(sys2.load_state(&v2).is_ok());
     }
+
+    #[test]
+    fn test_mount_point_info() {
+        let mp = MountPointInfo {
+            id: "Cartridge".to_string(),
+            name: "Cartridge Slot".to_string(),
+            extensions: vec!["nes".to_string(), "unf".to_string()],
+            required: true,
+        };
+
+        assert_eq!(mp.id, "Cartridge");
+        assert_eq!(mp.name, "Cartridge Slot");
+        assert_eq!(mp.extensions.len(), 2);
+        assert!(mp.required);
+    }
+
+    #[test]
+    fn test_system_mount_points() {
+        let sys = MockSystem;
+        let mount_points = sys.mount_points();
+
+        assert_eq!(mount_points.len(), 1);
+        assert_eq!(mount_points[0].id, "test");
+        assert_eq!(mount_points[0].name, "Test Slot");
+        assert!(!mount_points[0].required);
+    }
+
+    #[test]
+    fn test_system_supports_save_states() {
+        let sys = MockSystem;
+        // Default implementation returns false
+        assert!(!sys.supports_save_states());
+    }
+
+    #[test]
+    fn test_system_mount_operations() {
+        let mut sys = MockSystem;
+        
+        // Initially not mounted
+        assert!(!sys.is_mounted("test"));
+        
+        // Mount should succeed
+        assert!(sys.mount("test", &[1, 2, 3]).is_ok());
+        
+        // Unmount should succeed
+        assert!(sys.unmount("test").is_ok());
+    }
 }
