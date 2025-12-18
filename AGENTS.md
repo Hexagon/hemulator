@@ -6,6 +6,7 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
   - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
   - **CLI removed**: There is no CLI frontend, only the GUI
+  - **Core architecture**: Reusable CPU implementations in `crates/core/` (e.g., `cpu_6502`)
 - **Agent tasks**:
   - Run `cargo fmt` and `cargo clippy` on PRs.
   - Build the workspace (`cargo build --workspace`).
@@ -20,6 +21,47 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
 - **When to notify maintainers**:
   - Failing build or tests, or lint errors.
   - Long-running benchmark jobs exceeding expected time.
+
+## Architecture
+
+### Core Module (`crates/core/`)
+
+Contains reusable CPU implementations and common traits:
+
+- **`cpu_6502`**: Complete MOS 6502 CPU implementation
+  - Generic `Memory6502` trait for memory access
+  - Full instruction set with all addressing modes
+  - Comprehensive test coverage (12 unit tests)
+  - Can be used by any system: NES, Atari 2600, Apple II, Commodore 64, etc.
+  - Implementation includes:
+    - All official 6502 opcodes
+    - Accurate cycle counting
+    - Hardware interrupt support (NMI, IRQ)
+    - Page-wrap bug emulation (JMP indirect)
+    - Stack operations
+    - Status flags (N, V, B, D, I, Z, C)
+  - `ArrayMemory` helper for testing and simple use cases
+
+- **`types`**: Common data structures (Frame, AudioSample)
+- **`Cpu` trait**: Generic CPU interface
+- **`System` trait**: High-level system interface
+
+### System Modules (`crates/systems/`)
+
+System-specific implementations that use core components:
+
+- **NES (`emu_nes`)**: 
+  - Uses `cpu_6502` from core with NES-specific bus implementation
+  - `NesCpu` wraps `Cpu6502<NesMemory>` to provide NES-specific interface
+  - `NesMemory` enum implements `Memory6502` trait for both simple array and full NES bus
+  - NES bus includes: PPU, APU, controllers, mappers, RAM, WRAM
+  - All existing tests pass (33 mapper and PPU tests)
+
+- **Game Boy (`emu_gb`)**: Skeleton implementation
+
+### Frontend (`crates/frontend/gui`)
+
+GUI frontend using minifb and rodio.
 
 ## Documentation Structure
 
