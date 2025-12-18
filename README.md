@@ -60,8 +60,8 @@ The emulator will remember your last ROM and automatically load it next time you
 |-----|--------|-------------|
 | F1 | Help Overlay | Show/hide all controls and key mappings |
 | F3 | Open ROM | Browse and load a ROM file |
-| F5-F9 | Save State | Save to slot 1-5 |
-| Shift+F5-F9 | Load State | Load from slot 1-5 |
+| F5 | Save State | Open slot selector (1-5) to save |
+| F6 | Load State | Open slot selector (1-5) to load |
 | F11 | Cycle Scale | Switch between 1x, 2x, 4x, 8x window size |
 | F12 | Reset System | Restart the current game |
 
@@ -97,7 +97,9 @@ Located in the same directory as the executable, this file stores:
 
 Save states are stored in `saves/<rom_hash>/states.json`:
 - Each game gets its own directory based on ROM hash
-- 5 slots available per game (F5-F9 to save, Shift+F5-F9 to load)
+- 5 slots available per game
+- **F5** opens the save slot selector - press 1-5 to select a slot
+- **F6** opens the load slot selector - press 1-5 to select a slot (shows which slots have saves)
 - States are base64-encoded JSON for portability
 - Directory structure is created automatically
 

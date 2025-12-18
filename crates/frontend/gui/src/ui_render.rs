@@ -228,8 +228,8 @@ pub fn create_help_overlay(
         "Function Keys:",
         "  F1  - Toggle this help",
         "  F3  - Open ROM",
-        "  F5-F9 - Save to slot 1-5",
-        "  Shift+F5-F9 - Load from slot",
+        "  F5  - Save state (select slot)",
+        "  F6  - Load state (select slot)",
         "  F11 - Cycle window scale",
         "  F12 - Reset system",
         "  ESC - Exit",
@@ -245,6 +245,79 @@ pub fn create_help_overlay(
         width,
         height,
         &help_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create a slot selection overlay for save/load
+#[allow(clippy::too_many_arguments)]
+pub fn create_slot_selector_overlay(
+    width: usize,
+    height: usize,
+    mode: &str, // "SAVE" or "LOAD"
+    has_saves: &[bool; 5],
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let title = if mode == "SAVE" {
+        "SAVE STATE - Select Slot (1-5)"
+    } else {
+        "LOAD STATE - Select Slot (1-5)"
+    };
+
+    let mut all_lines = Vec::new();
+    all_lines.push(title);
+    all_lines.push("");
+
+    // Prepare slot lines
+    let slot1 = if mode == "LOAD" && !has_saves[0] {
+        "  1 - Slot 1 (empty)"
+    } else {
+        "  1 - Slot 1"
+    };
+    let slot2 = if mode == "LOAD" && !has_saves[1] {
+        "  2 - Slot 2 (empty)"
+    } else {
+        "  2 - Slot 2"
+    };
+    let slot3 = if mode == "LOAD" && !has_saves[2] {
+        "  3 - Slot 3 (empty)"
+    } else {
+        "  3 - Slot 3"
+    };
+    let slot4 = if mode == "LOAD" && !has_saves[3] {
+        "  4 - Slot 4 (empty)"
+    } else {
+        "  4 - Slot 4"
+    };
+    let slot5 = if mode == "LOAD" && !has_saves[4] {
+        "  5 - Slot 5 (empty)"
+    } else {
+        "  5 - Slot 5"
+    };
+
+    all_lines.push(slot1);
+    all_lines.push(slot2);
+    all_lines.push(slot3);
+    all_lines.push(slot4);
+    all_lines.push(slot5);
+    all_lines.push("");
+    all_lines.push("Press 1-5 to select, ESC to cancel");
+
+    let start_x = (width.saturating_sub(30 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &all_lines,
         start_x,
         start_y,
         FONT_HEIGHT + 2,

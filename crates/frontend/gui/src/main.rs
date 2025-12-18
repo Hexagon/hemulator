@@ -235,6 +235,10 @@ fn main() {
     // Help overlay state
     let mut show_help = false;
 
+    // Slot selector state
+    let mut show_slot_selector = false;
+    let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
+
     // Timing trackers
     let mut last_audio = Instant::now();
     let mut last_frame = Instant::now();
@@ -250,6 +254,76 @@ fn main() {
         // Toggle help overlay (F1)
         if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
             show_help = !show_help;
+            show_slot_selector = false; // Close slot selector if open
+        }
+
+        // Handle slot selector
+        if show_slot_selector {
+            // Check for slot selection (1-5) or cancel (ESC)
+            let mut selected_slot: Option<u8> = None;
+
+            if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+                selected_slot = Some(1);
+            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+                selected_slot = Some(2);
+            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+                selected_slot = Some(3);
+            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+                selected_slot = Some(4);
+            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+                selected_slot = Some(5);
+            }
+
+            if let Some(slot) = selected_slot {
+                show_slot_selector = false;
+
+                if let Some(ref hash) = rom_hash {
+                    if slot_selector_mode == "SAVE" {
+                        // Save state
+                        let state = sys.save_state();
+                        match serde_json::to_vec(&state) {
+                            Ok(data) => match game_saves.save_slot(slot, &data, hash) {
+                                Ok(_) => println!("Saved state to slot {}", slot),
+                                Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
+                            },
+                            Err(e) => eprintln!("Failed to serialize state: {}", e),
+                        }
+                    } else {
+                        // Load state
+                        match game_saves.load_slot(slot) {
+                            Ok(data) => match serde_json::from_slice::<serde_json::Value>(&data) {
+                                Ok(state) => match sys.load_state(&state) {
+                                    Ok(_) => println!("Loaded state from slot {}", slot),
+                                    Err(e) => eprintln!("Failed to load state: {}", e),
+                                },
+                                Err(e) => eprintln!("Failed to parse save state: {}", e),
+                            },
+                            Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
+                        }
+                    }
+                }
+            }
+
+            // Render slot selector
+            let has_saves = [
+                game_saves.slots.contains_key(&1),
+                game_saves.slots.contains_key(&2),
+                game_saves.slots.contains_key(&3),
+                game_saves.slots.contains_key(&4),
+                game_saves.slots.contains_key(&5),
+            ];
+            let slot_buffer = ui_render::create_slot_selector_overlay(
+                width,
+                height,
+                slot_selector_mode,
+                &has_saves,
+            );
+            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
         }
 
         // If help is showing, render it and continue
@@ -358,47 +432,18 @@ fn main() {
             println!("Scale changed to {}x", settings.scale);
         }
 
-        // Save/Load state keys (F5-F9)
-        if rom_loaded {
-            let shift_pressed =
-                window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+        // F5 - Show save state slot selector
+        if rom_loaded && window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
+            show_slot_selector = true;
+            slot_selector_mode = "SAVE";
+            show_help = false;
+        }
 
-            for (idx, key) in [Key::F5, Key::F6, Key::F7, Key::F8, Key::F9]
-                .iter()
-                .enumerate()
-            {
-                let slot = (idx + 1) as u8;
-
-                if window.is_key_pressed(*key, minifb::KeyRepeat::No) {
-                    if let Some(ref hash) = rom_hash {
-                        if shift_pressed {
-                            // Load state
-                            match game_saves.load_slot(slot) {
-                                Ok(data) => {
-                                    match serde_json::from_slice::<serde_json::Value>(&data) {
-                                        Ok(state) => match sys.load_state(&state) {
-                                            Ok(_) => println!("Loaded state from slot {}", slot),
-                                            Err(e) => eprintln!("Failed to load state: {}", e),
-                                        },
-                                        Err(e) => eprintln!("Failed to parse save state: {}", e),
-                                    }
-                                }
-                                Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
-                            }
-                        } else {
-                            // Save state
-                            let state = sys.save_state();
-                            match serde_json::to_vec(&state) {
-                                Ok(data) => match game_saves.save_slot(slot, &data, hash) {
-                                    Ok(_) => println!("Saved state to slot {}", slot),
-                                    Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
-                                },
-                                Err(e) => eprintln!("Failed to serialize state: {}", e),
-                            }
-                        }
-                    }
-                }
-            }
+        // F6 - Show load state slot selector
+        if rom_loaded && window.is_key_pressed(Key::F6, minifb::KeyRepeat::No) {
+            show_slot_selector = true;
+            slot_selector_mode = "LOAD";
+            show_help = false;
         }
 
         // Handle controller input only if ROM is loaded
