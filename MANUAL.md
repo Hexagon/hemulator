@@ -175,8 +175,6 @@ The emulator supports the following NES mappers:
 - Try disabling CRT filters (F11 to cycle to "None")
 - Close other resource-intensive applications
 - Ensure your graphics drivers are up to date
-- Close other resource-intensive applications
-- Ensure your graphics drivers are up to date
 
 ## System Requirements
 
