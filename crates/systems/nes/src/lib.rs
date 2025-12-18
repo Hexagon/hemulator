@@ -15,12 +15,13 @@ mod ppu;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
-use emu_core::{types::Frame, System};
+use emu_core::{types::Frame, System, apu::TimingMode};
 use ppu::Ppu;
 
 #[derive(Debug)]
 pub struct NesSystem {
     cpu: NesCpu,
+    timing: TimingMode,
 }
 
 impl NesSystem {
@@ -39,6 +40,19 @@ impl NesSystem {
             vec![0; count]
         }
     }
+
+    /// Set timing mode (NTSC/PAL)
+    pub fn set_timing(&mut self, timing: TimingMode) {
+        self.timing = timing;
+        if let Some(b) = self.cpu.bus_mut() {
+            b.apu.set_timing(timing);
+        }
+    }
+
+    /// Get current timing mode
+    pub fn timing(&self) -> TimingMode {
+        self.timing
+    }
 }
 
 impl Default for NesSystem {
@@ -49,13 +63,19 @@ impl Default for NesSystem {
         let ppu = Ppu::new(vec![], Mirroring::Vertical);
         let bus = NesBus::new(ppu);
         cpu.set_bus(bus);
-        Self { cpu }
+        Self {
+            cpu,
+            timing: TimingMode::Ntsc,
+        }
     }
 }
 
 impl NesSystem {
     /// Common cartridge setup logic
     fn setup_cartridge(&mut self, cart: cartridge::Cartridge) -> Result<(), std::io::Error> {
+        // Set timing mode from cartridge
+        self.timing = cart.timing;
+        
         // Derive the reset vector from the last PRG bank (mirrors hardware vectors).
         if cart.prg_rom.len() < 0x2000 {
             return Err(std::io::Error::new(
@@ -77,6 +97,8 @@ impl NesSystem {
 
         let ppu = Ppu::new(chr_backing, cart.mirroring);
         let mut nb = NesBus::new(ppu);
+        // Set APU timing to match cartridge
+        nb.apu.set_timing(cart.timing);
         nb.install_cart(cart);
         self.cpu.set_bus(nb);
         Ok(())
@@ -182,20 +204,24 @@ impl System for NesSystem {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // Run CPU cycles for one frame (approx. 29780 CPU cycles for NTSC).
+        // Run CPU cycles for one frame.
+        // NTSC: ~29780 CPU cycles, PAL: ~33247 CPU cycles
         // Model VBlank as the *tail* of the frame and trigger NMI at VBlank start.
         // IMPORTANT: render at the end of the *visible* portion (right before VBlank)
         // so we don't sample while games temporarily disable PPUMASK during their NMI.
-        const CYCLES_PER_FRAME: u32 = 29780;
-        const VBLANK_CYCLES: u32 = 2500;
-        const VISIBLE_CYCLES: u32 = CYCLES_PER_FRAME - VBLANK_CYCLES;
+        
+        let (cycles_per_frame, vblank_cycles) = match self.timing {
+            TimingMode::Ntsc => (29780u32, 2500u32),
+            TimingMode::Pal => (33247u32, 2798u32), // PAL has more cycles per frame
+        };
+        let visible_cycles = cycles_per_frame - vblank_cycles;
 
         // Visible portion (VBlank low)
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
         }
         let mut cycles = 0u32;
-        while cycles < VISIBLE_CYCLES {
+        while cycles < visible_cycles {
             let used = self.cpu.step();
             cycles = cycles.wrapping_add(used);
 
@@ -223,7 +249,7 @@ impl System for NesSystem {
         }
 
         // Run the rest of the frame (VBlank time).
-        while cycles < CYCLES_PER_FRAME {
+        while cycles < cycles_per_frame {
             cycles = cycles.wrapping_add(self.cpu.step());
 
             // Check for mapper IRQs during VBlank as well
