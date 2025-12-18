@@ -158,25 +158,57 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
 
     // Hemulator logo/title - draw each line centered individually
     let logo_y = height / 3;
-    
+
     // Center "HEMULATOR" (9 characters)
     let hemulator_x = (width - 9 * FONT_WIDTH) / 2;
-    draw_text(&mut buffer, width, height, "HEMULATOR", hemulator_x, logo_y, 0xFF16F2B3);
-    
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "HEMULATOR",
+        hemulator_x,
+        logo_y,
+        0xFF16F2B3,
+    );
+
     // Center "Multi-System Emulator" (21 characters)
     let subtitle_x = (width - 21 * FONT_WIDTH) / 2;
-    draw_text(&mut buffer, width, height, "Multi-System Emulator", subtitle_x, logo_y + (FONT_HEIGHT + 4) * 2, 0xFF16F2B3);
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Multi-System Emulator",
+        subtitle_x,
+        logo_y + (FONT_HEIGHT + 4) * 2,
+        0xFF16F2B3,
+    );
 
     // Instructions - center each line individually
     let inst_y = height * 2 / 3;
-    
+
     // "Press F3 to open a ROM" (22 characters)
     let inst1_x = (width - 22 * FONT_WIDTH) / 2;
-    draw_text(&mut buffer, width, height, "Press F3 to open a ROM", inst1_x, inst_y, 0xFFF0F0F0);
-    
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F3 to open a ROM",
+        inst1_x,
+        inst_y,
+        0xFFF0F0F0,
+    );
+
     // "Press F1 for help" (17 characters)
     let inst2_x = (width - 17 * FONT_WIDTH) / 2;
-    draw_text(&mut buffer, width, height, "Press F1 for help", inst2_x, inst_y + FONT_HEIGHT + 4, 0xFFF0F0F0);
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F1 for help",
+        inst2_x,
+        inst_y + FONT_HEIGHT + 4,
+        0xFFF0F0F0,
+    );
 
     buffer
 }

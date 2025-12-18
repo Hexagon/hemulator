@@ -243,7 +243,7 @@ fn main() {
 
     // Timing trackers
     let mut last_frame = Instant::now();
-    
+
     // Audio: NES runs at ~60 FPS, so generate 44100/60 ≈ 735 samples per frame
     const SAMPLES_PER_FRAME: usize = 735;
 
