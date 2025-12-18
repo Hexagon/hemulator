@@ -1,5 +1,6 @@
 //! Core emulator primitives and traits.
 
+pub mod cpu_6502;
 pub mod types {
     use serde::{Deserialize, Serialize};
 

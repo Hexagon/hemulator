@@ -26,14 +26,14 @@ pub struct NesSystem {
 impl NesSystem {
     /// Set controller 0 or 1 button state (bits 0..7 correspond to controller buttons).
     pub fn set_controller(&mut self, idx: usize, state: u8) {
-        if let Some(b) = &mut self.cpu.bus {
+        if let Some(b) = self.cpu.bus_mut() {
             b.set_controller(idx, state);
         }
     }
 
     /// Get audio samples from the APU
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
-        if let Some(b) = &mut self.cpu.bus {
+        if let Some(b) = self.cpu.bus_mut() {
             b.apu.generate_samples(count)
         } else {
             vec![0; count]
@@ -48,7 +48,7 @@ impl Default for NesSystem {
         cpu.reset();
         let ppu = Ppu::new(vec![], Mirroring::Vertical);
         let bus = NesBus::new(ppu);
-        cpu.bus = Some(Box::new(bus));
+        cpu.set_bus(bus);
         Self { cpu }
     }
 }
@@ -66,7 +66,7 @@ impl NesSystem {
         let last_bank = cart.prg_rom.len() - 0x2000;
         let reset_lo = cart.prg_rom.get(last_bank + 0x1FFC).copied().unwrap_or(0) as u16;
         let reset_hi = cart.prg_rom.get(last_bank + 0x1FFD).copied().unwrap_or(0) as u16;
-        self.cpu.pc = (reset_hi << 8) | reset_lo;
+        self.cpu.set_pc((reset_hi << 8) | reset_lo);
 
         // For mappers with CHR banking (e.g., MMC3), provide a 8KB pattern slot the mapper fills.
         let chr_backing = if cart.mapper == 4 && !cart.chr_rom.is_empty() {
@@ -78,7 +78,7 @@ impl NesSystem {
         let ppu = Ppu::new(chr_backing, cart.mirroring);
         let mut nb = NesBus::new(ppu);
         nb.install_cart(cart);
-        self.cpu.bus = Some(Box::new(nb));
+        self.cpu.set_bus(nb);
         Ok(())
     }
 
@@ -100,8 +100,8 @@ impl NesSystem {
 
     /// Return debug information useful for inspecting execution state.
     pub fn debug_state(&self) -> serde_json::Value {
-        let pc = self.cpu.pc;
-        let cycles = self.cpu.cycles;
+        let pc = self.cpu.pc();
+        let cycles = self.cpu.cycles();
         let mut vram_sample: Vec<u8> = Vec::new();
         let mut chr_sample: Vec<u8> = Vec::new();
         let mut vram_nonzero: usize = 0;
@@ -113,7 +113,7 @@ impl NesSystem {
         let mut reset_vec: u16 = 0;
         let mut irq_vec: u16 = 0;
 
-        if let Some(b) = &self.cpu.bus {
+        if let Some(b) = self.cpu.bus() {
             // take a small sample of VRAM and CHR for quick inspection
             let vlen = std::cmp::min(64, b.ppu.vram.len());
             vram_sample = b.ppu.vram[..vlen].to_vec();
@@ -191,7 +191,7 @@ impl System for NesSystem {
         const VISIBLE_CYCLES: u32 = CYCLES_PER_FRAME - VBLANK_CYCLES;
 
         // Visible portion (VBlank low)
-        if let Some(b) = &mut self.cpu.bus {
+        if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
         }
         let mut cycles = 0u32;
@@ -200,7 +200,7 @@ impl System for NesSystem {
             cycles = cycles.wrapping_add(used);
 
             // Mapper IRQs now clocked by PPU A12 edges directly from PPU fetches.
-            if let Some(b) = &mut self.cpu.bus {
+            if let Some(b) = self.cpu.bus_mut() {
                 if b.take_irq_pending() {
                     self.cpu.trigger_irq();
                 }
@@ -208,14 +208,14 @@ impl System for NesSystem {
         }
 
         // Snapshot the frame at the end of visible time.
-        let frame = if let Some(b) = &self.cpu.bus {
+        let frame = if let Some(b) = self.cpu.bus() {
             b.ppu.render_frame()
         } else {
             Frame::new(256, 240)
         };
 
         // VBlank start
-        if let Some(b) = &mut self.cpu.bus {
+        if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(true);
             if b.ppu.nmi_enabled() {
                 self.cpu.trigger_nmi();
@@ -227,7 +227,7 @@ impl System for NesSystem {
             cycles = cycles.wrapping_add(self.cpu.step());
 
             // Check for mapper IRQs during VBlank as well
-            if let Some(b) = &mut self.cpu.bus {
+            if let Some(b) = self.cpu.bus_mut() {
                 if b.take_irq_pending() {
                     self.cpu.trigger_irq();
                 }
@@ -235,7 +235,7 @@ impl System for NesSystem {
         }
 
         // VBlank end
-        if let Some(b) = &mut self.cpu.bus {
+        if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
         }
 
@@ -243,7 +243,7 @@ impl System for NesSystem {
     }
 
     fn save_state(&self) -> serde_json::Value {
-        serde_json::json!({ "system": "nes", "version": 1, "a": self.cpu.a })
+        serde_json::json!({ "system": "nes", "version": 1, "a": self.cpu.a() })
     }
 
     fn load_state(&mut self, _v: &serde_json::Value) -> Result<(), serde_json::Error> {
