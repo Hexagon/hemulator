@@ -472,3 +472,102 @@ impl Ppu {
         frame
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_palette_mirror_index() {
+        // Universal background at $3F00
+        assert_eq!(palette_mirror_index(0x00), 0x00);
+
+        // BG palette 0 colors 1-3 should not mirror
+        assert_eq!(palette_mirror_index(0x01), 0x01);
+        assert_eq!(palette_mirror_index(0x02), 0x02);
+        assert_eq!(palette_mirror_index(0x03), 0x03);
+
+        // BG palette 1 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x04), 0x00);
+        // BG palette 1 colors 1-3 should not mirror
+        assert_eq!(palette_mirror_index(0x05), 0x05);
+        assert_eq!(palette_mirror_index(0x06), 0x06);
+        assert_eq!(palette_mirror_index(0x07), 0x07);
+
+        // BG palette 2 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x08), 0x00);
+        assert_eq!(palette_mirror_index(0x09), 0x09);
+        assert_eq!(palette_mirror_index(0x0A), 0x0A);
+        assert_eq!(palette_mirror_index(0x0B), 0x0B);
+
+        // BG palette 3 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x0C), 0x00);
+        assert_eq!(palette_mirror_index(0x0D), 0x0D);
+        assert_eq!(palette_mirror_index(0x0E), 0x0E);
+        assert_eq!(palette_mirror_index(0x0F), 0x0F);
+
+        // Sprite palette universal should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x10), 0x00);
+        assert_eq!(palette_mirror_index(0x11), 0x11);
+        assert_eq!(palette_mirror_index(0x12), 0x12);
+        assert_eq!(palette_mirror_index(0x13), 0x13);
+
+        // Sprite palette 1 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x14), 0x00);
+        assert_eq!(palette_mirror_index(0x15), 0x15);
+        assert_eq!(palette_mirror_index(0x16), 0x16);
+        assert_eq!(palette_mirror_index(0x17), 0x17);
+
+        // Sprite palette 2 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x18), 0x00);
+        assert_eq!(palette_mirror_index(0x19), 0x19);
+        assert_eq!(palette_mirror_index(0x1A), 0x1A);
+        assert_eq!(palette_mirror_index(0x1B), 0x1B);
+
+        // Sprite palette 3 color 0 should mirror to universal bg
+        assert_eq!(palette_mirror_index(0x1C), 0x00);
+        assert_eq!(palette_mirror_index(0x1D), 0x1D);
+        assert_eq!(palette_mirror_index(0x1E), 0x1E);
+        assert_eq!(palette_mirror_index(0x1F), 0x1F);
+    }
+
+    #[test]
+    fn test_palette_writes_and_reads() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write to universal background
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x00); // PPUADDR low
+        ppu.write_register(7, 0x0F); // Write black to universal bg
+
+        // Read back from universal background
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Write to BG palette 1 color 0 (should mirror to universal bg)
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x04); // PPUADDR low
+        ppu.write_register(7, 0x30); // Write white
+
+        // Read back from universal background - should see the mirrored value
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30);
+
+        // Write to BG palette 1 color 1 (should NOT mirror)
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x05); // PPUADDR low
+        ppu.write_register(7, 0x15); // Write a color
+
+        // Read it back
+        ppu.vram_addr.set(0x3F05);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x15);
+
+        // Universal background should still be white
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30);
+    }
+}
