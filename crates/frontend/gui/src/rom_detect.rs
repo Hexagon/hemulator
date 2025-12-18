@@ -53,7 +53,8 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc)".to_string(),
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc)"
+            .to_string(),
     })
 }
 

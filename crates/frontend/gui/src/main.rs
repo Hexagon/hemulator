@@ -1,14 +1,14 @@
-mod settings;
-mod save_state;
 mod rom_detect;
+mod save_state;
+mod settings;
 mod ui_render;
 
 use emu_core::System;
 use minifb::{Key, Scale, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
-use settings::Settings;
 use save_state::GameSaves;
+use settings::Settings;
 use std::env;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
@@ -162,30 +162,28 @@ fn main() {
     // Try to load ROM if path is available
     if let Some(p) = &rom_path {
         match std::fs::read(p) {
-            Ok(data) => {
-                match detect_rom_type(&data) {
-                    Ok(SystemType::NES) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        if let Err(e) = sys.load_rom(&data) {
-                            eprintln!("Failed to load NES ROM: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
-                            }
-                            println!("Loaded NES ROM: {}", p);
+            Ok(data) => match detect_rom_type(&data) {
+                Ok(SystemType::NES) => {
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    if let Err(e) = sys.load_rom(&data) {
+                        eprintln!("Failed to load NES ROM: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                    }
-                    Ok(SystemType::GameBoy) => {
-                        eprintln!("Game Boy ROMs are not yet fully implemented");
-                    }
-                    Err(e) => {
-                        eprintln!("Unsupported ROM: {}", e);
+                        println!("Loaded NES ROM: {}", p);
                     }
                 }
-            }
+                Ok(SystemType::GameBoy) => {
+                    eprintln!("Game Boy ROMs are not yet fully implemented");
+                }
+                Err(e) => {
+                    eprintln!("Unsupported ROM: {}", e);
+                }
+            },
             Err(e) => {
                 eprintln!("Failed to read ROM file: {}", e);
             }
@@ -224,7 +222,10 @@ fn main() {
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Warning: Failed to initialize audio: {}. Audio will be disabled.", e);
+            eprintln!(
+                "Warning: Failed to initialize audio: {}. Audio will be disabled.",
+                e
+            );
             return;
         }
     };
@@ -291,42 +292,40 @@ fn main() {
             {
                 let path_str = path.to_string_lossy().to_string();
                 match std::fs::read(&path) {
-                    Ok(data) => {
-                        match detect_rom_type(&data) {
-                            Ok(SystemType::NES) => {
-                                rom_hash = Some(GameSaves::rom_hash(&data));
-                                match sys.load_rom(&data) {
-                                    Ok(_) => {
-                                        rom_loaded = true;
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        game_saves = if let Some(ref hash) = rom_hash {
-                                            GameSaves::load(hash)
-                                        } else {
-                                            GameSaves::default()
-                                        };
-                                        println!("Loaded NES ROM: {}", path_str);
+                    Ok(data) => match detect_rom_type(&data) {
+                        Ok(SystemType::NES) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            match sys.load_rom(&data) {
+                                Ok(_) => {
+                                    rom_loaded = true;
+                                    settings.last_rom_path = Some(path_str.clone());
+                                    if let Err(e) = settings.save() {
+                                        eprintln!("Warning: Failed to save settings: {}", e);
                                     }
-                                    Err(e) => {
-                                        eprintln!("Failed to load NES ROM: {}", e);
-                                        rom_hash = None;
-                                        rom_loaded = false;
-                                        buffer = ui_render::create_default_screen(width, height);
-                                    }
+                                    game_saves = if let Some(ref hash) = rom_hash {
+                                        GameSaves::load(hash)
+                                    } else {
+                                        GameSaves::default()
+                                    };
+                                    println!("Loaded NES ROM: {}", path_str);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to load NES ROM: {}", e);
+                                    rom_hash = None;
+                                    rom_loaded = false;
+                                    buffer = ui_render::create_default_screen(width, height);
                                 }
                             }
-                            Ok(SystemType::GameBoy) => {
-                                eprintln!("Game Boy ROMs are not yet fully implemented");
-                                buffer = ui_render::create_default_screen(width, height);
-                            }
-                            Err(e) => {
-                                eprintln!("Unsupported ROM: {}", e);
-                                buffer = ui_render::create_default_screen(width, height);
-                            }
                         }
-                    }
+                        Ok(SystemType::GameBoy) => {
+                            eprintln!("Game Boy ROMs are not yet fully implemented");
+                            buffer = ui_render::create_default_screen(width, height);
+                        }
+                        Err(e) => {
+                            eprintln!("Unsupported ROM: {}", e);
+                            buffer = ui_render::create_default_screen(width, height);
+                        }
+                    },
                     Err(e) => {
                         eprintln!("Failed to read ROM file: {}", e);
                     }
@@ -376,11 +375,15 @@ fn main() {
 
         // Save/Load state keys (F5-F9)
         if rom_loaded {
-            let shift_pressed = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-            
-            for (idx, key) in [Key::F5, Key::F6, Key::F7, Key::F8, Key::F9].iter().enumerate() {
+            let shift_pressed =
+                window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+
+            for (idx, key) in [Key::F5, Key::F6, Key::F7, Key::F8, Key::F9]
+                .iter()
+                .enumerate()
+            {
                 let slot = (idx + 1) as u8;
-                
+
                 if window.is_key_pressed(*key, minifb::KeyRepeat::No) {
                     if let Some(ref hash) = rom_hash {
                         if shift_pressed {
@@ -388,12 +391,10 @@ fn main() {
                             match game_saves.load_slot(slot) {
                                 Ok(data) => {
                                     match serde_json::from_slice::<serde_json::Value>(&data) {
-                                        Ok(state) => {
-                                            match sys.load_state(&state) {
-                                                Ok(_) => println!("Loaded state from slot {}", slot),
-                                                Err(e) => eprintln!("Failed to load state: {}", e),
-                                            }
-                                        }
+                                        Ok(state) => match sys.load_state(&state) {
+                                            Ok(_) => println!("Loaded state from slot {}", slot),
+                                            Err(e) => eprintln!("Failed to load state: {}", e),
+                                        },
                                         Err(e) => eprintln!("Failed to parse save state: {}", e),
                                     }
                                 }
@@ -403,12 +404,10 @@ fn main() {
                             // Save state
                             let state = sys.save_state();
                             match serde_json::to_vec(&state) {
-                                Ok(data) => {
-                                    match game_saves.save_slot(slot, &data, hash) {
-                                        Ok(_) => println!("Saved state to slot {}", slot),
-                                        Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
-                                    }
-                                }
+                                Ok(data) => match game_saves.save_slot(slot, &data, hash) {
+                                    Ok(_) => println!("Saved state to slot {}", slot),
+                                    Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
+                                },
                                 Err(e) => eprintln!("Failed to serialize state: {}", e),
                             }
                         }

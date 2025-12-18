@@ -5,6 +5,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// Maximum number of save slots per game
+pub const MAX_SAVE_SLOTS: u8 = 5;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveSlot {
     pub data: String, // Base64 encoded save state data
@@ -57,7 +60,10 @@ impl GameSaves {
             Ok(contents) => match serde_json::from_str(&contents) {
                 Ok(saves) => saves,
                 Err(e) => {
-                    eprintln!("Warning: Failed to parse save file: {}. Using empty saves.", e);
+                    eprintln!(
+                        "Warning: Failed to parse save file: {}. Using empty saves.",
+                        e
+                    );
                     Self::default()
                 }
             },
@@ -82,15 +88,15 @@ impl GameSaves {
         Ok(())
     }
 
-    /// Save state data to a specific slot (1-5)
+    /// Save state data to a specific slot (1-MAX_SAVE_SLOTS)
     pub fn save_slot(
         &mut self,
         slot: u8,
         data: &[u8],
         rom_hash: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if slot < 1 || slot > 5 {
-            return Err("Slot must be between 1 and 5".into());
+        if slot < 1 || slot > MAX_SAVE_SLOTS {
+            return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
 
         let encoded = BASE64.encode(data);
@@ -110,10 +116,10 @@ impl GameSaves {
         Ok(())
     }
 
-    /// Load state data from a specific slot (1-5)
+    /// Load state data from a specific slot (1-MAX_SAVE_SLOTS)
     pub fn load_slot(&self, slot: u8) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        if slot < 1 || slot > 5 {
-            return Err("Slot must be between 1 and 5".into());
+        if slot < 1 || slot > MAX_SAVE_SLOTS {
+            return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
 
         match self.slots.get(&slot) {
@@ -140,7 +146,7 @@ mod tests {
         let rom_data = b"test rom data";
         let hash = GameSaves::rom_hash(rom_data);
         assert_eq!(hash.len(), 64); // SHA256 produces 64 hex characters
-        // Hash should be consistent
+                                    // Hash should be consistent
         assert_eq!(hash, GameSaves::rom_hash(rom_data));
     }
 

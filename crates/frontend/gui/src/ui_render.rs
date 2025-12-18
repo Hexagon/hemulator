@@ -156,11 +156,7 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
     let mut buffer = vec![0xFF1A1A2E; width * height]; // Dark blue background
 
     // Hemulator logo/title
-    let logo_lines = vec![
-        "HEMULATOR",
-        "",
-        "Multi-System Emulator",
-    ];
+    let logo_lines = vec!["HEMULATOR", "", "Multi-System Emulator"];
 
     let logo_y = height / 3;
     let logo_x = (width - 9 * FONT_WIDTH) / 2; // Center "HEMULATOR"
@@ -177,10 +173,7 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
     );
 
     // Instructions
-    let instructions = vec![
-        "Press F3 to open a ROM",
-        "Press F1 for help",
-    ];
+    let instructions = vec!["Press F3 to open a ROM", "Press F1 for help"];
 
     let inst_y = height * 2 / 3;
     let inst_x = (width - 22 * FONT_WIDTH) / 2;
@@ -200,7 +193,11 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
 }
 
 /// Create a help overlay
-pub fn create_help_overlay(width: usize, height: usize, settings: &crate::settings::Settings) -> Vec<u32> {
+pub fn create_help_overlay(
+    width: usize,
+    height: usize,
+    settings: &crate::settings::Settings,
+) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
 
@@ -209,9 +206,13 @@ pub fn create_help_overlay(width: usize, height: usize, settings: &crate::settin
     let b_line = format!("  {} - B button", settings.keyboard.b);
     let select_line = format!("  {} - Select", settings.keyboard.select);
     let start_line = format!("  {} - Start", settings.keyboard.start);
-    let dpad_line = format!("  {} {} {} {} - D-pad", 
-        settings.keyboard.up, settings.keyboard.down, 
-        settings.keyboard.left, settings.keyboard.right);
+    let dpad_line = format!(
+        "  {} {} {} {} - D-pad",
+        settings.keyboard.up,
+        settings.keyboard.down,
+        settings.keyboard.left,
+        settings.keyboard.right
+    );
 
     let help_lines: Vec<&str> = vec![
         "HEMULATOR - Help",

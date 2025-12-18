@@ -70,7 +70,10 @@ impl Settings {
             Ok(contents) => match serde_json::from_str(&contents) {
                 Ok(settings) => settings,
                 Err(e) => {
-                    eprintln!("Warning: Failed to parse config.json: {}. Using defaults.", e);
+                    eprintln!(
+                        "Warning: Failed to parse config.json: {}. Using defaults.",
+                        e
+                    );
                     Self::default()
                 }
             },
@@ -117,8 +120,7 @@ mod tests {
     fn test_settings_serialization() {
         let settings = Settings::default();
         let json = serde_json::to_string(&settings).expect("Failed to serialize");
-        let deserialized: Settings =
-            serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: Settings = serde_json::from_str(&json).expect("Failed to deserialize");
         assert_eq!(deserialized.keyboard.a, settings.keyboard.a);
         assert_eq!(deserialized.scale, settings.scale);
     }
@@ -145,7 +147,10 @@ mod tests {
         let loaded_contents = fs::read_to_string(&test_config).unwrap();
         let loaded: Settings = serde_json::from_str(&loaded_contents).unwrap();
 
-        assert_eq!(loaded.last_rom_path, Some("/test/path/game.nes".to_string()));
+        assert_eq!(
+            loaded.last_rom_path,
+            Some("/test/path/game.nes".to_string())
+        );
         assert_eq!(loaded.scale, 4);
 
         // Clean up
