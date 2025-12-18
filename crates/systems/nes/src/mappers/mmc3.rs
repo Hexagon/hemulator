@@ -202,29 +202,29 @@ mod tests {
     #[test]
     fn mmc3_prg_banking() {
         let mut prg = vec![0; 0x10000]; // 8 banks of 8KB
-        prg[0] = 0x11;           // Bank 0
-        prg[0x2000] = 0x22;      // Bank 1
-        prg[0xE000] = 0x88;      // Bank 7 (last)
-        
+        prg[0] = 0x11; // Bank 0
+        prg[0x2000] = 0x22; // Bank 1
+        prg[0xE000] = 0x88; // Bank 7 (last)
+
         let cart = Cartridge {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 4,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
-        
+
         // Default: bank6=0, bank7=0, second_last=6, last=7
         // So: [0, 0, 6, 7] at $8000, $A000, $C000, $E000
         assert_eq!(mmc3.read_prg(0x8000), 0x11); // Bank 0
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
-        
+
         // Switch bank 6 to 1
         mmc3.write_prg(0x8000, 6, &mut ppu); // Select bank register 6
         mmc3.write_prg(0x8001, 1, &mut ppu); // Set it to 1
-        
+
         assert_eq!(mmc3.read_prg(0x8000), 0x22); // Now bank 1
     }
 
@@ -236,32 +236,32 @@ mod tests {
             mapper: 4,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
-        
+
         // Set IRQ latch to 2
         mmc3.write_prg(0xC000, 2, &mut ppu);
         // Reload counter (sets flag, actual reload happens on next A12 edge)
         mmc3.write_prg(0xC001, 0, &mut ppu);
         // Enable IRQ
         mmc3.write_prg(0xE001, 0, &mut ppu);
-        
+
         // Counter hasn't been reloaded yet (no A12 edge)
         assert_eq!(mmc3.irq_counter, 0);
         assert!(!mmc3.irq_pending);
-        
+
         // Simulate A12 rising edges (PPU fetches)
         mmc3.notify_a12(false);
-        mmc3.notify_a12(true);  // Counter reloaded to 2 because irq_reload was set
+        mmc3.notify_a12(true); // Counter reloaded to 2 because irq_reload was set
         assert_eq!(mmc3.irq_counter, 2);
-        
+
         mmc3.notify_a12(false);
-        mmc3.notify_a12(true);  // Counter decrements to 1
+        mmc3.notify_a12(true); // Counter decrements to 1
         assert_eq!(mmc3.irq_counter, 1);
-        
+
         mmc3.notify_a12(false);
-        mmc3.notify_a12(true);  // Counter decrements to 0, IRQ fires
+        mmc3.notify_a12(true); // Counter decrements to 0, IRQ fires
         assert_eq!(mmc3.irq_counter, 0);
         assert!(mmc3.irq_pending);
     }
@@ -274,15 +274,15 @@ mod tests {
             mapper: 4,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
-        
+
         // Switch to vertical mirroring
         mmc3.write_prg(0xA000, 0, &mut ppu);
         // PPU should now have vertical mirroring set
         // (We can't directly test this without accessing ppu.mirroring)
-        
+
         // Switch to horizontal mirroring
         mmc3.write_prg(0xA000, 1, &mut ppu);
     }

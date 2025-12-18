@@ -53,23 +53,23 @@ mod tests {
     #[test]
     fn uxrom_bank_switching() {
         let mut prg = vec![0; 0x8000]; // 2 banks of 16KB each
-        prg[0] = 0x11;           // Bank 0 start
-        prg[0x4000] = 0x22;      // Bank 1 start
-        
+        prg[0] = 0x11; // Bank 0 start
+        prg[0x4000] = 0x22; // Bank 1 start
+
         let cart = Cartridge {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 2,
             mirroring: Mirroring::Vertical,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
         let mut uxrom = Uxrom::new(cart, &mut ppu);
-        
+
         // Initially bank 0 at $8000, bank 1 (last) at $C000
         assert_eq!(uxrom.read_prg(0x8000), 0x11);
         assert_eq!(uxrom.read_prg(0xC000), 0x22);
-        
+
         // Switch to bank 1 at $8000
         uxrom.write_prg(0x8000, 1, &mut ppu);
         assert_eq!(uxrom.read_prg(0x8000), 0x22);
@@ -82,17 +82,17 @@ mod tests {
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
         prg[0x8000] = 0x33;
-        
+
         let cart = Cartridge {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 2,
             mirroring: Mirroring::Vertical,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
         let uxrom = Uxrom::new(cart, &mut ppu);
-        
+
         // Last bank (2) should always be at $C000
         assert_eq!(uxrom.read_prg(0xC000), 0x33);
     }

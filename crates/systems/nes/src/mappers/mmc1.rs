@@ -174,18 +174,18 @@ mod tests {
             mapper: 1,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
-        
+
         // Write 5 bits to control register (address $8000-9FFF)
         // Writing 0x0C (binary 01100) for vertical mirroring + 16KB PRG mode
-        mmc1.write_prg(0x8000, 0, &mut ppu);  // bit 0
-        mmc1.write_prg(0x8000, 0, &mut ppu);  // bit 1
-        mmc1.write_prg(0x8000, 1, &mut ppu);  // bit 2
-        mmc1.write_prg(0x8000, 1, &mut ppu);  // bit 3
-        mmc1.write_prg(0x8000, 0, &mut ppu);  // bit 4
-        
+        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 0
+        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 1
+        mmc1.write_prg(0x8000, 1, &mut ppu); // bit 2
+        mmc1.write_prg(0x8000, 1, &mut ppu); // bit 3
+        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 4
+
         // Control register should now be 0x0C
         assert_eq!(mmc1.control, 0x0C);
     }
@@ -198,17 +198,17 @@ mod tests {
             mapper: 1,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
-        
+
         // Start a write sequence
         mmc1.write_prg(0x8000, 1, &mut ppu);
         mmc1.write_prg(0x8000, 1, &mut ppu);
-        
+
         // Reset with bit 7 set
         mmc1.write_prg(0x8000, 0x80, &mut ppu);
-        
+
         // Write count should be reset
         assert_eq!(mmc1.write_count, 0);
         assert_eq!(mmc1.shift_reg, 0x10);
@@ -217,21 +217,21 @@ mod tests {
     #[test]
     fn mmc1_prg_banking_modes() {
         let mut prg = vec![0; 0x10000]; // 4 banks
-        prg[0] = 0x11;              // Bank 0
-        prg[0x4000] = 0x22;         // Bank 1
-        prg[0x8000] = 0x33;         // Bank 2
-        prg[0xC000] = 0x44;         // Bank 3
-        
+        prg[0] = 0x11; // Bank 0
+        prg[0x4000] = 0x22; // Bank 1
+        prg[0x8000] = 0x33; // Bank 2
+        prg[0xC000] = 0x44; // Bank 3
+
         let cart = Cartridge {
             prg_rom: prg,
             chr_rom: vec![],
             mapper: 1,
             mirroring: Mirroring::Horizontal,
         };
-        
+
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mmc1 = Mmc1::new(cart, &mut ppu);
-        
+
         // Default mode (3): swap lower bank, fix last
         // Bank 0 at $8000, Bank 3 at $C000
         assert_eq!(mmc1.read_prg(0x8000), 0x11);

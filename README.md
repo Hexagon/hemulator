@@ -41,11 +41,14 @@ The NES emulator currently supports the following iNES mappers:
 - MMC1 implements serial register writes and mirroring control
 - MMC3 implements IRQ generation for raster effects
 - CHR-RAM is supported for games without CHR-ROM
+- Comprehensive unit tests verify mapper behavior
 
 ### Known Limitations
 - Mapper implementations focus on common use cases
 - Some advanced mapper features may not be fully implemented
 - Four-screen mirroring is treated as vertical mirroring (2KB VRAM limitation)
+- PPU implementation is simplified and may not perfectly replicate all NES hardware behaviors
+- Sprite rendering and background rendering are functional but may have minor visual artifacts in some games
 
 ### Unsupported Mappers
 Games using other mappers (3, 5, 7, 9, 10, 11, etc.) will not work correctly. Common mappers planned for future implementation include:

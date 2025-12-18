@@ -39,7 +39,7 @@ mod tests {
     #[test]
     fn nrom_16kb_mirroring() {
         use crate::cartridge::Mirroring;
-        
+
         let cart = Cartridge {
             prg_rom: vec![0x42; 0x4000], // 16KB PRG
             chr_rom: vec![],
@@ -47,7 +47,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
         let nrom = Nrom::new(cart);
-        
+
         // 16KB ROM should mirror at 0x8000 and 0xC000
         assert_eq!(nrom.read_prg(0x8000), 0x42);
         assert_eq!(nrom.read_prg(0xC000), 0x42);
@@ -57,11 +57,11 @@ mod tests {
     #[test]
     fn nrom_32kb_no_mirroring() {
         use crate::cartridge::Mirroring;
-        
+
         let mut prg = vec![0; 0x8000]; // 32KB PRG
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
-        
+
         let cart = Cartridge {
             prg_rom: prg,
             chr_rom: vec![],
@@ -69,7 +69,7 @@ mod tests {
             mirroring: Mirroring::Horizontal,
         };
         let nrom = Nrom::new(cart);
-        
+
         // 32KB ROM should not mirror
         assert_eq!(nrom.read_prg(0x8000), 0x11);
         assert_eq!(nrom.read_prg(0xC000), 0x22);
