@@ -125,4 +125,19 @@ impl Mapper {
             m.notify_a12(a12_high);
         }
     }
+
+    /// Get mapper number
+    pub fn mapper_number(&self) -> u8 {
+        match self {
+            Mapper::Nrom(_) => 0,
+            Mapper::Mmc1(_) => 1,
+            Mapper::Uxrom(_) => 2,
+            Mapper::Cnrom(_) => 3,
+            Mapper::Mmc3(_) => 4,
+            Mapper::Axrom(_) => 7,
+            Mapper::Mmc2(_) => 9,
+            Mapper::Mmc4(_) => 10,
+            Mapper::ColorDreams(_) => 11,
+        }
+    }
 }

@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// UxROM (Mapper 2) - Switchable 16KB PRG banks with fixed last bank
 #[derive(Debug)]

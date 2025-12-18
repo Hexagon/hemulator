@@ -1,10 +1,10 @@
 //! Pulse wave generator for RP2A03/RP2A07 APU.
-//! 
+//!
 //! This module implements the pulse channel used in the NES APU and potentially
 //! reusable in other systems with similar square wave synthesis chips.
 
 /// Pulse channel that generates square wave samples.
-/// 
+///
 /// The pulse channel produces a variable-width pulse signal with support for:
 /// - 4 duty cycle modes (12.5%, 25%, 50%, 75%)
 /// - 11-bit timer for frequency control
@@ -114,38 +114,58 @@ mod tests {
     #[test]
     fn pulse_duty_patterns() {
         let mut pulse = PulseChannel::new();
-        
+
         // Test 12.5% duty cycle
         pulse.duty = 0;
-        let pattern: Vec<bool> = (0..8).map(|i| {
-            pulse.phase = i;
-            pulse.duty_output()
-        }).collect();
-        assert_eq!(pattern, vec![false, true, false, false, false, false, false, false]);
+        let pattern: Vec<bool> = (0..8)
+            .map(|i| {
+                pulse.phase = i;
+                pulse.duty_output()
+            })
+            .collect();
+        assert_eq!(
+            pattern,
+            vec![false, true, false, false, false, false, false, false]
+        );
 
         // Test 25% duty cycle
         pulse.duty = 1;
-        let pattern: Vec<bool> = (0..8).map(|i| {
-            pulse.phase = i;
-            pulse.duty_output()
-        }).collect();
-        assert_eq!(pattern, vec![false, true, true, false, false, false, false, false]);
+        let pattern: Vec<bool> = (0..8)
+            .map(|i| {
+                pulse.phase = i;
+                pulse.duty_output()
+            })
+            .collect();
+        assert_eq!(
+            pattern,
+            vec![false, true, true, false, false, false, false, false]
+        );
 
         // Test 50% duty cycle
         pulse.duty = 2;
-        let pattern: Vec<bool> = (0..8).map(|i| {
-            pulse.phase = i;
-            pulse.duty_output()
-        }).collect();
-        assert_eq!(pattern, vec![false, true, true, true, true, false, false, false]);
+        let pattern: Vec<bool> = (0..8)
+            .map(|i| {
+                pulse.phase = i;
+                pulse.duty_output()
+            })
+            .collect();
+        assert_eq!(
+            pattern,
+            vec![false, true, true, true, true, false, false, false]
+        );
 
         // Test 75% duty cycle
         pulse.duty = 3;
-        let pattern: Vec<bool> = (0..8).map(|i| {
-            pulse.phase = i;
-            pulse.duty_output()
-        }).collect();
-        assert_eq!(pattern, vec![true, false, false, true, true, true, true, true]);
+        let pattern: Vec<bool> = (0..8)
+            .map(|i| {
+                pulse.phase = i;
+                pulse.duty_output()
+            })
+            .collect();
+        assert_eq!(
+            pattern,
+            vec![true, false, false, true, true, true, true, true]
+        );
     }
 
     #[test]
@@ -158,14 +178,14 @@ mod tests {
         // Initial timer value is 4, counts down: 4, 3, 2, 1, 0
         // On the 5th clock (when timer=0), phase advances and timer reloads to 4
         let initial_phase = pulse.phase;
-        
+
         // Clock 4 times - timer goes from 4->3->2->1
         for _ in 0..4 {
             pulse.clock();
         }
         // Phase should still be the same
         assert_eq!(pulse.phase, initial_phase);
-        
+
         // Clock once more - timer goes 0, phase advances, timer reloads
         pulse.clock();
         assert_eq!(pulse.phase, (initial_phase + 1) & 7);

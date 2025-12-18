@@ -9,7 +9,9 @@
 //!
 //! This module implements just the audio portion.
 
-use super::{audio_chip::AudioChip, PulseChannel, TriangleChannel, NoiseChannel, TimingMode, LENGTH_TABLE};
+use super::{
+    audio_chip::AudioChip, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+};
 
 /// RP2A03 APU (NTSC variant).
 ///

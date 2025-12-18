@@ -6,7 +6,7 @@
 use emu_core::apu::{PulseChannel, TimingMode, LENGTH_TABLE};
 
 /// Minimal NES APU with 2 pulse channels.
-/// 
+///
 /// Uses core PulseChannel components for the actual synthesis.
 #[derive(Debug)]
 pub struct APU {

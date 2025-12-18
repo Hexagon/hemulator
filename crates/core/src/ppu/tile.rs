@@ -18,17 +18,17 @@ pub enum TileFormat {
     /// NES/Famicom: 2 bits per pixel, planar format.
     /// Each tile is 16 bytes: 8 bytes for low plane, 8 bytes for high plane.
     Nes2Bpp,
-    
+
     /// Game Boy: 2 bits per pixel, planar format.
     /// Each tile is 16 bytes with interleaved bitplanes (2 bytes per row).
     GameBoy2Bpp,
-    
+
     /// SNES: 2 bits per pixel, planar format (Mode 0-1).
     Snes2Bpp,
-    
+
     /// SNES: 4 bits per pixel, planar format (Mode 1-4).
     Snes4Bpp,
-    
+
     /// Genesis/Mega Drive: 4 bits per pixel, linear format.
     /// Each tile is 32 bytes with 4 bits per pixel stored sequentially.
     Genesis4Bpp,
@@ -64,13 +64,13 @@ impl TileDecoder for Nes2BppDecoder {
         if tile_data.len() < 16 || x > 7 || y > 7 {
             return 0;
         }
-        
+
         let lo = tile_data[y as usize];
         let hi = tile_data[y as usize + 8];
         let bit = 7 - x;
         let lo_bit = (lo >> bit) & 1;
         let hi_bit = (hi >> bit) & 1;
-        
+
         (hi_bit << 1) | lo_bit
     }
 
@@ -93,14 +93,14 @@ impl TileDecoder for GameBoy2BppDecoder {
         if tile_data.len() < 16 || x > 7 || y > 7 {
             return 0;
         }
-        
+
         let row_offset = (y as usize) * 2;
         let lo = tile_data[row_offset];
         let hi = tile_data[row_offset + 1];
         let bit = 7 - x;
         let lo_bit = (lo >> bit) & 1;
         let hi_bit = (hi >> bit) & 1;
-        
+
         (hi_bit << 1) | lo_bit
     }
 
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn test_nes_decoder_checkerboard() {
         let mut tile_data = vec![0u8; 16];
-        
+
         // Create a checkerboard pattern
         // Low plane: alternating bits
         tile_data[0] = 0b10101010;
@@ -137,7 +137,7 @@ mod tests {
         tile_data[5] = 0b01010101;
         tile_data[6] = 0b10101010;
         tile_data[7] = 0b01010101;
-        
+
         // High plane: solid in top half
         tile_data[8] = 0b11111111;
         tile_data[9] = 0b11111111;
@@ -147,18 +147,18 @@ mod tests {
         tile_data[13] = 0b00000000;
         tile_data[14] = 0b00000000;
         tile_data[15] = 0b00000000;
-        
+
         let decoder = Nes2BppDecoder;
-        
+
         // Top-left pixel: lo=1, hi=1 = 3
         assert_eq!(decoder.decode_pixel(&tile_data, 0, 0), 3);
-        
+
         // Second pixel: lo=0, hi=1 = 2
         assert_eq!(decoder.decode_pixel(&tile_data, 1, 0), 2);
-        
+
         // Bottom-left pixel: lo=1, hi=0 = 1
         assert_eq!(decoder.decode_pixel(&tile_data, 0, 4), 1);
-        
+
         // Bottom-second pixel: lo=0, hi=0 = 0
         assert_eq!(decoder.decode_pixel(&tile_data, 1, 4), 0);
     }
@@ -173,7 +173,7 @@ mod tests {
     fn test_nes_decoder_out_of_bounds() {
         let tile_data = vec![0u8; 16];
         let decoder = Nes2BppDecoder;
-        
+
         // Out of bounds should return 0
         assert_eq!(decoder.decode_pixel(&tile_data, 8, 0), 0);
         assert_eq!(decoder.decode_pixel(&tile_data, 0, 8), 0);
@@ -182,27 +182,27 @@ mod tests {
     #[test]
     fn test_gameboy_decoder_checkerboard() {
         let mut tile_data = vec![0u8; 16];
-        
+
         // Create a simple pattern with interleaved format
         // Row 0: lo=10101010, hi=11111111 -> pixels 3,2,3,2,3,2,3,2
         tile_data[0] = 0b10101010; // Low plane
         tile_data[1] = 0b11111111; // High plane
-        
+
         // Row 1: lo=01010101, hi=00000000 -> pixels 1,0,1,0,1,0,1,0
         tile_data[2] = 0b01010101; // Low plane
         tile_data[3] = 0b00000000; // High plane
-        
+
         let decoder = GameBoy2BppDecoder;
-        
+
         // Row 0, pixel 0: lo=1, hi=1 = 3
         assert_eq!(decoder.decode_pixel(&tile_data, 0, 0), 3);
-        
+
         // Row 0, pixel 1: lo=0, hi=1 = 2
         assert_eq!(decoder.decode_pixel(&tile_data, 1, 0), 2);
-        
+
         // Row 1, pixel 0: lo=0, hi=0 = 0
         assert_eq!(decoder.decode_pixel(&tile_data, 0, 1), 0);
-        
+
         // Row 1, pixel 1: lo=1, hi=0 = 1
         assert_eq!(decoder.decode_pixel(&tile_data, 1, 1), 1);
     }
@@ -217,7 +217,7 @@ mod tests {
     fn test_get_decoder() {
         let decoder = get_decoder(TileFormat::Nes2Bpp);
         assert_eq!(decoder.tile_size(), 16);
-        
+
         let decoder = get_decoder(TileFormat::GameBoy2Bpp);
         assert_eq!(decoder.tile_size(), 16);
     }

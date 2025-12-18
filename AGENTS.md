@@ -165,7 +165,9 @@ The GUI frontend includes a comprehensive settings system stored in `config.json
 - **Keyboard mappings**: Customizable button mappings for emulated controllers
   - Default: Z (A), X (B), LeftShift (Select), Enter (Start), Arrow keys (D-pad)
   - Settings automatically persist to disk on any change
-- **Window scale**: 1x, 2x, 4x, or 8x window scaling (default: 2x)
+- **Window size**: Actual window dimensions (width and height in pixels)
+  - Automatically saved when window is resized
+  - Default: 512x480 (2x scale of native 256x240 resolution)
 - **Last ROM path**: Automatically remembered for quick restarts
 - **Location**: `./config.json` (relative to executable, not working directory)
 
@@ -198,7 +200,7 @@ Save states are stored in `/saves/<rom_hash>/states.json` relative to the execut
 - **F3**: Open ROM file dialog
 - **F5-F9**: Save to slot 1-5
 - **Shift+F5-F9**: Load from slot 1-5
-- **F11**: Cycle window scale (1x → 2x → 4x → 8x → 1x)
+- **F10**: Toggle debug overlay (shows ROM info, mapper, PAL/NTSC, FPS)
 - **F12**: Reset system
 - **ESC**: Exit emulator
 

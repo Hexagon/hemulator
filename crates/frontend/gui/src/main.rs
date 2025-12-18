@@ -4,7 +4,7 @@ mod settings;
 mod ui_render;
 
 use emu_core::System;
-use minifb::{Key, Scale, ScaleMode, Window, WindowOptions};
+use minifb::{Key, ScaleMode, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -179,14 +179,6 @@ fn main() {
     let width = 256;
     let height = 240;
 
-    let scale = match settings.scale {
-        1 => Scale::X1,
-        2 => Scale::X2,
-        4 => Scale::X4,
-        8 => Scale::X8,
-        _ => Scale::X2,
-    };
-
     let mut window = match Window::new(
         "Hemulator - Multi-System Emulator",
         width,
@@ -194,7 +186,6 @@ fn main() {
         WindowOptions {
             resize: true,
             scale_mode: ScaleMode::AspectRatioStretch,
-            scale,
             ..WindowOptions::default()
         },
     ) {
@@ -204,6 +195,9 @@ fn main() {
             return;
         }
     };
+
+    // Note: minifb 0.25 doesn't support setting initial window size programmatically
+    // The window will use the default size and can be resized by the user
 
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
@@ -237,12 +231,17 @@ fn main() {
     // Help overlay state
     let mut show_help = false;
 
+    // Debug overlay state
+    let mut show_debug = false;
+
     // Slot selector state
     let mut show_slot_selector = false;
     let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
 
     // Timing trackers
     let mut last_frame = Instant::now();
+    let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
+    let mut current_fps = 60.0;
 
     // Audio: NES runs at ~60 FPS, generate samples to match
     const SAMPLE_RATE: usize = 44100;
@@ -261,6 +260,14 @@ fn main() {
         if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
+            show_debug = false; // Close debug if open
+        }
+
+        // Toggle debug overlay (F10)
+        if window.is_key_pressed(Key::F10, minifb::KeyRepeat::No) && rom_loaded {
+            show_debug = !show_debug;
+            show_slot_selector = false; // Close slot selector if open
+            show_help = false; // Close help if open
         }
 
         // Handle slot selector
@@ -339,6 +346,26 @@ fn main() {
             help_overlay = Some(ui_render::create_help_overlay(width, height, &settings));
         }
 
+        // Prepare debug overlay buffer when requested
+        let mut debug_overlay: Option<Vec<u32>> = None;
+        if show_debug && rom_loaded {
+            let debug_info = sys.get_debug_info();
+            let timing_str = match debug_info.timing_mode {
+                emu_core::apu::TimingMode::Ntsc => "NTSC",
+                emu_core::apu::TimingMode::Pal => "PAL",
+            };
+            debug_overlay = Some(ui_render::create_debug_overlay(
+                width,
+                height,
+                &debug_info.mapper_name,
+                debug_info.mapper_number,
+                timing_str,
+                debug_info.prg_banks,
+                debug_info.chr_banks,
+                current_fps,
+            ));
+        }
+
         // Check for reset key (F12)
         if window.is_key_pressed(Key::F12, minifb::KeyRepeat::No) && rom_loaded {
             sys.reset();
@@ -394,49 +421,6 @@ fn main() {
             }
         }
 
-        // Check for fullscreen/scale toggle (F11) – fullscreen not available in minifb 0.25,
-        // so we cycle through 1x/2x/4x/8x scales instead.
-        if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
-            settings.scale = match settings.scale {
-                1 => 2,
-                2 => 4,
-                4 => 8,
-                8 => 1,
-                _ => 2,
-            };
-
-            let new_scale = match settings.scale {
-                1 => Scale::X1,
-                2 => Scale::X2,
-                4 => Scale::X4,
-                8 => Scale::X8,
-                _ => Scale::X2,
-            };
-
-            window = match Window::new(
-                "Hemulator - Multi-System Emulator",
-                width,
-                height,
-                WindowOptions {
-                    resize: true,
-                    scale_mode: ScaleMode::AspectRatioStretch,
-                    scale: new_scale,
-                    ..WindowOptions::default()
-                },
-            ) {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!("Failed to recreate window: {}", e);
-                    break;
-                }
-            };
-
-            if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save settings: {}", e);
-            }
-            println!("Scale changed to {}x", settings.scale);
-        }
-
         // F5 - Show save state slot selector
         if rom_loaded && window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
             show_slot_selector = true;
@@ -452,7 +436,7 @@ fn main() {
         }
 
         // Handle controller input only if ROM is loaded
-        if rom_loaded && !show_help {
+        if rom_loaded && !show_help && !show_debug {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -493,7 +477,9 @@ fn main() {
             }
         }
 
-        let frame_to_present: &[u32] = if let Some(ref overlay) = help_overlay {
+        let frame_to_present: &[u32] = if let Some(ref overlay) = debug_overlay {
+            overlay.as_slice()
+        } else if let Some(ref overlay) = help_overlay {
             overlay.as_slice()
         } else {
             &buffer
@@ -504,11 +490,35 @@ fn main() {
             break;
         }
 
-        // ~60 FPS timing
+        // ~60 FPS timing and FPS calculation
         let frame_dt = last_frame.elapsed();
+        frame_times.push(frame_dt);
+        if frame_times.len() > 60 {
+            frame_times.remove(0);
+        }
+
+        // Calculate average FPS over the last 60 frames
+        if !frame_times.is_empty() {
+            let total_time: Duration = frame_times.iter().sum();
+            let avg_frame_time = total_time.as_secs_f64() / frame_times.len() as f64;
+            if avg_frame_time > 0.0 {
+                current_fps = 1.0 / avg_frame_time;
+            }
+        }
+
         if frame_dt < Duration::from_millis(16) {
             std::thread::sleep(Duration::from_millis(16) - frame_dt);
         }
         last_frame = Instant::now();
+
+        // Save window size if it changed
+        let (new_width, new_height) = window.get_size();
+        if new_width != settings.window_width || new_height != settings.window_height {
+            settings.window_width = new_width;
+            settings.window_height = new_height;
+            if let Err(e) = settings.save() {
+                eprintln!("Warning: Failed to save window size: {}", e);
+            }
+        }
     }
 }

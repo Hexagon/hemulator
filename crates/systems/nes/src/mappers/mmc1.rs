@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// MMC1 (Mapper 1/SxROM) - Switchable PRG and CHR banks with configurable mirroring
 #[derive(Debug)]

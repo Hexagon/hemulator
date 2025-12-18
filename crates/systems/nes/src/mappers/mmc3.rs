@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// MMC3 (Mapper 4/TxROM) - Advanced mapper with PRG/CHR banking and scanline IRQ counter
 #[derive(Debug)]

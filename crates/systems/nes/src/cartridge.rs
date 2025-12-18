@@ -1,7 +1,7 @@
+use emu_core::apu::TimingMode;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use emu_core::apu::TimingMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mirroring {

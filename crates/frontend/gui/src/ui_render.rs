@@ -250,7 +250,7 @@ pub fn create_help_overlay(
         "  F3  - Open ROM",
         "  F5  - Save state",
         "  F6  - Load state",
-        "  F11 - Scale",
+        "  F10 - Debug info",
         "  F12 - Reset",
         "  ESC - Exit",
         "",
@@ -341,6 +341,59 @@ pub fn create_slot_selector_overlay(
         start_x,
         start_y,
         FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create a debug info overlay
+pub fn create_debug_overlay(
+    width: usize,
+    height: usize,
+    mapper_name: &str,
+    mapper_number: u8,
+    timing_mode: &str,
+    prg_banks: usize,
+    chr_banks: usize,
+    fps: f64,
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let prg_line = format!("PRG: {} x 16KB", prg_banks);
+    let chr_line = if chr_banks == 0 {
+        "CHR: RAM".to_string()
+    } else {
+        format!("CHR: {} x 8KB", chr_banks)
+    };
+    let mapper_line = format!("Mapper: {} ({})", mapper_number, mapper_name);
+    let timing_line = format!("Timing: {}", timing_mode);
+    let fps_line = format!("FPS: {:.1}", fps);
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO",
+        "",
+        &mapper_line,
+        &prg_line,
+        &chr_line,
+        &timing_line,
+        &fps_line,
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
         0xFFFFFFFF,
     );
 
