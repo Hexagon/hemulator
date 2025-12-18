@@ -21,12 +21,11 @@ fn nes_palette_rgb(index: u8) -> u32 {
 }
 
 fn palette_mirror_index(i: usize) -> usize {
-    // Palette mirroring: $3F10/$3F14/$3F18/$3F1C mirror $3F00/$3F04/$3F08/$3F0C.
+    // Palette mirroring:
+    // - $3F04/$3F08/$3F0C (bg palette color 0s) mirror $3F00 (universal bg)
+    // - $3F10/$3F14/$3F18/$3F1C (sprite palette color 0s) also mirror $3F00
     match i & 0x1F {
-        0x10 => 0x00,
-        0x14 => 0x04,
-        0x18 => 0x08,
-        0x1C => 0x0C,
+        0x04 | 0x08 | 0x0C | 0x10 | 0x14 | 0x18 | 0x1C => 0x00,
         v => v,
     }
 }
