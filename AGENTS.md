@@ -2,6 +2,7 @@
 
 Purpose: guidance for automated agents and maintainers about CI, formatting, and safety.
 
+- **Keep track of the work**: Keep a todo in TODO.md
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/*`.
 - **Agent tasks**:
   - Run `cargo fmt` and `cargo clippy` on PRs.

@@ -2,11 +2,19 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mirroring {
+    Horizontal,
+    Vertical,
+    FourScreen,
+}
+
 #[derive(Debug)]
 pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,
     pub mapper: u8,
+    pub mirroring: Mirroring,
 }
 
 impl Cartridge {
@@ -16,11 +24,27 @@ impl Cartridge {
         let mut header = [0u8; 16];
         f.read_exact(&mut header)?;
         if &header[0..4] != b"NES\x1A" {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Not iNES file"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Not iNES file",
+            ));
         }
         let prg_size = header[4] as usize * 16 * 1024;
         let chr_size = header[5] as usize * 8 * 1024;
         let mapper = (header[6] >> 4) | (header[7] & 0xF0);
+
+        // iNES flags 6:
+        // bit 0 = mirroring (0 horizontal, 1 vertical)
+        // bit 3 = four-screen VRAM
+        let four_screen = (header[6] & 0x08) != 0;
+        let vertical = (header[6] & 0x01) != 0;
+        let mirroring = if four_screen {
+            Mirroring::FourScreen
+        } else if vertical {
+            Mirroring::Vertical
+        } else {
+            Mirroring::Horizontal
+        };
 
         // ignore trainer if present (flag 6 bit 2)
         let has_trainer = (header[6] & 0x04) != 0;
@@ -37,6 +61,11 @@ impl Cartridge {
             f.read_exact(&mut chr_rom)?;
         }
 
-        Ok(Self { prg_rom, chr_rom, mapper })
+        Ok(Self {
+            prg_rom,
+            chr_rom,
+            mapper,
+            mirroring,
+        })
     }
 }

@@ -1,5 +1,5 @@
-use std::env;
 use emu_core::System;
+use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -10,13 +10,19 @@ fn main() {
             let mut sys = emu_nes::NesSystem::default();
             let frame = sys.step_frame().unwrap();
             println!("Headless NES frame: {}x{}", frame.width, frame.height);
-            println!("Save-state: {}", serde_json::to_string_pretty(&sys.save_state()).unwrap());
+            println!(
+                "Save-state: {}",
+                serde_json::to_string_pretty(&sys.save_state()).unwrap()
+            );
         }
         "gb" => {
             let mut sys = emu_gb::GbSystem::default();
             let frame = sys.step_frame().unwrap();
             println!("Headless GB frame: {}x{}", frame.width, frame.height);
-            println!("Save-state: {}", serde_json::to_string_pretty(&sys.save_state()).unwrap());
+            println!(
+                "Save-state: {}",
+                serde_json::to_string_pretty(&sys.save_state()).unwrap()
+            );
         }
         other => eprintln!("Unknown system: {}", other),
     }
