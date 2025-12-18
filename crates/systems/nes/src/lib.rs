@@ -225,6 +225,13 @@ impl System for NesSystem {
         // Run the rest of the frame (VBlank time).
         while cycles < CYCLES_PER_FRAME {
             cycles = cycles.wrapping_add(self.cpu.step());
+
+            // Check for mapper IRQs during VBlank as well
+            if let Some(b) = &mut self.cpu.bus {
+                if b.take_irq_pending() {
+                    self.cpu.trigger_irq();
+                }
+            }
         }
 
         // VBlank end

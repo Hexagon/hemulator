@@ -242,8 +242,12 @@ fn main() {
     let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
 
     // Timing trackers
-    let mut last_audio = Instant::now();
     let mut last_frame = Instant::now();
+
+    // Audio: NES runs at ~60 FPS, generate samples to match
+    const SAMPLE_RATE: usize = 44100;
+    const FRAME_RATE: usize = 60;
+    const SAMPLES_PER_FRAME: usize = SAMPLE_RATE / FRAME_RATE; // ~735 samples per frame
 
     // Load saves for current ROM if available
     let mut game_saves = if let Some(ref hash) = rom_hash {
@@ -478,12 +482,9 @@ fn main() {
                 Ok(f) => {
                     buffer = f.pixels.clone();
 
-                    // Audio generation
-                    let elapsed = last_audio.elapsed();
-                    let mut wanted = (elapsed.as_secs_f64() * 44_100.0).round() as usize;
-                    wanted = wanted.clamp(400, 2000);
-                    let audio_samples = sys.get_audio_samples(wanted);
-                    last_audio = Instant::now();
+                    // Audio generation: generate a consistent number of samples per frame
+                    // to match the ~60 FPS frame rate (44100 Hz / 60 fps ≈ 735 samples)
+                    let audio_samples = sys.get_audio_samples(SAMPLES_PER_FRAME);
                     for s in audio_samples {
                         let _ = audio_tx.try_send(s);
                     }

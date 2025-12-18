@@ -156,38 +156,58 @@ pub fn draw_text_lines(
 pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
     let mut buffer = vec![0xFF1A1A2E; width * height]; // Dark blue background
 
-    // Hemulator logo/title
-    let logo_lines = vec!["HEMULATOR", "", "Multi-System Emulator"];
-
+    // Hemulator logo/title - draw each line centered individually
     let logo_y = height / 3;
-    let logo_x = (width - 9 * FONT_WIDTH) / 2; // Center "HEMULATOR"
 
-    draw_text_lines(
+    // Center "HEMULATOR" (9 characters)
+    let hemulator_x = (width - 9 * FONT_WIDTH) / 2;
+    draw_text(
         &mut buffer,
         width,
         height,
-        &logo_lines,
-        logo_x,
+        "HEMULATOR",
+        hemulator_x,
         logo_y,
-        FONT_HEIGHT + 4,
-        0xFF16F2B3, // Bright cyan
+        0xFF16F2B3,
     );
 
-    // Instructions
-    let instructions = vec!["Press F3 to open a ROM", "Press F1 for help"];
-
-    let inst_y = height * 2 / 3;
-    let inst_x = (width - 22 * FONT_WIDTH) / 2;
-
-    draw_text_lines(
+    // Center "Multi-System Emulator" (21 characters)
+    let subtitle_x = (width - 21 * FONT_WIDTH) / 2;
+    draw_text(
         &mut buffer,
         width,
         height,
-        &instructions,
-        inst_x,
+        "Multi-System Emulator",
+        subtitle_x,
+        logo_y + (FONT_HEIGHT + 4) * 2,
+        0xFF16F2B3,
+    );
+
+    // Instructions - center each line individually
+    let inst_y = height * 2 / 3;
+
+    // "Press F3 to open a ROM" (22 characters)
+    let inst1_x = (width - 22 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F3 to open a ROM",
+        inst1_x,
         inst_y,
-        FONT_HEIGHT + 4,
-        0xFFF0F0F0, // Light gray
+        0xFFF0F0F0,
+    );
+
+    // "Press F1 for help" (17 characters)
+    let inst2_x = (width - 17 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F1 for help",
+        inst2_x,
+        inst_y + FONT_HEIGHT + 4,
+        0xFFF0F0F0,
     );
 
     buffer
@@ -225,13 +245,13 @@ pub fn create_help_overlay(
         &start_line,
         &dpad_line,
         "",
-        "Function Keys:",
-        "  F1  - Toggle this help",
+        "Keys:",
+        "  F1  - Help",
         "  F3  - Open ROM",
-        "  F5  - Save state (select slot)",
-        "  F6  - Load state (select slot)",
-        "  F11 - Cycle window scale",
-        "  F12 - Reset system",
+        "  F5  - Save state",
+        "  F6  - Load state",
+        "  F11 - Scale",
+        "  F12 - Reset",
         "  ESC - Exit",
         "",
         "Press F1 to close",
@@ -247,7 +267,7 @@ pub fn create_help_overlay(
         &help_lines,
         start_x,
         start_y,
-        FONT_HEIGHT + 2,
+        FONT_HEIGHT + 1, // Reduced from +2 to +1 for tighter spacing
         0xFFFFFFFF,
     );
 

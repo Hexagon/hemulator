@@ -360,7 +360,7 @@ impl Ppu {
                         // - $05..$07 = BG palette 1
                         // - $09..$0B = BG palette 2
                         // - $0D..$0F = BG palette 3
-                        let pal_base = 1 + (palette_idx as usize) * 4;
+                        let pal_base = (palette_idx as usize) * 4;
                         let mut pal_entry =
                             self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
                         if (self.mask & 0x01) != 0 {
