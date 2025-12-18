@@ -251,6 +251,7 @@ pub fn create_help_overlay(
         "  F5  - Save state",
         "  F6  - Load state",
         "  F10 - Debug info",
+        "  F11 - CRT filter",
         "  F12 - Reset",
         "  ESC - Exit",
         "",
