@@ -131,7 +131,7 @@ impl Mmc1 {
         let data = self.shift_reg & 0x1F;
         let target = (addr >> 13) & 0x03; // 0: control, 1: CHR0, 2: CHR1, 3: PRG
         match target {
-            0 => self.control = data | 0x00,
+            0 => self.control = data,
             1 => self.chr_bank0 = data,
             2 => self.chr_bank1 = data,
             3 => self.prg_bank = data,
