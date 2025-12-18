@@ -13,7 +13,7 @@ pub use mmc3::Mmc3;
 pub use nrom::Nrom;
 pub use uxrom::Uxrom;
 
-use crate::cartridge::{Cartridge, Mirroring};
+use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 
 /// Unified mapper enum that dispatches to specific implementations

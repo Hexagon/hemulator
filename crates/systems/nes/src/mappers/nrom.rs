@@ -1,5 +1,4 @@
-use crate::cartridge::{Cartridge, Mirroring};
-use crate::ppu::Ppu;
+use crate::cartridge::Cartridge;
 
 /// NROM (Mapper 0) - Basic mapper with no banking
 #[derive(Debug)]
@@ -39,6 +38,8 @@ mod tests {
 
     #[test]
     fn nrom_16kb_mirroring() {
+        use crate::cartridge::Mirroring;
+        
         let cart = Cartridge {
             prg_rom: vec![0x42; 0x4000], // 16KB PRG
             chr_rom: vec![],
@@ -55,6 +56,8 @@ mod tests {
 
     #[test]
     fn nrom_32kb_no_mirroring() {
+        use crate::cartridge::Mirroring;
+        
         let mut prg = vec![0; 0x8000]; // 32KB PRG
         prg[0] = 0x11;
         prg[0x4000] = 0x22;
