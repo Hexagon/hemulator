@@ -1,10 +1,10 @@
 //! Minimal NES system skeleton for wiring into the core.
 
+mod apu;
 mod bus;
 mod cartridge;
 mod cpu;
 mod ppu;
-mod apu;
 
 use crate::cartridge::Mirroring;
 use bus::NesBus;
@@ -55,41 +55,26 @@ impl NesSystem {
         path: P,
     ) -> Result<(), std::io::Error> {
         let cart = cartridge::Cartridge::from_file(path)?;
-        if cart.mapper != 0 {
+        // Derive the reset vector from the last PRG bank (mirrors hardware vectors).
+        if cart.prg_rom.len() < 0x2000 {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Unsupported mapper {} (only NROM/0 supported)", cart.mapper),
+                std::io::ErrorKind::InvalidData,
+                "PRG ROM too small",
             ));
         }
-        // Map PRG ROM into CPU memory (NROM): 16KB PRG is mirrored, 32KB PRG is direct.
-        let prg = &cart.prg_rom;
-        let chr = cart.chr_rom.clone();
-        match prg.len() {
-            0x4000 => {
-                // 16KB PRG: load at 0x8000 and mirror at 0xC000
-                self.cpu.memory[0x8000..0xC000].copy_from_slice(prg);
-                self.cpu.memory[0xC000..0x10000].copy_from_slice(prg);
-                let lo = prg[0x3FFC] as u16;
-                let hi = prg[0x3FFD] as u16;
-                self.cpu.pc = (hi << 8) | lo;
-            }
-            0x8000 => {
-                // 32KB PRG: load at 0x8000
-                self.cpu.memory[0x8000..0x10000].copy_from_slice(prg);
-                let lo = prg[0x7FFC] as u16;
-                let hi = prg[0x7FFD] as u16;
-                self.cpu.pc = (hi << 8) | lo;
-            }
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Unsupported PRG ROM size",
-                ));
-            }
-        }
+        let last_bank = cart.prg_rom.len() - 0x2000;
+        let reset_lo = cart.prg_rom.get(last_bank + 0x1FFC).copied().unwrap_or(0) as u16;
+        let reset_hi = cart.prg_rom.get(last_bank + 0x1FFD).copied().unwrap_or(0) as u16;
+        self.cpu.pc = (reset_hi << 8) | reset_lo;
 
-        // create a PPU with CHR and install into a new bus, then attach bus to CPU
-        let ppu = Ppu::new(chr, cart.mirroring);
+        // For mappers with CHR banking (e.g., MMC3), provide a 8KB pattern slot the mapper fills.
+        let chr_backing = if cart.mapper == 4 && !cart.chr_rom.is_empty() {
+            vec![0u8; 0x2000]
+        } else {
+            cart.chr_rom.clone()
+        };
+
+        let ppu = Ppu::new(chr_backing, cart.mirroring);
         let mut nb = NesBus::new(ppu);
         nb.install_cart(cart);
         self.cpu.bus = Some(Box::new(nb));
@@ -121,11 +106,14 @@ impl NesSystem {
             ppu_ctrl = b.ppu.ctrl();
             ppu_mask = b.ppu.mask();
             ppu_scroll = b.ppu.scroll();
-            ppu_addr = b.ppu.vram_addr;
+            ppu_addr = b.ppu.vram_addr.get();
 
-            if let Some(cart) = &b.cart {
-                let prg = &cart.prg_rom;
-                let base = if prg.len() == 0x4000 { 0x0000 } else { 0x4000 };
+            if let Some(prg) = b.prg_rom() {
+                let base = if prg.len() == 0x4000 {
+                    0x0000
+                } else {
+                    prg.len().saturating_sub(0x4000)
+                };
                 let read_vec = |off: usize| -> u16 {
                     if prg.len() >= base + off + 2 {
                         (prg[base + off] as u16) | ((prg[base + off + 1] as u16) << 8)
@@ -133,8 +121,6 @@ impl NesSystem {
                         0
                     }
                 };
-                // Vectors are at end of CPU address space: $FFFA NMI, $FFFC RESET, $FFFE IRQ/BRK.
-                // Map to PRG end (mirrored for 16KB).
                 nmi_vec = read_vec(0x3FFA);
                 reset_vec = read_vec(0x3FFC);
                 irq_vec = read_vec(0x3FFE);
@@ -193,7 +179,15 @@ impl System for NesSystem {
         }
         let mut cycles = 0u32;
         while cycles < VISIBLE_CYCLES {
-            cycles = cycles.wrapping_add(self.cpu.step());
+            let used = self.cpu.step();
+            cycles = cycles.wrapping_add(used);
+
+            // Mapper IRQs now clocked by PPU A12 edges directly from PPU fetches.
+            if let Some(b) = &mut self.cpu.bus {
+                if b.take_irq_pending() {
+                    self.cpu.trigger_irq();
+                }
+            }
         }
 
         // Snapshot the frame at the end of visible time.

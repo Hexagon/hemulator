@@ -203,6 +203,22 @@ impl NesCpu {
         self.cycles = self.cycles.wrapping_add(7);
     }
 
+    pub fn trigger_irq(&mut self) {
+        // Respect the I flag: if set, ignore maskable IRQs.
+        if (self.status & 0x04) != 0 {
+            return;
+        }
+        // Push PC and status, then jump to IRQ/BRK vector at $FFFE.
+        self.push_u16(self.pc);
+        let mut s = self.status;
+        s &= !0x10; // clear B
+        s |= 0x20; // bit 5 always set
+        self.push_u8(s);
+        self.status |= 0x04; // set I
+        self.pc = self.read_u16(0xFFFE);
+        self.cycles = self.cycles.wrapping_add(7);
+    }
+
     fn set_zero_and_negative(&mut self, v: u8) {
         if v == 0 {
             self.status |= 0x02; // Z
@@ -615,7 +631,6 @@ impl NesCpu {
                 let carry = (old & 0x80) != 0;
                 let res = old << 1;
                 self.a = res;
-                use crate::bus::Bus;
                 if carry {
                     self.status |= 0x01
                 } else {

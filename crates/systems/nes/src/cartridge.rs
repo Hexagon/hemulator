@@ -7,9 +7,11 @@ pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
+    SingleScreenLower,
+    SingleScreenUpper,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cartridge {
     pub prg_rom: Vec<u8>,
     pub chr_rom: Vec<u8>,

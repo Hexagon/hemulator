@@ -10,6 +10,9 @@
 
 - [x] Render at end-of-visible (pre-VBlank) to avoid sampling while PPUMASK is toggled during NMI (fixes gray/black alternating frames).
 
+- [x] Add mapper 1 (MMC1) for NES Tetris/SxROM carts.
+- [x] Add mapper 2 (UxROM) for NES games like Mega Man.
+
 - [ ] Reduce/disable debug logging and CLI dumps for normal runs.
 - [ ] Improve PPU register coverage (scroll + nametable switching, PPUDATA reads) for more accurate visuals.
 - [ ] Add sprite rendering (OAM evaluation + sprite 0 hit).

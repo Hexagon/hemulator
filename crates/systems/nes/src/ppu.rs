@@ -1,6 +1,7 @@
 use crate::cartridge::Mirroring;
 use emu_core::types::Frame;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::fmt;
 
 // 2C02 NES master palette (RGB), packed as 0xFFRRGGBB.
 // This is a commonly used approximation; exact values vary by decoder.
@@ -30,11 +31,6 @@ fn palette_mirror_index(i: usize) -> usize {
     }
 }
 
-fn chr_read(chr: &[u8], addr: usize) -> u8 {
-    chr.get(addr).copied().unwrap_or(0)
-}
-
-#[derive(Debug)]
 pub struct Ppu {
     pub chr: Vec<u8>,
     chr_is_ram: bool,
@@ -48,9 +44,18 @@ pub struct Ppu {
     vblank: Cell<bool>,
     // PPUADDR latch
     addr_latch: Cell<bool>,
-    pub vram_addr: u16,
+    pub vram_addr: Cell<u16>,
+    read_buffer: Cell<u8>,
+    #[allow(clippy::type_complexity)]
+    a12_callback: RefCell<Option<Box<dyn FnMut(bool)>>>,
     scroll_x: u8,
     scroll_y: u8,
+}
+
+impl fmt::Debug for Ppu {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ppu").finish_non_exhaustive()
+    }
 }
 
 impl Ppu {
@@ -71,7 +76,9 @@ impl Ppu {
             mask: 0,
             vblank: Cell::new(false),
             addr_latch: Cell::new(false),
-            vram_addr: 0,
+            vram_addr: Cell::new(0),
+            read_buffer: Cell::new(0),
+            a12_callback: RefCell::new(None),
             scroll_x: 0,
             scroll_y: 0,
         }
@@ -95,9 +102,15 @@ impl Ppu {
                 2 | 3 => 1,
                 _ => 0,
             },
+            Mirroring::SingleScreenLower => 0,
+            Mirroring::SingleScreenUpper => 1,
         };
 
         (physical_table * 0x0400 + offset) as usize & 0x07FF
+    }
+
+    pub fn set_mirroring(&mut self, mirroring: Mirroring) {
+        self.mirroring = mirroring;
     }
 
     pub fn nmi_enabled(&self) -> bool {
@@ -121,6 +134,19 @@ impl Ppu {
         self.vblank.set(v);
     }
 
+    pub fn set_a12_callback(&self, cb: Option<Box<dyn FnMut(bool)>>) {
+        *self.a12_callback.borrow_mut() = cb;
+    }
+
+    fn chr_fetch(&self, addr: usize) -> u8 {
+        // Notify mapper about PPU A12 line (bit 12 of CHR address) transitions.
+        if let Some(cb) = &mut *self.a12_callback.borrow_mut() {
+            let a12_high = (addr & 0x1000) != 0;
+            cb(a12_high);
+        }
+        self.chr.get(addr).copied().unwrap_or(0)
+    }
+
     /// Read a PPU register (very partial implementation).
     pub fn read_register(&self, reg: u16) -> u8 {
         match reg & 0x7 {
@@ -134,6 +160,31 @@ impl Ppu {
                 self.vblank.set(false);
                 self.addr_latch.set(false);
                 status
+            }
+            7 => {
+                // PPUDATA read with buffered behavior.
+                let addr = self.vram_addr.get() & 0x3FFF;
+
+                // Palette reads return immediately, no buffering.
+                if (0x3F00..=0x3F1F).contains(&addr) {
+                    let p = (addr - 0x3F00) & 0x1F;
+                    let target = palette_mirror_index(p as usize);
+                    let val = self.palette[target];
+                    let inc = if (self.ctrl & 0x04) != 0 { 32 } else { 1 };
+                    self.vram_addr.set(self.vram_addr.get().wrapping_add(inc));
+                    return val;
+                }
+
+                // Return buffered value, then reload buffer from current addr.
+                let buffered = self.read_buffer.get();
+                let fetched = self.read_vram(addr);
+                self.read_buffer.set(fetched);
+
+                // Increment VRAM address.
+                let inc = if (self.ctrl & 0x04) != 0 { 32 } else { 1 };
+                self.vram_addr.set(self.vram_addr.get().wrapping_add(inc));
+
+                buffered
             }
             _ => 0,
         }
@@ -162,16 +213,18 @@ impl Ppu {
             6 => {
                 // PPUADDR (write high then low)
                 if !self.addr_latch.get() {
-                    self.vram_addr = ((val as u16) << 8) | (self.vram_addr & 0x00FF);
+                    let lo = self.vram_addr.get() & 0x00FF;
+                    self.vram_addr.set(((val as u16) << 8) | lo);
                     self.addr_latch.set(true);
                 } else {
-                    self.vram_addr = (self.vram_addr & 0xFF00) | (val as u16);
+                    let hi = self.vram_addr.get() & 0xFF00;
+                    self.vram_addr.set(hi | val as u16);
                     self.addr_latch.set(false);
                 }
             }
             7 => {
                 // PPUDATA: write to vram or chr depending on address
-                let addr = self.vram_addr & 0x3FFF;
+                let addr = self.vram_addr.get() & 0x3FFF;
                 if addr < 0x2000 {
                     // CHR-ROM is typically read-only; only allow writes for CHR-RAM.
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
@@ -189,7 +242,7 @@ impl Ppu {
                 // Increment VRAM address based on PPUCTRL bit 2.
                 // 0 = increment by 1, 1 = increment by 32.
                 let inc = if (self.ctrl & 0x04) != 0 { 32 } else { 1 };
-                self.vram_addr = self.vram_addr.wrapping_add(inc);
+                self.vram_addr.set(self.vram_addr.get().wrapping_add(inc));
             }
             _ => {
                 // Other regs ignored for now
@@ -205,9 +258,25 @@ impl Ppu {
     }
 
     /// DMA helper accepting a prepared 256-byte buffer to avoid borrowing the bus during copy.
+    #[allow(dead_code)]
     pub fn dma_oam_from_slice(&mut self, data: &[u8]) {
         for (i, b) in data.iter().take(256).enumerate() {
             self.oam[i] = *b;
+        }
+    }
+
+    fn read_vram(&self, addr: u16) -> u8 {
+        let a = addr & 0x3FFF;
+        if a < 0x2000 {
+            self.chr_fetch(a as usize)
+        } else if a < 0x3F00 {
+            let idx = self.map_nametable_addr(a);
+            self.vram[idx]
+        } else if a < 0x4000 {
+            let p = (a - 0x3F00) & 0x1F;
+            self.palette[palette_mirror_index(p as usize)]
+        } else {
+            0
         }
     }
 
@@ -229,7 +298,11 @@ impl Ppu {
         let base_nt = (self.ctrl & 0x03) as u8;
 
         // Universal background color is palette[$00].
-        let universal_bg = nes_palette_rgb(self.palette[palette_mirror_index(0)]);
+        let mut universal_bg_idx = self.palette[palette_mirror_index(0)];
+        if (self.mask & 0x01) != 0 {
+            universal_bg_idx &= 0x30; // grayscale forces high bits only
+        }
+        let universal_bg = nes_palette_rgb(universal_bg_idx);
 
         // Apply scroll with basic nametable switching when crossing 256x240.
         // This approximates the PPU's coarse scroll behavior.
@@ -245,7 +318,8 @@ impl Ppu {
 
                     let nt_x = ((wx / 256) & 1) as u8;
                     let nt_y = ((wy / 240) & 1) as u8;
-                    let nt = base_nt ^ nt_x ^ (nt_y << 1);
+                    // Choose nametable based on base + scroll crossing; avoid XOR so single-screen mirroring stays stable.
+                    let nt = (base_nt + nt_x + (nt_y << 1)) & 0x03;
 
                     let world_x = wx % 256;
                     let world_y = wy % 240;
@@ -269,8 +343,8 @@ impl Ppu {
                     let palette_idx = (attr_byte >> shift) & 0x03;
 
                     let tile_addr = bg_pattern_base + (tile_index as usize) * 16;
-                    let lo = chr_read(&self.chr, tile_addr + fine_y);
-                    let hi = chr_read(&self.chr, tile_addr + fine_y + 8);
+                    let lo = self.chr_fetch(tile_addr + fine_y);
+                    let hi = self.chr_fetch(tile_addr + fine_y + 8);
                     let bit = 7 - fine_x;
                     let lo_bit = (lo >> bit) & 1;
                     let hi_bit = (hi >> bit) & 1;
@@ -286,8 +360,11 @@ impl Ppu {
                         // - $09..$0B = BG palette 2
                         // - $0D..$0F = BG palette 3
                         let pal_base = 1 + (palette_idx as usize) * 4;
-                        let pal_entry =
+                        let mut pal_entry =
                             self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
+                        if (self.mask & 0x01) != 0 {
+                            pal_entry &= 0x30; // grayscale
+                        }
                         nes_palette_rgb(pal_entry)
                     };
 
@@ -351,8 +428,8 @@ impl Ppu {
                     };
 
                     let addr = pattern_base + (tile_index as usize) * 16;
-                    let lo = chr_read(&self.chr, addr + fine_y);
-                    let hi = chr_read(&self.chr, addr + fine_y + 8);
+                    let lo = self.chr_fetch(addr + fine_y);
+                    let hi = self.chr_fetch(addr + fine_y + 8);
 
                     for col in 0..8 {
                         let sx = if flip_h { col } else { 7 - col };
@@ -371,8 +448,11 @@ impl Ppu {
                         // Sprite palette layout:
                         // - $10 is sprite "universal" (mirrors $00), and $11..$13 are palette 0 colors, etc.
                         let pal_base = 0x11 + pal * 4;
-                        let pal_entry =
+                        let mut pal_entry =
                             self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
+                        if (self.mask & 0x01) != 0 {
+                            pal_entry &= 0x30; // grayscale
+                        }
                         let rgb = nes_palette_rgb(pal_entry);
 
                         let idx = (y as u32 * width + x as u32) as usize;

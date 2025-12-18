@@ -1,9 +1,9 @@
 use emu_core::System;
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, Scale, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use std::env;
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 fn key_to_button(key: Key) -> Option<u8> {
     // NES controller bit mapping: 0=A,1=B,2=Select,3=Start,4=Up,5=Down,6=Left,7=Right
@@ -98,7 +98,15 @@ fn main() {
     let width = frame.width as usize;
     let height = frame.height as usize;
 
-    let mut window = match Window::new("emu_gui - NES", width, height, WindowOptions::default()) {
+    let mut window = match Window::new(
+        "emu_gui - NES",
+        width,
+        height,
+        WindowOptions {
+            scale: Scale::X2,
+            ..WindowOptions::default()
+        },
+    ) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("Failed to create window: {}", e);
@@ -110,15 +118,25 @@ fn main() {
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Warning: Failed to initialize audio: {}. Audio will be disabled.", e);
+            eprintln!(
+                "Warning: Failed to initialize audio: {}. Audio will be disabled.",
+                e
+            );
             return;
         }
     };
     let (audio_tx, audio_rx) = sync_channel::<i16>(44100 * 2); // ~2 seconds buffer
-    if let Err(e) = stream_handle
-        .play_raw(StreamSource { rx: audio_rx, sample_rate: 44100 }.convert_samples())
-    {
-        eprintln!("Warning: Failed to start audio playback: {}. Audio will be disabled.", e);
+    if let Err(e) = stream_handle.play_raw(
+        StreamSource {
+            rx: audio_rx,
+            sample_rate: 44100,
+        }
+        .convert_samples(),
+    ) {
+        eprintln!(
+            "Warning: Failed to start audio playback: {}. Audio will be disabled.",
+            e
+        );
     }
 
     // controller state: bitfield per controller
