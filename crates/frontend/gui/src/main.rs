@@ -1,3 +1,4 @@
+mod crt_filter;
 mod rom_detect;
 mod save_state;
 mod settings;
@@ -271,6 +272,15 @@ fn main() {
             show_help = false; // Close help if open
         }
 
+        // Cycle CRT filter (F11)
+        if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
+            settings.crt_filter = settings.crt_filter.next();
+            if let Err(e) = settings.save() {
+                eprintln!("Warning: Failed to save CRT filter setting: {}", e);
+            }
+            println!("CRT Filter: {}", settings.crt_filter.name());
+        }
+
         // Handle slot selector
         if show_slot_selector {
             // Check for slot selection (1-5) or cancel (ESC)
@@ -466,6 +476,11 @@ fn main() {
             match sys.step_frame() {
                 Ok(f) => {
                     buffer = f.pixels.clone();
+
+                    // Apply CRT filter if not showing overlays
+                    if !show_help && !show_debug && !show_slot_selector {
+                        settings.crt_filter.apply(&mut buffer, width, height);
+                    }
 
                     // Audio generation: generate a consistent number of samples per frame
                     // to match the ~60 FPS frame rate (44100 Hz / 60 fps ≈ 735 samples)

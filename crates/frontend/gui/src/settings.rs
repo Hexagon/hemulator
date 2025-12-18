@@ -1,3 +1,4 @@
+use crate::crt_filter::CrtFilter;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -35,6 +36,8 @@ pub struct Settings {
     pub window_width: usize,
     pub window_height: usize,
     pub last_rom_path: Option<String>,
+    #[serde(default)]
+    pub crt_filter: CrtFilter,
 }
 
 impl Default for Settings {
@@ -44,6 +47,7 @@ impl Default for Settings {
             window_width: 512,  // 256 * 2 (default 2x scale)
             window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
+            crt_filter: CrtFilter::default(),
         }
     }
 }

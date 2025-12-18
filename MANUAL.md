@@ -43,7 +43,20 @@ The emulator will remember your last ROM and automatically load it next time you
 | F5 | Save State | Open slot selector (1-5) to save |
 | F6 | Load State | Open slot selector (1-5) to load |
 | F10 | Debug Info | Show/hide debug information overlay |
+| F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
+
+### CRT Filters (F11)
+
+Press **F11** to cycle through different CRT (Cathode Ray Tube) display filters that simulate the appearance of classic CRT monitors and TVs. These filters add visual effects to make the emulator output look more authentic to the original hardware experience.
+
+Available filters:
+- **None**: Raw pixel output with no filtering
+- **Scanlines**: Adds horizontal dark lines simulating CRT raster scan lines
+- **Phosphor**: Creates a soft glow and horizontal color bleeding between pixels, mimicking CRT phosphor behavior
+- **CRT Monitor**: Full CRT effect combining scanlines, phosphor glow, and brightness adjustments for an authentic CRT appearance
+
+The selected filter is automatically saved and restored when you restart the emulator.
 
 ### Window Management
 
@@ -81,11 +94,16 @@ Located in the same directory as the executable, this file stores your preferenc
   },
   "window_width": 512,
   "window_height": 480,
-  "last_rom_path": "/path/to/last/rom.nes"
+  "last_rom_path": "/path/to/last/rom.nes",
+  "crt_filter": "None"
 }
 ```
 
-**Customization**: Edit this file to change key bindings. The window size is automatically saved when you resize the window.
+**Customization**: 
+- Edit this file to change key bindings
+- The window size is automatically saved when you resize the window
+- CRT filter preference is saved automatically when you cycle filters with F11
+- Valid `crt_filter` values: "None", "Scanlines", "Phosphor", "CrtMonitor"
 
 ### Save States
 
@@ -146,7 +164,7 @@ The emulator supports the following NES mappers:
 ### Settings not saving
 - Verify you have write permissions in the emulator directory
 - Check that `config.json` isn't marked as read-only
-- Settings save automatically when changed (e.g., F11 for scale, F3 for ROM)
+- Settings save automatically when changed (e.g., F11 for CRT filter, F3 for ROM)
 
 ### Save states not working
 - Ensure you've loaded a ROM first
@@ -154,7 +172,7 @@ The emulator supports the following NES mappers:
 - Check file system permissions in the emulator directory
 
 ### Performance issues
-- Try using a lower window scale (F11 to cycle through options)
+- Try disabling CRT filters (F11 to cycle to "None")
 - Close other resource-intensive applications
 - Ensure your graphics drivers are up to date
 
