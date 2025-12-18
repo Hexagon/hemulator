@@ -94,6 +94,9 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release -p emu_gui --target ${{ matrix.target.rust_target }}
+        env:
+          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.target.arch == 'i686' && '1' || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.target.arch == 'i686' && '/usr/lib/i386-linux-gnu/pkgconfig' || '' }}
 
       - name: Create release package (tarball)
         run: |
