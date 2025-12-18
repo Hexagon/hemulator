@@ -196,8 +196,9 @@ fn main() {
         }
     };
 
-    // Note: minifb 0.25 doesn't support setting initial window size programmatically
-    // The window will use the default size and can be resized by the user
+    // Note: minifb 0.25 doesn't provide a way to programmatically set window size
+    // The window uses default sizing, but users can resize it freely via OS controls
+    // The size is tracked and saved in settings (could be used with future minifb versions)
 
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
