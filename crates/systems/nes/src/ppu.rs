@@ -234,12 +234,13 @@ impl Ppu {
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
                         self.chr[addr as usize] = val;
                     }
-                } else if addr >= 0x2000 && addr < 0x3F00 {
+                } else if addr < 0x3F00 {
                     // Nametable VRAM space with mirroring
                     let idx = self.map_nametable_addr(addr);
                     self.vram[idx] = val;
                 } else {
-                    // Palette RAM spans $3F00-$3FFF and mirrors every 32 bytes
+                    // Palette RAM: $3F00-$3FFF with 32-byte mirroring
+                    // (addr is already masked to 0x3FFF, so this handles $3F00-$3FFF)
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     self.palette[target] = val;
