@@ -28,6 +28,7 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
   - Included in all release packages
   - Keep separate from README to focus on user needs
   - Update when adding user-facing features or changing controls
+- **CONTRIBUTING.md**: Contribution guidelines for developers
 - **AGENTS.md**: This file - guidance for automated agents and CI
 - **TODO.md**: Work tracking and future plans
 
