@@ -2,6 +2,7 @@
 
 pub mod apu;
 pub mod cpu_6502;
+pub mod ppu;
 pub mod types {
     use serde::{Deserialize, Serialize};
 

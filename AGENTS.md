@@ -69,6 +69,22 @@ Contains reusable CPU implementations and common traits:
     - Frame counter rates: NTSC 240 Hz, PAL 200 Hz
   - Comprehensive unit tests (40+ tests)
 
+- **`ppu`**: Reusable video/graphics processing components
+  - **Core Components** (building blocks for tile-based systems):
+    - `IndexedPalette`: Generic indexed palette trait for color lookup systems
+    - `RamPalette`: Simple RAM-based palette storage
+    - `TileDecoder`: Trait for decoding tile/pattern data into pixel indices
+    - `Nes2BppDecoder`: NES/Famicom 2bpp planar tile format
+    - `GameBoy2BppDecoder`: Game Boy 2bpp interleaved tile format
+    - `TileFormat`: Enum for different tile encoding formats
+  - **Design Philosophy**:
+    - Provides reusable primitives, not complete PPU implementations
+    - Each system has unique register layouts, memory maps, and rendering pipelines
+    - Systems like NES, Game Boy, SNES, Genesis share common concepts (tiles, palettes, sprites)
+    - Core components reduce code duplication while allowing system-specific customization
+  - **Future Formats**: SNES 4/8bpp, Genesis 4bpp linear (currently unimplemented)
+  - Comprehensive unit tests (10+ tests)
+
 - **`types`**: Common data structures (Frame, AudioSample)
 - **`Cpu` trait**: Generic CPU interface
 - **`System` trait**: High-level system interface
@@ -82,11 +98,31 @@ System-specific implementations that use core components:
   - `NesCpu` wraps `Cpu6502<NesMemory>` to provide NES-specific interface
   - `NesMemory` enum implements `Memory6502` trait for both simple array and full NES bus
   - NES bus includes: PPU, APU, controllers, mappers, RAM, WRAM
+  - **PPU (Picture Processing Unit)**:
+    - System-specific implementation in `crates/systems/nes/ppu.rs`
+    - 2C02 PPU with 64-color master palette (NES-specific RGB values)
+    - 32-byte palette RAM with NES-specific mirroring rules
+    - 8KB CHR/pattern memory (ROM or RAM depending on cartridge)
+    - 2KB internal VRAM for nametables with cartridge mirroring support
+    - 256-byte OAM (Object Attribute Memory) for sprites
+    - Background rendering with attribute table palette selection
+    - Sprite rendering with 8x8 and 8x16 modes, priority, and flipping
+    - Scrolling support with nametable switching
+    - **Timing Model**: Frame-based rendering (not cycle-accurate)
+      - Renders complete 256x240 frames on-demand via `render_frame()`
+      - Does not track individual scanlines or PPU cycles
+      - VBlank flag management for NMI generation
+      - Suitable for most games; some games requiring precise PPU timing may not work perfectly
+    - Could potentially use core `ppu` components (palette, tile decoder) in future refactoring
   - **PAL/NTSC Support**:
     - Auto-detection from iNES/NES 2.0 ROM headers
     - Timing-aware CPU cycles per frame (NTSC: ~29780, PAL: ~33247)
     - Timing-aware VBlank cycles (NTSC: 2500, PAL: 2798)
     - APU configured to match ROM timing mode
+    - **PPU Timing Differences** (informational - not implemented in current frame-based model):
+      - NTSC: 262 scanlines/frame, 341 PPU cycles/scanline, ~60.1 Hz
+      - PAL: 312 scanlines/frame, 341 PPU cycles/scanline, ~50.0 Hz
+      - Current implementation abstracts these differences at system level
   - All existing tests pass (33 mapper and PPU tests)
 
 - **Game Boy (`emu_gb`)**: Skeleton implementation
