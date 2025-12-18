@@ -21,7 +21,10 @@ fn nes_palette_rgb(index: u8) -> u32 {
 }
 
 fn palette_mirror_index(i: usize) -> usize {
-    // Palette mirroring: $3F10/$3F14/$3F18/$3F1C mirror $3F00/$3F04/$3F08/$3F0C.
+    // Palette mirroring:
+    // - $3F10/$3F14/$3F18/$3F1C (sprite palette color 0s) mirror $3F00/$3F04/$3F08/$3F0C
+    // Note: $3F04/$3F08/$3F0C can contain unique data but are unused during rendering
+    // since pattern value 0 always uses the backdrop color at $3F00
     match i & 0x1F {
         0x10 => 0x00,
         0x14 => 0x04,
@@ -166,7 +169,8 @@ impl Ppu {
                 let addr = self.vram_addr.get() & 0x3FFF;
 
                 // Palette reads return immediately, no buffering.
-                if (0x3F00..=0x3F1F).contains(&addr) {
+                // Palette RAM spans $3F00-$3FFF and mirrors every 32 bytes
+                if addr >= 0x3F00 {
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     let val = self.palette[target];
@@ -230,11 +234,13 @@ impl Ppu {
                     if self.chr_is_ram && self.chr.len() >= (addr as usize + 1) {
                         self.chr[addr as usize] = val;
                     }
-                } else if addr >= 0x2000 && addr < 0x3F00 {
+                } else if addr < 0x3F00 {
                     // Nametable VRAM space with mirroring
                     let idx = self.map_nametable_addr(addr);
                     self.vram[idx] = val;
-                } else if addr >= 0x3F00 && addr < 0x3F20 {
+                } else {
+                    // Palette RAM: $3F00-$3FFF with 32-byte mirroring
+                    // (addr is already masked to 0x3FFF, so this handles $3F00-$3FFF)
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     self.palette[target] = val;
@@ -471,5 +477,267 @@ impl Ppu {
         }
 
         frame
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_palette_mirror_index() {
+        // Universal background at $3F00
+        assert_eq!(palette_mirror_index(0x00), 0x00);
+
+        // BG palette 0 colors 1-3 should not mirror
+        assert_eq!(palette_mirror_index(0x01), 0x01);
+        assert_eq!(palette_mirror_index(0x02), 0x02);
+        assert_eq!(palette_mirror_index(0x03), 0x03);
+
+        // BG palette 1 color 0 - can hold unique data (not used in rendering)
+        assert_eq!(palette_mirror_index(0x04), 0x04);
+        // BG palette 1 colors 1-3 should not mirror
+        assert_eq!(palette_mirror_index(0x05), 0x05);
+        assert_eq!(palette_mirror_index(0x06), 0x06);
+        assert_eq!(palette_mirror_index(0x07), 0x07);
+
+        // BG palette 2 color 0 - can hold unique data (not used in rendering)
+        assert_eq!(palette_mirror_index(0x08), 0x08);
+        assert_eq!(palette_mirror_index(0x09), 0x09);
+        assert_eq!(palette_mirror_index(0x0A), 0x0A);
+        assert_eq!(palette_mirror_index(0x0B), 0x0B);
+
+        // BG palette 3 color 0 - can hold unique data (not used in rendering)
+        assert_eq!(palette_mirror_index(0x0C), 0x0C);
+        assert_eq!(palette_mirror_index(0x0D), 0x0D);
+        assert_eq!(palette_mirror_index(0x0E), 0x0E);
+        assert_eq!(palette_mirror_index(0x0F), 0x0F);
+
+        // Sprite palette 0 color 0 should mirror to $3F00
+        assert_eq!(palette_mirror_index(0x10), 0x00);
+        assert_eq!(palette_mirror_index(0x11), 0x11);
+        assert_eq!(palette_mirror_index(0x12), 0x12);
+        assert_eq!(palette_mirror_index(0x13), 0x13);
+
+        // Sprite palette 1 color 0 should mirror to $3F04
+        assert_eq!(palette_mirror_index(0x14), 0x04);
+        assert_eq!(palette_mirror_index(0x15), 0x15);
+        assert_eq!(palette_mirror_index(0x16), 0x16);
+        assert_eq!(palette_mirror_index(0x17), 0x17);
+
+        // Sprite palette 2 color 0 should mirror to $3F08
+        assert_eq!(palette_mirror_index(0x18), 0x08);
+        assert_eq!(palette_mirror_index(0x19), 0x19);
+        assert_eq!(palette_mirror_index(0x1A), 0x1A);
+        assert_eq!(palette_mirror_index(0x1B), 0x1B);
+
+        // Sprite palette 3 color 0 should mirror to $3F0C
+        assert_eq!(palette_mirror_index(0x1C), 0x0C);
+        assert_eq!(palette_mirror_index(0x1D), 0x1D);
+        assert_eq!(palette_mirror_index(0x1E), 0x1E);
+        assert_eq!(palette_mirror_index(0x1F), 0x1F);
+    }
+
+    #[test]
+    fn test_palette_writes_and_reads() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write to universal background
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x00); // PPUADDR low
+        ppu.write_register(7, 0x0F); // Write black to universal bg
+
+        // Read back from universal background
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Write to BG palette 1 color 0 - does NOT mirror, holds unique data
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x04); // PPUADDR low
+        ppu.write_register(7, 0x30); // Write white
+
+        // Read back from $3F04 - should see what we wrote
+        ppu.vram_addr.set(0x3F04);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30);
+
+        // Universal background should still be 0x0F (not affected)
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Write to sprite palette 0 color 0 ($3F10) - should mirror to $3F00
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x10); // PPUADDR low
+        ppu.write_register(7, 0x20); // Write a color
+
+        // Read back from $3F00 - should see the mirrored value
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x20);
+
+        // Read back from $3F10 - should also see the same value
+        ppu.vram_addr.set(0x3F10);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x20);
+
+        // Write to sprite palette 1 color 0 ($3F14) - should mirror to $3F04
+        ppu.write_register(6, 0x3F); // PPUADDR high
+        ppu.write_register(6, 0x14); // PPUADDR low
+        ppu.write_register(7, 0x25); // Write a color
+
+        // Read back from $3F04 - should see the mirrored value
+        ppu.vram_addr.set(0x3F04);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x25);
+
+        // Read back from $3F14 - should also see the same value
+        ppu.vram_addr.set(0x3F14);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x25);
+    }
+
+    #[test]
+    fn test_background_palette_rendering() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Set up a simple 8x8 tile in CHR-ROM (requires CHR-RAM for test)
+        ppu.chr_is_ram = true;
+        // Tile pattern: checkerboard pattern
+        // Low plane: 0b10101010
+        ppu.chr[0] = 0b10101010;
+        ppu.chr[1] = 0b01010101;
+        ppu.chr[2] = 0b10101010;
+        ppu.chr[3] = 0b01010101;
+        ppu.chr[4] = 0b10101010;
+        ppu.chr[5] = 0b01010101;
+        ppu.chr[6] = 0b10101010;
+        ppu.chr[7] = 0b01010101;
+        // High plane: 0b11110000
+        ppu.chr[8] = 0b11110000;
+        ppu.chr[9] = 0b11110000;
+        ppu.chr[10] = 0b11110000;
+        ppu.chr[11] = 0b11110000;
+        ppu.chr[12] = 0b00001111;
+        ppu.chr[13] = 0b00001111;
+        ppu.chr[14] = 0b00001111;
+        ppu.chr[15] = 0b00001111;
+
+        // Set up palette: universal bg + 3 colors for palette 0
+        ppu.palette[0] = 0x0F; // Universal background (black)
+        ppu.palette[1] = 0x30; // Color 1 (white)
+        ppu.palette[2] = 0x16; // Color 2 (red)
+        ppu.palette[3] = 0x27; // Color 3 (green)
+
+        // Enable background rendering
+        ppu.mask = 0x08; // Show background
+
+        // Set first nametable tile to use tile 0
+        ppu.vram[0] = 0;
+
+        // Set attribute to use palette 0
+        let attr_addr = ppu.map_nametable_addr(0x23C0);
+        ppu.vram[attr_addr] = 0x00; // Palette 0 for all quadrants
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // Check that different colors are rendered
+        // Top-left pixel should combine lo=1, hi=1 = color 3
+        let pixel0 = frame.pixels[0];
+        assert_eq!(pixel0, nes_palette_rgb(0x27)); // Color 3 (green)
+
+        // Second pixel should combine lo=0, hi=1 = color 2
+        let pixel1 = frame.pixels[1];
+        assert_eq!(pixel1, nes_palette_rgb(0x16)); // Color 2 (red)
+    }
+
+    #[test]
+    fn test_palette_color_zero_uses_backdrop() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Set up a tile where all pixels are color 0 (both planes 0)
+        for i in 0..16 {
+            ppu.chr[i] = 0;
+        }
+
+        // Set different values for universal bg and palette 1 color 0
+        ppu.palette[0] = 0x0F; // Universal background (black)
+        ppu.palette[4] = 0x30; // BG palette 1 color 0 (white) - should be ignored
+
+        // Enable background rendering
+        ppu.mask = 0x08;
+
+        // Set first tile to use tile 0
+        ppu.vram[0] = 0;
+
+        // Set attribute to use palette 1 (not palette 0)
+        let attr_addr = ppu.map_nametable_addr(0x23C0);
+        ppu.vram[attr_addr] = 0x01; // Palette 1 for first quadrant
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // All pixels should use universal background, not palette 1 color 0
+        let pixel = frame.pixels[0];
+        assert_eq!(pixel, nes_palette_rgb(0x0F)); // Should be black, not white
+    }
+
+    #[test]
+    fn test_nes_palette_rgb() {
+        // Test that master palette lookup works correctly
+        assert_eq!(nes_palette_rgb(0x0F), 0xFF000000); // Black
+        assert_eq!(nes_palette_rgb(0x30), 0xFFECEEEC); // White
+
+        // Test that only lower 6 bits are used (& 0x3F)
+        assert_eq!(nes_palette_rgb(0x4F), nes_palette_rgb(0x0F)); // Same as 0x0F
+        assert_eq!(nes_palette_rgb(0xFF), nes_palette_rgb(0x3F)); // Same as 0x3F
+    }
+
+    #[test]
+    fn test_palette_ram_mirrors_throughout_range() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write to $3F00 (universal background)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x0F); // Black
+
+        // Read from $3F20 (should mirror to $3F00)
+        ppu.vram_addr.set(0x3F20);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Read from $3F40 (should also mirror to $3F00)
+        ppu.vram_addr.set(0x3F40);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F);
+
+        // Write to $3F25 (should mirror to $3F05)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x25);
+        ppu.write_register(7, 0x16); // Red
+
+        // Read from $3F05 directly
+        ppu.vram_addr.set(0x3F05);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x16);
+
+        // Read from $3F45 (should also mirror to $3F05)
+        ppu.vram_addr.set(0x3F45);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x16);
+
+        // Write to $3FF0 (should mirror to $3F10, which mirrors to $3F00)
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0xF0);
+        ppu.write_register(7, 0x30); // White
+
+        // Universal background should now be white
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30);
     }
 }
