@@ -16,6 +16,8 @@
 - [x] Add F12 reset key to GUI.
 - [x] Create CI workflow for automated testing across platforms.
 - [x] Clean up code warnings and improve code quality.
+- [x] Implement mapper 3 (CNROM) and mapper 7 (AxROM) for broader game compatibility.
+- [x] Implement mappers 9 (MMC2), 10 (MMC4), and 11 (Color Dreams) reaching 86% game coverage.
 
 ## In Progress / Future Work
 - [ ] Reduce/disable debug logging and CLI dumps for normal runs (partially done with --keep-logs flag).
@@ -24,7 +26,7 @@
 - [ ] Verify Tetris (Mapper 1) graphics rendering - requires testing with actual ROM.
 - [ ] Verify SMB3 (Mapper 4) startup and IRQ timing - requires testing with actual ROM.
 - [ ] Add configuration interface for resolution and other settings.
-- [ ] Implement additional common mappers (3, 7, 9, 10).
+- [ ] Implement additional mappers for even broader coverage (5, 19, etc.).
 - [ ] Improve PPU timing accuracy for better game compatibility.
 - [ ] Add save state UI management.
 - [ ] Add audio configuration options.

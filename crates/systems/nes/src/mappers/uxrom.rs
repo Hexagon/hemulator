@@ -1,4 +1,4 @@
-use crate::cartridge::{Cartridge, Mirroring};
+use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 
 /// UxROM (Mapper 2) - Switchable 16KB PRG banks with fixed last bank
@@ -49,6 +49,7 @@ impl Uxrom {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cartridge::Mirroring;
 
     #[test]
     fn uxrom_bank_switching() {
