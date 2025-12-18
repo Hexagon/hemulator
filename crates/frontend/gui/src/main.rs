@@ -151,11 +151,14 @@ fn main() {
     let mut rom_loaded = false;
 
     // Try to load ROM if path is available
+    // Note: We still use ROM type detection at startup to determine which system to instantiate.
+    // The mount point system works within a system for managing media slots.
     if let Some(p) = &rom_path {
         match std::fs::read(p) {
             Ok(data) => match detect_rom_type(&data) {
                 Ok(SystemType::NES) => {
                     rom_hash = Some(GameSaves::rom_hash(&data));
+                    // Use the mount point system to load the cartridge
                     if let Err(e) = sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load NES ROM: {}", e);
                         rom_hash = None;
