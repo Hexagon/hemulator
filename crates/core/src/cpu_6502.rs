@@ -276,6 +276,31 @@ impl<M: Memory6502> Cpu6502<M> {
         }
     }
 
+    /// Perform ADC operation on a value and update accumulator and flags
+    #[inline]
+    fn adc(&mut self, val: u8) {
+        let carry_in = if (self.status & 0x01) != 0 { 1u16 } else { 0u16 };
+        let sum = self.a as u16 + val as u16 + carry_in;
+        let result = sum as u8;
+        
+        // Set carry flag
+        if sum > 0xFF {
+            self.status |= 0x01;
+        } else {
+            self.status &= !0x01;
+        }
+        
+        // Set overflow flag: (~(A ^ M) & (A ^ R)) & 0x80
+        if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
+            self.status |= 0x40;
+        } else {
+            self.status &= !0x40;
+        }
+        
+        self.a = result;
+        self.set_zero_and_negative(self.a);
+    }
+
     /// Execute one instruction and return cycles used.
     pub fn step(&mut self) -> u32 {
         let op = self.fetch_u8();
@@ -331,6 +356,12 @@ impl<M: Memory6502> Cpu6502<M> {
             0xD8 => {
                 // CLD
                 self.status &= !0x08;
+                self.cycles += 2;
+                2
+            }
+            0xF8 => {
+                // SED
+                self.status |= 0x08;
                 self.cycles += 2;
                 2
             }
@@ -438,26 +469,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0x69 => {
                 // ADC immediate
                 let val = self.fetch_u8();
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01; // set carry
-                } else {
-                    self.status &= !0x01;
-                }
-                // overflow: (~(A ^ M) & (A ^ R)) & 0x80
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 2;
                 2
             }
@@ -512,7 +524,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 self.cycles += 4;
                 4
             }
-            0x09 | 0x05 | 0x0D | 0x01 | 0x11 | 0x15 | 0x19 => {
+            0x09 | 0x05 | 0x0D | 0x01 | 0x11 | 0x15 | 0x19 | 0x1D => {
                 // ORA variants
                 if op == 0x09 {
                     let val = self.fetch_u8();
@@ -546,6 +558,10 @@ impl<M: Memory6502> Cpu6502<M> {
                             let a = self.addr_absolute_y();
                             self.read(a)
                         }
+                        0x1D => {
+                            let a = self.addr_absolute_x();
+                            self.read(a)
+                        }
                         _ => 0,
                     };
                     self.a |= val;
@@ -554,7 +570,7 @@ impl<M: Memory6502> Cpu6502<M> {
                     4
                 }
             }
-            0x49 | 0x45 | 0x4D | 0x41 | 0x51 | 0x55 | 0x59 => {
+            0x49 | 0x45 | 0x4D | 0x41 | 0x51 | 0x55 | 0x59 | 0x5D => {
                 // EOR variants
                 if op == 0x49 {
                     let val = self.fetch_u8();
@@ -586,6 +602,10 @@ impl<M: Memory6502> Cpu6502<M> {
                         }
                         0x59 => {
                             let a = self.addr_absolute_y();
+                            self.read(a)
+                        }
+                        0x5D => {
+                            let a = self.addr_absolute_x();
                             self.read(a)
                         }
                         _ => 0,
@@ -692,12 +712,14 @@ impl<M: Memory6502> Cpu6502<M> {
                 self.cycles += 2;
                 2
             }
-            0x06 | 0x0E => {
-                // ASL zp or abs
-                let addr = if op == 0x06 {
-                    self.fetch_u8() as u16
-                } else {
-                    self.fetch_u16()
+            0x06 | 0x0E | 0x16 | 0x1E => {
+                // ASL zp / abs / zp,X / abs,X
+                let addr = match op {
+                    0x06 => self.fetch_u8() as u16,
+                    0x0E => self.fetch_u16(),
+                    0x16 => self.addr_zero_page_x(),
+                    0x1E => self.addr_absolute_x(),
+                    _ => 0,
                 };
                 let old = self.read(addr);
                 let carry = (old & 0x80) != 0;
@@ -709,12 +731,15 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.status &= !0x01
                 }
                 self.set_zero_and_negative(res);
-                self.cycles += if op == 0x06 { 5 } else { 6 };
-                if op == 0x06 {
-                    5
-                } else {
-                    6
-                }
+                let cycles = match op {
+                    0x06 => 5,
+                    0x0E => 6,
+                    0x16 => 6,
+                    0x1E => 7,
+                    _ => 5,
+                };
+                self.cycles += cycles as u64;
+                cycles
             }
             0x4A => {
                 // LSR accumulator
@@ -731,8 +756,8 @@ impl<M: Memory6502> Cpu6502<M> {
                 self.cycles += 2;
                 2
             }
-            0x2A | 0x26 | 0x2E => {
-                // ROL accumulator / ROL zp / ROL abs
+            0x2A | 0x26 | 0x2E | 0x36 | 0x3E => {
+                // ROL accumulator / ROL zp / ROL abs / ROL zp,X / ROL abs,X
                 if op == 0x2A {
                     let old = self.a;
                     let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
@@ -748,10 +773,12 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    let addr = if op == 0x26 {
-                        self.fetch_u8() as u16
-                    } else {
-                        self.fetch_u16()
+                    let addr = match op {
+                        0x26 => self.fetch_u8() as u16,
+                        0x2E => self.fetch_u16(),
+                        0x36 => self.addr_zero_page_x(),
+                        0x3E => self.addr_absolute_x(),
+                        _ => 0,
                     };
                     let old = self.read(addr);
                     let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
@@ -764,16 +791,19 @@ impl<M: Memory6502> Cpu6502<M> {
                         self.status &= !0x01
                     }
                     self.set_zero_and_negative(res);
-                    self.cycles += if op == 0x26 { 5 } else { 6 };
-                    if op == 0x26 {
-                        5
-                    } else {
-                        6
-                    }
+                    let cycles = match op {
+                        0x26 => 5,
+                        0x2E => 6,
+                        0x36 => 6,
+                        0x3E => 7,
+                        _ => 5,
+                    };
+                    self.cycles += cycles as u64;
+                    cycles
                 }
             }
-            0x6A | 0x66 | 0x6E => {
-                // ROR accumulator / ROR zp / ROR abs
+            0x6A | 0x66 | 0x6E | 0x76 | 0x7E => {
+                // ROR accumulator / ROR zp / ROR abs / ROR zp,X / ROR abs,X
                 if op == 0x6A {
                     let old = self.a;
                     let carry_in = if (self.status & 0x01) != 0 { 0x80 } else { 0 };
@@ -789,10 +819,12 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    let addr = if op == 0x66 {
-                        self.fetch_u8() as u16
-                    } else {
-                        self.fetch_u16()
+                    let addr = match op {
+                        0x66 => self.fetch_u8() as u16,
+                        0x6E => self.fetch_u16(),
+                        0x76 => self.addr_zero_page_x(),
+                        0x7E => self.addr_absolute_x(),
+                        _ => 0,
                     };
                     let old = self.read(addr);
                     let carry_in = if (self.status & 0x01) != 0 { 0x80 } else { 0 };
@@ -805,16 +837,19 @@ impl<M: Memory6502> Cpu6502<M> {
                         self.status &= !0x01
                     }
                     self.set_zero_and_negative(res);
-                    self.cycles += if op == 0x66 { 5 } else { 6 };
-                    if op == 0x66 {
-                        5
-                    } else {
-                        6
-                    }
+                    let cycles = match op {
+                        0x66 => 5,
+                        0x6E => 6,
+                        0x76 => 6,
+                        0x7E => 7,
+                        _ => 5,
+                    };
+                    self.cycles += cycles as u64;
+                    cycles
                 }
             }
-            0xE9 | 0xE5 | 0xED | 0xE1 | 0xF1 => {
-                // SBC variants (immediate, zp, abs, (ind,X), (ind),Y)
+            0xE9 | 0xE5 | 0xED | 0xE1 | 0xF1 | 0xF5 | 0xF9 | 0xFD => {
+                // SBC variants (immediate, zp, abs, (ind,X), (ind),Y, zp,X, abs,Y, abs,X)
                 // Implement using ADC on one's complement: A = A - M - (1 - C)
                 let m = match op {
                     0xE9 => self.fetch_u8(),
@@ -832,6 +867,18 @@ impl<M: Memory6502> Cpu6502<M> {
                     }
                     0xF1 => {
                         let a = self.addr_indirect_y();
+                        self.read(a)
+                    }
+                    0xF5 => {
+                        let a = self.addr_zero_page_x();
+                        self.read(a)
+                    }
+                    0xF9 => {
+                        let a = self.addr_absolute_y();
+                        self.read(a)
+                    }
+                    0xFD => {
+                        let a = self.addr_absolute_x();
                         self.read(a)
                     }
                     _ => 0,
@@ -854,8 +901,19 @@ impl<M: Memory6502> Cpu6502<M> {
                 }
                 self.a = result;
                 self.set_zero_and_negative(self.a);
-                self.cycles += 2;
-                2
+                let cycles = match op {
+                    0xE9 => 2,  // immediate
+                    0xE5 => 3,  // zero page
+                    0xED => 4,  // absolute
+                    0xE1 => 6,  // (indirect,X)
+                    0xF1 => 5,  // (indirect),Y
+                    0xF5 => 4,  // zero page,X
+                    0xF9 => 4,  // absolute,Y
+                    0xFD => 4,  // absolute,X
+                    _ => 2,
+                };
+                self.cycles += cycles as u64;
+                cycles
             }
             0xE0 | 0xE4 | 0xEC => {
                 // CPX immediate/zp/abs
@@ -993,12 +1051,14 @@ impl<M: Memory6502> Cpu6502<M> {
                     2
                 }
             }
-            0x46 | 0x4E => {
-                // LSR zp or abs
-                let addr = if op == 0x46 {
-                    self.fetch_u8() as u16
-                } else {
-                    self.fetch_u16()
+            0x46 | 0x4E | 0x56 | 0x5E => {
+                // LSR zp / abs / zp,X / abs,X
+                let addr = match op {
+                    0x46 => self.fetch_u8() as u16,
+                    0x4E => self.fetch_u16(),
+                    0x56 => self.addr_zero_page_x(),
+                    0x5E => self.addr_absolute_x(),
+                    _ => 0,
                 };
                 let old = self.read(addr);
                 let carry = (old & 0x01) != 0;
@@ -1010,12 +1070,15 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.status &= !0x01
                 }
                 self.set_zero_and_negative(res);
-                self.cycles += if op == 0x46 { 5 } else { 6 };
-                if op == 0x46 {
-                    5
-                } else {
-                    6
-                }
+                let cycles = match op {
+                    0x46 => 5,
+                    0x4E => 6,
+                    0x56 => 6,
+                    0x5E => 7,
+                    _ => 5,
+                };
+                self.cycles += cycles as u64;
+                cycles
             }
             0xA5 => {
                 // LDA zero page
@@ -1039,25 +1102,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC zero page
                 let zp = self.fetch_u8() as u16;
                 let val = self.read(zp);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 3;
                 3
             }
@@ -1110,27 +1155,49 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC absolute
                 let addr = self.fetch_u16();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 4;
                 4
+            }
+            0x75 => {
+                // ADC zero page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                self.adc(val);
+                self.cycles += 4;
+                4
+            }
+            0x7D => {
+                // ADC absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                self.adc(val);
+                self.cycles += 4;
+                4
+            }
+            0x79 => {
+                // ADC absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                self.adc(val);
+                self.cycles += 4;
+                4
+            }
+            0x61 => {
+                // ADC (indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                self.adc(val);
+                self.cycles += 6;
+                6
+            }
+            0x71 => {
+                // ADC (indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                self.adc(val);
+                self.cycles += 5;
+                5
             }
             0x85 => {
                 // STA zero page
@@ -1536,6 +1603,252 @@ mod tests {
         assert_eq!(cpu.a, 0x42);
         assert_eq!(cpu.step(), 3); // STA stores A into $0010
         assert_eq!(cpu.memory.read(0x0010), 0x42);
+    }
+
+    #[test]
+    fn adc_all_addressing_modes() {
+        // Test ADC zero page,X (0x75)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0015, 0x10);
+        cpu.memory.load_program(0x8000, &[0x75, 0x10]); // ADC $10,X
+        cpu.reset();
+        cpu.a = 0x05;
+        cpu.x = 0x05;
+        cpu.status &= !0x01; // clear carry
+        assert_eq!(cpu.step(), 4);
+        assert_eq!(cpu.a, 0x15);
+
+        // Test ADC absolute,X (0x7D)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x2005, 0x20);
+        cpu2.memory.load_program(0x8000, &[0x7D, 0x00, 0x20]); // ADC $2000,X
+        cpu2.reset();
+        cpu2.a = 0x10;
+        cpu2.x = 0x05;
+        cpu2.status &= !0x01;
+        assert_eq!(cpu2.step(), 4);
+        assert_eq!(cpu2.a, 0x30);
+
+        // Test ADC absolute,Y (0x79)
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.write(0x2003, 0x0F);
+        cpu3.memory.load_program(0x8000, &[0x79, 0x00, 0x20]); // ADC $2000,Y
+        cpu3.reset();
+        cpu3.a = 0x01;
+        cpu3.y = 0x03;
+        cpu3.status &= !0x01;
+        assert_eq!(cpu3.step(), 4);
+        assert_eq!(cpu3.a, 0x10);
+
+        // Test ADC (indirect,X) (0x61)
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.write(0x0015, 0x00); // pointer low
+        cpu4.memory.write(0x0016, 0x30); // pointer high -> $3000
+        cpu4.memory.write(0x3000, 0x42);
+        cpu4.memory.load_program(0x8000, &[0x61, 0x10]); // ADC ($10,X)
+        cpu4.reset();
+        cpu4.a = 0x08;
+        cpu4.x = 0x05; // 0x10 + 0x05 = 0x15
+        cpu4.status &= !0x01;
+        assert_eq!(cpu4.step(), 6);
+        assert_eq!(cpu4.a, 0x4A);
+
+        // Test ADC (indirect),Y (0x71)
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.write(0x0020, 0x00); // pointer low
+        cpu5.memory.write(0x0021, 0x30); // pointer high -> $3000
+        cpu5.memory.write(0x3002, 0x33);
+        cpu5.memory.load_program(0x8000, &[0x71, 0x20]); // ADC ($20),Y
+        cpu5.reset();
+        cpu5.a = 0x0D;
+        cpu5.y = 0x02; // $3000 + 0x02 = $3002
+        cpu5.status &= !0x01;
+        assert_eq!(cpu5.step(), 5);
+        assert_eq!(cpu5.a, 0x40);
+    }
+
+    #[test]
+    fn shift_and_rotate_indexed_modes() {
+        // Test ASL zero page,X (0x16)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0015, 0x40);
+        cpu.memory.load_program(0x8000, &[0x16, 0x10]); // ASL $10,X
+        cpu.reset();
+        cpu.x = 0x05;
+        assert_eq!(cpu.step(), 6);
+        assert_eq!(cpu.memory.read(0x0015), 0x80);
+        assert_eq!(cpu.status & 0x01, 0); // no carry
+        assert_eq!(cpu.status & 0x80, 0x80); // negative
+
+        // Test ASL absolute,X (0x1E)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x2005, 0x81);
+        cpu2.memory.load_program(0x8000, &[0x1E, 0x00, 0x20]); // ASL $2000,X
+        cpu2.reset();
+        cpu2.x = 0x05;
+        assert_eq!(cpu2.step(), 7);
+        assert_eq!(cpu2.memory.read(0x2005), 0x02);
+        assert_eq!(cpu2.status & 0x01, 0x01); // carry set
+
+        // Test LSR zero page,X (0x56)
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.write(0x0012, 0x82);
+        cpu3.memory.load_program(0x8000, &[0x56, 0x10]); // LSR $10,X
+        cpu3.reset();
+        cpu3.x = 0x02;
+        assert_eq!(cpu3.step(), 6);
+        assert_eq!(cpu3.memory.read(0x0012), 0x41);
+        assert_eq!(cpu3.status & 0x01, 0); // no carry
+
+        // Test LSR absolute,X (0x5E)
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.write(0x2010, 0x03);
+        cpu4.memory.load_program(0x8000, &[0x5E, 0x00, 0x20]); // LSR $2000,X
+        cpu4.reset();
+        cpu4.x = 0x10;
+        assert_eq!(cpu4.step(), 7);
+        assert_eq!(cpu4.memory.read(0x2010), 0x01);
+        assert_eq!(cpu4.status & 0x01, 0x01); // carry set
+
+        // Test ROL zero page,X (0x36)
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.write(0x0015, 0x80);
+        cpu5.memory.load_program(0x8000, &[0x36, 0x10]); // ROL $10,X
+        cpu5.reset();
+        cpu5.x = 0x05;
+        cpu5.status |= 0x01; // set carry
+        assert_eq!(cpu5.step(), 6);
+        assert_eq!(cpu5.memory.read(0x0015), 0x01);
+        assert_eq!(cpu5.status & 0x01, 0x01); // carry still set
+
+        // Test ROL absolute,X (0x3E)
+        let mem6 = ArrayMemory::new();
+        let mut cpu6 = Cpu6502::new(mem6);
+        cpu6.memory.write(0x2020, 0x40);
+        cpu6.memory.load_program(0x8000, &[0x3E, 0x00, 0x20]); // ROL $2000,X
+        cpu6.reset();
+        cpu6.x = 0x20;
+        cpu6.status &= !0x01; // clear carry
+        assert_eq!(cpu6.step(), 7);
+        assert_eq!(cpu6.memory.read(0x2020), 0x80);
+
+        // Test ROR zero page,X (0x76)
+        let mem7 = ArrayMemory::new();
+        let mut cpu7 = Cpu6502::new(mem7);
+        cpu7.memory.write(0x0018, 0x01);
+        cpu7.memory.load_program(0x8000, &[0x76, 0x10]); // ROR $10,X
+        cpu7.reset();
+        cpu7.x = 0x08;
+        cpu7.status |= 0x01; // set carry
+        assert_eq!(cpu7.step(), 6);
+        assert_eq!(cpu7.memory.read(0x0018), 0x80);
+        assert_eq!(cpu7.status & 0x01, 0x01); // carry still set
+
+        // Test ROR absolute,X (0x7E)
+        let mem8 = ArrayMemory::new();
+        let mut cpu8 = Cpu6502::new(mem8);
+        cpu8.memory.write(0x2030, 0x02);
+        cpu8.memory.load_program(0x8000, &[0x7E, 0x00, 0x20]); // ROR $2000,X
+        cpu8.reset();
+        cpu8.x = 0x30;
+        cpu8.status &= !0x01; // clear carry
+        assert_eq!(cpu8.step(), 7);
+        assert_eq!(cpu8.memory.read(0x2030), 0x01);
+    }
+
+    #[test]
+    fn logical_ops_absolute_x() {
+        // Test ORA absolute,X (0x1D)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x2005, 0xF0);
+        cpu.memory.load_program(0x8000, &[0x1D, 0x00, 0x20]); // ORA $2000,X
+        cpu.reset();
+        cpu.a = 0x0F;
+        cpu.x = 0x05;
+        assert_eq!(cpu.step(), 4);
+        assert_eq!(cpu.a, 0xFF);
+
+        // Test EOR absolute,X (0x5D)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x2010, 0xAA);
+        cpu2.memory.load_program(0x8000, &[0x5D, 0x00, 0x20]); // EOR $2000,X
+        cpu2.reset();
+        cpu2.a = 0xFF;
+        cpu2.x = 0x10;
+        assert_eq!(cpu2.step(), 4);
+        assert_eq!(cpu2.a, 0x55);
+    }
+
+    #[test]
+    fn sbc_indexed_modes() {
+        // Test SBC zero page,X (0xF5)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0015, 0x05);
+        cpu.memory.load_program(0x8000, &[0xF5, 0x10]); // SBC $10,X
+        cpu.reset();
+        cpu.a = 0x10;
+        cpu.x = 0x05;
+        cpu.status |= 0x01; // set carry (no borrow)
+        assert_eq!(cpu.step(), 4);
+        assert_eq!(cpu.a, 0x0B);
+
+        // Test SBC absolute,X (0xFD)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x2020, 0x08);
+        cpu2.memory.load_program(0x8000, &[0xFD, 0x00, 0x20]); // SBC $2000,X
+        cpu2.reset();
+        cpu2.a = 0x20;
+        cpu2.x = 0x20;
+        cpu2.status |= 0x01;
+        assert_eq!(cpu2.step(), 4);
+        assert_eq!(cpu2.a, 0x18);
+
+        // Test SBC absolute,Y (0xF9)
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.write(0x2015, 0x0A);
+        cpu3.memory.load_program(0x8000, &[0xF9, 0x00, 0x20]); // SBC $2000,Y
+        cpu3.reset();
+        cpu3.a = 0x1A;
+        cpu3.y = 0x15;
+        cpu3.status |= 0x01;
+        assert_eq!(cpu3.step(), 4);
+        assert_eq!(cpu3.a, 0x10);
+    }
+
+    #[test]
+    fn sed_flag_operation() {
+        // Test SED (0xF8)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0xF8]); // SED
+        cpu.reset();
+        cpu.status &= !0x08; // clear decimal flag
+        assert_eq!(cpu.step(), 2);
+        assert_eq!(cpu.status & 0x08, 0x08); // decimal flag set
+
+        // Verify CLD still works
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0xD8]); // CLD
+        cpu2.reset();
+        cpu2.status |= 0x08; // set decimal flag
+        assert_eq!(cpu2.step(), 2);
+        assert_eq!(cpu2.status & 0x08, 0); // decimal flag cleared
     }
 
     #[test]
