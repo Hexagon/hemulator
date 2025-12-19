@@ -213,6 +213,7 @@ impl<M: Memory6502> Cpu6502<M> {
         (hi << 8) | lo
     }
 
+    /// Trigger a Non-Maskable Interrupt (NMI)
     pub fn trigger_nmi(&mut self) {
         // Avoid nested NMIs in this simplified model.
         if self.in_nmi {
@@ -230,6 +231,7 @@ impl<M: Memory6502> Cpu6502<M> {
         self.cycles = self.cycles.wrapping_add(7);
     }
 
+    /// Trigger a maskable IRQ (interrupt request)
     pub fn trigger_irq(&mut self) {
         // Respect the I flag: if set, ignore maskable IRQs.
         if (self.status & 0x04) != 0 {

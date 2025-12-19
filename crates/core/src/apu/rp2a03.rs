@@ -26,6 +26,7 @@ pub struct Rp2a03Apu {
 }
 
 impl Rp2a03Apu {
+    /// Create a new RP2A03 APU (NTSC timing)
     pub fn new() -> Self {
         Self {
             pulse1: PulseChannel::new(),
