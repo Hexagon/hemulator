@@ -633,11 +633,10 @@ fn main() {
                 slot_selector_mode,
                 &has_saves,
             );
-            window
-                .update_with_buffer(&slot_buffer, width, height)
-                .unwrap_or_else(|e| {
-                    eprintln!("Window update error: {}", e);
-                });
+            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
             &[]
         } else if show_mount_selector {
             // Render mount point selector overlay
@@ -647,20 +646,18 @@ fn main() {
                 height,
                 &mount_points,
             );
-            window
-                .update_with_buffer(&mount_buffer, width, height)
-                .unwrap_or_else(|e| {
-                    eprintln!("Window update error: {}", e);
-                });
+            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
             &[]
         } else if let Some(ref overlay) = debug_overlay {
             let composed = blend_over(&buffer, overlay);
             // Keep the composed buffer alive for the duration of update_with_buffer.
-            window
-                .update_with_buffer(composed.as_slice(), width, height)
-                .unwrap_or_else(|e| {
-                    eprintln!("Window update error: {}", e);
-                });
+            if let Err(e) = window.update_with_buffer(composed.as_slice(), width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
             // Timing and window-size persistence still run below.
             // Skip the normal update path since we've already presented.
             // NOTE: This keeps debug overlay transparent without pausing emulation.
