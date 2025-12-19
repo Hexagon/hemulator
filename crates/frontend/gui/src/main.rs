@@ -502,6 +502,7 @@ fn main() {
                 debug_info.prg_banks,
                 debug_info.chr_banks,
                 current_fps,
+                sys.get_runtime_stats(),
             ));
         }
 

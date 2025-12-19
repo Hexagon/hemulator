@@ -358,6 +358,7 @@ pub fn create_debug_overlay(
     prg_banks: usize,
     chr_banks: usize,
     fps: f64,
+    runtime: emu_nes::RuntimeStats,
 ) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
@@ -372,6 +373,33 @@ pub fn create_debug_overlay(
     let timing_line = format!("Timing: {}", timing_mode);
     let fps_line = format!("FPS: {:.1}", fps);
 
+    let pc_line = format!("PC: 0x{:04X}", runtime.pc);
+    let vec_line = format!(
+        "VEC: reset=0x{:04X} nmi=0x{:04X} irq=0x{:04X}",
+        runtime.vec_reset, runtime.vec_nmi, runtime.vec_irq
+    );
+    let hot0 = runtime.pc_hotspots[0];
+    let hot1 = runtime.pc_hotspots[1];
+    let hot2 = runtime.pc_hotspots[2];
+    let pc_hot_line = format!(
+        "PC hot: [{:04X} x{}] [{:04X} x{}] [{:04X} x{}]",
+        hot0.pc, hot0.count, hot1.pc, hot1.count, hot2.pc, hot2.count
+    );
+    let cpu_line = format!(
+        "CPU: steps={} cycles={}",
+        runtime.cpu_steps, runtime.cpu_cycles
+    );
+    let int_line = format!(
+        "INT: irq={} nmi={} a12_edges={}",
+        runtime.irqs, runtime.nmis, runtime.mmc3_a12_edges
+    );
+    let ppu_line = format!(
+        "PPU: ctrl=0x{:02X} mask=0x{:02X} vblank={}",
+        runtime.ppu_ctrl,
+        runtime.ppu_mask,
+        if runtime.ppu_vblank { "1" } else { "0" }
+    );
+
     let debug_lines: Vec<&str> = vec![
         "DEBUG INFO",
         "",
@@ -380,6 +408,13 @@ pub fn create_debug_overlay(
         &chr_line,
         &timing_line,
         &fps_line,
+        "",
+        &pc_line,
+        &vec_line,
+        &pc_hot_line,
+        &cpu_line,
+        &int_line,
+        &ppu_line,
         "",
         "Press F10 to close",
     ];

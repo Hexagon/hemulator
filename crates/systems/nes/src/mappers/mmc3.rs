@@ -154,6 +154,9 @@ impl Mmc3 {
                 if addr & 1 == 0 {
                     self.irq_latch = val;
                 } else {
+                    // Per MMC3 spec, writing $C001 clears the counter immediately and
+                    // requests a reload on the next A12 rising edge.
+                    self.irq_counter = 0;
                     self.irq_reload = true;
                 }
             }
@@ -172,14 +175,17 @@ impl Mmc3 {
     pub fn notify_a12(&mut self, a12_high: bool) {
         if !self.last_a12 && a12_high {
             // Rising edge clocks the counter per MMC3 spec.
+            // When clocked: if counter==0 OR reload flag set, reload from latch; else decrement.
             if self.irq_reload || self.irq_counter == 0 {
                 self.irq_counter = self.irq_latch;
                 self.irq_reload = false;
             } else {
                 self.irq_counter = self.irq_counter.saturating_sub(1);
-                if self.irq_counter == 0 && self.irq_enabled {
-                    self.irq_pending = true;
-                }
+            }
+
+            // "New"/Sharp behavior: trigger when counter is 0 after clocking.
+            if self.irq_counter == 0 && self.irq_enabled {
+                self.irq_pending = true;
             }
         }
         self.last_a12 = a12_high;

@@ -74,9 +74,11 @@ impl<M: Memory6502> Cpu6502<M> {
         self.y = 0;
         self.sp = 0xFD;
         self.status = 0x24;
-        self.pc = 0x8000;
         self.cycles = 0;
         self.in_nmi = false;
+
+        // On real hardware, RESET loads the vector at $FFFC-$FFFD.
+        self.pc = self.read_u16(0xFFFC);
     }
 
     /// Replace the memory interface while preserving CPU state
@@ -1320,7 +1322,19 @@ impl<M: Memory6502> Cpu6502<M> {
                 6
             }
             0x00 => {
-                // BRK - treat as NOP for skeleton
+                // BRK
+                // BRK is treated as a 2-byte instruction; PC is incremented by one extra
+                // before pushing.
+                let pc_to_push = self.pc.wrapping_add(1);
+                self.push_u16(pc_to_push);
+
+                let mut s = self.status;
+                s |= 0x10; // set B when pushed by BRK
+                s |= 0x20; // bit 5 always set
+                self.push_u8(s);
+
+                self.status |= 0x04; // set I
+                self.pc = self.read_u16(0xFFFE);
                 self.cycles += 7;
                 7
             }
@@ -1387,8 +1401,8 @@ mod tests {
     fn lda_immediate_sets_a_and_flags() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
-        cpu.reset();
         cpu.memory.load_program(0x8000, &[0xA9, 0x05, 0xEA]);
+        cpu.reset();
         let c1 = cpu.step();
         assert_eq!(c1, 2);
         assert_eq!(cpu.a, 5);
@@ -1401,8 +1415,8 @@ mod tests {
     fn lda_zero_sets_zero_flag() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
-        cpu.reset();
         cpu.memory.load_program(0x8000, &[0xA9, 0x00]);
+        cpu.reset();
         let _ = cpu.step();
         assert_eq!(cpu.a, 0);
         assert_eq!(cpu.status & 0x02, 0x02);
@@ -1412,22 +1426,20 @@ mod tests {
     fn adc_immediate_and_carry_overflow() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x69, 0x10]); // ADC #$10
         cpu.reset();
         cpu.a = 0x50;
         cpu.status &= !0x01; // clear carry
-        cpu.pc = 0x8000;
-        cpu.memory.load_program(0x8000, &[0x69, 0x10]); // ADC #$10
         assert_eq!(cpu.step(), 2);
         assert_eq!(cpu.a, 0x60);
 
         // test carry
         let mem2 = ArrayMemory::new();
         let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x69, 0x01]);
         cpu2.reset();
         cpu2.a = 0xFF;
         cpu2.status |= 0x01; // carry in
-        cpu2.pc = 0x8000;
-        cpu2.memory.load_program(0x8000, &[0x69, 0x01]);
         assert_eq!(cpu2.step(), 2);
         assert_eq!(cpu2.a, 0x01);
         assert_eq!(cpu2.status & 0x01, 0x01);
@@ -1437,10 +1449,10 @@ mod tests {
     fn beq_branches_when_zero() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
-        cpu.reset();
         // LDA #0; BEQ +2; LDA #1; LDA #2
         cpu.memory
             .load_program(0x8000, &[0xA9, 0x00, 0xF0, 0x02, 0xA9, 0x01, 0xA9, 0x02]);
+        cpu.reset();
         assert_eq!(cpu.step(), 2); // LDA #0 -> sets Z
         assert_eq!(cpu.step(), 3); // BEQ taken
         assert_eq!(cpu.step(), 2); // LDA #2
@@ -1451,10 +1463,9 @@ mod tests {
     fn pha_pla_roundtrip() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x48, 0xA9, 0x00, 0x68]); // PHA; LDA #0; PLA
         cpu.reset();
         cpu.a = 0x7F;
-        cpu.pc = 0x8000;
-        cpu.memory.load_program(0x8000, &[0x48, 0xA9, 0x00, 0x68]); // PHA; LDA #0; PLA
         assert_eq!(cpu.step(), 3); // PHA
         assert_eq!(cpu.step(), 2); // LDA #0
         assert_eq!(cpu.step(), 4); // PLA
@@ -1465,13 +1476,13 @@ mod tests {
     fn jsr_rts_returns() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
-        cpu.reset();
         // JSR to 0x8010; at 0x8010 put RTS
         // program at 0x8000: JSR $8010 ; LDA #1
         cpu.memory
             .load_program(0x8000, &[0x20, 0x10, 0x80, 0xA9, 0x01]);
         // place RTS at 0x8010
         cpu.memory.write(0x8010, 0x60);
+        cpu.reset();
         assert_eq!(cpu.step(), 6); // JSR
                                    // Now at subroutine, execute RTS
         assert_eq!(cpu.step(), 6); // RTS
@@ -1483,9 +1494,9 @@ mod tests {
     fn lda_zero_page_and_sta_zero_page() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu6502::new(mem);
-        cpu.reset();
         // LDA #$42 ; STA $10
         cpu.memory.load_program(0x8000, &[0xA9, 0x42, 0x85, 0x10]);
+        cpu.reset();
         assert_eq!(cpu.step(), 2); // A = 0x42
         assert_eq!(cpu.a, 0x42);
         assert_eq!(cpu.step(), 3); // STA stores A into $0010
@@ -1508,14 +1519,15 @@ mod tests {
         cpu.memory.write(0x0011, 0x20);
         // test (indirect,X): set X then LDA (zp,X)
         cpu.x = 6;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xA1, 0x0A]);
+        cpu.reset();
+        cpu.x = 6;
         assert_eq!(cpu.step(), 6);
         assert_eq!(cpu.a, 0xAB);
 
         // test (indirect),Y: pointer at $20 points to 0x2000, Y = 0
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xB1, 0x20]);
+        cpu.reset();
         cpu.y = 0;
         assert_eq!(cpu.step(), 5);
         assert_eq!(cpu.a, 0xAB);
@@ -1528,45 +1540,51 @@ mod tests {
         cpu.reset();
         // AND immediate
         cpu.a = 0xF0;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x29, 0x0F]);
+        cpu.reset();
+        cpu.a = 0xF0;
         cpu.step();
         assert_eq!(cpu.a, 0x00);
         assert_eq!(cpu.status & 0x02, 0x02); // zero
 
         // ORA immediate
         cpu.a = 0x0F;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x09, 0xF0]);
+        cpu.reset();
+        cpu.a = 0x0F;
         cpu.step();
         assert_eq!(cpu.a, 0xFF);
 
         // EOR immediate
         cpu.a = 0xFF;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x49, 0x0F]);
+        cpu.reset();
+        cpu.a = 0xFF;
         cpu.step();
         assert_eq!(cpu.a, 0xF0);
 
         // CMP immediate (A >= M)
         cpu.a = 0x10;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xC9, 0x0F]);
+        cpu.reset();
+        cpu.a = 0x10;
         cpu.step();
         assert_eq!(cpu.status & 0x01, 0x01);
 
         // ASL accumulator
         cpu.a = 0x80;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x0A]);
+        cpu.reset();
+        cpu.a = 0x80;
         cpu.step();
         assert_eq!(cpu.a, 0x00);
         assert_eq!(cpu.status & 0x01, 0x01); // carry set
 
         // LSR accumulator
         cpu.a = 0x01;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x4A]);
+        cpu.reset();
+        cpu.a = 0x01;
         cpu.step();
         assert_eq!(cpu.a, 0x00);
         assert_eq!(cpu.status & 0x01, 0x01);
@@ -1595,8 +1613,9 @@ mod tests {
         cpu.reset();
         // ROL accumulator
         cpu.a = 0x80;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x2A]);
+        cpu.reset();
+        cpu.a = 0x80;
         cpu.step();
         assert_eq!(cpu.a, 0x00);
         assert_eq!(cpu.status & 0x01, 0x01);
@@ -1604,8 +1623,10 @@ mod tests {
         // ROR accumulator
         cpu.a = 0x01;
         cpu.status &= !0x01;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0x6A]);
+        cpu.reset();
+        cpu.a = 0x01;
+        cpu.status &= !0x01;
         cpu.step();
         assert_eq!(cpu.a, 0x00);
         assert_eq!(cpu.status & 0x01, 0x01);
@@ -1613,29 +1634,34 @@ mod tests {
         // SBC immediate: 0x10 - 0x01 = 0x0F
         cpu.a = 0x10;
         cpu.status |= 0x01; // carry set
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xE9, 0x01]);
+        cpu.reset();
+        cpu.a = 0x10;
+        cpu.status |= 0x01; // carry set
         cpu.step();
         assert_eq!(cpu.a, 0x0F);
 
         // CPX immediate
         cpu.x = 0x05;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xE0, 0x05]);
+        cpu.reset();
+        cpu.x = 0x05;
         cpu.step();
         assert_eq!(cpu.status & 0x02, 0x02);
 
         // CPY immediate
         cpu.y = 0x03;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xC0, 0x03]);
+        cpu.reset();
+        cpu.y = 0x03;
         cpu.step();
         assert_eq!(cpu.status & 0x02, 0x02);
 
         // Branch BCS taken
         cpu.status |= 0x01;
-        cpu.pc = 0x8000;
         cpu.memory.load_program(0x8000, &[0xB0, 0x01, 0xEA, 0xEA]);
+        cpu.reset();
+        cpu.status |= 0x01;
         cpu.step();
         assert_eq!(cpu.step(), 2); // land on the last NOP
     }
@@ -1648,6 +1674,7 @@ mod tests {
         // Place value at 0x1234, then LDA $1234
         cpu.memory.write(0x1234, 0x99);
         cpu.memory.load_program(0x8000, &[0xAD, 0x34, 0x12]);
+        cpu.reset();
         assert_eq!(cpu.step(), 4);
         assert_eq!(cpu.a, 0x99);
     }

@@ -6,8 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Available CRT filter types
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CrtFilter {
     /// No filter - raw pixels
     #[default]
@@ -64,7 +63,6 @@ impl CrtFilter {
         }
     }
 }
-
 
 /// Extract RGB components from a 0xRRGGBB color
 #[inline]

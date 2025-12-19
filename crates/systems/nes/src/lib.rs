@@ -12,11 +12,14 @@ mod cpu;
 mod mappers;
 mod ppu;
 
+use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct DebugInfo {
@@ -27,11 +30,47 @@ pub struct DebugInfo {
     pub chr_banks: usize,
 }
 
+fn trace_pc_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("EMU_TRACE_PC").as_deref(),
+            Ok("1") | Ok("true") | Ok("TRUE")
+        )
+    })
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PcHotspot {
+    pub pc: u16,
+    pub count: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeStats {
+    pub frame_index: u64,
+    pub cpu_steps: u32,
+    pub cpu_cycles: u32,
+    pub irqs: u32,
+    pub nmis: u32,
+    pub mmc3_a12_edges: u32,
+    pub ppu_ctrl: u8,
+    pub ppu_mask: u8,
+    pub ppu_vblank: bool,
+    pub pc: u16,
+    pub vec_reset: u16,
+    pub vec_nmi: u16,
+    pub vec_irq: u16,
+    pub pc_hotspots: [PcHotspot; 3],
+}
+
 #[derive(Debug)]
 pub struct NesSystem {
     cpu: NesCpu,
     timing: TimingMode,
     cartridge_loaded: bool,
+    frame_index: u64,
+    last_stats: RuntimeStats,
 }
 
 impl NesSystem {
@@ -104,6 +143,11 @@ impl NesSystem {
             chr_banks,
         }
     }
+
+    /// Get runtime stats for debugging / overlays.
+    pub fn get_runtime_stats(&self) -> RuntimeStats {
+        self.last_stats
+    }
 }
 
 impl Default for NesSystem {
@@ -118,6 +162,8 @@ impl Default for NesSystem {
             cpu,
             timing: TimingMode::Ntsc,
             cartridge_loaded: false,
+            frame_index: 0,
+            last_stats: RuntimeStats::default(),
         }
     }
 }
@@ -204,26 +250,65 @@ impl System for NesSystem {
         let mut ppu_cycles_accum: u32 = 0;
         let ppu_cycles_per_scanline: u32 = 341;
 
+        self.frame_index = self.frame_index.wrapping_add(1);
+
+        let mut cpu_steps: u32 = 0;
+        let mut cpu_cycles_used: u32 = 0;
+        let mut irqs: u32 = 0;
+        let mut nmis: u32 = 0;
+        let mut mmc3_a12_edges: u32 = 0;
+        let mut rendering_happened: bool = false;
+
+        let mut pc_hist: Option<HashMap<u16, u16>> = if trace_pc_enabled() {
+            Some(HashMap::with_capacity(1024))
+        } else {
+            None
+        };
+
+        // Prepare an output frame and render scanlines incrementally during visible time.
+        let mut frame = Frame::new(256, 240);
+        let mut rendered_scanlines: u32 = 0;
+
         // Visible portion (VBlank low)
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
         }
         let mut cycles = 0u32;
         while cycles < visible_cycles {
+            if let Some(h) = pc_hist.as_mut() {
+                let pc = self.cpu.pc();
+                let e = h.entry(pc).or_insert(0);
+                *e = e.saturating_add(1);
+            }
+
             let used = self.cpu.step();
+            cpu_steps = cpu_steps.wrapping_add(1);
+            cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
 
             let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
 
             // Synthesize scanline edges for mapper IRQs during visible time.
             // Only do this when rendering is enabled (background or sprites).
             if let Some(b) = self.cpu.bus_mut() {
                 let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
                 if rendering_enabled {
+                    rendering_happened = true;
                     ppu_cycles_accum = ppu_cycles_accum.saturating_add(used.saturating_mul(3));
                     while ppu_cycles_accum >= ppu_cycles_per_scanline {
                         ppu_cycles_accum -= ppu_cycles_per_scanline;
+
+                        // Render the scanline that just completed using the state that was in
+                        // effect during that scanline. MMC3 IRQ-triggered bank changes typically
+                        // affect the *next* scanline.
+                        if rendered_scanlines < 240 {
+                            b.ppu.render_scanline(rendered_scanlines, &mut frame);
+                            rendered_scanlines += 1;
+                        }
+
                         b.clock_mapper_a12_rising_edge();
+                        mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
                         if b.take_irq_pending() {
                             irq_to_fire = true;
                         }
@@ -234,47 +319,178 @@ impl System for NesSystem {
                 if b.take_irq_pending() {
                     irq_to_fire = true;
                 }
+
+                if b.ppu.take_nmi_pending() {
+                    nmi_to_fire = true;
+                }
             }
 
             if irq_to_fire {
                 self.cpu.trigger_irq();
+                irqs = irqs.wrapping_add(1);
+            }
+            if nmi_to_fire {
+                self.cpu.trigger_nmi();
+                nmis = nmis.wrapping_add(1);
             }
         }
 
-        // Snapshot the frame at the end of visible time.
-        let frame = if let Some(b) = self.cpu.bus() {
-            b.ppu.render_frame()
-        } else {
-            Frame::new(256, 240)
-        };
+        // If we didn't reach exactly 240 synthesized scanlines (e.g., timing edge cases),
+        // render any remaining scanlines using the final visible-state.
+        if rendered_scanlines < 240 {
+            if let Some(b) = self.cpu.bus_mut() {
+                while rendered_scanlines < 240 {
+                    b.ppu.render_scanline(rendered_scanlines, &mut frame);
+                    rendered_scanlines += 1;
+                }
+            }
+        }
 
         // VBlank start
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(true);
-            if b.ppu.nmi_enabled() {
-                self.cpu.trigger_nmi();
-            }
         }
 
         // Run the rest of the frame (VBlank time).
         while cycles < cycles_per_frame {
-            cycles = cycles.wrapping_add(self.cpu.step());
+            if let Some(h) = pc_hist.as_mut() {
+                let pc = self.cpu.pc();
+                let e = h.entry(pc).or_insert(0);
+                *e = e.saturating_add(1);
+            }
+
+            let used = self.cpu.step();
+            cpu_steps = cpu_steps.wrapping_add(1);
+            cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
+            cycles = cycles.wrapping_add(used);
 
             // Check for mapper IRQs during VBlank as well.
             let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
             if let Some(b) = self.cpu.bus_mut() {
                 if b.take_irq_pending() {
                     irq_to_fire = true;
                 }
+                if b.ppu.take_nmi_pending() {
+                    nmi_to_fire = true;
+                }
             }
             if irq_to_fire {
                 self.cpu.trigger_irq();
+                irqs = irqs.wrapping_add(1);
+            }
+            if nmi_to_fire {
+                self.cpu.trigger_nmi();
+                nmis = nmis.wrapping_add(1);
             }
         }
 
         // VBlank end
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
+        }
+
+        // Many MMC3 games clock the IRQ counter 241 times per frame (one per visible scanline plus
+        // an additional clock during the pre-render scanline). Our frame model naturally produces
+        // 240 clocks during the 240 visible scanlines, so add one extra "pre-render" clock when
+        // rendering was enabled at any point during the frame.
+        if rendering_happened {
+            if let Some(b) = self.cpu.bus_mut() {
+                b.clock_mapper_a12_rising_edge();
+                mmc3_a12_edges = mmc3_a12_edges.wrapping_add(1);
+            }
+        }
+
+        // Snapshot stats for overlay.
+        let (ppu_ctrl, ppu_mask, ppu_vblank, vec_nmi, vec_reset, vec_irq) =
+            if let Some(b) = self.cpu.bus() {
+                let read_u16 = |a: u16| -> u16 {
+                    let lo = b.read(a) as u16;
+                    let hi = b.read(a.wrapping_add(1)) as u16;
+                    (hi << 8) | lo
+                };
+                (
+                    b.ppu.ctrl(),
+                    b.ppu.mask(),
+                    b.ppu.vblank_flag(),
+                    read_u16(0xFFFA),
+                    read_u16(0xFFFC),
+                    read_u16(0xFFFE),
+                )
+            } else {
+                (0, 0, false, 0, 0, 0)
+            };
+        let pc = self.cpu.pc();
+
+        let mut hotspots = [
+            PcHotspot::default(),
+            PcHotspot::default(),
+            PcHotspot::default(),
+        ];
+        if let Some(h) = pc_hist {
+            for (pc, count) in h {
+                let s = PcHotspot { pc, count };
+                if s.count > hotspots[0].count {
+                    hotspots[2] = hotspots[1];
+                    hotspots[1] = hotspots[0];
+                    hotspots[0] = s;
+                } else if s.count > hotspots[1].count {
+                    hotspots[2] = hotspots[1];
+                    hotspots[1] = s;
+                } else if s.count > hotspots[2].count {
+                    hotspots[2] = s;
+                }
+            }
+        }
+
+        self.last_stats = RuntimeStats {
+            frame_index: self.frame_index,
+            cpu_steps,
+            cpu_cycles: cpu_cycles_used,
+            irqs,
+            nmis,
+            mmc3_a12_edges,
+            ppu_ctrl,
+            ppu_mask,
+            ppu_vblank,
+            pc,
+            vec_reset,
+            vec_nmi,
+            vec_irq,
+            pc_hotspots: hotspots,
+        };
+
+        if std::env::var("EMU_TRACE_NES").is_ok() {
+            // Log occasionally to avoid overwhelming the GUI.
+            if (self.frame_index % 60) == 0 {
+                eprintln!(
+                    "NES TRACE: frame={} pc=0x{:04X} steps={} cycles={} irq={} nmi={} a12_edges={} ppu_ctrl=0x{:02X} ppu_mask=0x{:02X} vec_reset=0x{:04X} vec_nmi=0x{:04X} vec_irq=0x{:04X}",
+                    self.last_stats.frame_index,
+                    self.last_stats.pc,
+                    self.last_stats.cpu_steps,
+                    self.last_stats.cpu_cycles,
+                    self.last_stats.irqs,
+                    self.last_stats.nmis,
+                    self.last_stats.mmc3_a12_edges,
+                    self.last_stats.ppu_ctrl,
+                    self.last_stats.ppu_mask,
+                    self.last_stats.vec_reset,
+                    self.last_stats.vec_nmi,
+                    self.last_stats.vec_irq
+                );
+            }
+        }
+
+        if trace_pc_enabled() {
+            if (self.frame_index % 60) == 0 {
+                let h0 = self.last_stats.pc_hotspots[0];
+                let h1 = self.last_stats.pc_hotspots[1];
+                let h2 = self.last_stats.pc_hotspots[2];
+                eprintln!(
+                    "NES PC HOT: frame={} [0x{:04X} x{}] [0x{:04X} x{}] [0x{:04X} x{}]",
+                    self.last_stats.frame_index, h0.pc, h0.count, h1.pc, h1.count, h2.pc, h2.count
+                );
+            }
         }
 
         Ok(frame)

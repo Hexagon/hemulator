@@ -30,13 +30,21 @@ impl Cartridge {
                 "Data too small for iNES header",
             ));
         }
-        let header = &data[0..16];
+        let mut header = [0u8; 16];
+        header.copy_from_slice(&data[0..16]);
+
         if &header[0..4] != b"NES\x1A" {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Not iNES file",
             ));
         }
+
+        // Fix DiskDude! corruption
+        if &header[7..16] == b"DiskDude!" {
+            header[7..16].fill(0);
+        }
+
         let prg_size = header[4] as usize * 16 * 1024;
         let chr_size = header[5] as usize * 8 * 1024;
         let mapper = (header[6] >> 4) | (header[7] & 0xF0);
@@ -123,6 +131,12 @@ impl Cartridge {
                 "Not iNES file",
             ));
         }
+
+        // Fix DiskDude! corruption
+        if &header[7..16] == b"DiskDude!" {
+            header[7..16].fill(0);
+        }
+
         let prg_size = header[4] as usize * 16 * 1024;
         let chr_size = header[5] as usize * 8 * 1024;
         let mapper = (header[6] >> 4) | (header[7] & 0xF0);
@@ -179,5 +193,36 @@ impl Cartridge {
             mirroring,
             timing,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diskdude_cleanup() {
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x08, // PRG size
+            0x10, // CHR size
+            0x11, // Flags 6 (Mapper low nibble 1)
+            0x44, // Flags 7 (Mapper high nibble 4) -> 'D'
+            0x69, // 'i'
+            0x73, // 's'
+            0x6B, // 'k'
+            0x44, // 'D'
+            0x75, // 'u'
+            0x64, // 'd'
+            0x65, // 'e'
+            0x21, // '!'
+        ];
+        // Add some dummy PRG/CHR data
+        data.resize(16 + 128*1024 + 128*1024, 0);
+        
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // Before fix: Mapper would be 0x41 (65)
+        // After fix: Mapper should be 0x01 (1) because byte 7 is zeroed.
+        assert_eq!(cart.mapper, 1);
     }
 }
