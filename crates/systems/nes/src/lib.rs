@@ -198,6 +198,12 @@ impl System for NesSystem {
         };
         let visible_cycles = cycles_per_frame - vblank_cycles;
 
+        // Approximate PPU scanline timing so mappers like MMC3 can clock their IRQ counter.
+        // The NES PPU runs at 3x the CPU clock and has 341 PPU cycles per scanline.
+        // In this frame-based renderer we synthesize one A12 rising edge per scanline.
+        let mut ppu_cycles_accum: u32 = 0;
+        let ppu_cycles_per_scanline: u32 = 341;
+
         // Visible portion (VBlank low)
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(false);
@@ -207,11 +213,31 @@ impl System for NesSystem {
             let used = self.cpu.step();
             cycles = cycles.wrapping_add(used);
 
-            // Mapper IRQs now clocked by PPU A12 edges directly from PPU fetches.
+            let mut irq_to_fire = false;
+
+            // Synthesize scanline edges for mapper IRQs during visible time.
+            // Only do this when rendering is enabled (background or sprites).
             if let Some(b) = self.cpu.bus_mut() {
-                if b.take_irq_pending() {
-                    self.cpu.trigger_irq();
+                let rendering_enabled = (b.ppu.mask() & 0x18) != 0;
+                if rendering_enabled {
+                    ppu_cycles_accum = ppu_cycles_accum.saturating_add(used.saturating_mul(3));
+                    while ppu_cycles_accum >= ppu_cycles_per_scanline {
+                        ppu_cycles_accum -= ppu_cycles_per_scanline;
+                        b.clock_mapper_a12_rising_edge();
+                        if b.take_irq_pending() {
+                            irq_to_fire = true;
+                        }
+                    }
                 }
+
+                // Also check for any mapper IRQs not driven by the synthesized scanline clock.
+                if b.take_irq_pending() {
+                    irq_to_fire = true;
+                }
+            }
+
+            if irq_to_fire {
+                self.cpu.trigger_irq();
             }
         }
 
@@ -234,11 +260,15 @@ impl System for NesSystem {
         while cycles < cycles_per_frame {
             cycles = cycles.wrapping_add(self.cpu.step());
 
-            // Check for mapper IRQs during VBlank as well
+            // Check for mapper IRQs during VBlank as well.
+            let mut irq_to_fire = false;
             if let Some(b) = self.cpu.bus_mut() {
                 if b.take_irq_pending() {
-                    self.cpu.trigger_irq();
+                    irq_to_fire = true;
                 }
+            }
+            if irq_to_fire {
+                self.cpu.trigger_irq();
             }
         }
 

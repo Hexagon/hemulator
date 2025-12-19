@@ -1,9 +1,10 @@
 //! APU timing configuration for different console regions.
 
 /// Console region timing configuration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimingMode {
     /// NTSC (North America, Japan) - 1.789773 MHz CPU clock
+    #[default]
     Ntsc,
     /// PAL (Europe, Australia) - 1.662607 MHz CPU clock
     Pal,
@@ -32,11 +33,5 @@ impl TimingMode {
             TimingMode::Ntsc => 240.0,
             TimingMode::Pal => 200.0,
         }
-    }
-}
-
-impl Default for TimingMode {
-    fn default() -> Self {
-        TimingMode::Ntsc
     }
 }

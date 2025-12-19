@@ -584,10 +584,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0xC9 | 0xC5 | 0xCD | 0xC1 | 0xD1 => {
                 // CMP variants (A - M)
                 let val = match op {
-                    0xC9 => {
-                        let v = self.fetch_u8();
-                        v
-                    }
+                    0xC9 => self.fetch_u8(),
                     0xC5 => {
                         let zp = self.fetch_u8() as u16;
                         self.read(zp)
@@ -710,7 +707,7 @@ impl<M: Memory6502> Cpu6502<M> {
                     let old = self.a;
                     let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
                     let carry_out = (old & 0x80) != 0;
-                    let res = ((old << 1) | carry_in) as u8;
+                    let res = (old << 1) | carry_in;
                     self.a = res;
                     if carry_out {
                         self.status |= 0x01
@@ -729,7 +726,7 @@ impl<M: Memory6502> Cpu6502<M> {
                     let old = self.read(addr);
                     let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
                     let carry_out = (old & 0x80) != 0;
-                    let res = ((old << 1) | carry_in) as u8;
+                    let res = (old << 1) | carry_in;
                     self.write(addr, res);
                     if carry_out {
                         self.status |= 0x01
@@ -790,10 +787,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // SBC variants (immediate, zp, abs, (ind,X), (ind),Y)
                 // Implement using ADC on one's complement: A = A - M - (1 - C)
                 let m = match op {
-                    0xE9 => {
-                        let v = self.fetch_u8();
-                        v
-                    }
+                    0xE9 => self.fetch_u8(),
                     0xE5 => {
                         let zp = self.fetch_u8() as u16;
                         self.read(zp)
@@ -813,7 +807,7 @@ impl<M: Memory6502> Cpu6502<M> {
                     _ => 0,
                 } as i16;
                 let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
-                let value = (m ^ 0xFF) as i16; // one's complement
+                let value = m ^ 0xFF; // one's complement
                 let sum = (self.a as i16) + value + (carry as i16);
                 let result = (sum & 0xFF) as u8;
                 // set carry if result didn't borrow (i.e., sum >= 0)
@@ -836,8 +830,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0xE0 | 0xE4 | 0xEC => {
                 // CPX immediate/zp/abs
                 let val = if op == 0xE0 {
-                    let v = self.fetch_u8();
-                    v
+                    self.fetch_u8()
                 } else if op == 0xE4 {
                     let zp = self.fetch_u8() as u16;
                     self.read(zp)
@@ -870,8 +863,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0xC0 | 0xC4 | 0xCC => {
                 // CPY immediate/zp/abs
                 let val = if op == 0xC0 {
-                    let v = self.fetch_u8();
-                    v
+                    self.fetch_u8()
                 } else if op == 0xC4 {
                     let zp = self.fetch_u8() as u16;
                     self.read(zp)
@@ -1016,7 +1008,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0x65 => {
                 // ADC zero page
                 let zp = self.fetch_u8() as u16;
-                let val = self.read(zp as u16);
+                let val = self.read(zp);
                 let carry_in = if (self.status & 0x01) != 0 {
                     1u16
                 } else {

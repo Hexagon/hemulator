@@ -626,7 +626,8 @@ fn main() {
                     // Audio generation: generate samples based on actual frame rate
                     // NTSC: ~60.1 FPS (≈734 samples), PAL: ~50.0 FPS (≈882 samples)
                     let timing = sys.timing();
-                    let samples_per_frame = (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
+                    let samples_per_frame =
+                        (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
                     let audio_samples = sys.get_audio_samples(samples_per_frame);
                     for s in audio_samples {
                         let _ = audio_tx.try_send(s);
@@ -659,11 +660,7 @@ fn main() {
         } else if show_mount_selector {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
-            let mount_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-            );
+            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;

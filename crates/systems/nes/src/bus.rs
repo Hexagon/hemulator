@@ -98,6 +98,16 @@ impl NesBus {
         }
     }
 
+    /// Synthesize a PPU A12 low->high transition for mappers that use it for scanline IRQs
+    /// (notably MMC3). This is a pragmatic approximation used by the frame-based renderer.
+    pub fn clock_mapper_a12_rising_edge(&mut self) {
+        if let Some(m) = &mut self.mapper {
+            // Ensure we generate a rising edge even if the last sampled value was high.
+            m.borrow_mut().notify_a12(false);
+            m.borrow_mut().notify_a12(true);
+        }
+    }
+
     /// Get mapper number for debug info
     pub fn mapper_number(&self) -> Option<u8> {
         self.mapper.as_ref().map(|m| m.borrow().mapper_number())
