@@ -6,8 +6,22 @@ use emu_core::apu::TimingMode;
 /// MMC2 (Mapper 9) - Used primarily in Punch-Out!!
 ///
 /// Features PPU-triggered CHR bank switching via latch addresses.
-/// When the PPU reads from $FD8 or $FE8 in the pattern tables,
-/// the mapper automatically switches CHR banks.
+///
+/// # Hardware Behavior (per NESdev wiki)
+/// - **PRG ROM**: 128 KB max, 8 KB switchable at $8000-$9FFF, fixed banks at $A000-$FFFF
+/// - **CHR ROM**: Two 4 KB banks ($0000-$0FFF, $1000-$1FFF), each with dual-bank selection
+/// - **Latch Mechanism**: When PPU reads from specific CHR addresses, latches switch
+///   which bank is active. **Note:** MMC2 differs from MMC4 in address ranges:
+///   * $0FD8: Sets latch 0 to $FD (affects $0000-$0FFF) - SINGLE ADDRESS
+///   * $0FE8: Sets latch 0 to $FE (affects $0000-$0FFF) - SINGLE ADDRESS
+///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF) - 8-BYTE RANGE
+///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF) - 8-BYTE RANGE
+///
+/// # Implementation Notes
+/// This implementation is correct per specification but `ppu_read_chr()` is not
+/// automatically called in the current frame-based renderer. For cycle-accurate
+/// emulation, this method should be invoked on every PPU CHR read. The current
+/// frame-based approach suppresses mid-frame callbacks for performance.
 #[derive(Debug)]
 pub struct Mmc2 {
     prg_rom: Vec<u8>,
@@ -146,7 +160,23 @@ impl Mmc2 {
     }
 
     /// Called by PPU when reading from pattern tables
-    /// This handles the automatic latch switching
+    /// This handles the automatic latch switching per MMC2 specification.
+    ///
+    /// # Latch Address Ranges (per NESdev wiki)
+    /// MMC2 uses SINGLE addresses for left latch, RANGES for right latch:
+    /// - $0FD8: Latch 0 → $FD (left pattern table) - single address only
+    /// - $0FE8: Latch 0 → $FE (left pattern table) - single address only
+    /// - $1FD8-$1FDF: Latch 1 → $FD (right pattern table) - 8-byte range
+    /// - $1FE8-$1FEF: Latch 1 → $FE (right pattern table) - 8-byte range
+    ///
+    /// This asymmetry is hardware-verified and differs from MMC4 which uses
+    /// 8-byte ranges for all four latch triggers.
+    ///
+    /// # Current Limitation
+    /// This method is currently not automatically called during rendering due to
+    /// the frame-based (non-cycle-accurate) PPU implementation. Games like
+    /// Punch-Out!! that rely on mid-scanline latch switching may not render
+    /// correctly. This is marked as dead code because it's only used in tests.
     #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {

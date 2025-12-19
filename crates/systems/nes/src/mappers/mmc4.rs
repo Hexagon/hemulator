@@ -5,8 +5,24 @@ use emu_core::apu::TimingMode;
 
 /// MMC4 (Mapper 10) - Similar to MMC2 but with different CHR latch addresses
 ///
-/// Used in a few Japanese exclusive games like Fire Emblem.
+/// Used in games like Fire Emblem (Famicom) and Fire Emblem Gaiden.
 /// Features PPU-triggered CHR bank switching via latch addresses.
+///
+/// # Hardware Behavior (per NESdev wiki)
+/// - **PRG ROM**: 128 KB max, 16 KB switchable at $8000-$BFFF, 16 KB fixed at $C000-$FFFF
+/// - **CHR ROM**: Two 4 KB banks ($0000-$0FFF, $1000-$1FFF), each with dual-bank selection
+/// - **Latch Mechanism**: When PPU reads from specific CHR addresses, latches switch
+///   which bank is active for subsequent rendering:
+///   * $0FD8-$0FDF: Sets latch 0 to $FD (affects $0000-$0FFF)
+///   * $0FE8-$0FEF: Sets latch 0 to $FE (affects $0000-$0FFF)
+///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF)
+///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF)
+///
+/// # Implementation Notes
+/// This implementation is correct per specification but `ppu_read_chr()` is not
+/// automatically called in the current frame-based renderer. For cycle-accurate
+/// emulation, this method should be invoked on every PPU CHR read. The current
+/// frame-based approach suppresses mid-frame callbacks for performance.
 #[derive(Debug)]
 pub struct Mmc4 {
     prg_rom: Vec<u8>,
@@ -145,8 +161,20 @@ impl Mmc4 {
     }
 
     /// Called by PPU when reading from pattern tables
-    /// This handles the automatic latch switching
-    /// MMC4 uses different addresses than MMC2
+    /// This handles the automatic latch switching per MMC4 specification.
+    ///
+    /// # Latch Address Ranges (per NESdev wiki)
+    /// MMC4 uses 8-byte ranges for all latch triggers (unlike MMC2):
+    /// - $0FD8-$0FDF: Latch 0 → $FD (left pattern table)
+    /// - $0FE8-$0FEF: Latch 0 → $FE (left pattern table)
+    /// - $1FD8-$1FDF: Latch 1 → $FD (right pattern table)
+    /// - $1FE8-$1FEF: Latch 1 → $FE (right pattern table)
+    ///
+    /// # Current Limitation
+    /// This method is currently not automatically called during rendering due to
+    /// the frame-based (non-cycle-accurate) PPU implementation. Games that rely
+    /// on mid-scanline latch switching may not render correctly. This is marked
+    /// as dead code because it's only used in tests, not in actual emulation.
     #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {
