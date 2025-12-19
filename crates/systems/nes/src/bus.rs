@@ -134,8 +134,12 @@ impl Bus for NesBus {
                 self.ppu.read_register(reg)
             }
             0x4000..=0x4017 => {
-                // 0x4016: controller 1, 0x4017: controller 2
+                // 0x4016: controller 1, 0x4017: controller 2, 0x4015: APU status
                 match addr {
+                    0x4015 => {
+                        // APU status register
+                        self.apu.read_register(addr)
+                    }
                     0x4016 => {
                         // When strobed, return current button A state (bit 0).
                         // When not strobed, shift out latched controller bits.
@@ -205,7 +209,7 @@ impl Bus for NesBus {
             }
             0x4000..=0x4017 => {
                 // APU registers and controller strobe
-                if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 {
+                if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 || addr == 0x4017 {
                     self.apu.write_register(addr, val);
                 }
 

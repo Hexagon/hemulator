@@ -263,10 +263,8 @@ fn main() {
     let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
     let mut current_fps = 60.0;
 
-    // Audio: NES runs at ~60 FPS, generate samples to match
+    // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
-    const FRAME_RATE: usize = 60;
-    const SAMPLES_PER_FRAME: usize = SAMPLE_RATE / FRAME_RATE; // ~735 samples per frame
 
     // Load saves for current ROM if available
     let mut game_saves = if let Some(ref hash) = rom_hash {
@@ -389,27 +387,6 @@ fn main() {
                     }
                 }
             }
-
-            // Render slot selector
-            let has_saves = [
-                game_saves.slots.contains_key(&1),
-                game_saves.slots.contains_key(&2),
-                game_saves.slots.contains_key(&3),
-                game_saves.slots.contains_key(&4),
-                game_saves.slots.contains_key(&5),
-            ];
-            let slot_buffer = ui_render::create_slot_selector_overlay(
-                width,
-                height,
-                slot_selector_mode,
-                &has_saves,
-            );
-            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
         }
 
         // Handle mount point selector
@@ -610,8 +587,8 @@ fn main() {
         }
 
         // Handle controller input / emulation step when ROM is loaded.
-        // Debug overlay should NOT pause the game.
-        if rom_loaded && !show_help {
+        // Debug overlay should NOT pause the game, but selectors should.
+        if rom_loaded && !show_help && !show_slot_selector && !show_mount_selector {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -646,9 +623,11 @@ fn main() {
                         settings.crt_filter.apply(&mut buffer, width, height);
                     }
 
-                    // Audio generation: generate a consistent number of samples per frame
-                    // to match the ~60 FPS frame rate (44100 Hz / 60 fps ≈ 735 samples)
-                    let audio_samples = sys.get_audio_samples(SAMPLES_PER_FRAME);
+                    // Audio generation: generate samples based on actual frame rate
+                    // NTSC: ~60.1 FPS (≈734 samples), PAL: ~50.0 FPS (≈882 samples)
+                    let timing = sys.timing();
+                    let samples_per_frame = (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
+                    let audio_samples = sys.get_audio_samples(samples_per_frame);
                     for s in audio_samples {
                         let _ = audio_tx.try_send(s);
                     }
@@ -657,14 +636,46 @@ fn main() {
             }
         }
 
-        let frame_to_present: &[u32] = if let Some(ref overlay) = debug_overlay {
+        let frame_to_present: &[u32] = if show_slot_selector {
+            // Render slot selector overlay
+            let has_saves = [
+                game_saves.slots.contains_key(&1),
+                game_saves.slots.contains_key(&2),
+                game_saves.slots.contains_key(&3),
+                game_saves.slots.contains_key(&4),
+                game_saves.slots.contains_key(&5),
+            ];
+            let slot_buffer = ui_render::create_slot_selector_overlay(
+                width,
+                height,
+                slot_selector_mode,
+                &has_saves,
+            );
+            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            &[]
+        } else if show_mount_selector {
+            // Render mount point selector overlay
+            let mount_points = sys.mount_points();
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+            );
+            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            &[]
+        } else if let Some(ref overlay) = debug_overlay {
             let composed = blend_over(&buffer, overlay);
             // Keep the composed buffer alive for the duration of update_with_buffer.
-            window
-                .update_with_buffer(composed.as_slice(), width, height)
-                .unwrap_or_else(|e| {
-                    eprintln!("Window update error: {}", e);
-                });
+            if let Err(e) = window.update_with_buffer(composed.as_slice(), width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
             // Timing and window-size persistence still run below.
             // Skip the normal update path since we've already presented.
             // NOTE: This keeps debug overlay transparent without pausing emulation.
@@ -684,7 +695,7 @@ fn main() {
             }
         }
 
-        // ~60 FPS timing and FPS calculation
+        // Dynamic frame pacing based on timing mode (NTSC ~60.1 FPS, PAL ~50.0 FPS)
         let frame_dt = last_frame.elapsed();
 
         frame_times.push(frame_dt);
@@ -700,8 +711,18 @@ fn main() {
             }
         }
 
-        if frame_dt < Duration::from_millis(16) {
-            std::thread::sleep(Duration::from_millis(16) - frame_dt);
+        // Get target frame time from system timing mode
+        let target_frame_time = if rom_loaded {
+            let timing = sys.timing();
+            let frame_rate = timing.frame_rate_hz();
+            Duration::from_secs_f64(1.0 / frame_rate)
+        } else {
+            // Default to NTSC timing when no ROM loaded
+            Duration::from_secs_f64(1.0 / emu_core::apu::TimingMode::Ntsc.frame_rate_hz())
+        };
+
+        if frame_dt < target_frame_time {
+            std::thread::sleep(target_frame_time - frame_dt);
         }
         last_frame = Instant::now();
 

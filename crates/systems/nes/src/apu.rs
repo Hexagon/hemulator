@@ -14,6 +14,10 @@ pub struct APU {
     pub pulse2: PulseChannel,
     cycle_accum: f64,
     timing: TimingMode,
+    /// Frame counter for clocking length counters and envelopes
+    /// Counts CPU cycles and triggers quarter/half frame events
+    frame_counter_cycles: u32,
+    frame_counter_mode: bool, // false = 4-step, true = 5-step
 }
 
 impl APU {
@@ -27,6 +31,8 @@ impl APU {
             pulse2: PulseChannel::new(),
             cycle_accum: 0.0,
             timing,
+            frame_counter_cycles: 0,
+            frame_counter_mode: false,
         }
     }
 
@@ -60,9 +66,9 @@ impl APU {
                 let high = (val & 0x07) as u16;
                 let low = self.pulse1.timer_reload & 0xFF;
                 self.pulse1.set_timer((high << 8) | low);
-                // Trigger: reset phase and enable
+                // Trigger: reset phase
                 self.pulse1.reset_phase();
-                self.pulse1.enabled = true;
+                // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
                 let len_index = (val >> 3) & 0x1F;
                 self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
@@ -88,7 +94,7 @@ impl APU {
                 let freq_low = (self.pulse2.timer_reload & 0xFF) as u16;
                 self.pulse2.set_timer((freq_high << 8) | freq_low);
                 self.pulse2.reset_phase();
-                self.pulse2.enabled = true;
+                // Note: enabled flag is only controlled by $4015, not by writes to $4007
                 let len_index = (val >> 3) & 0x1F;
                 self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
             }
@@ -99,7 +105,40 @@ impl APU {
                 self.pulse2.enabled = (val & 2) != 0;
             }
 
+            // Frame Counter register
+            0x4017 => {
+                // Bit 7: Mode (0 = 4-step, 1 = 5-step)
+                // Bit 6: IRQ inhibit flag
+                self.frame_counter_mode = (val & 0x80) != 0;
+                // Reset frame counter on write
+                self.frame_counter_cycles = 0;
+            }
+
             _ => {}
+        }
+    }
+
+    /// Read APU status register ($4015)
+    pub fn read_register(&self, addr: u16) -> u8 {
+        match addr {
+            0x4015 => {
+                // Bit 0: Pulse 1 length counter > 0
+                // Bit 1: Pulse 2 length counter > 0
+                // Bits 2-3: Triangle and Noise (not implemented, return 0)
+                // Bit 4: DMC active (not implemented, return 0)
+                // Bit 5: unused (return 0)
+                // Bit 6: Frame interrupt (not implemented, return 0)
+                // Bit 7: DMC interrupt (not implemented, return 0)
+                let mut status = 0u8;
+                if self.pulse1.length_counter > 0 {
+                    status |= 0x01;
+                }
+                if self.pulse2.length_counter > 0 {
+                    status |= 0x02;
+                }
+                status
+            }
+            _ => 0,
         }
     }
 
@@ -109,6 +148,21 @@ impl APU {
         const SAMPLE_HZ: f64 = 44_100.0;
         let cpu_hz = self.timing.cpu_clock_hz();
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
+
+        // Frame counter clocking intervals
+        // Quarter frame: clocks envelope at ~240 Hz (NTSC) or ~200 Hz (PAL)
+        // Half frame: clocks length counter at quarters 2 and 4
+        let frame_counter_hz = self.timing.frame_counter_hz();
+        let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
+        
+        // Full frame cycle count for resetting counter (prevents overflow)
+        // 4-step mode: 4 quarter frames (~29829 cycles NTSC)
+        // 5-step mode: 5 quarter frames (~37281 cycles NTSC)
+        let full_frame_cycles = if self.frame_counter_mode {
+            quarter_frame_cycles * 5 // 5-step mode
+        } else {
+            quarter_frame_cycles * 4 // 4-step mode
+        };
 
         let mut out = Vec::with_capacity(sample_count);
         for _ in 0..sample_count {
@@ -121,6 +175,35 @@ impl APU {
 
             let mut acc = 0i32;
             for _ in 0..cycles {
+                // Clock frame counter
+                let prev_quarter = self.frame_counter_cycles / quarter_frame_cycles;
+                
+                self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
+                
+                // Reset frame counter at end of full frame to prevent overflow issues
+                if self.frame_counter_cycles >= full_frame_cycles {
+                    self.frame_counter_cycles = 0;
+                }
+                
+                // Check for quarter frame boundaries
+                let curr_quarter = self.frame_counter_cycles / quarter_frame_cycles;
+                if curr_quarter != prev_quarter {
+                    // Length counters clock at quarters 2 and 4 (half frames)
+                    // In 4-step mode: quarters 0, 1, 2, 3 -> clock at 1 and 3 (0-indexed)
+                    // In 5-step mode: quarters 0, 1, 2, 3, 4 -> clock at 1 and 3 only (NOT at 4)
+                    let quarter_index = curr_quarter % 5; // Will be 0-4 in 5-step, 0-3 in 4-step
+                    if quarter_index == 1 || quarter_index == 3 {
+                        // Clock length counters at half-frame rate (~120 Hz NTSC, ~100 Hz PAL)
+                        if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
+                            self.pulse1.length_counter -= 1;
+                        }
+                        if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
+                            self.pulse2.length_counter -= 1;
+                        }
+                    }
+                }
+                
+                // Clock pulse channels
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
                 acc += s1 + s2;
