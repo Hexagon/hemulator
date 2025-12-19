@@ -39,6 +39,7 @@ The emulator will remember your last ROM and automatically load it next time you
 | Key | Action | Description |
 |-----|--------|-------------|
 | F1 | Help Overlay | Show/hide all controls and key mappings |
+| F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) |
 | F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
 | F5 | Save State | Open slot selector (1-5) to save |
 | F6 | Load State | Open slot selector (1-5) to load |
@@ -46,21 +47,19 @@ The emulator will remember your last ROM and automatically load it next time you
 | F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
 
-### Emulation Speed Control
+### Emulation Speed Control (F2)
 
-Hold **F1** and press a number key to change the emulation speed:
+Press **F2** to open the speed selector menu. The game will pause while the menu is visible.
 
-| Key Combo | Speed | Description |
-|-----------|-------|-------------|
-| F1 + 1 | 0.25x | Quarter speed (slow motion) |
-| F1 + 2 | 0.5x | Half speed |
-| F1 + 3 | 1x | Normal speed (default) |
-| F1 + 4 | 2x | Double speed (fast forward) |
-| F1 + 5 | 10x | Ultra fast (turbo mode) |
+Available speed options:
+- **0 - Pause (0x)**: Completely pause emulation (useful for studying frame-by-frame)
+- **1 - Slow Motion (0.25x)**: Quarter speed for analyzing difficult sections
+- **2 - Half Speed (0.5x)**: Half speed for practicing tricky maneuvers
+- **3 - Normal (1x)**: Default speed (typically ~60 FPS for NTSC, ~50 FPS for PAL)
+- **4 - Fast Forward (2x)**: Double speed for skipping slow parts
+- **5 - Turbo (10x)**: Ultra fast for grinding or replaying sections quickly
 
-The selected speed is automatically saved and restored when you restart the emulator. This is useful for:
-- **Slow motion (0.25x, 0.5x)**: Analyzing difficult sections or practicing tricky maneuvers
-- **Fast forward (2x, 10x)**: Skipping through slow parts, grinding, or replaying sections quickly
+The selected speed is automatically saved and restored when you restart the emulator. Press **0-5** to select a speed, or **ESC** to cancel.
 
 ### CRT Filters (F11)
 
@@ -123,9 +122,9 @@ Located in the same directory as the executable, this file stores your preferenc
 - Edit this file to change key bindings
 - The window size is automatically saved when you resize the window
 - CRT filter preference is saved automatically when you cycle filters with F11
-- Emulation speed is saved automatically when you change it with F1 + number keys
+- Emulation speed is saved automatically when you change it with F2
 - Valid `crt_filter` values: "None", "Scanlines", "Phosphor", "CrtMonitor"
-- Valid `emulation_speed` values: 0.25, 0.5, 1.0, 2.0, 10.0 (or any positive number)
+- Valid `emulation_speed` values: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0 (or any positive number)
 
 **Mount Points**: The emulator now supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", future systems might have "BIOS", "Floppy1", etc.). When you press F3:
 - If the system has only one mount point (like NES), the file browser opens directly

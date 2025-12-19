@@ -234,7 +234,6 @@ pub fn create_help_overlay(
         settings.keyboard.left,
         settings.keyboard.right
     );
-    let speed_line = format!("  Speed: {:.2}x", settings.emulation_speed);
 
     let help_lines: Vec<&str> = vec![
         "HEMULATOR - Help",
@@ -248,6 +247,7 @@ pub fn create_help_overlay(
         "",
         "Keys:",
         "  F1  - Help",
+        "  F2  - Speed",
         "  F3  - Open ROM",
         "  F5  - Save state",
         "  F6  - Load state",
@@ -255,11 +255,6 @@ pub fn create_help_overlay(
         "  F11 - CRT filter",
         "  F12 - Reset",
         "  ESC - Exit",
-        "",
-        "Speed (hold F1 + number):",
-        "  1 - 0.25x   3 - 1x",
-        "  2 - 0.5x    4 - 2x   5 - 10x",
-        &speed_line,
         "",
         "Press F1 to close",
     ];
@@ -443,6 +438,62 @@ pub fn create_mount_point_selector(
         start_x,
         start_y,
         FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create a speed selector overlay
+pub fn create_speed_selector_overlay(width: usize, height: usize, current_speed: f64) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let title = "EMULATION SPEED - Select (0-5)";
+
+    // Speed options
+    let speeds = [
+        (0.0, "0 - Pause (0x)"),
+        (0.25, "1 - Slow Motion (0.25x)"),
+        (0.5, "2 - Half Speed (0.5x)"),
+        (1.0, "3 - Normal (1x)"),
+        (2.0, "4 - Fast Forward (2x)"),
+        (10.0, "5 - Turbo (10x)"),
+    ];
+
+    let mut all_lines = Vec::new();
+    all_lines.push(title);
+    all_lines.push("");
+
+    // Store the strings so they live long enough
+    let mut speed_lines = Vec::new();
+    for (speed_value, label) in &speeds {
+        let marker = if (*speed_value - current_speed).abs() < 0.01 {
+            ">"
+        } else {
+            " "
+        };
+        speed_lines.push(format!("{} {}", marker, label));
+    }
+
+    for line in &speed_lines {
+        all_lines.push(line.as_str());
+    }
+
+    all_lines.push("");
+    all_lines.push("Press 0-5 to select, ESC to cancel");
+
+    let start_x = (width.saturating_sub(35 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &all_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
         0xFFFFFFFF,
     );
 
