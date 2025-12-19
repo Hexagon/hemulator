@@ -4,5 +4,6 @@ members = [
   "crates/core",
   "crates/systems/nes",
   "crates/systems/gb",
+  "crates/systems/atari2600",
   "crates/frontend/gui",
 ]

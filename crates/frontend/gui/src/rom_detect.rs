@@ -7,6 +7,7 @@ use std::fmt;
 pub enum SystemType {
     NES,
     GameBoy,
+    Atari2600,
 }
 
 #[derive(Debug)]
@@ -39,6 +40,15 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         }
     }
 
+    // Check for Atari 2600
+    // Atari 2600 ROMs are typically 2K, 4K, 8K, 12K, 16K, or 32K
+    // They have no header, so we detect by size and lack of other formats
+    if matches!(data.len(), 2048 | 4096 | 8192 | 12288 | 16384 | 32768) {
+        // If it's a power-of-2 size that matches Atari 2600 cartridge sizes
+        // and doesn't match other formats, assume it's Atari 2600
+        return Ok(SystemType::Atari2600);
+    }
+
     // Try to provide a helpful error message
     if data.len() < 16 {
         return Err(UnsupportedRomError {
@@ -49,12 +59,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Only iNES (.nes) and Game Boy (.gb/.gbc) formats are supported".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin)"
             .to_string(),
     })
 }
@@ -84,8 +94,17 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_unknown() {
-        let data = vec![0u8; 1024];
-        assert!(detect_rom_type(&data).is_err());
+    fn test_detect_atari2600_rom() {
+        // 4K ROM
+        let data = vec![0u8; 4096];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
+        
+        // 2K ROM
+        let data = vec![0u8; 2048];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
+        
+        // 8K ROM
+        let data = vec![0u8; 8192];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
     }
 }
