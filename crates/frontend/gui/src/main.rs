@@ -256,6 +256,9 @@ fn main() {
     // Mount point selector state
     let mut show_mount_selector = false;
 
+    // Speed selector state
+    let mut show_speed_selector = false;
+
     // Timing trackers
     let mut last_frame = Instant::now();
 
@@ -311,6 +314,16 @@ fn main() {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
+            show_speed_selector = false; // Close speed selector if open
+            show_debug = false; // Close debug if open
+        }
+
+        // Toggle speed selector (F2)
+        if window.is_key_pressed(Key::F2, minifb::KeyRepeat::No) {
+            show_speed_selector = !show_speed_selector;
+            show_help = false; // Close help if open
+            show_slot_selector = false; // Close slot selector if open
+            show_mount_selector = false; // Close mount selector if open
             show_debug = false; // Close debug if open
         }
 
@@ -318,6 +331,7 @@ fn main() {
         if window.is_key_pressed(Key::F10, minifb::KeyRepeat::No) && rom_loaded {
             show_debug = !show_debug;
             show_slot_selector = false; // Close slot selector if open
+            show_speed_selector = false; // Close speed selector if open
             show_help = false; // Close help if open
         }
 
@@ -328,6 +342,35 @@ fn main() {
                 eprintln!("Warning: Failed to save CRT filter setting: {}", e);
             }
             println!("CRT Filter: {}", settings.crt_filter.name());
+        }
+
+        // Handle speed selector
+        if show_speed_selector {
+            // Check for speed selection (0-5) or cancel (ESC)
+            let mut selected_speed: Option<f64> = None;
+
+            if window.is_key_pressed(Key::Key0, minifb::KeyRepeat::No) {
+                selected_speed = Some(0.0); // Pause
+            } else if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+                selected_speed = Some(0.25);
+            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+                selected_speed = Some(0.5);
+            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+                selected_speed = Some(1.0);
+            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+                selected_speed = Some(2.0);
+            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+                selected_speed = Some(10.0);
+            }
+
+            if let Some(speed) = selected_speed {
+                show_speed_selector = false;
+                settings.emulation_speed = speed;
+                if let Err(e) = settings.save() {
+                    eprintln!("Warning: Failed to save speed setting: {}", e);
+                }
+                println!("Emulation speed: {}x", speed);
+            }
         }
 
         // Handle slot selector
@@ -589,7 +632,14 @@ fn main() {
 
         // Handle controller input / emulation step when ROM is loaded.
         // Debug overlay should NOT pause the game, but selectors should.
-        if rom_loaded && !show_help && !show_slot_selector && !show_mount_selector {
+        // Speed selector and 0x speed also pause the game.
+        if rom_loaded
+            && !show_help
+            && !show_slot_selector
+            && !show_mount_selector
+            && !show_speed_selector
+            && settings.emulation_speed > 0.0
+        {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -638,7 +688,16 @@ fn main() {
             }
         }
 
-        let frame_to_present: &[u32] = if show_slot_selector {
+        let frame_to_present: &[u32] = if show_speed_selector {
+            // Render speed selector overlay
+            let speed_buffer =
+                ui_render::create_speed_selector_overlay(width, height, settings.emulation_speed);
+            if let Err(e) = window.update_with_buffer(&speed_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            &[]
+        } else if show_slot_selector {
             // Render slot selector overlay
             let has_saves = [
                 game_saves.slots.contains_key(&1),
@@ -709,14 +768,19 @@ fn main() {
             }
         }
 
-        // Get target frame time from system timing mode
-        let target_frame_time = if rom_loaded {
+        // Get target frame time from system timing mode, adjusted by emulation speed
+        let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
             let timing = sys.timing();
             let frame_rate = timing.frame_rate_hz();
-            Duration::from_secs_f64(1.0 / frame_rate)
-        } else {
+            Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
+        } else if settings.emulation_speed > 0.0 {
             // Default to NTSC timing when no ROM loaded
-            Duration::from_secs_f64(1.0 / emu_core::apu::TimingMode::Ntsc.frame_rate_hz())
+            Duration::from_secs_f64(
+                1.0 / (emu_core::apu::TimingMode::Ntsc.frame_rate_hz() * settings.emulation_speed),
+            )
+        } else {
+            // When paused (0x speed), use a longer sleep time
+            Duration::from_millis(100)
         };
 
         if frame_dt < target_frame_time {
