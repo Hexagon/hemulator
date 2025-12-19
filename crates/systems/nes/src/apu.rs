@@ -149,11 +149,12 @@ impl APU {
         let cpu_hz = self.timing.cpu_clock_hz();
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
-        // Frame counter clocking intervals (4-step mode, NTSC approximation)
-        // Quarter frame: ~7457 CPU cycles (240 Hz)
-        // Half frame: ~14913 CPU cycles (120 Hz)
-        const QUARTER_FRAME_CYCLES: u32 = 7457;
-        const HALF_FRAME_CYCLES: u32 = 14913;
+        // Frame counter clocking intervals (4-step mode)
+        // Quarter frame: clocks envelope at ~240 Hz (NTSC) or ~200 Hz (PAL)
+        // Half frame: clocks length counter at ~120 Hz (NTSC) or ~100 Hz (PAL)
+        let frame_counter_hz = self.timing.frame_counter_hz();
+        let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
+        let half_frame_cycles = quarter_frame_cycles * 2;
 
         let mut out = Vec::with_capacity(sample_count);
         for _ in 0..sample_count {
@@ -166,19 +167,15 @@ impl APU {
 
             let mut acc = 0i32;
             for _ in 0..cycles {
-                // Clock frame counter
-                let prev_quarter = self.frame_counter_cycles / QUARTER_FRAME_CYCLES;
-                let prev_half = self.frame_counter_cycles / HALF_FRAME_CYCLES;
+                // Clock frame counter (wraps at a full frame cycle count)
+                let prev_half = self.frame_counter_cycles / half_frame_cycles;
                 
                 self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
                 
-                // Check for quarter frame (envelope clocking) - not implemented yet
-                let curr_quarter = self.frame_counter_cycles / QUARTER_FRAME_CYCLES;
-                
                 // Check for half frame (length counter clocking)
-                let curr_half = self.frame_counter_cycles / HALF_FRAME_CYCLES;
+                let curr_half = self.frame_counter_cycles / half_frame_cycles;
                 if curr_half != prev_half {
-                    // Clock length counters at half-frame rate (~120 Hz)
+                    // Clock length counters at half-frame rate (~120 Hz NTSC, ~100 Hz PAL)
                     if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
                         self.pulse1.length_counter -= 1;
                     }

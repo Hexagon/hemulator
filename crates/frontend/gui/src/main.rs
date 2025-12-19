@@ -700,7 +700,7 @@ fn main() {
             Duration::from_secs_f64(1.0 / frame_rate)
         } else {
             // Default to NTSC timing when no ROM loaded
-            Duration::from_secs_f64(1.0 / 60.0988)
+            Duration::from_secs_f64(1.0 / emu_core::apu::TimingMode::Ntsc.frame_rate_hz())
         };
 
         if frame_dt < target_frame_time {
