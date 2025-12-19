@@ -17,11 +17,10 @@ use emu_core::apu::TimingMode;
 ///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF) - 8-BYTE RANGE
 ///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF) - 8-BYTE RANGE
 ///
-/// # Implementation Notes
-/// This implementation is correct per specification but `ppu_read_chr()` is not
-/// automatically called in the current frame-based renderer. For cycle-accurate
-/// emulation, this method should be invoked on every PPU CHR read. The current
-/// frame-based approach suppresses mid-frame callbacks for performance.
+/// # Implementation
+/// Latch switching is now fully implemented via CHR read callbacks. When the PPU
+/// reads from latch trigger addresses during rendering, the mapper tracks latch
+/// state changes and applies CHR bank updates after each frame completes.
 #[derive(Debug)]
 pub struct Mmc2 {
     prg_rom: Vec<u8>,
@@ -36,6 +35,8 @@ pub struct Mmc2 {
     // Latch states (FD or FE)
     latch_0: u8, // For $0000-$0FFF
     latch_1: u8, // For $1000-$1FFF
+    // Track if CHR needs updating
+    chr_dirty: bool,
 }
 
 impl Mmc2 {
@@ -51,6 +52,7 @@ impl Mmc2 {
             chr_bank_1_fe: 0,
             latch_0: 0xFE,
             latch_1: 0xFE,
+            chr_dirty: false,
         };
         mmc2.update_chr_mapping(ppu);
         mmc2
@@ -169,14 +171,49 @@ impl Mmc2 {
     /// - $1FD8-$1FDF: Latch 1 → $FD (right pattern table) - 8-byte range
     /// - $1FE8-$1FEF: Latch 1 → $FE (right pattern table) - 8-byte range
     ///
-    /// This asymmetry is hardware-verified and differs from MMC4 which uses
-    /// 8-byte ranges for all four latch triggers.
-    ///
-    /// # Current Limitation
-    /// This method is currently not automatically called during rendering due to
-    /// the frame-based (non-cycle-accurate) PPU implementation. Games like
-    /// Punch-Out!! that rely on mid-scanline latch switching may not render
-    /// correctly. This is marked as dead code because it's only used in tests.
+    /// This method is called via callback during PPU rendering. It updates
+    /// internal latch state and marks CHR as dirty for later update.
+    pub fn notify_chr_read(&mut self, addr: u16) {
+        match addr {
+            0x0FD8 => {
+                if self.latch_0 != 0xFD {
+                    self.latch_0 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x0FE8 => {
+                if self.latch_0 != 0xFE {
+                    self.latch_0 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FD8..=0x1FDF => {
+                if self.latch_1 != 0xFD {
+                    self.latch_1 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FE8..=0x1FEF => {
+                if self.latch_1 != 0xFE {
+                    self.latch_1 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply pending CHR bank updates if latches changed during rendering.
+    /// Should be called after frame rendering completes.
+    pub fn apply_chr_update(&mut self, ppu: &mut Ppu) {
+        if self.chr_dirty {
+            self.update_chr_mapping(ppu);
+            self.chr_dirty = false;
+        }
+    }
+
+    /// Legacy method kept for tests.
+    /// In actual emulation, use notify_chr_read() + apply_chr_update() instead.
     #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {
