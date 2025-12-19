@@ -364,6 +364,11 @@ impl System for NesSystem {
             }
         }
 
+        // Apply any pending CHR updates from MMC2/MMC4 latch switching during rendering.
+        if let Some(b) = self.cpu.bus_mut() {
+            b.apply_mapper_chr_update();
+        }
+
         // VBlank start
         if let Some(b) = self.cpu.bus_mut() {
             b.ppu.set_vblank(true);

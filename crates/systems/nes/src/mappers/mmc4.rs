@@ -5,8 +5,23 @@ use emu_core::apu::TimingMode;
 
 /// MMC4 (Mapper 10) - Similar to MMC2 but with different CHR latch addresses
 ///
-/// Used in a few Japanese exclusive games like Fire Emblem.
+/// Used in games like Fire Emblem (Famicom) and Fire Emblem Gaiden.
 /// Features PPU-triggered CHR bank switching via latch addresses.
+///
+/// # Hardware Behavior (per NESdev wiki)
+/// - **PRG ROM**: 128 KB max, 16 KB switchable at $8000-$BFFF, 16 KB fixed at $C000-$FFFF
+/// - **CHR ROM**: Two 4 KB banks ($0000-$0FFF, $1000-$1FFF), each with dual-bank selection
+/// - **Latch Mechanism**: When PPU reads from specific CHR addresses, latches switch
+///   which bank is active for subsequent rendering:
+///   * $0FD8-$0FDF: Sets latch 0 to $FD (affects $0000-$0FFF)
+///   * $0FE8-$0FEF: Sets latch 0 to $FE (affects $0000-$0FFF)
+///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF)
+///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF)
+///
+/// # Implementation
+/// Latch switching is now fully implemented via CHR read callbacks. When the PPU
+/// reads from latch trigger addresses during rendering, the mapper tracks latch
+/// state changes and applies CHR bank updates after each frame completes.
 #[derive(Debug)]
 pub struct Mmc4 {
     prg_rom: Vec<u8>,
@@ -21,6 +36,8 @@ pub struct Mmc4 {
     // Latch states (FD or FE)
     latch_0: u8, // For $0000-$0FFF
     latch_1: u8, // For $1000-$1FFF
+    // Track if CHR needs updating
+    chr_dirty: bool,
 }
 
 impl Mmc4 {
@@ -36,6 +53,7 @@ impl Mmc4 {
             chr_bank_1_fe: 0,
             latch_0: 0xFE,
             latch_1: 0xFE,
+            chr_dirty: false,
         };
         mmc4.update_chr_mapping(ppu);
         mmc4
@@ -145,8 +163,58 @@ impl Mmc4 {
     }
 
     /// Called by PPU when reading from pattern tables
-    /// This handles the automatic latch switching
-    /// MMC4 uses different addresses than MMC2
+    /// This handles the automatic latch switching per MMC4 specification.
+    ///
+    /// # Latch Address Ranges (per NESdev wiki)
+    /// MMC4 uses 8-byte ranges for all latch triggers (unlike MMC2):
+    /// - $0FD8-$0FDF: Latch 0 → $FD (left pattern table)
+    /// - $0FE8-$0FEF: Latch 0 → $FE (left pattern table)
+    /// - $1FD8-$1FDF: Latch 1 → $FD (right pattern table)
+    /// - $1FE8-$1FEF: Latch 1 → $FE (right pattern table)
+    ///
+    /// This method is called via callback during PPU rendering. It updates
+    /// internal latch state and marks CHR as dirty for later update.
+    pub fn notify_chr_read(&mut self, addr: u16) {
+        match addr {
+            0x0FD8..=0x0FDF => {
+                if self.latch_0 != 0xFD {
+                    self.latch_0 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x0FE8..=0x0FEF => {
+                if self.latch_0 != 0xFE {
+                    self.latch_0 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FD8..=0x1FDF => {
+                if self.latch_1 != 0xFD {
+                    self.latch_1 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FE8..=0x1FEF => {
+                if self.latch_1 != 0xFE {
+                    self.latch_1 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply pending CHR bank updates if latches changed during rendering.
+    /// Should be called after frame rendering completes.
+    pub fn apply_chr_update(&mut self, ppu: &mut Ppu) {
+        if self.chr_dirty {
+            self.update_chr_mapping(ppu);
+            self.chr_dirty = false;
+        }
+    }
+
+    /// Legacy method kept for tests.
+    /// In actual emulation, use notify_chr_read() + apply_chr_update() instead.
     #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {

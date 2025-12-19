@@ -53,6 +53,8 @@ pub struct Ppu {
     read_buffer: Cell<u8>,
     #[allow(clippy::type_complexity)]
     a12_callback: RefCell<Option<Box<dyn FnMut(bool)>>>,
+    #[allow(clippy::type_complexity)]
+    chr_read_callback: RefCell<Option<Box<dyn FnMut(u16)>>>,
     suppress_a12: Cell<bool>,
     scroll_x: u8,
     scroll_y: u8,
@@ -88,6 +90,7 @@ impl Ppu {
             vram_addr: Cell::new(0),
             read_buffer: Cell::new(0),
             a12_callback: RefCell::new(None),
+            chr_read_callback: RefCell::new(None),
             suppress_a12: Cell::new(false),
             scroll_x: 0,
             scroll_y: 0,
@@ -167,6 +170,10 @@ impl Ppu {
         *self.a12_callback.borrow_mut() = cb;
     }
 
+    pub fn set_chr_read_callback(&self, cb: Option<Box<dyn FnMut(u16)>>) {
+        *self.chr_read_callback.borrow_mut() = cb;
+    }
+
     fn chr_fetch(&self, addr: usize) -> u8 {
         // Notify mapper about PPU A12 line (bit 12 of CHR address) transitions.
         if !self.suppress_a12.get() {
@@ -174,6 +181,11 @@ impl Ppu {
                 let a12_high = (addr & 0x1000) != 0;
                 cb(a12_high);
             }
+        }
+        // Notify mapper about CHR reads (for MMC2/MMC4 latch switching).
+        // This runs even when suppress_a12 is true, during frame rendering.
+        if let Some(cb) = &mut *self.chr_read_callback.borrow_mut() {
+            cb(addr as u16);
         }
         self.chr.get(addr).copied().unwrap_or(0)
     }

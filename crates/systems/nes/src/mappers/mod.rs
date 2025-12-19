@@ -126,6 +126,24 @@ impl Mapper {
         }
     }
 
+    /// Notify mapper of PPU CHR reads (for MMC2/MMC4 latch switching)
+    pub fn notify_chr_read(&mut self, addr: u16) {
+        match self {
+            Mapper::Mmc2(m) => m.notify_chr_read(addr),
+            Mapper::Mmc4(m) => m.notify_chr_read(addr),
+            _ => {}
+        }
+    }
+
+    /// Apply pending CHR updates for MMC2/MMC4 after frame rendering
+    pub fn apply_chr_update(&mut self, ppu: &mut Ppu) {
+        match self {
+            Mapper::Mmc2(m) => m.apply_chr_update(ppu),
+            Mapper::Mmc4(m) => m.apply_chr_update(ppu),
+            _ => {}
+        }
+    }
+
     /// Get mapper number
     pub fn mapper_number(&self) -> u8 {
         match self {

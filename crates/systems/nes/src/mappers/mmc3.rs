@@ -4,6 +4,27 @@ use crate::ppu::Ppu;
 use emu_core::apu::TimingMode;
 
 /// MMC3 (Mapper 4/TxROM) - Advanced mapper with PRG/CHR banking and scanline IRQ counter
+///
+/// # Hardware Behavior (per NESdev wiki)
+/// - **PRG ROM**: Up to 512 KB, four 8KB banks mapped to CPU $8000-$FFFF
+/// - **CHR ROM**: Up to 256 KB, eight 1KB banks mapped to PPU $0000-$1FFF
+/// - **PRG Banking Modes** (controlled by bit 6 of $8000):
+///   * Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
+///   * Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
+///   * (-2) = second-last bank, (-1) = last bank (fixed)
+/// - **CHR Banking Modes** (controlled by bit 7 of $8000):
+///   * Mode 0: Two 2KB banks at $0000/$0800, four 1KB banks at $1000-$1FFF
+///   * Mode 1: Four 1KB banks at $0000-$0FFF, two 2KB banks at $1000/$1800
+/// - **IRQ Counter**: Scanline-based counter triggered by PPU A12 rising edges
+///   * $C000: IRQ latch (reload value)
+///   * $C001: IRQ reload (clears counter, sets reload flag)
+///   * $E000: IRQ disable (also clears pending)
+///   * $E001: IRQ enable
+///   * Uses "new" MMC3B/C behavior: IRQ fires after counter decrements to 0
+///
+/// # Implementation Notes
+/// This implementation uses the "new/sharp" IRQ behavior where the counter
+/// triggers IRQ only when it decrements to 0, not when it reloads to 0.
 #[derive(Debug)]
 pub struct Mmc3 {
     prg_rom: Vec<u8>,
@@ -63,9 +84,11 @@ impl Mmc3 {
         let bank7 = (self.bank_regs[7] as usize) % prg_count;
 
         if !self.prg_mode {
-            self.prg_banks = [bank6, bank7, second_last, last];
+            // Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
+            self.prg_banks = [bank6, second_last, bank7, last];
         } else {
-            self.prg_banks = [second_last, bank7, bank6, last];
+            // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
+            self.prg_banks = [second_last, bank6, bank7, last];
         }
 
         // CHR banking (1KB units with two 2KB registers)
@@ -226,7 +249,7 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Default: bank6=0, bank7=0, second_last=6, last=7
-        // So: [0, 0, 6, 7] at $8000, $A000, $C000, $E000
+        // Mode 0: [bank6=0, second_last=6, bank7=0, last=7] at $8000, $A000, $C000, $E000
         assert_eq!(mmc3.read_prg(0x8000), 0x11); // Bank 0
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
 

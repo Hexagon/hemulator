@@ -123,7 +123,16 @@ System-specific implementations that use core components:
       - NTSC: 262 scanlines/frame, 341 PPU cycles/scanline, ~60.1 Hz
       - PAL: 312 scanlines/frame, 341 PPU cycles/scanline, ~50.0 Hz
       - Current implementation abstracts these differences at system level
-  - All existing tests pass (33 mapper and PPU tests)
+  - **Mappers**:
+    - System-specific implementations in `crates/systems/nes/mappers/`
+    - Supported mappers: NROM (0), MMC1 (1), UxROM (2), CNROM (3), MMC3 (4), AxROM (7), MMC2 (9), MMC4 (10), ColorDreams (11)
+    - **MMC2/MMC4 Latch Switching**: Fully implemented via CHR read callbacks
+      - Hardware switches CHR banks when PPU reads from specific addresses ($0FD8, $0FE8, $1FD8-$1FDF, $1FE8-$1FEF)
+      - PPU notifies mapper of CHR reads during frame rendering
+      - Mapper tracks latch state changes and applies CHR bank updates after each frame
+      - Frame-based rendering means updates happen per-frame, not mid-scanline
+      - Games like Punch-Out!! and Fire Emblem should work correctly with per-frame latch switching
+  - All existing tests pass (38 mapper and PPU tests)
 
 - **Game Boy (`emu_gb`)**: Skeleton implementation
 

@@ -76,10 +76,18 @@ impl NesBus {
         let rc = Rc::new(RefCell::new(mapper));
 
         // Wire PPU A12 transitions to the mapper for IRQ clocking (e.g., MMC3).
-        let weak: Weak<RefCell<Mapper>> = Rc::downgrade(&rc);
+        let weak_a12: Weak<RefCell<Mapper>> = Rc::downgrade(&rc);
         self.ppu.set_a12_callback(Some(Box::new(move |a12_high| {
-            if let Some(m) = weak.upgrade() {
+            if let Some(m) = weak_a12.upgrade() {
                 m.borrow_mut().notify_a12(a12_high);
+            }
+        })));
+
+        // Wire PPU CHR reads to the mapper for latch switching (MMC2/MMC4).
+        let weak_chr: Weak<RefCell<Mapper>> = Rc::downgrade(&rc);
+        self.ppu.set_chr_read_callback(Some(Box::new(move |addr| {
+            if let Some(m) = weak_chr.upgrade() {
+                m.borrow_mut().notify_chr_read(addr);
             }
         })));
 
@@ -106,6 +114,14 @@ impl NesBus {
             // Ensure we generate a rising edge even if the last sampled value was high.
             m.borrow_mut().notify_a12(false);
             m.borrow_mut().notify_a12(true);
+        }
+    }
+
+    /// Apply pending CHR updates for MMC2/MMC4 after frame rendering.
+    /// This updates CHR banks based on latch switches that occurred during rendering.
+    pub fn apply_mapper_chr_update(&mut self) {
+        if let Some(m) = &mut self.mapper {
+            m.borrow_mut().apply_chr_update(&mut self.ppu);
         }
     }
 

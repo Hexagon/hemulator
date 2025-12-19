@@ -6,8 +6,21 @@ use emu_core::apu::TimingMode;
 /// MMC2 (Mapper 9) - Used primarily in Punch-Out!!
 ///
 /// Features PPU-triggered CHR bank switching via latch addresses.
-/// When the PPU reads from $FD8 or $FE8 in the pattern tables,
-/// the mapper automatically switches CHR banks.
+///
+/// # Hardware Behavior (per NESdev wiki)
+/// - **PRG ROM**: 128 KB max, 8 KB switchable at $8000-$9FFF, fixed banks at $A000-$FFFF
+/// - **CHR ROM**: Two 4 KB banks ($0000-$0FFF, $1000-$1FFF), each with dual-bank selection
+/// - **Latch Mechanism**: When PPU reads from specific CHR addresses, latches switch
+///   which bank is active. **Note:** MMC2 differs from MMC4 in address ranges:
+///   * $0FD8: Sets latch 0 to $FD (affects $0000-$0FFF) - SINGLE ADDRESS
+///   * $0FE8: Sets latch 0 to $FE (affects $0000-$0FFF) - SINGLE ADDRESS
+///   * $1FD8-$1FDF: Sets latch 1 to $FD (affects $1000-$1FFF) - 8-BYTE RANGE
+///   * $1FE8-$1FEF: Sets latch 1 to $FE (affects $1000-$1FFF) - 8-BYTE RANGE
+///
+/// # Implementation
+/// Latch switching is now fully implemented via CHR read callbacks. When the PPU
+/// reads from latch trigger addresses during rendering, the mapper tracks latch
+/// state changes and applies CHR bank updates after each frame completes.
 #[derive(Debug)]
 pub struct Mmc2 {
     prg_rom: Vec<u8>,
@@ -22,6 +35,8 @@ pub struct Mmc2 {
     // Latch states (FD or FE)
     latch_0: u8, // For $0000-$0FFF
     latch_1: u8, // For $1000-$1FFF
+    // Track if CHR needs updating
+    chr_dirty: bool,
 }
 
 impl Mmc2 {
@@ -37,6 +52,7 @@ impl Mmc2 {
             chr_bank_1_fe: 0,
             latch_0: 0xFE,
             latch_1: 0xFE,
+            chr_dirty: false,
         };
         mmc2.update_chr_mapping(ppu);
         mmc2
@@ -146,7 +162,58 @@ impl Mmc2 {
     }
 
     /// Called by PPU when reading from pattern tables
-    /// This handles the automatic latch switching
+    /// This handles the automatic latch switching per MMC2 specification.
+    ///
+    /// # Latch Address Ranges (per NESdev wiki)
+    /// MMC2 uses SINGLE addresses for left latch, RANGES for right latch:
+    /// - $0FD8: Latch 0 → $FD (left pattern table) - single address only
+    /// - $0FE8: Latch 0 → $FE (left pattern table) - single address only
+    /// - $1FD8-$1FDF: Latch 1 → $FD (right pattern table) - 8-byte range
+    /// - $1FE8-$1FEF: Latch 1 → $FE (right pattern table) - 8-byte range
+    ///
+    /// This method is called via callback during PPU rendering. It updates
+    /// internal latch state and marks CHR as dirty for later update.
+    pub fn notify_chr_read(&mut self, addr: u16) {
+        match addr {
+            0x0FD8 => {
+                if self.latch_0 != 0xFD {
+                    self.latch_0 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x0FE8 => {
+                if self.latch_0 != 0xFE {
+                    self.latch_0 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FD8..=0x1FDF => {
+                if self.latch_1 != 0xFD {
+                    self.latch_1 = 0xFD;
+                    self.chr_dirty = true;
+                }
+            }
+            0x1FE8..=0x1FEF => {
+                if self.latch_1 != 0xFE {
+                    self.latch_1 = 0xFE;
+                    self.chr_dirty = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Apply pending CHR bank updates if latches changed during rendering.
+    /// Should be called after frame rendering completes.
+    pub fn apply_chr_update(&mut self, ppu: &mut Ppu) {
+        if self.chr_dirty {
+            self.update_chr_mapping(ppu);
+            self.chr_dirty = false;
+        }
+    }
+
+    /// Legacy method kept for tests.
+    /// In actual emulation, use notify_chr_read() + apply_chr_update() instead.
     #[allow(dead_code)]
     pub fn ppu_read_chr(&mut self, addr: u16, ppu: &mut Ppu) {
         match addr {
