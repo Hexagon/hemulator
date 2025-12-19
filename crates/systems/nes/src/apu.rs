@@ -154,7 +154,7 @@ impl APU {
         // Half frame: clocks length counter at quarters 2 and 4
         let frame_counter_hz = self.timing.frame_counter_hz();
         let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
-        
+
         // Full frame cycle count for resetting counter (prevents overflow)
         // 4-step mode: 4 quarter frames (~29829 cycles NTSC)
         // 5-step mode: 5 quarter frames (~37281 cycles NTSC)
@@ -177,14 +177,14 @@ impl APU {
             for _ in 0..cycles {
                 // Clock frame counter
                 let prev_quarter = self.frame_counter_cycles / quarter_frame_cycles;
-                
+
                 self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
-                
+
                 // Reset frame counter at end of full frame to prevent overflow issues
                 if self.frame_counter_cycles >= full_frame_cycles {
                     self.frame_counter_cycles = 0;
                 }
-                
+
                 // Check for quarter frame boundaries
                 let curr_quarter = self.frame_counter_cycles / quarter_frame_cycles;
                 if curr_quarter != prev_quarter {
@@ -202,7 +202,7 @@ impl APU {
                         }
                     }
                 }
-                
+
                 // Clock pulse channels
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
