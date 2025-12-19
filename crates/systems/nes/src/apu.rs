@@ -126,7 +126,7 @@ impl APU {
                 // Bit 1: Pulse 2 length counter > 0
                 // Bits 2-3: Triangle and Noise (not implemented, return 0)
                 // Bit 4: DMC active (not implemented, return 0)
-                // Bits 5: unused (return 0)
+                // Bit 5: unused (return 0)
                 // Bit 6: Frame interrupt (not implemented, return 0)
                 // Bit 7: DMC interrupt (not implemented, return 0)
                 let mut status = 0u8;
