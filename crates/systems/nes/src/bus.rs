@@ -209,7 +209,7 @@ impl Bus for NesBus {
             }
             0x4000..=0x4017 => {
                 // APU registers and controller strobe
-                if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 {
+                if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 || addr == 0x4017 {
                     self.apu.write_register(addr, val);
                 }
 

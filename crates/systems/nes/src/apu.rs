@@ -14,6 +14,10 @@ pub struct APU {
     pub pulse2: PulseChannel,
     cycle_accum: f64,
     timing: TimingMode,
+    /// Frame counter for clocking length counters and envelopes
+    /// Counts CPU cycles and triggers quarter/half frame events
+    frame_counter_cycles: u32,
+    frame_counter_mode: bool, // false = 4-step, true = 5-step
 }
 
 impl APU {
@@ -27,6 +31,8 @@ impl APU {
             pulse2: PulseChannel::new(),
             cycle_accum: 0.0,
             timing,
+            frame_counter_cycles: 0,
+            frame_counter_mode: false,
         }
     }
 
@@ -99,6 +105,15 @@ impl APU {
                 self.pulse2.enabled = (val & 2) != 0;
             }
 
+            // Frame Counter register
+            0x4017 => {
+                // Bit 7: Mode (0 = 4-step, 1 = 5-step)
+                // Bit 6: IRQ inhibit flag
+                self.frame_counter_mode = (val & 0x80) != 0;
+                // Reset frame counter on write
+                self.frame_counter_cycles = 0;
+            }
+
             _ => {}
         }
     }
@@ -134,6 +149,12 @@ impl APU {
         let cpu_hz = self.timing.cpu_clock_hz();
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
+        // Frame counter clocking intervals (4-step mode, NTSC approximation)
+        // Quarter frame: ~7457 CPU cycles (240 Hz)
+        // Half frame: ~14913 CPU cycles (120 Hz)
+        const QUARTER_FRAME_CYCLES: u32 = 7457;
+        const HALF_FRAME_CYCLES: u32 = 14913;
+
         let mut out = Vec::with_capacity(sample_count);
         for _ in 0..sample_count {
             self.cycle_accum += cycles_per_sample;
@@ -145,6 +166,28 @@ impl APU {
 
             let mut acc = 0i32;
             for _ in 0..cycles {
+                // Clock frame counter
+                let prev_quarter = self.frame_counter_cycles / QUARTER_FRAME_CYCLES;
+                let prev_half = self.frame_counter_cycles / HALF_FRAME_CYCLES;
+                
+                self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
+                
+                // Check for quarter frame (envelope clocking) - not implemented yet
+                let curr_quarter = self.frame_counter_cycles / QUARTER_FRAME_CYCLES;
+                
+                // Check for half frame (length counter clocking)
+                let curr_half = self.frame_counter_cycles / HALF_FRAME_CYCLES;
+                if curr_half != prev_half {
+                    // Clock length counters at half-frame rate (~120 Hz)
+                    if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
+                        self.pulse1.length_counter -= 1;
+                    }
+                    if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
+                        self.pulse2.length_counter -= 1;
+                    }
+                }
+                
+                // Clock pulse channels
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
                 acc += s1 + s2;
