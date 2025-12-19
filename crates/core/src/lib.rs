@@ -182,13 +182,13 @@ mod tests {
     #[test]
     fn test_system_mount_operations() {
         let mut sys = MockSystem;
-        
+
         // Initially not mounted
         assert!(!sys.is_mounted("test"));
-        
+
         // Mount should succeed
         assert!(sys.mount("test", &[1, 2, 3]).is_ok());
-        
+
         // Unmount should succeed
         assert!(sys.unmount("test").is_ok());
     }

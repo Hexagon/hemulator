@@ -113,7 +113,11 @@ impl GameSaves {
 
     /// Load state data from a specific slot (1-MAX_SAVE_SLOTS)
     /// Verifies that the ROM hash matches if present in the save slot
-    pub fn load_slot(&self, slot: u8, current_rom_hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    pub fn load_slot(
+        &self,
+        slot: u8,
+        current_rom_hash: &str,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         if !(1..=MAX_SAVE_SLOTS).contains(&slot) {
             return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
@@ -125,10 +129,11 @@ impl GameSaves {
                     if saved_hash != current_rom_hash {
                         return Err(format!(
                             "ROM hash mismatch: save state was created with a different ROM"
-                        ).into());
+                        )
+                        .into());
                     }
                 }
-                
+
                 let decoded = BASE64.decode(&save_slot.data)?;
                 Ok(decoded)
             }
@@ -231,7 +236,10 @@ mod tests {
         let loaded = GameSaves::load(rom_hash1);
         let result = loaded.load_slot(1, rom_hash2);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("ROM hash mismatch"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("ROM hash mismatch"));
 
         // Load with correct ROM hash - should succeed
         let result = loaded.load_slot(1, rom_hash1);
