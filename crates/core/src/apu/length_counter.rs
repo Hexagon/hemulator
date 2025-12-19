@@ -3,16 +3,16 @@
 //! The length counter provides automatic note duration control.
 
 /// NES length counter lookup table.
-/// 
+///
 /// This table is indexed by a 5-bit value (0-31) and returns the length counter value.
 /// The counter is clocked at half the frame counter rate (~120Hz NTSC, ~100Hz PAL).
 pub const LENGTH_TABLE: [u8; 32] = [
-    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 
-    12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
+    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
+    192, 24, 72, 26, 16, 28, 32, 30,
 ];
 
 /// Length counter component.
-/// 
+///
 /// Automatically decrements and can be halted. When it reaches zero,
 /// the associated channel is silenced.
 #[derive(Debug, Clone)]
@@ -87,7 +87,7 @@ mod tests {
         let mut lc = LengthCounter::new();
         lc.set_enabled(true);
         lc.load(0); // Load value 10 (from LENGTH_TABLE[0])
-        
+
         assert_eq!(lc.value(), 10);
         lc.clock();
         assert_eq!(lc.value(), 9);
@@ -112,7 +112,7 @@ mod tests {
         let mut lc = LengthCounter::new();
         lc.set_enabled(true);
         lc.load(0); // Load value 10
-        
+
         assert_eq!(lc.value(), 10);
         lc.set_enabled(false);
         assert_eq!(lc.value(), 0);

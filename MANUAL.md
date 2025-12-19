@@ -40,10 +40,39 @@ The emulator will remember your last ROM and automatically load it next time you
 |-----|--------|-------------|
 | F1 | Help Overlay | Show/hide all controls and key mappings |
 | F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
-| F5 | Save State | Open slot selector (1-5) to save (only if system supports save states) |
-| F6 | Load State | Open slot selector (1-5) to load (only if system supports save states) |
-| F11 | Cycle Scale | Switch between 1x, 2x, 4x, 8x window size |
+| F5 | Save State | Open slot selector (1-5) to save |
+| F6 | Load State | Open slot selector (1-5) to load |
+| F10 | Debug Info | Show/hide debug information overlay |
+| F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
+
+### CRT Filters (F11)
+
+Press **F11** to cycle through different CRT (Cathode Ray Tube) display filters that simulate the appearance of classic CRT monitors and TVs. These filters add visual effects to make the emulator output look more authentic to the original hardware experience.
+
+Available filters:
+- **None**: Raw pixel output with no filtering
+- **Scanlines**: Adds horizontal dark lines simulating CRT raster scan lines
+- **Phosphor**: Creates a soft glow and horizontal color bleeding between pixels, mimicking CRT phosphor behavior
+- **CRT Monitor**: Full CRT effect combining scanlines, phosphor glow, and brightness adjustments for an authentic CRT appearance
+
+The selected filter is automatically saved and restored when you restart the emulator.
+
+### Window Management
+
+The emulator window can be resized freely by dragging the window edges or maximizing the window. The window maintains the correct aspect ratio while stretching to fill the available space. The window size is automatically remembered between sessions.
+
+## Debug Information (F10)
+
+When a ROM is loaded, press **F10** to display the debug information overlay. This shows:
+
+- **Mapper**: The cartridge mapper number and name
+- **PRG**: Number of PRG ROM banks (16KB each)
+- **CHR**: Number of CHR ROM banks (8KB each) or "RAM" if using CHR-RAM
+- **Timing**: NTSC or PAL timing mode (auto-detected from ROM header)
+- **FPS**: Current frame rate
+
+This information is useful for troubleshooting compatibility issues or understanding ROM specifications.
 
 ## Configuration
 
@@ -63,18 +92,21 @@ Located in the same directory as the executable, this file stores your preferenc
     "left": "Left",
     "right": "Right"
   },
-  "window_width": 256,
-  "window_height": 240,
-  "scale": 2,
-  "fullscreen": false,
+  "window_width": 512,
+  "window_height": 480,
   "last_rom_path": "/path/to/last/rom.nes",
-  "mount_points": {
+    "mount_points": {
     "Cartridge": "/path/to/last/rom.nes"
   }
+  "crt_filter": "None"
 }
 ```
 
-**Customization**: Edit this file to change key bindings. Changes are automatically saved when you modify settings in-game (e.g., changing window scale with F11).
+**Customization**: 
+- Edit this file to change key bindings
+- The window size is automatically saved when you resize the window
+- CRT filter preference is saved automatically when you cycle filters with F11
+- Valid `crt_filter` values: "None", "Scanlines", "Phosphor", "CrtMonitor"
 
 **Mount Points**: The emulator now supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", future systems might have "BIOS", "Floppy1", etc.). When you press F3:
 - If the system has only one mount point (like NES), the file browser opens directly
@@ -144,7 +176,7 @@ The emulator supports the following NES mappers:
 ### Settings not saving
 - Verify you have write permissions in the emulator directory
 - Check that `config.json` isn't marked as read-only
-- Settings save automatically when changed (e.g., F11 for scale, F3 for ROM)
+- Settings save automatically when changed (e.g., F11 for CRT filter, F3 for ROM)
 
 ### Save states not working
 - Ensure you've loaded a ROM first
@@ -152,7 +184,7 @@ The emulator supports the following NES mappers:
 - Check file system permissions in the emulator directory
 
 ### Performance issues
-- Try using a lower window scale (F11 to cycle through options)
+- Try disabling CRT filters (F11 to cycle to "None")
 - Close other resource-intensive applications
 - Ensure your graphics drivers are up to date
 

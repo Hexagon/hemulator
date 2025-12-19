@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// Color Dreams (Mapper 11) - Simple PRG and CHR bank switching
 ///

@@ -1,6 +1,6 @@
-use emu_core::apu::TimingMode;
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
+use emu_core::apu::TimingMode;
 
 /// MMC4 (Mapper 10) - Similar to MMC2 but with different CHR latch addresses
 ///

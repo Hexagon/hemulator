@@ -94,7 +94,7 @@ mod tests {
         let palette = RamPalette::new(16);
         assert_eq!(palette.len(), 16);
         assert!(!palette.is_empty());
-        
+
         // All colors should default to opaque black
         for i in 0..16 {
             assert_eq!(palette.get_color(i), 0xFF000000);
@@ -104,12 +104,12 @@ mod tests {
     #[test]
     fn test_ram_palette_set_get() {
         let mut palette = RamPalette::new(4);
-        
+
         palette.set_color(0, 0xFF0000FF); // Blue
         palette.set_color(1, 0xFF00FF00); // Green
         palette.set_color(2, 0xFFFF0000); // Red
         palette.set_color(3, 0xFFFFFFFF); // White
-        
+
         assert_eq!(palette.get_color(0), 0xFF0000FF);
         assert_eq!(palette.get_color(1), 0xFF00FF00);
         assert_eq!(palette.get_color(2), 0xFFFF0000);
@@ -119,10 +119,10 @@ mod tests {
     #[test]
     fn test_ram_palette_out_of_bounds() {
         let mut palette = RamPalette::new(4);
-        
+
         // Out of bounds reads should return black
         assert_eq!(palette.get_color(10), 0xFF000000);
-        
+
         // Out of bounds writes should not panic
         palette.set_color(10, 0xFFFF0000);
     }
@@ -131,7 +131,7 @@ mod tests {
     fn test_ram_palette_from_colors() {
         let colors = vec![0xFF0000FF, 0xFF00FF00, 0xFFFF0000];
         let palette = RamPalette::from_colors(colors.clone());
-        
+
         assert_eq!(palette.len(), 3);
         assert_eq!(palette.get_color(0), 0xFF0000FF);
         assert_eq!(palette.get_color(1), 0xFF00FF00);

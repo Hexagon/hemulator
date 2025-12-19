@@ -4,7 +4,9 @@
 //! It's functionally identical to the RP2A03 but runs at a different clock speed
 //! and has slightly different noise period tables.
 
-use super::{audio_chip::AudioChip, PulseChannel, TriangleChannel, NoiseChannel, TimingMode, LENGTH_TABLE};
+use super::{
+    audio_chip::AudioChip, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+};
 
 /// RP2A07 APU (PAL variant).
 ///

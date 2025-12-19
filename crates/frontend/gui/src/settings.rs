@@ -1,3 +1,4 @@
+use crate::crt_filter::CrtFilter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -41,18 +42,19 @@ pub struct Settings {
     pub last_rom_path: Option<String>, // Kept for backward compatibility
     #[serde(default)]
     pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
+    #[serde(default)]
+    pub crt_filter: CrtFilter,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             keyboard: KeyMapping::default(),
-            window_width: 256,
-            window_height: 240,
-            scale: 2,
-            fullscreen: false,
+            window_width: 512,  // 256 * 2 (default 2x scale)
+            window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
             mount_points: HashMap::new(),
+            crt_filter: CrtFilter::default(),
         }
     }
 }
@@ -122,8 +124,8 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.keyboard.a, "Z");
         assert_eq!(settings.keyboard.b, "X");
-        assert_eq!(settings.scale, 2);
-        assert!(!settings.fullscreen);
+        assert_eq!(settings.window_width, 512);
+        assert_eq!(settings.window_height, 480);
         assert_eq!(settings.last_rom_path, None);
     }
 
@@ -133,7 +135,7 @@ mod tests {
         let json = serde_json::to_string(&settings).expect("Failed to serialize");
         let deserialized: Settings = serde_json::from_str(&json).expect("Failed to deserialize");
         assert_eq!(deserialized.keyboard.a, settings.keyboard.a);
-        assert_eq!(deserialized.scale, settings.scale);
+        assert_eq!(deserialized.window_width, settings.window_width);
     }
 
     #[test]
@@ -148,7 +150,8 @@ mod tests {
 
         let settings = Settings {
             last_rom_path: Some("/test/path/game.nes".to_string()),
-            scale: 4,
+            window_width: 1024,
+            window_height: 960,
             ..Default::default()
         };
 
@@ -164,7 +167,8 @@ mod tests {
             loaded.last_rom_path,
             Some("/test/path/game.nes".to_string())
         );
-        assert_eq!(loaded.scale, 4);
+        assert_eq!(loaded.window_width, 1024);
+        assert_eq!(loaded.window_height, 960);
 
         // Clean up
         fs::remove_dir_all(&test_dir).unwrap();

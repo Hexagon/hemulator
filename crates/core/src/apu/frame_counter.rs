@@ -6,12 +6,12 @@
 use super::timing::TimingMode;
 
 /// Frame counter component.
-/// 
+///
 /// Provides timing signals for:
 /// - Envelope generators (quarter frames)
 /// - Length counters (half frames)
 /// - Sweep units (half frames)
-/// 
+///
 /// Supports two modes:
 /// - 4-step mode: f f f f (4 quarter frames, IRQ on 4th)
 /// - 5-step mode: f f f f - (5 quarter frames, no IRQ)
@@ -57,7 +57,7 @@ impl FrameCounter {
             self.step += 1;
 
             let max_step = if self.mode_5_step { 5 } else { 4 };
-            
+
             if self.step >= max_step {
                 self.step = 0;
                 // Generate IRQ on step 4 in 4-step mode if not inhibited
@@ -68,7 +68,7 @@ impl FrameCounter {
 
             // Quarter frame signal on every step
             let quarter_frame = true;
-            
+
             // Half frame signal on steps 1 and 3 (4-step) or 1 and 4 (5-step)
             let half_frame = if self.mode_5_step {
                 self.step == 1 || self.step == 4
@@ -86,7 +86,7 @@ impl FrameCounter {
     pub fn write_control(&mut self, value: u8) {
         self.mode_5_step = (value & 0x80) != 0;
         self.irq_inhibit = (value & 0x40) != 0;
-        
+
         if self.irq_inhibit {
             self.irq_pending = false;
         }
@@ -170,6 +170,9 @@ mod tests {
         let fc_pal = FrameCounter::new(TimingMode::Pal);
 
         // PAL should have different (slower) timing
-        assert_ne!(fc_ntsc.cycles_per_quarter_frame, fc_pal.cycles_per_quarter_frame);
+        assert_ne!(
+            fc_ntsc.cycles_per_quarter_frame,
+            fc_pal.cycles_per_quarter_frame
+        );
     }
 }

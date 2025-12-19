@@ -15,8 +15,17 @@ mod ppu;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
-use emu_core::{types::Frame, System, MountPointInfo, apu::TimingMode};
+use emu_core::{types::Frame, System, MountPointInfo, apu::TimingMode, apu::TimingMode};
 use ppu::Ppu;
+
+#[derive(Debug, Clone)]
+pub struct DebugInfo {
+    pub timing_mode: TimingMode,
+    pub mapper_name: String,
+    pub mapper_number: u8,
+    pub prg_banks: usize,
+    pub chr_banks: usize,
+}
 
 #[derive(Debug)]
 pub struct NesSystem {
@@ -54,6 +63,47 @@ impl NesSystem {
     pub fn timing(&self) -> TimingMode {
         self.timing
     }
+
+    /// Get debug information for the overlay
+    pub fn get_debug_info(&self) -> DebugInfo {
+        let mut mapper_name = "Unknown".to_string();
+        let mut mapper_number = 0u8;
+        let mut prg_banks = 0;
+        let mut chr_banks = 0;
+
+        if let Some(b) = self.cpu.bus() {
+            if let Some(num) = b.mapper_number() {
+                mapper_number = num;
+                mapper_name = match mapper_number {
+                    0 => "NROM".to_string(),
+                    1 => "MMC1/SxROM".to_string(),
+                    2 => "UxROM".to_string(),
+                    3 => "CNROM".to_string(),
+                    4 => "MMC3/TxROM".to_string(),
+                    7 => "AxROM".to_string(),
+                    9 => "MMC2/PxROM".to_string(),
+                    10 => "MMC4/FxROM".to_string(),
+                    11 => "Color Dreams".to_string(),
+                    _ => format!("Mapper {}", mapper_number),
+                };
+                prg_banks = (b.prg_rom_size() / 16384).max(1); // 16KB banks
+            }
+            // CHR size from PPU
+            chr_banks = if b.ppu.chr.is_empty() {
+                0 // CHR-RAM
+            } else {
+                (b.ppu.chr.len() / 8192).max(1) // 8KB banks
+            };
+        }
+
+        DebugInfo {
+            timing_mode: self.timing,
+            mapper_name,
+            mapper_number,
+            prg_banks,
+            chr_banks,
+        }
+    }
 }
 
 impl Default for NesSystem {
@@ -77,7 +127,7 @@ impl NesSystem {
     fn setup_cartridge(&mut self, cart: cartridge::Cartridge) -> Result<(), std::io::Error> {
         // Set timing mode from cartridge
         self.timing = cart.timing;
-        
+
         // Derive the reset vector from the last PRG bank (mirrors hardware vectors).
         if cart.prg_rom.len() < 0x2000 {
             return Err(std::io::Error::new(
@@ -212,7 +262,7 @@ impl System for NesSystem {
         // Model VBlank as the *tail* of the frame and trigger NMI at VBlank start.
         // IMPORTANT: render at the end of the *visible* portion (right before VBlank)
         // so we don't sample while games temporarily disable PPUMASK during their NMI.
-        
+
         let (cycles_per_frame, vblank_cycles) = match self.timing {
             TimingMode::Ntsc => (29780u32, 2500u32),
             TimingMode::Pal => (33247u32, 2798u32), // PAL has more cycles per frame
