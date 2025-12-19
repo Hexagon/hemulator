@@ -557,6 +557,7 @@ name = "emu_gui"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "emu_atari2600",
  "emu_core",
  "emu_gb",
  "emu_nes",
