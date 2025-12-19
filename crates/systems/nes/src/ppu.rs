@@ -45,6 +45,7 @@ pub struct Ppu {
     mask: u8,
     // Minimal PPUSTATUS bit7 (VBlank) flag.
     vblank: Cell<bool>,
+    sprite_0_hit: Cell<bool>,
     nmi_pending: Cell<bool>,
     // PPUADDR latch
     addr_latch: Cell<bool>,
@@ -55,6 +56,7 @@ pub struct Ppu {
     suppress_a12: Cell<bool>,
     scroll_x: u8,
     scroll_y: u8,
+    oam_addr: Cell<u8>,
 }
 
 impl fmt::Debug for Ppu {
@@ -80,6 +82,7 @@ impl Ppu {
             ctrl: 0,
             mask: 0,
             vblank: Cell::new(false),
+            sprite_0_hit: Cell::new(false),
             nmi_pending: Cell::new(false),
             addr_latch: Cell::new(false),
             vram_addr: Cell::new(0),
@@ -88,6 +91,7 @@ impl Ppu {
             suppress_a12: Cell::new(false),
             scroll_x: 0,
             scroll_y: 0,
+            oam_addr: Cell::new(0),
         }
     }
 
@@ -143,6 +147,9 @@ impl Ppu {
             // VBlank just started and NMI is enabled.
             self.nmi_pending.set(true);
         }
+        if !v {
+            self.sprite_0_hit.set(false);
+        }
     }
 
     pub fn vblank_flag(&self) -> bool {
@@ -175,15 +182,23 @@ impl Ppu {
     pub fn read_register(&self, reg: u16) -> u8 {
         match reg & 0x7 {
             2 => {
-                // PPUSTATUS: bit 7 = vblank
+                // PPUSTATUS: bit 7 = vblank, bit 6 = sprite 0 hit
                 let mut status = 0u8;
                 if self.vblank.get() {
                     status |= 0x80;
+                }
+                if self.sprite_0_hit.get() {
+                    status |= 0x40;
                 }
                 // Reading PPUSTATUS clears vblank and resets address latch.
                 self.vblank.set(false);
                 self.addr_latch.set(false);
                 status
+            }
+            4 => {
+                // OAMDATA read: return current OAM byte at oam_addr
+                let addr = self.oam_addr.get() as usize;
+                self.oam[addr]
             }
             7 => {
                 // PPUDATA read with buffered behavior.
@@ -230,6 +245,16 @@ impl Ppu {
             1 => {
                 // PPUMASK
                 self.mask = val;
+            }
+            3 => {
+                // OAMADDR: set OAM address for $2004 access
+                self.oam_addr.set(val);
+            }
+            4 => {
+                // OAMDATA: write to OAM at current address, then increment
+                let addr = self.oam_addr.get() as usize;
+                self.oam[addr] = val;
+                self.oam_addr.set(self.oam_addr.get().wrapping_add(1));
             }
             5 => {
                 // PPUSCROLL (write x then y), shares latch with PPUADDR.
@@ -682,6 +707,20 @@ impl Ppu {
                     let rgb = nes_palette_rgb(pal_entry);
 
                     let idx = (y * width + x as u32) as usize;
+
+                    // Sprite 0 hit detection
+                    if i == 0 && bg_enabled && !self.sprite_0_hit.get() {
+                        // Check if background pixel is opaque (approximate by color)
+                        if frame.pixels[idx] != universal_bg && x < 255 {
+                             // Check left clipping
+                             let bg_clip = (self.mask & 0x02) == 0;
+                             let spr_clip = (self.mask & 0x04) == 0;
+                             if !((bg_clip || spr_clip) && x < 8) {
+                                 self.sprite_0_hit.set(true);
+                             }
+                        }
+                    }
+
                     if behind_bg {
                         if frame.pixels[idx] == universal_bg {
                             frame.pixels[idx] = rgb;

@@ -4,6 +4,7 @@
 //! reusable components from the core module.
 
 use emu_core::apu::{PulseChannel, TimingMode, LENGTH_TABLE};
+use std::cell::Cell;
 
 /// Minimal NES APU with 2 pulse channels.
 ///
@@ -18,6 +19,11 @@ pub struct APU {
     /// Counts CPU cycles and triggers quarter/half frame events
     frame_counter_cycles: u32,
     frame_counter_mode: bool, // false = 4-step, true = 5-step
+    
+    // IRQ specific state (duplicated to avoid rewriting audio generation for now)
+    irq_frame_counter_cycles: u32,
+    irq_inhibit: bool,
+    irq_pending: Cell<bool>,
 }
 
 impl APU {
@@ -33,6 +39,9 @@ impl APU {
             timing,
             frame_counter_cycles: 0,
             frame_counter_mode: false,
+            irq_frame_counter_cycles: 0,
+            irq_inhibit: true, // Default is inhibited
+            irq_pending: Cell::new(false),
         }
     }
 
@@ -110,8 +119,17 @@ impl APU {
                 // Bit 7: Mode (0 = 4-step, 1 = 5-step)
                 // Bit 6: IRQ inhibit flag
                 self.frame_counter_mode = (val & 0x80) != 0;
+                self.irq_inhibit = (val & 0x40) != 0;
+
+                if self.irq_inhibit {
+                    self.irq_pending.set(false);
+                }
+
                 // Reset frame counter on write
                 self.frame_counter_cycles = 0;
+                self.irq_frame_counter_cycles = 0;
+                
+                // If 5-step mode, clock immediately (not implemented here for audio, but noted)
             }
 
             _ => {}
@@ -127,7 +145,7 @@ impl APU {
                 // Bits 2-3: Triangle and Noise (not implemented, return 0)
                 // Bit 4: DMC active (not implemented, return 0)
                 // Bit 5: unused (return 0)
-                // Bit 6: Frame interrupt (not implemented, return 0)
+                // Bit 6: Frame interrupt
                 // Bit 7: DMC interrupt (not implemented, return 0)
                 let mut status = 0u8;
                 if self.pulse1.length_counter > 0 {
@@ -136,9 +154,41 @@ impl APU {
                 if self.pulse2.length_counter > 0 {
                     status |= 0x02;
                 }
+                if self.irq_pending.get() {
+                    status |= 0x40;
+                    self.irq_pending.set(false); // Reading $4015 clears frame interrupt
+                }
                 status
             }
             _ => 0,
+        }
+    }
+
+    pub fn irq_pending(&self) -> bool {
+        self.irq_pending.get()
+    }
+
+    pub fn clock_irq(&mut self, cycles: u32) {
+        if self.frame_counter_mode {
+            return; // 5-step mode: no IRQ
+        }
+
+        let cpu_hz = self.timing.cpu_clock_hz();
+        let frame_counter_hz = self.timing.frame_counter_hz();
+        let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
+        // 4-step mode: IRQ at end of step 4 (approx 29828 cycles)
+        let irq_time = quarter_frame_cycles * 4;
+
+        self.irq_frame_counter_cycles += cycles;
+
+        if !self.irq_inhibit && self.irq_frame_counter_cycles >= irq_time {
+            self.irq_pending.set(true);
+        }
+
+        // Wrap around (simplified)
+        // In reality, it wraps slightly differently, but this ensures periodic IRQs
+        if self.irq_frame_counter_cycles >= irq_time + 20 { // small buffer
+             self.irq_frame_counter_cycles %= irq_time;
         }
     }
 

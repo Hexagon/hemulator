@@ -40,6 +40,17 @@ fn trace_pc_enabled() -> bool {
     })
 }
 
+#[allow(dead_code)]
+fn log_irq() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("EMU_LOG_IRQ").as_deref(),
+            Ok("1") | Ok("true") | Ok("TRUE")
+        )
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PcHotspot {
     pub pc: u16,
@@ -286,6 +297,11 @@ impl System for NesSystem {
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
 
+            // Clock APU IRQ counter
+            if let Some(b) = self.cpu.bus_mut() {
+                b.apu.clock_irq(used);
+            }
+
             let mut irq_to_fire = false;
             let mut nmi_to_fire = false;
 
@@ -326,6 +342,9 @@ impl System for NesSystem {
             }
 
             if irq_to_fire {
+                if log_irq() {
+                    eprintln!("System: Firing IRQ! Mapper/APU pending.");
+                }
                 self.cpu.trigger_irq();
                 irqs = irqs.wrapping_add(1);
             }

@@ -223,4 +223,36 @@ When no ROM is loaded or ROM fails to load, a default splash screen is displayed
 - Instructions: "Press F3 to open a ROM" and "Press F1 for help"
 - Clean dark blue background with cyan/white text
 
-Local reproduction: run the same commands the agent runs (build, clippy, test) from the workspace root.
+## Debug Environment Variables
+
+The emulator supports several environment variables for debugging:
+
+- **`EMU_LOG_UNKNOWN_OPS=1`**: Log unknown/unimplemented 6502 opcodes to stderr
+  - Useful for finding missing CPU instruction implementations
+  - Example: `$env:EMU_LOG_UNKNOWN_OPS=1; cargo run --release -- roms/nes/game.nes`
+
+- **`EMU_LOG_BRK=1`**: Log BRK instruction execution with PC and status register
+  - Shows when BRK is executed and where it jumps to (IRQ vector)
+  - Helpful for debugging unexpected BRK loops or interrupt issues
+  - Example: `$env:EMU_LOG_BRK=1; cargo run --release -- roms/nes/game.nes`
+
+- **`EMU_LOG_IRQ=1`**: Log when IRQ interrupts are fired
+  - Shows when mapper or APU IRQs are pending and triggered
+  - Useful for debugging IRQ timing issues
+  - Example: `$env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/game.nes`
+
+- **`EMU_TRACE_PC=1`**: Trace program counter (PC) execution
+  - Logs every PC address executed (high-volume output)
+  - Use with caution - generates massive log files
+  - Example: `$env:EMU_TRACE_PC=1; cargo run --release -- roms/nes/game.nes > trace.log`
+
+**PowerShell usage** (Windows):
+```powershell
+$env:EMU_LOG_BRK=1; $env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/excitebike.nes
+```
+
+**Bash usage** (Linux/macOS):
+```bash
+EMU_LOG_BRK=1 EMU_LOG_IRQ=1 cargo run --release -- roms/nes/excitebike.nes
+```
+

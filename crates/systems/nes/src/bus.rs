@@ -91,11 +91,12 @@ impl NesBus {
     }
 
     pub fn take_irq_pending(&mut self) -> bool {
-        if let Some(m) = &mut self.mapper {
+        let mapper_irq = if let Some(m) = &mut self.mapper {
             m.borrow_mut().take_irq_pending()
         } else {
             false
-        }
+        };
+        mapper_irq || self.apu.irq_pending()
     }
 
     /// Synthesize a PPU A12 low->high transition for mappers that use it for scanline IRQs

@@ -25,6 +25,17 @@ fn log_unknown_ops() -> bool {
         )
     })
 }
+
+#[allow(dead_code)]
+fn log_brk() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("EMU_LOG_BRK").as_deref(),
+            Ok("1") | Ok("true") | Ok("TRUE")
+        )
+    })
+}
 /// MOS 6502 CPU state and execution engine
 ///
 /// This is a generic, reusable 6502 CPU implementation that works with any
@@ -229,7 +240,9 @@ impl<M: Memory6502> Cpu6502<M> {
         s |= 0x20; // bit 5 is always set
         self.push_u8(s);
         self.status |= 0x04; // set I
-        self.pc = self.read_u16(0xFFFA);
+        let vector = self.read_u16(0xFFFA);
+        // eprintln!("CPU: NMI triggered at PC={:04X}, jumping to {:04X}", self.pc, vector);
+        self.pc = vector;
         self.cycles = self.cycles.wrapping_add(7);
     }
 
@@ -246,7 +259,9 @@ impl<M: Memory6502> Cpu6502<M> {
         s |= 0x20; // bit 5 always set
         self.push_u8(s);
         self.status |= 0x04; // set I
-        self.pc = self.read_u16(0xFFFE);
+        let vector = self.read_u16(0xFFFE);
+        eprintln!("CPU: IRQ triggered at PC={:04X}, jumping to {:04X}", self.pc, vector);
+        self.pc = vector;
         self.cycles = self.cycles.wrapping_add(7);
     }
 
@@ -583,8 +598,8 @@ impl<M: Memory6502> Cpu6502<M> {
                     4
                 }
             }
-            0xC9 | 0xC5 | 0xCD | 0xC1 | 0xD1 => {
-                // CMP variants (A - M)
+            0xC9 | 0xC5 | 0xCD | 0xC1 | 0xD1 | 0xD5 | 0xD9 | 0xDD => {
+                // CMP variants (A - M) - all addressing modes
                 let val = match op {
                     0xC9 => self.fetch_u8(),
                     0xC5 => {
@@ -601,6 +616,21 @@ impl<M: Memory6502> Cpu6502<M> {
                     }
                     0xD1 => {
                         let a = self.addr_indirect_y();
+                        self.read(a)
+                    }
+                    0xD5 => {
+                        // CMP zp,X
+                        let a = self.addr_zero_page_x();
+                        self.read(a)
+                    }
+                    0xD9 => {
+                        // CMP abs,Y
+                        let a = self.addr_absolute_y();
+                        self.read(a)
+                    }
+                    0xDD => {
+                        // CMP abs,X
+                        let a = self.addr_absolute_x();
                         self.read(a)
                     }
                     _ => 0,
@@ -1326,6 +1356,10 @@ impl<M: Memory6502> Cpu6502<M> {
                 // BRK is treated as a 2-byte instruction; PC is incremented by one extra
                 // before pushing.
                 let pc_to_push = self.pc.wrapping_add(1);
+                let brk_pc = self.pc.wrapping_sub(1);
+                if log_brk() {
+                    eprintln!("CPU: BRK executed at PC={:04X}, pushing {:04X}, status={:02X}", brk_pc, pc_to_push, self.status);
+                }
                 self.push_u16(pc_to_push);
 
                 let mut s = self.status;
@@ -1335,6 +1369,9 @@ impl<M: Memory6502> Cpu6502<M> {
 
                 self.status |= 0x04; // set I
                 self.pc = self.read_u16(0xFFFE);
+                if log_brk() {
+                    eprintln!("CPU: BRK jumped to {:04X}", self.pc);
+                }
                 self.cycles += 7;
                 7
             }
