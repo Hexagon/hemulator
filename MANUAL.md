@@ -46,6 +46,22 @@ The emulator will remember your last ROM and automatically load it next time you
 | F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
 
+### Emulation Speed Control
+
+Hold **F1** and press a number key to change the emulation speed:
+
+| Key Combo | Speed | Description |
+|-----------|-------|-------------|
+| F1 + 1 | 0.25x | Quarter speed (slow motion) |
+| F1 + 2 | 0.5x | Half speed |
+| F1 + 3 | 1x | Normal speed (default) |
+| F1 + 4 | 2x | Double speed (fast forward) |
+| F1 + 5 | 10x | Ultra fast (turbo mode) |
+
+The selected speed is automatically saved and restored when you restart the emulator. This is useful for:
+- **Slow motion (0.25x, 0.5x)**: Analyzing difficult sections or practicing tricky maneuvers
+- **Fast forward (2x, 10x)**: Skipping through slow parts, grinding, or replaying sections quickly
+
 ### CRT Filters (F11)
 
 Press **F11** to cycle through different CRT (Cathode Ray Tube) display filters that simulate the appearance of classic CRT monitors and TVs. These filters add visual effects to make the emulator output look more authentic to the original hardware experience.
@@ -98,7 +114,8 @@ Located in the same directory as the executable, this file stores your preferenc
     "mount_points": {
     "Cartridge": "/path/to/last/rom.nes"
   }
-  "crt_filter": "None"
+  "crt_filter": "None",
+  "emulation_speed": 1.0
 }
 ```
 
@@ -106,7 +123,9 @@ Located in the same directory as the executable, this file stores your preferenc
 - Edit this file to change key bindings
 - The window size is automatically saved when you resize the window
 - CRT filter preference is saved automatically when you cycle filters with F11
+- Emulation speed is saved automatically when you change it with F1 + number keys
 - Valid `crt_filter` values: "None", "Scanlines", "Phosphor", "CrtMonitor"
+- Valid `emulation_speed` values: 0.25, 0.5, 1.0, 2.0, 10.0 (or any positive number)
 
 **Mount Points**: The emulator now supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", future systems might have "BIOS", "Floppy1", etc.). When you press F3:
 - If the system has only one mount point (like NES), the file browser opens directly

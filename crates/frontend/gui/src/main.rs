@@ -306,7 +306,32 @@ fn main() {
     }
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // Toggle help overlay (F1)
+        // Speed selector: F1 + number keys (1-5) to set speed
+        if window.is_key_down(Key::F1) {
+            let mut new_speed: Option<f64> = None;
+
+            if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+                new_speed = Some(0.25);
+            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+                new_speed = Some(0.5);
+            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+                new_speed = Some(1.0);
+            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+                new_speed = Some(2.0);
+            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+                new_speed = Some(10.0);
+            }
+
+            if let Some(speed) = new_speed {
+                settings.emulation_speed = speed;
+                if let Err(e) = settings.save() {
+                    eprintln!("Warning: Failed to save speed setting: {}", e);
+                }
+                println!("Emulation speed: {}x", speed);
+            }
+        }
+
+        // Toggle help overlay (F1) - only when F1 is released without number key
         if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
@@ -626,7 +651,8 @@ fn main() {
                     // Audio generation: generate samples based on actual frame rate
                     // NTSC: ~60.1 FPS (≈734 samples), PAL: ~50.0 FPS (≈882 samples)
                     let timing = sys.timing();
-                    let samples_per_frame = (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
+                    let samples_per_frame =
+                        (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
                     let audio_samples = sys.get_audio_samples(samples_per_frame);
                     for s in audio_samples {
                         let _ = audio_tx.try_send(s);
@@ -659,11 +685,7 @@ fn main() {
         } else if show_mount_selector {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
-            let mount_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-            );
+            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
@@ -711,14 +733,16 @@ fn main() {
             }
         }
 
-        // Get target frame time from system timing mode
+        // Get target frame time from system timing mode, adjusted by emulation speed
         let target_frame_time = if rom_loaded {
             let timing = sys.timing();
             let frame_rate = timing.frame_rate_hz();
-            Duration::from_secs_f64(1.0 / frame_rate)
+            Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
         } else {
             // Default to NTSC timing when no ROM loaded
-            Duration::from_secs_f64(1.0 / emu_core::apu::TimingMode::Ntsc.frame_rate_hz())
+            Duration::from_secs_f64(
+                1.0 / (emu_core::apu::TimingMode::Ntsc.frame_rate_hz() * settings.emulation_speed),
+            )
         };
 
         if frame_dt < target_frame_time {

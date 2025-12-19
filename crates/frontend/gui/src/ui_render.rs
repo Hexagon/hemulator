@@ -234,6 +234,7 @@ pub fn create_help_overlay(
         settings.keyboard.left,
         settings.keyboard.right
     );
+    let speed_line = format!("  Speed: {:.2}x", settings.emulation_speed);
 
     let help_lines: Vec<&str> = vec![
         "HEMULATOR - Help",
@@ -254,6 +255,11 @@ pub fn create_help_overlay(
         "  F11 - CRT filter",
         "  F12 - Reset",
         "  ESC - Exit",
+        "",
+        "Speed (hold F1 + number):",
+        "  1 - 0.25x   3 - 1x",
+        "  2 - 0.5x    4 - 2x   5 - 10x",
+        &speed_line,
         "",
         "Press F1 to close",
     ];
