@@ -26,7 +26,6 @@ fn log_unknown_ops() -> bool {
     })
 }
 
-#[allow(dead_code)]
 fn log_brk() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
@@ -260,7 +259,6 @@ impl<M: Memory6502> Cpu6502<M> {
         self.push_u8(s);
         self.status |= 0x04; // set I
         let vector = self.read_u16(0xFFFE);
-        eprintln!("CPU: IRQ triggered at PC={:04X}, jumping to {:04X}", self.pc, vector);
         self.pc = vector;
         self.cycles = self.cycles.wrapping_add(7);
     }

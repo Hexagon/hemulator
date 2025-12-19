@@ -1,5 +1,6 @@
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
+#[cfg(test)]
 use emu_core::apu::TimingMode;
 
 /// MMC2 (Mapper 9) - Used primarily in Punch-Out!!

@@ -1,5 +1,6 @@
 use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
+#[cfg(test)]
 use emu_core::apu::TimingMode;
 
 /// AxROM (Mapper 7) - 32KB PRG switching with single-screen mirroring

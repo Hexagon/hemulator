@@ -40,7 +40,6 @@ fn trace_pc_enabled() -> bool {
     })
 }
 
-#[allow(dead_code)]
 fn log_irq() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
