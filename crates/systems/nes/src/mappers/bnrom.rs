@@ -55,11 +55,8 @@ impl Bnrom {
 
     pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu) {
         if (0x8000..=0xFFFF).contains(&addr) {
-            // Select 32KB bank
-            // Only use lower bits based on ROM size
-            // For 128KB (4 banks), use 2 bits; for 64KB (2 banks), use 1 bit
-            let bank_mask = (self.prg_bank_count() as u8).saturating_sub(1);
-            self.bank_select = val & bank_mask;
+            // Select 32KB bank - wrapping handled by modulo in read_prg
+            self.bank_select = val;
         }
     }
 
