@@ -60,9 +60,9 @@ impl APU {
                 let high = (val & 0x07) as u16;
                 let low = self.pulse1.timer_reload & 0xFF;
                 self.pulse1.set_timer((high << 8) | low);
-                // Trigger: reset phase and enable
+                // Trigger: reset phase
                 self.pulse1.reset_phase();
-                self.pulse1.enabled = true;
+                // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
                 let len_index = (val >> 3) & 0x1F;
                 self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
@@ -88,7 +88,7 @@ impl APU {
                 let freq_low = (self.pulse2.timer_reload & 0xFF) as u16;
                 self.pulse2.set_timer((freq_high << 8) | freq_low);
                 self.pulse2.reset_phase();
-                self.pulse2.enabled = true;
+                // Note: enabled flag is only controlled by $4015, not by writes to $4007
                 let len_index = (val >> 3) & 0x1F;
                 self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
             }
@@ -100,6 +100,30 @@ impl APU {
             }
 
             _ => {}
+        }
+    }
+
+    /// Read APU status register ($4015)
+    pub fn read_register(&self, addr: u16) -> u8 {
+        match addr {
+            0x4015 => {
+                // Bit 0: Pulse 1 length counter > 0
+                // Bit 1: Pulse 2 length counter > 0
+                // Bits 2-3: Triangle and Noise (not implemented, return 0)
+                // Bit 4: DMC active (not implemented, return 0)
+                // Bits 5: unused (return 0)
+                // Bit 6: Frame interrupt (not implemented, return 0)
+                // Bit 7: DMC interrupt (not implemented, return 0)
+                let mut status = 0u8;
+                if self.pulse1.length_counter > 0 {
+                    status |= 0x01;
+                }
+                if self.pulse2.length_counter > 0 {
+                    status |= 0x02;
+                }
+                status
+            }
+            _ => 0,
         }
     }
 
