@@ -1,4 +1,5 @@
 use crate::cartridge::Cartridge;
+#[cfg(test)]
 use emu_core::apu::TimingMode;
 
 /// NROM (Mapper 0) - Basic mapper with no banking
