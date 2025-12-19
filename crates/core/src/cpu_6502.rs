@@ -276,6 +276,31 @@ impl<M: Memory6502> Cpu6502<M> {
         }
     }
 
+    /// Perform ADC operation on a value and update accumulator and flags
+    #[inline]
+    fn adc(&mut self, val: u8) {
+        let carry_in = if (self.status & 0x01) != 0 { 1u16 } else { 0u16 };
+        let sum = self.a as u16 + val as u16 + carry_in;
+        let result = sum as u8;
+        
+        // Set carry flag
+        if sum > 0xFF {
+            self.status |= 0x01;
+        } else {
+            self.status &= !0x01;
+        }
+        
+        // Set overflow flag: (~(A ^ M) & (A ^ R)) & 0x80
+        if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
+            self.status |= 0x40;
+        } else {
+            self.status &= !0x40;
+        }
+        
+        self.a = result;
+        self.set_zero_and_negative(self.a);
+    }
+
     /// Execute one instruction and return cycles used.
     pub fn step(&mut self) -> u32 {
         let op = self.fetch_u8();
@@ -444,26 +469,7 @@ impl<M: Memory6502> Cpu6502<M> {
             0x69 => {
                 // ADC immediate
                 let val = self.fetch_u8();
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01; // set carry
-                } else {
-                    self.status &= !0x01;
-                }
-                // overflow: (~(A ^ M) & (A ^ R)) & 0x80
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 2;
                 2
             }
@@ -1096,25 +1102,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC zero page
                 let zp = self.fetch_u8() as u16;
                 let val = self.read(zp);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 3;
                 3
             }
@@ -1167,25 +1155,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC absolute
                 let addr = self.fetch_u16();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 4;
                 4
             }
@@ -1193,25 +1163,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC zero page,X
                 let addr = self.addr_zero_page_x();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 4;
                 4
             }
@@ -1219,25 +1171,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC absolute,X
                 let addr = self.addr_absolute_x();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 4;
                 4
             }
@@ -1245,25 +1179,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC absolute,Y
                 let addr = self.addr_absolute_y();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 4;
                 4
             }
@@ -1271,25 +1187,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC (indirect,X)
                 let addr = self.addr_indirect_x();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 6;
                 6
             }
@@ -1297,25 +1195,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // ADC (indirect),Y
                 let addr = self.addr_indirect_y();
                 let val = self.read(addr);
-                let carry_in = if (self.status & 0x01) != 0 {
-                    1u16
-                } else {
-                    0u16
-                };
-                let sum = self.a as u16 + val as u16 + carry_in;
-                let result = sum as u8;
-                if sum > 0xFF {
-                    self.status |= 0x01;
-                } else {
-                    self.status &= !0x01;
-                }
-                if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40;
-                } else {
-                    self.status &= !0x40;
-                }
-                self.a = result;
-                self.set_zero_and_negative(self.a);
+                self.adc(val);
                 self.cycles += 5;
                 5
             }
