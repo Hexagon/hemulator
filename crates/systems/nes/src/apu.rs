@@ -152,7 +152,8 @@ impl APU {
         // Frame counter clocking intervals (4-step mode)
         // Half frame: clocks length counter at ~120 Hz (NTSC) or ~100 Hz (PAL)
         let frame_counter_hz = self.timing.frame_counter_hz();
-        let half_frame_cycles = (cpu_hz / (frame_counter_hz / 2.0)) as u32;
+        let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
+        let half_frame_cycles = quarter_frame_cycles * 2;
         
         // Full frame cycle count for resetting counter (prevents overflow)
         // 4-step mode: 4 half-frames, 5-step mode: 5 half-frames
