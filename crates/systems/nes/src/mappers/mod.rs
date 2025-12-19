@@ -4,22 +4,28 @@
 //! that handle PRG/CHR banking and other cartridge hardware features.
 
 mod axrom;
+mod camerica;
 mod cnrom;
 mod colordreams;
+mod gxrom;
 mod mmc1;
 mod mmc2;
 mod mmc3;
 mod mmc4;
+mod namco118;
 mod nrom;
 mod uxrom;
 
 pub use axrom::Axrom;
+pub use camerica::Camerica;
 pub use cnrom::Cnrom;
 pub use colordreams::ColorDreams;
+pub use gxrom::Gxrom;
 pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
 pub use mmc3::Mmc3;
 pub use mmc4::Mmc4;
+pub use namco118::Namco118;
 pub use nrom::Nrom;
 pub use uxrom::Uxrom;
 
@@ -38,6 +44,9 @@ pub enum Mapper {
     Mmc2(Mmc2),
     Mmc4(Mmc4),
     ColorDreams(ColorDreams),
+    Gxrom(Gxrom),
+    Camerica(Camerica),
+    Namco118(Namco118),
 }
 
 impl Mapper {
@@ -52,6 +61,9 @@ impl Mapper {
             9 => Mapper::Mmc2(Mmc2::new(cart, ppu)),
             10 => Mapper::Mmc4(Mmc4::new(cart, ppu)),
             11 => Mapper::ColorDreams(ColorDreams::new(cart, ppu)),
+            66 => Mapper::Gxrom(Gxrom::new(cart, ppu)),
+            71 => Mapper::Camerica(Camerica::new(cart, ppu)),
+            206 => Mapper::Namco118(Namco118::new(cart, ppu)),
             _ => Mapper::Nrom(Nrom::new(cart)),
         }
     }
@@ -68,6 +80,9 @@ impl Mapper {
             Mapper::Mmc2(m) => m.read_prg(addr),
             Mapper::Mmc4(m) => m.read_prg(addr),
             Mapper::ColorDreams(m) => m.read_prg(addr),
+            Mapper::Gxrom(m) => m.read_prg(addr),
+            Mapper::Camerica(m) => m.read_prg(addr),
+            Mapper::Namco118(m) => m.read_prg(addr),
         }
     }
 
@@ -86,6 +101,9 @@ impl Mapper {
             Mapper::Mmc2(m) => m.write_prg(addr, val, ppu),
             Mapper::Mmc4(m) => m.write_prg(addr, val, ppu),
             Mapper::ColorDreams(m) => m.write_prg(addr, val, ppu),
+            Mapper::Gxrom(m) => m.write_prg(addr, val, ppu),
+            Mapper::Camerica(m) => m.write_prg(addr, val, ppu),
+            Mapper::Namco118(m) => m.write_prg(addr, val, ppu),
         }
     }
 
@@ -101,6 +119,9 @@ impl Mapper {
             Mapper::Mmc2(m) => m.prg_rom(),
             Mapper::Mmc4(m) => m.prg_rom(),
             Mapper::ColorDreams(m) => m.prg_rom(),
+            Mapper::Gxrom(m) => m.prg_rom(),
+            Mapper::Camerica(m) => m.prg_rom(),
+            Mapper::Namco118(m) => m.prg_rom(),
         }
     }
 
@@ -116,6 +137,9 @@ impl Mapper {
             Mapper::Mmc2(_) => false,
             Mapper::Mmc4(_) => false,
             Mapper::ColorDreams(_) => false,
+            Mapper::Gxrom(_) => false,
+            Mapper::Camerica(_) => false,
+            Mapper::Namco118(_) => false,
         }
     }
 
@@ -156,6 +180,9 @@ impl Mapper {
             Mapper::Mmc2(_) => 9,
             Mapper::Mmc4(_) => 10,
             Mapper::ColorDreams(_) => 11,
+            Mapper::Gxrom(_) => 66,
+            Mapper::Camerica(_) => 71,
+            Mapper::Namco118(_) => 206,
         }
     }
 }

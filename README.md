@@ -4,7 +4,7 @@ A cross-platform, multi-system console emulator written in Rust, focusing on NES
 
 ## Features
 
-- 🎮 **NES Emulation**: Full support for 86% of NES games via 9 mapper implementations
+- 🎮 **NES Emulation**: Full support for ~87-88% of NES games via 12 mapper implementations
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
@@ -35,26 +35,32 @@ cargo run --release -p emu_gui
 
 ## NES Mapper Support
 
-The NES emulator supports 9 mappers covering approximately **86% of all NES games**.
+The NES emulator supports 12 mappers covering approximately **87-88% of all NES games** (based on nescartdb statistics).
 
 ### Supported Mappers
-- **Mapper 0 (NROM)** - Basic mapper with no banking
-- **Mapper 1 (MMC1/SxROM)** - Tetris, Metroid, The Legend of Zelda
-- **Mapper 2 (UxROM)** - Mega Man, Castlevania, Contra
-- **Mapper 3 (CNROM)** - Gradius, Paperboy
-- **Mapper 4 (MMC3/TxROM)** - Super Mario Bros. 3, Mega Man 3-6
-- **Mapper 7 (AxROM)** - Battletoads, Marble Madness
+- **Mapper 0 (NROM)** - Basic mapper with no banking (~10% of games)
+- **Mapper 1 (MMC1/SxROM)** - Tetris, Metroid, The Legend of Zelda (~28% of games)
+- **Mapper 2 (UxROM)** - Mega Man, Castlevania, Contra (~11% of games)
+- **Mapper 3 (CNROM)** - Gradius, Paperboy (~6.4% of games)
+- **Mapper 4 (MMC3/TxROM)** - Super Mario Bros. 3, Mega Man 3-6 (~24% of games)
+- **Mapper 7 (AxROM)** - Battletoads, Marble Madness (~3.1% of games)
 - **Mapper 9 (MMC2/PxROM)** - Mike Tyson's Punch-Out!!
 - **Mapper 10 (MMC4/FxROM)** - Fire Emblem (Japanese exclusives)
-- **Mapper 11 (Color Dreams)** - Color Dreams and Wisdom Tree games
+- **Mapper 11 (Color Dreams)** - Color Dreams and Wisdom Tree games (~1.3% of games)
+- **Mapper 66 (GxROM)** - SMB + Duck Hunt, Doraemon (~1.2% of games)
+- **Mapper 71 (Camerica/Codemasters)** - Fire Hawk, Micro Machines (~0.6% of games)
+- **Mapper 206 (Namco 118)** - Dragon Spirit, Famista (~1.8% of games)
 
 ### Implementation Details
 - All mappers handle basic PRG and CHR banking
 - MMC1: Serial register writes and mirroring control
 - MMC3: IRQ generation for raster effects
 - MMC2/MMC4: PPU-triggered CHR latch switching
+- Namco 118: MMC3-like banking without IRQ support
+- GxROM: Dual PRG/CHR bank switching
+- Camerica: UxROM variant with bus conflict prevention
 - CHR-RAM support for games without CHR-ROM
-- Comprehensive unit tests (48 tests total)
+- Comprehensive unit tests (51 tests total)
 
 See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibility.
 

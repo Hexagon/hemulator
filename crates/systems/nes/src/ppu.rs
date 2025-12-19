@@ -127,6 +127,10 @@ impl Ppu {
         self.mirroring = mirroring;
     }
 
+    pub fn get_mirroring(&self) -> Mirroring {
+        self.mirroring
+    }
+
     pub fn nmi_enabled(&self) -> bool {
         (self.ctrl & 0x80) != 0
     }
