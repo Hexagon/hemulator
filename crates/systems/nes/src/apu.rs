@@ -149,18 +149,19 @@ impl APU {
         let cpu_hz = self.timing.cpu_clock_hz();
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
-        // Frame counter clocking intervals (4-step mode)
-        // Half frame: clocks length counter at ~120 Hz (NTSC) or ~100 Hz (PAL)
+        // Frame counter clocking intervals
+        // Quarter frame: clocks envelope at ~240 Hz (NTSC) or ~200 Hz (PAL)
+        // Half frame: clocks length counter at quarters 2 and 4
         let frame_counter_hz = self.timing.frame_counter_hz();
         let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
-        let half_frame_cycles = quarter_frame_cycles * 2;
         
         // Full frame cycle count for resetting counter (prevents overflow)
-        // 4-step mode: 4 half-frames, 5-step mode: 5 half-frames
+        // 4-step mode: 4 quarter frames (~29829 cycles NTSC)
+        // 5-step mode: 5 quarter frames (~37281 cycles NTSC)
         let full_frame_cycles = if self.frame_counter_mode {
-            half_frame_cycles * 5 // 5-step mode
+            quarter_frame_cycles * 5 // 5-step mode
         } else {
-            half_frame_cycles * 4 // 4-step mode
+            quarter_frame_cycles * 4 // 4-step mode
         };
 
         let mut out = Vec::with_capacity(sample_count);
@@ -174,8 +175,8 @@ impl APU {
 
             let mut acc = 0i32;
             for _ in 0..cycles {
-                // Clock frame counter with modular wrapping
-                let prev_half = self.frame_counter_cycles / half_frame_cycles;
+                // Clock frame counter
+                let prev_quarter = self.frame_counter_cycles / quarter_frame_cycles;
                 
                 self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
                 
@@ -184,15 +185,21 @@ impl APU {
                     self.frame_counter_cycles = 0;
                 }
                 
-                // Check for half frame (length counter clocking)
-                let curr_half = self.frame_counter_cycles / half_frame_cycles;
-                if curr_half != prev_half {
-                    // Clock length counters at half-frame rate (~120 Hz NTSC, ~100 Hz PAL)
-                    if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
-                        self.pulse1.length_counter -= 1;
-                    }
-                    if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
-                        self.pulse2.length_counter -= 1;
+                // Check for quarter frame boundaries
+                let curr_quarter = self.frame_counter_cycles / quarter_frame_cycles;
+                if curr_quarter != prev_quarter {
+                    // Length counters clock at quarters 2 and 4 (half frames)
+                    // In 4-step mode: quarters 0, 1, 2, 3 -> clock at 1 and 3 (0-indexed)
+                    // In 5-step mode: quarters 0, 1, 2, 3, 4 -> clock at 1 and 3 only (NOT at 4)
+                    let quarter_index = curr_quarter % 5; // Will be 0-4 in 5-step, 0-3 in 4-step
+                    if quarter_index == 1 || quarter_index == 3 {
+                        // Clock length counters at half-frame rate (~120 Hz NTSC, ~100 Hz PAL)
+                        if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
+                            self.pulse1.length_counter -= 1;
+                        }
+                        if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
+                            self.pulse2.length_counter -= 1;
+                        }
                     }
                 }
                 
