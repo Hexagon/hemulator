@@ -1,32 +1,138 @@
-//! Minimal Game Boy system skeleton for wiring into the core.
+//! Game Boy system implementation
 
-use emu_core::{types::Frame, MountPointInfo, System};
+use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
-#[derive(Debug, Default)]
+mod bus;
+use bus::GbBus;
+
 pub struct GbSystem {
-    // placeholder fields for CPU, PPU (LCD), MMU, cartridge
+    cpu: CpuLr35902<GbBus>,
+    cart_loaded: bool,
+}
+
+impl Default for GbSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GbSystem {
+    pub fn new() -> Self {
+        let bus = GbBus::new();
+        let mut cpu = CpuLr35902::new(bus);
+        cpu.reset();
+        
+        Self {
+            cpu,
+            cart_loaded: false,
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("GB error")]
-pub struct GbError;
+pub enum GbError {
+    #[error("No cartridge loaded")]
+    NoCartridge,
+    #[error("Invalid mount point")]
+    InvalidMountPoint,
+}
 
 impl System for GbSystem {
     type Error = GbError;
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        self.cpu.reset();
+    }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
+        if !self.cart_loaded {
+            return Err(GbError::NoCartridge);
+        }
+
+        // Game Boy runs at ~4.194304 MHz
+        // Frame rate is ~59.73 Hz
+        // Cycles per frame: 4194304 / 59.73 ≈ 70224 cycles
+        const CYCLES_PER_FRAME: u32 = 70224;
+        
+        let mut cycles = 0;
+        while cycles < CYCLES_PER_FRAME {
+            cycles += self.cpu.step();
+        }
+
         // Game Boy native framebuffer is 160x144
+        // For now, return empty frame (PPU not implemented)
         Ok(Frame::new(160, 144))
     }
 
     fn save_state(&self) -> serde_json::Value {
-        serde_json::json!({ "system": "gb", "version": 1 })
+        serde_json::json!({
+            "system": "gb",
+            "version": 1,
+            "cpu": {
+                "a": self.cpu.a,
+                "f": self.cpu.f,
+                "b": self.cpu.b,
+                "c": self.cpu.c,
+                "d": self.cpu.d,
+                "e": self.cpu.e,
+                "h": self.cpu.h,
+                "l": self.cpu.l,
+                "sp": self.cpu.sp,
+                "pc": self.cpu.pc,
+                "ime": self.cpu.ime,
+                "halted": self.cpu.halted,
+                "stopped": self.cpu.stopped,
+            }
+        })
     }
 
-    fn load_state(&mut self, _v: &serde_json::Value) -> Result<(), serde_json::Error> {
+    fn load_state(&mut self, v: &serde_json::Value) -> Result<(), serde_json::Error> {
+        if let Some(cpu_state) = v.get("cpu") {
+            if let Some(a) = cpu_state.get("a").and_then(|v| v.as_u64()) {
+                self.cpu.a = a as u8;
+            }
+            if let Some(f) = cpu_state.get("f").and_then(|v| v.as_u64()) {
+                self.cpu.f = f as u8;
+            }
+            if let Some(b) = cpu_state.get("b").and_then(|v| v.as_u64()) {
+                self.cpu.b = b as u8;
+            }
+            if let Some(c) = cpu_state.get("c").and_then(|v| v.as_u64()) {
+                self.cpu.c = c as u8;
+            }
+            if let Some(d) = cpu_state.get("d").and_then(|v| v.as_u64()) {
+                self.cpu.d = d as u8;
+            }
+            if let Some(e) = cpu_state.get("e").and_then(|v| v.as_u64()) {
+                self.cpu.e = e as u8;
+            }
+            if let Some(h) = cpu_state.get("h").and_then(|v| v.as_u64()) {
+                self.cpu.h = h as u8;
+            }
+            if let Some(l) = cpu_state.get("l").and_then(|v| v.as_u64()) {
+                self.cpu.l = l as u8;
+            }
+            if let Some(sp) = cpu_state.get("sp").and_then(|v| v.as_u64()) {
+                self.cpu.sp = sp as u16;
+            }
+            if let Some(pc) = cpu_state.get("pc").and_then(|v| v.as_u64()) {
+                self.cpu.pc = pc as u16;
+            }
+            if let Some(ime) = cpu_state.get("ime").and_then(|v| v.as_bool()) {
+                self.cpu.ime = ime;
+            }
+            if let Some(halted) = cpu_state.get("halted").and_then(|v| v.as_bool()) {
+                self.cpu.halted = halted;
+            }
+            if let Some(stopped) = cpu_state.get("stopped").and_then(|v| v.as_bool()) {
+                self.cpu.stopped = stopped;
+            }
+        }
         Ok(())
+    }
+
+    fn supports_save_states(&self) -> bool {
+        true
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
@@ -38,22 +144,100 @@ impl System for GbSystem {
         }]
     }
 
-    fn mount(&mut self, mount_point_id: &str, _data: &[u8]) -> Result<(), Self::Error> {
+    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            return Err(GbError);
+            return Err(GbError::InvalidMountPoint);
         }
-        // Skeleton implementation - not yet functional
+        
+        self.cpu.memory.load_cart(data);
+        self.cart_loaded = true;
+        self.reset();
+        
         Ok(())
     }
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            return Err(GbError);
+            return Err(GbError::InvalidMountPoint);
         }
+        
+        self.cart_loaded = false;
         Ok(())
     }
 
-    fn is_mounted(&self, _mount_point_id: &str) -> bool {
-        false
+    fn is_mounted(&self, mount_point_id: &str) -> bool {
+        mount_point_id == "Cartridge" && self.cart_loaded
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gb_system_creation() {
+        let sys = GbSystem::new();
+        assert!(!sys.cart_loaded);
+    }
+
+    #[test]
+    fn test_gb_mount_points() {
+        let sys = GbSystem::new();
+        let mount_points = sys.mount_points();
+        assert_eq!(mount_points.len(), 1);
+        assert_eq!(mount_points[0].id, "Cartridge");
+        assert!(mount_points[0].required);
+    }
+
+    #[test]
+    fn test_gb_mount_unmount() {
+        let mut sys = GbSystem::new();
+        assert!(!sys.is_mounted("Cartridge"));
+
+        // Mount a minimal ROM
+        let rom = vec![0; 0x8000]; // 32KB ROM
+        assert!(sys.mount("Cartridge", &rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        assert!(sys.unmount("Cartridge").is_ok());
+        assert!(!sys.is_mounted("Cartridge"));
+    }
+
+    #[test]
+    fn test_gb_save_load_state() {
+        let sys = GbSystem::new();
+        let state = sys.save_state();
+        assert_eq!(state["system"], "gb");
+        assert_eq!(state["version"], 1);
+
+        let mut sys2 = GbSystem::new();
+        assert!(sys2.load_state(&state).is_ok());
+    }
+
+    #[test]
+    fn test_gb_supports_save_states() {
+        let sys = GbSystem::new();
+        assert!(sys.supports_save_states());
+    }
+
+    #[test]
+    fn test_gb_step_frame_without_cart() {
+        let mut sys = GbSystem::new();
+        let result = sys.step_frame();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_gb_step_frame_with_cart() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+        
+        let result = sys.step_frame();
+        assert!(result.is_ok());
+        let frame = result.unwrap();
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 144);
+    }
+}
+
