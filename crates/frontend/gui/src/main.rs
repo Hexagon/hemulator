@@ -387,27 +387,6 @@ fn main() {
                     }
                 }
             }
-
-            // Render slot selector
-            let has_saves = [
-                game_saves.slots.contains_key(&1),
-                game_saves.slots.contains_key(&2),
-                game_saves.slots.contains_key(&3),
-                game_saves.slots.contains_key(&4),
-                game_saves.slots.contains_key(&5),
-            ];
-            let slot_buffer = ui_render::create_slot_selector_overlay(
-                width,
-                height,
-                slot_selector_mode,
-                &has_saves,
-            );
-            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
         }
 
         // Handle mount point selector
@@ -481,19 +460,6 @@ fn main() {
                     }
                 }
             }
-
-            // Render mount point selector
-            let mount_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-            );
-            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
         }
 
         // Prepare help overlay buffer when requested; keep processing input so other
@@ -605,8 +571,8 @@ fn main() {
         }
 
         // Handle controller input / emulation step when ROM is loaded.
-        // Debug overlay should NOT pause the game.
-        if rom_loaded && !show_help {
+        // Debug overlay should NOT pause the game, but selectors should.
+        if rom_loaded && !show_help && !show_slot_selector && !show_mount_selector {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -652,7 +618,42 @@ fn main() {
             }
         }
 
-        let frame_to_present: &[u32] = if let Some(ref overlay) = debug_overlay {
+        let frame_to_present: &[u32] = if show_slot_selector {
+            // Render slot selector overlay
+            let has_saves = [
+                game_saves.slots.contains_key(&1),
+                game_saves.slots.contains_key(&2),
+                game_saves.slots.contains_key(&3),
+                game_saves.slots.contains_key(&4),
+                game_saves.slots.contains_key(&5),
+            ];
+            let slot_buffer = ui_render::create_slot_selector_overlay(
+                width,
+                height,
+                slot_selector_mode,
+                &has_saves,
+            );
+            window
+                .update_with_buffer(&slot_buffer, width, height)
+                .unwrap_or_else(|e| {
+                    eprintln!("Window update error: {}", e);
+                });
+            &[]
+        } else if show_mount_selector {
+            // Render mount point selector overlay
+            let mount_points = sys.mount_points();
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+            );
+            window
+                .update_with_buffer(&mount_buffer, width, height)
+                .unwrap_or_else(|e| {
+                    eprintln!("Window update error: {}", e);
+                });
+            &[]
+        } else if let Some(ref overlay) = debug_overlay {
             let composed = blend_over(&buffer, overlay);
             // Keep the composed buffer alive for the duration of update_with_buffer.
             window
