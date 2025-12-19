@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 /// Available CRT filter types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CrtFilter {
     /// No filter - raw pixels
+    #[default]
     None,
     /// Scanlines effect - horizontal lines simulating CRT raster lines
     Scanlines,
@@ -63,11 +65,6 @@ impl CrtFilter {
     }
 }
 
-impl Default for CrtFilter {
-    fn default() -> Self {
-        CrtFilter::None
-    }
-}
 
 /// Extract RGB components from a 0xRRGGBB color
 #[inline]

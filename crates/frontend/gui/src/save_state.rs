@@ -127,9 +127,7 @@ impl GameSaves {
                 // Verify ROM hash if present in save slot
                 if let Some(ref saved_hash) = save_slot.rom_hash {
                     if saved_hash != current_rom_hash {
-                        return Err(format!(
-                            "ROM hash mismatch: save state was created with a different ROM"
-                        )
+                        return Err("ROM hash mismatch: save state was created with a different ROM".to_string()
                         .into());
                     }
                 }

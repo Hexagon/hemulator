@@ -277,7 +277,7 @@ fn main() {
         debug_assert_eq!(base.len(), overlay.len());
         let mut out = Vec::with_capacity(base.len());
         for (b, o) in base.iter().copied().zip(overlay.iter().copied()) {
-            let a = ((o >> 24) & 0xFF) as u32;
+            let a = (o >> 24) & 0xFF;
             if a == 0 {
                 out.push(b);
                 continue;
@@ -288,13 +288,13 @@ fn main() {
             }
 
             let inv = 255 - a;
-            let br = ((b >> 16) & 0xFF) as u32;
-            let bg = ((b >> 8) & 0xFF) as u32;
-            let bb = (b & 0xFF) as u32;
+            let br = (b >> 16) & 0xFF;
+            let bg = (b >> 8) & 0xFF;
+            let bb = b & 0xFF;
 
-            let or = ((o >> 16) & 0xFF) as u32;
-            let og = ((o >> 8) & 0xFF) as u32;
-            let ob = (o & 0xFF) as u32;
+            let or = (o >> 16) & 0xFF;
+            let og = (o >> 8) & 0xFF;
+            let ob = o & 0xFF;
 
             let r = (or * a + br * inv) / 255;
             let g = (og * a + bg * inv) / 255;
