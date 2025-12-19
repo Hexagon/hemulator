@@ -1,6 +1,6 @@
 //! Minimal Game Boy system skeleton for wiring into the core.
 
-use emu_core::{types::Frame, System, MountPointInfo};
+use emu_core::{types::Frame, MountPointInfo, System};
 
 #[derive(Debug, Default)]
 pub struct GbSystem {

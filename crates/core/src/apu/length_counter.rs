@@ -26,6 +26,7 @@ pub struct LengthCounter {
 }
 
 impl LengthCounter {
+    /// Create a new length counter with default state
     pub fn new() -> Self {
         Self {
             value: 0,

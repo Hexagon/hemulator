@@ -32,6 +32,7 @@ pub struct TriangleChannel {
 }
 
 impl TriangleChannel {
+    /// Create a new triangle channel with default state
     pub fn new() -> Self {
         Self {
             timer_reload: 0,
