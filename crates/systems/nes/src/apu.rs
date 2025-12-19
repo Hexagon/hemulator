@@ -150,11 +150,17 @@ impl APU {
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
         // Frame counter clocking intervals (4-step mode)
-        // Quarter frame: clocks envelope at ~240 Hz (NTSC) or ~200 Hz (PAL)
         // Half frame: clocks length counter at ~120 Hz (NTSC) or ~100 Hz (PAL)
         let frame_counter_hz = self.timing.frame_counter_hz();
-        let quarter_frame_cycles = (cpu_hz / frame_counter_hz) as u32;
-        let half_frame_cycles = quarter_frame_cycles * 2;
+        let half_frame_cycles = (cpu_hz / (frame_counter_hz / 2.0)) as u32;
+        
+        // Full frame cycle count for resetting counter (prevents overflow)
+        // 4-step mode: 4 half-frames, 5-step mode: 5 half-frames
+        let full_frame_cycles = if self.frame_counter_mode {
+            half_frame_cycles * 5 // 5-step mode
+        } else {
+            half_frame_cycles * 4 // 4-step mode
+        };
 
         let mut out = Vec::with_capacity(sample_count);
         for _ in 0..sample_count {
@@ -167,10 +173,15 @@ impl APU {
 
             let mut acc = 0i32;
             for _ in 0..cycles {
-                // Clock frame counter (wraps at a full frame cycle count)
+                // Clock frame counter with modular wrapping
                 let prev_half = self.frame_counter_cycles / half_frame_cycles;
                 
                 self.frame_counter_cycles = self.frame_counter_cycles.wrapping_add(1);
+                
+                // Reset frame counter at end of full frame to prevent overflow issues
+                if self.frame_counter_cycles >= full_frame_cycles {
+                    self.frame_counter_cycles = 0;
+                }
                 
                 // Check for half frame (length counter clocking)
                 let curr_half = self.frame_counter_cycles / half_frame_cycles;
