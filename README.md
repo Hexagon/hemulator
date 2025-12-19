@@ -4,7 +4,7 @@ A cross-platform, multi-system console emulator written in Rust, focusing on NES
 
 ## Features
 
-- 🎮 **NES Emulation**: Full support for ~87-88% of NES games via 12 mapper implementations
+- 🎮 **NES Emulation**: Full support for ~90%+ of NES games via 14 mapper implementations
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
@@ -35,7 +35,7 @@ cargo run --release -p emu_gui
 
 ## NES Mapper Support
 
-The NES emulator supports 12 mappers covering approximately **87-88% of all NES games** (based on nescartdb statistics).
+The NES emulator supports 14 mappers covering approximately **90%+ of all NES games** (based on nescartdb statistics).
 
 ### Supported Mappers
 - **Mapper 0 (NROM)** - Basic mapper with no banking (~10% of games)
@@ -47,8 +47,10 @@ The NES emulator supports 12 mappers covering approximately **87-88% of all NES 
 - **Mapper 9 (MMC2/PxROM)** - Mike Tyson's Punch-Out!!
 - **Mapper 10 (MMC4/FxROM)** - Fire Emblem (Japanese exclusives)
 - **Mapper 11 (Color Dreams)** - Color Dreams and Wisdom Tree games (~1.3% of games)
+- **Mapper 34 (BNROM)** - Deadly Towers, homebrew titles
 - **Mapper 66 (GxROM)** - SMB + Duck Hunt, Doraemon (~1.2% of games)
 - **Mapper 71 (Camerica/Codemasters)** - Fire Hawk, Micro Machines (~0.6% of games)
+- **Mapper 79 (NINA-03/06)** - AVE games like Dudes with Attitude, Pyramid
 - **Mapper 206 (Namco 118)** - Dragon Spirit, Famista (~1.8% of games)
 
 ### Implementation Details
@@ -58,9 +60,11 @@ The NES emulator supports 12 mappers covering approximately **87-88% of all NES 
 - MMC2/MMC4: PPU-triggered CHR latch switching
 - Namco 118: MMC3-like banking without IRQ support
 - GxROM: Dual PRG/CHR bank switching
+- BNROM: Simple 32KB PRG bank switching with CHR-RAM
 - Camerica: UxROM variant with bus conflict prevention
+- NINA-03/06: AVE discrete logic mapper with unusual register range
 - CHR-RAM support for games without CHR-ROM
-- Comprehensive unit tests (51 tests total)
+- Comprehensive unit tests (61 tests total)
 
 See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibility.
 
