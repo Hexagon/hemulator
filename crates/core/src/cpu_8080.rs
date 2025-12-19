@@ -201,9 +201,13 @@ impl<M: Memory8080> Cpu8080<M> {
         self.set_flag(FLAG_P, val.count_ones() % 2 == 0);
     }
 
-    fn update_flags_ac(&mut self, a: u8, b: u8, carry: bool) {
-        let c = if carry { 1 } else { 0 };
-        self.set_flag(FLAG_AC, ((a & 0x0F) + (b & 0x0F) + c) > 0x0F);
+    fn update_flags_ac_add(&mut self, a: u8, b: u8, carry: u8) {
+        self.set_flag(FLAG_AC, ((a & 0x0F) + (b & 0x0F) + carry) > 0x0F);
+    }
+
+    fn update_flags_ac_sub(&mut self, a: u8, b: u8, borrow: u8) {
+        // For subtraction, AC is set if borrow from bit 4
+        self.set_flag(FLAG_AC, (a & 0x0F) < ((b & 0x0F) + borrow));
     }
 
     // Arithmetic operations
@@ -211,7 +215,7 @@ impl<M: Memory8080> Cpu8080<M> {
         let c = if carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let result = self.a as u16 + val as u16 + c as u16;
         
-        self.update_flags_ac(self.a, val, carry && self.get_flag(FLAG_C));
+        self.update_flags_ac_add(self.a, val, c);
         self.set_flag(FLAG_C, result > 0xFF);
         self.a = result as u8;
         self.update_flags_szp(self.a);
@@ -221,7 +225,7 @@ impl<M: Memory8080> Cpu8080<M> {
         let c = if carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let result = self.a as i16 - val as i16 - c as i16;
         
-        self.update_flags_ac(self.a, !val, !carry || !self.get_flag(FLAG_C));
+        self.update_flags_ac_sub(self.a, val, c);
         self.set_flag(FLAG_C, result < 0);
         self.a = result as u8;
         self.update_flags_szp(self.a);
@@ -250,21 +254,21 @@ impl<M: Memory8080> Cpu8080<M> {
 
     fn cmp(&mut self, val: u8) {
         let result = self.a as i16 - val as i16;
-        self.update_flags_ac(self.a, !val, true);
+        self.update_flags_ac_sub(self.a, val, 0);
         self.set_flag(FLAG_C, result < 0);
         self.update_flags_szp(result as u8);
     }
 
     fn inr(&mut self, val: u8) -> u8 {
         let result = val.wrapping_add(1);
-        self.update_flags_ac(val, 1, false);
+        self.update_flags_ac_add(val, 1, 0);
         self.update_flags_szp(result);
         result
     }
 
     fn dcr(&mut self, val: u8) -> u8 {
         let result = val.wrapping_sub(1);
-        self.update_flags_ac(val, !1, true);
+        self.update_flags_ac_sub(val, 1, 0);
         self.update_flags_szp(result);
         result
     }

@@ -87,46 +87,44 @@ impl System for GbSystem {
     }
 
     fn load_state(&mut self, v: &serde_json::Value) -> Result<(), serde_json::Error> {
+        macro_rules! load_u8 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u8;
+                }
+            };
+        }
+        
+        macro_rules! load_u16 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u16;
+                }
+            };
+        }
+        
+        macro_rules! load_bool {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
+                    $target = val;
+                }
+            };
+        }
+        
         if let Some(cpu_state) = v.get("cpu") {
-            if let Some(a) = cpu_state.get("a").and_then(|v| v.as_u64()) {
-                self.cpu.a = a as u8;
-            }
-            if let Some(f) = cpu_state.get("f").and_then(|v| v.as_u64()) {
-                self.cpu.f = f as u8;
-            }
-            if let Some(b) = cpu_state.get("b").and_then(|v| v.as_u64()) {
-                self.cpu.b = b as u8;
-            }
-            if let Some(c) = cpu_state.get("c").and_then(|v| v.as_u64()) {
-                self.cpu.c = c as u8;
-            }
-            if let Some(d) = cpu_state.get("d").and_then(|v| v.as_u64()) {
-                self.cpu.d = d as u8;
-            }
-            if let Some(e) = cpu_state.get("e").and_then(|v| v.as_u64()) {
-                self.cpu.e = e as u8;
-            }
-            if let Some(h) = cpu_state.get("h").and_then(|v| v.as_u64()) {
-                self.cpu.h = h as u8;
-            }
-            if let Some(l) = cpu_state.get("l").and_then(|v| v.as_u64()) {
-                self.cpu.l = l as u8;
-            }
-            if let Some(sp) = cpu_state.get("sp").and_then(|v| v.as_u64()) {
-                self.cpu.sp = sp as u16;
-            }
-            if let Some(pc) = cpu_state.get("pc").and_then(|v| v.as_u64()) {
-                self.cpu.pc = pc as u16;
-            }
-            if let Some(ime) = cpu_state.get("ime").and_then(|v| v.as_bool()) {
-                self.cpu.ime = ime;
-            }
-            if let Some(halted) = cpu_state.get("halted").and_then(|v| v.as_bool()) {
-                self.cpu.halted = halted;
-            }
-            if let Some(stopped) = cpu_state.get("stopped").and_then(|v| v.as_bool()) {
-                self.cpu.stopped = stopped;
-            }
+            load_u8!(cpu_state, "a", self.cpu.a);
+            load_u8!(cpu_state, "f", self.cpu.f);
+            load_u8!(cpu_state, "b", self.cpu.b);
+            load_u8!(cpu_state, "c", self.cpu.c);
+            load_u8!(cpu_state, "d", self.cpu.d);
+            load_u8!(cpu_state, "e", self.cpu.e);
+            load_u8!(cpu_state, "h", self.cpu.h);
+            load_u8!(cpu_state, "l", self.cpu.l);
+            load_u16!(cpu_state, "sp", self.cpu.sp);
+            load_u16!(cpu_state, "pc", self.cpu.pc);
+            load_bool!(cpu_state, "ime", self.cpu.ime);
+            load_bool!(cpu_state, "halted", self.cpu.halted);
+            load_bool!(cpu_state, "stopped", self.cpu.stopped);
         }
         Ok(())
     }
