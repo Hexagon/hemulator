@@ -12,6 +12,8 @@ pub const MAX_SAVE_SLOTS: u8 = 5;
 pub struct SaveSlot {
     pub data: String, // Base64 encoded save state data
     pub timestamp: u64,
+    #[serde(default)]
+    pub rom_hash: Option<String>, // Hash of the ROM this state was saved with
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -101,6 +103,7 @@ impl GameSaves {
             SaveSlot {
                 data: encoded,
                 timestamp,
+                rom_hash: Some(rom_hash.to_string()), // Store ROM hash for verification
             },
         );
 
@@ -109,13 +112,23 @@ impl GameSaves {
     }
 
     /// Load state data from a specific slot (1-MAX_SAVE_SLOTS)
-    pub fn load_slot(&self, slot: u8) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    /// Verifies that the ROM hash matches if present in the save slot
+    pub fn load_slot(&self, slot: u8, current_rom_hash: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         if !(1..=MAX_SAVE_SLOTS).contains(&slot) {
             return Err(format!("Slot must be between 1 and {}", MAX_SAVE_SLOTS).into());
         }
 
         match self.slots.get(&slot) {
             Some(save_slot) => {
+                // Verify ROM hash if present in save slot
+                if let Some(ref saved_hash) = save_slot.rom_hash {
+                    if saved_hash != current_rom_hash {
+                        return Err(format!(
+                            "ROM hash mismatch: save state was created with a different ROM"
+                        ).into());
+                    }
+                }
+                
                 let decoded = BASE64.decode(&save_slot.data)?;
                 Ok(decoded)
             }
@@ -160,7 +173,7 @@ mod tests {
 
         // Load from the same hash
         let loaded = GameSaves::load(rom_hash);
-        let decoded = loaded.load_slot(1).expect("Failed to load slot");
+        let decoded = loaded.load_slot(1, rom_hash).expect("Failed to load slot");
 
         assert_eq!(decoded, test_data);
         assert!(loaded.has_slot(1));
@@ -175,13 +188,14 @@ mod tests {
     #[test]
     fn test_slot_validation() {
         let saves = GameSaves::default();
+        let rom_hash = "test_hash";
 
         // Test invalid slots
-        assert!(saves.load_slot(0).is_err());
-        assert!(saves.load_slot(6).is_err());
+        assert!(saves.load_slot(0, rom_hash).is_err());
+        assert!(saves.load_slot(6, rom_hash).is_err());
 
         // Test valid slot that's empty
-        assert!(saves.load_slot(3).is_err());
+        assert!(saves.load_slot(3, rom_hash).is_err());
     }
 
     #[test]
@@ -192,9 +206,37 @@ mod tests {
 
         saves.save_slot(2, test_data, rom_hash).unwrap();
         let loaded = GameSaves::load(rom_hash);
-        let decoded = loaded.load_slot(2).unwrap();
+        let decoded = loaded.load_slot(2, rom_hash).unwrap();
 
         assert_eq!(decoded, test_data);
+
+        // Clean up
+        let test_dir = std::env::temp_dir().join("hemulator_test_saves");
+        if test_dir.exists() {
+            fs::remove_dir_all(&test_dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_rom_hash_verification() {
+        let mut saves = GameSaves::default();
+        let test_data = b"test state data";
+        let rom_hash1 = "original_rom_hash";
+        let rom_hash2 = "different_rom_hash";
+
+        // Save with one ROM hash
+        saves.save_slot(1, test_data, rom_hash1).unwrap();
+
+        // Try to load with different ROM hash - should fail
+        let loaded = GameSaves::load(rom_hash1);
+        let result = loaded.load_slot(1, rom_hash2);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ROM hash mismatch"));
+
+        // Load with correct ROM hash - should succeed
+        let result = loaded.load_slot(1, rom_hash1);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), test_data);
 
         // Clean up
         let test_dir = std::env::temp_dir().join("hemulator_test_saves");

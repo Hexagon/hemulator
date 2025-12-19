@@ -1,5 +1,6 @@
 use crate::crt_filter::CrtFilter;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -35,7 +36,12 @@ pub struct Settings {
     pub keyboard: KeyMapping,
     pub window_width: usize,
     pub window_height: usize,
-    pub last_rom_path: Option<String>,
+    pub scale: u8,
+    pub fullscreen: bool,
+    #[serde(default)]
+    pub last_rom_path: Option<String>, // Kept for backward compatibility
+    #[serde(default)]
+    pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
     #[serde(default)]
     pub crt_filter: CrtFilter,
 }
@@ -47,6 +53,7 @@ impl Default for Settings {
             window_width: 512,  // 256 * 2 (default 2x scale)
             window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
+            mount_points: HashMap::new(),
             crt_filter: CrtFilter::default(),
         }
     }
@@ -90,6 +97,21 @@ impl Settings {
         let contents = serde_json::to_string_pretty(self)?;
         fs::write(&path, contents)?;
         Ok(())
+    }
+
+    /// Set a mount point path
+    pub fn set_mount_point(&mut self, mount_point_id: &str, path: String) {
+        self.mount_points.insert(mount_point_id.to_string(), path);
+    }
+
+    /// Get a mount point path
+    pub fn get_mount_point(&self, mount_point_id: &str) -> Option<&String> {
+        self.mount_points.get(mount_point_id)
+    }
+
+    /// Clear a mount point path
+    pub fn clear_mount_point(&mut self, mount_point_id: &str) {
+        self.mount_points.remove(mount_point_id);
     }
 }
 
