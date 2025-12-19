@@ -361,7 +361,7 @@ pub fn create_debug_overlay(
 ) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
-  
+
     let prg_line = format!("PRG: {} x 16KB", prg_banks);
     let chr_line = if chr_banks == 0 {
         "CHR: RAM".to_string()
@@ -433,7 +433,7 @@ pub fn create_mount_point_selector(
         &mut buffer,
         width,
         height,
-        &debug_lines,
+        &display_lines,
         start_x,
         start_y,
         FONT_HEIGHT + 1,

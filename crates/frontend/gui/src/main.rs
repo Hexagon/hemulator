@@ -5,7 +5,7 @@ mod settings;
 mod ui_render;
 
 use emu_core::System;
-use minifb::{Key, ScaleMode, Window, WindowOptions};
+use minifb::{Key, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -190,13 +190,16 @@ fn main() {
     let width = 256;
     let height = 240;
 
+    // Window size is user-resizable and persisted; buffer size stays at native resolution.
+    let window_width = settings.window_width.max(width);
+    let window_height = settings.window_height.max(height);
+
     let mut window = match Window::new(
         "Hemulator - Multi-System Emulator",
-        width,
-        height,
+        window_width,
+        window_height,
         WindowOptions {
             resize: true,
-            scale_mode: ScaleMode::AspectRatioStretch,
             ..WindowOptions::default()
         },
     ) {
@@ -252,10 +255,11 @@ fn main() {
 
     // Mount point selector state
     let mut show_mount_selector = false;
-    let mut selected_mount_point: Option<String> = None;
 
     // Timing trackers
     let mut last_frame = Instant::now();
+
+    // FPS tracking (used by the debug overlay)
     let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
     let mut current_fps = 60.0;
 
@@ -270,6 +274,38 @@ fn main() {
     } else {
         GameSaves::default()
     };
+
+    fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
+        debug_assert_eq!(base.len(), overlay.len());
+        let mut out = Vec::with_capacity(base.len());
+        for (b, o) in base.iter().copied().zip(overlay.iter().copied()) {
+            let a = ((o >> 24) & 0xFF) as u32;
+            if a == 0 {
+                out.push(b);
+                continue;
+            }
+            if a == 255 {
+                out.push(0xFF00_0000 | (o & 0x00FF_FFFF));
+                continue;
+            }
+
+            let inv = 255 - a;
+            let br = ((b >> 16) & 0xFF) as u32;
+            let bg = ((b >> 8) & 0xFF) as u32;
+            let bb = (b & 0xFF) as u32;
+
+            let or = ((o >> 16) & 0xFF) as u32;
+            let og = ((o >> 8) & 0xFF) as u32;
+            let ob = (o & 0xFF) as u32;
+
+            let r = (or * a + br * inv) / 255;
+            let g = (og * a + bg * inv) / 255;
+            let b = (ob * a + bb * inv) / 255;
+
+            out.push(0xFF00_0000 | (r << 16) | (g << 8) | b);
+        }
+        out
+    }
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         // Toggle help overlay (F1)
@@ -403,7 +439,6 @@ fn main() {
 
             if let Some(idx) = selected_index {
                 if idx < mount_points.len() {
-                    selected_mount_point = Some(mount_points[idx].id.clone());
                     show_mount_selector = false;
                     
                     // Now show file dialog for the selected mount point
@@ -444,7 +479,6 @@ fn main() {
                             }
                         }
                     }
-                    selected_mount_point = None;
                 }
             }
 
@@ -570,8 +604,9 @@ fn main() {
             }
         }
 
-        // Handle controller input only if ROM is loaded
-        if rom_loaded && !show_help && !show_debug {
+        // Handle controller input / emulation step when ROM is loaded.
+        // Debug overlay should NOT pause the game.
+        if rom_loaded && !show_help {
             let keys_to_check: Vec<Key> = vec![
                 string_to_key(&settings.keyboard.a),
                 string_to_key(&settings.keyboard.b),
@@ -602,7 +637,7 @@ fn main() {
                     buffer = f.pixels.clone();
 
                     // Apply CRT filter if not showing overlays
-                    if !show_help && !show_debug && !show_slot_selector {
+                    if !show_help && !show_slot_selector {
                         settings.crt_filter.apply(&mut buffer, width, height);
                     }
 
@@ -618,26 +653,40 @@ fn main() {
         }
 
         let frame_to_present: &[u32] = if let Some(ref overlay) = debug_overlay {
-            overlay.as_slice()
+            let composed = blend_over(&buffer, overlay);
+            // Keep the composed buffer alive for the duration of update_with_buffer.
+            window
+                .update_with_buffer(composed.as_slice(), width, height)
+                .unwrap_or_else(|e| {
+                    eprintln!("Window update error: {}", e);
+                });
+            // Timing and window-size persistence still run below.
+            // Skip the normal update path since we've already presented.
+            // NOTE: This keeps debug overlay transparent without pausing emulation.
+            //
+            // Return a dummy slice; it won't be used.
+            &[]
         } else if let Some(ref overlay) = help_overlay {
             overlay.as_slice()
         } else {
             &buffer
         };
 
-        if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
-            eprintln!("Window update error: {}", e);
-            break;
+        if !frame_to_present.is_empty() {
+            if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
         }
 
         // ~60 FPS timing and FPS calculation
         let frame_dt = last_frame.elapsed();
+
         frame_times.push(frame_dt);
         if frame_times.len() > 60 {
             frame_times.remove(0);
         }
 
-        // Calculate average FPS over the last 60 frames
         if !frame_times.is_empty() {
             let total_time: Duration = frame_times.iter().sum();
             let avg_frame_time = total_time.as_secs_f64() / frame_times.len() as f64;

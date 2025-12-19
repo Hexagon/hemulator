@@ -15,7 +15,7 @@ mod ppu;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
-use emu_core::{types::Frame, System, MountPointInfo, apu::TimingMode, apu::TimingMode};
+use emu_core::{types::Frame, System, MountPointInfo, apu::TimingMode};
 use ppu::Ppu;
 
 #[derive(Debug, Clone)]
@@ -64,7 +64,7 @@ impl NesSystem {
         self.timing
     }
 
-    /// Get debug information for the overlay
+    /// Get debug information for the GUI overlay.
     pub fn get_debug_info(&self) -> DebugInfo {
         let mut mapper_name = "Unknown".to_string();
         let mut mapper_number = 0u8;
@@ -88,7 +88,7 @@ impl NesSystem {
                 };
                 prg_banks = (b.prg_rom_size() / 16384).max(1); // 16KB banks
             }
-            // CHR size from PPU
+
             chr_banks = if b.ppu.chr.is_empty() {
                 0 // CHR-RAM
             } else {
@@ -173,76 +173,6 @@ impl NesSystem {
         self.setup_cartridge(cart)
     }
 
-    /// Return debug information useful for inspecting execution state.
-    pub fn debug_state(&self) -> serde_json::Value {
-        let pc = self.cpu.pc();
-        let cycles = self.cpu.cycles();
-        let mut vram_sample: Vec<u8> = Vec::new();
-        let mut chr_sample: Vec<u8> = Vec::new();
-        let mut vram_nonzero: usize = 0;
-        let mut ppu_ctrl: u8 = 0;
-        let mut ppu_mask: u8 = 0;
-        let mut ppu_scroll: (u8, u8) = (0, 0);
-        let mut ppu_addr: u16 = 0;
-        let mut nmi_vec: u16 = 0;
-        let mut reset_vec: u16 = 0;
-        let mut irq_vec: u16 = 0;
-
-        if let Some(b) = self.cpu.bus() {
-            // take a small sample of VRAM and CHR for quick inspection
-            let vlen = std::cmp::min(64, b.ppu.vram.len());
-            vram_sample = b.ppu.vram[..vlen].to_vec();
-            vram_nonzero = b.ppu.vram.iter().filter(|&&x| x != 0).count();
-            chr_sample = b.ppu.chr.iter().take(64).cloned().collect();
-
-            ppu_ctrl = b.ppu.ctrl();
-            ppu_mask = b.ppu.mask();
-            ppu_scroll = b.ppu.scroll();
-            ppu_addr = b.ppu.vram_addr.get();
-
-            if let Some(prg) = b.prg_rom() {
-                let base = if prg.len() == 0x4000 {
-                    0x0000
-                } else {
-                    prg.len().saturating_sub(0x4000)
-                };
-                let read_vec = |off: usize| -> u16 {
-                    if prg.len() >= base + off + 2 {
-                        (prg[base + off] as u16) | ((prg[base + off + 1] as u16) << 8)
-                    } else {
-                        0
-                    }
-                };
-                nmi_vec = read_vec(0x3FFA);
-                reset_vec = read_vec(0x3FFC);
-                irq_vec = read_vec(0x3FFE);
-            }
-        }
-
-        serde_json::json!({
-            "pc": pc,
-            "cycles": cycles,
-            "ppu": {
-                "ctrl": ppu_ctrl,
-                "mask": ppu_mask,
-                "scroll_x": ppu_scroll.0,
-                "scroll_y": ppu_scroll.1,
-                "vram_addr": ppu_addr,
-                "nmi_enabled": (ppu_ctrl & 0x80) != 0,
-                "bg_enabled": (ppu_mask & 0x08) != 0,
-                "sprites_enabled": (ppu_mask & 0x10) != 0
-            },
-            "vectors": {
-                "nmi": nmi_vec,
-                "reset": reset_vec,
-                "irq": irq_vec
-            },
-            "vram_sample": vram_sample,
-            "vram_nonzero": vram_nonzero,
-            "chr_sample_len": chr_sample.len(),
-            "chr_sample": chr_sample,
-        })
-    }
 }
 
 #[derive(thiserror::Error, Debug)]

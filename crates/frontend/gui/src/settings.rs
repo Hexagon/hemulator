@@ -1,5 +1,6 @@
 use crate::crt_filter::CrtFilter;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -36,14 +37,14 @@ pub struct Settings {
     pub keyboard: KeyMapping,
     pub window_width: usize,
     pub window_height: usize,
-    pub scale: u8,
-    pub fullscreen: bool,
     #[serde(default)]
     pub last_rom_path: Option<String>, // Kept for backward compatibility
     #[serde(default)]
     pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
     #[serde(default)]
     pub crt_filter: CrtFilter,
+    #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
+    pub extra: HashMap<String, Value>,
 }
 
 impl Default for Settings {
@@ -55,6 +56,7 @@ impl Default for Settings {
             last_rom_path: None,
             mount_points: HashMap::new(),
             crt_filter: CrtFilter::default(),
+            extra: HashMap::new(),
         }
     }
 }

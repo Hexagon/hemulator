@@ -69,7 +69,6 @@ Since we cannot include ROMs in the repository:
 
 Future work should include:
 - Key binding configuration
-- Window scale/resolution options
 - Audio volume control
 - Save state management UI
 - Controller mapping

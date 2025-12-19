@@ -11,7 +11,7 @@ path = "src/main.rs"
 emu_core = { path = "../../core" }
 emu_nes = { path = "../../systems/nes" }
 emu_gb = { path = "../../systems/gb" }
-minifb = "0.25"
+minifb = "0.28"
 rodio = "0.17"
 log = "0.4"
 env_logger = "0.10"

@@ -62,6 +62,8 @@ The selected filter is automatically saved and restored when you restart the emu
 
 The emulator window can be resized freely by dragging the window edges or maximizing the window. The window maintains the correct aspect ratio while stretching to fill the available space. The window size is automatically remembered between sessions.
 
+## Configuration
+
 ## Debug Information (F10)
 
 When a ROM is loaded, press **F10** to display the debug information overlay. This shows:
@@ -73,8 +75,6 @@ When a ROM is loaded, press **F10** to display the debug information overlay. Th
 - **FPS**: Current frame rate
 
 This information is useful for troubleshooting compatibility issues or understanding ROM specifications.
-
-## Configuration
 
 ### Settings File (`config.json`)
 
