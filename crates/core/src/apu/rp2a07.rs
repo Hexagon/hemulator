@@ -27,6 +27,7 @@ const NOISE_PERIOD_TABLE_PAL: [u16; 16] = [
 ];
 
 impl Rp2a07Apu {
+    /// Create a new RP2A07 APU (PAL timing)
     pub fn new() -> Self {
         Self {
             pulse1: PulseChannel::new(),

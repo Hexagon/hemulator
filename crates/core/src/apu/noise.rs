@@ -43,6 +43,7 @@ const NOISE_PERIOD_TABLE_PAL: [u16; 16] = [
 ];
 
 impl NoiseChannel {
+    /// Create a new noise channel with default state
     pub fn new() -> Self {
         Self {
             enabled: false,

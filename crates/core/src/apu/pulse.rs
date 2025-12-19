@@ -33,6 +33,7 @@ pub struct PulseChannel {
 }
 
 impl PulseChannel {
+    /// Create a new pulse channel with default state
     pub fn new() -> Self {
         Self {
             duty: 0,

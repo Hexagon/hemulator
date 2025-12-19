@@ -213,6 +213,7 @@ impl<M: Memory6502> Cpu6502<M> {
         (hi << 8) | lo
     }
 
+    /// Trigger a Non-Maskable Interrupt (NMI)
     pub fn trigger_nmi(&mut self) {
         // Avoid nested NMIs in this simplified model.
         if self.in_nmi {
@@ -230,6 +231,7 @@ impl<M: Memory6502> Cpu6502<M> {
         self.cycles = self.cycles.wrapping_add(7);
     }
 
+    /// Trigger a maskable IRQ (interrupt request)
     pub fn trigger_irq(&mut self) {
         // Respect the I flag: if set, ignore maskable IRQs.
         if (self.status & 0x04) != 0 {
@@ -446,8 +448,6 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             0x29 | 0x25 | 0x2D | 0x21 | 0x31 | 0x35 | 0x39 => {
                 // AND variants: immediate/zero/abs/(ind,X)/(ind),Y/zero,X/abs,Y
-                // For simplicity map common encodings to immediate-like behavior where fetch is used.
-                // We'll handle immediate (0x29) here; other encodings should call appropriate addr helpers.
                 if op == 0x29 {
                     let val = self.fetch_u8();
                     self.a &= val;
@@ -455,7 +455,6 @@ impl<M: Memory6502> Cpu6502<M> {
                     self.cycles += 2;
                     2
                 } else {
-                    // handle via reading address depending on opcode
                     let val = match op {
                         0x25 => {
                             let zp = self.fetch_u8() as u16;
@@ -485,7 +484,6 @@ impl<M: Memory6502> Cpu6502<M> {
                     };
                     self.a &= val;
                     self.set_zero_and_negative(self.a);
-                    // cycles conservative
                     self.cycles += 4;
                     4
                 }

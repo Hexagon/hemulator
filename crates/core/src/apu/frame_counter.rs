@@ -32,6 +32,7 @@ pub struct FrameCounter {
 }
 
 impl FrameCounter {
+    /// Create a new frame counter for the specified timing mode
     pub fn new(timing: TimingMode) -> Self {
         let cpu_hz = timing.cpu_clock_hz();
         let frame_counter_hz = timing.frame_counter_hz();

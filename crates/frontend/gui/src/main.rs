@@ -374,13 +374,15 @@ fn main() {
                             eprintln!("Save states are not supported for this system");
                         } else {
                             match game_saves.load_slot(slot, hash) {
-                                Ok(data) => match serde_json::from_slice::<serde_json::Value>(&data) {
-                                    Ok(state) => match sys.load_state(&state) {
-                                        Ok(_) => println!("Loaded state from slot {}", slot),
-                                        Err(e) => eprintln!("Failed to load state: {}", e),
-                                    },
-                                    Err(e) => eprintln!("Failed to parse save state: {}", e),
-                                },
+                                Ok(data) => {
+                                    match serde_json::from_slice::<serde_json::Value>(&data) {
+                                        Ok(state) => match sys.load_state(&state) {
+                                            Ok(_) => println!("Loaded state from slot {}", slot),
+                                            Err(e) => eprintln!("Failed to load state: {}", e),
+                                        },
+                                        Err(e) => eprintln!("Failed to parse save state: {}", e),
+                                    }
+                                }
                                 Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
                             }
                         }
@@ -413,7 +415,7 @@ fn main() {
         // Handle mount point selector
         if show_mount_selector {
             let mount_points = sys.mount_points();
-            
+
             // Check for mount point selection
             let mut selected_index: Option<usize> = None;
 
@@ -440,11 +442,12 @@ fn main() {
             if let Some(idx) = selected_index {
                 if idx < mount_points.len() {
                     show_mount_selector = false;
-                    
+
                     // Now show file dialog for the selected mount point
                     let mp_info = &mount_points[idx];
-                    let extensions: Vec<&str> = mp_info.extensions.iter().map(|s| s.as_str()).collect();
-                    
+                    let extensions: Vec<&str> =
+                        mp_info.extensions.iter().map(|s| s.as_str()).collect();
+
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("ROM/Media Files", &extensions)
                         .pick_file()
@@ -466,10 +469,16 @@ fn main() {
                                         } else {
                                             GameSaves::default()
                                         };
-                                        println!("Loaded media into {}: {}", mp_info.name, path_str);
+                                        println!(
+                                            "Loaded media into {}: {}",
+                                            mp_info.name, path_str
+                                        );
                                     }
                                     Err(e) => {
-                                        eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
+                                        eprintln!(
+                                            "Failed to mount media into {}: {}",
+                                            mp_info.name, e
+                                        );
                                         buffer = ui_render::create_default_screen(width, height);
                                     }
                                 }
@@ -483,11 +492,7 @@ fn main() {
             }
 
             // Render mount point selector
-            let mount_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-            );
+            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
@@ -532,13 +537,13 @@ fn main() {
         // Check for open ROM dialog (F3)
         if window.is_key_pressed(Key::F3, minifb::KeyRepeat::No) {
             let mount_points = sys.mount_points();
-            
+
             // If system has only one mount point, go directly to file dialog
             // Otherwise, show mount point selector
             if mount_points.len() == 1 {
                 let mp_info = &mount_points[0];
                 let extensions: Vec<&str> = mp_info.extensions.iter().map(|s| s.as_str()).collect();
-                
+
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("ROM/Media Files", &extensions)
                     .pick_file()
