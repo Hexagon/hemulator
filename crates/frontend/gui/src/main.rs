@@ -263,10 +263,8 @@ fn main() {
     let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
     let mut current_fps = 60.0;
 
-    // Audio: NES runs at ~60 FPS, generate samples to match
+    // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
-    const FRAME_RATE: usize = 60;
-    const SAMPLES_PER_FRAME: usize = SAMPLE_RATE / FRAME_RATE; // ~735 samples per frame
 
     // Load saves for current ROM if available
     let mut game_saves = if let Some(ref hash) = rom_hash {
@@ -607,9 +605,11 @@ fn main() {
                         settings.crt_filter.apply(&mut buffer, width, height);
                     }
 
-                    // Audio generation: generate a consistent number of samples per frame
-                    // to match the ~60 FPS frame rate (44100 Hz / 60 fps ≈ 735 samples)
-                    let audio_samples = sys.get_audio_samples(SAMPLES_PER_FRAME);
+                    // Audio generation: generate samples based on actual frame rate
+                    // NTSC: ~60.1 FPS (≈734 samples), PAL: ~50.0 FPS (≈882 samples)
+                    let timing = sys.timing();
+                    let samples_per_frame = (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
+                    let audio_samples = sys.get_audio_samples(samples_per_frame);
                     for s in audio_samples {
                         let _ = audio_tx.try_send(s);
                     }
@@ -677,7 +677,7 @@ fn main() {
             }
         }
 
-        // ~60 FPS timing and FPS calculation
+        // Dynamic frame pacing based on timing mode (NTSC ~60.1 FPS, PAL ~50.0 FPS)
         let frame_dt = last_frame.elapsed();
 
         frame_times.push(frame_dt);
@@ -693,8 +693,18 @@ fn main() {
             }
         }
 
-        if frame_dt < Duration::from_millis(16) {
-            std::thread::sleep(Duration::from_millis(16) - frame_dt);
+        // Get target frame time from system timing mode
+        let target_frame_time = if rom_loaded {
+            let timing = sys.timing();
+            let frame_rate = timing.frame_rate_hz();
+            Duration::from_secs_f64(1.0 / frame_rate)
+        } else {
+            // Default to NTSC timing when no ROM loaded
+            Duration::from_secs_f64(1.0 / 60.0988)
+        };
+
+        if frame_dt < target_frame_time {
+            std::thread::sleep(target_frame_time - frame_dt);
         }
         last_frame = Instant::now();
 
