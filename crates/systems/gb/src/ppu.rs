@@ -1,4 +1,104 @@
-//! Game Boy PPU (LCD Controller) implementation
+//! Game Boy PPU (Picture Processing Unit / LCD Controller) implementation
+//!
+//! The PPU is responsible for rendering graphics to the 160x144 pixel LCD screen.
+//! It operates in a tile-based system with multiple layers and supports scrolling,
+//! windows, and sprites.
+//!
+//! # Display Architecture
+//!
+//! ## Layers (in rendering order)
+//! 1. **Background**: 256x256 pixel tilemap with scrolling support
+//! 2. **Window**: Overlay layer with independent position (WX, WY)
+//! 3. **Sprites (OBJ)**: 40 movable 8x8 or 8x16 pixel objects
+//!
+//! ## Tile System
+//! - Tiles are 8x8 pixels, 2 bits per pixel (4 colors)
+//! - Each tile uses 16 bytes (2 bytes per row)
+//! - Two tile data areas:
+//!   - `$8000-$8FFF`: 256 tiles (unsigned addressing mode)
+//!   - `$8800-$97FF`: 256 tiles (signed addressing mode, -128 to +127)
+//! - Two tile map areas:
+//!   - `$9800-$9BFF`: Background/Window tilemap
+//!   - `$9C00-$9FFF`: Background/Window tilemap
+//!
+//! ## Color Palettes (DMG Mode)
+//! - BGP ($FF47): Background palette
+//! - OBP0 ($FF48): Object palette 0
+//! - OBP1 ($FF49): Object palette 1
+//! - Each palette maps 4 colors (2 bits) to 4 shades:
+//!   - 0: White (0xFFFFFF)
+//!   - 1: Light gray (0xAAAAAA)
+//!   - 2: Dark gray (0x555555)
+//!   - 3: Black (0x000000)
+//!
+//! # LCD Control Register (LCDC - $FF40)
+//!
+//! - Bit 7: LCD enable (0=off, 1=on)
+//! - Bit 6: Window tilemap area (0=$9800-$9BFF, 1=$9C00-$9FFF)
+//! - Bit 5: Window enable (0=off, 1=on)
+//! - Bit 4: BG & Window tile data area (0=$8800-$97FF signed, 1=$8000-$8FFF unsigned)
+//! - Bit 3: BG tilemap area (0=$9800-$9BFF, 1=$9C00-$9FFF)
+//! - Bit 2: Sprite size (0=8x8, 1=8x16)
+//! - Bit 1: Sprite enable (0=off, 1=on)
+//! - Bit 0: BG & Window enable (0=off, 1=on)
+//!
+//! # LCD Status Register (STAT - $FF41)
+//!
+//! - Bit 6: LYC=LY interrupt enable
+//! - Bit 5: Mode 2 OAM interrupt enable
+//! - Bit 4: Mode 1 VBlank interrupt enable
+//! - Bit 3: Mode 0 HBlank interrupt enable
+//! - Bit 2: LYC=LY coincidence flag (0=different, 1=equal)
+//! - Bits 1-0: Mode flag (0=HBlank, 1=VBlank, 2=OAM search, 3=pixel transfer)
+//!
+//! # Sprites (OBJ)
+//!
+//! Each sprite is defined by 4 bytes in OAM (Object Attribute Memory):
+//! - Byte 0: Y position (actual position - 16)
+//! - Byte 1: X position (actual position - 8)
+//! - Byte 2: Tile index
+//! - Byte 3: Flags
+//!   - Bit 7: BG/Window priority (0=above BG, 1=behind BG colors 1-3)
+//!   - Bit 6: Y flip
+//!   - Bit 5: X flip
+//!   - Bit 4: Palette (0=OBP0, 1=OBP1)
+//!   - Bits 3-0: Unused (CGB palette in CGB mode)
+//!
+//! # Timing Model
+//!
+//! This implementation uses a **frame-based** rendering model:
+//! - Entire frames are rendered on-demand
+//! - Scanline counter (LY) is updated during CPU execution
+//! - V-Blank detection occurs when LY reaches 144
+//! - Suitable for most games, but not cycle-accurate
+//!
+//! ## Actual Hardware Timing (for reference)
+//! - Mode 2 (OAM search): 80 cycles
+//! - Mode 3 (pixel transfer): 168-291 cycles
+//! - Mode 0 (HBlank): 85-208 cycles
+//! - Total scanline: 456 cycles
+//! - VBlank: 10 scanlines (4560 cycles)
+//!
+//! # Current Implementation
+//!
+//! ## Implemented
+//! - ✅ Background rendering with scrolling
+//! - ✅ Window rendering
+//! - ✅ Sprite rendering (8x8 and 8x16)
+//! - ✅ Sprite flipping (horizontal and vertical)
+//! - ✅ Sprite priority (above/behind background)
+//! - ✅ Palette support (BGP, OBP0, OBP1)
+//! - ✅ LYC=LY coincidence detection
+//! - ✅ Frame-based timing with scanline counter
+//!
+//! ## Not Implemented
+//! - ❌ Cycle-accurate PPU timing
+//! - ❌ Mid-scanline effects
+//! - ❌ Sprite-per-scanline limit (10 sprites)
+//! - ❌ PPU mode transitions (Mode 0-3)
+//! - ❌ STAT interrupts
+//! - ❌ OAM DMA transfer
+//! - ❌ Game Boy Color features (color palettes, VRAM banking)
 
 use emu_core::types::Frame;
 
@@ -206,7 +306,7 @@ impl Ppu {
             let tile_y = (win_y / 8) as u16;
             let pixel_y = (win_y % 8) as u16;
 
-            let start_x = if self.wx >= 7 { self.wx - 7 } else { 0 };
+            let start_x = self.wx.saturating_sub(7);
             
             for screen_x in start_x..160 {
                 let win_x = screen_x - start_x;
@@ -265,7 +365,7 @@ impl Ppu {
             let flags = self.oam[oam_addr + 3];
 
             // Check if sprite is visible
-            if x_pos >= 160 && x_pos < 248 {
+            if (160..248).contains(&x_pos) {
                 continue; // Off screen
             }
 
