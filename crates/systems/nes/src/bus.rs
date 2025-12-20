@@ -94,10 +94,6 @@ impl NesBus {
         self.mapper = Some(rc);
     }
 
-    pub fn prg_rom(&self) -> Option<Vec<u8>> {
-        self.mapper.as_ref().map(|m| m.borrow().prg_rom().to_vec())
-    }
-
     pub fn take_irq_pending(&mut self) -> bool {
         let mapper_irq = if let Some(m) = &mut self.mapper {
             m.borrow_mut().take_irq_pending()

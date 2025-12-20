@@ -1,14 +1,79 @@
-//! NES APU implementation using core APU components.
+//! NES APU (Audio Processing Unit) implementation.
 //!
 //! This module provides the NES-specific APU interface while using
 //! reusable components from the core module.
+//!
+//! ## Current Implementation
+//!
+//! The APU currently implements:
+//!
+//! - **2 Pulse Channels**: Square wave generators with duty cycle control
+//! - **Length Counter**: Automatic note duration control
+//! - **Envelope**: Volume envelope with decay
+//! - **Frame Counter**: Timing controller (4-step and 5-step modes)
+//! - **Frame IRQ**: Frame counter interrupt support
+//!
+//! ## Not Yet Implemented
+//!
+//! - **Triangle Channel**: 32-step triangle wave generator
+//! - **Noise Channel**: Pseudo-random noise with LFSR
+//! - **DMC Channel**: Delta modulation channel for sample playback
+//! - **Sweep Units**: Pitch bending for pulse channels
+//!
+//! ## Register Interface
+//!
+//! - **$4000-$4003**: Pulse channel 1 (duty, envelope, frequency, length)
+//! - **$4004-$4007**: Pulse channel 2 (duty, envelope, frequency, length)
+//! - **$4008-$400B**: Triangle channel (not implemented)
+//! - **$400C-$400F**: Noise channel (not implemented)
+//! - **$4010-$4013**: DMC channel (not implemented)
+//! - **$4015**: Status/enable register
+//! - **$4017**: Frame counter mode and IRQ control
+//!
+//! ## Audio Output
+//!
+//! The APU generates 44.1 kHz stereo audio by:
+//!
+//! 1. Clocking the APU at CPU speed (1.789773 MHz NTSC or 1.662607 MHz PAL)
+//! 2. Mixing the active channels using linear approximation
+//! 3. Downsampling to the target sample rate
+//!
+//! The current implementation uses a simple average mixing strategy.
+//! Future enhancements could include proper NES mixer simulation with
+//! non-linear output curves.
 
 use emu_core::apu::{PulseChannel, TimingMode, LENGTH_TABLE};
 use std::cell::Cell;
 
-/// Minimal NES APU with 2 pulse channels.
+/// NES APU with 2 pulse channels.
 ///
-/// Uses core PulseChannel components for the actual synthesis.
+/// Uses core `PulseChannel` components for audio synthesis.
+///
+/// # Registers
+///
+/// The APU responds to writes at $4000-$4017:
+///
+/// - $4000-$4003: Pulse 1 (DDLC VVVV, sweep, timer low, length/timer high)
+/// - $4004-$4007: Pulse 2 (same as pulse 1)
+/// - $4015: Enable register (bits 0-1 enable pulse 1-2)
+/// - $4017: Frame counter mode (bit 7 = 5-step, bit 6 = IRQ inhibit)
+///
+/// # Timing
+///
+/// The APU runs at CPU clock speed:
+///
+/// - NTSC: 1.789773 MHz
+/// - PAL: 1.662607 MHz
+///
+/// Frame counter events occur at:
+///
+/// - NTSC: ~240 Hz (quarter frame)
+/// - PAL: ~200 Hz (quarter frame)
+///
+/// # IRQ Generation
+///
+/// In 4-step mode, the frame counter generates an IRQ at the end of step 4
+/// unless the IRQ inhibit flag is set. Reading $4015 clears the pending IRQ.
 #[derive(Debug)]
 pub struct APU {
     pub pulse1: PulseChannel,

@@ -7,14 +7,14 @@ use emu_core::cpu_6502::{Cpu6502, Memory6502};
 #[derive(Debug)]
 pub enum NesMemory {
     /// Simple array-based memory for testing
-    Array([u8; 0x10000]),
+    Array(Box<[u8; 0x10000]>),
     /// NES bus with PPU, APU, mappers, etc.
     Bus(Box<crate::bus::NesBus>),
 }
 
 impl NesMemory {
     pub fn new_array() -> Self {
-        Self::Array([0; 0x10000])
+        Self::Array(Box::new([0; 0x10000]))
     }
 
     pub fn new_bus(bus: crate::bus::NesBus) -> Self {

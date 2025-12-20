@@ -1,3 +1,49 @@
+//! NES PPU (Picture Processing Unit) implementation.
+//!
+//! This module implements the 2C02 PPU chip found in NTSC NES systems,
+//! with support for PAL variants (2C07).
+//!
+//! ## Features
+//!
+//! - **Resolution**: 256x240 pixels
+//! - **Colors**: 64-color master palette
+//! - **Palettes**: 8 background + 8 sprite palettes (4 colors each)
+//! - **Tiles**: 8x8 pixel tiles from CHR ROM/RAM
+//! - **Sprites**: Up to 64 sprites (8x8 or 8x16 modes)
+//! - **Scrolling**: Smooth scrolling with nametable switching
+//! - **Mirroring**: Horizontal, vertical, four-screen, and single-screen
+//!
+//! ## Rendering Model
+//!
+//! This implementation uses a **frame-based** rendering model rather than
+//! cycle-accurate scanline rendering:
+//!
+//! - Entire frames are rendered on-demand via `render_frame()`
+//! - Scanlines can be rendered incrementally via `render_scanline()` for mapper CHR switching
+//! - VBlank is simulated at the system level, not by the PPU
+//! - **Sprite evaluation** is performed per scanline to set sprite overflow flag
+//! - Sprite 0 hit detection is basic but functional
+//!
+//! This approach is suitable for most games but may not handle edge cases
+//! requiring precise PPU timing (mid-scanline register changes, exact sprite 0 hit timing, etc.).
+//!
+//! ## Memory Map
+//!
+//! - **$0000-$1FFF**: CHR ROM/RAM (pattern tables)
+//! - **$2000-$2FFF**: Nametables (mapped to 2KB internal VRAM via mirroring)
+//! - **$3F00-$3FFF**: Palette RAM (32 bytes, mirrored)
+//!
+//! ## Register Interface
+//!
+//! - **$2000 (PPUCTRL)**: Control register (NMI enable, sprite size, etc.)
+//! - **$2001 (PPUMASK)**: Mask register (enable background/sprites, grayscale, etc.)
+//! - **$2002 (PPUSTATUS)**: Status register (VBlank flag, sprite 0 hit)
+//! - **$2003 (OAMADDR)**: OAM address for $2004 access
+//! - **$2004 (OAMDATA)**: OAM data read/write
+//! - **$2005 (PPUSCROLL)**: Scroll position (write twice: X then Y)
+//! - **$2006 (PPUADDR)**: VRAM address (write twice: high then low)
+//! - **$2007 (PPUDATA)**: VRAM data read/write (with buffering)
+
 use crate::cartridge::Mirroring;
 use emu_core::types::Frame;
 use std::cell::{Cell, RefCell};
@@ -34,6 +80,32 @@ fn palette_mirror_index(i: usize) -> usize {
     }
 }
 
+/// NES PPU (Picture Processing Unit).
+///
+/// Implements the 2C02 PPU with frame-based rendering.
+///
+/// # Memory Layout
+///
+/// - `chr`: 8KB CHR ROM/RAM (pattern tables)
+/// - `vram`: 2KB internal VRAM (nametables)
+/// - `palette`: 32 bytes palette RAM
+/// - `oam`: 256 bytes Object Attribute Memory (sprites)
+///
+/// # Register State
+///
+/// - `ctrl`: PPUCTRL ($2000)
+/// - `mask`: PPUMASK ($2001)
+/// - `vblank`: VBlank flag (PPUSTATUS bit 7)
+/// - `sprite_0_hit`: Sprite 0 hit flag (PPUSTATUS bit 6)
+/// - `sprite_overflow`: Sprite overflow flag (PPUSTATUS bit 5)
+/// - `nmi_pending`: Pending NMI request
+/// - `vram_addr`: Current VRAM address
+/// - `scroll_x`, `scroll_y`: Scroll position
+///
+/// # Callbacks
+///
+/// - `a12_callback`: Notifies mappers of A12 line changes (for IRQ timing)
+/// - `chr_read_callback`: Notifies mappers of CHR reads (for latch switching)
 pub struct Ppu {
     pub chr: Vec<u8>,
     chr_is_ram: bool,
@@ -43,9 +115,10 @@ pub struct Ppu {
     mirroring: Mirroring,
     ctrl: u8,
     mask: u8,
-    // Minimal PPUSTATUS bit7 (VBlank) flag.
+    // PPUSTATUS flags
     vblank: Cell<bool>,
     sprite_0_hit: Cell<bool>,
+    sprite_overflow: Cell<bool>,
     nmi_pending: Cell<bool>,
     // PPUADDR latch
     addr_latch: Cell<bool>,
@@ -85,6 +158,7 @@ impl Ppu {
             mask: 0,
             vblank: Cell::new(false),
             sprite_0_hit: Cell::new(false),
+            sprite_overflow: Cell::new(false),
             nmi_pending: Cell::new(false),
             addr_latch: Cell::new(false),
             vram_addr: Cell::new(0),
@@ -151,7 +225,9 @@ impl Ppu {
             self.nmi_pending.set(true);
         }
         if !v {
+            // Clear sprite 0 hit and sprite overflow at the start of vblank
             self.sprite_0_hit.set(false);
+            self.sprite_overflow.set(false);
         }
     }
 
@@ -194,13 +270,16 @@ impl Ppu {
     pub fn read_register(&self, reg: u16) -> u8 {
         match reg & 0x7 {
             2 => {
-                // PPUSTATUS: bit 7 = vblank, bit 6 = sprite 0 hit
+                // PPUSTATUS: bit 7 = vblank, bit 6 = sprite 0 hit, bit 5 = sprite overflow
                 let mut status = 0u8;
                 if self.vblank.get() {
                     status |= 0x80;
                 }
                 if self.sprite_0_hit.get() {
                     status |= 0x40;
+                }
+                if self.sprite_overflow.get() {
+                    status |= 0x20;
                 }
                 // Reading PPUSTATUS clears vblank and resets address latch.
                 self.vblank.set(false);
@@ -333,6 +412,37 @@ impl Ppu {
     pub fn dma_oam_from_slice(&mut self, data: &[u8]) {
         for (i, b) in data.iter().take(256).enumerate() {
             self.oam[i] = *b;
+        }
+    }
+
+    /// Evaluate sprites for a scanline to determine sprite overflow.
+    ///
+    /// The NES PPU can only display 8 sprites per scanline. If more than 8 sprites
+    /// are on the same scanline, the sprite overflow flag is set.
+    ///
+    /// This is a simplified version of the hardware sprite evaluation process.
+    fn evaluate_sprites_for_scanline(&self, scanline: u32) {
+        let sprite_size_16 = (self.ctrl & 0x20) != 0;
+        let sprite_height = if sprite_size_16 { 16 } else { 8 };
+        
+        let mut sprites_found = 0;
+        
+        // Check all 64 sprites in OAM
+        for i in 0..64 {
+            let o = i * 4;
+            let y_pos = self.oam[o] as i16 + 1;
+            
+            // Check if this sprite is on the current scanline
+            let row = (scanline as i16) - y_pos;
+            if row >= 0 && row < sprite_height {
+                sprites_found += 1;
+                
+                // If we found more than 8 sprites on this scanline, set overflow
+                if sprites_found > 8 {
+                    self.sprite_overflow.set(true);
+                    return;
+                }
+            }
         }
     }
 
@@ -553,6 +663,8 @@ impl Ppu {
     /// This is a pragmatic helper for mappers (notably MMC3) that change CHR banks mid-frame.
     /// By rendering scanlines incrementally, the frame output can reflect CHR/scroll changes
     /// that occur between scanlines even in this non-cycle-accurate renderer.
+    ///
+    /// This version includes sprite evaluation to set sprite overflow flag.
     pub fn render_scanline(&self, y: u32, frame: &mut Frame) {
         if y >= 240 {
             return;
@@ -570,6 +682,11 @@ impl Ppu {
 
         let bg_enabled = (self.mask & 0x08) != 0;
         let sprites_enabled = (self.mask & 0x10) != 0;
+
+        // Perform sprite evaluation for this scanline to determine sprite overflow
+        if sprites_enabled {
+            self.evaluate_sprites_for_scanline(y);
+        }
 
         let bg_pattern_base: usize = if (self.ctrl & 0x10) != 0 {
             0x1000
@@ -1007,5 +1124,116 @@ mod tests {
         ppu.vram_addr.set(0x3F00);
         let val = ppu.read_register(7);
         assert_eq!(val, 0x30);
+    }
+
+    #[test]
+    fn test_sprite_overflow_flag() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Enable sprite rendering
+        ppu.ctrl = 0x00; // 8x8 sprites
+        ppu.mask = 0x10; // Show sprites
+
+        // Place 9 sprites on scanline 100
+        for i in 0..9 {
+            ppu.oam[i * 4] = 99; // Y position (sprite top is Y+1, so scanline 100)
+            ppu.oam[i * 4 + 1] = 0; // Tile index
+            ppu.oam[i * 4 + 2] = 0; // Attributes
+            ppu.oam[i * 4 + 3] = i as u8 * 8; // X position
+        }
+
+        // Evaluate sprites for scanline 100
+        ppu.evaluate_sprites_for_scanline(100);
+
+        // Sprite overflow flag should be set
+        assert!(ppu.sprite_overflow.get());
+
+        // Reading PPUSTATUS should return sprite overflow bit (bit 5)
+        let status = ppu.read_register(2);
+        assert_eq!(status & 0x20, 0x20);
+    }
+
+    #[test]
+    fn test_sprite_overflow_not_set_with_8_sprites() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Enable sprite rendering
+        ppu.ctrl = 0x00; // 8x8 sprites
+        ppu.mask = 0x10; // Show sprites
+
+        // Place exactly 8 sprites on scanline 100
+        for i in 0..8 {
+            ppu.oam[i * 4] = 99; // Y position
+            ppu.oam[i * 4 + 1] = 0; // Tile index
+            ppu.oam[i * 4 + 2] = 0; // Attributes
+            ppu.oam[i * 4 + 3] = i as u8 * 8; // X position
+        }
+
+        // Evaluate sprites for scanline 100
+        ppu.evaluate_sprites_for_scanline(100);
+
+        // Sprite overflow flag should NOT be set
+        assert!(!ppu.sprite_overflow.get());
+
+        // Reading PPUSTATUS should not have sprite overflow bit set
+        let status = ppu.read_register(2);
+        assert_eq!(status & 0x20, 0x00);
+    }
+
+    #[test]
+    fn test_sprite_overflow_with_16_pixel_sprites() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Enable 8x16 sprite mode
+        ppu.ctrl = 0x20; // 8x16 sprites
+        ppu.mask = 0x10; // Show sprites
+
+        // Place 9 8x16 sprites on scanline 100
+        for i in 0..9 {
+            ppu.oam[i * 4] = 99; // Y position (sprite extends from scanline 100-115)
+            ppu.oam[i * 4 + 1] = 0; // Tile index
+            ppu.oam[i * 4 + 2] = 0; // Attributes
+            ppu.oam[i * 4 + 3] = i as u8 * 8; // X position
+        }
+
+        // Evaluate sprites for scanline 100 (first scanline of the sprite)
+        ppu.evaluate_sprites_for_scanline(100);
+
+        // Sprite overflow flag should be set
+        assert!(ppu.sprite_overflow.get());
+
+        // Evaluate for scanline 110 (middle of 8x16 sprite)
+        ppu.sprite_overflow.set(false); // Reset flag
+        ppu.evaluate_sprites_for_scanline(110);
+
+        // Should still detect overflow
+        assert!(ppu.sprite_overflow.get());
+    }
+
+    #[test]
+    fn test_vblank_clears_sprite_flags() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Set sprite 0 hit and sprite overflow
+        ppu.sprite_0_hit.set(true);
+        ppu.sprite_overflow.set(true);
+
+        // Verify flags are set
+        assert!(ppu.sprite_0_hit.get());
+        assert!(ppu.sprite_overflow.get());
+
+        // Start VBlank
+        ppu.set_vblank(true);
+
+        // Flags should still be set during VBlank
+        assert!(ppu.sprite_0_hit.get());
+        assert!(ppu.sprite_overflow.get());
+
+        // End VBlank (start of new frame)
+        ppu.set_vblank(false);
+
+        // Flags should be cleared at start of frame
+        assert!(!ppu.sprite_0_hit.get());
+        assert!(!ppu.sprite_overflow.get());
     }
 }
