@@ -47,7 +47,7 @@ impl PolynomialCounter {
         if self.div == self.frequency {
             self.div = 0;
             self.clock_poly4();
-            
+
             // Clock poly5 based on poly4 bit 0
             if (self.poly4 & 1) == 0 {
                 self.clock_poly5();
@@ -77,16 +77,16 @@ impl PolynomialCounter {
         // TIA waveform types based on AUDC value
         // Simplified implementation - full TIA would have more complex mixing
         let bit = match self.control {
-            0x00 | 0x0B => 0, // Set to 1 (pure tone - always on)
-            0x01 => self.poly4 & 1, // 4-bit polynomial
-            0x02 => (self.div & 1) ^ 1, // Division by 2
+            0x00 | 0x0B => 0,                            // Set to 1 (pure tone - always on)
+            0x01 => self.poly4 & 1,                      // 4-bit polynomial
+            0x02 => (self.div & 1) ^ 1,                  // Division by 2
             0x03 => (self.poly4 & 1) & (self.poly5 & 1), // 4-bit AND 5-bit
-            0x04 | 0x05 => self.div & 1, // Pure tone (division)
-            0x06 | 0x0A => self.div & 1, // Division by 31
-            0x07 | 0x09 => self.poly5 & 1, // 5-bit polynomial
-            0x08 => self.poly5 & 1, // 5-bit poly (noise)
-            0x0C | 0x0D => self.poly4 & 1, // Pure tone with 4-bit
-            0x0E => self.poly4 & 1, // 4-bit polynomial
+            0x04 | 0x05 => self.div & 1,                 // Pure tone (division)
+            0x06 | 0x0A => self.div & 1,                 // Division by 31
+            0x07 | 0x09 => self.poly5 & 1,               // 5-bit polynomial
+            0x08 => self.poly5 & 1,                      // 5-bit poly (noise)
+            0x0C | 0x0D => self.poly4 & 1,               // Pure tone with 4-bit
+            0x0E => self.poly4 & 1,                      // 4-bit polynomial
             0x0F => (self.poly4 & 1) ^ (self.poly5 & 1), // 4-bit XOR 5-bit
             _ => 0,
         };
@@ -144,12 +144,12 @@ mod tests {
         let mut poly = PolynomialCounter::new();
         poly.set_frequency(10);
         poly.set_volume(15);
-        
+
         // Clock multiple times
         for _ in 0..5 {
             poly.clock();
         }
-        
+
         // Division counter should have incremented
         assert!(poly.div > 0);
     }
@@ -159,12 +159,12 @@ mod tests {
         let mut poly = PolynomialCounter::new();
         poly.set_control(0x04); // Pure tone
         poly.set_frequency(0);
-        
+
         // Volume 0 should produce 0 output
         poly.set_volume(0);
         let output = poly.clock();
         assert_eq!(output, 0);
-        
+
         // Volume 15 should produce non-zero when waveform is high
         poly.div = 0;
         poly.set_volume(15);
@@ -176,16 +176,16 @@ mod tests {
         let mut poly = PolynomialCounter::new();
         poly.set_frequency(0); // Clock on every cycle
         poly.set_volume(15);
-        
+
         let initial_poly4 = poly.poly4;
-        
+
         // Need to clock until div wraps around
         // div starts at 0, increments each clock, and resets when == frequency (0)
         // So div will go 1, 2, ..., 31, 0 then poly4 clocks
         for _ in 0..32 {
             poly.clock();
         }
-        
+
         // poly4 should have changed
         assert_ne!(poly.poly4, initial_poly4);
     }
@@ -195,18 +195,18 @@ mod tests {
         let mut poly = PolynomialCounter::new();
         poly.set_frequency(0);
         poly.set_volume(15);
-        
+
         // Try different control values
         for control in 0..16 {
             poly.set_control(control);
             poly.reset();
-            
+
             // Generate some samples
             let mut samples = Vec::new();
             for _ in 0..100 {
                 samples.push(poly.clock());
             }
-            
+
             // Verify output is within valid range
             assert!(samples.iter().all(|&s| s <= 15));
         }
@@ -217,14 +217,14 @@ mod tests {
         let mut poly = PolynomialCounter::new();
         poly.set_frequency(5);
         poly.set_volume(10);
-        
+
         // Clock it a bunch
         for _ in 0..100 {
             poly.clock();
         }
-        
+
         poly.reset();
-        
+
         // Check reset state
         assert_eq!(poly.poly4, 0x0F);
         assert_eq!(poly.poly5, 0x1F);
@@ -240,21 +240,21 @@ mod tests {
         poly1.set_control(0x04); // Pure tone
         poly1.set_frequency(1); // Triggers when div reaches 1
         poly1.set_volume(15);
-        
+
         let mut poly2 = PolynomialCounter::new();
         poly2.set_control(0x04);
         poly2.set_frequency(10); // Triggers when div reaches 10
         poly2.set_volume(15);
-        
+
         let initial_poly4_1 = poly1.poly4;
         let _initial_poly4_2 = poly2.poly4;
-        
+
         // Clock both enough times that poly1 should trigger but poly2 shouldn't
         for _ in 0..5 {
             poly1.clock();
             poly2.clock();
         }
-        
+
         // poly1 should have clocked poly4 (freq=1 reached after 2 clocks)
         // poly2 should not have clocked poly4 yet (freq=10 not reached in 5 clocks)
         assert_ne!(poly1.poly4, initial_poly4_1);

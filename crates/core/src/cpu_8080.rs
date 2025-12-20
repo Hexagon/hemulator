@@ -198,7 +198,7 @@ impl<M: Memory8080> Cpu8080<M> {
     fn update_flags_szp(&mut self, val: u8) {
         self.set_flag(FLAG_S, (val & 0x80) != 0);
         self.set_flag(FLAG_Z, val == 0);
-        self.set_flag(FLAG_P, val.count_ones() % 2 == 0);
+        self.set_flag(FLAG_P, val.count_ones().is_multiple_of(2));
     }
 
     fn update_flags_ac_add(&mut self, a: u8, b: u8, carry: u8) {

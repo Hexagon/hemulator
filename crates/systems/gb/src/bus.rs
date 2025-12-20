@@ -94,8 +94,8 @@
 //! - ❌ DMA register
 //! - ❌ CGB-specific registers
 
-use emu_core::cpu_lr35902::MemoryLr35902;
 use crate::ppu::Ppu;
+use emu_core::cpu_lr35902::MemoryLr35902;
 
 /// Game Boy memory bus
 pub struct GbBus {
@@ -213,7 +213,7 @@ impl MemoryLr35902 for GbBus {
                     // Return button state based on selected mode
                     let select_buttons = (self.joypad & 0x20) == 0;
                     let select_dpad = (self.joypad & 0x10) == 0;
-                    
+
                     let mut result = self.joypad & 0xF0;
                     if select_buttons {
                         result |= (self.button_state >> 4) & 0x0F;
@@ -277,7 +277,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF41 => self.ppu.stat = val,
                     0xFF42 => self.ppu.scy = val,
                     0xFF43 => self.ppu.scx = val,
-                    0xFF44 => {}, // LY is read-only
+                    0xFF44 => {} // LY is read-only
                     0xFF45 => self.ppu.lyc = val,
                     0xFF47 => self.ppu.bgp = val,
                     0xFF48 => self.ppu.obp0 = val,

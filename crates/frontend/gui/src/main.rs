@@ -369,23 +369,19 @@ fn save_screenshot(
 
     // Get current local time
     let now = Local::now();
-    
+
     // Generate random number 000-999
     let random = rand::thread_rng().gen_range(0..1000);
-    
+
     // Create filename: YYYYMMDDHHMMSSRRR.png
-    let filename = format!(
-        "{}{:03}.png",
-        now.format("%Y%m%d%H%M%S"),
-        random
-    );
-    
+    let filename = format!("{}{:03}.png", now.format("%Y%m%d%H%M%S"), random);
+
     // Create screenshots directory structure
     let screenshots_dir = PathBuf::from("screenshots").join(system_name);
     fs::create_dir_all(&screenshots_dir)?;
-    
+
     let filepath = screenshots_dir.join(&filename);
-    
+
     // Convert RGBA buffer to RGB
     let mut rgb_data = Vec::with_capacity(width * height * 3);
     for pixel in buffer {
@@ -396,16 +392,16 @@ fn save_screenshot(
         rgb_data.push(g);
         rgb_data.push(b);
     }
-    
+
     // Write PNG file
     let file = fs::File::create(&filepath)?;
     let mut encoder = Encoder::new(file, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
-    
+
     let mut writer = encoder.write_header()?;
     writer.write_image_data(&rgb_data)?;
-    
+
     Ok(filepath.to_string_lossy().to_string())
 }
 

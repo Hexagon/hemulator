@@ -57,15 +57,15 @@ impl SweepUnit {
 
             if self.enabled && self.period > 0 {
                 let new_freq = self.calculate_frequency();
-                
+
                 // Check for overflow (frequency >= 2048 on Game Boy)
                 if new_freq < 2048 && self.shift > 0 {
                     self.frequency = new_freq;
                     self.shadow_frequency = new_freq;
-                    
+
                     // Perform overflow check again
                     let _ = self.calculate_frequency();
-                    
+
                     return Some(new_freq);
                 }
             }
@@ -77,7 +77,7 @@ impl SweepUnit {
     /// Calculate the new frequency based on current sweep settings
     fn calculate_frequency(&self) -> u16 {
         let delta = self.shadow_frequency >> self.shift;
-        
+
         if self.negate {
             // Decrease frequency
             self.shadow_frequency.saturating_sub(delta)
@@ -139,13 +139,13 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(1, false, 1); // Period 1, increase, shift 1
         sweep.trigger(100);
-        
+
         // Initial frequency
         assert_eq!(sweep.get_frequency(), 100);
-        
+
         // Clock once to decrement timer
         sweep.clock();
-        
+
         // Timer should be 0, sweep should apply
         // New frequency = 100 + (100 >> 1) = 100 + 50 = 150
         assert_eq!(sweep.get_frequency(), 150);
@@ -156,11 +156,11 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(1, true, 1); // Period 1, decrease, shift 1
         sweep.trigger(100);
-        
+
         assert_eq!(sweep.get_frequency(), 100);
-        
+
         sweep.clock();
-        
+
         // New frequency = 100 - (100 >> 1) = 100 - 50 = 50
         assert_eq!(sweep.get_frequency(), 50);
     }
@@ -170,12 +170,12 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(3, false, 1); // Period 3
         sweep.trigger(100);
-        
+
         // Clock twice - frequency should not change yet
         sweep.clock();
         sweep.clock();
         assert_eq!(sweep.get_frequency(), 100);
-        
+
         // Clock third time - frequency should change
         sweep.clock();
         assert_eq!(sweep.get_frequency(), 150);
@@ -186,9 +186,9 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(1, false, 0); // Shift 0
         sweep.trigger(100);
-        
+
         sweep.clock();
-        
+
         // Frequency should not change with shift = 0
         assert_eq!(sweep.get_frequency(), 100);
     }
@@ -198,13 +198,13 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(1, false, 1); // Increase by half each time
         sweep.trigger(1500);
-        
+
         // 1500 + (1500 >> 1) = 1500 + 750 = 2250, which is >= 2048 (overflow)
         assert!(sweep.will_overflow());
-        
+
         // After sweep: frequency should not change due to overflow
         sweep.clock();
-        
+
         // Frequency should not have changed due to overflow
         assert_eq!(sweep.get_frequency(), 1500);
     }
@@ -214,7 +214,7 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(0, false, 1); // Period 0
         sweep.trigger(100);
-        
+
         // With period 0, timer should use 8
         assert_eq!(sweep.timer, 8);
     }
@@ -224,7 +224,7 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(0, false, 0);
         sweep.trigger(100);
-        
+
         assert!(!sweep.enabled);
     }
 
@@ -233,14 +233,14 @@ mod tests {
         let mut sweep = SweepUnit::new();
         sweep.set_params(1, false, 0);
         sweep.trigger(100);
-        
+
         // Should be enabled with period > 0
         assert!(sweep.enabled);
-        
+
         sweep.reset();
         sweep.set_params(0, false, 1);
         sweep.trigger(100);
-        
+
         // Should be enabled with shift > 0
         assert!(sweep.enabled);
     }

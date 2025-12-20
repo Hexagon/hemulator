@@ -43,14 +43,14 @@ impl WaveChannel {
     pub fn clock(&mut self) -> i16 {
         // Get current sample from wave RAM
         let sample_4bit = self.wave_ram[self.position as usize] & 0x0F;
-        
+
         // Apply volume shift
         let sample = if self.enabled && self.volume_shift > 0 {
             let shifted = match self.volume_shift {
-                1 => sample_4bit,           // 100% (no shift)
-                2 => sample_4bit >> 1,      // 50% (shift right 1)
-                3 | 4 => sample_4bit >> 2,  // 25% (shift right 2)
-                _ => 0,                      // Mute
+                1 => sample_4bit,          // 100% (no shift)
+                2 => sample_4bit >> 1,     // 50% (shift right 1)
+                3 | 4 => sample_4bit >> 2, // 25% (shift right 2)
+                _ => 0,                    // Mute
             };
             // Convert 4-bit value to signed 16-bit (scale up without centering)
             (shifted as i16) << 10
@@ -115,7 +115,7 @@ mod tests {
         wave.enabled = true;
         wave.volume_shift = 1; // 100% volume
         wave.set_timer(0); // Fastest timer
-        
+
         let initial_pos = wave.position;
         wave.clock();
         assert_eq!(wave.position, (initial_pos + 1) & 31);
@@ -128,7 +128,7 @@ mod tests {
         wave.volume_shift = 1;
         wave.set_timer(0);
         wave.position = 31;
-        
+
         wave.clock();
         assert_eq!(wave.position, 0);
     }
@@ -139,21 +139,21 @@ mod tests {
         wave.enabled = true;
         wave.wave_ram[0] = 15; // Maximum sample value
         wave.set_timer(10); // Slow enough to sample same position
-        
+
         // 100% volume
         wave.volume_shift = 1;
         let sample_100 = wave.clock().abs();
-        
+
         // 50% volume
         wave.position = 0;
         wave.volume_shift = 2;
         let sample_50 = wave.clock().abs();
-        
+
         // 25% volume
         wave.position = 0;
         wave.volume_shift = 3;
         let sample_25 = wave.clock().abs();
-        
+
         // Volume should decrease
         assert!(sample_100 > sample_50);
         assert!(sample_50 > sample_25);
@@ -165,7 +165,7 @@ mod tests {
         wave.enabled = false;
         wave.volume_shift = 1;
         wave.wave_ram[0] = 15;
-        
+
         let sample = wave.clock();
         assert_eq!(sample, 0);
     }
@@ -176,7 +176,7 @@ mod tests {
         wave.enabled = true;
         wave.volume_shift = 0;
         wave.wave_ram[0] = 15;
-        
+
         let sample = wave.clock();
         assert_eq!(sample, 0);
     }
@@ -184,12 +184,12 @@ mod tests {
     #[test]
     fn wave_ram_write_read() {
         let mut wave = WaveChannel::new();
-        
+
         // Write a byte containing two samples
         wave.write_wave_ram_byte(0, 0xAB);
         assert_eq!(wave.wave_ram[0], 0x0A);
         assert_eq!(wave.wave_ram[1], 0x0B);
-        
+
         // Read it back
         assert_eq!(wave.read_wave_ram_byte(0), 0xAB);
     }
@@ -197,12 +197,12 @@ mod tests {
     #[test]
     fn wave_ram_byte_format() {
         let mut wave = WaveChannel::new();
-        
+
         // Write multiple bytes
         wave.write_wave_ram_byte(0, 0x12);
         wave.write_wave_ram_byte(1, 0x34);
         wave.write_wave_ram_byte(2, 0x56);
-        
+
         // Check samples are stored correctly
         assert_eq!(wave.wave_ram[0], 0x01);
         assert_eq!(wave.wave_ram[1], 0x02);
