@@ -54,17 +54,17 @@ impl KeyMapping {
     pub fn player2_default() -> Self {
         Self {
             a: "U".to_string(),
-            b: "I".to_string(),
+            b: "O".to_string(),
             x: String::new(),
             y: String::new(),
             l: String::new(),
             r: String::new(),
             select: "RightShift".to_string(),
-            start: "RightBracket".to_string(), // ] key
-            up: "W".to_string(),
-            down: "S".to_string(),
-            left: "A".to_string(),
-            right: "D".to_string(),
+            start: "P".to_string(), // P key (single key on right side)
+            up: "I".to_string(),
+            down: "K".to_string(),
+            left: "J".to_string(),
+            right: "L".to_string(),
         }
     }
 
@@ -341,7 +341,9 @@ mod tests {
 
         // Player 2 has different default mappings
         assert_eq!(settings.input.player2.a, "U");
-        assert_eq!(settings.input.player2.up, "W");
+        assert_eq!(settings.input.player2.b, "O");
+        assert_eq!(settings.input.player2.up, "I");
+        assert_eq!(settings.input.player2.start, "P");
 
         // Players 3 and 4 are unmapped by default
         assert!(settings.input.player3.a.is_empty());

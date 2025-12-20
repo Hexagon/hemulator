@@ -93,11 +93,11 @@ pub struct InputConfig {
 - **Start**: Enter
 
 ### Player 2 (Default)
-- **D-pad**: W/A/S/D (W=Up, S=Down, A=Left, D=Right)
+- **D-pad**: I/J/K/L (I=Up, K=Down, J=Left, L=Right)
 - **A**: U
-- **B**: I
+- **B**: O
 - **Select**: Right Shift
-- **Start**: Right Bracket (])
+- **Start**: P
 
 ### Players 3 & 4
 - Unmapped by default (all empty strings)

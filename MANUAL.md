@@ -39,15 +39,15 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 
 | Key | Action | Notes |
 |-----|--------|-------|
-| W/A/S/D | D-pad | W=Up, S=Down, A=Left, D=Right |
+| I/J/K/L | D-pad | I=Up, K=Down, J=Left, L=Right |
 | U | A button | Confirm/Jump |
-| I | B button | Back/Action |
-| Right Bracket (]) | Start | Pause menu |
+| O | B button | Back/Action |
+| P | Start | Pause menu |
 | Right Shift | Select | Menu navigation |
 
 *All controller mappings for all players can be customized by editing `config.json`*
 
-**Note**: Players 3 and 4 are not mapped by default but can be configured in `config.json` for systems that support 4 players (future SNES support, etc.).
+**Note**: All Player 1 keys are on the left side of the keyboard, and all Player 2 keys are on the right side for comfortable simultaneous play. Players 3 and 4 are not mapped by default but can be configured in `config.json` for systems that support 4 players (future SNES support, etc.).
 
 ### Future Enhancements
 
@@ -181,11 +181,11 @@ Located in the same directory as the executable, this file stores your preferenc
       "l": "",
       "r": "",
       "select": "RightShift",
-      "start": "RightBracket",
-      "up": "W",
-      "down": "S",
-      "left": "A",
-      "right": "D"
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
     },
     "player3": {
       "a": "",
