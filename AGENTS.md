@@ -48,7 +48,7 @@ Contains reusable CPU implementations and common traits:
     - Status flags (N, V, B, D, I, Z, C)
   - `ArrayMemory` helper for testing and simple use cases
 
-- **`cpu_8086`**: Complete Intel 8086 CPU implementation
+- **`cpu_8086`**: Intel 8086 CPU implementation with core instruction set
   - Generic `Memory8086` trait for memory access
   - Segment-based memory addressing (CS, DS, ES, SS)
   - Comprehensive test coverage (22 unit tests)
@@ -57,13 +57,13 @@ Contains reusable CPU implementations and common traits:
     - All general-purpose registers (AX, BX, CX, DX, SI, DI, BP, SP)
     - Segment registers (CS, DS, ES, SS)
     - Instruction pointer (IP) and FLAGS register
-    - Arithmetic operations (ADD, SUB, CMP, INC, DEC)
-    - Logical operations (AND, OR, XOR)
-    - Control flow (JMP, conditional jumps)
+    - Core instructions: MOV (immediate), arithmetic (ADD, SUB, CMP, INC, DEC), logical (AND, OR, XOR)
+    - Control flow: JMP (short), conditional jumps (JZ, JNZ, JC, JNC)
     - Stack operations (PUSH, POP)
     - Flag manipulation (CLC, STC, CLI, STI, CLD, STD)
     - Accurate cycle counting
     - Parity, zero, sign, carry, and overflow flags
+  - Ready for extension with additional instructions (ModR/M, multiply/divide, shifts, string operations, etc.)
   - `ArrayMemory` helper for testing and simple use cases
 
 - **`apu`**: Reusable audio processing unit components

@@ -154,17 +154,19 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Read a word (16-bit) from code segment at IP
     #[inline]
     fn fetch_u16(&mut self) -> u16 {
-        let lo = self.fetch_u8() as u16;
-        let hi = self.fetch_u8() as u16;
-        (hi << 8) | lo
+        // 8086 is little-endian: fetch low byte first, then high byte
+        let low_byte = self.fetch_u8() as u16;
+        let high_byte = self.fetch_u8() as u16;
+        (high_byte << 8) | low_byte
     }
 
     /// Read a word from memory at segment:offset
     #[inline]
     fn read_u16(&self, segment: u16, offset: u16) -> u16 {
-        let lo = self.read(segment, offset) as u16;
-        let hi = self.read(segment, offset.wrapping_add(1)) as u16;
-        (hi << 8) | lo
+        // 8086 is little-endian: read low byte at offset, then high byte at offset + 1
+        let low_byte = self.read(segment, offset) as u16;
+        let high_byte = self.read(segment, offset.wrapping_add(1)) as u16;
+        (high_byte << 8) | low_byte
     }
 
     /// Write a word to memory at segment:offset
@@ -195,12 +197,13 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     #[allow(dead_code)]
     fn get_reg8_high(&self, reg: u8) -> u8 {
+        debug_assert!(reg < 4, "Invalid 8-bit high register index: {} (must be 0-3)", reg);
         match reg {
             0 => (self.ax >> 8) as u8, // AH
             1 => (self.cx >> 8) as u8, // CH
             2 => (self.dx >> 8) as u8, // DH
             3 => (self.bx >> 8) as u8, // BH
-            _ => panic!("Invalid 8-bit high register index: {} (must be 0-3)", reg),
+            _ => unreachable!(),
         }
     }
 
@@ -208,42 +211,46 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     #[allow(dead_code)]
     fn get_reg8_low(&self, reg: u8) -> u8 {
+        debug_assert!(reg < 4, "Invalid 8-bit low register index: {} (must be 0-3)", reg);
         match reg {
             0 => (self.ax & 0xFF) as u8, // AL
             1 => (self.cx & 0xFF) as u8, // CL
             2 => (self.dx & 0xFF) as u8, // DL
             3 => (self.bx & 0xFF) as u8, // BL
-            _ => panic!("Invalid 8-bit low register index: {} (must be 0-3)", reg),
+            _ => unreachable!(),
         }
     }
 
     /// Set 8-bit high register
     #[inline]
     fn set_reg8_high(&mut self, reg: u8, val: u8) {
+        debug_assert!(reg < 4, "Invalid 8-bit high register index: {} (must be 0-3)", reg);
         match reg {
             0 => self.ax = (self.ax & 0x00FF) | ((val as u16) << 8), // AH
             1 => self.cx = (self.cx & 0x00FF) | ((val as u16) << 8), // CH
             2 => self.dx = (self.dx & 0x00FF) | ((val as u16) << 8), // DH
             3 => self.bx = (self.bx & 0x00FF) | ((val as u16) << 8), // BH
-            _ => panic!("Invalid 8-bit high register index: {} (must be 0-3)", reg),
+            _ => unreachable!(),
         }
     }
 
     /// Set 8-bit low register
     #[inline]
     fn set_reg8_low(&mut self, reg: u8, val: u8) {
+        debug_assert!(reg < 4, "Invalid 8-bit low register index: {} (must be 0-3)", reg);
         match reg {
             0 => self.ax = (self.ax & 0xFF00) | (val as u16), // AL
             1 => self.cx = (self.cx & 0xFF00) | (val as u16), // CL
             2 => self.dx = (self.dx & 0xFF00) | (val as u16), // DL
             3 => self.bx = (self.bx & 0xFF00) | (val as u16), // BL
-            _ => panic!("Invalid 8-bit low register index: {} (must be 0-3)", reg),
+            _ => unreachable!(),
         }
     }
 
     /// Get 16-bit register
     #[inline]
     fn get_reg16(&self, reg: u8) -> u16 {
+        debug_assert!(reg < 8, "Invalid 16-bit register index: {} (must be 0-7)", reg);
         match reg {
             0 => self.ax,
             1 => self.cx,
@@ -253,13 +260,14 @@ impl<M: Memory8086> Cpu8086<M> {
             5 => self.bp,
             6 => self.si,
             7 => self.di,
-            _ => panic!("Invalid 16-bit register index: {} (must be 0-7)", reg),
+            _ => unreachable!(),
         }
     }
 
     /// Set 16-bit register
     #[inline]
     fn set_reg16(&mut self, reg: u8, val: u16) {
+        debug_assert!(reg < 8, "Invalid 16-bit register index: {} (must be 0-7)", reg);
         match reg {
             0 => self.ax = val,
             1 => self.cx = val,
@@ -269,7 +277,7 @@ impl<M: Memory8086> Cpu8086<M> {
             5 => self.bp = val,
             6 => self.si = val,
             7 => self.di = val,
-            _ => panic!("Invalid 16-bit register index: {} (must be 0-7)", reg),
+            _ => unreachable!(),
         }
     }
 
@@ -317,6 +325,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
     /// Calculate parity (true if even number of 1 bits in low byte)
     #[inline]
+    #[allow(clippy::manual_is_multiple_of)] // Use % for compatibility with older Rust versions
     fn calc_parity(val: u8) -> bool {
         val.count_ones() % 2 == 0
     }
@@ -552,6 +561,7 @@ impl<M: Memory8086> Cpu8086<M> {
             }
 
             // INC reg16 (40-47)
+            // Note: INC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
             0x40..=0x47 => {
                 let reg = opcode & 0x07;
                 let val = self.get_reg16(reg);
@@ -566,6 +576,7 @@ impl<M: Memory8086> Cpu8086<M> {
             }
 
             // DEC reg16 (48-4F)
+            // Note: DEC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
             0x48..=0x4F => {
                 let reg = opcode & 0x07;
                 let val = self.get_reg16(reg);
@@ -600,7 +611,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // JMP short (EB)
             0xEB => {
                 let offset = self.fetch_u8() as i8;
-                self.ip = self.ip.wrapping_add(offset as u16);
+                // Add signed offset to IP (wrapping_add_signed would be clearer but requires i16 cast)
+                self.ip = self.ip.wrapping_add(offset as i16 as u16);
                 self.cycles += 15;
                 15
             }
@@ -609,7 +621,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x74 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as u16);
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
                     self.cycles += 16;
                     16
                 } else {
@@ -622,7 +634,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x75 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as u16);
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
                     self.cycles += 16;
                     16
                 } else {
@@ -635,7 +647,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x72 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add(offset as u16);
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
                     self.cycles += 16;
                     16
                 } else {
@@ -648,7 +660,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x73 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add(offset as u16);
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
                     self.cycles += 16;
                     16
                 } else {
