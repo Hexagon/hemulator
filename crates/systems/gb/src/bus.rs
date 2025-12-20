@@ -94,6 +94,7 @@
 //! - ❌ DMA register
 //! - ❌ CGB-specific registers
 
+use crate::apu::GbApu;
 use crate::ppu::Ppu;
 use emu_core::cpu_lr35902::MemoryLr35902;
 
@@ -115,6 +116,8 @@ pub struct GbBus {
     boot_rom_enabled: bool,
     /// PPU (Picture Processing Unit)
     pub ppu: Ppu,
+    /// APU (Audio Processing Unit)
+    pub apu: GbApu,
     /// Joypad state register (0xFF00)
     joypad: u8,
     /// Joypad button state
@@ -132,6 +135,7 @@ impl GbBus {
             cart_ram: Vec::new(),
             boot_rom_enabled: true,
             ppu: Ppu::new(),
+            apu: GbApu::new(),
             joypad: 0xFF,
             button_state: 0xFF,
         }
@@ -225,6 +229,10 @@ impl MemoryLr35902 for GbBus {
                     result
                 }
                 0xFF0F => self.if_reg,
+                // APU registers
+                0xFF10..=0xFF26 => self.apu.read_register(addr),
+                0xFF30..=0xFF3F => self.apu.read_register(addr),
+                // PPU registers
                 0xFF40 => self.ppu.lcdc,
                 0xFF41 => self.ppu.stat,
                 0xFF42 => self.ppu.scy,
@@ -273,6 +281,10 @@ impl MemoryLr35902 for GbBus {
                 match addr {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
                     0xFF0F => self.if_reg = val,
+                    // APU registers
+                    0xFF10..=0xFF26 => self.apu.write_register(addr, val),
+                    0xFF30..=0xFF3F => self.apu.write_register(addr, val),
+                    // PPU registers
                     0xFF40 => self.ppu.lcdc = val,
                     0xFF41 => self.ppu.stat = val,
                     0xFF42 => self.ppu.scy = val,

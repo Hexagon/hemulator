@@ -18,6 +18,10 @@ pub struct Envelope {
     period: u8,
     /// Loop flag (restart envelope when it reaches 0)
     loop_flag: bool,
+    /// Initial volume (for Game Boy)
+    initial_volume: u8,
+    /// Add mode (true = increase, false = decrease)
+    add_mode: bool,
 }
 
 impl Envelope {
@@ -28,23 +32,33 @@ impl Envelope {
             divider: 0,
             period: 0,
             loop_flag: false,
+            initial_volume: 0,
+            add_mode: false,
         }
     }
 
-    /// Clock the envelope (called by frame counter at ~240Hz NTSC)
+    /// Clock the envelope (called by frame counter at ~240Hz NTSC or ~64Hz GB)
     pub fn clock(&mut self) {
         if self.start_flag {
             self.start_flag = false;
-            self.decay_level = 15;
+            self.decay_level = self.initial_volume;
             self.divider = self.period;
         } else if self.divider > 0 {
             self.divider -= 1;
         } else {
             self.divider = self.period;
-            if self.decay_level > 0 {
-                self.decay_level -= 1;
-            } else if self.loop_flag {
-                self.decay_level = 15;
+            if self.add_mode {
+                // Game Boy add mode: increase volume
+                if self.decay_level < 15 {
+                    self.decay_level += 1;
+                }
+            } else {
+                // NES/GB subtract mode: decrease volume
+                if self.decay_level > 0 {
+                    self.decay_level -= 1;
+                } else if self.loop_flag {
+                    self.decay_level = 15;
+                }
             }
         }
     }
@@ -67,6 +81,38 @@ impl Envelope {
     /// Set the loop flag
     pub fn set_loop(&mut self, loop_flag: bool) {
         self.loop_flag = loop_flag;
+    }
+    
+    /// Set all envelope parameters (Game Boy style)
+    pub fn set_params(&mut self, initial_volume: u8, add_mode: bool, period: u8) {
+        self.initial_volume = initial_volume & 0x0F;
+        self.add_mode = add_mode;
+        self.period = period & 0x07;
+    }
+    
+    /// Trigger the envelope (start from initial volume)
+    pub fn trigger(&mut self) {
+        self.start_flag = true;
+    }
+    
+    /// Get the current volume (0-15)
+    pub fn volume(&self) -> u8 {
+        self.decay_level
+    }
+    
+    /// Get the initial volume setting
+    pub fn initial_volume(&self) -> u8 {
+        self.initial_volume
+    }
+    
+    /// Get the add mode flag
+    pub fn add_mode(&self) -> bool {
+        self.add_mode
+    }
+    
+    /// Get the period setting
+    pub fn period(&self) -> u8 {
+        self.period
     }
 }
 

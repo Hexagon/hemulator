@@ -71,6 +71,21 @@ impl LengthCounter {
     pub fn is_active(&self) -> bool {
         self.value > 0
     }
+    
+    /// Load a Game Boy length value
+    /// The GB uses direct length values (not a table), max_length determines the max
+    pub fn load_gb(&mut self, length_load: u8, max_length: u16) {
+        if self.enabled {
+            // GB length counters count DOWN from (max_length - length_load)
+            let length = max_length.saturating_sub(length_load as u16);
+            self.value = length.min(255) as u8;
+        }
+    }
+    
+    /// Check if length counter is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 impl Default for LengthCounter {

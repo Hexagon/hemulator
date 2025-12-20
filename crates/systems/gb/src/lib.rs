@@ -134,6 +134,7 @@
 
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
+mod apu;
 mod bus;
 pub(crate) mod ppu;
 
