@@ -184,6 +184,15 @@ impl Atari2600System {
             })
         })
     }
+
+    /// Get audio samples from the TIA
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        if let Some(bus) = self.cpu.bus_mut() {
+            bus.tia.generate_audio_samples(count)
+        } else {
+            vec![0; count]
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
