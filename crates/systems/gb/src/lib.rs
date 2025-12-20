@@ -32,6 +32,15 @@ impl GbSystem {
             cart_loaded: false,
         }
     }
+
+    /// Set controller state (Game Boy buttons)
+    /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
+    pub fn set_controller(&mut self, state: u8) {
+        // Game Boy controller is memory-mapped to $FF00 (joypad register)
+        // For now, we'll just store it in the bus
+        // TODO: Implement proper joypad I/O register in bus
+        let _ = state; // Suppress unused warning until we implement joypad register
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
