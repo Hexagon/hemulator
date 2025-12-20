@@ -276,12 +276,12 @@ mod tests {
         apply_phosphor(&mut buffer, width, height);
 
         // Middle pixel should remain bright but will be slightly dimmed from blending
-        let (r, g, b) = unpack_rgb(buffer[1]);
+        let (r, _g, _b) = unpack_rgb(buffer[1]);
         assert!(r > 180); // Should still be quite bright (accounting for blending)
 
         // Edge pixels should have some bleed from the middle
-        let (r0, g0, b0) = unpack_rgb(buffer[0]);
-        let (r2, g2, b2) = unpack_rgb(buffer[2]);
+        let (r0, _g0, _b0) = unpack_rgb(buffer[0]);
+        let (r2, _g2, _b2) = unpack_rgb(buffer[2]);
         assert!(r0 > 0); // Should have some brightness from neighbor
         assert!(r2 > 0);
     }

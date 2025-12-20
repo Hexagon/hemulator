@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_save_load_state() {
-        let mut sys = Atari2600System::new();
+        let sys = Atari2600System::new();
 
         assert!(sys.supports_save_states());
 

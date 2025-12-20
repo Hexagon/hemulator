@@ -856,7 +856,7 @@ mod tests {
         
         // Write wave RAM
         for i in 0..16 {
-            apu.write_register(0xFF30 + i, 0x01 * i as u8);
+            apu.write_register(0xFF30 + i, i as u8);
         }
         
         // Trigger wave channel
