@@ -54,13 +54,13 @@
 - [x] Add WaveChannel for programmable waveforms (Game Boy wave channel).
 - [x] Add SweepUnit for frequency sweep (Game Boy pulse 1).
 - [x] Add PolynomialCounter for TIA waveform generation (Atari 2600).
-- [ ] Implement Game Boy APU:
-  - [ ] Pulse 1 channel with sweep
-  - [ ] Pulse 2 channel without sweep
-  - [ ] Wave channel with 32x4-bit wave RAM
-  - [ ] Noise channel with 7/15-bit LFSR
-  - [ ] Frame sequencer (512 Hz)
-  - [ ] Master volume and mixing
+- [x] Implement Game Boy APU:
+  - [x] Pulse 1 channel with sweep
+  - [x] Pulse 2 channel without sweep
+  - [x] Wave channel with 32x4-bit wave RAM
+  - [x] Noise channel with 7/15-bit LFSR
+  - [x] Frame sequencer (512 Hz)
+  - [x] Master volume and mixing
   - [ ] Audio output integration with frontend
 - [ ] Implement Atari 2600 TIA audio:
   - [ ] Channel 0 with PolynomialCounter

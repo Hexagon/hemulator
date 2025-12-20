@@ -235,6 +235,39 @@ System-specific implementations that use core components:
     - RAM size auto-detection from header
     - MBC0 (no mapper) support only
     - **Not yet implemented**: MBC1, MBC3, MBC5 (required for most commercial games)
+  - **APU (Audio Processing Unit)**:
+    - System-specific implementation in `crates/systems/gb/apu.rs`
+    - Uses reusable components from `core/apu`
+    - **4 Sound Channels**:
+      1. **Pulse 1 (NR10-NR14)**: Square wave with sweep
+         - Duty cycle: 12.5%, 25%, 50%, 75%
+         - Frequency sweep (increase/decrease over time)
+         - Envelope generator for volume control
+         - Length counter for automatic duration
+      2. **Pulse 2 (NR21-NR24)**: Square wave without sweep
+         - Same as Pulse 1 but no sweep unit
+      3. **Wave (NR30-NR34)**: Custom waveform
+         - 32 x 4-bit samples in wave RAM ($FF30-$FF3F)
+         - Volume control: mute, 100%, 50%, 25%
+         - No envelope generator
+         - Length counter
+      4. **Noise (NR41-NR44)**: Pseudo-random noise
+         - 7-bit or 15-bit LFSR modes
+         - Envelope generator for volume control
+         - Length counter
+    - **Frame Sequencer**: 512 Hz timing controller
+      - Clocks length counters at 256 Hz (every other step)
+      - Clocks sweep at 128 Hz (steps 2 and 6)
+      - Clocks envelopes at 64 Hz (step 7)
+    - **Master Controls (NR50-NR52)**:
+      - Volume control (left/right channels)
+      - Sound panning per channel
+      - Global power on/off
+    - **Audio Output**: Ready for integration with frontend
+      - 44.1 kHz sample rate
+      - Mixes all 4 channels
+      - Method `generate_samples()` available
+    - **Registers**: $FF10-$FF26 (control), $FF30-$FF3F (wave RAM)
   - **Timing**:
     - 4.194304 MHz CPU clock
     - ~59.73 Hz frame rate
@@ -245,32 +278,15 @@ System-specific implementations that use core components:
     - Cartridge mount/unmount
     - System reset
     - Controller input handling
+    - Audio synthesis (not yet integrated with frontend)
   - **Known Limitations**:
     - DMG (original Game Boy) mode only - no Game Boy Color support
     - No MBC support - only works with 32KB ROMs (MBC0)
-    - No audio (APU not implemented)
-      - **Future Implementation**: Will use components from `core/apu`
-      - Game Boy has 4 sound channels:
-        1. **Pulse 1**: Square wave with sweep (`PulseChannel` + `SweepUnit`)
-           - Duty cycle: 12.5%, 25%, 50%, 75%
-           - Frequency sweep (increase/decrease over time)
-           - Envelope generator for volume control
-        2. **Pulse 2**: Square wave without sweep (`PulseChannel` only)
-           - Same as Pulse 1 but no sweep unit
-        3. **Wave**: Custom waveform (`WaveChannel`)
-           - 32 x 4-bit samples in wave RAM
-           - Volume control: mute, 100%, 50%, 25%
-           - No envelope generator
-        4. **Noise**: Pseudo-random noise (`NoiseChannel`)
-           - 7-bit or 15-bit LFSR modes
-           - Envelope generator for volume control
-      - All channels use `LengthCounter` for automatic duration
-      - Frame sequencer at 512 Hz controls envelope and sweep timing
-      - See components in `crates/core/src/apu/` for implementation details
+    - Audio output not yet connected to frontend (requires GUI audio integration)
     - No timer registers
     - No serial/link cable support
     - Frame-based timing (not cycle-accurate)
-  - All tests pass (20 tests: 13 PPU, 7 system)
+  - All tests pass (27 tests: 13 PPU, 7 APU, 7 system)
 
 - **Atari 2600 (`emu_atari2600`)**: 
   - Uses `cpu_6502` from core with Atari 2600-specific bus implementation (6507 variant)
