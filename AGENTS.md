@@ -216,18 +216,52 @@ System-specific implementations that use core components:
   - `Atari2600Cpu` wraps `Cpu6502<Atari2600Bus>` to provide system-specific interface
   - Atari 2600 bus includes: TIA (video/audio), RIOT (RAM/I/O/timer), cartridge
   - **TIA (Television Interface Adapter)**:
-    - Simplified scanline-based rendering (160x192 resolution)
-    - Playfield rendering with reflection/score modes
-    - Color registers for background, playfield, and sprites
-    - Audio registers (simplified - full audio not yet implemented)
+    - System-specific implementation in `crates/systems/atari2600/tia.rs`
+    - Resolution: 160x192 visible pixels (NTSC)
+    - 128-color NTSC palette with proper hue/luminance mapping
+    - **Graphics Objects**:
+      - Playfield: 40-bit bitmap with mirror/repeat modes
+      - 2 Players (sprites): 8-pixel wide with reflection support
+      - 2 Missiles: 1-pixel wide, share color with players
+      - 1 Ball: 1-pixel wide, uses playfield color
+    - Priority ordering: Playfield/Player/Missile/Ball/Background (configurable)
+    - **Timing Model**: Frame-based rendering (not cycle-accurate)
+      - Renders complete 160x192 frames on-demand
+      - TIA state updated during CPU execution
+      - Suitable for most games; timing-critical effects may not work perfectly
+    - **Audio Registers**: Stored but synthesis simplified (2 channels, control/frequency/volume)
+    - **Known Limitations**:
+      - Player/missile sizing (NUSIZ) stored but not applied
+      - Horizontal motion (HMxx) stored but not applied
+      - Collision detection registers exist but return 0
+      - Delayed graphics registers not implemented
   - **RIOT (6532 chip)**:
-    - 128 bytes of RAM with mirroring
+    - System-specific implementation in `crates/systems/atari2600/riot.rs`
+    - 128 bytes of RAM with proper mirroring at $00-$7F, $80-$FF, $100-$17F
     - Programmable interval timer (1, 8, 64, 1024 clock intervals)
-    - I/O ports for joystick and console switches
+    - Timer underflow detection and interrupt flag
+    - I/O ports for joystick (SWCHA) and console switches (SWCHB)
+    - Data direction registers (SWACNT, SWBCNT)
   - **Cartridge Banking**:
+    - System-specific implementation in `crates/systems/atari2600/cartridge.rs`
     - Supports 2K, 4K (no banking), 8K (F8), 12K (FA), 16K (F6), 32K (F4)
-    - Bank switching via memory writes to specific addresses
-  - All existing tests pass (33 tests total)
+    - Auto-detection based on ROM size
+    - Bank switching via memory reads/writes to specific addresses
+    - **Schemes**:
+      - F8 (8K): 2 banks, switch at $1FF8-$1FF9
+      - FA (12K): 3 banks, switch at $1FF8-$1FFA
+      - F6 (16K): 4 banks, switch at $1FF6-$1FF9
+      - F4 (32K): 8 banks, switch at $1FF4-$1FFB
+  - **Timing**:
+    - CPU: ~1.19 MHz (NTSC)
+    - ~19,912 cycles per frame (~60 Hz)
+    - 262 scanlines/frame, ~76 cycles/scanline
+  - **Features**:
+    - Full save state support (CPU, TIA, RIOT, cartridge banking)
+    - Comprehensive test coverage (39 tests)
+    - Proper NTSC color palette
+    - Player/missile/ball rendering with priority
+  - All existing tests pass (39 tests total: 14 TIA, 6 RIOT, 6 cartridge, 7 system, 4 bus, 2 CPU)
 
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation

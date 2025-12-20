@@ -1,10 +1,119 @@
 //! Atari 2600 cartridge handling and banking
 //!
-//! Most Atari 2600 cartridges use simple ROM banking schemes.
-//! Common formats:
-//! - 2K: No banking, ROM at $F800-$FFFF
-//! - 4K: No banking, ROM at $F000-$FFFF
-//! - 8K and larger: Various banking schemes (F8, F6, F4, etc.)
+//! Most Atari 2600 cartridges use simple ROM banking schemes to expand beyond the
+//! 4KB directly addressable in the cartridge space ($1000-$1FFF).
+//!
+//! # Banking Schemes
+//!
+//! Unlike the NES with its complex mapper chips, Atari 2600 banking is typically very simple:
+//! reading or writing to specific addresses in the cartridge space switches banks.
+//!
+//! ## Supported Formats
+//!
+//! ### 2K ROM (No Banking)
+//! - **Size**: 2048 bytes
+//! - **Mapping**: ROM appears at $F800-$FFFF (2K), mirrored
+//! - **Games**: Early simple games (e.g., Combat, Video Olympics)
+//! - **Note**: This was the original Atari 2600 ROM size
+//!
+//! ### 4K ROM (No Banking)
+//! - **Size**: 4096 bytes
+//! - **Mapping**: ROM appears at $F000-$FFFF (4K)
+//! - **Games**: Most common format (e.g., Adventure, Pac-Man, Space Invaders)
+//! - **Note**: This is the "standard" Atari 2600 cartridge size
+//!
+//! ### F8 Banking (8K)
+//! - **Size**: 8192 bytes (2 banks of 4K each)
+//! - **Banks**: 2
+//! - **Mapping**: One 4K bank visible at $F000-$FFFF
+//! - **Switching**:
+//!   - Read from $1FF8 → select bank 0
+//!   - Read from $1FF9 → select bank 1
+//! - **Games**: Many popular games (e.g., Pitfall!, River Raid)
+//!
+//! ### FA Banking (12K)
+//! - **Size**: 12288 bytes (3 banks of 4K each)
+//! - **Banks**: 3
+//! - **Mapping**: One 4K bank visible at $F000-$FFFF
+//! - **Switching**:
+//!   - Read from $1FF8 → select bank 0
+//!   - Read from $1FF9 → select bank 1
+//!   - Read from $1FFA → select bank 2
+//! - **Games**: CBS games (e.g., Omega Race)
+//!
+//! ### F6 Banking (16K)
+//! - **Size**: 16384 bytes (4 banks of 4K each)
+//! - **Banks**: 4
+//! - **Mapping**: One 4K bank visible at $F000-$FFFF
+//! - **Switching**:
+//!   - Read from $1FF6 → select bank 0
+//!   - Read from $1FF7 → select bank 1
+//!   - Read from $1FF8 → select bank 2
+//!   - Read from $1FF9 → select bank 3
+//! - **Games**: Later games needing more space (e.g., Crystal Castles)
+//!
+//! ### F4 Banking (32K)
+//! - **Size**: 32768 bytes (8 banks of 4K each)
+//! - **Banks**: 8
+//! - **Mapping**: One 4K bank visible at $F000-$FFFF
+//! - **Switching**:
+//!   - Read from $1FF4 → select bank 0
+//!   - Read from $1FF5 → select bank 1
+//!   - ... through ...
+//!   - Read from $1FFB → select bank 7
+//! - **Games**: Large games (e.g., Fatal Run)
+//! - **Note**: This is the largest standard Atari 2600 cartridge format
+//!
+//! # Bank Switching Mechanics
+//!
+//! Bank switching on the Atari 2600 is **triggered by reads or writes** to specific addresses.
+//! The actual data read/written doesn't matter - just accessing the address switches the bank.
+//!
+//! ## Example: F8 Banking
+//!
+//! ```no_run
+//! // Atari 2600 assembly example
+//! LDA $1FF9    ; Switch to bank 1 (the value read is discarded)
+//! JMP SubInBank1
+//!
+//! LDA $1FF8    ; Switch to bank 0
+//! JMP SubInBank0
+//! ```
+//!
+//! ## Common Patterns
+//!
+//! 1. **Hotspots in ROM**: Bank switch addresses are usually in the cartridge ROM area itself,
+//!    so jumping to code near the end of a bank automatically switches banks.
+//!
+//! 2. **Shared Code**: The last few bytes of each bank often contain the same reset vectors,
+//!    ensuring the system boots correctly regardless of which bank is selected.
+//!
+//! 3. **Initialization**: Most games switch to bank 0 during initialization.
+//!
+//! # Auto-Detection
+//!
+//! This implementation **auto-detects** the banking scheme based on ROM size:
+//! - 2KB → No banking (2K ROM)
+//! - 4KB → No banking (4K ROM)
+//! - 8KB → F8 banking
+//! - 12KB → FA banking
+//! - 16KB → F6 banking
+//! - 32KB → F4 banking
+//!
+//! There's no header or metadata - the size determines the banking scheme. This works because
+//! these schemes became de facto standards.
+//!
+//! # Implementation Details
+//!
+//! This implementation:
+//! - ✅ Supports all 6 standard banking schemes (2K, 4K, F8, FA, F6, F4)
+//! - ✅ Auto-detects banking from ROM size
+//! - ✅ Properly handles bank switching via read/write access
+//! - ✅ Maintains current bank state across frames
+//! - ✅ Supports save states (bank state is serializable)
+//! - ❌ Does not support more exotic schemes (e.g., DPC, FE, 3F, E0, etc.)
+//!
+//! The implemented schemes cover the vast majority of commercially released Atari 2600 games.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

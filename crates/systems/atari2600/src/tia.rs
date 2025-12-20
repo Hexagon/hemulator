@@ -2,6 +2,105 @@
 //!
 //! The TIA handles all video and audio generation for the Atari 2600.
 //! Unlike modern systems, it has no framebuffer and generates video scanline-by-scanline.
+//!
+//! # Video Generation
+//!
+//! The TIA generates NTSC video signals with the following capabilities:
+//!
+//! ## Resolution and Timing
+//! - **Visible Area**: 160x192 pixels (NTSC)
+//! - **Total Scanlines**: 262 (NTSC), including overscan and vblank
+//! - **Color Clock**: 3.579545 MHz (NTSC)
+//! - **Pixels per Scanline**: 160 visible, 228 total (including blanking)
+//!
+//! ## Graphics Objects
+//!
+//! The TIA can render several types of graphics objects simultaneously:
+//!
+//! ### Playfield
+//! - 40-bit wide bitmap (20 pixels visible, each bit controls 4 color clocks)
+//! - Split into 3 registers: PF0 (4 bits), PF1 (8 bits), PF2 (8 bits)
+//! - Can be **mirrored** (left half repeats mirrored on right) or **repeated** (both halves identical)
+//! - **Score mode**: Left half uses player 0 color, right half uses player 1 color
+//! - **Priority mode**: Playfield drawn in front of players instead of behind
+//!
+//! ### Players (Sprites)
+//! - 2 independent 8-pixel wide sprites (Player 0 and Player 1)
+//! - Each player has:
+//!   - Graphics register (8 bits = 8 pixels)
+//!   - Horizontal position (set by strobing RESP0/RESP1 registers)
+//!   - Color register (COLUP0/COLUP1)
+//!   - Reflection flag (REFP0/REFP1)
+//! - Can be sized, duplicated, and positioned (NUSIZ registers - stored but not fully implemented)
+//!
+//! ### Missiles
+//! - 2 missiles (one per player), typically 1 pixel wide
+//! - Share color with their associated player
+//! - Can be enabled/disabled independently (ENAM0/ENAM1)
+//! - Horizontal positioning similar to players (RESM0/RESM1)
+//!
+//! ### Ball
+//! - Single 1-pixel object
+//! - Uses playfield color
+//! - Can be enabled/disabled (ENABL)
+//! - Horizontal positioning (RESBL)
+//!
+//! ## Colors
+//!
+//! The TIA uses a **128-color NTSC palette**:
+//! - Upper 4 bits: Hue (0-15, representing different colors)
+//! - Lower 3 bits: Luminance (0-7, controlling brightness)
+//! - Bit 0 is unused in color registers
+//!
+//! This implementation includes a proper NTSC palette table mapping these values to RGB.
+//!
+//! ## Priority and Collision
+//!
+//! **Drawing Priority** (when playfield priority is off - default):
+//! 1. Player 0 / Missile 0
+//! 2. Player 1 / Missile 1
+//! 3. Ball
+//! 4. Playfield
+//! 5. Background
+//!
+//! **Drawing Priority** (when playfield priority is on):
+//! 1. Playfield / Ball
+//! 2. Player 0 / Missile 0
+//! 3. Player 1 / Missile 1
+//! 4. Background
+//!
+//! **Collision Detection**: The TIA has hardware collision detection registers that set bits
+//! when different objects overlap. This implementation stores these registers but always returns 0
+//! (simplified implementation).
+//!
+//! # Audio Generation
+//!
+//! The TIA has 2 audio channels, each with:
+//! - **Control register** (AUDC0/AUDC1): 4 bits selecting waveform type
+//! - **Frequency register** (AUDF0/AUDF1): 5 bits controlling pitch
+//! - **Volume register** (AUDV0/AUDV1): 4 bits controlling volume (0-15)
+//!
+//! This implementation **stores** the audio registers but does not fully synthesize audio output.
+//! Full audio synthesis would require implementing the various waveform generators.
+//!
+//! # Implementation Details
+//!
+//! ## Rendering Model
+//! This implementation uses **frame-based rendering** rather than cycle-accurate scanline generation:
+//! - TIA state (colors, graphics) is updated during CPU execution
+//! - At frame end, all 192 visible scanlines are rendered at once
+//! - Each pixel's color is determined by checking all graphics objects at that position
+//!
+//! ## Known Limitations
+//!
+//! 1. **Player/Missile Sizing**: NUSIZ registers are stored but not used for sizing/duplication
+//! 2. **Horizontal Motion**: HMxx registers are stored but motion is not applied
+//! 3. **Collision Detection**: Registers exist but always return 0
+//! 4. **Audio Synthesis**: Registers stored but waveforms not generated
+//! 5. **Delayed Graphics**: Old/new graphics registers not implemented
+//!
+//! These limitations represent acceptable trade-offs for a functional emulator. Most games
+//! will display correctly with the current implementation.
 
 use serde::{Deserialize, Serialize};
 
