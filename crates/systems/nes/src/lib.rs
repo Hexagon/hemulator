@@ -485,7 +485,7 @@ impl System for NesSystem {
 
         if std::env::var("EMU_TRACE_NES").is_ok() {
             // Log occasionally to avoid overwhelming the GUI.
-            if (self.frame_index % 60) == 0 {
+            if self.frame_index.is_multiple_of(60) {
                 eprintln!(
                     "NES TRACE: frame={} pc=0x{:04X} steps={} cycles={} irq={} nmi={} a12_edges={} ppu_ctrl=0x{:02X} ppu_mask=0x{:02X} vec_reset=0x{:04X} vec_nmi=0x{:04X} vec_irq=0x{:04X}",
                     self.last_stats.frame_index,
@@ -504,16 +504,15 @@ impl System for NesSystem {
             }
         }
 
-        if trace_pc_enabled() {
-            if (self.frame_index % 60) == 0 {
-                let h0 = self.last_stats.pc_hotspots[0];
-                let h1 = self.last_stats.pc_hotspots[1];
-                let h2 = self.last_stats.pc_hotspots[2];
-                eprintln!(
-                    "NES PC HOT: frame={} [0x{:04X} x{}] [0x{:04X} x{}] [0x{:04X} x{}]",
-                    self.last_stats.frame_index, h0.pc, h0.count, h1.pc, h1.count, h2.pc, h2.count
-                );
-            }
+        if trace_pc_enabled()
+            && self.frame_index.is_multiple_of(60) {
+            let h0 = self.last_stats.pc_hotspots[0];
+            let h1 = self.last_stats.pc_hotspots[1];
+            let h2 = self.last_stats.pc_hotspots[2];
+            eprintln!(
+                "NES PC HOT: frame={} [0x{:04X} x{}] [0x{:04X} x{}] [0x{:04X} x{}]",
+                self.last_stats.frame_index, h0.pc, h0.count, h1.pc, h1.count, h2.pc, h2.count
+            );
         }
 
         Ok(frame)
@@ -592,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_nes_save_state_support() {
-        let mut sys = NesSystem::default();
+        let sys = NesSystem::default();
 
         // Should not support save states without a cartridge
         assert!(!sys.supports_save_states());
