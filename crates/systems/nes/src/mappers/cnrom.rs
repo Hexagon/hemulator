@@ -184,4 +184,86 @@ mod tests {
             assert_eq!(ppu.chr[0], expected);
         }
     }
+
+    #[test]
+    fn cnrom_chr_bank_wrapping() {
+        let mut chr = vec![0; 0x4000]; // 2 banks
+        chr[0] = 0xAA;
+        chr[0x2000] = 0xBB;
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 3,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut cnrom = Cnrom::new(cart, &mut ppu);
+
+        // Select bank 5 (should wrap to 5 % 2 = 1)
+        cnrom.write_prg(0x8000, 5, &mut ppu);
+        assert_eq!(ppu.chr[0], 0xBB, "Bank 5 should wrap to bank 1");
+
+        // Select bank 10 (should wrap to 10 % 2 = 0)
+        cnrom.write_prg(0x8000, 10, &mut ppu);
+        assert_eq!(ppu.chr[0], 0xAA, "Bank 10 should wrap to bank 0");
+    }
+
+    #[test]
+    fn cnrom_write_anywhere_in_range() {
+        let mut chr = vec![0; 0x4000]; // 2 banks
+        chr[0] = 0x11;
+        chr[0x2000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 3,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut cnrom = Cnrom::new(cart, &mut ppu);
+
+        // CNROM responds to writes anywhere in $8000-$FFFF
+        cnrom.write_prg(0x8000, 1, &mut ppu);
+        assert_eq!(ppu.chr[0], 0x22);
+
+        cnrom.write_prg(0xFFFF, 0, &mut ppu);
+        assert_eq!(ppu.chr[0], 0x11);
+
+        cnrom.write_prg(0xC456, 1, &mut ppu);
+        assert_eq!(ppu.chr[0], 0x22);
+    }
+
+    #[test]
+    fn cnrom_full_8bit_bank_select() {
+        // CNROM supports up to 256 banks via 8-bit select
+        let mut chr = vec![0; 0x20000]; // 16 banks (128KB)
+        for i in 0..16 {
+            chr[i * 0x2000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 3,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut cnrom = Cnrom::new(cart, &mut ppu);
+
+        // Test selecting high bank numbers
+        cnrom.write_prg(0x8000, 15, &mut ppu);
+        assert_eq!(ppu.chr[0], 0x1F, "Should support 8-bit bank select");
+
+        // Test with value larger than available banks
+        cnrom.write_prg(0x8000, 200, &mut ppu);
+        assert_eq!(ppu.chr[0], (0x10 + (200 % 16)) as u8, "Should wrap high values");
+    }
 }

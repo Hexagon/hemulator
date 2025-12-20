@@ -1444,4 +1444,302 @@ mod tests {
             "Sequential palette reads should update buffer each time"
         );
     }
+
+    // ============================================================================
+    // Base NES Edge Case Tests
+    // ============================================================================
+
+    #[test]
+    fn test_vram_address_wrapping() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Write to an address > 0x3FFF and verify it wraps
+        ppu.write_register(6, 0xFF); // High byte (0xFF00)
+        ppu.write_register(6, 0xFF); // Low byte (0xFFFF)
+
+        // Address should wrap to 0x3FFF due to masking
+        assert_eq!(ppu.vram_addr.get(), 0xFFFF);
+
+        // Write a value - this should write to wrapped address (0x3FFF & 0x3FFF = 0x3FFF)
+        ppu.write_register(7, 0x12);
+
+        // Read back from palette $3F1F (since $3FFF wraps to palette space)
+        ppu.vram_addr.set(0x3F1F);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x12, "VRAM address should wrap at 0x3FFF boundary");
+    }
+
+    #[test]
+    fn test_ppuctrl_ppumask_write_only() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write distinctive values to PPUCTRL and PPUMASK
+        ppu.write_register(0, 0xAB); // PPUCTRL
+        ppu.write_register(1, 0xCD); // PPUMASK
+
+        // Reading from write-only registers should return 0
+        // (Actually returns 0 from open bus, but our implementation returns 0)
+        assert_eq!(ppu.read_register(0), 0, "PPUCTRL is write-only");
+        assert_eq!(ppu.read_register(1), 0, "PPUMASK is write-only");
+    }
+
+    #[test]
+    fn test_ppustatus_clears_vblank_and_latch() {
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Set VBlank flag
+        ppu.set_vblank(true);
+        assert!(ppu.vblank.get());
+
+        // Set address latch to true (simulate partial PPUADDR write)
+        ppu.addr_latch.set(true);
+
+        // Read PPUSTATUS
+        let status = ppu.read_register(2);
+        assert_eq!(status & 0x80, 0x80, "VBlank bit should be set before read");
+
+        // VBlank flag should be cleared after read
+        assert!(!ppu.vblank.get(), "Reading PPUSTATUS should clear VBlank");
+
+        // Address latch should be reset
+        assert!(
+            !ppu.addr_latch.get(),
+            "Reading PPUSTATUS should reset address latch"
+        );
+    }
+
+    #[test]
+    fn test_ppuscroll_double_write_behavior() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // First write sets X scroll
+        ppu.write_register(5, 0x12);
+        assert_eq!(ppu.scroll_x, 0x12);
+        assert!(ppu.addr_latch.get(), "First write should set latch");
+
+        // Second write sets Y scroll
+        ppu.write_register(5, 0x34);
+        assert_eq!(ppu.scroll_y, 0x34);
+        assert!(!ppu.addr_latch.get(), "Second write should clear latch");
+
+        // Third write should start over (X scroll)
+        ppu.write_register(5, 0x56);
+        assert_eq!(ppu.scroll_x, 0x56);
+        assert!(ppu.addr_latch.get(), "Third write should set latch again");
+    }
+
+    #[test]
+    fn test_ppuaddr_double_write_behavior() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // First write sets high byte
+        ppu.write_register(6, 0x20);
+        assert_eq!(ppu.vram_addr.get() & 0xFF00, 0x2000);
+        assert!(ppu.addr_latch.get(), "First write should set latch");
+
+        // Second write sets low byte
+        ppu.write_register(6, 0x50);
+        assert_eq!(ppu.vram_addr.get(), 0x2050);
+        assert!(!ppu.addr_latch.get(), "Second write should clear latch");
+
+        // Third write should start over (high byte)
+        ppu.write_register(6, 0x3F);
+        assert_eq!(ppu.vram_addr.get() & 0xFF00, 0x3F00);
+        assert!(ppu.addr_latch.get(), "Third write should set latch again");
+    }
+
+    #[test]
+    fn test_ppuaddr_ppuscroll_shared_latch() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write to PPUSCROLL (sets latch)
+        ppu.write_register(5, 0x10);
+        assert!(ppu.addr_latch.get(), "PPUSCROLL should set latch");
+
+        // Write to PPUADDR should use the shared latch
+        // Since latch is true, this should write low byte
+        ppu.write_register(6, 0x50);
+        assert!(!ppu.addr_latch.get(), "PPUADDR should clear latch");
+        assert_eq!(
+            ppu.vram_addr.get() & 0xFF,
+            0x50,
+            "Low byte should be set"
+        );
+
+        // Reset and test the other way
+        ppu.addr_latch.set(false);
+        ppu.write_register(6, 0x20); // High byte
+        assert!(ppu.addr_latch.get());
+
+        // Write to PPUSCROLL should use shared latch
+        // Since latch is true, this should write Y scroll
+        ppu.write_register(5, 0x30);
+        assert!(!ppu.addr_latch.get());
+        assert_eq!(ppu.scroll_y, 0x30, "Y scroll should be set");
+    }
+
+    #[test]
+    fn test_oam_addr_wrapping() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Set OAM address to 0xFF
+        ppu.write_register(3, 0xFF);
+        assert_eq!(ppu.oam_addr.get(), 0xFF);
+
+        // Write to OAMDATA should wrap address
+        ppu.write_register(4, 0xAB);
+        assert_eq!(ppu.oam[0xFF], 0xAB);
+        assert_eq!(
+            ppu.oam_addr.get(),
+            0x00,
+            "OAM address should wrap to 0 after 0xFF"
+        );
+
+        // Next write should go to address 0
+        ppu.write_register(4, 0xCD);
+        assert_eq!(ppu.oam[0x00], 0xCD);
+        assert_eq!(ppu.oam_addr.get(), 0x01);
+    }
+
+    #[test]
+    fn test_vram_increment_mode() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Test increment by 1 (default)
+        ppu.ctrl = 0x00; // Bit 2 = 0: increment by 1
+        ppu.vram_addr.set(0x2000);
+        ppu.write_register(7, 0xAA);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2001,
+            "Should increment by 1 when bit 2 is clear"
+        );
+
+        // Test increment by 32
+        ppu.ctrl = 0x04; // Bit 2 = 1: increment by 32
+        ppu.vram_addr.set(0x2000);
+        ppu.write_register(7, 0xBB);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2020,
+            "Should increment by 32 when bit 2 is set"
+        );
+
+        // Test that reads also increment
+        ppu.ctrl = 0x00; // Increment by 1
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7); // Buffered read
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2001,
+            "Read should also increment address"
+        );
+    }
+
+    #[test]
+    fn test_nmi_on_vblank_when_enabled() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Enable NMI in PPUCTRL
+        ppu.write_register(0, 0x80); // Set bit 7
+
+        // Set VBlank - should trigger NMI
+        ppu.set_vblank(true);
+        assert!(ppu.take_nmi_pending(), "NMI should be pending when VBlank starts with NMI enabled");
+
+        // Second call should return false (NMI was taken)
+        assert!(!ppu.take_nmi_pending(), "NMI should only fire once");
+    }
+
+    #[test]
+    fn test_nmi_enable_during_vblank() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Start VBlank with NMI disabled
+        ppu.ctrl = 0x00; // NMI disabled
+        ppu.set_vblank(true);
+        assert!(!ppu.take_nmi_pending(), "NMI should not fire when disabled");
+
+        // Enable NMI during VBlank - should trigger NMI
+        ppu.write_register(0, 0x80); // Enable NMI
+        assert!(
+            ppu.take_nmi_pending(),
+            "Enabling NMI during VBlank should trigger NMI"
+        );
+    }
+
+    #[test]
+    fn test_palette_address_mirroring_edge_cases() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Test writing to palette addresses beyond $3F1F mirrors correctly
+        // $3F20 should mirror to $3F00
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x20);
+        ppu.write_register(7, 0x0F);
+
+        // Read from $3F00 - should see mirrored value
+        ppu.vram_addr.set(0x3F00);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x0F, "$3F20 should mirror to $3F00");
+
+        // Test $3FFF mirrors to $3F1F
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0xFF);
+        ppu.write_register(7, 0x30);
+
+        ppu.vram_addr.set(0x3F1F);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0x30, "$3FFF should mirror to $3F1F");
+    }
+
+    #[test]
+    fn test_single_screen_mirroring() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::SingleScreenLower);
+
+        // Write to all four nametables
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA); // NT 0
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB); // NT 1
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC); // NT 2
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD); // NT 3
+
+        // All should map to the same physical address in single-screen lower
+        // Last write (0xDD) should be visible in all positions
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val0 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val2 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7);
+        let val3 = ppu.read_register(7);
+
+        assert_eq!(
+            val0, 0xDD,
+            "SingleScreenLower: all nametables map to same RAM"
+        );
+        assert_eq!(val1, 0xDD, "NT1 should mirror to same location");
+        assert_eq!(val2, 0xDD, "NT2 should mirror to same location");
+        assert_eq!(val3, 0xDD, "NT3 should mirror to same location");
+    }
 }

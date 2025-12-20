@@ -101,4 +101,105 @@ mod tests {
         // Last bank (2) should always be at $C000
         assert_eq!(uxrom.read_prg(0xC000), 0x33);
     }
+
+    #[test]
+    fn uxrom_bank_wrapping() {
+        let mut prg = vec![0; 0x8000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x4000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 2,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut uxrom = Uxrom::new(cart, &mut ppu);
+
+        // Try to select bank beyond available banks (should wrap)
+        uxrom.write_prg(0x8000, 10, &mut ppu); // 10 % 2 = 0
+        assert_eq!(uxrom.read_prg(0x8000), 0x11, "Bank 10 should wrap to bank 0");
+    }
+
+    #[test]
+    fn uxrom_upper_bits_ignored() {
+        let mut prg = vec![0; 0x8000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x4000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 2,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut uxrom = Uxrom::new(cart, &mut ppu);
+
+        // Bank select masks to 4 bits (0x0F), upper bits should be ignored
+        uxrom.write_prg(0x8000, 0xF1, &mut ppu); // Should select bank 1
+        assert_eq!(
+            uxrom.read_prg(0x8000),
+            0x22,
+            "Upper bits should be ignored, only lower 4 bits matter"
+        );
+    }
+
+    #[test]
+    fn uxrom_single_bank_rom() {
+        let mut prg = vec![0; 0x4000]; // Only 1 bank of 16KB
+        prg[0] = 0xAA;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 2,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let uxrom = Uxrom::new(cart, &mut ppu);
+
+        // With only 1 bank, both windows should show the same bank
+        assert_eq!(uxrom.read_prg(0x8000), 0xAA);
+        assert_eq!(
+            uxrom.read_prg(0xC000),
+            0xAA,
+            "Last bank should be bank 0 when only 1 bank exists"
+        );
+    }
+
+    #[test]
+    fn uxrom_write_anywhere() {
+        let mut prg = vec![0; 0x8000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x4000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 2,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut uxrom = Uxrom::new(cart, &mut ppu);
+
+        // UxROM responds to writes anywhere in $8000-$FFFF
+        uxrom.write_prg(0x8000, 1, &mut ppu);
+        assert_eq!(uxrom.read_prg(0x8000), 0x22);
+
+        uxrom.write_prg(0xFFFF, 0, &mut ppu);
+        assert_eq!(uxrom.read_prg(0x8000), 0x11);
+
+        uxrom.write_prg(0xC123, 1, &mut ppu);
+        assert_eq!(uxrom.read_prg(0x8000), 0x22);
+    }
 }
