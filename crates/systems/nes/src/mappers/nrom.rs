@@ -78,4 +78,69 @@ mod tests {
         assert_eq!(nrom.read_prg(0x8000), 0x11);
         assert_eq!(nrom.read_prg(0xC000), 0x22);
     }
+
+    #[test]
+    fn nrom_empty_rom() {
+        use crate::cartridge::Mirroring;
+
+        let cart = Cartridge {
+            prg_rom: vec![], // Empty ROM
+            chr_rom: vec![],
+            mapper: 0,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+        let nrom = Nrom::new(cart);
+
+        // Empty ROM should return 0
+        assert_eq!(nrom.read_prg(0x8000), 0);
+        assert_eq!(nrom.read_prg(0xFFFF), 0);
+    }
+
+    #[test]
+    fn nrom_address_wrapping() {
+        use crate::cartridge::Mirroring;
+
+        let mut prg = vec![0; 0x4000]; // 16KB PRG
+        prg[0] = 0xAA;
+        prg[0x3FFF] = 0xBB;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 0,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+        let nrom = Nrom::new(cart);
+
+        // Test address wrapping at boundaries
+        assert_eq!(nrom.read_prg(0x8000), 0xAA); // Start of first mapping
+        assert_eq!(nrom.read_prg(0xBFFF), 0xBB); // End of first mapping
+        assert_eq!(nrom.read_prg(0xC000), 0xAA); // Start of mirrored mapping
+        assert_eq!(nrom.read_prg(0xFFFF), 0xBB); // End of mirrored mapping
+    }
+
+    #[test]
+    fn nrom_non_standard_size() {
+        use crate::cartridge::Mirroring;
+
+        // Test with unusual ROM size (24KB)
+        let mut prg = vec![0; 0x6000];
+        prg[0] = 0x11;
+        prg[0x4000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 0,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+        let nrom = Nrom::new(cart);
+
+        // Should wrap at 24KB boundary
+        assert_eq!(nrom.read_prg(0x8000), 0x11);
+        assert_eq!(nrom.read_prg(0xC000), 0x22);
+    }
 }

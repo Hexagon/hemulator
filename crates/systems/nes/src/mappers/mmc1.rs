@@ -244,4 +244,259 @@ mod tests {
         assert_eq!(mmc1.read_prg(0x8000), 0x11);
         assert_eq!(mmc1.read_prg(0xC000), 0x44);
     }
+
+    #[test]
+    fn mmc1_partial_write_sequence() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Write only 3 bits (incomplete sequence)
+        mmc1.write_prg(0x8000, 1, &mut ppu);
+        mmc1.write_prg(0x8000, 1, &mut ppu);
+        mmc1.write_prg(0x8000, 1, &mut ppu);
+
+        // Control register should not have changed yet
+        assert_eq!(mmc1.control, 0x0C, "Partial write should not update register");
+        assert_eq!(mmc1.write_count, 3, "Write count should be 3");
+    }
+
+    #[test]
+    fn mmc1_32kb_prg_mode() {
+        let mut prg = vec![0; 0x10000]; // 4 banks
+        for i in 0..4 {
+            prg[i * 0x4000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Switch to 32KB mode (control bits [3:2] = 00 or 01)
+        // Write 0x00 to control: mirroring=single lower, CHR=8KB, PRG=32KB
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, 0, &mut ppu);
+        }
+        assert_eq!(mmc1.control, 0x00);
+
+        // Select bank 2 via PRG register (will select banks 2-3 in 32KB mode)
+        for i in 0..5 {
+            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu);
+        }
+
+        // In 32KB mode, bit 0 is ignored, so bank 2 -> banks 2-3
+        assert_eq!(mmc1.read_prg(0x8000), 0x12, "Lower 16KB should be bank 2");
+        assert_eq!(mmc1.read_prg(0xC000), 0x13, "Upper 16KB should be bank 3");
+    }
+
+    #[test]
+    fn mmc1_fix_first_bank_mode() {
+        let mut prg = vec![0; 0x10000]; // 4 banks
+        for i in 0..4 {
+            prg[i * 0x4000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Switch to "fix first" mode (control bits [3:2] = 10)
+        // Write 0x08 to control: mirroring=single lower, CHR=8KB, PRG=fix first
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x08 >> i) & 1, &mut ppu);
+        }
+        assert_eq!(mmc1.control, 0x08);
+
+        // Select bank 2 via PRG register
+        for i in 0..5 {
+            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu);
+        }
+
+        // In fix-first mode: bank 0 at $8000, selected bank at $C000
+        assert_eq!(mmc1.read_prg(0x8000), 0x10, "First bank should be fixed at $8000");
+        assert_eq!(mmc1.read_prg(0xC000), 0x12, "Bank 2 should be at $C000");
+    }
+
+    #[test]
+    fn mmc1_chr_4kb_mode() {
+        let mut chr = vec![0; 0x4000]; // 4 CHR banks
+        for i in 0..4 {
+            chr[i * 0x1000] = (0x20 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Switch to 4KB CHR mode (control bit 4 = 1)
+        // Write 0x1C to control: mirroring=horiz, CHR=4KB, PRG=fix last
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu);
+        }
+        assert_eq!(mmc1.control, 0x1C);
+
+        // Select CHR bank 1 for $0000-$0FFF
+        for i in 0..5 {
+            mmc1.write_prg(0xA000, (1 >> i) & 1, &mut ppu);
+        }
+
+        // Select CHR bank 2 for $1000-$1FFF
+        for i in 0..5 {
+            mmc1.write_prg(0xC000, (2 >> i) & 1, &mut ppu);
+        }
+
+        // Verify CHR banks
+        assert_eq!(ppu.chr[0], 0x21, "CHR bank 1 at $0000");
+        assert_eq!(ppu.chr[0x1000], 0x22, "CHR bank 2 at $1000");
+    }
+
+    #[test]
+    fn mmc1_chr_8kb_mode() {
+        let mut chr = vec![0; 0x4000]; // 4 CHR banks
+        for i in 0..4 {
+            chr[i * 0x1000] = (0x30 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Default is 8KB CHR mode (control bit 4 = 0)
+        // CHR bank 0 register selects 8KB bank (bit 0 ignored)
+        // Select CHR banks 2-3 (write even value 2)
+        for i in 0..5 {
+            mmc1.write_prg(0xA000, (2 >> i) & 1, &mut ppu);
+        }
+
+        assert_eq!(ppu.chr[0], 0x32, "CHR bank 2 at $0000 in 8KB mode");
+        assert_eq!(ppu.chr[0x1000], 0x33, "CHR bank 3 at $1000 in 8KB mode");
+    }
+
+    #[test]
+    fn mmc1_all_mirroring_modes() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Test single-screen lower (control & 0x03 = 0)
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x0C >> i) & 1, &mut ppu); // 0x0C has bits [1:0] = 00
+        }
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Test single-screen upper (control & 0x03 = 1)
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x0D >> i) & 1, &mut ppu); // 0x0D has bits [1:0] = 01
+        }
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        // Test vertical (control & 0x03 = 2)
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x0E >> i) & 1, &mut ppu); // 0x0E has bits [1:0] = 10
+        }
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
+
+        // Test horizontal (control & 0x03 = 3)
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x0F >> i) & 1, &mut ppu); // 0x0F has bits [1:0] = 11
+        }
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+    }
+
+    #[test]
+    fn mmc1_prg_bank_wrapping() {
+        let mut prg = vec![0; 0x8000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x4000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Try to select bank 10 (should wrap to 10 % 2 = 0)
+        for i in 0..5 {
+            mmc1.write_prg(0xE000, (10 >> i) & 1, &mut ppu);
+        }
+
+        assert_eq!(mmc1.read_prg(0x8000), 0x11, "Bank 10 should wrap to bank 0");
+    }
+
+    #[test]
+    fn mmc1_chr_bank_wrapping() {
+        let mut chr = vec![0; 0x2000]; // 2 CHR banks
+        chr[0] = 0xAA;
+        chr[0x1000] = 0xBB;
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: chr,
+            mapper: 1,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc1 = Mmc1::new(cart, &mut ppu);
+
+        // Switch to 4KB CHR mode
+        for i in 0..5 {
+            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu);
+        }
+
+        // Try to select CHR bank 5 at $0000 (should wrap to 5 % 2 = 1)
+        for i in 0..5 {
+            mmc1.write_prg(0xA000, (5 >> i) & 1, &mut ppu);
+        }
+
+        assert_eq!(ppu.chr[0], 0xBB, "CHR bank 5 should wrap to bank 1");
+    }
 }

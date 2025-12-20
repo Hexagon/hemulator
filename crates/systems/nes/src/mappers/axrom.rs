@@ -177,4 +177,90 @@ mod tests {
         axrom.write_prg(0x8000, 3, &mut ppu);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
     }
+
+    #[test]
+    fn axrom_upper_bits_in_bank_select() {
+        let mut prg = vec![0; 0x10000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x8000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 7,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut axrom = Axrom::new(cart, &mut ppu);
+
+        // AxROM uses bits 0-2 for bank select (3 bits = 8 banks max)
+        // Upper bits (except bit 4 for mirroring) should be ignored
+        axrom.write_prg(0x8000, 0xF1, &mut ppu); // 0xF1 & 0x07 = 1
+        assert_eq!(axrom.read_prg(0x8000), 0x22, "Should select bank 1");
+
+        // Bit 3 should be ignored for banking
+        axrom.write_prg(0x8000, 0x08, &mut ppu); // 0x08 & 0x07 = 0
+        assert_eq!(axrom.read_prg(0x8000), 0x11, "Bit 3 should not affect banking");
+    }
+
+    #[test]
+    fn axrom_write_anywhere_in_range() {
+        let mut prg = vec![0; 0x10000]; // 2 banks
+        prg[0] = 0x11;
+        prg[0x8000] = 0x22;
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 7,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut axrom = Axrom::new(cart, &mut ppu);
+
+        // AxROM should respond to writes anywhere in $8000-$FFFF
+        axrom.write_prg(0x8000, 1, &mut ppu);
+        assert_eq!(axrom.read_prg(0x8000), 0x22);
+
+        axrom.write_prg(0xFFFF, 0, &mut ppu);
+        assert_eq!(axrom.read_prg(0x8000), 0x11);
+
+        axrom.write_prg(0xC123, 1, &mut ppu);
+        assert_eq!(axrom.read_prg(0x8000), 0x22);
+    }
+
+    #[test]
+    fn axrom_mirroring_independent_of_banking() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 7,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut axrom = Axrom::new(cart, &mut ppu);
+
+        // Test lower screen (bit 4 = 0)
+        axrom.write_prg(0x8000, 0x00, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Test upper screen (bit 4 = 1)
+        axrom.write_prg(0x8000, 0x10, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        // Test that banking and mirroring work together
+        axrom.write_prg(0x8000, 0x12, &mut ppu); // Bank 2 + upper screen
+        assert_eq!(axrom.prg_bank, 2);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        axrom.write_prg(0x8000, 0x03, &mut ppu); // Bank 3 + lower screen
+        assert_eq!(axrom.prg_bank, 3);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+    }
 }
