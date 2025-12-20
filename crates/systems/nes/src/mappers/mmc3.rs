@@ -200,15 +200,17 @@ impl Mmc3 {
         if !self.last_a12 && a12_high {
             // Rising edge clocks the counter per MMC3 spec.
             // When clocked: if counter==0 OR reload flag set, reload from latch; else decrement.
-            if self.irq_reload || self.irq_counter == 0 {
+            let did_decrement = if self.irq_reload || self.irq_counter == 0 {
                 self.irq_counter = self.irq_latch;
                 self.irq_reload = false;
+                false // Reloaded, did not decrement
             } else {
                 self.irq_counter = self.irq_counter.saturating_sub(1);
-            }
+                true // Decremented
+            };
 
-            // "New"/Sharp behavior: trigger when counter is 0 after clocking.
-            if self.irq_counter == 0 && self.irq_enabled {
+            // "New"/Sharp behavior: trigger IRQ when counter DECREMENTS to 0, not when RELOADED to 0.
+            if self.irq_counter == 0 && self.irq_enabled && did_decrement {
                 self.irq_pending = true;
             }
         }
@@ -319,5 +321,120 @@ mod tests {
 
         // Switch to horizontal mirroring
         mmc3.write_prg(0xA000, 1, &mut ppu);
+    }
+
+    #[test]
+    fn mmc3_irq_zero_latch() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch to 0
+        mmc3.write_prg(0xC000, 0, &mut ppu);
+        // Reload counter
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        // Enable IRQ
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // First A12 edge should reload counter to 0
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+
+        // According to MMC3 spec, reloading to 0 should NOT fire IRQ
+        // IRQ should only fire when counter DECREMENTS to 0
+        assert!(
+            !mmc3.take_irq_pending(),
+            "IRQ should not fire when reloading to 0"
+        );
+
+        // Second A12 edge: counter is already 0, should reload again to 0
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(
+            !mmc3.take_irq_pending(),
+            "IRQ should not fire when reloading to 0 again"
+        );
+    }
+
+    #[test]
+    fn mmc3_irq_decrement_from_1_to_0() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch to 1
+        mmc3.write_prg(0xC000, 1, &mut ppu);
+        // Reload counter
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        // Enable IRQ
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // First A12 edge: reload counter to 1
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(!mmc3.take_irq_pending(), "No IRQ when reloading to 1");
+
+        // Second A12 edge: decrement from 1 to 0, should fire IRQ
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(
+            mmc3.take_irq_pending(),
+            "IRQ should fire when decrementing to 0"
+        );
+    }
+
+    #[test]
+    fn mmc3_irq_latch_value_1_cycle() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch to 1
+        mmc3.write_prg(0xC000, 1, &mut ppu);
+        // Reload counter
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        // Enable IRQ
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // First A12 edge: reload to 1
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(!mmc3.take_irq_pending());
+
+        // Second A12 edge: decrement to 0, fires IRQ
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(mmc3.take_irq_pending());
+
+        // Third A12 edge: counter is 0, reload to 1
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(!mmc3.take_irq_pending());
+
+        // Fourth A12 edge: decrement to 0 again, fires IRQ
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(mmc3.take_irq_pending());
     }
 }

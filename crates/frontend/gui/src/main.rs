@@ -38,7 +38,11 @@ impl EmulatorSystem {
         }
     }
 
-    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    fn mount(
+        &mut self,
+        mount_point_id: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             EmulatorSystem::NES(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::GameBoy(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),

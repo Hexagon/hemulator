@@ -49,7 +49,7 @@ impl Cartridge {
     /// Create a new cartridge from ROM data
     pub fn new(rom: Vec<u8>) -> Result<Self, CartridgeError> {
         let scheme = Self::detect_banking(&rom)?;
-        
+
         Ok(Self {
             rom,
             current_bank: 0,
@@ -185,7 +185,7 @@ mod tests {
     fn test_2k_cartridge() {
         let rom = vec![0x42; 2048];
         let cart = Cartridge::new(rom).unwrap();
-        
+
         assert_eq!(cart.scheme(), BankingScheme::Rom2K);
         assert_eq!(cart.read(0xF800), 0x42);
         assert_eq!(cart.read(0xFFFF), 0x42);
@@ -196,9 +196,9 @@ mod tests {
         let mut rom = vec![0x00; 4096];
         rom[0] = 0x12;
         rom[4095] = 0x34;
-        
+
         let cart = Cartridge::new(rom).unwrap();
-        
+
         assert_eq!(cart.scheme(), BankingScheme::Rom4K);
         assert_eq!(cart.read(0xF000), 0x12);
         assert_eq!(cart.read(0xFFFF), 0x34);
@@ -211,20 +211,20 @@ mod tests {
         rom[0] = 0x11;
         // Bank 1 data
         rom[4096] = 0x22;
-        
+
         let mut cart = Cartridge::new(rom).unwrap();
-        
+
         assert_eq!(cart.scheme(), BankingScheme::F8);
-        
+
         // Initially in bank 0
         assert_eq!(cart.current_bank(), 0);
         assert_eq!(cart.read(0xF000), 0x11);
-        
+
         // Switch to bank 1
         cart.write(0x1FF9);
         assert_eq!(cart.current_bank(), 1);
         assert_eq!(cart.read(0xF000), 0x22);
-        
+
         // Switch back to bank 0
         cart.write(0x1FF8);
         assert_eq!(cart.current_bank(), 0);
@@ -237,11 +237,11 @@ mod tests {
         for i in 0..4 {
             rom[i * 4096] = (0x10 + i) as u8;
         }
-        
+
         let mut cart = Cartridge::new(rom).unwrap();
-        
+
         assert_eq!(cart.scheme(), BankingScheme::F6);
-        
+
         // Test all 4 banks
         for bank in 0..4 {
             cart.write(0x1FF6 + bank as u16);
@@ -254,9 +254,9 @@ mod tests {
     fn test_32k_f4_banking() {
         let rom = vec![0x00; 32768];
         let mut cart = Cartridge::new(rom).unwrap();
-        
+
         assert_eq!(cart.scheme(), BankingScheme::F4);
-        
+
         // Test all 8 banks
         for bank in 0..8 {
             cart.write(0x1FF4 + bank as u16);
