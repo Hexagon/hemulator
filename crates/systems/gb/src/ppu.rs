@@ -239,7 +239,7 @@ impl Ppu {
 
             for screen_x in 0u8..160 {
                 let x = screen_x.wrapping_add(self.scx);
-                let tile_x = (x / 8) as u16;
+                let tile_x = ((x / 8) & 31) as u16;
                 let pixel_x = (x % 8) as u16;
 
                 // Get tile index from tilemap
@@ -311,6 +311,12 @@ impl Ppu {
             for screen_x in start_x..160 {
                 let win_x = screen_x - start_x;
                 let tile_x = (win_x / 8) as u16;
+                
+                // Ensure tile_x is within bounds (0-31)
+                if tile_x >= 32 {
+                    continue;
+                }
+                
                 let pixel_x = (win_x % 8) as u16;
 
                 // Get tile index from tilemap
@@ -326,6 +332,12 @@ impl Ppu {
 
                 // Get tile data (2 bytes per row)
                 let tile_row_addr = tile_addr + (pixel_y * 2);
+                
+                // Ensure we don't exceed VRAM bounds
+                if (tile_row_addr + 1) as usize >= self.vram.len() {
+                    continue;
+                }
+                
                 let byte1 = self.vram[tile_row_addr as usize];
                 let byte2 = self.vram[(tile_row_addr + 1) as usize];
 
@@ -365,7 +377,7 @@ impl Ppu {
             let flags = self.oam[oam_addr + 3];
 
             // Check if sprite is visible
-            if (160..248).contains(&x_pos) {
+            if x_pos >= 160 {
                 continue; // Off screen
             }
 
@@ -396,6 +408,12 @@ impl Ppu {
 
                 let tile_addr = (tile as u16) * 16;
                 let row_offset = (pixel_y % 8) * 2;
+                
+                // Ensure we don't exceed VRAM bounds
+                if (tile_addr + row_offset as u16 + 1) as usize >= self.vram.len() {
+                    continue;
+                }
+                
                 let byte1 = self.vram[(tile_addr + row_offset as u16) as usize];
                 let byte2 = self.vram[(tile_addr + row_offset as u16 + 1) as usize];
 
