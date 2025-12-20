@@ -98,11 +98,11 @@ mod tests {
         // 4K ROM
         let data = vec![0u8; 4096];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
-        
+
         // 2K ROM
         let data = vec![0u8; 2048];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
-        
+
         // 8K ROM
         let data = vec![0u8; 8192];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
