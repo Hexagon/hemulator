@@ -126,7 +126,7 @@ impl Ppu {
     pub fn set_mirroring(&mut self, mirroring: Mirroring) {
         self.mirroring = mirroring;
     }
-
+    #[cfg(test)]
     pub fn get_mirroring(&self) -> Mirroring {
         self.mirroring
     }
@@ -141,10 +141,6 @@ impl Ppu {
 
     pub fn mask(&self) -> u8 {
         self.mask
-    }
-
-    pub fn scroll(&self) -> (u8, u8) {
-        (self.scroll_x, self.scroll_y)
     }
 
     /// Set/clear the VBlank flag (PPUSTATUS bit 7).
@@ -354,7 +350,7 @@ impl Ppu {
             0
         }
     }
-
+    #[cfg(test)]
     pub fn render_frame(&self) -> Frame {
         // Rendering is done "out of band" (not cycle-accurate). Suppress A12 callbacks
         // so mappers like MMC3 don't see thousands of synthetic edges during draw.
@@ -728,12 +724,12 @@ impl Ppu {
                     if i == 0 && bg_enabled && !self.sprite_0_hit.get() {
                         // Check if background pixel is opaque (approximate by color)
                         if frame.pixels[idx] != universal_bg && x < 255 {
-                             // Check left clipping
-                             let bg_clip = (self.mask & 0x02) == 0;
-                             let spr_clip = (self.mask & 0x04) == 0;
-                             if !((bg_clip || spr_clip) && x < 8) {
-                                 self.sprite_0_hit.set(true);
-                             }
+                            // Check left clipping
+                            let bg_clip = (self.mask & 0x02) == 0;
+                            let spr_clip = (self.mask & 0x04) == 0;
+                            if !((bg_clip || spr_clip) && x < 8) {
+                                self.sprite_0_hit.set(true);
+                            }
                         }
                     }
 
