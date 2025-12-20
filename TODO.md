@@ -21,6 +21,8 @@
 - [x] Create PC system with 8086 CPU emulation (experimental).
 - [x] Add ROM detection for DOS executables (.COM and .EXE files).
 - [x] Integrate PC system with GUI frontend.
+- [x] Add reusable audio components (WaveChannel, SweepUnit, PolynomialCounter) to core APU.
+- [x] Document audio architecture and implementation guidelines in AGENTS.md.
 
 ## In Progress / Future Work
 
@@ -46,3 +48,22 @@
 - [ ] Add configuration interface for resolution and other settings.
 - [ ] Add save state UI management.
 - [ ] Add audio configuration options.
+
+### Audio Implementation
+- [x] Create reusable audio components in core APU (PulseChannel, TriangleChannel, NoiseChannel, Envelope, LengthCounter, FrameCounter).
+- [x] Add WaveChannel for programmable waveforms (Game Boy wave channel).
+- [x] Add SweepUnit for frequency sweep (Game Boy pulse 1).
+- [x] Add PolynomialCounter for TIA waveform generation (Atari 2600).
+- [ ] Implement Game Boy APU:
+  - [ ] Pulse 1 channel with sweep
+  - [ ] Pulse 2 channel without sweep
+  - [ ] Wave channel with 32x4-bit wave RAM
+  - [ ] Noise channel with 7/15-bit LFSR
+  - [ ] Frame sequencer (512 Hz)
+  - [ ] Master volume and mixing
+  - [ ] Audio output integration with frontend
+- [ ] Implement Atari 2600 TIA audio:
+  - [ ] Channel 0 with PolynomialCounter
+  - [ ] Channel 1 with PolynomialCounter
+  - [ ] Proper waveform generation for all 16 AUDC modes
+  - [ ] Audio output integration with frontend

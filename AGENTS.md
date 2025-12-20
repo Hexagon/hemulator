@@ -97,12 +97,15 @@ Contains reusable CPU implementations and common traits:
 
 - **`apu`**: Reusable audio processing unit components
   - **Core Components** (building blocks for various systems):
-    - `PulseChannel`: Square wave generator with duty cycle control
-    - `TriangleChannel`: Triangle wave generator (32-step)
-    - `NoiseChannel`: Pseudo-random noise with LFSR
-    - `Envelope`: Volume envelope generator with decay
-    - `LengthCounter`: Automatic note duration control
-    - `FrameCounter`: Timing controller for envelope/length/sweep units
+    - `PulseChannel`: Square wave generator with duty cycle control (NES, Game Boy)
+    - `TriangleChannel`: Triangle wave generator (32-step) (NES)
+    - `WaveChannel`: Programmable waveform playback (Game Boy, custom waveform systems)
+    - `NoiseChannel`: Pseudo-random noise with LFSR (NES, Game Boy)
+    - `PolynomialCounter`: TIA-style waveform generation (Atari 2600)
+    - `Envelope`: Volume envelope generator with decay (NES, Game Boy)
+    - `LengthCounter`: Automatic note duration control (NES, Game Boy)
+    - `SweepUnit`: Frequency sweep for pitch modulation (Game Boy)
+    - `FrameCounter`: Timing controller for envelope/length/sweep units (NES, Game Boy)
   - **Audio Chip Implementations**:
     - `Rp2a03Apu`: NES NTSC audio chip (1.789773 MHz)
     - `Rp2a07Apu`: NES PAL audio chip (1.662607 MHz)
@@ -114,7 +117,11 @@ Contains reusable CPU implementations and common traits:
     - CPU clock frequencies: NTSC 1.789773 MHz, PAL 1.662607 MHz
     - Frame rates: NTSC ~60.1 Hz, PAL ~50.0 Hz
     - Frame counter rates: NTSC 240 Hz, PAL 200 Hz
-  - Comprehensive unit tests (40+ tests)
+  - **Component Reusability**:
+    - **For Game Boy APU**: Use `PulseChannel` (with `SweepUnit` for channel 1), `WaveChannel`, `NoiseChannel`, `Envelope`, `LengthCounter`
+    - **For Atari 2600 TIA**: Use `PolynomialCounter` for both audio channels
+    - **For future systems**: Mix and match components as needed (e.g., SN76489 can use `NoiseChannel`)
+  - Comprehensive unit tests (48+ tests covering all components)
 
 - **`ppu`**: Reusable video/graphics processing components
   - **Core Components** (building blocks for tile-based systems):
@@ -242,6 +249,24 @@ System-specific implementations that use core components:
     - DMG (original Game Boy) mode only - no Game Boy Color support
     - No MBC support - only works with 32KB ROMs (MBC0)
     - No audio (APU not implemented)
+      - **Future Implementation**: Will use components from `core/apu`
+      - Game Boy has 4 sound channels:
+        1. **Pulse 1**: Square wave with sweep (`PulseChannel` + `SweepUnit`)
+           - Duty cycle: 12.5%, 25%, 50%, 75%
+           - Frequency sweep (increase/decrease over time)
+           - Envelope generator for volume control
+        2. **Pulse 2**: Square wave without sweep (`PulseChannel` only)
+           - Same as Pulse 1 but no sweep unit
+        3. **Wave**: Custom waveform (`WaveChannel`)
+           - 32 x 4-bit samples in wave RAM
+           - Volume control: mute, 100%, 50%, 25%
+           - No envelope generator
+        4. **Noise**: Pseudo-random noise (`NoiseChannel`)
+           - 7-bit or 15-bit LFSR modes
+           - Envelope generator for volume control
+      - All channels use `LengthCounter` for automatic duration
+      - Frame sequencer at 512 Hz controls envelope and sweep timing
+      - See components in `crates/core/src/apu/` for implementation details
     - No timer registers
     - No serial/link cable support
     - Frame-based timing (not cycle-accurate)
@@ -265,7 +290,15 @@ System-specific implementations that use core components:
       - Renders complete 160x192 frames on-demand
       - TIA state updated during CPU execution
       - Suitable for most games; timing-critical effects may not work perfectly
-    - **Audio Registers**: Stored but synthesis simplified (2 channels, control/frequency/volume)
+    - **Audio Registers**: Stored but synthesis not yet implemented (2 channels, control/frequency/volume)
+      - **Future Implementation**: Will use `PolynomialCounter` from `core/apu`
+      - Each channel has:
+        - AUDC (4 bits): Waveform type selector (0-15 different waveforms)
+        - AUDF (5 bits): Frequency divider (0-31)
+        - AUDV (4 bits): Volume (0-15)
+      - Waveform types include pure tones, buzzy sounds, white noise, and combinations
+      - Polynomial counters (4-bit and 5-bit) create waveforms via LFSR feedback
+      - See `crates/core/src/apu/polynomial.rs` for implementation details
     - **Known Limitations**:
       - Player/missile sizing (NUSIZ) stored but not applied
       - Horizontal motion (HMxx) stored but not applied
@@ -327,6 +360,77 @@ System-specific implementations that use core components:
 ### Frontend (`crates/frontend/gui`)
 
 GUI frontend using minifb and rodio.
+
+## Audio Implementation Guidelines
+
+When implementing audio for a new system or enhancing existing audio:
+
+### Component Selection
+
+1. **Identify the audio hardware**: Research the system's audio chip specifications
+   - Number of channels
+   - Waveform types (pulse/square, triangle, noise, wave, custom)
+   - Frequency control mechanism
+   - Volume/envelope control
+   - Special features (sweep, programmable waveforms, etc.)
+
+2. **Select reusable components** from `crates/core/src/apu/`:
+   - **PulseChannel**: For square/pulse waves (NES, Game Boy, potentially others)
+   - **TriangleChannel**: For triangle waves (NES-specific, 32-step quantized)
+   - **WaveChannel**: For programmable waveforms (Game Boy wave channel)
+   - **NoiseChannel**: For LFSR-based noise (NES, Game Boy, can be adapted)
+   - **PolynomialCounter**: For complex waveform generation (Atari 2600 TIA)
+   - **Envelope**: For volume decay/fade effects
+   - **LengthCounter**: For automatic note duration
+   - **SweepUnit**: For frequency modulation/sweep effects
+
+3. **Create system-specific wrappers**: Most systems need a wrapper that:
+   - Maps hardware registers to component parameters
+   - Manages multiple channels
+   - Handles mixing and output
+   - Implements the `AudioChip` trait for integration
+
+### Implementation Steps
+
+1. **Create APU structure** in system crate (e.g., `crates/systems/gb/src/apu.rs`)
+2. **Instantiate core components** for each channel
+3. **Implement register I/O** to map system registers to component state
+4. **Implement clock method** to generate audio samples
+5. **Mix channels** and output to audio buffer
+6. **Write comprehensive tests** for each register and channel interaction
+
+### Testing Strategy
+
+- Test each channel independently
+- Test register writes affect correct parameters
+- Test volume/envelope behavior
+- Test frequency control accuracy
+- Test interaction between components (e.g., length counter muting)
+- Add integration tests with known waveforms
+
+### Example: Game Boy APU Implementation
+
+```rust
+// In crates/systems/gb/src/apu.rs
+use emu_core::apu::{PulseChannel, WaveChannel, NoiseChannel, SweepUnit, Envelope, LengthCounter};
+
+pub struct GbApu {
+    pulse1: PulseChannel,
+    pulse1_sweep: SweepUnit,
+    pulse2: PulseChannel,
+    wave: WaveChannel,
+    noise: NoiseChannel,
+    // ... frame sequencer, mixing, etc.
+}
+```
+
+### Common Pitfalls
+
+- **Timing errors**: Ensure correct clock rate and sample generation rate
+- **Register mapping**: Verify bit positions match hardware specifications
+- **Mixing levels**: Balance channel volumes to avoid clipping or distortion
+- **State management**: Save/restore APU state for save states
+- **Test coverage**: Write tests before implementing to verify correctness
 
 ## Documentation Structure
 
