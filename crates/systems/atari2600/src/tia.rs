@@ -11,7 +11,7 @@ pub struct Tia {
     // Video registers
     vsync: bool,
     vblank: bool,
-    
+
     // Playfield
     pf0: u8,
     pf1: u8,
@@ -19,13 +19,13 @@ pub struct Tia {
     playfield_reflect: bool,
     playfield_score_mode: bool,
     playfield_priority: bool,
-    
+
     // Colors (palette indices)
     colubk: u8, // Background color
     colupf: u8, // Playfield color
     colup0: u8, // Player 0 color
     colup1: u8, // Player 1 color
-    
+
     // Players (sprites)
     grp0: u8, // Player 0 graphics
     grp1: u8, // Player 1 graphics
@@ -33,28 +33,28 @@ pub struct Tia {
     player1_x: u8,
     player0_reflect: bool,
     player1_reflect: bool,
-    
+
     // Missiles
     enam0: bool, // Missile 0 enable
     enam1: bool, // Missile 1 enable
     missile0_x: u8,
     missile1_x: u8,
-    
+
     // Ball
     enabl: bool, // Ball enable
     ball_x: u8,
-    
+
     // Horizontal motion
     hmp0: i8,
     hmp1: i8,
     hmm0: i8,
     hmm1: i8,
     hmbl: i8,
-    
+
     // Current scanline and pixel position
     scanline: u16,
     pixel: u16,
-    
+
     // Audio (simplified - just register storage)
     audc0: u8,
     audc1: u8,
@@ -126,7 +126,7 @@ impl Tia {
             0x01 => self.vblank = (val & 0x02) != 0,
             0x02 => {} // WSYNC - handled by bus
             0x03 => {} // RSYNC
-            
+
             // Player 0
             0x04 => {
                 // NUSIZ0 - Player 0 number and size
@@ -139,14 +139,14 @@ impl Tia {
             0x07 => self.colup1 = val,
             0x08 => self.colupf = val,
             0x09 => self.colubk = val,
-            
+
             // Playfield control
             0x0A => {
                 self.playfield_reflect = (val & 0x01) != 0;
                 self.playfield_score_mode = (val & 0x02) != 0;
                 self.playfield_priority = (val & 0x04) != 0;
             }
-            
+
             // Player reflect
             0x0B => {
                 self.player0_reflect = (val & 0x08) != 0;
@@ -154,19 +154,19 @@ impl Tia {
             0x0C => {
                 self.player1_reflect = (val & 0x08) != 0;
             }
-            
+
             // Playfield
             0x0D => self.pf0 = val,
             0x0E => self.pf1 = val,
             0x0F => self.pf2 = val,
-            
+
             // Player position resets
             0x10 => self.player0_x = (self.pixel as u8).wrapping_sub(5),
             0x11 => self.player1_x = (self.pixel as u8).wrapping_sub(5),
             0x12 => self.missile0_x = (self.pixel as u8).wrapping_sub(4),
             0x13 => self.missile1_x = (self.pixel as u8).wrapping_sub(4),
             0x14 => self.ball_x = (self.pixel as u8).wrapping_sub(4),
-            
+
             // Audio
             0x15 => self.audc0 = val & 0x0F,
             0x16 => self.audc1 = val & 0x0F,
@@ -174,23 +174,23 @@ impl Tia {
             0x18 => self.audf1 = val & 0x1F,
             0x19 => self.audv0 = val & 0x0F,
             0x1A => self.audv1 = val & 0x0F,
-            
+
             // Player graphics
             0x1B => self.grp0 = val,
             0x1C => self.grp1 = val,
-            
+
             // Enable missiles and ball
             0x1D => self.enam0 = (val & 0x02) != 0,
             0x1E => self.enam1 = (val & 0x02) != 0,
             0x1F => self.enabl = (val & 0x02) != 0,
-            
+
             // Horizontal motion
             0x20 => self.hmp0 = (val as i8) >> 4,
             0x21 => self.hmp1 = (val as i8) >> 4,
             0x22 => self.hmm0 = (val as i8) >> 4,
             0x23 => self.hmm1 = (val as i8) >> 4,
             0x24 => self.hmbl = (val as i8) >> 4,
-            
+
             // Clear horizontal motion
             0x2B => {
                 self.hmp0 = 0;
@@ -199,7 +199,7 @@ impl Tia {
                 self.hmm1 = 0;
                 self.hmbl = 0;
             }
-            
+
             _ => {}
         }
     }
@@ -219,11 +219,11 @@ impl Tia {
     pub fn clock(&mut self) {
         // Simplified: just advance pixel counter
         self.pixel += 3; // 3 color clocks per CPU cycle
-        
+
         if self.pixel >= 228 {
             self.pixel = 0;
             self.scanline += 1;
-            
+
             if self.scanline >= 262 {
                 self.scanline = 0;
             }
@@ -257,12 +257,12 @@ impl Tia {
     /// Get the color of a pixel at the given position
     fn get_pixel_color(&self, x: usize, _line: usize) -> u32 {
         // Simplified rendering - just show playfield and background
-        
+
         // Check if this pixel is part of the playfield
         if self.is_playfield_pixel(x) {
             return ntsc_to_rgb(self.colupf);
         }
-        
+
         // Background color
         ntsc_to_rgb(self.colubk)
     }
@@ -284,7 +284,7 @@ impl Tia {
                 self.get_playfield_bit(bit_pos)
             }
         };
-        
+
         pf_bit
     }
 
@@ -312,12 +312,12 @@ fn ntsc_to_rgb(ntsc: u8) -> u32 {
     // In a full implementation, this would use a proper NTSC color table
     let luminance = (ntsc & 0x0F) as u32;
     let hue = ((ntsc >> 4) & 0x0F) as u32;
-    
+
     // Very basic color mapping
     let r = ((luminance * 16) + (hue * 8)) & 0xFF;
     let g = ((luminance * 16) + (hue * 4)) & 0xFF;
     let b = ((luminance * 16) + (hue * 2)) & 0xFF;
-    
+
     0xFF000000 | (r << 16) | (g << 8) | b
 }
 
@@ -356,7 +356,7 @@ mod tests {
         tia.write(0x07, 0x84); // COLUP1
         tia.write(0x08, 0x26); // COLUPF
         tia.write(0x09, 0x00); // COLUBK
-        
+
         assert_eq!(tia.colup0, 0x42);
         assert_eq!(tia.colup1, 0x84);
         assert_eq!(tia.colupf, 0x26);
@@ -369,7 +369,7 @@ mod tests {
         tia.write(0x0D, 0xF0); // PF0
         tia.write(0x0E, 0xAA); // PF1
         tia.write(0x0F, 0x55); // PF2
-        
+
         assert_eq!(tia.pf0, 0xF0);
         assert_eq!(tia.pf1, 0xAA);
         assert_eq!(tia.pf2, 0x55);
@@ -380,10 +380,10 @@ mod tests {
         let mut tia = Tia::new();
         tia.write(0x0A, 0x01); // Reflect
         assert!(tia.playfield_reflect);
-        
+
         tia.write(0x0A, 0x02); // Score mode
         assert!(tia.playfield_score_mode);
-        
+
         tia.write(0x0A, 0x04); // Priority
         assert!(tia.playfield_priority);
     }
@@ -393,7 +393,7 @@ mod tests {
         let mut tia = Tia::new();
         tia.clock();
         assert_eq!(tia.pixel, 3);
-        
+
         // Clock through a scanline
         for _ in 0..75 {
             tia.clock();
@@ -408,7 +408,7 @@ mod tests {
         tia.write(0x15, 0x0F); // AUDC0
         tia.write(0x17, 0x1F); // AUDF0
         tia.write(0x19, 0x0F); // AUDV0
-        
+
         assert_eq!(tia.audc0, 0x0F);
         assert_eq!(tia.audf0, 0x1F);
         assert_eq!(tia.audv0, 0x0F);
@@ -419,7 +419,7 @@ mod tests {
         let mut tia = Tia::new();
         tia.write(0x1B, 0xFF); // GRP0
         tia.write(0x1C, 0xAA); // GRP1
-        
+
         assert_eq!(tia.grp0, 0xFF);
         assert_eq!(tia.grp1, 0xAA);
     }
@@ -430,9 +430,9 @@ mod tests {
         tia.write(0x06, 0x42);
         tia.write(0x0D, 0xF0);
         tia.scanline = 100;
-        
+
         tia.reset();
-        
+
         assert_eq!(tia.colup0, 0);
         assert_eq!(tia.pf0, 0);
         assert_eq!(tia.scanline, 0);

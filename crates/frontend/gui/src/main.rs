@@ -23,8 +23,12 @@ enum EmulatorSystem {
 impl EmulatorSystem {
     fn step_frame(&mut self) -> Result<Frame, Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -35,10 +39,18 @@ impl EmulatorSystem {
         }
     }
 
-    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    fn mount(
+        &mut self,
+        mount_point_id: &str,
+        data: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 

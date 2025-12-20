@@ -68,22 +68,22 @@ impl Memory6502 for Atari2600Bus {
             // TIA read registers (collision detection and input)
             0x0000..=0x000D => self.tia.read((addr & 0x0F) as u8),
             0x000E..=0x002F => 0, // Unused
-            
+
             // TIA read (mirrored)
             0x0030..=0x003F => self.tia.read((addr & 0x0F) as u8),
-            
+
             // Unused
             0x0040..=0x007F => 0,
-            
+
             // RIOT RAM and I/O
             0x0000..=0x007F => self.riot.read(addr),
             0x0080..=0x00FF => self.riot.read(addr),
             0x0100..=0x017F => self.riot.read(addr),
             0x0280..=0x029F => self.riot.read(addr),
-            
+
             // Unused
             0x02A0..=0x0FFF => 0,
-            
+
             // Cartridge ROM
             0x1000..=0x1FFF => {
                 if let Some(cart) = &self.cartridge {
@@ -92,7 +92,7 @@ impl Memory6502 for Atari2600Bus {
                     0xFF
                 }
             }
-            
+
             _ => 0,
         }
     }
@@ -104,24 +104,24 @@ impl Memory6502 for Atari2600Bus {
         match addr {
             // TIA write registers
             0x0000..=0x002C => self.tia.write((addr & 0x3F) as u8, val),
-            0x002D..=0x003F => {}, // Unused
-            
+            0x002D..=0x003F => {} // Unused
+
             // TIA write (mirrored)
             0x0040..=0x007F => self.tia.write((addr & 0x3F) as u8, val),
-            
+
             // RIOT RAM and I/O
             0x0000..=0x007F => self.riot.write(addr, val),
             0x0080..=0x00FF => self.riot.write(addr, val),
             0x0100..=0x017F => self.riot.write(addr, val),
             0x0280..=0x029F => self.riot.write(addr, val),
-            
+
             // Cartridge ROM (for bank switching)
             0x1000..=0x1FFF => {
                 if let Some(cart) = &mut self.cartridge {
                     cart.write(addr);
                 }
             }
-            
+
             _ => {}
         }
     }
@@ -134,10 +134,10 @@ mod tests {
     #[test]
     fn test_bus_tia_access() {
         let mut bus = Atari2600Bus::new();
-        
+
         // Write to TIA
         bus.write(0x0006, 0x42); // COLUP0
-        
+
         // TIA writes don't have read-back, but we can verify no crash
         assert_eq!(bus.read(0x0000), 0); // TIA read register
     }
@@ -145,11 +145,11 @@ mod tests {
     #[test]
     fn test_bus_riot_ram() {
         let mut bus = Atari2600Bus::new();
-        
+
         // Write to RIOT RAM
         bus.write(0x0080, 0x12);
         assert_eq!(bus.read(0x0080), 0x12);
-        
+
         // Test mirror
         bus.write(0x0100, 0x34);
         assert_eq!(bus.read(0x0100), 0x34);
@@ -158,13 +158,13 @@ mod tests {
     #[test]
     fn test_bus_riot_timer() {
         let mut bus = Atari2600Bus::new();
-        
+
         // Set timer (TIM1T at $294)
         bus.write(0x0294, 10);
-        
+
         // Clock the bus
         bus.clock(1);
-        
+
         // Timer should have decremented (INTIM at $284)
         let timer_val = bus.read(0x0284);
         assert!(timer_val <= 10);
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_bus_address_masking() {
         let bus = Atari2600Bus::new();
-        
+
         // 6507 has 13-bit address bus, so high bits should be masked
         // $2000 should map to $0000
         assert_eq!(bus.read(0x2000), bus.read(0x0000));

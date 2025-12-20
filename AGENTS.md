@@ -48,6 +48,24 @@ Contains reusable CPU implementations and common traits:
     - Status flags (N, V, B, D, I, Z, C)
   - `ArrayMemory` helper for testing and simple use cases
 
+- **`cpu_8086`**: Complete Intel 8086 CPU implementation
+  - Generic `Memory8086` trait for memory access
+  - Segment-based memory addressing (CS, DS, ES, SS)
+  - Comprehensive test coverage (22 unit tests)
+  - Can be used by any system: IBM PC, PC XT, etc.
+  - Implementation includes:
+    - All general-purpose registers (AX, BX, CX, DX, SI, DI, BP, SP)
+    - Segment registers (CS, DS, ES, SS)
+    - Instruction pointer (IP) and FLAGS register
+    - Arithmetic operations (ADD, SUB, CMP, INC, DEC)
+    - Logical operations (AND, OR, XOR)
+    - Control flow (JMP, conditional jumps)
+    - Stack operations (PUSH, POP)
+    - Flag manipulation (CLC, STC, CLI, STI, CLD, STD)
+    - Accurate cycle counting
+    - Parity, zero, sign, carry, and overflow flags
+  - `ArrayMemory` helper for testing and simple use cases
+
 - **`apu`**: Reusable audio processing unit components
   - **Core Components** (building blocks for various systems):
     - `PulseChannel`: Square wave generator with duty cycle control

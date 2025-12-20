@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 
 mod serde_arrays {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    
+
     pub fn serialize<S>(arr: &[u8; 128], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         arr.as_slice().serialize(serializer)
     }
-    
+
     pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 128], D::Error>
     where
         D: Deserializer<'de>,
@@ -34,28 +34,28 @@ pub struct Riot {
     /// 128 bytes of RAM (0x80-0xFF in RIOT address space)
     #[serde(with = "serde_arrays")]
     ram: [u8; 128],
-    
+
     /// Timer value (counts down to 0)
     timer: u8,
-    
+
     /// Timer interval (1, 8, 64, or 1024)
     timer_interval: u16,
-    
+
     /// Cycles until next timer decrement
     timer_cycles: u16,
-    
+
     /// Timer interrupt flag
     timer_underflow: bool,
-    
+
     /// Port A data direction register (0 = input, 1 = output)
     swcha_ddr: u8,
-    
+
     /// Port A data (joystick inputs)
     swcha: u8,
-    
+
     /// Port B data direction register
     swchb_ddr: u8,
-    
+
     /// Port B data (console switches)
     swchb: u8,
 }
@@ -103,7 +103,7 @@ impl Riot {
             0x0000..=0x007F => self.ram[addr as usize],
             0x0080..=0x00FF => self.ram[(addr & 0x7F) as usize],
             0x0100..=0x017F => self.ram[(addr & 0x7F) as usize],
-            
+
             // I/O and timer ($280-$297, mirrored every 32 bytes)
             0x0280..=0x029F => {
                 match addr & 0x0F {
@@ -114,12 +114,16 @@ impl Riot {
                     0x04 | 0x06 => self.timer, // INTIM
                     0x05 | 0x07 => {
                         // TIMINT/INSTAT
-                        if self.timer_underflow { 0x80 } else { 0x00 }
+                        if self.timer_underflow {
+                            0x80
+                        } else {
+                            0x00
+                        }
                     }
                     _ => 0,
                 }
             }
-            
+
             _ => 0,
         }
     }
@@ -132,7 +136,7 @@ impl Riot {
             0x0000..=0x007F => self.ram[addr as usize] = val,
             0x0080..=0x00FF => self.ram[(addr & 0x7F) as usize] = val,
             0x0100..=0x017F => self.ram[(addr & 0x7F) as usize] = val,
-            
+
             // I/O and timer ($280-$29F, mirrored every 32 bytes)
             0x0280..=0x029F => {
                 match addr & 0x1F {
@@ -171,7 +175,7 @@ impl Riot {
                     _ => {}
                 }
             }
-            
+
             _ => {}
         }
     }
@@ -182,7 +186,7 @@ impl Riot {
             self.timer_cycles += 1;
             if self.timer_cycles >= self.timer_interval {
                 self.timer_cycles = 0;
-                
+
                 // Decrement timer
                 if self.timer == 0 {
                     // Timer at 0, wrap around
@@ -211,7 +215,7 @@ impl Riot {
         } else {
             direction + 4 // Player 1: bits 4-7
         };
-        
+
         if pressed {
             self.swcha &= !(1 << bit);
         } else {
@@ -241,11 +245,11 @@ mod tests {
     #[test]
     fn test_riot_ram() {
         let mut riot = Riot::new();
-        
+
         // Test RAM write/read at $80
         riot.write(0x0080, 0x42);
         assert_eq!(riot.read(0x0080), 0x42);
-        
+
         // Test RAM mirroring at $00
         riot.write(0x0000, 0x12);
         assert_eq!(riot.read(0x0000), 0x12);
@@ -254,15 +258,15 @@ mod tests {
     #[test]
     fn test_riot_timer() {
         let mut riot = Riot::new();
-        
+
         // Set timer to 10 with 1 clock interval (TIM1T is at $294)
         riot.write(0x0294, 10);
         assert_eq!(riot.read(0x0284), 10); // INTIM is at $284
-        
+
         // Clock once
         riot.clock(1);
         assert_eq!(riot.read(0x0284), 9);
-        
+
         // Clock until underflow
         riot.clock(9);
         assert_eq!(riot.read(0x0284), 0xFF); // Should wrap to 0xFF
@@ -272,17 +276,17 @@ mod tests {
     #[test]
     fn test_riot_timer_intervals() {
         let mut riot = Riot::new();
-        
+
         // Test TIM8T at $295
         riot.write(0x0295, 5);
         riot.clock(8);
         assert_eq!(riot.read(0x0284), 4);
-        
+
         // Test TIM64T at $296
         riot.write(0x0296, 5);
         riot.clock(64);
         assert_eq!(riot.read(0x0284), 4);
-        
+
         // Test T1024T at $297
         riot.write(0x0297, 5);
         riot.clock(1024);
@@ -292,14 +296,14 @@ mod tests {
     #[test]
     fn test_riot_joystick() {
         let mut riot = Riot::new();
-        
+
         // Initially all joysticks unpressed (all bits high)
         assert_eq!(riot.read(0x0280), 0xFF); // SWCHA at $280
-        
+
         // Press Player 0 Up (bit 0)
         riot.set_joystick(0, 0, true);
         assert_eq!(riot.read(0x0280) & 0x01, 0x00);
-        
+
         // Press Player 1 Down (bit 6)
         riot.set_joystick(1, 2, true);
         assert_eq!(riot.read(0x0280) & 0x40, 0x00);
@@ -308,11 +312,11 @@ mod tests {
     #[test]
     fn test_riot_console_switches() {
         let mut riot = Riot::new();
-        
+
         // Press reset switch (bit 0) - SWCHB at $282
         riot.set_console_switch(0, true);
         assert_eq!(riot.read(0x0282) & 0x01, 0x00);
-        
+
         // Press select switch (bit 1)
         riot.set_console_switch(1, true);
         assert_eq!(riot.read(0x0282) & 0x02, 0x00);
@@ -321,12 +325,12 @@ mod tests {
     #[test]
     fn test_riot_reset() {
         let mut riot = Riot::new();
-        
+
         riot.write(0x0080, 0x42);
         riot.write(0x0294, 10);
-        
+
         riot.reset();
-        
+
         assert_eq!(riot.read(0x0080), 0x00);
         assert_eq!(riot.read(0x0284), 0x00);
     }

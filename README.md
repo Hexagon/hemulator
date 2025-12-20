@@ -136,6 +136,7 @@ The project follows a modular architecture:
   - `System` trait for emulator implementations
   - `Frame` for video output
   - `cpu_6502` module: Reusable 6502 CPU (used by NES and Atari 2600)
+  - `cpu_8086` module: Reusable 8086 CPU (prepared for future PC emulation)
   - `apu` module: Reusable audio components (currently used by NES)
   - `ppu` module: Reusable video primitives
   - Save state serialization support
