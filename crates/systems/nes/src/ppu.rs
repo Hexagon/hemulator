@@ -62,6 +62,10 @@ const NES_MASTER_PALETTE: [u32; 64] = [
     0xFFCCDCA0, 0xFFB4E4A0, 0xFFA8E4B4, 0xFFA0E4CC, 0xFFA0D4E4, 0xFFA0A2A0, 0xFF000000, 0xFF000000,
 ];
 
+// Offset to convert palette addresses ($3F00-$3FFF) to their mirrored nametable addresses ($2F00-$2FFF).
+// When reading from palette RAM via PPUDATA, the internal buffer is filled with the mirrored nametable value.
+const PALETTE_TO_NAMETABLE_OFFSET: u16 = 0x1000;
+
 fn nes_palette_rgb(index: u8) -> u32 {
     NES_MASTER_PALETTE[(index & 0x3F) as usize]
 }
@@ -304,7 +308,7 @@ impl Ppu {
                     let val = self.palette[target];
                     
                     // Fill buffer with the mirrored nametable value underneath
-                    let mirrored_nt_addr = addr - 0x1000; // $3F00 mirrors $2F00
+                    let mirrored_nt_addr = addr - PALETTE_TO_NAMETABLE_OFFSET;
                     let idx = self.map_nametable_addr(mirrored_nt_addr);
                     self.read_buffer.set(self.vram[idx]);
                     
