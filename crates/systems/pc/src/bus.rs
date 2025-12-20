@@ -7,6 +7,7 @@
 //! - 0xC0000-0xFFFFF: ROM area (256KB)
 //! - 0xF0000-0xFFFFF: BIOS ROM (64KB)
 
+use crate::keyboard::Keyboard;
 use emu_core::cpu_8086::Memory8086;
 
 /// PC memory bus
@@ -19,6 +20,8 @@ pub struct PcBus {
     rom: Vec<u8>,
     /// Loaded executable data
     executable: Option<Vec<u8>>,
+    /// Keyboard controller
+    pub keyboard: Keyboard,
 }
 
 impl PcBus {
@@ -29,6 +32,7 @@ impl PcBus {
             vram: vec![0; 0x20000], // 128KB
             rom: vec![0; 0x40000],  // 256KB
             executable: None,
+            keyboard: Keyboard::new(),
         }
     }
 
@@ -37,6 +41,7 @@ impl PcBus {
         // Clear RAM but preserve ROM and executable
         self.ram.fill(0);
         self.vram.fill(0);
+        self.keyboard.clear();
     }
 
     /// Load an executable at a specific address
@@ -55,6 +60,11 @@ impl PcBus {
     /// Get a reference to the executable data
     pub fn executable(&self) -> Option<&[u8]> {
         self.executable.as_deref()
+    }
+
+    /// Get a reference to the video RAM (for rendering)
+    pub fn vram(&self) -> &[u8] {
+        &self.vram
     }
 }
 

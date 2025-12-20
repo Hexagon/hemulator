@@ -8,6 +8,8 @@
 mod bios;
 mod bus;
 mod cpu;
+mod keyboard;
+mod video;
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
@@ -15,6 +17,9 @@ use cpu::{CpuRegisters, PcCpu};
 use emu_core::{cpu_8086::Memory8086, types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
+use video::CgaVideo;
+
+pub use keyboard::*; // Export keyboard scancodes for GUI integration
 
 #[derive(Debug, Error)]
 pub enum PcError {
@@ -31,6 +36,7 @@ pub struct PcSystem {
     cpu: PcCpu,
     cycles: u64,
     frame_cycles: u64,
+    video: CgaVideo,
 }
 
 impl Default for PcSystem {
@@ -54,6 +60,7 @@ impl PcSystem {
             cpu,
             cycles: 0,
             frame_cycles: 0,
+            video: CgaVideo::new(),
         }
     }
 
@@ -82,6 +89,16 @@ impl PcSystem {
         }
 
         Ok(())
+    }
+
+    /// Handle keyboard input (called by GUI)
+    pub fn key_press(&mut self, scancode: u8) {
+        self.cpu.bus_mut().keyboard.key_press(scancode);
+    }
+
+    /// Handle keyboard release (called by GUI)
+    pub fn key_release(&mut self, scancode: u8) {
+        self.cpu.bus_mut().keyboard.key_release(scancode);
     }
 
     /// Get debug information
@@ -135,11 +152,8 @@ impl System for PcSystem {
         // At 60 Hz, that's ~79,500 cycles per frame
         const CYCLES_PER_FRAME: u32 = 79500;
 
-        // Create a simple frame buffer (text mode 80x25, scaled to 640x400 for display)
+        // Create frame buffer for text mode 80x25 (640x400 pixels)
         let mut frame = Frame::new(640, 400);
-
-        // Fill with black background
-        frame.pixels.fill(0xFF000000);
 
         let mut cycles_this_frame = 0u32;
 
@@ -149,6 +163,16 @@ impl System for PcSystem {
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
             self.frame_cycles += cycles as u64;
+        }
+
+        // Render video memory to frame buffer
+        // CGA text mode video RAM starts at 0xB8000
+        let vram = self.cpu.bus().vram();
+        // The text mode buffer is at offset 0x18000 in VRAM (0xB8000 - 0xA0000)
+        let text_buffer_offset = 0x18000;
+        if vram.len() > text_buffer_offset {
+            self.video
+                .render(&vram[text_buffer_offset..], &mut frame.pixels);
         }
 
         Ok(frame)
