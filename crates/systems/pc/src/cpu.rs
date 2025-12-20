@@ -98,6 +98,7 @@ impl PcCpu {
     }
 
     /// Get total cycles executed
+    #[allow(dead_code)]
     pub fn cycles(&self) -> u64 {
         self.cpu.cycles
     }

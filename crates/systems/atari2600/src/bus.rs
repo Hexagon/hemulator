@@ -74,14 +74,14 @@ impl Memory6502 for Atari2600Bus {
 
             // RIOT RAM (mirrored at 0x00-0x7F)
             0x0040..=0x007F => self.riot.read(addr),
-            
+
             // RIOT RAM
             0x0080..=0x00FF => self.riot.read(addr),
             0x0100..=0x017F => self.riot.read(addr),
-            
+
             // Unused
             0x0180..=0x027F => 0,
-            
+
             // RIOT I/O and timer
             0x0280..=0x029F => self.riot.read(addr),
 
@@ -122,10 +122,10 @@ impl Memory6502 for Atari2600Bus {
             // RIOT RAM
             0x0080..=0x00FF => self.riot.write(addr, val),
             0x0100..=0x017F => self.riot.write(addr, val),
-            
+
             // Unused
             0x0180..=0x027F => {}
-            
+
             // RIOT I/O and timer
             0x0280..=0x029F => self.riot.write(addr, val),
 
