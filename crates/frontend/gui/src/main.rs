@@ -19,14 +19,24 @@ enum EmulatorSystem {
     NES(emu_nes::NesSystem),
     GameBoy(emu_gb::GbSystem),
     Atari2600(emu_atari2600::Atari2600System),
+    PC(emu_pc::PcSystem),
 }
 
 impl EmulatorSystem {
     fn step_frame(&mut self) -> Result<Frame, Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::GameBoy(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PC(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -35,6 +45,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.reset(),
             EmulatorSystem::GameBoy(sys) => sys.reset(),
             EmulatorSystem::Atari2600(sys) => sys.reset(),
+            EmulatorSystem::PC(sys) => sys.reset(),
         }
     }
 
@@ -44,9 +55,18 @@ impl EmulatorSystem {
         data: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::GameBoy(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PC(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -55,6 +75,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.mount_points(),
             EmulatorSystem::GameBoy(sys) => sys.mount_points(),
             EmulatorSystem::Atari2600(sys) => sys.mount_points(),
+            EmulatorSystem::PC(sys) => sys.mount_points(),
         }
     }
 
@@ -63,6 +84,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.supports_save_states(),
             EmulatorSystem::GameBoy(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari2600(sys) => sys.supports_save_states(),
+            EmulatorSystem::PC(sys) => sys.supports_save_states(),
         }
     }
 
@@ -71,6 +93,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.save_state(),
             EmulatorSystem::GameBoy(sys) => sys.save_state(),
             EmulatorSystem::Atari2600(sys) => sys.save_state(),
+            EmulatorSystem::PC(sys) => sys.save_state(),
         }
     }
 
@@ -79,6 +102,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.load_state(state),
             EmulatorSystem::GameBoy(sys) => sys.load_state(state),
             EmulatorSystem::Atari2600(sys) => sys.load_state(state),
+            EmulatorSystem::PC(sys) => sys.load_state(state),
         }
     }
 
@@ -100,11 +124,79 @@ impl EmulatorSystem {
                         | ((state & 0x01) << 4)           // A (bit 0 -> bit 4)
                         | ((state & 0x02) << 4)           // B (bit 1 -> bit 5)
                         | ((state & 0x04) << 4)           // Select (bit 2 -> bit 6)
-                        | ((state & 0x08) << 4);          // Start (bit 3 -> bit 7)
+                        | ((state & 0x08) << 4); // Start (bit 3 -> bit 7)
                     sys.set_controller(gb_state);
                 }
             }
             EmulatorSystem::Atari2600(_) => {}
+            EmulatorSystem::PC(_) => {} // PC doesn't use controller input
+        }
+    }
+
+    fn handle_keyboard(&mut self, key: minifb::Key, pressed: bool) {
+        match self {
+            EmulatorSystem::PC(sys) => {
+                // Map minifb keys to PC scancodes
+                let scancode = match key {
+                    minifb::Key::A => Some(emu_pc::SCANCODE_A),
+                    minifb::Key::B => Some(emu_pc::SCANCODE_B),
+                    minifb::Key::C => Some(emu_pc::SCANCODE_C),
+                    minifb::Key::D => Some(emu_pc::SCANCODE_D),
+                    minifb::Key::E => Some(emu_pc::SCANCODE_E),
+                    minifb::Key::F => Some(emu_pc::SCANCODE_F),
+                    minifb::Key::G => Some(emu_pc::SCANCODE_G),
+                    minifb::Key::H => Some(emu_pc::SCANCODE_H),
+                    minifb::Key::I => Some(emu_pc::SCANCODE_I),
+                    minifb::Key::J => Some(emu_pc::SCANCODE_J),
+                    minifb::Key::K => Some(emu_pc::SCANCODE_K),
+                    minifb::Key::L => Some(emu_pc::SCANCODE_L),
+                    minifb::Key::M => Some(emu_pc::SCANCODE_M),
+                    minifb::Key::N => Some(emu_pc::SCANCODE_N),
+                    minifb::Key::O => Some(emu_pc::SCANCODE_O),
+                    minifb::Key::P => Some(emu_pc::SCANCODE_P),
+                    minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
+                    minifb::Key::R => Some(emu_pc::SCANCODE_R),
+                    minifb::Key::S => Some(emu_pc::SCANCODE_S),
+                    minifb::Key::T => Some(emu_pc::SCANCODE_T),
+                    minifb::Key::U => Some(emu_pc::SCANCODE_U),
+                    minifb::Key::V => Some(emu_pc::SCANCODE_V),
+                    minifb::Key::W => Some(emu_pc::SCANCODE_W),
+                    minifb::Key::X => Some(emu_pc::SCANCODE_X),
+                    minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
+                    minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
+                    minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
+                    minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
+                    minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
+                    minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
+                    minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
+                    minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
+                    minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
+                    minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
+                    minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
+                    minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
+                    minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
+                    minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
+                    minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
+                    minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
+                    minifb::Key::LeftShift | minifb::Key::RightShift => {
+                        Some(emu_pc::SCANCODE_LEFT_SHIFT)
+                    }
+                    minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
+                        Some(emu_pc::SCANCODE_LEFT_CTRL)
+                    }
+                    minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
+                    _ => None,
+                };
+
+                if let Some(sc) = scancode {
+                    if pressed {
+                        sys.key_press(sc);
+                    } else {
+                        sys.key_release(sc);
+                    }
+                }
+            }
+            _ => {} // Other systems don't use keyboard input
         }
     }
 
@@ -113,6 +205,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => Some(sys.get_debug_info()),
             EmulatorSystem::GameBoy(_) => None,
             EmulatorSystem::Atari2600(_) => None,
+            EmulatorSystem::PC(_) => None,
         }
     }
 
@@ -121,6 +214,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
             EmulatorSystem::GameBoy(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari2600(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::PC(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -129,6 +223,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.timing(),
             EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -137,6 +232,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(_) => vec![0; count], // TODO: Implement audio for Game Boy
             EmulatorSystem::Atari2600(_) => vec![0; count], // TODO: Implement audio for Atari 2600
+            EmulatorSystem::PC(_) => vec![0; count],      // TODO: Implement audio for PC
         }
     }
 
@@ -145,6 +241,7 @@ impl EmulatorSystem {
             EmulatorSystem::NES(_) => (256, 240),
             EmulatorSystem::GameBoy(_) => (160, 144),
             EmulatorSystem::Atari2600(_) => (160, 192),
+            EmulatorSystem::PC(_) => (640, 400),
         }
     }
 }
@@ -342,6 +439,23 @@ fn main() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
                         println!("Loaded Game Boy ROM: {}", p);
+                    }
+                }
+                Ok(SystemType::PC) => {
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut pc_sys = emu_pc::PcSystem::new();
+                    if let Err(e) = pc_sys.mount("Executable", &data) {
+                        eprintln!("Failed to load PC executable: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        sys = EmulatorSystem::PC(pc_sys);
+                        settings.set_mount_point("Executable", p.clone());
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
+                        }
+                        println!("Loaded PC executable: {}", p);
                     }
                 }
                 Err(e) => {
@@ -831,6 +945,17 @@ fn main() {
                 }
             }
             sys.set_controller(0, ctrl0);
+
+            // Handle keyboard input for PC system
+            if let EmulatorSystem::PC(_) = &sys {
+                // Get all keys and send to PC system
+                let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
+                for key in keys {
+                    sys.handle_keyboard(key, true);
+                }
+                // Note: Key releases are not easily tracked with minifb's API
+                // The keyboard buffer in PC system handles this with timeouts
+            }
 
             // Step one frame and display
             match sys.step_frame() {

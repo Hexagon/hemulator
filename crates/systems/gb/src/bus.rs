@@ -97,12 +97,10 @@ impl MemoryLr35902 for GbBus {
             // Not usable
             0xFEA0..=0xFEFF => 0xFF,
             // I/O Registers
-            0xFF00..=0xFF7F => {
-                match addr {
-                    0xFF0F => self.if_reg,
-                    _ => 0xFF,
-                }
-            }
+            0xFF00..=0xFF7F => match addr {
+                0xFF0F => self.if_reg,
+                _ => 0xFF,
+            },
             // High RAM
             0xFF80..=0xFFFE => self.hram[(addr - 0xFF80) as usize],
             // Interrupt Enable

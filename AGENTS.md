@@ -226,6 +226,31 @@ System-specific implementations that use core components:
     - Bank switching via memory writes to specific addresses
   - All existing tests pass (33 tests total)
 
+- **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
+  - Uses `cpu_8086` from core with PC-specific bus implementation
+  - `PcCpu` wraps `Cpu8086<PcBus>` to provide PC-specific interface
+  - PC bus includes: 640KB RAM, 128KB VRAM, 256KB ROM area
+  - **Memory Map**:
+    - 0x00000-0x9FFFF: Conventional memory (640KB)
+    - 0xA0000-0xBFFFF: Video memory (128KB)
+    - 0xC0000-0xFFFFF: ROM area (256KB, includes BIOS)
+    - 0xF0000-0xFFFFF: BIOS ROM (64KB)
+  - **BIOS**:
+    - Minimal BIOS stub for booting DOS executables
+    - Entry point at 0xFFFF:0x0000 (physical 0xFFFF0)
+    - Initializes segments and stack
+    - Jumps to loaded program at 0x0000:0x0100 (COM file convention)
+  - **Executable Support**:
+    - COM files: Loaded at 0x0100, limited to 64KB - 256 bytes
+    - EXE files: MZ header detected but full parsing not yet implemented
+  - **Timing**:
+    - 4.77 MHz CPU clock (IBM PC standard)
+    - ~79,500 cycles per frame at 60 Hz
+  - **Display**:
+    - 640x400 frame buffer (text mode 80x25 equivalent)
+    - Currently renders black screen (video hardware not implemented)
+  - All tests pass (22 tests total)
+
 ### Frontend (`crates/frontend/gui`)
 
 GUI frontend using minifb and rodio.
@@ -276,6 +301,7 @@ ROMs are auto-detected based on their format:
 - **NES**: iNES format (header starts with `NES\x1A`)
 - **Atari 2600**: Raw binary format, detected by size (2048, 4096, 8192, 12288, 16384, or 32768 bytes)
 - **Game Boy**: GB/GBC format (Nintendo logo at offset 0x104)
+- **PC/DOS**: MZ header for EXE files, or small binary files (16-65280 bytes) for COM files
 - Unsupported formats show clear error messages
 
 ROM loading workflow:

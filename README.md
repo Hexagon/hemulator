@@ -1,16 +1,18 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust, focusing on NES and Atari 2600 emulation with comprehensive save state management and customizable controls.
+A cross-platform, multi-system console emulator written in Rust, supporting NES, Atari 2600, Game Boy, and PC emulation with comprehensive save state management and customizable controls.
 
 ## Features
 
 - 🎮 **NES Emulation**: Full support for ~90%+ of NES games via 14 mapper implementations
 - 🕹️ **Atari 2600 Emulation**: Support for most cartridge formats (2K-32K) with multiple banking schemes
+- 🎲 **Game Boy Emulation**: Work-in-progress support for Game Boy/Game Boy Color ROMs
+- 💻 **PC Emulation**: Basic IBM PC/XT emulation with 8086 CPU (experimental)
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
 - 🎵 **Audio Support**: Integrated audio playback via rodio (NES audio implemented)
-- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, and Game Boy ROM formats
+- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, Game Boy, and DOS executable formats
 
 ## For Users
 
@@ -74,6 +76,7 @@ See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibi
 - **NES**: iNES format (.nes) - automatically detected via header signature
 - **Atari 2600**: Raw binary (.a26, .bin) - detected by size (2K, 4K, 8K, 12K, 16K, 32K)
 - **Game Boy**: GB/GBC format (.gb, .gbc) - skeleton implementation (WIP)
+- **PC/DOS**: COM/EXE executables (.com, .exe) - experimental 8086 emulation
 
 ## Project Structure
 
@@ -84,7 +87,8 @@ hemulator/
 │   ├── systems/
 │   │   ├── nes/        # NES emulation (CPU, PPU, APU, mappers)
 │   │   ├── atari2600/  # Atari 2600 emulation (TIA, RIOT, cartridge banking)
-│   │   └── gb/         # Game Boy emulation (skeleton)
+│   │   ├── gb/         # Game Boy emulation (WIP)
+│   │   └── pc/         # IBM PC/XT emulation (8086 CPU, experimental)
 │   └── frontend/
 │       └── gui/        # GUI frontend (minifb + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
@@ -136,7 +140,10 @@ The project follows a modular architecture:
   - `System` trait for emulator implementations
   - `Frame` for video output
   - `cpu_6502` module: Reusable 6502 CPU (used by NES and Atari 2600)
-  - `cpu_8086` module: Reusable 8086 CPU with core instruction set (prepared for future PC emulation)
+  - `cpu_8086` module: Reusable 8086 CPU with core instruction set (used by PC emulation)
+  - `cpu_8080` module: Intel 8080 CPU (foundation for Z80 and Game Boy CPUs)
+  - `cpu_z80` module: Zilog Z80 CPU (stub implementation)
+  - `cpu_lr35902` module: Game Boy CPU (stub implementation)
   - `apu` module: Reusable audio components (currently used by NES)
   - `ppu` module: Reusable video primitives
   - Save state serialization support
@@ -144,12 +151,14 @@ The project follows a modular architecture:
 - **Systems**: Individual emulator implementations
   - **NES (`emu_nes`)**: Complete NES emulator with CPU, PPU, APU, and 14 mappers
   - **Atari 2600 (`emu_atari2600`)**: Atari 2600 with TIA, RIOT, and cartridge banking
-  - **Game Boy (`emu_gb`)**: Skeleton implementation (WIP)
+  - **Game Boy (`emu_gb`)**: Work-in-progress Game Boy emulator
+  - **PC (`emu_pc`)**: Experimental IBM PC/XT emulator with 8086 CPU, BIOS stub, and DOS executable support
   
 - **Frontend (`emu_gui`)**: GUI application
   - Window management with `minifb`
   - Audio playback with `rodio`
   - Settings and save state management
+  - ROM loading and system selection
   - ROM loading and system selection
 
 ### Adding New Mappers

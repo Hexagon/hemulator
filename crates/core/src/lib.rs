@@ -3,9 +3,9 @@
 pub mod apu;
 pub mod cpu_6502;
 pub mod cpu_8080;
+pub mod cpu_8086;
 pub mod cpu_lr35902;
 pub mod cpu_z80;
-pub mod cpu_8086;
 pub mod ppu;
 pub mod types {
     use serde::{Deserialize, Serialize};

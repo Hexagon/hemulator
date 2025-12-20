@@ -7,7 +7,7 @@
 pub trait MemoryLr35902 {
     /// Read a byte from memory
     fn read(&self, addr: u16) -> u8;
-    
+
     /// Write a byte to memory
     fn write(&mut self, addr: u16, val: u8);
 }
@@ -185,7 +185,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
     fn add(&mut self, val: u8, carry: bool) {
         let c = if carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let result = self.a as u16 + val as u16 + c as u16;
-        
+
         self.set_flag(FLAG_H, ((self.a & 0x0F) + (val & 0x0F) + c) > 0x0F);
         self.set_flag(FLAG_C, result > 0xFF);
         self.a = result as u8;
@@ -195,7 +195,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
     fn sub(&mut self, val: u8, carry: bool) {
         let c = if carry && self.get_flag(FLAG_C) { 1 } else { 0 };
         let result = self.a as i16 - val as i16 - c as i16;
-        
+
         self.set_flag(FLAG_H, (self.a & 0x0F) < ((val & 0x0F) + c));
         self.set_flag(FLAG_C, result < 0);
         self.a = result as u8;
@@ -335,151 +335,415 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             0x00 => 4,
 
             // LD BC,d16 / LD DE,d16 / LD HL,d16 / LD SP,d16
-            0x01 => { let val = self.read_pc_u16(); self.set_bc(val); 12 }
-            0x11 => { let val = self.read_pc_u16(); self.set_de(val); 12 }
-            0x21 => { let val = self.read_pc_u16(); self.set_hl(val); 12 }
-            0x31 => { self.sp = self.read_pc_u16(); 12 }
+            0x01 => {
+                let val = self.read_pc_u16();
+                self.set_bc(val);
+                12
+            }
+            0x11 => {
+                let val = self.read_pc_u16();
+                self.set_de(val);
+                12
+            }
+            0x21 => {
+                let val = self.read_pc_u16();
+                self.set_hl(val);
+                12
+            }
+            0x31 => {
+                self.sp = self.read_pc_u16();
+                12
+            }
 
             // LD (BC),A / LD (DE),A / LD (HL+),A / LD (HL-),A
-            0x02 => { self.memory.write(self.bc(), self.a); 8 }
-            0x12 => { self.memory.write(self.de(), self.a); 8 }
-            0x22 => { let addr = self.hl(); self.memory.write(addr, self.a); self.set_hl(addr.wrapping_add(1)); 8 }
-            0x32 => { let addr = self.hl(); self.memory.write(addr, self.a); self.set_hl(addr.wrapping_sub(1)); 8 }
+            0x02 => {
+                self.memory.write(self.bc(), self.a);
+                8
+            }
+            0x12 => {
+                self.memory.write(self.de(), self.a);
+                8
+            }
+            0x22 => {
+                let addr = self.hl();
+                self.memory.write(addr, self.a);
+                self.set_hl(addr.wrapping_add(1));
+                8
+            }
+            0x32 => {
+                let addr = self.hl();
+                self.memory.write(addr, self.a);
+                self.set_hl(addr.wrapping_sub(1));
+                8
+            }
 
             // INC BC / INC DE / INC HL / INC SP
-            0x03 => { self.set_bc(self.bc().wrapping_add(1)); 8 }
-            0x13 => { self.set_de(self.de().wrapping_add(1)); 8 }
-            0x23 => { self.set_hl(self.hl().wrapping_add(1)); 8 }
-            0x33 => { self.sp = self.sp.wrapping_add(1); 8 }
+            0x03 => {
+                self.set_bc(self.bc().wrapping_add(1));
+                8
+            }
+            0x13 => {
+                self.set_de(self.de().wrapping_add(1));
+                8
+            }
+            0x23 => {
+                self.set_hl(self.hl().wrapping_add(1));
+                8
+            }
+            0x33 => {
+                self.sp = self.sp.wrapping_add(1);
+                8
+            }
 
             // INC r
-            0x04 => { self.b = self.inc(self.b); 4 }
-            0x0C => { self.c = self.inc(self.c); 4 }
-            0x14 => { self.d = self.inc(self.d); 4 }
-            0x1C => { self.e = self.inc(self.e); 4 }
-            0x24 => { self.h = self.inc(self.h); 4 }
-            0x2C => { self.l = self.inc(self.l); 4 }
-            0x34 => { let addr = self.hl(); let val = self.memory.read(addr); let result = self.inc(val); self.memory.write(addr, result); 12 }
-            0x3C => { self.a = self.inc(self.a); 4 }
+            0x04 => {
+                self.b = self.inc(self.b);
+                4
+            }
+            0x0C => {
+                self.c = self.inc(self.c);
+                4
+            }
+            0x14 => {
+                self.d = self.inc(self.d);
+                4
+            }
+            0x1C => {
+                self.e = self.inc(self.e);
+                4
+            }
+            0x24 => {
+                self.h = self.inc(self.h);
+                4
+            }
+            0x2C => {
+                self.l = self.inc(self.l);
+                4
+            }
+            0x34 => {
+                let addr = self.hl();
+                let val = self.memory.read(addr);
+                let result = self.inc(val);
+                self.memory.write(addr, result);
+                12
+            }
+            0x3C => {
+                self.a = self.inc(self.a);
+                4
+            }
 
             // DEC r
-            0x05 => { self.b = self.dec(self.b); 4 }
-            0x0D => { self.c = self.dec(self.c); 4 }
-            0x15 => { self.d = self.dec(self.d); 4 }
-            0x1D => { self.e = self.dec(self.e); 4 }
-            0x25 => { self.h = self.dec(self.h); 4 }
-            0x2D => { self.l = self.dec(self.l); 4 }
-            0x35 => { let addr = self.hl(); let val = self.memory.read(addr); let result = self.dec(val); self.memory.write(addr, result); 12 }
-            0x3D => { self.a = self.dec(self.a); 4 }
+            0x05 => {
+                self.b = self.dec(self.b);
+                4
+            }
+            0x0D => {
+                self.c = self.dec(self.c);
+                4
+            }
+            0x15 => {
+                self.d = self.dec(self.d);
+                4
+            }
+            0x1D => {
+                self.e = self.dec(self.e);
+                4
+            }
+            0x25 => {
+                self.h = self.dec(self.h);
+                4
+            }
+            0x2D => {
+                self.l = self.dec(self.l);
+                4
+            }
+            0x35 => {
+                let addr = self.hl();
+                let val = self.memory.read(addr);
+                let result = self.dec(val);
+                self.memory.write(addr, result);
+                12
+            }
+            0x3D => {
+                self.a = self.dec(self.a);
+                4
+            }
 
             // LD r,d8
-            0x06 => { self.b = self.read_pc(); 8 }
-            0x0E => { self.c = self.read_pc(); 8 }
-            0x16 => { self.d = self.read_pc(); 8 }
-            0x1E => { self.e = self.read_pc(); 8 }
-            0x26 => { self.h = self.read_pc(); 8 }
-            0x2E => { self.l = self.read_pc(); 8 }
-            0x36 => { let val = self.read_pc(); self.memory.write(self.hl(), val); 12 }
-            0x3E => { self.a = self.read_pc(); 8 }
+            0x06 => {
+                self.b = self.read_pc();
+                8
+            }
+            0x0E => {
+                self.c = self.read_pc();
+                8
+            }
+            0x16 => {
+                self.d = self.read_pc();
+                8
+            }
+            0x1E => {
+                self.e = self.read_pc();
+                8
+            }
+            0x26 => {
+                self.h = self.read_pc();
+                8
+            }
+            0x2E => {
+                self.l = self.read_pc();
+                8
+            }
+            0x36 => {
+                let val = self.read_pc();
+                self.memory.write(self.hl(), val);
+                12
+            }
+            0x3E => {
+                self.a = self.read_pc();
+                8
+            }
 
             // RLCA / RRCA / RLA / RRA
-            0x07 => { self.a = self.rlc(self.a); self.set_flag(FLAG_Z, false); 4 }
-            0x0F => { self.a = self.rrc(self.a); self.set_flag(FLAG_Z, false); 4 }
-            0x17 => { self.a = self.rl(self.a); self.set_flag(FLAG_Z, false); 4 }
-            0x1F => { self.a = self.rr(self.a); self.set_flag(FLAG_Z, false); 4 }
+            0x07 => {
+                self.a = self.rlc(self.a);
+                self.set_flag(FLAG_Z, false);
+                4
+            }
+            0x0F => {
+                self.a = self.rrc(self.a);
+                self.set_flag(FLAG_Z, false);
+                4
+            }
+            0x17 => {
+                self.a = self.rl(self.a);
+                self.set_flag(FLAG_Z, false);
+                4
+            }
+            0x1F => {
+                self.a = self.rr(self.a);
+                self.set_flag(FLAG_Z, false);
+                4
+            }
 
             // LD (a16),SP
-            0x08 => { let addr = self.read_pc_u16(); self.memory.write(addr, self.sp as u8); self.memory.write(addr.wrapping_add(1), (self.sp >> 8) as u8); 20 }
+            0x08 => {
+                let addr = self.read_pc_u16();
+                self.memory.write(addr, self.sp as u8);
+                self.memory
+                    .write(addr.wrapping_add(1), (self.sp >> 8) as u8);
+                20
+            }
 
             // ADD HL,r16
-            0x09 => { self.add_hl(self.bc()); 8 }
-            0x19 => { self.add_hl(self.de()); 8 }
-            0x29 => { self.add_hl(self.hl()); 8 }
-            0x39 => { self.add_hl(self.sp); 8 }
+            0x09 => {
+                self.add_hl(self.bc());
+                8
+            }
+            0x19 => {
+                self.add_hl(self.de());
+                8
+            }
+            0x29 => {
+                self.add_hl(self.hl());
+                8
+            }
+            0x39 => {
+                self.add_hl(self.sp);
+                8
+            }
 
             // LD A,(BC) / LD A,(DE) / LD A,(HL+) / LD A,(HL-)
-            0x0A => { self.a = self.memory.read(self.bc()); 8 }
-            0x1A => { self.a = self.memory.read(self.de()); 8 }
-            0x2A => { let addr = self.hl(); self.a = self.memory.read(addr); self.set_hl(addr.wrapping_add(1)); 8 }
-            0x3A => { let addr = self.hl(); self.a = self.memory.read(addr); self.set_hl(addr.wrapping_sub(1)); 8 }
+            0x0A => {
+                self.a = self.memory.read(self.bc());
+                8
+            }
+            0x1A => {
+                self.a = self.memory.read(self.de());
+                8
+            }
+            0x2A => {
+                let addr = self.hl();
+                self.a = self.memory.read(addr);
+                self.set_hl(addr.wrapping_add(1));
+                8
+            }
+            0x3A => {
+                let addr = self.hl();
+                self.a = self.memory.read(addr);
+                self.set_hl(addr.wrapping_sub(1));
+                8
+            }
 
             // DEC BC / DEC DE / DEC HL / DEC SP
-            0x0B => { self.set_bc(self.bc().wrapping_sub(1)); 8 }
-            0x1B => { self.set_de(self.de().wrapping_sub(1)); 8 }
-            0x2B => { self.set_hl(self.hl().wrapping_sub(1)); 8 }
-            0x3B => { self.sp = self.sp.wrapping_sub(1); 8 }
+            0x0B => {
+                self.set_bc(self.bc().wrapping_sub(1));
+                8
+            }
+            0x1B => {
+                self.set_de(self.de().wrapping_sub(1));
+                8
+            }
+            0x2B => {
+                self.set_hl(self.hl().wrapping_sub(1));
+                8
+            }
+            0x3B => {
+                self.sp = self.sp.wrapping_sub(1);
+                8
+            }
 
             // JR r8 / JR cc,r8
-            0x18 => { let offset = self.read_pc() as i8; self.pc = self.pc.wrapping_add(offset as u16); 12 }
-            0x20 => { let offset = self.read_pc() as i8; if !self.get_flag(FLAG_Z) { self.pc = self.pc.wrapping_add(offset as u16); 12 } else { 8 } }
-            0x28 => { let offset = self.read_pc() as i8; if self.get_flag(FLAG_Z) { self.pc = self.pc.wrapping_add(offset as u16); 12 } else { 8 } }
-            0x30 => { let offset = self.read_pc() as i8; if !self.get_flag(FLAG_C) { self.pc = self.pc.wrapping_add(offset as u16); 12 } else { 8 } }
-            0x38 => { let offset = self.read_pc() as i8; if self.get_flag(FLAG_C) { self.pc = self.pc.wrapping_add(offset as u16); 12 } else { 8 } }
+            0x18 => {
+                let offset = self.read_pc() as i8;
+                self.pc = self.pc.wrapping_add(offset as u16);
+                12
+            }
+            0x20 => {
+                let offset = self.read_pc() as i8;
+                if !self.get_flag(FLAG_Z) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    12
+                } else {
+                    8
+                }
+            }
+            0x28 => {
+                let offset = self.read_pc() as i8;
+                if self.get_flag(FLAG_Z) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    12
+                } else {
+                    8
+                }
+            }
+            0x30 => {
+                let offset = self.read_pc() as i8;
+                if !self.get_flag(FLAG_C) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    12
+                } else {
+                    8
+                }
+            }
+            0x38 => {
+                let offset = self.read_pc() as i8;
+                if self.get_flag(FLAG_C) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    12
+                } else {
+                    8
+                }
+            }
 
             // DAA / CPL / SCF / CCF
             0x27 => {
                 let mut adjust = 0u8;
                 let mut carry = false;
-                
+
                 if self.get_flag(FLAG_H) || (!self.get_flag(FLAG_N) && (self.a & 0x0F) > 9) {
                     adjust |= 0x06;
                 }
-                
+
                 if self.get_flag(FLAG_C) || (!self.get_flag(FLAG_N) && self.a > 0x99) {
                     adjust |= 0x60;
                     carry = true;
                 }
-                
+
                 if self.get_flag(FLAG_N) {
                     self.a = self.a.wrapping_sub(adjust);
                 } else {
                     self.a = self.a.wrapping_add(adjust);
                 }
-                
+
                 self.set_flag(FLAG_Z, self.a == 0);
                 self.set_flag(FLAG_H, false);
                 self.set_flag(FLAG_C, carry);
                 4
             }
-            0x2F => { self.a = !self.a; self.set_flag(FLAG_N, true); self.set_flag(FLAG_H, true); 4 }
-            0x37 => { self.set_flag(FLAG_N, false); self.set_flag(FLAG_H, false); self.set_flag(FLAG_C, true); 4 }
-            0x3F => { self.set_flag(FLAG_N, false); self.set_flag(FLAG_H, false); self.set_flag(FLAG_C, !self.get_flag(FLAG_C)); 4 }
+            0x2F => {
+                self.a = !self.a;
+                self.set_flag(FLAG_N, true);
+                self.set_flag(FLAG_H, true);
+                4
+            }
+            0x37 => {
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                self.set_flag(FLAG_C, true);
+                4
+            }
+            0x3F => {
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                self.set_flag(FLAG_C, !self.get_flag(FLAG_C));
+                4
+            }
 
             // STOP / HALT
-            0x10 => { self.stopped = true; self.read_pc(); 4 }
-            0x76 => { self.halted = true; 4 }
+            0x10 => {
+                self.stopped = true;
+                self.read_pc();
+                4
+            }
+            0x76 => {
+                self.halted = true;
+                4
+            }
 
             // LD r,r (0x40-0x7F except 0x76 which is HALT)
             0x40..=0x7F if opcode != 0x76 => {
                 let dst = (opcode >> 3) & 0x07;
                 let src = opcode & 0x07;
-                
+
                 let val = match src {
-                    0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
-                    4 => self.h, 5 => self.l, 6 => self.memory.read(self.hl()), 7 => self.a,
+                    0 => self.b,
+                    1 => self.c,
+                    2 => self.d,
+                    3 => self.e,
+                    4 => self.h,
+                    5 => self.l,
+                    6 => self.memory.read(self.hl()),
+                    7 => self.a,
                     _ => unreachable!(),
                 };
-                
+
                 match dst {
-                    0 => self.b = val, 1 => self.c = val, 2 => self.d = val, 3 => self.e = val,
-                    4 => self.h = val, 5 => self.l = val, 6 => self.memory.write(self.hl(), val), 7 => self.a = val,
+                    0 => self.b = val,
+                    1 => self.c = val,
+                    2 => self.d = val,
+                    3 => self.e = val,
+                    4 => self.h = val,
+                    5 => self.l = val,
+                    6 => self.memory.write(self.hl(), val),
+                    7 => self.a = val,
                     _ => unreachable!(),
                 }
-                
-                if src == 6 || dst == 6 { 8 } else { 4 }
+
+                if src == 6 || dst == 6 {
+                    8
+                } else {
+                    4
+                }
             }
 
             // ADD/ADC/SUB/SBC/AND/XOR/OR/CP r (0x80-0xBF)
             0x80..=0xBF => {
                 let op = (opcode >> 3) & 0x07;
                 let reg = opcode & 0x07;
-                
+
                 let val = match reg {
-                    0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
-                    4 => self.h, 5 => self.l, 6 => self.memory.read(self.hl()), 7 => self.a,
+                    0 => self.b,
+                    1 => self.c,
+                    2 => self.d,
+                    3 => self.e,
+                    4 => self.h,
+                    5 => self.l,
+                    6 => self.memory.read(self.hl()),
+                    7 => self.a,
                     _ => unreachable!(),
                 };
-                
+
                 match op {
                     0 => self.add(val, false),
                     1 => self.add(val, true),
@@ -491,52 +755,215 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
                     7 => self.cp(val),
                     _ => unreachable!(),
                 }
-                
-                if reg == 6 { 8 } else { 4 }
+
+                if reg == 6 {
+                    8
+                } else {
+                    4
+                }
             }
 
             // RET cc
-            0xC0 => if !self.get_flag(FLAG_Z) { self.pc = self.pop_u16(); 20 } else { 8 }
-            0xC8 => if self.get_flag(FLAG_Z) { self.pc = self.pop_u16(); 20 } else { 8 }
-            0xD0 => if !self.get_flag(FLAG_C) { self.pc = self.pop_u16(); 20 } else { 8 }
-            0xD8 => if self.get_flag(FLAG_C) { self.pc = self.pop_u16(); 20 } else { 8 }
+            0xC0 => {
+                if !self.get_flag(FLAG_Z) {
+                    self.pc = self.pop_u16();
+                    20
+                } else {
+                    8
+                }
+            }
+            0xC8 => {
+                if self.get_flag(FLAG_Z) {
+                    self.pc = self.pop_u16();
+                    20
+                } else {
+                    8
+                }
+            }
+            0xD0 => {
+                if !self.get_flag(FLAG_C) {
+                    self.pc = self.pop_u16();
+                    20
+                } else {
+                    8
+                }
+            }
+            0xD8 => {
+                if self.get_flag(FLAG_C) {
+                    self.pc = self.pop_u16();
+                    20
+                } else {
+                    8
+                }
+            }
 
             // POP BC/DE/HL/AF
-            0xC1 => { let val = self.pop_u16(); self.set_bc(val); 12 }
-            0xD1 => { let val = self.pop_u16(); self.set_de(val); 12 }
-            0xE1 => { let val = self.pop_u16(); self.set_hl(val); 12 }
-            0xF1 => { let val = self.pop_u16(); self.set_af(val); 12 }
+            0xC1 => {
+                let val = self.pop_u16();
+                self.set_bc(val);
+                12
+            }
+            0xD1 => {
+                let val = self.pop_u16();
+                self.set_de(val);
+                12
+            }
+            0xE1 => {
+                let val = self.pop_u16();
+                self.set_hl(val);
+                12
+            }
+            0xF1 => {
+                let val = self.pop_u16();
+                self.set_af(val);
+                12
+            }
 
             // JP cc,a16
-            0xC2 => { let addr = self.read_pc_u16(); if !self.get_flag(FLAG_Z) { self.pc = addr; 16 } else { 12 } }
-            0xCA => { let addr = self.read_pc_u16(); if self.get_flag(FLAG_Z) { self.pc = addr; 16 } else { 12 } }
-            0xD2 => { let addr = self.read_pc_u16(); if !self.get_flag(FLAG_C) { self.pc = addr; 16 } else { 12 } }
-            0xDA => { let addr = self.read_pc_u16(); if self.get_flag(FLAG_C) { self.pc = addr; 16 } else { 12 } }
+            0xC2 => {
+                let addr = self.read_pc_u16();
+                if !self.get_flag(FLAG_Z) {
+                    self.pc = addr;
+                    16
+                } else {
+                    12
+                }
+            }
+            0xCA => {
+                let addr = self.read_pc_u16();
+                if self.get_flag(FLAG_Z) {
+                    self.pc = addr;
+                    16
+                } else {
+                    12
+                }
+            }
+            0xD2 => {
+                let addr = self.read_pc_u16();
+                if !self.get_flag(FLAG_C) {
+                    self.pc = addr;
+                    16
+                } else {
+                    12
+                }
+            }
+            0xDA => {
+                let addr = self.read_pc_u16();
+                if self.get_flag(FLAG_C) {
+                    self.pc = addr;
+                    16
+                } else {
+                    12
+                }
+            }
 
             // JP a16
-            0xC3 => { self.pc = self.read_pc_u16(); 16 }
+            0xC3 => {
+                self.pc = self.read_pc_u16();
+                16
+            }
 
             // CALL cc,a16
-            0xC4 => { let addr = self.read_pc_u16(); if !self.get_flag(FLAG_Z) { self.push_u16(self.pc); self.pc = addr; 24 } else { 12 } }
-            0xCC => { let addr = self.read_pc_u16(); if self.get_flag(FLAG_Z) { self.push_u16(self.pc); self.pc = addr; 24 } else { 12 } }
-            0xD4 => { let addr = self.read_pc_u16(); if !self.get_flag(FLAG_C) { self.push_u16(self.pc); self.pc = addr; 24 } else { 12 } }
-            0xDC => { let addr = self.read_pc_u16(); if self.get_flag(FLAG_C) { self.push_u16(self.pc); self.pc = addr; 24 } else { 12 } }
+            0xC4 => {
+                let addr = self.read_pc_u16();
+                if !self.get_flag(FLAG_Z) {
+                    self.push_u16(self.pc);
+                    self.pc = addr;
+                    24
+                } else {
+                    12
+                }
+            }
+            0xCC => {
+                let addr = self.read_pc_u16();
+                if self.get_flag(FLAG_Z) {
+                    self.push_u16(self.pc);
+                    self.pc = addr;
+                    24
+                } else {
+                    12
+                }
+            }
+            0xD4 => {
+                let addr = self.read_pc_u16();
+                if !self.get_flag(FLAG_C) {
+                    self.push_u16(self.pc);
+                    self.pc = addr;
+                    24
+                } else {
+                    12
+                }
+            }
+            0xDC => {
+                let addr = self.read_pc_u16();
+                if self.get_flag(FLAG_C) {
+                    self.push_u16(self.pc);
+                    self.pc = addr;
+                    24
+                } else {
+                    12
+                }
+            }
 
             // PUSH BC/DE/HL/AF
-            0xC5 => { self.push_u16(self.bc()); 16 }
-            0xD5 => { self.push_u16(self.de()); 16 }
-            0xE5 => { self.push_u16(self.hl()); 16 }
-            0xF5 => { self.push_u16(self.af()); 16 }
+            0xC5 => {
+                self.push_u16(self.bc());
+                16
+            }
+            0xD5 => {
+                self.push_u16(self.de());
+                16
+            }
+            0xE5 => {
+                self.push_u16(self.hl());
+                16
+            }
+            0xF5 => {
+                self.push_u16(self.af());
+                16
+            }
 
             // ADD/ADC/SUB/SBC/AND/XOR/OR/CP d8
-            0xC6 => { let val = self.read_pc(); self.add(val, false); 8 }
-            0xCE => { let val = self.read_pc(); self.add(val, true); 8 }
-            0xD6 => { let val = self.read_pc(); self.sub(val, false); 8 }
-            0xDE => { let val = self.read_pc(); self.sub(val, true); 8 }
-            0xE6 => { let val = self.read_pc(); self.and(val); 8 }
-            0xEE => { let val = self.read_pc(); self.xor(val); 8 }
-            0xF6 => { let val = self.read_pc(); self.or(val); 8 }
-            0xFE => { let val = self.read_pc(); self.cp(val); 8 }
+            0xC6 => {
+                let val = self.read_pc();
+                self.add(val, false);
+                8
+            }
+            0xCE => {
+                let val = self.read_pc();
+                self.add(val, true);
+                8
+            }
+            0xD6 => {
+                let val = self.read_pc();
+                self.sub(val, false);
+                8
+            }
+            0xDE => {
+                let val = self.read_pc();
+                self.sub(val, true);
+                8
+            }
+            0xE6 => {
+                let val = self.read_pc();
+                self.and(val);
+                8
+            }
+            0xEE => {
+                let val = self.read_pc();
+                self.xor(val);
+                8
+            }
+            0xF6 => {
+                let val = self.read_pc();
+                self.or(val);
+                8
+            }
+            0xFE => {
+                let val = self.read_pc();
+                self.cp(val);
+                8
+            }
 
             // RST n
             0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF => {
@@ -547,19 +974,37 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             }
 
             // RET
-            0xC9 => { self.pc = self.pop_u16(); 16 }
+            0xC9 => {
+                self.pc = self.pop_u16();
+                16
+            }
 
             // RETI
-            0xD9 => { self.pc = self.pop_u16(); self.ime = true; 16 }
+            0xD9 => {
+                self.pc = self.pop_u16();
+                self.ime = true;
+                16
+            }
 
             // JP (HL)
-            0xE9 => { self.pc = self.hl(); 4 }
+            0xE9 => {
+                self.pc = self.hl();
+                4
+            }
 
             // LD SP,HL
-            0xF9 => { self.sp = self.hl(); 8 }
+            0xF9 => {
+                self.sp = self.hl();
+                8
+            }
 
             // CALL a16
-            0xCD => { let addr = self.read_pc_u16(); self.push_u16(self.pc); self.pc = addr; 24 }
+            0xCD => {
+                let addr = self.read_pc_u16();
+                self.push_u16(self.pc);
+                self.pc = addr;
+                24
+            }
 
             // CB prefix
             0xCB => {
@@ -568,20 +1013,48 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             }
 
             // LDH (a8),A / LDH A,(a8)
-            0xE0 => { let offset = self.read_pc() as u16; self.memory.write(0xFF00 + offset, self.a); 12 }
-            0xF0 => { let offset = self.read_pc() as u16; self.a = self.memory.read(0xFF00 + offset); 12 }
+            0xE0 => {
+                let offset = self.read_pc() as u16;
+                self.memory.write(0xFF00 + offset, self.a);
+                12
+            }
+            0xF0 => {
+                let offset = self.read_pc() as u16;
+                self.a = self.memory.read(0xFF00 + offset);
+                12
+            }
 
             // LD (C),A / LD A,(C)
-            0xE2 => { self.memory.write(0xFF00 + self.c as u16, self.a); 8 }
-            0xF2 => { self.a = self.memory.read(0xFF00 + self.c as u16); 8 }
+            0xE2 => {
+                self.memory.write(0xFF00 + self.c as u16, self.a);
+                8
+            }
+            0xF2 => {
+                self.a = self.memory.read(0xFF00 + self.c as u16);
+                8
+            }
 
             // LD (a16),A / LD A,(a16)
-            0xEA => { let addr = self.read_pc_u16(); self.memory.write(addr, self.a); 16 }
-            0xFA => { let addr = self.read_pc_u16(); self.a = self.memory.read(addr); 16 }
+            0xEA => {
+                let addr = self.read_pc_u16();
+                self.memory.write(addr, self.a);
+                16
+            }
+            0xFA => {
+                let addr = self.read_pc_u16();
+                self.a = self.memory.read(addr);
+                16
+            }
 
             // DI / EI
-            0xF3 => { self.ime = false; 4 }
-            0xFB => { self.ime = true; 4 }
+            0xF3 => {
+                self.ime = false;
+                4
+            }
+            0xFB => {
+                self.ime = true;
+                4
+            }
 
             // ADD SP,r8
             0xE8 => {
@@ -618,16 +1091,23 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         let reg = opcode & 0x07;
         let op = (opcode >> 3) & 0x07;
         let bit = (opcode >> 3) & 0x07;
-        
+
         // Get value
         let val = match reg {
-            0 => self.b, 1 => self.c, 2 => self.d, 3 => self.e,
-            4 => self.h, 5 => self.l, 6 => self.memory.read(self.hl()), 7 => self.a,
+            0 => self.b,
+            1 => self.c,
+            2 => self.d,
+            3 => self.e,
+            4 => self.h,
+            5 => self.l,
+            6 => self.memory.read(self.hl()),
+            7 => self.a,
             _ => unreachable!(),
         };
-        
+
         let result = match opcode >> 6 {
-            0 => { // Rotates and shifts
+            0 => {
+                // Rotates and shifts
                 match op {
                     0 => self.rlc(val),
                     1 => self.rrc(val),
@@ -640,7 +1120,8 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
                     _ => unreachable!(),
                 }
             }
-            1 => { // BIT
+            1 => {
+                // BIT
                 self.bit(bit, val);
                 return if reg == 6 { 12 } else { 8 };
             }
@@ -648,15 +1129,25 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             3 => val | (1 << bit),  // SET
             _ => unreachable!(),
         };
-        
+
         // Store result
         match reg {
-            0 => self.b = result, 1 => self.c = result, 2 => self.d = result, 3 => self.e = result,
-            4 => self.h = result, 5 => self.l = result, 6 => self.memory.write(self.hl(), result), 7 => self.a = result,
+            0 => self.b = result,
+            1 => self.c = result,
+            2 => self.d = result,
+            3 => self.e = result,
+            4 => self.h = result,
+            5 => self.l = result,
+            6 => self.memory.write(self.hl(), result),
+            7 => self.a = result,
             _ => unreachable!(),
         }
-        
-        if reg == 6 { 16 } else { 8 }
+
+        if reg == 6 {
+            16
+        } else {
+            8
+        }
     }
 }
 
