@@ -14,7 +14,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 // System wrapper enum to support multiple emulated systems
 enum EmulatorSystem {
@@ -363,67 +363,21 @@ fn save_screenshot(
     height: usize,
     system_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    use chrono::Local;
     use png::Encoder;
     use rand::Rng;
 
-    // Get current timestamp
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let secs = now.as_secs();
-    
-    // Convert to local time components (simple UTC approximation)
-    let total_secs = secs;
-    let days = total_secs / 86400;
-    let remaining = total_secs % 86400;
-    let hours = remaining / 3600;
-    let minutes = (remaining % 3600) / 60;
-    let seconds = remaining % 60;
-    
-    // Simplified date calculation from Unix epoch (1970-01-01)
-    let mut year = 1970;
-    let mut day_of_year = days as u32;
-    
-    // Account for leap years (simplified - doesn't handle century rules perfectly)
-    loop {
-        let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-            366
-        } else {
-            365
-        };
-        
-        if day_of_year < days_in_year {
-            break;
-        }
-        
-        day_of_year -= days_in_year;
-        year += 1;
-    }
-    
-    // Calculate month and day (simplified)
-    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_in_months = if is_leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    
-    let mut month = 1;
-    let mut day = day_of_year + 1;
-    
-    for &days_in_month in &days_in_months {
-        if day <= days_in_month {
-            break;
-        }
-        day -= days_in_month;
-        month += 1;
-    }
+    // Get current local time
+    let now = Local::now();
     
     // Generate random number 000-999
     let random = rand::thread_rng().gen_range(0..1000);
     
     // Create filename: YYYYMMDDHHMMSSRRR.png
     let filename = format!(
-        "{:04}{:02}{:02}{:02}{:02}{:02}{:03}.png",
-        year, month, day, hours, minutes, seconds, random
+        "{}{:03}.png",
+        now.format("%Y%m%d%H%M%S"),
+        random
     );
     
     // Create screenshots directory structure

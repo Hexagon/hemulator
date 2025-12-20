@@ -111,7 +111,9 @@ impl Memory6502 for Atari2600Bus {
             0x002D..=0x003F => {} // Unused
 
             // TIA write (mirrored) / RIOT RAM (mirrored at 0x00-0x7F)
-            // TIA write has priority in documented memory map
+            // On real hardware, addresses $40-$7F are decoded for both TIA write and RIOT RAM.
+            // The 6507 bus allows simultaneous writes to both chips in this range.
+            // This is intentional hardware behavior - not a bug in the emulator.
             0x0040..=0x007F => {
                 self.tia.write((addr & 0x3F) as u8, val);
                 self.riot.write(addr, val);

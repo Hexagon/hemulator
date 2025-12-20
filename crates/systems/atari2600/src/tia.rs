@@ -520,13 +520,14 @@ impl Tia {
 /// Upper 4 bits: hue (0-15), Lower 3 bits: luminance (0-7, bit 0 unused)
 fn ntsc_to_rgb(ntsc: u8) -> u32 {
     // NTSC palette table for Atari 2600
-    // This is a standard NTSC palette mapping used by most emulators
+    // Organized by hue (16 hues) x luminance (8 levels) = 128 colors
+    // Each row is one hue with 8 luminance levels from darkest to brightest
     const NTSC_PALETTE: [u32; 128] = [
-        // Luminance 0 (darkest)
+        // Hue 0 (Gray) - Luminance 0-7 (darkest to brightest)
         0xFF000000, 0xFF404040, 0xFF6C6C6C, 0xFF909090, 0xFFB0B0B0, 0xFFC8C8C8, 0xFFDCDCDC, 0xFFECECEC,
-        // Luminance 1
+        // Hue 1 (Gold/Yellow) - Luminance 0-7
         0xFF444400, 0xFF646410, 0xFF848424, 0xFFA0A034, 0xFFB8B840, 0xFFD0D050, 0xFFE8E85C, 0xFFFCFC68,
-        // Luminance 2
+        // Hue 2 (Orange) - Luminance 0-7
         0xFF702800, 0xFF844414, 0xFF985C28, 0xFFAC783C, 0xFFBC8C4C, 0xFFCCA05C, 0xFFDCB468, 0xFFECC878,
         // Luminance 3
         0xFF841800, 0xFF983418, 0xFFAC5030, 0xFFC06848, 0xFFD0805C, 0xFFE09470, 0xFFECA880, 0xFFFCBC94,
@@ -552,10 +553,12 @@ fn ntsc_to_rgb(ntsc: u8) -> u32 {
         0xFF143800, 0xFF345C1C, 0xFF507C38, 0xFF6C9850, 0xFF84B468, 0xFF9CCC7C, 0xFFB4E490, 0xFFC8FCA4,
         // Luminance 14
         0xFF2C3000, 0xFF4C501C, 0xFF687034, 0xFF848C4C, 0xFF9CA864, 0xFFB4C078, 0xFFCCD488, 0xFFE0EC9C,
-        // Luminance 15 (brightest)
+        // Hue 15 (brightest)
         0xFF442800, 0xFF644818, 0xFF846830, 0xFFA08444, 0xFFB89C58, 0xFFD0B46C, 0xFFE8CC7C, 0xFFFCE08C,
     ];
     
+    // Mask to 7 bits to ensure we're within the 128-color palette bounds
+    // NTSC color encoding only uses bits 1-7 (bit 0 is unused)
     NTSC_PALETTE[ntsc as usize & 0x7F]
 }
 
