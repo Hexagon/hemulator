@@ -401,7 +401,8 @@ impl APU {
             }
 
             let avg = acc / cycles as i32;
-            let mixed = avg / 4; // simple average mix for 4 channels
+            const CHANNEL_COUNT: i32 = 4;
+            let mixed = avg / CHANNEL_COUNT; // Average for 4 channels
             out.push(mixed.clamp(-32768, 32767) as i16);
         }
 

@@ -558,7 +558,8 @@ impl Tia {
         const SAMPLE_HZ: f64 = 44_100.0;
         const TIA_AUDIO_HZ: f64 = 31_400.0; // Approximate TIA audio clock rate
         const TIA_CLOCKS_PER_SAMPLE: f64 = TIA_AUDIO_HZ / SAMPLE_HZ;
-        const AUDIO_OFFSET: i32 = 15360; // Precalculated: 15 * 1024
+        // 15 represents the midpoint when both channels are at max (15+15)/2 = 15
+        const AUDIO_OFFSET: i32 = 15360; // 15 * 1024
 
         let mut samples = Vec::with_capacity(sample_count);
         let mut accum = 0.0;
@@ -570,15 +571,16 @@ impl Tia {
             accum -= tia_clocks as f64;
 
             // Clock both audio channels and mix
+            let clocks_to_run = tia_clocks.max(1);
             let mut mixed = 0i32;
-            for _ in 0..tia_clocks.max(1) {
+            for _ in 0..clocks_to_run {
                 let s0 = self.audio0.clock() as i32;
                 let s1 = self.audio1.clock() as i32;
                 mixed += s0 + s1;
             }
 
             // Average and scale to 16-bit range
-            let avg = mixed / tia_clocks.max(1) as i32;
+            let avg = mixed / clocks_to_run as i32;
             // Scale from 0-30 (max 15+15) to approximately -16384 to 16384
             // Using bit shift for efficiency: avg * 1024 - 15360
             let scaled = (avg << 10) - AUDIO_OFFSET;
