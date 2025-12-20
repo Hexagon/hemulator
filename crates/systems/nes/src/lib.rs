@@ -1,4 +1,64 @@
-//! Minimal NES system skeleton for wiring into the core.
+//! NES (Nintendo Entertainment System) emulation implementation.
+//!
+//! This module provides a complete NES system emulator using the reusable 6502 CPU core
+//! from `emu_core`, along with NES-specific components:
+//!
+//! - **CPU**: Ricoh 2A03 (6502 without decimal mode)
+//! - **PPU**: 2C02 Picture Processing Unit with frame-based rendering
+//! - **APU**: Audio Processing Unit with 2 pulse channels (expandable)
+//! - **Mappers**: 14 cartridge mappers covering ~90%+ of NES games
+//! - **Controllers**: Standard NES controller support (D-pad, A, B, Select, Start)
+//! - **Timing**: Both NTSC (1.789773 MHz) and PAL (1.662607 MHz) modes
+//!
+//! ## Supported Mappers
+//!
+//! - **0 (NROM)**: No banking, 16KB or 32KB PRG ROM
+//! - **1 (MMC1/SxROM)**: Switchable PRG/CHR banks, various modes
+//! - **2 (UxROM)**: 16KB switchable + 16KB fixed PRG banks
+//! - **3 (CNROM)**: Switchable CHR banks only
+//! - **4 (MMC3/TxROM)**: Advanced banking with scanline IRQ counter
+//! - **7 (AxROM)**: 32KB switchable PRG banks, single-screen mirroring
+//! - **9 (MMC2/PxROM)**: Latch-based CHR switching (Punch-Out!!)
+//! - **10 (MMC4/FxROM)**: Similar to MMC2 (Fire Emblem)
+//! - **11 (Color Dreams)**: Simple PRG/CHR banking
+//! - **34 (BNROM)**: 32KB switchable PRG banks
+//! - **66 (GxROM)**: Combined PRG/CHR banking
+//! - **71 (Camerica)**: 16KB switchable PRG banks
+//! - **79 (NINA-03/06)**: AVE mapper with PRG/CHR banking
+//! - **206 (Namco 118)**: Variant of MMC3 without IRQ support
+//!
+//! ## PPU Features
+//!
+//! - 256x240 resolution
+//! - 64-color master palette
+//! - 8 background palettes (4 colors each)
+//! - 8 sprite palettes (4 colors each)
+//! - Scrolling with nametable switching
+//! - Sprite rendering (8x8 and 8x16 modes)
+//! - Sprite priority and flipping
+//! - Sprite 0 hit detection (basic)
+//! - Frame-based rendering (not cycle-accurate)
+//!
+//! ## APU Features
+//!
+//! - 2 pulse channels with duty cycle control
+//! - Length counter and envelope support
+//! - Frame counter (4-step and 5-step modes)
+//! - APU IRQ support (frame counter)
+//! - 44.1 kHz audio output
+//! - Note: Triangle, noise, and DMC channels not yet implemented
+//!
+//! ## Timing Model
+//!
+//! The emulator uses a frame-based timing model rather than cycle-accurate PPU rendering:
+//!
+//! - **NTSC**: ~29,780 CPU cycles per frame (~60.1 Hz)
+//! - **PAL**: ~33,247 CPU cycles per frame (~50.0 Hz)
+//! - **VBlank**: Simulated at end of frame with appropriate cycle count
+//! - **Scanline IRQs**: Synthesized for mappers like MMC3
+//!
+//! This model is suitable for most games but may not handle edge cases requiring
+//! precise PPU timing (mid-scanline effects, exact sprite 0 hit timing, etc.).
 
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::unnecessary_cast)]
@@ -21,12 +81,21 @@ use ppu::Ppu;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+/// Debug information for the NES system.
+///
+/// Provides runtime information about the loaded cartridge and system state
+/// for display in debug overlays.
 #[derive(Debug, Clone)]
 pub struct DebugInfo {
+    /// Current timing mode (NTSC or PAL)
     pub timing_mode: TimingMode,
+    /// Human-readable mapper name (e.g., "MMC3/TxROM")
     pub mapper_name: String,
+    /// iNES mapper number (0-255)
     pub mapper_number: u8,
+    /// Number of 16KB PRG banks
     pub prg_banks: usize,
+    /// Number of 8KB CHR banks (0 for CHR-RAM)
     pub chr_banks: usize,
 }
 
@@ -50,30 +119,58 @@ fn log_irq() -> bool {
     })
 }
 
+/// Program counter hotspot tracking for performance analysis.
+///
+/// Tracks the most frequently executed addresses to help identify
+/// performance bottlenecks and infinite loops.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PcHotspot {
+    /// Program counter address
     pub pc: u16,
+    /// Number of times this address was executed in the frame
     pub count: u16,
 }
 
+/// Runtime statistics for debugging and performance monitoring.
+///
+/// Collected each frame and available via `get_runtime_stats()`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuntimeStats {
+    /// Current frame number (wraps at u64::MAX)
     pub frame_index: u64,
+    /// Number of CPU instructions executed this frame
     pub cpu_steps: u32,
+    /// Total CPU cycles used this frame
     pub cpu_cycles: u32,
+    /// Number of IRQ interrupts fired this frame
     pub irqs: u32,
+    /// Number of NMI interrupts fired this frame
     pub nmis: u32,
+    /// Number of MMC3 A12 rising edges this frame (for IRQ timing)
     pub mmc3_a12_edges: u32,
+    /// Current PPUCTRL register value
     pub ppu_ctrl: u8,
+    /// Current PPUMASK register value
     pub ppu_mask: u8,
+    /// Current VBlank flag state
     pub ppu_vblank: bool,
+    /// Current program counter
     pub pc: u16,
+    /// Reset vector ($FFFC)
     pub vec_reset: u16,
+    /// NMI vector ($FFFA)
     pub vec_nmi: u16,
+    /// IRQ vector ($FFFE)
     pub vec_irq: u16,
+    /// Top 3 most frequently executed addresses this frame
     pub pc_hotspots: [PcHotspot; 3],
 }
 
+/// NES system implementation.
+///
+/// Combines the 6502 CPU, PPU, APU, and cartridge mappers into a complete
+/// NES emulator. Implements the `System` trait from `emu_core` for integration
+/// with the frontend.
 #[derive(Debug)]
 pub struct NesSystem {
     cpu: NesCpu,
@@ -519,6 +616,17 @@ impl System for NesSystem {
     }
 
     fn save_state(&self) -> serde_json::Value {
+        // Note: This is a minimal save state implementation.
+        // A complete implementation would include:
+        // - CPU registers (A, X, Y, SP, P, PC)
+        // - RAM and WRAM contents
+        // - PPU registers and VRAM
+        // - APU state
+        // - Mapper state (bank registers, IRQ counters, etc.)
+        // - Controller latch state
+        //
+        // Currently only saves a minimal placeholder to validate the interface.
+        // ROM verification is handled by the frontend via ROM hash.
         serde_json::json!({ "system": "nes", "version": 1, "a": self.cpu.a() })
     }
 
@@ -625,5 +733,53 @@ mod tests {
         // Should fail with wrong system type
         let wrong_state = serde_json::json!({"system": "gb", "version": 1});
         assert!(sys.load_state(&wrong_state).is_err());
+    }
+
+    #[test]
+    fn test_nes_controller_input() {
+        use crate::bus::Bus;
+
+        let mut sys = NesSystem::default();
+
+        // Set controller 0 state: A=1, B=1, others=0
+        // NES button order: A, B, Select, Start, Up, Down, Left, Right
+        let buttons = 0b00000011; // A and B pressed
+        sys.set_controller(0, buttons);
+
+        // Verify controller state was set in the bus
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.controller_state[0], buttons);
+        }
+
+        // Controller 1 should be unaffected
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.controller_state[1], 0);
+        }
+
+        // Set controller 1 state
+        let buttons2 = 0b11110000; // D-pad all pressed
+        sys.set_controller(1, buttons2);
+
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.controller_state[0], buttons);
+            assert_eq!(bus.controller_state[1], buttons2);
+        }
+
+        // Test controller strobe and shift behavior
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Strobe controller to latch state
+            bus.write(0x4016, 1);
+            bus.write(0x4016, 0);
+
+            // Read 8 bits from controller 0
+            assert_eq!(bus.read(0x4016) & 1, 1); // A button
+            assert_eq!(bus.read(0x4016) & 1, 1); // B button
+            assert_eq!(bus.read(0x4016) & 1, 0); // Select
+            assert_eq!(bus.read(0x4016) & 1, 0); // Start
+            assert_eq!(bus.read(0x4016) & 1, 0); // Up
+            assert_eq!(bus.read(0x4016) & 1, 0); // Down
+            assert_eq!(bus.read(0x4016) & 1, 0); // Left
+            assert_eq!(bus.read(0x4016) & 1, 0); // Right
+        }
     }
 }

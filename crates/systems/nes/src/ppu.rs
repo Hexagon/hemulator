@@ -1,3 +1,48 @@
+//! NES PPU (Picture Processing Unit) implementation.
+//!
+//! This module implements the 2C02 PPU chip found in NTSC NES systems,
+//! with support for PAL variants (2C07).
+//!
+//! ## Features
+//!
+//! - **Resolution**: 256x240 pixels
+//! - **Colors**: 64-color master palette
+//! - **Palettes**: 8 background + 8 sprite palettes (4 colors each)
+//! - **Tiles**: 8x8 pixel tiles from CHR ROM/RAM
+//! - **Sprites**: Up to 64 sprites (8x8 or 8x16 modes)
+//! - **Scrolling**: Smooth scrolling with nametable switching
+//! - **Mirroring**: Horizontal, vertical, four-screen, and single-screen
+//!
+//! ## Rendering Model
+//!
+//! This implementation uses a **frame-based** rendering model rather than
+//! cycle-accurate scanline rendering:
+//!
+//! - Entire frames are rendered on-demand via `render_frame()`
+//! - Scanlines can be rendered incrementally via `render_scanline()` for mapper CHR switching
+//! - VBlank is simulated at the system level, not by the PPU
+//! - Sprite evaluation and sprite overflow are not cycle-accurate
+//!
+//! This approach is suitable for most games but may not handle edge cases
+//! requiring precise PPU timing (mid-scanline register changes, exact sprite 0 hit, etc.).
+//!
+//! ## Memory Map
+//!
+//! - **$0000-$1FFF**: CHR ROM/RAM (pattern tables)
+//! - **$2000-$2FFF**: Nametables (mapped to 2KB internal VRAM via mirroring)
+//! - **$3F00-$3FFF**: Palette RAM (32 bytes, mirrored)
+//!
+//! ## Register Interface
+//!
+//! - **$2000 (PPUCTRL)**: Control register (NMI enable, sprite size, etc.)
+//! - **$2001 (PPUMASK)**: Mask register (enable background/sprites, grayscale, etc.)
+//! - **$2002 (PPUSTATUS)**: Status register (VBlank flag, sprite 0 hit)
+//! - **$2003 (OAMADDR)**: OAM address for $2004 access
+//! - **$2004 (OAMDATA)**: OAM data read/write
+//! - **$2005 (PPUSCROLL)**: Scroll position (write twice: X then Y)
+//! - **$2006 (PPUADDR)**: VRAM address (write twice: high then low)
+//! - **$2007 (PPUDATA)**: VRAM data read/write (with buffering)
+
 use crate::cartridge::Mirroring;
 use emu_core::types::Frame;
 use std::cell::{Cell, RefCell};
@@ -34,6 +79,31 @@ fn palette_mirror_index(i: usize) -> usize {
     }
 }
 
+/// NES PPU (Picture Processing Unit).
+///
+/// Implements the 2C02 PPU with frame-based rendering.
+///
+/// # Memory Layout
+///
+/// - `chr`: 8KB CHR ROM/RAM (pattern tables)
+/// - `vram`: 2KB internal VRAM (nametables)
+/// - `palette`: 32 bytes palette RAM
+/// - `oam`: 256 bytes Object Attribute Memory (sprites)
+///
+/// # Register State
+///
+/// - `ctrl`: PPUCTRL ($2000)
+/// - `mask`: PPUMASK ($2001)
+/// - `vblank`: VBlank flag (PPUSTATUS bit 7)
+/// - `sprite_0_hit`: Sprite 0 hit flag (PPUSTATUS bit 6)
+/// - `nmi_pending`: Pending NMI request
+/// - `vram_addr`: Current VRAM address
+/// - `scroll_x`, `scroll_y`: Scroll position
+///
+/// # Callbacks
+///
+/// - `a12_callback`: Notifies mappers of A12 line changes (for IRQ timing)
+/// - `chr_read_callback`: Notifies mappers of CHR reads (for latch switching)
 pub struct Ppu {
     pub chr: Vec<u8>,
     chr_is_ram: bool,
