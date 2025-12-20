@@ -200,7 +200,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => (self.cx >> 8) as u8, // CH
             2 => (self.dx >> 8) as u8, // DH
             3 => (self.bx >> 8) as u8, // BH
-            _ => unreachable!(),
+            _ => panic!("Invalid 8-bit high register index: {} (must be 0-3)", reg),
         }
     }
 
@@ -213,7 +213,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => (self.cx & 0xFF) as u8, // CL
             2 => (self.dx & 0xFF) as u8, // DL
             3 => (self.bx & 0xFF) as u8, // BL
-            _ => unreachable!(),
+            _ => panic!("Invalid 8-bit low register index: {} (must be 0-3)", reg),
         }
     }
 
@@ -225,7 +225,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => self.cx = (self.cx & 0x00FF) | ((val as u16) << 8), // CH
             2 => self.dx = (self.dx & 0x00FF) | ((val as u16) << 8), // DH
             3 => self.bx = (self.bx & 0x00FF) | ((val as u16) << 8), // BH
-            _ => unreachable!(),
+            _ => panic!("Invalid 8-bit high register index: {} (must be 0-3)", reg),
         }
     }
 
@@ -237,7 +237,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => self.cx = (self.cx & 0xFF00) | (val as u16), // CL
             2 => self.dx = (self.dx & 0xFF00) | (val as u16), // DL
             3 => self.bx = (self.bx & 0xFF00) | (val as u16), // BL
-            _ => unreachable!(),
+            _ => panic!("Invalid 8-bit low register index: {} (must be 0-3)", reg),
         }
     }
 
@@ -253,7 +253,7 @@ impl<M: Memory8086> Cpu8086<M> {
             5 => self.bp,
             6 => self.si,
             7 => self.di,
-            _ => unreachable!(),
+            _ => panic!("Invalid 16-bit register index: {} (must be 0-7)", reg),
         }
     }
 
@@ -269,7 +269,7 @@ impl<M: Memory8086> Cpu8086<M> {
             5 => self.bp = val,
             6 => self.si = val,
             7 => self.di = val,
-            _ => unreachable!(),
+            _ => panic!("Invalid 16-bit register index: {} (must be 0-7)", reg),
         }
     }
 
@@ -282,7 +282,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => self.cs,
             2 => self.ss,
             3 => self.ds,
-            _ => unreachable!(),
+            _ => panic!("Invalid segment register index: {} (must be 0-3)", seg),
         }
     }
 
@@ -295,7 +295,7 @@ impl<M: Memory8086> Cpu8086<M> {
             1 => self.cs = val,
             2 => self.ss = val,
             3 => self.ds = val,
-            _ => unreachable!(),
+            _ => panic!("Invalid segment register index: {} (must be 0-3)", seg),
         }
     }
 
