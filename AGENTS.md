@@ -137,6 +137,24 @@ System-specific implementations that use core components:
 
 - **Game Boy (`emu_gb`)**: Skeleton implementation
 
+- **Atari 2600 (`emu_atari2600`)**: 
+  - Uses `cpu_6502` from core with Atari 2600-specific bus implementation (6507 variant)
+  - `Atari2600Cpu` wraps `Cpu6502<Atari2600Bus>` to provide system-specific interface
+  - Atari 2600 bus includes: TIA (video/audio), RIOT (RAM/I/O/timer), cartridge
+  - **TIA (Television Interface Adapter)**:
+    - Simplified scanline-based rendering (160x192 resolution)
+    - Playfield rendering with reflection/score modes
+    - Color registers for background, playfield, and sprites
+    - Audio registers (simplified - full audio not yet implemented)
+  - **RIOT (6532 chip)**:
+    - 128 bytes of RAM with mirroring
+    - Programmable interval timer (1, 8, 64, 1024 clock intervals)
+    - I/O ports for joystick and console switches
+  - **Cartridge Banking**:
+    - Supports 2K, 4K (no banking), 8K (F8), 12K (FA), 16K (F6), 32K (F4)
+    - Bank switching via memory writes to specific addresses
+  - All existing tests pass (33 tests total)
+
 ### Frontend (`crates/frontend/gui`)
 
 GUI frontend using minifb and rodio.
@@ -185,13 +203,14 @@ The GUI frontend includes a comprehensive settings system stored in `config.json
 
 ROMs are auto-detected based on their format:
 - **NES**: iNES format (header starts with `NES\x1A`)
+- **Atari 2600**: Raw binary format, detected by size (2048, 4096, 8192, 12288, 16384, or 32768 bytes)
 - **Game Boy**: GB/GBC format (Nintendo logo at offset 0x104)
 - Unsupported formats show clear error messages
 
 ROM loading workflow:
 1. User opens ROM via F3 key or command-line argument
 2. System detects ROM format automatically
-3. Appropriate emulator core is selected (NES fully implemented, GB is skeleton)
+3. Appropriate emulator core is selected (NES fully implemented, Atari 2600 core functional, GB is skeleton)
 4. ROM hash is calculated for save state management
 5. Last ROM path is saved to settings for auto-load on next start
 

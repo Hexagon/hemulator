@@ -1,15 +1,16 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust, focusing on NES and Game Boy emulation with comprehensive save state management and customizable controls.
+A cross-platform, multi-system console emulator written in Rust, focusing on NES and Atari 2600 emulation with comprehensive save state management and customizable controls.
 
 ## Features
 
 - 🎮 **NES Emulation**: Full support for ~90%+ of NES games via 14 mapper implementations
+- 🕹️ **Atari 2600 Emulation**: Support for most cartridge formats (2K-32K) with multiple banking schemes
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
-- 🎵 **Audio Support**: Integrated audio playback via rodio
-- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES) and Game Boy ROM formats
+- 🎵 **Audio Support**: Integrated audio playback via rodio (NES audio implemented)
+- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, and Game Boy ROM formats
 
 ## For Users
 
@@ -71,6 +72,7 @@ See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibi
 ## Supported ROM Formats
 
 - **NES**: iNES format (.nes) - automatically detected via header signature
+- **Atari 2600**: Raw binary (.a26, .bin) - detected by size (2K, 4K, 8K, 12K, 16K, 32K)
 - **Game Boy**: GB/GBC format (.gb, .gbc) - skeleton implementation (WIP)
 
 ## Project Structure
@@ -81,6 +83,7 @@ hemulator/
 │   ├── core/           # Shared traits and types (System, Frame, save-state)
 │   ├── systems/
 │   │   ├── nes/        # NES emulation (CPU, PPU, APU, mappers)
+│   │   ├── atari2600/  # Atari 2600 emulation (TIA, RIOT, cartridge banking)
 │   │   └── gb/         # Game Boy emulation (skeleton)
 │   └── frontend/
 │       └── gui/        # GUI frontend (minifb + rodio) - builds as 'hemu'
@@ -132,10 +135,14 @@ The project follows a modular architecture:
 - **Core (`emu_core`)**: Defines traits and types shared across systems
   - `System` trait for emulator implementations
   - `Frame` for video output
+  - `cpu_6502` module: Reusable 6502 CPU (used by NES and Atari 2600)
+  - `apu` module: Reusable audio components (currently used by NES)
+  - `ppu` module: Reusable video primitives
   - Save state serialization support
   
 - **Systems**: Individual emulator implementations
-  - **NES (`emu_nes`)**: Complete NES emulator with CPU, PPU, APU, and 9 mappers
+  - **NES (`emu_nes`)**: Complete NES emulator with CPU, PPU, APU, and 14 mappers
+  - **Atari 2600 (`emu_atari2600`)**: Atari 2600 with TIA, RIOT, and cartridge banking
   - **Game Boy (`emu_gb`)**: Skeleton implementation (WIP)
   
 - **Frontend (`emu_gui`)**: GUI application
