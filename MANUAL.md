@@ -41,6 +41,7 @@ The emulator will remember your last ROM and automatically load it next time you
 | F1 | Help Overlay | Show/hide all controls and key mappings |
 | F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) |
 | F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
+| F4 | Screenshot | Save screenshot to `screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png` |
 | F5 | Save State | Open slot selector (1-5) to save |
 | F6 | Load State | Open slot selector (1-5) to load |
 | F10 | Debug Info | Show/hide debug information overlay |
@@ -72,6 +73,26 @@ Available filters:
 - **CRT Monitor**: Full CRT effect combining scanlines, phosphor glow, and brightness adjustments for an authentic CRT appearance
 
 The selected filter is automatically saved and restored when you restart the emulator.
+
+### Screenshots (F4)
+
+Press **F4** at any time to capture the current frame and save it as a PNG image.
+
+Screenshots are automatically saved to:
+```
+screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png
+```
+
+Where:
+- `<system-name>` is the emulated system (e.g., `nes`, `atari2600`, `gameboy`, `pc`)
+- `YYYYMMDDHHMMSS` is the current date and time (Year, Month, Day, Hour, Minute, Second)
+- `RRR` is a random 3-digit number (000-999) to prevent filename collisions
+
+**Examples:**
+- `screenshots/nes/20231215143022456.png` - NES screenshot from Dec 15, 2023 at 2:30:22 PM
+- `screenshots/atari2600/20231215143025789.png` - Atari 2600 screenshot from Dec 15, 2023 at 2:30:25 PM
+
+The `screenshots` directory will be created automatically in the same folder as the emulator executable.
 
 ### Window Management
 

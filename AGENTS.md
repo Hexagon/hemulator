@@ -326,9 +326,11 @@ Save states are stored in `/saves/<rom_hash>/states.json` relative to the execut
 ### Function Keys
 
 - **F1**: Toggle help overlay (shows all controls)
+- **F2**: Speed selector (0x, 0.5x, 1x, 2x, 4x)
 - **F3**: Open ROM file dialog
-- **F5-F9**: Save to slot 1-5
-- **Shift+F5-F9**: Load from slot 1-5
+- **F4**: Take screenshot (saved to screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png)
+- **F5**: Save state (opens slot selector)
+- **F6**: Load state (opens slot selector)
 - **F10**: Toggle debug overlay (shows ROM info, mapper, PAL/NTSC, FPS)
 - **F11**: Cycle CRT filters (None → Scanlines → Phosphor → CRT Monitor → None)
 - **F12**: Reset system
