@@ -249,6 +249,7 @@ pub fn create_help_overlay(
         "  F1  - Help",
         "  F2  - Speed",
         "  F3  - Open ROM",
+        "  F4  - Screenshot",
         "  F5  - Save state",
         "  F6  - Load state",
         "  F10 - Debug info",

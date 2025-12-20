@@ -1,9 +1,103 @@
 //! RIOT (6532) - RAM, I/O, and Timer chip for Atari 2600
 //!
-//! The RIOT chip provides:
-//! - 128 bytes of RAM
-//! - Two 8-bit I/O ports (for joystick/paddle controllers and console switches)
-//! - Programmable interval timer
+//! The RIOT chip provides RAM, I/O ports, and timing functions for the Atari 2600.
+//!
+//! # Components
+//!
+//! ## RAM
+//! - **Size**: 128 bytes (all the RAM the Atari 2600 has!)
+//! - **Address Range**: $80-$FF in RIOT address space
+//! - **Mirroring**: Also accessible at $00-$7F and $100-$17F in the 6507's address space
+//!
+//! This is the **only** read/write memory in the system. Games must be extremely frugal with
+//! RAM usage, often reusing variables and packing multiple flags into single bytes.
+//!
+//! ## I/O Ports
+//!
+//! The RIOT provides two 8-bit I/O ports with programmable direction registers:
+//!
+//! ### Port A (SWCHA / SWACNT)
+//! Used for **joystick and paddle controllers**:
+//!
+//! **SWCHA bits** (active low - 0 = pressed):
+//! - Bit 0: Player 0 Up
+//! - Bit 1: Player 0 Down  
+//! - Bit 2: Player 0 Left
+//! - Bit 3: Player 0 Right
+//! - Bit 4: Player 1 Up
+//! - Bit 5: Player 1 Down
+//! - Bit 6: Player 1 Left
+//! - Bit 7: Player 1 Right
+//!
+//! **SWACNT**: Data direction register (0 = input, 1 = output)
+//!
+//! ### Port B (SWCHB / SWBCNT)
+//! Used for **console switches**:
+//!
+//! **SWCHB bits** (active low - 0 = pressed/selected):
+//! - Bit 0: Reset button
+//! - Bit 1: Select button
+//! - Bit 3: Color/BW switch (0 = BW, 1 = Color)
+//! - Bit 6: Left difficulty (0 = A/Pro, 1 = B/Amateur)
+//! - Bit 7: Right difficulty (0 = A/Pro, 1 = B/Amateur)
+//!
+//! **SWBCNT**: Data direction register
+//!
+//! ## Programmable Interval Timer
+//!
+//! The timer is a countdown timer that can trigger interrupts:
+//!
+//! **Features**:
+//! - 8-bit counter that counts down to 0
+//! - Four clock intervals: 1, 8, 64, or 1024 CPU clocks per decrement
+//! - After reaching 0, continues counting down at 1 clock/decrement
+//! - Sets underflow flag (TIMINT) when reaching 0
+//!
+//! **Registers**:
+//! - **TIM1T** ($294): Set timer with 1 clock interval
+//! - **TIM8T** ($295): Set timer with 8 clock interval
+//! - **TIM64T** ($296): Set timer with 64 clock interval
+//! - **T1024T** ($297): Set timer with 1024 clock interval
+//! - **INTIM** ($284): Read current timer value
+//! - **TIMINT** ($285): Read timer underflow flag (bit 7)
+//!
+//! **Usage**: Games use the timer for frame synchronization. A common pattern is:
+//! 1. Set timer at start of frame (e.g., `STA TIM64T`)
+//! 2. Do frame processing
+//! 3. Wait for timer to reach 0 (`BIT TIMINT` loop)
+//! 4. Start next frame
+//!
+//! This ensures consistent frame timing regardless of how much work the CPU does each frame.
+//!
+//! # Memory Map (within RIOT)
+//!
+//! ```text
+//! $00-$7F:   RAM (128 bytes, mirrored)
+//! $80-$FF:   RAM (128 bytes)
+//! $100-$17F: RAM (128 bytes, mirrored)
+//! $280:      SWCHA (Port A data)
+//! $281:      SWACNT (Port A direction)
+//! $282:      SWCHB (Port B data)
+//! $283:      SWBCNT (Port B direction)
+//! $284:      INTIM (Read timer)
+//! $285:      TIMINT (Read timer status)
+//! $294:      TIM1T (Set timer, 1 clock interval)
+//! $295:      TIM8T (Set timer, 8 clock interval)
+//! $296:      TIM64T (Set timer, 64 clock interval)
+//! $297:      T1024T (Set timer, 1024 clock interval)
+//! ```
+//!
+//! # Implementation Notes
+//!
+//! This implementation provides full RIOT functionality including:
+//! - ✅ Complete 128-byte RAM with proper mirroring
+//! - ✅ Programmable interval timer with all 4 clock rates
+//! - ✅ Timer underflow detection
+//! - ✅ I/O port registers (with helper methods for setting controller state)
+//! - ✅ Data direction registers (stored but not enforced)
+//!
+//! Controller input is managed through public API methods (`set_joystick`, `set_console_switch`)
+//! rather than directly manipulating the I/O port registers.
 
 use serde::{Deserialize, Serialize};
 
@@ -209,6 +303,7 @@ impl Riot {
     /// Set joystick state (Port A)
     /// Bits: P0 Right, P0 Left, P0 Down, P0 Up, P1 Right, P1 Left, P1 Down, P1 Up
     /// 0 = pressed, 1 = not pressed (active low)
+    #[allow(dead_code)]
     pub fn set_joystick(&mut self, player: u8, direction: u8, pressed: bool) {
         let bit = if player == 0 {
             direction // Player 0: bits 0-3
@@ -229,6 +324,7 @@ impl Riot {
     /// Bit 3: BW/Color (0 = BW, 1 = Color)
     /// Bit 6: Left difficulty (0 = A/Pro, 1 = B/Amateur)
     /// Bit 7: Right difficulty (0 = A/Pro, 1 = B/Amateur)
+    #[allow(dead_code)]
     pub fn set_console_switch(&mut self, bit: u8, pressed: bool) {
         if pressed {
             self.swchb &= !(1 << bit);

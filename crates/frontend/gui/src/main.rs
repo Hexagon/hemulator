@@ -11,6 +11,8 @@ use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 
@@ -244,6 +246,15 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => (640, 400),
         }
     }
+
+    fn system_name(&self) -> &str {
+        match self {
+            EmulatorSystem::NES(_) => "nes",
+            EmulatorSystem::GameBoy(_) => "gameboy",
+            EmulatorSystem::Atari2600(_) => "atari2600",
+            EmulatorSystem::PC(_) => "pc",
+        }
+    }
 }
 
 fn string_to_key(s: &str) -> Option<Key> {
@@ -341,6 +352,61 @@ impl Source for StreamSource {
     fn total_duration(&self) -> Option<std::time::Duration> {
         None
     }
+}
+
+/// Save a screenshot to the screenshots directory
+/// Format: screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png
+/// where RRR is a random number between 000 and 999
+fn save_screenshot(
+    buffer: &[u32],
+    width: usize,
+    height: usize,
+    system_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use chrono::Local;
+    use png::Encoder;
+    use rand::Rng;
+
+    // Get current local time
+    let now = Local::now();
+    
+    // Generate random number 000-999
+    let random = rand::thread_rng().gen_range(0..1000);
+    
+    // Create filename: YYYYMMDDHHMMSSRRR.png
+    let filename = format!(
+        "{}{:03}.png",
+        now.format("%Y%m%d%H%M%S"),
+        random
+    );
+    
+    // Create screenshots directory structure
+    let screenshots_dir = PathBuf::from("screenshots").join(system_name);
+    fs::create_dir_all(&screenshots_dir)?;
+    
+    let filepath = screenshots_dir.join(&filename);
+    
+    // Convert RGBA buffer to RGB
+    let mut rgb_data = Vec::with_capacity(width * height * 3);
+    for pixel in buffer {
+        let r = ((pixel >> 16) & 0xFF) as u8;
+        let g = ((pixel >> 8) & 0xFF) as u8;
+        let b = (pixel & 0xFF) as u8;
+        rgb_data.push(r);
+        rgb_data.push(g);
+        rgb_data.push(b);
+    }
+    
+    // Write PNG file
+    let file = fs::File::create(&filepath)?;
+    let mut encoder = Encoder::new(file, width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&rgb_data)?;
+    
+    Ok(filepath.to_string_lossy().to_string())
 }
 
 fn main() {
@@ -887,6 +953,14 @@ fn main() {
                 // Show mount point selector for systems with multiple mount points
                 show_mount_selector = true;
                 show_help = false;
+            }
+        }
+
+        // Check for screenshot key (F4)
+        if window.is_key_pressed(Key::F4, minifb::KeyRepeat::No) {
+            match save_screenshot(&buffer, width, height, sys.system_name()) {
+                Ok(path) => println!("Screenshot saved to: {}", path),
+                Err(e) => eprintln!("Failed to save screenshot: {}", e),
             }
         }
 
