@@ -389,14 +389,7 @@ impl APU {
                     }
 
                     // Clock linear counter (triangle) at every quarter frame
-                    if self.triangle.linear_counter_reload_flag {
-                        self.triangle.linear_counter = self.triangle.linear_counter_reload;
-                    } else if self.triangle.linear_counter > 0 {
-                        self.triangle.linear_counter -= 1;
-                    }
-                    if !self.triangle.control_flag {
-                        self.triangle.linear_counter_reload_flag = false;
-                    }
+                    self.triangle.clock_linear_counter();
                 }
 
                 // Clock all channels
