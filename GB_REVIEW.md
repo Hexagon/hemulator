@@ -2,11 +2,11 @@
 
 **Date**: 2025-12-20  
 **Reviewer**: Automated Code Review  
-**Status**: ✅ IMPROVED AND FUNCTIONAL
+**Status**: ✅ IMPROVED, FUNCTIONAL, AND SECURE
 
 ## Overview
 
-The Game Boy system implementation in `crates/systems/gb` has been thoroughly reviewed and significantly improved. The implementation now includes functional PPU rendering (background, window, sprites), joypad input, comprehensive documentation, and a solid test suite. While some features remain unimplemented (MBC mappers, audio, Game Boy Color support), the current implementation provides a good foundation for homebrew ROMs and future enhancements.
+The Game Boy system implementation in `crates/systems/gb` has been thoroughly reviewed and significantly improved. The implementation now includes functional PPU rendering (background, window, sprites), joypad input, comprehensive documentation, robust bounds checking, and a solid test suite. While some features remain unimplemented (MBC mappers, audio, Game Boy Color support), the current implementation provides a secure and solid foundation for homebrew ROMs and future enhancements.
 
 ## Review Scope
 
@@ -23,10 +23,17 @@ The Game Boy system implementation in `crates/systems/gb` has been thoroughly re
 1. **Fixed Clippy Warnings** (6 warnings → 0 warnings)
    - Marked unused constants with `#[allow(dead_code)]` (LCDC flags for future use)
    - Applied `saturating_sub()` for safe subtraction
-   - Used `Range::contains()` for cleaner range checks
+   - Used `Range::contains()` for cleaner range checks (later reverted for clarity)
    - Added documentation to public methods
 
-2. **Code Organization**
+2. **Security Fixes** (from code review)
+   - Added VRAM bounds checking for window rendering
+   - Added VRAM bounds checking for sprite rendering
+   - Fixed sprite visibility check (was inverted, causing off-screen sprites to render)
+   - Fixed background tile coordinate wrapping (now uses `& 31` for proper bounds)
+   - Added tile_x bounds check for window rendering
+
+3. **Code Organization**
    - Refactored PPU to live inside the bus (similar to NES architecture)
    - Clean separation between CPU, PPU, and bus
    - Proper module visibility and encapsulation
@@ -52,11 +59,14 @@ The Game Boy system implementation in `crates/systems/gb` has been thoroughly re
    - Sprite priority (above/behind background)
    - Two sprite palettes (OBP0, OBP1)
    - Color 0 transparency for sprites
+   - **Security**: VRAM bounds checking to prevent out-of-bounds access
+   - **Security**: Fixed sprite visibility logic to prevent rendering off-screen sprites
 
 4. **VRAM and OAM Access**
    - Integrated VRAM (8KB) into memory bus at $8000-$9FFF
    - Integrated OAM (160 bytes) into memory bus at $FE00-$FE9F
    - Proper delegation from bus to PPU
+   - **Security**: All VRAM access now includes bounds checking
 
 ### Bus and I/O Improvements
 
@@ -141,6 +151,8 @@ The Game Boy system implementation in `crates/systems/gb` has been thoroughly re
    - Safe code throughout (no unsafe blocks)
    - Proper error handling with Result types
    - All clippy warnings resolved
+   - **Security**: Comprehensive VRAM bounds checking
+   - **Security**: Fixed array indexing issues in PPU
    - Comprehensive documentation (320+ lines)
    - Good test coverage (20 tests)
 
@@ -200,6 +212,28 @@ The Game Boy system implementation in `crates/systems/gb` has been thoroughly re
    - Sprite-per-scanline limit (10 sprites)
    - Mid-scanline effects
    - PPU mode transitions
+
+### 🔒 Security Summary
+
+All security findings from code review have been addressed:
+
+1. **VRAM Bounds Checking** ✅
+   - Added bounds checking for background tile access
+   - Added bounds checking for window tile access
+   - Added bounds checking for sprite tile access
+   - Prevents potential buffer overflows
+
+2. **Array Indexing** ✅
+   - Fixed background tile coordinate wrapping (now uses `& 31`)
+   - Added tile_x bounds check in window rendering
+   - Fixed sprite visibility logic (was inverted)
+   - All array accesses are now safe
+
+3. **No Security Vulnerabilities** ✅
+   - No unsafe code blocks
+   - No unchecked array accesses
+   - Proper bounds checking throughout
+   - Safe arithmetic operations
 
 ### 📊 Test Coverage
 
