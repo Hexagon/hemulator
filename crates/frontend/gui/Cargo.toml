@@ -11,6 +11,7 @@ path = "src/main.rs"
 emu_core = { path = "../../core" }
 emu_nes = { path = "../../systems/nes" }
 emu_gb = { path = "../../systems/gb" }
+emu_atari2600 = { path = "../../systems/atari2600" }
 minifb = "0.28"
 rodio = "0.17"
 log = "0.4"

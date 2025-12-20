@@ -218,8 +218,8 @@ mod tests {
             0x21, // '!'
         ];
         // Add some dummy PRG/CHR data
-        data.resize(16 + 128*1024 + 128*1024, 0);
-        
+        data.resize(16 + 128 * 1024 + 128 * 1024, 0);
+
         let cart = Cartridge::from_bytes(&data).unwrap();
         // Before fix: Mapper would be 0x41 (65)
         // After fix: Mapper should be 0x01 (1) because byte 7 is zeroed.

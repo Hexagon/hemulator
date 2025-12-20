@@ -19,7 +19,7 @@ pub struct APU {
     /// Counts CPU cycles and triggers quarter/half frame events
     frame_counter_cycles: u32,
     frame_counter_mode: bool, // false = 4-step, true = 5-step
-    
+
     // IRQ specific state (duplicated to avoid rewriting audio generation for now)
     irq_frame_counter_cycles: u32,
     irq_inhibit: bool,
@@ -128,7 +128,7 @@ impl APU {
                 // Reset frame counter on write
                 self.frame_counter_cycles = 0;
                 self.irq_frame_counter_cycles = 0;
-                
+
                 // If 5-step mode, clock immediately (not implemented here for audio, but noted)
             }
 
@@ -187,8 +187,9 @@ impl APU {
 
         // Wrap around (simplified)
         // In reality, it wraps slightly differently, but this ensures periodic IRQs
-        if self.irq_frame_counter_cycles >= irq_time + 20 { // small buffer
-             self.irq_frame_counter_cycles %= irq_time;
+        if self.irq_frame_counter_cycles >= irq_time + 20 {
+            // small buffer
+            self.irq_frame_counter_cycles %= irq_time;
         }
     }
 

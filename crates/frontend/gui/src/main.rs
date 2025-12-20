@@ -4,7 +4,7 @@ mod save_state;
 mod settings;
 mod ui_render;
 
-use emu_core::System;
+use emu_core::{types::Frame, System};
 use minifb::{Key, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
@@ -13,6 +13,105 @@ use settings::Settings;
 use std::env;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
+
+// System wrapper enum to support multiple emulated systems
+enum EmulatorSystem {
+    NES(emu_nes::NesSystem),
+    Atari2600(emu_atari2600::Atari2600System),
+}
+
+impl EmulatorSystem {
+    fn step_frame(&mut self) -> Result<Frame, Box<dyn std::error::Error>> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            EmulatorSystem::NES(sys) => sys.reset(),
+            EmulatorSystem::Atari2600(sys) => sys.reset(),
+        }
+    }
+
+    fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+        }
+    }
+
+    fn mount_points(&self) -> Vec<emu_core::MountPointInfo> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.mount_points(),
+            EmulatorSystem::Atari2600(sys) => sys.mount_points(),
+        }
+    }
+
+    fn supports_save_states(&self) -> bool {
+        match self {
+            EmulatorSystem::NES(sys) => sys.supports_save_states(),
+            EmulatorSystem::Atari2600(sys) => sys.supports_save_states(),
+        }
+    }
+
+    fn save_state(&self) -> serde_json::Value {
+        match self {
+            EmulatorSystem::NES(sys) => sys.save_state(),
+            EmulatorSystem::Atari2600(sys) => sys.save_state(),
+        }
+    }
+
+    fn load_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.load_state(state),
+            EmulatorSystem::Atari2600(sys) => sys.load_state(state),
+        }
+    }
+
+    // NES-specific methods (return None/default for other systems)
+    fn set_controller(&mut self, port: usize, state: u8) {
+        if let EmulatorSystem::NES(sys) = self {
+            sys.set_controller(port, state);
+        }
+    }
+
+    fn get_debug_info(&self) -> Option<emu_nes::DebugInfo> {
+        match self {
+            EmulatorSystem::NES(sys) => Some(sys.get_debug_info()),
+            EmulatorSystem::Atari2600(_) => None,
+        }
+    }
+
+    fn get_runtime_stats(&self) -> emu_nes::RuntimeStats {
+        match self {
+            EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
+            EmulatorSystem::Atari2600(_) => emu_nes::RuntimeStats::default(),
+        }
+    }
+
+    fn timing(&self) -> emu_core::apu::TimingMode {
+        match self {
+            EmulatorSystem::NES(sys) => sys.timing(),
+            EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
+        }
+    }
+
+    fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::Atari2600(_) => vec![0; count], // TODO: Implement audio for Atari 2600
+        }
+    }
+
+    fn resolution(&self) -> (usize, usize) {
+        match self {
+            EmulatorSystem::NES(_) => (256, 240),
+            EmulatorSystem::Atari2600(_) => (160, 192),
+        }
+    }
+}
 
 fn string_to_key(s: &str) -> Option<Key> {
     match s {
@@ -147,7 +246,7 @@ fn main() {
         }
     }
 
-    let mut sys = emu_nes::NesSystem::default();
+    let mut sys: EmulatorSystem = EmulatorSystem::NES(emu_nes::NesSystem::default());
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
 
@@ -159,18 +258,37 @@ fn main() {
             Ok(data) => match detect_rom_type(&data) {
                 Ok(SystemType::NES) => {
                     rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut nes_sys = emu_nes::NesSystem::default();
                     // Use the mount point system to load the cartridge
-                    if let Err(e) = sys.mount("Cartridge", &data) {
+                    if let Err(e) = nes_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load NES ROM: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
+                        sys = EmulatorSystem::NES(nes_sys);
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone()); // Keep for backward compat
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
                         println!("Loaded NES ROM: {}", p);
+                    }
+                }
+                Ok(SystemType::Atari2600) => {
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut a2600_sys = emu_atari2600::Atari2600System::new();
+                    if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                        eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        sys = EmulatorSystem::Atari2600(a2600_sys);
+                        settings.set_mount_point("Cartridge", p.clone());
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
+                        }
+                        println!("Loaded Atari 2600 ROM: {}", p);
                     }
                 }
                 Ok(SystemType::GameBoy) => {
@@ -186,9 +304,8 @@ fn main() {
         }
     }
 
-    // Create window using NES resolution (256x240)
-    let width = 256;
-    let height = 240;
+    // Get resolution from the system
+    let (width, height) = sys.resolution();
 
     // Window size is user-resizable and persisted; buffer size stays at native resolution.
     let window_width = settings.window_width.max(width);
@@ -531,22 +648,23 @@ fn main() {
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
         if show_debug && rom_loaded {
-            let debug_info = sys.get_debug_info();
-            let timing_str = match debug_info.timing_mode {
-                emu_core::apu::TimingMode::Ntsc => "NTSC",
-                emu_core::apu::TimingMode::Pal => "PAL",
-            };
-            debug_overlay = Some(ui_render::create_debug_overlay(
-                width,
-                height,
-                &debug_info.mapper_name,
-                debug_info.mapper_number,
-                timing_str,
-                debug_info.prg_banks,
-                debug_info.chr_banks,
-                current_fps,
-                sys.get_runtime_stats(),
-            ));
+            if let Some(debug_info) = sys.get_debug_info() {
+                let timing_str = match debug_info.timing_mode {
+                    emu_core::apu::TimingMode::Ntsc => "NTSC",
+                    emu_core::apu::TimingMode::Pal => "PAL",
+                };
+                debug_overlay = Some(ui_render::create_debug_overlay(
+                    width,
+                    height,
+                    &debug_info.mapper_name,
+                    debug_info.mapper_number,
+                    timing_str,
+                    debug_info.prg_banks,
+                    debug_info.chr_banks,
+                    current_fps,
+                    sys.get_runtime_stats(),
+                ));
+            }
         }
 
         // Check for reset key (F12)

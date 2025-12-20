@@ -279,24 +279,28 @@ impl<M: Memory6502> Cpu6502<M> {
     /// Perform ADC operation on a value and update accumulator and flags
     #[inline]
     fn adc(&mut self, val: u8) {
-        let carry_in = if (self.status & 0x01) != 0 { 1u16 } else { 0u16 };
+        let carry_in = if (self.status & 0x01) != 0 {
+            1u16
+        } else {
+            0u16
+        };
         let sum = self.a as u16 + val as u16 + carry_in;
         let result = sum as u8;
-        
+
         // Set carry flag
         if sum > 0xFF {
             self.status |= 0x01;
         } else {
             self.status &= !0x01;
         }
-        
+
         // Set overflow flag: (~(A ^ M) & (A ^ R)) & 0x80
         if (((!(self.a ^ val)) & (self.a ^ result)) & 0x80) != 0 {
             self.status |= 0x40;
         } else {
             self.status &= !0x40;
         }
-        
+
         self.a = result;
         self.set_zero_and_negative(self.a);
     }
@@ -902,14 +906,14 @@ impl<M: Memory6502> Cpu6502<M> {
                 self.a = result;
                 self.set_zero_and_negative(self.a);
                 let cycles = match op {
-                    0xE9 => 2,  // immediate
-                    0xE5 => 3,  // zero page
-                    0xED => 4,  // absolute
-                    0xE1 => 6,  // (indirect,X)
-                    0xF1 => 5,  // (indirect),Y
-                    0xF5 => 4,  // zero page,X
-                    0xF9 => 4,  // absolute,Y
-                    0xFD => 4,  // absolute,X
+                    0xE9 => 2, // immediate
+                    0xE5 => 3, // zero page
+                    0xED => 4, // absolute
+                    0xE1 => 6, // (indirect,X)
+                    0xF1 => 5, // (indirect),Y
+                    0xF5 => 4, // zero page,X
+                    0xF9 => 4, // absolute,Y
+                    0xFD => 4, // absolute,X
                     _ => 2,
                 };
                 self.cycles += cycles as u64;
@@ -1423,7 +1427,10 @@ impl<M: Memory6502> Cpu6502<M> {
                 let pc_to_push = self.pc.wrapping_add(1);
                 let brk_pc = self.pc.wrapping_sub(1);
                 if log_brk() {
-                    eprintln!("CPU: BRK executed at PC={:04X}, pushing {:04X}, status={:02X}", brk_pc, pc_to_push, self.status);
+                    eprintln!(
+                        "CPU: BRK executed at PC={:04X}, pushing {:04X}, status={:02X}",
+                        brk_pc, pc_to_push, self.status
+                    );
                 }
                 self.push_u16(pc_to_push);
 
