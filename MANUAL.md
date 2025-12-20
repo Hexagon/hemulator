@@ -21,7 +21,11 @@ The emulator will remember your last ROM and automatically load it next time you
 
 ## Controls
 
-### Game Controller (Customizable)
+### Multi-Player Support
+
+Hemulator supports up to 4 players for systems that support multiple controllers. By default, Player 1 and Player 2 are mapped to the keyboard.
+
+#### Player 1 Controller (Default Mapping)
 
 | Key | Action | Notes |
 |-----|--------|-------|
@@ -30,9 +34,42 @@ The emulator will remember your last ROM and automatically load it next time you
 | X | B button | Back/Action |
 | Enter | Start | Pause menu |
 | Left Shift | Select | Menu navigation |
-| Escape | Exit | Close emulator |
 
-*All controller mappings can be customized by editing `config.json`*
+#### Player 2 Controller (Default Mapping)
+
+| Key | Action | Notes |
+|-----|--------|-------|
+| W/A/S/D | D-pad | W=Up, S=Down, A=Left, D=Right |
+| U | A button | Confirm/Jump |
+| I | B button | Back/Action |
+| Right Bracket (]) | Start | Pause menu |
+| Right Shift | Select | Menu navigation |
+
+*All controller mappings for all players can be customized by editing `config.json`*
+
+**Note**: Players 3 and 4 are not mapped by default but can be configured in `config.json` for systems that support 4 players (future SNES support, etc.).
+
+### Future Enhancements
+
+**Joystick/Gamepad Support**: Physical USB joysticks and gamepads are planned for future releases. When implemented, joysticks will be automatically mapped to D-pad and button controls, with the ability to customize mappings in `config.json`. Until then, keyboard controls provide full functionality for all supported systems.
+
+### PC/DOS Keyboard Input
+
+When running PC/DOS programs, the emulator provides full keyboard passthrough by default. This means all keyboard keys are sent directly to the emulated PC, allowing you to type and use DOS programs naturally.
+
+#### Host Modifier Key
+
+To access function keys (F1-F12) for emulator controls while running a PC program, hold the **Right Ctrl** key (the host modifier) while pressing the function key. For example:
+- **Right Ctrl + F3**: Open ROM/executable file dialog
+- **Right Ctrl + F4**: Take screenshot
+- **Right Ctrl + F5**: Save state
+
+The host modifier key can be customized in `config.json` by changing the `host_modifier` field (default: `RightCtrl`).
+
+**Without the host modifier**: Function keys are sent to the DOS program
+**With the host modifier**: Function keys control the emulator
+
+**Note**: ESC always exits the emulator, even in PC mode.
 
 ### Function Keys
 
@@ -121,34 +158,72 @@ Located in the same directory as the executable, this file stores your preferenc
 
 ```json
 {
-  "keyboard": {
-    "a": "Z",
-    "b": "X",
-    "select": "LeftShift",
-    "start": "Enter",
-    "up": "Up",
-    "down": "Down",
-    "left": "Left",
-    "right": "Right"
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "I",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "RightShift",
+      "start": "RightBracket",
+      "up": "W",
+      "down": "S",
+      "left": "A",
+      "right": "D"
+    },
+    "player3": {
+      "a": "",
+      "b": "",
+      ...
+    },
+    "player4": {
+      "a": "",
+      "b": "",
+      ...
+    },
+    "host_modifier": "RightCtrl"
   },
   "window_width": 512,
   "window_height": 480,
-  "last_rom_path": "/path/to/last/rom.nes",
-    "mount_points": {
+  "mount_points": {
     "Cartridge": "/path/to/last/rom.nes"
-  }
+  },
   "crt_filter": "None",
   "emulation_speed": 1.0
 }
 ```
 
 **Customization**: 
-- Edit this file to change key bindings
+- Edit this file to change key bindings for any player
+- Empty strings ("") mean that button is unmapped
+- The `x`, `y`, `l`, and `r` buttons are for future SNES support and other systems
+- The `host_modifier` key (default: "RightCtrl") controls when function keys are passed to the emulator vs the PC system
 - The window size is automatically saved when you resize the window
 - CRT filter preference is saved automatically when you cycle filters with F11
 - Emulation speed is saved automatically when you change it with F2
 - Valid `crt_filter` values: "None", "Scanlines", "Phosphor", "CrtMonitor"
 - Valid `emulation_speed` values: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0 (or any positive number)
+
+**Valid Key Names**: 
+A-Z, Space, Enter, LeftShift, RightShift, LeftCtrl, RightCtrl, Up, Down, Left, Right, LeftBracket, RightBracket
+
+**Backward Compatibility**: If you have an old `config.json` with a `keyboard` field instead of `input`, it will be automatically migrated to `input.player1` on first load.
 
 **Mount Points**: The emulator now supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", future systems might have "BIOS", "Floppy1", etc.). When you press F3:
 - If the system has only one mount point (like NES), the file browser opens directly

@@ -601,8 +601,7 @@ impl System for NesSystem {
             }
         }
 
-        if trace_pc_enabled()
-            && self.frame_index.is_multiple_of(60) {
+        if trace_pc_enabled() && self.frame_index.is_multiple_of(60) {
             let h0 = self.last_stats.pc_hotspots[0];
             let h1 = self.last_stats.pc_hotspots[1];
             let h2 = self.last_stats.pc_hotspots[2];

@@ -386,10 +386,10 @@ mod tests {
     #[test]
     fn test_gb_controller_input() {
         let mut sys = GbSystem::new();
-        
+
         // Test setting controller state
         sys.set_controller(0xFF); // All buttons released
-        
+
         // Test individual buttons
         sys.set_controller(0x01); // Right pressed
         sys.set_controller(0x10); // A pressed
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn test_gb_ppu_registers() {
         let sys = GbSystem::new();
-        
+
         // Verify initial PPU register values
         assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91);
         assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC);

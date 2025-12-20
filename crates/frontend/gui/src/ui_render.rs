@@ -374,6 +374,7 @@ pub fn create_slot_selector_overlay(
 }
 
 /// Create a debug info overlay
+#[allow(clippy::too_many_arguments)]
 pub fn create_debug_overlay(
     width: usize,
     height: usize,

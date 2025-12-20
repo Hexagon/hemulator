@@ -143,11 +143,11 @@ pub struct Settings {
     // Backward compatibility: keep old keyboard field for migration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyboard: Option<KeyMapping>,
-    
+
     // New input configuration supporting multiple players
     #[serde(default)]
     pub input: InputConfig,
-    
+
     pub window_width: usize,
     pub window_height: usize,
     #[serde(default)]
@@ -204,7 +204,7 @@ impl Settings {
                         settings.input.player1 = old_keyboard;
                     }
                     settings
-                },
+                }
                 Err(e) => {
                     eprintln!(
                         "Warning: Failed to parse config.json: {}. Using defaults.",
@@ -239,6 +239,7 @@ impl Settings {
     }
 
     /// Clear a mount point path
+    #[allow(dead_code)]
     pub fn clear_mount_point(&mut self, mount_point_id: &str) {
         self.mount_points.remove(mount_point_id);
     }
@@ -324,7 +325,7 @@ mod tests {
             "window_width": 512,
             "window_height": 480
         }"#;
-        
+
         let settings: Settings = serde_json::from_str(old_format).unwrap();
         assert_eq!(settings.input.player1.a, "Z");
         assert_eq!(settings.input.player1.b, "X");
@@ -333,15 +334,15 @@ mod tests {
     #[test]
     fn test_multi_player_defaults() {
         let settings = Settings::default();
-        
+
         // Player 1 uses default mappings
         assert_eq!(settings.input.player1.a, "Z");
         assert_eq!(settings.input.player1.up, "Up");
-        
+
         // Player 2 has different default mappings
         assert_eq!(settings.input.player2.a, "U");
         assert_eq!(settings.input.player2.up, "W");
-        
+
         // Players 3 and 4 are unmapped by default
         assert!(settings.input.player3.a.is_empty());
         assert!(settings.input.player4.a.is_empty());

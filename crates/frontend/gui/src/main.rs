@@ -17,6 +17,8 @@ use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 
 // System wrapper enum to support multiple emulated systems
+#[allow(clippy::large_enum_variant)]
+#[allow(clippy::upper_case_acronyms)]
 enum EmulatorSystem {
     NES(emu_nes::NesSystem),
     GameBoy(emu_gb::GbSystem),
@@ -136,70 +138,68 @@ impl EmulatorSystem {
     }
 
     fn handle_keyboard(&mut self, key: minifb::Key, pressed: bool) {
-        match self {
-            EmulatorSystem::PC(sys) => {
-                // Map minifb keys to PC scancodes
-                let scancode = match key {
-                    minifb::Key::A => Some(emu_pc::SCANCODE_A),
-                    minifb::Key::B => Some(emu_pc::SCANCODE_B),
-                    minifb::Key::C => Some(emu_pc::SCANCODE_C),
-                    minifb::Key::D => Some(emu_pc::SCANCODE_D),
-                    minifb::Key::E => Some(emu_pc::SCANCODE_E),
-                    minifb::Key::F => Some(emu_pc::SCANCODE_F),
-                    minifb::Key::G => Some(emu_pc::SCANCODE_G),
-                    minifb::Key::H => Some(emu_pc::SCANCODE_H),
-                    minifb::Key::I => Some(emu_pc::SCANCODE_I),
-                    minifb::Key::J => Some(emu_pc::SCANCODE_J),
-                    minifb::Key::K => Some(emu_pc::SCANCODE_K),
-                    minifb::Key::L => Some(emu_pc::SCANCODE_L),
-                    minifb::Key::M => Some(emu_pc::SCANCODE_M),
-                    minifb::Key::N => Some(emu_pc::SCANCODE_N),
-                    minifb::Key::O => Some(emu_pc::SCANCODE_O),
-                    minifb::Key::P => Some(emu_pc::SCANCODE_P),
-                    minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
-                    minifb::Key::R => Some(emu_pc::SCANCODE_R),
-                    minifb::Key::S => Some(emu_pc::SCANCODE_S),
-                    minifb::Key::T => Some(emu_pc::SCANCODE_T),
-                    minifb::Key::U => Some(emu_pc::SCANCODE_U),
-                    minifb::Key::V => Some(emu_pc::SCANCODE_V),
-                    minifb::Key::W => Some(emu_pc::SCANCODE_W),
-                    minifb::Key::X => Some(emu_pc::SCANCODE_X),
-                    minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
-                    minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
-                    minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
-                    minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
-                    minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
-                    minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
-                    minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
-                    minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
-                    minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
-                    minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
-                    minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
-                    minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
-                    minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
-                    minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
-                    minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
-                    minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
-                    minifb::Key::LeftShift | minifb::Key::RightShift => {
-                        Some(emu_pc::SCANCODE_LEFT_SHIFT)
-                    }
-                    minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
-                        Some(emu_pc::SCANCODE_LEFT_CTRL)
-                    }
-                    minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
-                    _ => None,
-                };
+        if let EmulatorSystem::PC(sys) = self {
+            // Map minifb keys to PC scancodes
+            let scancode = match key {
+                minifb::Key::A => Some(emu_pc::SCANCODE_A),
+                minifb::Key::B => Some(emu_pc::SCANCODE_B),
+                minifb::Key::C => Some(emu_pc::SCANCODE_C),
+                minifb::Key::D => Some(emu_pc::SCANCODE_D),
+                minifb::Key::E => Some(emu_pc::SCANCODE_E),
+                minifb::Key::F => Some(emu_pc::SCANCODE_F),
+                minifb::Key::G => Some(emu_pc::SCANCODE_G),
+                minifb::Key::H => Some(emu_pc::SCANCODE_H),
+                minifb::Key::I => Some(emu_pc::SCANCODE_I),
+                minifb::Key::J => Some(emu_pc::SCANCODE_J),
+                minifb::Key::K => Some(emu_pc::SCANCODE_K),
+                minifb::Key::L => Some(emu_pc::SCANCODE_L),
+                minifb::Key::M => Some(emu_pc::SCANCODE_M),
+                minifb::Key::N => Some(emu_pc::SCANCODE_N),
+                minifb::Key::O => Some(emu_pc::SCANCODE_O),
+                minifb::Key::P => Some(emu_pc::SCANCODE_P),
+                minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
+                minifb::Key::R => Some(emu_pc::SCANCODE_R),
+                minifb::Key::S => Some(emu_pc::SCANCODE_S),
+                minifb::Key::T => Some(emu_pc::SCANCODE_T),
+                minifb::Key::U => Some(emu_pc::SCANCODE_U),
+                minifb::Key::V => Some(emu_pc::SCANCODE_V),
+                minifb::Key::W => Some(emu_pc::SCANCODE_W),
+                minifb::Key::X => Some(emu_pc::SCANCODE_X),
+                minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
+                minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
+                minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
+                minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
+                minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
+                minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
+                minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
+                minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
+                minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
+                minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
+                minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
+                minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
+                minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
+                minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
+                minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
+                minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
+                minifb::Key::LeftShift | minifb::Key::RightShift => {
+                    Some(emu_pc::SCANCODE_LEFT_SHIFT)
+                }
+                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
+                    Some(emu_pc::SCANCODE_LEFT_CTRL)
+                }
+                minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
+                _ => None,
+            };
 
-                if let Some(sc) = scancode {
-                    if pressed {
-                        sys.key_press(sc);
-                    } else {
-                        sys.key_release(sc);
-                    }
+            if let Some(sc) = scancode {
+                if pressed {
+                    sys.key_press(sc);
+                } else {
+                    sys.key_release(sc);
                 }
             }
-            _ => {} // Other systems don't use keyboard input
         }
+        // Other systems don't use keyboard input
     }
 
     fn get_debug_info(&self) -> Option<emu_nes::DebugInfo> {
@@ -262,7 +262,7 @@ fn string_to_key(s: &str) -> Option<Key> {
     if s.is_empty() {
         return None;
     }
-    
+
     match s {
         "Z" => Some(Key::Z),
         "X" => Some(Key::X),
@@ -405,23 +405,19 @@ fn save_screenshot(
 
     // Get current local time
     let now = Local::now();
-    
+
     // Generate random number 000-999
     let random = rand::thread_rng().gen_range(0..1000);
-    
+
     // Create filename: YYYYMMDDHHMMSSRRR.png
-    let filename = format!(
-        "{}{:03}.png",
-        now.format("%Y%m%d%H%M%S"),
-        random
-    );
-    
+    let filename = format!("{}{:03}.png", now.format("%Y%m%d%H%M%S"), random);
+
     // Create screenshots directory structure
     let screenshots_dir = PathBuf::from("screenshots").join(system_name);
     fs::create_dir_all(&screenshots_dir)?;
-    
+
     let filepath = screenshots_dir.join(&filename);
-    
+
     // Convert RGBA buffer to RGB
     let mut rgb_data = Vec::with_capacity(width * height * 3);
     for pixel in buffer {
@@ -432,16 +428,16 @@ fn save_screenshot(
         rgb_data.push(g);
         rgb_data.push(b);
     }
-    
+
     // Write PNG file
     let file = fs::File::create(&filepath)?;
     let mut encoder = Encoder::new(file, width as u32, height as u32);
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
-    
+
     let mut writer = encoder.write_header()?;
     writer.write_image_data(&rgb_data)?;
-    
+
     Ok(filepath.to_string_lossy().to_string())
 }
 
@@ -1055,7 +1051,7 @@ fn main() {
                 let ctrl0 = get_controller_state(&window, &settings.input.player1);
                 let ctrl1 = get_controller_state(&window, &settings.input.player2);
                 // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
-                
+
                 sys.set_controller(0, ctrl0);
                 sys.set_controller(1, ctrl1);
             }

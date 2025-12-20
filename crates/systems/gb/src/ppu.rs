@@ -307,16 +307,16 @@ impl Ppu {
             let pixel_y = (win_y % 8) as u16;
 
             let start_x = self.wx.saturating_sub(7);
-            
+
             for screen_x in start_x..160 {
                 let win_x = screen_x - start_x;
                 let tile_x = (win_x / 8) as u16;
-                
+
                 // Ensure tile_x is within bounds (0-31)
                 if tile_x >= 32 {
                     continue;
                 }
-                
+
                 let pixel_x = (win_x % 8) as u16;
 
                 // Get tile index from tilemap
@@ -332,12 +332,12 @@ impl Ppu {
 
                 // Get tile data (2 bytes per row)
                 let tile_row_addr = tile_addr + (pixel_y * 2);
-                
+
                 // Ensure we don't exceed VRAM bounds
                 if (tile_row_addr + 1) as usize >= self.vram.len() {
                     continue;
                 }
-                
+
                 let byte1 = self.vram[tile_row_addr as usize];
                 let byte2 = self.vram[(tile_row_addr + 1) as usize];
 
@@ -366,7 +366,11 @@ impl Ppu {
 
     fn render_sprites(&self, frame: &mut Frame) {
         // Sprite rendering - Game Boy supports 40 sprites, max 10 per scanline
-        let sprite_height = if (self.lcdc & LCDC_OBJ_SIZE) != 0 { 16 } else { 8 };
+        let sprite_height = if (self.lcdc & LCDC_OBJ_SIZE) != 0 {
+            16
+        } else {
+            8
+        };
 
         // Iterate through all 40 sprites (OAM has 40 entries of 4 bytes each)
         for sprite_idx in 0..40 {
@@ -381,7 +385,11 @@ impl Ppu {
                 continue; // Off screen
             }
 
-            let palette = if (flags & 0x10) != 0 { self.obp1 } else { self.obp0 };
+            let palette = if (flags & 0x10) != 0 {
+                self.obp1
+            } else {
+                self.obp0
+            };
             let flip_x = (flags & 0x20) != 0;
             let flip_y = (flags & 0x40) != 0;
             let bg_priority = (flags & 0x80) != 0;
@@ -394,7 +402,7 @@ impl Ppu {
                 }
 
                 let pixel_y = if flip_y { sprite_height - 1 - sy } else { sy };
-                
+
                 // For 8x16 sprites, use tile_index & 0xFE for top, tile_index | 0x01 for bottom
                 let tile = if sprite_height == 16 {
                     if pixel_y < 8 {
@@ -408,12 +416,12 @@ impl Ppu {
 
                 let tile_addr = (tile as u16) * 16;
                 let row_offset = (pixel_y % 8) * 2;
-                
+
                 // Ensure we don't exceed VRAM bounds
                 if (tile_addr + row_offset as u16 + 1) as usize >= self.vram.len() {
                     continue;
                 }
-                
+
                 let byte1 = self.vram[(tile_addr + row_offset as u16) as usize];
                 let byte2 = self.vram[(tile_addr + row_offset as u16 + 1) as usize];
 
@@ -436,7 +444,7 @@ impl Ppu {
 
                     // Apply palette
                     let palette_color = (palette >> (color_index * 2)) & 0x03;
-                    
+
                     // Check background priority
                     if bg_priority {
                         // Sprite is behind background colors 1-3
@@ -542,14 +550,14 @@ mod tests {
         ppu.lcdc = 0xE1; // Enable LCD, window, and background
         ppu.wy = 0;
         ppu.wx = 7;
-        
+
         // Set up a simple tile in VRAM
         ppu.write_vram(0x0000, 0xFF); // First byte of tile 0
         ppu.write_vram(0x0001, 0xFF); // Second byte of tile 0
-        
+
         // Set window tilemap to use tile 0
         ppu.write_vram(0x1800, 0x00); // Tilemap entry for tile 0
-        
+
         let frame = ppu.render_frame();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
@@ -559,17 +567,17 @@ mod tests {
     fn test_sprite_rendering() {
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
-        
+
         // Set up sprite in OAM
         ppu.write_oam(0, 16); // Y position
-        ppu.write_oam(1, 8);  // X position
-        ppu.write_oam(2, 0);  // Tile index
-        ppu.write_oam(3, 0);  // Flags (no flip, palette 0, above BG)
-        
+        ppu.write_oam(1, 8); // X position
+        ppu.write_oam(2, 0); // Tile index
+        ppu.write_oam(3, 0); // Flags (no flip, palette 0, above BG)
+
         // Set up a simple tile in VRAM for the sprite
         ppu.write_vram(0x0000, 0xFF);
         ppu.write_vram(0x0001, 0xFF);
-        
+
         let frame = ppu.render_frame();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
@@ -579,16 +587,16 @@ mod tests {
     fn test_sprite_flip() {
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93;
-        
+
         // Set up sprite with horizontal flip
         ppu.write_oam(0, 16);
         ppu.write_oam(1, 8);
         ppu.write_oam(2, 0);
         ppu.write_oam(3, 0x20); // Flip X flag
-        
+
         ppu.write_vram(0x0000, 0x80); // Left-most pixel set
         ppu.write_vram(0x0001, 0x00);
-        
+
         let frame = ppu.render_frame();
         // With flip, the pixel should appear on the right side
         assert_eq!(frame.width, 160);
@@ -599,13 +607,13 @@ mod tests {
     fn test_sprite_priority() {
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93;
-        
+
         // Set up sprite with background priority
         ppu.write_oam(0, 16);
         ppu.write_oam(1, 8);
         ppu.write_oam(2, 0);
         ppu.write_oam(3, 0x80); // BG priority flag
-        
+
         let frame = ppu.render_frame();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
@@ -616,7 +624,7 @@ mod tests {
         let mut ppu = Ppu::new();
         ppu.ly = 10;
         ppu.lyc = 11;
-        
+
         ppu.step(456);
         assert_eq!(ppu.ly, 11);
         assert!(ppu.stat & 0x04 != 0); // Coincidence flag should be set

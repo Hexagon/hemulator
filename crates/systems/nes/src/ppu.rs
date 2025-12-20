@@ -424,19 +424,19 @@ impl Ppu {
     fn evaluate_sprites_for_scanline(&self, scanline: u32) {
         let sprite_size_16 = (self.ctrl & 0x20) != 0;
         let sprite_height = if sprite_size_16 { 16 } else { 8 };
-        
+
         let mut sprites_found = 0;
-        
+
         // Check all 64 sprites in OAM
         for i in 0..64 {
             let o = i * 4;
             let y_pos = self.oam[o] as i16 + 1;
-            
+
             // Check if this sprite is on the current scanline
             let row = (scanline as i16) - y_pos;
             if row >= 0 && row < sprite_height {
                 sprites_found += 1;
-                
+
                 // If we found more than 8 sprites on this scanline, set overflow
                 if sprites_found > 8 {
                     self.sprite_overflow.set(true);
