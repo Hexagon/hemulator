@@ -3,14 +3,12 @@
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod bus;
-mod ppu;
+pub(crate) mod ppu;
 
 use bus::GbBus;
-use ppu::Ppu;
 
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
-    ppu: Ppu,
     cart_loaded: bool,
 }
 
@@ -28,7 +26,6 @@ impl GbSystem {
 
         Self {
             cpu,
-            ppu: Ppu::new(),
             cart_loaded: false,
         }
     }
@@ -36,10 +33,7 @@ impl GbSystem {
     /// Set controller state (Game Boy buttons)
     /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
     pub fn set_controller(&mut self, state: u8) {
-        // Game Boy controller is memory-mapped to $FF00 (joypad register)
-        // For now, we'll just store it in the bus
-        // TODO: Implement proper joypad I/O register in bus
-        let _ = state; // Suppress unused warning until we implement joypad register
+        self.cpu.memory.set_buttons(state);
     }
 }
 
@@ -74,13 +68,13 @@ impl System for GbSystem {
             cycles += cpu_cycles;
 
             // Step PPU
-            if self.ppu.step(cpu_cycles) {
+            if self.cpu.memory.ppu.step(cpu_cycles) {
                 // V-Blank started - could trigger NMI here
             }
         }
 
         // Render the frame from PPU
-        Ok(self.ppu.render_frame())
+        Ok(self.cpu.memory.ppu.render_frame())
     }
 
     fn save_state(&self) -> serde_json::Value {
@@ -255,5 +249,28 @@ mod tests {
         let frame = result.unwrap();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
+    }
+
+    #[test]
+    fn test_gb_controller_input() {
+        let mut sys = GbSystem::new();
+        
+        // Test setting controller state
+        sys.set_controller(0xFF); // All buttons released
+        
+        // Test individual buttons
+        sys.set_controller(0x01); // Right pressed
+        sys.set_controller(0x10); // A pressed
+        sys.set_controller(0x80); // Start pressed
+    }
+
+    #[test]
+    fn test_gb_ppu_registers() {
+        let sys = GbSystem::new();
+        
+        // Verify initial PPU register values
+        assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91);
+        assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC);
+        assert_eq!(sys.cpu.memory.ppu.ly, 0);
     }
 }

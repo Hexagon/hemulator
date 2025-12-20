@@ -1,6 +1,7 @@
 //! Game Boy memory bus implementation
 
 use emu_core::cpu_lr35902::MemoryLr35902;
+use crate::ppu::Ppu;
 
 /// Game Boy memory bus
 pub struct GbBus {
@@ -18,6 +19,12 @@ pub struct GbBus {
     cart_ram: Vec<u8>,
     /// Boot ROM enabled flag
     boot_rom_enabled: bool,
+    /// PPU (Picture Processing Unit)
+    pub ppu: Ppu,
+    /// Joypad state register (0xFF00)
+    joypad: u8,
+    /// Joypad button state
+    button_state: u8,
 }
 
 impl GbBus {
@@ -30,7 +37,16 @@ impl GbBus {
             cart_rom: Vec::new(),
             cart_ram: Vec::new(),
             boot_rom_enabled: true,
+            ppu: Ppu::new(),
+            joypad: 0xFF,
+            button_state: 0xFF,
         }
+    }
+
+    /// Set joypad button state
+    /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
+    pub fn set_buttons(&mut self, state: u8) {
+        self.button_state = state;
     }
 
     pub fn load_cart(&mut self, data: &[u8]) {
@@ -77,8 +93,8 @@ impl MemoryLr35902 for GbBus {
                     0xFF
                 }
             }
-            // VRAM (8KB) - stub
-            0x8000..=0x9FFF => 0xFF,
+            // VRAM (8KB) - delegate to PPU
+            0x8000..=0x9FFF => self.ppu.read_vram(addr - 0x8000),
             // External RAM (switchable)
             0xA000..=0xBFFF => {
                 let offset = (addr - 0xA000) as usize;
@@ -92,13 +108,40 @@ impl MemoryLr35902 for GbBus {
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize],
             // Echo RAM (mirror of C000-DDFF)
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize],
-            // OAM (Object Attribute Memory) - stub
-            0xFE00..=0xFE9F => 0xFF,
+            // OAM (Object Attribute Memory) - delegate to PPU
+            0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
             // Not usable
             0xFEA0..=0xFEFF => 0xFF,
             // I/O Registers
             0xFF00..=0xFF7F => match addr {
+                0xFF00 => {
+                    // Joypad register
+                    // Return button state based on selected mode
+                    let select_buttons = (self.joypad & 0x20) == 0;
+                    let select_dpad = (self.joypad & 0x10) == 0;
+                    
+                    let mut result = self.joypad & 0xF0;
+                    if select_buttons {
+                        result |= (self.button_state >> 4) & 0x0F;
+                    } else if select_dpad {
+                        result |= self.button_state & 0x0F;
+                    } else {
+                        result |= 0x0F;
+                    }
+                    result
+                }
                 0xFF0F => self.if_reg,
+                0xFF40 => self.ppu.lcdc,
+                0xFF41 => self.ppu.stat,
+                0xFF42 => self.ppu.scy,
+                0xFF43 => self.ppu.scx,
+                0xFF44 => self.ppu.ly,
+                0xFF45 => self.ppu.lyc,
+                0xFF47 => self.ppu.bgp,
+                0xFF48 => self.ppu.obp0,
+                0xFF49 => self.ppu.obp1,
+                0xFF4A => self.ppu.wy,
+                0xFF4B => self.ppu.wx,
                 _ => 0xFF,
             },
             // High RAM
@@ -114,8 +157,8 @@ impl MemoryLr35902 for GbBus {
             0x0000..=0x7FFF => {
                 // MBC commands would go here
             }
-            // VRAM - stub
-            0x8000..=0x9FFF => {}
+            // VRAM - delegate to PPU
+            0x8000..=0x9FFF => self.ppu.write_vram(addr - 0x8000, val),
             // External RAM
             0xA000..=0xBFFF => {
                 let offset = (addr - 0xA000) as usize;
@@ -127,14 +170,26 @@ impl MemoryLr35902 for GbBus {
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize] = val,
             // Echo RAM
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize] = val,
-            // OAM - stub
-            0xFE00..=0xFE9F => {}
+            // OAM - delegate to PPU
+            0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
             // Not usable
             0xFEA0..=0xFEFF => {}
             // I/O Registers
             0xFF00..=0xFF7F => {
                 match addr {
+                    0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
                     0xFF0F => self.if_reg = val,
+                    0xFF40 => self.ppu.lcdc = val,
+                    0xFF41 => self.ppu.stat = val,
+                    0xFF42 => self.ppu.scy = val,
+                    0xFF43 => self.ppu.scx = val,
+                    0xFF44 => {}, // LY is read-only
+                    0xFF45 => self.ppu.lyc = val,
+                    0xFF47 => self.ppu.bgp = val,
+                    0xFF48 => self.ppu.obp0 = val,
+                    0xFF49 => self.ppu.obp1 = val,
+                    0xFF4A => self.ppu.wy = val,
+                    0xFF4B => self.ppu.wx = val,
                     0xFF50 => self.boot_rom_enabled = false, // Disable boot ROM
                     _ => {}
                 }
