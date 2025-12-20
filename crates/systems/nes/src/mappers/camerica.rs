@@ -60,7 +60,7 @@ impl Camerica {
             // Select 16KB bank for $8000-$BFFF
             // Only lower 4 bits are used for bank selection
             self.bank_select = val & 0x0F;
-            
+
             // Note: Fire Hawk board uses bit 4 for mirroring control:
             // - Bit 4 = 0: One-screen lower
             // - Bit 4 = 1: One-screen upper

@@ -202,9 +202,9 @@ mod tests {
         n118.write_prg(0x8000, 7, &mut ppu); // Select register 7
         n118.write_prg(0x8001, 7, &mut ppu); // R7 = 7
 
-        assert_eq!(n118.read_prg(0x8000), 6);  // R6 (bank 5)
+        assert_eq!(n118.read_prg(0x8000), 6); // R6 (bank 5)
         assert_eq!(n118.read_prg(0xA000), 15); // (-2) = bank 14
-        assert_eq!(n118.read_prg(0xC000), 8);  // R7 (bank 7)
+        assert_eq!(n118.read_prg(0xC000), 8); // R7 (bank 7)
         assert_eq!(n118.read_prg(0xE000), 16); // (-1) = bank 15
     }
 
@@ -234,8 +234,8 @@ mod tests {
 
         // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
         assert_eq!(n118.read_prg(0x8000), 15); // (-2) = bank 14
-        assert_eq!(n118.read_prg(0xA000), 6);  // R6 (bank 5)
-        assert_eq!(n118.read_prg(0xC000), 8);  // R7 (bank 7)
+        assert_eq!(n118.read_prg(0xA000), 6); // R6 (bank 5)
+        assert_eq!(n118.read_prg(0xC000), 8); // R7 (bank 7)
         assert_eq!(n118.read_prg(0xE000), 16); // (-1) = bank 15
     }
 
