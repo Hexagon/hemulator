@@ -3,10 +3,14 @@
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod bus;
+mod ppu;
+
 use bus::GbBus;
+use ppu::Ppu;
 
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
+    ppu: Ppu,
     cart_loaded: bool,
 }
 
@@ -24,6 +28,7 @@ impl GbSystem {
         
         Self {
             cpu,
+            ppu: Ppu::new(),
             cart_loaded: false,
         }
     }
@@ -56,12 +61,17 @@ impl System for GbSystem {
         
         let mut cycles = 0;
         while cycles < CYCLES_PER_FRAME {
-            cycles += self.cpu.step();
+            let cpu_cycles = self.cpu.step();
+            cycles += cpu_cycles;
+            
+            // Step PPU
+            if self.ppu.step(cpu_cycles) {
+                // V-Blank started - could trigger NMI here
+            }
         }
 
-        // Game Boy native framebuffer is 160x144
-        // For now, return empty frame (PPU not implemented)
-        Ok(Frame::new(160, 144))
+        // Render the frame from PPU
+        Ok(self.ppu.render_frame())
     }
 
     fn save_state(&self) -> serde_json::Value {
