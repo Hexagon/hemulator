@@ -320,4 +320,44 @@ mod tests {
         // Switch to horizontal mirroring
         mmc3.write_prg(0xA000, 1, &mut ppu);
     }
+
+    #[test]
+    fn mmc3_irq_zero_latch() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch to 0
+        mmc3.write_prg(0xC000, 0, &mut ppu);
+        // Reload counter
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        // Enable IRQ
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // First A12 edge should reload counter to 0
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+
+        // According to MMC3 spec, reloading to 0 should NOT fire IRQ
+        // IRQ should only fire when counter DECREMENTS to 0
+        assert!(
+            !mmc3.take_irq_pending(),
+            "IRQ should not fire when reloading to 0"
+        );
+
+        // Second A12 edge: counter is already 0, should reload again to 0
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(
+            !mmc3.take_irq_pending(),
+            "IRQ should not fire when reloading to 0 again"
+        );
+    }
 }
