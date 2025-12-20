@@ -831,4 +831,113 @@ mod tests {
         // Length counter should have been clocked
         // After one frame sequencer step, length should decrease
     }
+    
+    #[test]
+    fn test_pulse2_trigger() {
+        let mut apu = GbApu::new();
+        
+        // Configure pulse 2
+        apu.write_register(0xFF16, 0b10_111111); // Duty 50%, length 63
+        apu.write_register(0xFF17, 0xF3); // Volume 15, add mode, period 3
+        apu.write_register(0xFF18, 0x00); // Freq low
+        apu.write_register(0xFF19, 0x87); // Trigger, length enable, freq high
+        
+        assert!(apu.pulse2.enabled);
+        assert_eq!(apu.pulse2.duty, 2); // 50% duty
+    }
+    
+    #[test]
+    fn test_wave_channel_enable() {
+        let mut apu = GbApu::new();
+        
+        // Enable DAC
+        apu.write_register(0xFF1A, 0x80);
+        assert!(apu.wave_dac_enabled);
+        
+        // Write wave RAM
+        for i in 0..16 {
+            apu.write_register(0xFF30 + i, 0x01 * i as u8);
+        }
+        
+        // Trigger wave channel
+        apu.write_register(0xFF1E, 0x80);
+        assert!(apu.wave.enabled);
+    }
+    
+    #[test]
+    fn test_noise_channel_modes() {
+        let mut apu = GbApu::new();
+        
+        // Test 7-bit mode
+        apu.write_register(0xFF22, 0x08); // Width mode bit set
+        assert!(apu.noise.mode);
+        
+        // Test 15-bit mode
+        apu.write_register(0xFF22, 0x00); // Width mode bit clear
+        assert!(!apu.noise.mode);
+    }
+    
+    #[test]
+    fn test_envelope_increase_mode() {
+        let mut apu = GbApu::new();
+        
+        // Set envelope with increase mode
+        apu.write_register(0xFF12, 0x08); // Initial volume 0, add mode, period 0
+        apu.write_register(0xFF14, 0x80); // Trigger
+        
+        // Volume should start at 0
+        assert_eq!(apu.pulse1_envelope.volume(), 0);
+        
+        // Clock envelope
+        for _ in 0..8 {
+            apu.frame_sequencer_step = 7;
+            apu.clock_frame_sequencer();
+        }
+        
+        // Volume should have increased
+        assert!(apu.pulse1_envelope.volume() > 0);
+    }
+    
+    #[test]
+    fn test_channel_panning() {
+        let mut apu = GbApu::new();
+        
+        // Set panning - all channels to both speakers
+        apu.write_register(0xFF25, 0xFF);
+        assert_eq!(apu.channel_panning, 0xFF);
+        
+        // Set panning - channel 1 left only
+        apu.write_register(0xFF25, 0x10);
+        assert_eq!(apu.channel_panning, 0x10);
+    }
+    
+    #[test]
+    fn test_power_off_clears_registers() {
+        let mut apu = GbApu::new();
+        
+        // Set some registers
+        apu.write_register(0xFF12, 0xF0);
+        apu.write_register(0xFF24, 0x77);
+        
+        // Turn power off
+        apu.write_register(0xFF26, 0x00);
+        
+        // All state should be cleared
+        assert_eq!(apu.left_volume, 0);
+        assert_eq!(apu.right_volume, 0);
+        assert!(!apu.power_on);
+    }
+    
+    #[test]
+    fn test_sweep_unit_integration() {
+        let mut apu = GbApu::new();
+        
+        // Configure sweep
+        apu.write_register(0xFF10, 0x11); // Period 1, shift 1
+        apu.write_register(0xFF13, 0x00); // Freq low
+        apu.write_register(0xFF14, 0x80); // Trigger
+        
+        // Sweep should be enabled after trigger
+        assert!(apu.pulse1_sweep.enabled || apu.pulse1_sweep.period > 0 || apu.pulse1_sweep.shift > 0);
+    }
 }

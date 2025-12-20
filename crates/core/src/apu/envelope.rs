@@ -129,8 +129,8 @@ mod tests {
     #[test]
     fn envelope_restart_sets_level_to_15() {
         let mut env = Envelope::new();
-        env.set_period(1);
-        env.restart();
+        env.set_params(15, false, 1); // Initial volume 15
+        env.trigger();
         env.clock(); // Process the start flag
         assert_eq!(env.level(), 15);
     }
@@ -138,8 +138,8 @@ mod tests {
     #[test]
     fn envelope_decays_to_zero() {
         let mut env = Envelope::new();
-        env.set_period(0); // Fastest decay
-        env.restart();
+        env.set_params(15, false, 0); // Fastest decay from 15
+        env.trigger();
         env.clock(); // Process start flag, level = 15
 
         // Clock until decay reaches 0
@@ -152,9 +152,9 @@ mod tests {
     #[test]
     fn envelope_loops_when_flag_set() {
         let mut env = Envelope::new();
-        env.set_period(0); // Fastest decay
+        env.set_params(15, false, 0); // Fastest decay from 15
         env.set_loop(true);
-        env.restart();
+        env.trigger();
 
         // First clock processes start flag
         env.clock();
@@ -174,8 +174,8 @@ mod tests {
     #[test]
     fn envelope_period_controls_decay_rate() {
         let mut env = Envelope::new();
-        env.set_period(2); // Slower decay
-        env.restart();
+        env.set_params(15, false, 2); // Slower decay from 15
+        env.trigger();
         env.clock(); // Process start flag, level = 15, divider = 2
 
         env.clock(); // divider = 1
