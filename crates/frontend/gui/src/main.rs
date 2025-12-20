@@ -184,9 +184,7 @@ impl EmulatorSystem {
                 minifb::Key::LeftShift | minifb::Key::RightShift => {
                     Some(emu_pc::SCANCODE_LEFT_SHIFT)
                 }
-                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
-                    Some(emu_pc::SCANCODE_LEFT_CTRL)
-                }
+                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
                 minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
                 _ => None,
             };
@@ -439,6 +437,42 @@ fn save_screenshot(
     writer.write_image_data(&rgb_data)?;
 
     Ok(filepath.to_string_lossy().to_string())
+}
+
+/// Create a file dialog with individual filters for each file type plus an "All Files" option
+/// This improves the user experience by allowing them to filter by specific file types
+fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog {
+    let mut dialog = rfd::FileDialog::new();
+
+    // Add individual filters for each extension
+    for ext in &mount_point.extensions {
+        // Create a user-friendly name for the filter
+        let filter_name = match ext.as_str() {
+            "nes" => "NES ROM (*.nes)".to_string(),
+            "unf" => "UNIF ROM (*.unf)".to_string(),
+            "gb" => "Game Boy ROM (*.gb)".to_string(),
+            "gbc" => "Game Boy Color ROM (*.gbc)".to_string(),
+            "a26" => "Atari 2600 ROM (*.a26)".to_string(),
+            "bin" => "Binary ROM (*.bin)".to_string(),
+            "com" => "DOS COM Executable (*.com)".to_string(),
+            "exe" => "DOS EXE Executable (*.exe)".to_string(),
+            _ => {
+                // For unknown extensions, create a generic filter
+                format!("{} File (*.{})", ext.to_uppercase(), ext)
+            }
+        };
+
+        dialog = dialog.add_filter(&filter_name, &[ext.as_str()]);
+    }
+
+    // Add "All supported files" filter with all extensions
+    let extensions: Vec<&str> = mount_point.extensions.iter().map(|s| s.as_str()).collect();
+    dialog = dialog.add_filter("All Supported Files", &extensions);
+
+    // Add "All Files" filter
+    dialog = dialog.add_filter("All Files (*.*)", &["*"]);
+
+    dialog
 }
 
 fn main() {
@@ -844,13 +878,8 @@ fn main() {
 
                     // Now show file dialog for the selected mount point
                     let mp_info = &mount_points[idx];
-                    let extensions: Vec<&str> =
-                        mp_info.extensions.iter().map(|s| s.as_str()).collect();
 
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("ROM/Media Files", &extensions)
-                        .pick_file()
-                    {
+                    if let Some(path) = create_file_dialog(mp_info).pick_file() {
                         let path_str = path.to_string_lossy().to_string();
                         match std::fs::read(&path) {
                             Ok(data) => {
@@ -943,12 +972,8 @@ fn main() {
             // Otherwise, show mount point selector
             if mount_points.len() == 1 {
                 let mp_info = &mount_points[0];
-                let extensions: Vec<&str> = mp_info.extensions.iter().map(|s| s.as_str()).collect();
 
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("ROM/Media Files", &extensions)
-                    .pick_file()
-                {
+                if let Some(path) = create_file_dialog(mp_info).pick_file() {
                     let path_str = path.to_string_lossy().to_string();
                     match std::fs::read(&path) {
                         Ok(data) => {
