@@ -200,15 +200,17 @@ impl Mmc3 {
         if !self.last_a12 && a12_high {
             // Rising edge clocks the counter per MMC3 spec.
             // When clocked: if counter==0 OR reload flag set, reload from latch; else decrement.
-            if self.irq_reload || self.irq_counter == 0 {
+            let did_decrement = if self.irq_reload || self.irq_counter == 0 {
                 self.irq_counter = self.irq_latch;
                 self.irq_reload = false;
+                false // Reloaded, did not decrement
             } else {
                 self.irq_counter = self.irq_counter.saturating_sub(1);
-            }
+                true // Decremented
+            };
 
-            // "New"/Sharp behavior: trigger when counter is 0 after clocking.
-            if self.irq_counter == 0 && self.irq_enabled {
+            // "New"/Sharp behavior: trigger IRQ when counter DECREMENTS to 0, not when RELOADED to 0.
+            if self.irq_counter == 0 && self.irq_enabled && did_decrement {
                 self.irq_pending = true;
             }
         }
