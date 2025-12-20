@@ -546,34 +546,64 @@ When no ROM is loaded or ROM fails to load, a default splash screen is displayed
 
 ## Debug Environment Variables
 
-The emulator supports several environment variables for debugging:
+The emulator supports several environment variables for debugging. Set them to `1`, `true`, or `TRUE` to enable, or `0` (or any other value) to disable.
 
-- **`EMU_LOG_UNKNOWN_OPS=1`**: Log unknown/unimplemented 6502 opcodes to stderr
+### Core (6502 CPU)
+
+- **`EMU_LOG_UNKNOWN_OPS`**: Log unknown/unimplemented 6502 opcodes to stderr
   - Useful for finding missing CPU instruction implementations
+  - Applies to: NES, Atari 2600, and any other 6502-based systems
   - Example: `$env:EMU_LOG_UNKNOWN_OPS=1; cargo run --release -- roms/nes/game.nes`
 
-- **`EMU_LOG_BRK=1`**: Log BRK instruction execution with PC and status register
+- **`EMU_LOG_BRK`**: Log BRK instruction execution with PC and status register
   - Shows when BRK is executed and where it jumps to (IRQ vector)
   - Helpful for debugging unexpected BRK loops or interrupt issues
+  - Applies to: NES, Atari 2600, and any other 6502-based systems
   - Example: `$env:EMU_LOG_BRK=1; cargo run --release -- roms/nes/game.nes`
 
-- **`EMU_LOG_IRQ=1`**: Log when IRQ interrupts are fired
+### NES-Specific
+
+- **`EMU_LOG_PPU_WRITES`**: Log all PPU register writes
+  - Shows when games write to PPU registers ($2000-$2007)
+  - Useful for debugging graphics/rendering issues
+  - Example: `$env:EMU_LOG_PPU_WRITES=1; cargo run --release -- roms/nes/game.nes`
+
+- **`EMU_LOG_IRQ`**: Log when IRQ interrupts are fired
   - Shows when mapper or APU IRQs are pending and triggered
-  - Useful for debugging IRQ timing issues
+  - Useful for debugging IRQ timing issues (e.g., MMC3 scanline counter)
   - Example: `$env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/game.nes`
 
-- **`EMU_TRACE_PC=1`**: Trace program counter (PC) execution
-  - Logs every PC address executed (high-volume output)
-  - Use with caution - generates massive log files
-  - Example: `$env:EMU_TRACE_PC=1; cargo run --release -- roms/nes/game.nes > trace.log`
+- **`EMU_TRACE_PC`**: Log program counter hotspots every 60 frames
+  - Shows the top 3 most frequently executed addresses
+  - Useful for performance profiling and finding infinite loops
+  - Lower volume than full PC tracing
+  - Example: `$env:EMU_TRACE_PC=1; cargo run --release -- roms/nes/game.nes`
+
+- **`EMU_TRACE_NES`**: Comprehensive NES system trace every 60 frames
+  - Logs frame index, PC, CPU steps/cycles, IRQ/NMI counts, MMC3 A12 edges, PPU registers, and interrupt vectors
+  - Useful for debugging complex system-level issues
+  - High-level overview of NES state over time
+  - Example: `$env:EMU_TRACE_NES=1; cargo run --release -- roms/nes/game.nes`
+
+### Usage Examples
 
 **PowerShell usage** (Windows):
 ```powershell
+# Enable logs
 $env:EMU_LOG_BRK=1; $env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/excitebike.nes
+
+# Disable logs (set to 0 or unset)
+$env:EMU_LOG_BRK=0; cargo run --release -- roms/nes/excitebike.nes
 ```
 
 **Bash usage** (Linux/macOS):
 ```bash
+# Enable logs
 EMU_LOG_BRK=1 EMU_LOG_IRQ=1 cargo run --release -- roms/nes/excitebike.nes
+
+# Disable logs (set to 0 or just don't set the variable)
+EMU_LOG_BRK=0 cargo run --release -- roms/nes/excitebike.nes
 ```
+
+**Note**: All environment variables accept `1`, `true`, or `TRUE` to enable. Any other value (including `0`) or an unset variable will disable the log.
 

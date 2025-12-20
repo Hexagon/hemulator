@@ -1212,7 +1212,7 @@ mod tests {
 
     #[test]
     fn test_vblank_clears_sprite_flags() {
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
 
         // Set sprite 0 hit and sprite overflow
         ppu.sprite_0_hit.set(true);

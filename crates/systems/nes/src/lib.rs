@@ -119,6 +119,16 @@ fn log_irq() -> bool {
     })
 }
 
+fn trace_nes_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("EMU_TRACE_NES").as_deref(),
+            Ok("1") | Ok("true") | Ok("TRUE")
+        )
+    })
+}
+
 /// Program counter hotspot tracking for performance analysis.
 ///
 /// Tracks the most frequently executed addresses to help identify
@@ -580,7 +590,7 @@ impl System for NesSystem {
             pc_hotspots: hotspots,
         };
 
-        if std::env::var("EMU_TRACE_NES").is_ok() {
+        if trace_nes_enabled() {
             // Log occasionally to avoid overwhelming the GUI.
             if self.frame_index.is_multiple_of(60) {
                 eprintln!(
