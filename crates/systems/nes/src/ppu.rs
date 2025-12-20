@@ -295,12 +295,19 @@ impl Ppu {
                 // PPUDATA read with buffered behavior.
                 let addr = self.vram_addr.get() & 0x3FFF;
 
-                // Palette reads return immediately, no buffering.
-                // Palette RAM spans $3F00-$3FFF and mirrors every 32 bytes
+                // Palette reads return the palette value immediately (not buffered),
+                // but still update the internal buffer with the mirrored nametable value.
+                // Palette addresses $3F00-$3FFF mirror the nametable at $2F00-$2FFF.
                 if addr >= 0x3F00 {
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     let val = self.palette[target];
+                    
+                    // Fill buffer with the mirrored nametable value underneath
+                    let mirrored_nt_addr = addr - 0x1000; // $3F00 mirrors $2F00
+                    let idx = self.map_nametable_addr(mirrored_nt_addr);
+                    self.read_buffer.set(self.vram[idx]);
+                    
                     let inc = if (self.ctrl & 0x04) != 0 { 32 } else { 1 };
                     self.vram_addr.set(self.vram_addr.get().wrapping_add(inc));
                     return val;
@@ -1235,5 +1242,36 @@ mod tests {
         // Flags should be cleared at start of frame
         assert!(!ppu.sprite_0_hit.get());
         assert!(!ppu.sprite_overflow.get());
+    }
+
+    #[test]
+    fn test_palette_read_updates_buffer_with_mirrored_nametable() {
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+
+        // Write a distinctive value to nametable at $2F00 (which mirrors to palette $3F00)
+        let nt_addr = 0x2F00;
+        let idx = ppu.map_nametable_addr(nt_addr);
+        ppu.vram[idx] = 0xAB;
+
+        // Write a palette value to $3F00
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x1C); // Palette value
+
+        // Reset address to read from palette $3F00
+        ppu.write_register(6, 0x3F);
+        ppu.write_register(6, 0x00);
+
+        // First read from palette should return the palette value immediately
+        let palette_val = ppu.read_register(7);
+        assert_eq!(palette_val, 0x1C);
+
+        // Now read from a non-palette address (e.g., $2000)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        
+        // This should return the buffered value (the mirrored nametable value from $2F00)
+        let buffered = ppu.read_register(7);
+        assert_eq!(buffered, 0xAB, "Buffer should contain mirrored nametable value from palette read");
     }
 }
