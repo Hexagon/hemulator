@@ -12,6 +12,7 @@ emu_core = { path = "../../core" }
 emu_nes = { path = "../../systems/nes" }
 emu_gb = { path = "../../systems/gb" }
 emu_atari2600 = { path = "../../systems/atari2600" }
+emu_pc = { path = "../../systems/pc" }
 minifb = "0.28"
 rodio = "0.17"
 log = "0.4"

@@ -25,7 +25,7 @@ impl GbSystem {
         let bus = GbBus::new();
         let mut cpu = CpuLr35902::new(bus);
         cpu.reset();
-        
+
         Self {
             cpu,
             ppu: Ppu::new(),
@@ -67,12 +67,12 @@ impl System for GbSystem {
         // Frame rate is ~59.73 Hz
         // Cycles per frame: 4194304 / 59.73 ≈ 70224 cycles
         const CYCLES_PER_FRAME: u32 = 70224;
-        
+
         let mut cycles = 0;
         while cycles < CYCLES_PER_FRAME {
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
-            
+
             // Step PPU
             if self.ppu.step(cpu_cycles) {
                 // V-Blank started - could trigger NMI here
@@ -113,7 +113,7 @@ impl System for GbSystem {
                 }
             };
         }
-        
+
         macro_rules! load_u16 {
             ($state:expr, $field:literal, $target:expr) => {
                 if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
@@ -121,7 +121,7 @@ impl System for GbSystem {
                 }
             };
         }
-        
+
         macro_rules! load_bool {
             ($state:expr, $field:literal, $target:expr) => {
                 if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
@@ -129,7 +129,7 @@ impl System for GbSystem {
                 }
             };
         }
-        
+
         if let Some(cpu_state) = v.get("cpu") {
             load_u8!(cpu_state, "a", self.cpu.a);
             load_u8!(cpu_state, "f", self.cpu.f);
@@ -165,11 +165,11 @@ impl System for GbSystem {
         if mount_point_id != "Cartridge" {
             return Err(GbError::InvalidMountPoint);
         }
-        
+
         self.cpu.memory.load_cart(data);
         self.cart_loaded = true;
         self.reset();
-        
+
         Ok(())
     }
 
@@ -177,7 +177,7 @@ impl System for GbSystem {
         if mount_point_id != "Cartridge" {
             return Err(GbError::InvalidMountPoint);
         }
-        
+
         self.cart_loaded = false;
         Ok(())
     }
@@ -249,7 +249,7 @@ mod tests {
         let mut sys = GbSystem::new();
         let rom = vec![0; 0x8000];
         sys.mount("Cartridge", &rom).unwrap();
-        
+
         let result = sys.step_frame();
         assert!(result.is_ok());
         let frame = result.unwrap();
@@ -257,4 +257,3 @@ mod tests {
         assert_eq!(frame.height, 144);
     }
 }
-

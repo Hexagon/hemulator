@@ -8,7 +8,7 @@ pub struct Ppu {
     vram: [u8; 0x2000],
     /// OAM (Object Attribute Memory - 160 bytes)
     oam: [u8; 0xA0],
-    
+
     /// LCD Control (0xFF40)
     pub lcdc: u8,
     /// LCD Status (0xFF41)
@@ -81,7 +81,7 @@ impl Ppu {
     /// Render a complete frame (160x144)
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(160, 144);
-        
+
         if (self.lcdc & LCDC_ENABLE) == 0 {
             // LCD is off - return blank screen
             return frame;
@@ -153,7 +153,7 @@ impl Ppu {
 
                 // Apply palette
                 let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
-                
+
                 // Convert to RGB (DMG palette: 0=white, 1=light gray, 2=dark gray, 3=black)
                 let rgb = match palette_color {
                     0 => 0xFFFFFFFF, // White
@@ -174,14 +174,14 @@ impl Ppu {
         let scanlines = cycles / 456; // ~456 cycles per scanline
         for _ in 0..scanlines {
             self.ly = (self.ly + 1) % 154;
-            
+
             // Check LYC=LY interrupt
             if self.ly == self.lyc {
                 self.stat |= 0x04; // Set coincidence flag
             } else {
                 self.stat &= !0x04;
             }
-            
+
             // V-Blank is lines 144-153
             if self.ly == 144 {
                 return true; // V-Blank started

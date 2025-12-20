@@ -197,7 +197,11 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     #[allow(dead_code)]
     fn get_reg8_high(&self, reg: u8) -> u8 {
-        debug_assert!(reg < 4, "Invalid 8-bit high register index: {} (must be 0-3)", reg);
+        debug_assert!(
+            reg < 4,
+            "Invalid 8-bit high register index: {} (must be 0-3)",
+            reg
+        );
         match reg {
             0 => (self.ax >> 8) as u8, // AH
             1 => (self.cx >> 8) as u8, // CH
@@ -211,7 +215,11 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     #[allow(dead_code)]
     fn get_reg8_low(&self, reg: u8) -> u8 {
-        debug_assert!(reg < 4, "Invalid 8-bit low register index: {} (must be 0-3)", reg);
+        debug_assert!(
+            reg < 4,
+            "Invalid 8-bit low register index: {} (must be 0-3)",
+            reg
+        );
         match reg {
             0 => (self.ax & 0xFF) as u8, // AL
             1 => (self.cx & 0xFF) as u8, // CL
@@ -224,7 +232,11 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Set 8-bit high register
     #[inline]
     fn set_reg8_high(&mut self, reg: u8, val: u8) {
-        debug_assert!(reg < 4, "Invalid 8-bit high register index: {} (must be 0-3)", reg);
+        debug_assert!(
+            reg < 4,
+            "Invalid 8-bit high register index: {} (must be 0-3)",
+            reg
+        );
         match reg {
             0 => self.ax = (self.ax & 0x00FF) | ((val as u16) << 8), // AH
             1 => self.cx = (self.cx & 0x00FF) | ((val as u16) << 8), // CH
@@ -237,7 +249,11 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Set 8-bit low register
     #[inline]
     fn set_reg8_low(&mut self, reg: u8, val: u8) {
-        debug_assert!(reg < 4, "Invalid 8-bit low register index: {} (must be 0-3)", reg);
+        debug_assert!(
+            reg < 4,
+            "Invalid 8-bit low register index: {} (must be 0-3)",
+            reg
+        );
         match reg {
             0 => self.ax = (self.ax & 0xFF00) | (val as u16), // AL
             1 => self.cx = (self.cx & 0xFF00) | (val as u16), // CL
@@ -250,7 +266,11 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Get 16-bit register
     #[inline]
     fn get_reg16(&self, reg: u8) -> u16 {
-        debug_assert!(reg < 8, "Invalid 16-bit register index: {} (must be 0-7)", reg);
+        debug_assert!(
+            reg < 8,
+            "Invalid 16-bit register index: {} (must be 0-7)",
+            reg
+        );
         match reg {
             0 => self.ax,
             1 => self.cx,
@@ -267,7 +287,11 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Set 16-bit register
     #[inline]
     fn set_reg16(&mut self, reg: u8, val: u16) {
-        debug_assert!(reg < 8, "Invalid 16-bit register index: {} (must be 0-7)", reg);
+        debug_assert!(
+            reg < 8,
+            "Invalid 16-bit register index: {} (must be 0-7)",
+            reg
+        );
         match reg {
             0 => self.ax = val,
             1 => self.cx = val,

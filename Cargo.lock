@@ -561,6 +561,7 @@ dependencies = [
  "emu_core",
  "emu_gb",
  "emu_nes",
+ "emu_pc",
  "env_logger",
  "log",
  "minifb",
@@ -573,6 +574,16 @@ dependencies = [
 
 [[package]]
 name = "emu_nes"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "emu_pc"
 version = "0.1.0"
 dependencies = [
  "emu_core",

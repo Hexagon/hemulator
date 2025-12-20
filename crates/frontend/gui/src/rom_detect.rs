@@ -8,6 +8,7 @@ pub enum SystemType {
     NES,
     GameBoy,
     Atari2600,
+    PC,
 }
 
 #[derive(Debug)]
@@ -27,6 +28,20 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check for NES (iNES format)
     if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
         return Ok(SystemType::NES);
+    }
+
+    // Check for DOS executable (MZ header)
+    if data.len() >= 2 && &data[0..2] == b"MZ" {
+        return Ok(SystemType::PC);
+    }
+
+    // Check for DOS COM file (no header, typically small)
+    // COM files are 64KB or less and have no specific signature
+    // We'll detect them by exclusion and reasonable size
+    if data.len() <= 0xFF00 && data.len() >= 16 {
+        // Could be a COM file - check if it's not another format first
+        // If we get here and it's a reasonable size, tentatively classify as PC
+        // but continue checking other formats
     }
 
     // Check for Game Boy
@@ -49,6 +64,11 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         return Ok(SystemType::Atari2600);
     }
 
+    // If it's small enough and not another format, assume COM file
+    if data.len() <= 0xFF00 && data.len() >= 16 {
+        return Ok(SystemType::PC);
+    }
+
     // Try to provide a helpful error message
     if data.len() < 16 {
         return Err(UnsupportedRomError {
@@ -59,12 +79,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe)"
             .to_string(),
     })
 }
@@ -106,5 +126,25 @@ mod tests {
         // 8K ROM
         let data = vec![0u8; 8192];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::Atari2600);
+    }
+
+    #[test]
+    fn test_detect_pc_exe() {
+        // DOS EXE with MZ header
+        let mut data = vec![0u8; 1024];
+        data[0..2].copy_from_slice(b"MZ");
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::PC);
+    }
+
+    #[test]
+    fn test_detect_pc_com() {
+        // Small COM file (no header) - needs to be at least 16 bytes
+        let mut data = vec![0xB8, 0x00, 0x4C, 0xCD, 0x21]; // Simple DOS program
+        data.resize(20, 0x90); // Pad with NOP instructions to 20 bytes
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::PC);
+
+        // Larger COM file
+        let data = vec![0u8; 1000];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::PC);
     }
 }
