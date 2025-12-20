@@ -306,12 +306,12 @@ impl Ppu {
                     let p = (addr - 0x3F00) & 0x1F;
                     let target = palette_mirror_index(p as usize);
                     let val = self.palette[target];
-                    
+
                     // Fill buffer with the mirrored nametable value underneath
                     let mirrored_nt_addr = addr - PALETTE_TO_NAMETABLE_OFFSET;
                     let idx = self.map_nametable_addr(mirrored_nt_addr);
                     self.read_buffer.set(self.vram[idx]);
-                    
+
                     let inc = if (self.ctrl & 0x04) != 0 { 32 } else { 1 };
                     self.vram_addr.set(self.vram_addr.get().wrapping_add(inc));
                     return val;
@@ -1273,10 +1273,13 @@ mod tests {
         // Now read from a non-palette address (e.g., $2000)
         ppu.write_register(6, 0x20);
         ppu.write_register(6, 0x00);
-        
+
         // This should return the buffered value (the mirrored nametable value from $2F00)
         let buffered = ppu.read_register(7);
-        assert_eq!(buffered, 0xAB, "Buffer should contain mirrored nametable value from palette read");
+        assert_eq!(
+            buffered, 0xAB,
+            "Buffer should contain mirrored nametable value from palette read"
+        );
     }
 
     #[test]
@@ -1285,7 +1288,7 @@ mod tests {
 
         // Test that different palette addresses ($3F00-$3FFF) mirror to corresponding nametable addresses
         // $3F00 -> $2F00, $3F10 -> $2F10, $3F20 -> $2F20 (with 32-byte palette mirroring)
-        
+
         // Set up different values in nametable at $2F00, $2F10, $2F20
         let nt_addr_1 = 0x2F00;
         let idx_1 = ppu.map_nametable_addr(nt_addr_1);
@@ -1303,7 +1306,7 @@ mod tests {
         ppu.write_register(6, 0x3F);
         ppu.write_register(6, 0x00);
         ppu.read_register(7); // Palette value (discard)
-        
+
         // Read from CHR to get buffered value
         ppu.write_register(6, 0x00);
         ppu.write_register(6, 0x00);
@@ -1314,7 +1317,7 @@ mod tests {
         ppu.write_register(6, 0x3F);
         ppu.write_register(6, 0x10);
         ppu.read_register(7); // Palette value (discard)
-        
+
         // Read from CHR to get buffered value
         ppu.write_register(6, 0x00);
         ppu.write_register(6, 0x00);
@@ -1325,7 +1328,7 @@ mod tests {
         ppu.write_register(6, 0x3F);
         ppu.write_register(6, 0x1F);
         ppu.read_register(7); // Palette value (discard)
-        
+
         // Read from CHR to get buffered value
         ppu.write_register(6, 0x00);
         ppu.write_register(6, 0x00);
@@ -1339,7 +1342,7 @@ mod tests {
 
         // Test that palette addresses mirror every 32 bytes
         // $3F20 should mirror to $3F00 for palette data, but $2F20 for buffer
-        
+
         let nt_addr = 0x2F20;
         let idx = ppu.map_nametable_addr(nt_addr);
         ppu.vram[idx] = 0xCD;
@@ -1368,7 +1371,7 @@ mod tests {
 
         // Test palette mirroring with different nametable mirroring modes
         // With vertical mirroring, $2F00 and $2F00+$400 map differently
-        
+
         // Set value in first nametable
         let nt_addr_1 = 0x2F00;
         let idx_1 = ppu.map_nametable_addr(nt_addr_1);
@@ -1383,12 +1386,15 @@ mod tests {
         ppu.write_register(6, 0x3F);
         ppu.write_register(6, 0x00);
         ppu.read_register(7); // Palette value (discard)
-        
+
         // Check buffer contains value from first nametable
         ppu.write_register(6, 0x00);
         ppu.write_register(6, 0x00);
         let buffered_1 = ppu.read_register(7);
-        assert_eq!(buffered_1, 0xAA, "Buffer should respect nametable mirroring");
+        assert_eq!(
+            buffered_1, 0xAA,
+            "Buffer should respect nametable mirroring"
+        );
 
         // Read from palette $3F00+$400 (would map to $2F00+$400 = $3300)
         // But $3300 is outside palette range, so this tests normal VRAM reads
@@ -1428,11 +1434,14 @@ mod tests {
         ppu.write_register(6, 0x00);
         ppu.write_register(6, 0x00);
         let buffered = ppu.read_register(7);
-        
+
         // Buffer should contain the mirrored value from the last palette read
         // Last read was from $3F00+7=$3F07, which mirrors to $2F07
         let expected_idx = ppu.map_nametable_addr(0x2F07);
         let expected = ppu.vram[expected_idx];
-        assert_eq!(buffered, expected, "Sequential palette reads should update buffer each time");
+        assert_eq!(
+            buffered, expected,
+            "Sequential palette reads should update buffer each time"
+        );
     }
 }

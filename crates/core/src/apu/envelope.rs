@@ -82,34 +82,34 @@ impl Envelope {
     pub fn set_loop(&mut self, loop_flag: bool) {
         self.loop_flag = loop_flag;
     }
-    
+
     /// Set all envelope parameters (Game Boy style)
     pub fn set_params(&mut self, initial_volume: u8, add_mode: bool, period: u8) {
         self.initial_volume = initial_volume & 0x0F;
         self.add_mode = add_mode;
         self.period = period & 0x07;
     }
-    
+
     /// Trigger the envelope (start from initial volume)
     pub fn trigger(&mut self) {
         self.start_flag = true;
     }
-    
+
     /// Get the current volume (0-15)
     pub fn volume(&self) -> u8 {
         self.decay_level
     }
-    
+
     /// Get the initial volume setting
     pub fn initial_volume(&self) -> u8 {
         self.initial_volume
     }
-    
+
     /// Get the add mode flag
     pub fn add_mode(&self) -> bool {
         self.add_mode
     }
-    
+
     /// Get the period setting
     pub fn period(&self) -> u8 {
         self.period
