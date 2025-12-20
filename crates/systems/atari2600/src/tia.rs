@@ -76,12 +76,22 @@
 //! # Audio Generation
 //!
 //! The TIA has 2 audio channels, each with:
-//! - **Control register** (AUDC0/AUDC1): 4 bits selecting waveform type
-//! - **Frequency register** (AUDF0/AUDF1): 5 bits controlling pitch
+//! - **Control register** (AUDC0/AUDC1): 4 bits selecting waveform type (0-15)
+//! - **Frequency register** (AUDF0/AUDF1): 5 bits controlling pitch (0-31)
 //! - **Volume register** (AUDV0/AUDV1): 4 bits controlling volume (0-15)
 //!
-//! This implementation **stores** the audio registers but does not fully synthesize audio output.
-//! Full audio synthesis would require implementing the various waveform generators.
+//! Audio synthesis uses polynomial counters to generate 16 different waveform types:
+//! - **Type 0, 11**: Set to 1 (always on - pure DC)
+//! - **Type 1**: 4-bit polynomial (buzzy tone)
+//! - **Type 2**: Division by 2 (pure tone, one octave lower)
+//! - **Type 3**: 4-bit AND 5-bit poly (complex tone)
+//! - **Type 4, 5**: Pure tone via division
+//! - **Type 6, 10**: Division by 31 (low pure tone)
+//! - **Type 7, 9**: 5-bit polynomial (white noise-like)
+//! - **Type 8**: 5-bit polynomial (noise)
+//! - **Type 12, 13**: Pure tone with 4-bit poly
+//! - **Type 14**: 4-bit polynomial
+//! - **Type 15**: 4-bit XOR 5-bit (complex noise)
 //!
 //! # Implementation Details
 //!
@@ -96,12 +106,12 @@
 //! 1. **Player/Missile Sizing**: NUSIZ registers are stored but not used for sizing/duplication
 //! 2. **Horizontal Motion**: HMxx registers are stored but motion is not applied
 //! 3. **Collision Detection**: Registers exist but always return 0
-//! 4. **Audio Synthesis**: Registers stored but waveforms not generated
-//! 5. **Delayed Graphics**: Old/new graphics registers not implemented
+//! 4. **Delayed Graphics**: Old/new graphics registers not implemented
 //!
 //! These limitations represent acceptable trade-offs for a functional emulator. Most games
 //! will display correctly with the current implementation.
 
+use emu_core::apu::PolynomialCounter;
 use serde::{Deserialize, Serialize};
 
 /// TIA chip state
@@ -154,7 +164,13 @@ pub struct Tia {
     scanline: u16,
     pixel: u16,
 
-    // Audio (simplified - just register storage)
+    // Audio channels
+    #[serde(skip)]
+    audio0: PolynomialCounter,
+    #[serde(skip)]
+    audio1: PolynomialCounter,
+
+    // Audio registers
     audc0: u8,
     audc1: u8,
     audf0: u8,
@@ -204,6 +220,10 @@ impl Tia {
             hmbl: 0,
             scanline: 0,
             pixel: 0,
+
+            audio0: PolynomialCounter::new(),
+            audio1: PolynomialCounter::new(),
+
             audc0: 0,
             audc1: 0,
             audf0: 0,
@@ -267,12 +287,30 @@ impl Tia {
             0x14 => self.ball_x = (self.pixel as u8).wrapping_sub(4),
 
             // Audio
-            0x15 => self.audc0 = val & 0x0F,
-            0x16 => self.audc1 = val & 0x0F,
-            0x17 => self.audf0 = val & 0x1F,
-            0x18 => self.audf1 = val & 0x1F,
-            0x19 => self.audv0 = val & 0x0F,
-            0x1A => self.audv1 = val & 0x0F,
+            0x15 => {
+                self.audc0 = val & 0x0F;
+                self.audio0.control = self.audc0;
+            }
+            0x16 => {
+                self.audc1 = val & 0x0F;
+                self.audio1.control = self.audc1;
+            }
+            0x17 => {
+                self.audf0 = val & 0x1F;
+                self.audio0.frequency = self.audf0;
+            }
+            0x18 => {
+                self.audf1 = val & 0x1F;
+                self.audio1.frequency = self.audf1;
+            }
+            0x19 => {
+                self.audv0 = val & 0x0F;
+                self.audio0.volume = self.audv0;
+            }
+            0x1A => {
+                self.audv1 = val & 0x0F;
+                self.audio1.volume = self.audv1;
+            }
 
             // Player graphics
             0x1B => self.grp0 = val,
@@ -512,6 +550,39 @@ impl Tia {
         } else {
             false
         }
+    }
+
+    /// Generate audio samples for a given count
+    /// TIA runs at 31.4 kHz (color clock / 114), but we output at 44.1 kHz
+    pub fn generate_audio_samples(&mut self, sample_count: usize) -> Vec<i16> {
+        const SAMPLE_HZ: f64 = 44_100.0;
+        const TIA_AUDIO_HZ: f64 = 31_400.0; // Approximate TIA audio clock rate
+
+        let mut samples = Vec::with_capacity(sample_count);
+        let mut accum = 0.0;
+
+        for _ in 0..sample_count {
+            // Determine how many TIA clocks to run for this sample
+            accum += TIA_AUDIO_HZ / SAMPLE_HZ;
+            let tia_clocks = accum as u32;
+            accum -= tia_clocks as f64;
+
+            // Clock both audio channels and mix
+            let mut mixed = 0i32;
+            for _ in 0..tia_clocks.max(1) {
+                let s0 = self.audio0.clock() as i32;
+                let s1 = self.audio1.clock() as i32;
+                mixed += s0 + s1;
+            }
+
+            // Average and scale to 16-bit range
+            let avg = mixed / tia_clocks.max(1) as i32;
+            // Scale from 0-30 (max 15+15) to approximately -16384 to 16384
+            let scaled = (avg - 15) * 1024;
+            samples.push(scaled.clamp(-32768, 32767) as i16);
+        }
+
+        samples
     }
 }
 
