@@ -184,9 +184,7 @@ impl EmulatorSystem {
                 minifb::Key::LeftShift | minifb::Key::RightShift => {
                     Some(emu_pc::SCANCODE_LEFT_SHIFT)
                 }
-                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
-                    Some(emu_pc::SCANCODE_LEFT_CTRL)
-                }
+                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
                 minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
                 _ => None,
             };
@@ -445,7 +443,7 @@ fn save_screenshot(
 /// This improves the user experience by allowing them to filter by specific file types
 fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
-    
+
     // Add individual filters for each extension
     for ext in &mount_point.extensions {
         // Create a user-friendly name for the filter
@@ -463,17 +461,17 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
                 format!("{} File (*.{})", ext.to_uppercase(), ext)
             }
         };
-        
+
         dialog = dialog.add_filter(&filter_name, &[ext.as_str()]);
     }
-    
+
     // Add "All supported files" filter with all extensions
     let extensions: Vec<&str> = mount_point.extensions.iter().map(|s| s.as_str()).collect();
     dialog = dialog.add_filter("All Supported Files", &extensions);
-    
+
     // Add "All Files" filter
     dialog = dialog.add_filter("All Files (*.*)", &["*"]);
-    
+
     dialog
 }
 
