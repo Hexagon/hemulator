@@ -222,30 +222,53 @@ pub fn create_help_overlay(
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
 
-    // Create strings that live long enough
-    let a_line = format!("  {} - A button", settings.keyboard.a);
-    let b_line = format!("  {} - B button", settings.keyboard.b);
-    let select_line = format!("  {} - Select", settings.keyboard.select);
-    let start_line = format!("  {} - Start", settings.keyboard.start);
-    let dpad_line = format!(
+    // Player 1 controls
+    let p1_a = format!("  {} - A", settings.input.player1.a);
+    let p1_b = format!("  {} - B", settings.input.player1.b);
+    let p1_select = format!("  {} - Select", settings.input.player1.select);
+    let p1_start = format!("  {} - Start", settings.input.player1.start);
+    let p1_dpad = format!(
         "  {} {} {} {} - D-pad",
-        settings.keyboard.up,
-        settings.keyboard.down,
-        settings.keyboard.left,
-        settings.keyboard.right
+        settings.input.player1.up,
+        settings.input.player1.down,
+        settings.input.player1.left,
+        settings.input.player1.right
     );
 
-    let help_lines: Vec<&str> = vec![
+    // Player 2 controls (if mapped)
+    let p2_mapped = !settings.input.player2.a.is_empty();
+    let p2_a = format!("  {} - A", settings.input.player2.a);
+    let p2_b = format!("  {} - B", settings.input.player2.b);
+    let p2_dpad = format!(
+        "  {} {} {} {} - D-pad",
+        settings.input.player2.up,
+        settings.input.player2.down,
+        settings.input.player2.left,
+        settings.input.player2.right
+    );
+
+    let mut help_lines: Vec<&str> = vec![
         "HEMULATOR - Help",
         "",
-        "Controller:",
-        &a_line,
-        &b_line,
-        &select_line,
-        &start_line,
-        &dpad_line,
+        "Player 1 Controller:",
+        &p1_a,
+        &p1_b,
+        &p1_select,
+        &p1_start,
+        &p1_dpad,
+    ];
+
+    if p2_mapped {
+        help_lines.push("");
+        help_lines.push("Player 2 Controller:");
+        help_lines.push(&p2_a);
+        help_lines.push(&p2_b);
+        help_lines.push(&p2_dpad);
+    }
+
+    help_lines.extend_from_slice(&[
         "",
-        "Keys:",
+        "Function Keys:",
         "  F1  - Help",
         "  F2  - Speed",
         "  F3  - Open ROM",
@@ -258,7 +281,7 @@ pub fn create_help_overlay(
         "  ESC - Exit",
         "",
         "Press F1 to close",
-    ];
+    ]);
 
     let start_x = 10;
     let start_y = 10;
@@ -351,6 +374,7 @@ pub fn create_slot_selector_overlay(
 }
 
 /// Create a debug info overlay
+#[allow(clippy::too_many_arguments)]
 pub fn create_debug_overlay(
     width: usize,
     height: usize,

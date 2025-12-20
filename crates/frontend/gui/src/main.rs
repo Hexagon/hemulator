@@ -17,6 +17,8 @@ use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 
 // System wrapper enum to support multiple emulated systems
+#[allow(clippy::large_enum_variant)]
+#[allow(clippy::upper_case_acronyms)]
 enum EmulatorSystem {
     NES(emu_nes::NesSystem),
     GameBoy(emu_gb::GbSystem),
@@ -136,70 +138,68 @@ impl EmulatorSystem {
     }
 
     fn handle_keyboard(&mut self, key: minifb::Key, pressed: bool) {
-        match self {
-            EmulatorSystem::PC(sys) => {
-                // Map minifb keys to PC scancodes
-                let scancode = match key {
-                    minifb::Key::A => Some(emu_pc::SCANCODE_A),
-                    minifb::Key::B => Some(emu_pc::SCANCODE_B),
-                    minifb::Key::C => Some(emu_pc::SCANCODE_C),
-                    minifb::Key::D => Some(emu_pc::SCANCODE_D),
-                    minifb::Key::E => Some(emu_pc::SCANCODE_E),
-                    minifb::Key::F => Some(emu_pc::SCANCODE_F),
-                    minifb::Key::G => Some(emu_pc::SCANCODE_G),
-                    minifb::Key::H => Some(emu_pc::SCANCODE_H),
-                    minifb::Key::I => Some(emu_pc::SCANCODE_I),
-                    minifb::Key::J => Some(emu_pc::SCANCODE_J),
-                    minifb::Key::K => Some(emu_pc::SCANCODE_K),
-                    minifb::Key::L => Some(emu_pc::SCANCODE_L),
-                    minifb::Key::M => Some(emu_pc::SCANCODE_M),
-                    minifb::Key::N => Some(emu_pc::SCANCODE_N),
-                    minifb::Key::O => Some(emu_pc::SCANCODE_O),
-                    minifb::Key::P => Some(emu_pc::SCANCODE_P),
-                    minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
-                    minifb::Key::R => Some(emu_pc::SCANCODE_R),
-                    minifb::Key::S => Some(emu_pc::SCANCODE_S),
-                    minifb::Key::T => Some(emu_pc::SCANCODE_T),
-                    minifb::Key::U => Some(emu_pc::SCANCODE_U),
-                    minifb::Key::V => Some(emu_pc::SCANCODE_V),
-                    minifb::Key::W => Some(emu_pc::SCANCODE_W),
-                    minifb::Key::X => Some(emu_pc::SCANCODE_X),
-                    minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
-                    minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
-                    minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
-                    minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
-                    minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
-                    minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
-                    minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
-                    minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
-                    minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
-                    minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
-                    minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
-                    minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
-                    minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
-                    minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
-                    minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
-                    minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
-                    minifb::Key::LeftShift | minifb::Key::RightShift => {
-                        Some(emu_pc::SCANCODE_LEFT_SHIFT)
-                    }
-                    minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
-                        Some(emu_pc::SCANCODE_LEFT_CTRL)
-                    }
-                    minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
-                    _ => None,
-                };
+        if let EmulatorSystem::PC(sys) = self {
+            // Map minifb keys to PC scancodes
+            let scancode = match key {
+                minifb::Key::A => Some(emu_pc::SCANCODE_A),
+                minifb::Key::B => Some(emu_pc::SCANCODE_B),
+                minifb::Key::C => Some(emu_pc::SCANCODE_C),
+                minifb::Key::D => Some(emu_pc::SCANCODE_D),
+                minifb::Key::E => Some(emu_pc::SCANCODE_E),
+                minifb::Key::F => Some(emu_pc::SCANCODE_F),
+                minifb::Key::G => Some(emu_pc::SCANCODE_G),
+                minifb::Key::H => Some(emu_pc::SCANCODE_H),
+                minifb::Key::I => Some(emu_pc::SCANCODE_I),
+                minifb::Key::J => Some(emu_pc::SCANCODE_J),
+                minifb::Key::K => Some(emu_pc::SCANCODE_K),
+                minifb::Key::L => Some(emu_pc::SCANCODE_L),
+                minifb::Key::M => Some(emu_pc::SCANCODE_M),
+                minifb::Key::N => Some(emu_pc::SCANCODE_N),
+                minifb::Key::O => Some(emu_pc::SCANCODE_O),
+                minifb::Key::P => Some(emu_pc::SCANCODE_P),
+                minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
+                minifb::Key::R => Some(emu_pc::SCANCODE_R),
+                minifb::Key::S => Some(emu_pc::SCANCODE_S),
+                minifb::Key::T => Some(emu_pc::SCANCODE_T),
+                minifb::Key::U => Some(emu_pc::SCANCODE_U),
+                minifb::Key::V => Some(emu_pc::SCANCODE_V),
+                minifb::Key::W => Some(emu_pc::SCANCODE_W),
+                minifb::Key::X => Some(emu_pc::SCANCODE_X),
+                minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
+                minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
+                minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
+                minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
+                minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
+                minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
+                minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
+                minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
+                minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
+                minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
+                minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
+                minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
+                minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
+                minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
+                minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
+                minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
+                minifb::Key::LeftShift | minifb::Key::RightShift => {
+                    Some(emu_pc::SCANCODE_LEFT_SHIFT)
+                }
+                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => {
+                    Some(emu_pc::SCANCODE_LEFT_CTRL)
+                }
+                minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
+                _ => None,
+            };
 
-                if let Some(sc) = scancode {
-                    if pressed {
-                        sys.key_press(sc);
-                    } else {
-                        sys.key_release(sc);
-                    }
+            if let Some(sc) = scancode {
+                if pressed {
+                    sys.key_press(sc);
+                } else {
+                    sys.key_release(sc);
                 }
             }
-            _ => {} // Other systems don't use keyboard input
         }
+        // Other systems don't use keyboard input
     }
 
     fn get_debug_info(&self) -> Option<emu_nes::DebugInfo> {
@@ -258,6 +258,11 @@ impl EmulatorSystem {
 }
 
 fn string_to_key(s: &str) -> Option<Key> {
+    // Return None for empty strings (unmapped keys)
+    if s.is_empty() {
+        return None;
+    }
+
     match s {
         "Z" => Some(Key::Z),
         "X" => Some(Key::X),
@@ -287,37 +292,68 @@ fn string_to_key(s: &str) -> Option<Key> {
         "Y" => Some(Key::Y),
         "LeftShift" => Some(Key::LeftShift),
         "RightShift" => Some(Key::RightShift),
+        "LeftCtrl" => Some(Key::LeftCtrl),
+        "RightCtrl" => Some(Key::RightCtrl),
         "Enter" => Some(Key::Enter),
         "Space" => Some(Key::Space),
         "Up" => Some(Key::Up),
         "Down" => Some(Key::Down),
         "Left" => Some(Key::Left),
         "Right" => Some(Key::Right),
+        "LeftBracket" => Some(Key::LeftBracket),
+        "RightBracket" => Some(Key::RightBracket),
         _ => None,
     }
 }
 
-fn key_mapping_to_button(key: Key, settings: &Settings) -> Option<u8> {
-    // Map key to button based on settings
-    if Some(key) == string_to_key(&settings.keyboard.a) {
+fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
+    // Map key to button based on mapping
+    if Some(key) == string_to_key(&mapping.a) {
         Some(0)
-    } else if Some(key) == string_to_key(&settings.keyboard.b) {
+    } else if Some(key) == string_to_key(&mapping.b) {
         Some(1)
-    } else if Some(key) == string_to_key(&settings.keyboard.select) {
+    } else if Some(key) == string_to_key(&mapping.select) {
         Some(2)
-    } else if Some(key) == string_to_key(&settings.keyboard.start) {
+    } else if Some(key) == string_to_key(&mapping.start) {
         Some(3)
-    } else if Some(key) == string_to_key(&settings.keyboard.up) {
+    } else if Some(key) == string_to_key(&mapping.up) {
         Some(4)
-    } else if Some(key) == string_to_key(&settings.keyboard.down) {
+    } else if Some(key) == string_to_key(&mapping.down) {
         Some(5)
-    } else if Some(key) == string_to_key(&settings.keyboard.left) {
+    } else if Some(key) == string_to_key(&mapping.left) {
         Some(6)
-    } else if Some(key) == string_to_key(&settings.keyboard.right) {
+    } else if Some(key) == string_to_key(&mapping.right) {
         Some(7)
     } else {
         None
     }
+}
+
+/// Get controller state for a player from current keyboard state
+fn get_controller_state(window: &Window, mapping: &settings::KeyMapping) -> u8 {
+    let keys_to_check: Vec<Key> = vec![
+        string_to_key(&mapping.a),
+        string_to_key(&mapping.b),
+        string_to_key(&mapping.select),
+        string_to_key(&mapping.start),
+        string_to_key(&mapping.up),
+        string_to_key(&mapping.down),
+        string_to_key(&mapping.left),
+        string_to_key(&mapping.right),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let mut state: u8 = 0;
+    for k in keys_to_check.iter() {
+        if window.is_key_down(*k) {
+            if let Some(bit) = key_mapping_to_button(*k, mapping) {
+                state |= 1u8 << bit;
+            }
+        }
+    }
+    state
 }
 
 /// Streaming audio source backed by a channel. When there's no data, it outputs silence to avoid
@@ -992,39 +1028,32 @@ fn main() {
             && !show_speed_selector
             && settings.emulation_speed > 0.0
         {
-            let keys_to_check: Vec<Key> = vec![
-                string_to_key(&settings.keyboard.a),
-                string_to_key(&settings.keyboard.b),
-                string_to_key(&settings.keyboard.select),
-                string_to_key(&settings.keyboard.start),
-                string_to_key(&settings.keyboard.up),
-                string_to_key(&settings.keyboard.down),
-                string_to_key(&settings.keyboard.left),
-                string_to_key(&settings.keyboard.right),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-
-            let mut ctrl0: u8 = 0;
-            for k in keys_to_check.iter() {
-                if window.is_key_down(*k) {
-                    if let Some(bit) = key_mapping_to_button(*k, &settings) {
-                        ctrl0 |= 1u8 << bit;
-                    }
-                }
-            }
-            sys.set_controller(0, ctrl0);
-
-            // Handle keyboard input for PC system
+            // Handle keyboard input for PC system (full keyboard passthrough)
             if let EmulatorSystem::PC(_) = &sys {
-                // Get all keys and send to PC system
-                let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
-                for key in keys {
-                    sys.handle_keyboard(key, true);
+                // Check if host modifier key is pressed
+                let host_modifier_pressed = string_to_key(&settings.input.host_modifier)
+                    .map(|k| window.is_key_down(k))
+                    .unwrap_or(false);
+
+                if !host_modifier_pressed {
+                    // Normal mode: pass all keys to PC
+                    let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
+                    for key in keys {
+                        sys.handle_keyboard(key, true);
+                    }
+                    // Note: Key releases are not easily tracked with minifb's API
+                    // The keyboard buffer in PC system handles this with timeouts
                 }
-                // Note: Key releases are not easily tracked with minifb's API
-                // The keyboard buffer in PC system handles this with timeouts
+                // If host modifier is pressed, function keys are handled by the GUI above
+            } else {
+                // Controller-based systems (NES, GB, Atari, etc.)
+                // Get controller state for each player
+                let ctrl0 = get_controller_state(&window, &settings.input.player1);
+                let ctrl1 = get_controller_state(&window, &settings.input.player2);
+                // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
+
+                sys.set_controller(0, ctrl0);
+                sys.set_controller(1, ctrl1);
             }
 
             // Step one frame and display
