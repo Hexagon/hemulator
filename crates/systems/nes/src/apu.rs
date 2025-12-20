@@ -8,6 +8,8 @@
 //! The APU currently implements:
 //!
 //! - **2 Pulse Channels**: Square wave generators with duty cycle control
+//! - **Triangle Channel**: 32-step triangle wave generator
+//! - **Noise Channel**: Pseudo-random noise with LFSR
 //! - **Length Counter**: Automatic note duration control
 //! - **Envelope**: Volume envelope with decay
 //! - **Frame Counter**: Timing controller (4-step and 5-step modes)
@@ -15,8 +17,6 @@
 //!
 //! ## Not Yet Implemented
 //!
-//! - **Triangle Channel**: 32-step triangle wave generator
-//! - **Noise Channel**: Pseudo-random noise with LFSR
 //! - **DMC Channel**: Delta modulation channel for sample playback
 //! - **Sweep Units**: Pitch bending for pulse channels
 //!
@@ -24,8 +24,8 @@
 //!
 //! - **$4000-$4003**: Pulse channel 1 (duty, envelope, frequency, length)
 //! - **$4004-$4007**: Pulse channel 2 (duty, envelope, frequency, length)
-//! - **$4008-$400B**: Triangle channel (not implemented)
-//! - **$400C-$400F**: Noise channel (not implemented)
+//! - **$4008-$400B**: Triangle channel (control, linear counter, frequency, length)
+//! - **$400C-$400F**: Noise channel (envelope, mode/period, length)
 //! - **$4010-$4013**: DMC channel (not implemented)
 //! - **$4015**: Status/enable register
 //! - **$4017**: Frame counter mode and IRQ control
@@ -42,12 +42,12 @@
 //! Future enhancements could include proper NES mixer simulation with
 //! non-linear output curves.
 
-use emu_core::apu::{PulseChannel, TimingMode, LENGTH_TABLE};
+use emu_core::apu::{NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE};
 use std::cell::Cell;
 
-/// NES APU with 2 pulse channels.
+/// NES APU with pulse, triangle, and noise channels.
 ///
-/// Uses core `PulseChannel` components for audio synthesis.
+/// Uses core APU components for audio synthesis.
 ///
 /// # Registers
 ///
@@ -55,7 +55,9 @@ use std::cell::Cell;
 ///
 /// - $4000-$4003: Pulse 1 (DDLC VVVV, sweep, timer low, length/timer high)
 /// - $4004-$4007: Pulse 2 (same as pulse 1)
-/// - $4015: Enable register (bits 0-1 enable pulse 1-2)
+/// - $4008-$400B: Triangle (control, unused, timer low, timer high/length)
+/// - $400C-$400F: Noise (envelope, unused, mode/period, length)
+/// - $4015: Enable register (bits 0-3 enable pulse 1-2, triangle, noise)
 /// - $4017: Frame counter mode (bit 7 = 5-step, bit 6 = IRQ inhibit)
 ///
 /// # Timing
@@ -78,6 +80,8 @@ use std::cell::Cell;
 pub struct APU {
     pub pulse1: PulseChannel,
     pub pulse2: PulseChannel,
+    pub triangle: TriangleChannel,
+    pub noise: NoiseChannel,
     cycle_accum: f64,
     timing: TimingMode,
     /// Frame counter for clocking length counters and envelopes
@@ -100,6 +104,8 @@ impl APU {
         Self {
             pulse1: PulseChannel::new(),
             pulse2: PulseChannel::new(),
+            triangle: TriangleChannel::new(),
+            noise: NoiseChannel::new(),
             cycle_accum: 0.0,
             timing,
             frame_counter_cycles: 0,
@@ -173,10 +179,61 @@ impl APU {
                 self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
             }
 
+            // Triangle registers
+            0x4008 => {
+                // Control flag (bit 7) and linear counter reload value (bits 6-0)
+                self.triangle.control_flag = (val & 0x80) != 0;
+                self.triangle.linear_counter_reload = val & 0x7F;
+            }
+            0x4009 => {
+                // Unused
+            }
+            0x400A => {
+                // Frequency low byte
+                let low = val as u16;
+                let high = (self.triangle.timer_reload >> 8) & 0x07;
+                self.triangle.set_timer((high << 8) | low);
+            }
+            0x400B => {
+                // Frequency high byte + length counter index
+                let high = (val & 0x07) as u16;
+                let low = self.triangle.timer_reload & 0xFF;
+                self.triangle.set_timer((high << 8) | low);
+                // Set reload flag to reload linear counter
+                self.triangle.linear_counter_reload_flag = true;
+                // Length counter index in upper 5 bits
+                let len_index = (val >> 3) & 0x1F;
+                self.triangle.length_counter = LENGTH_TABLE[len_index as usize];
+            }
+
+            // Noise registers
+            0x400C => {
+                // Envelope settings (same format as pulse channels)
+                self.noise.length_counter_halt = (val & 0x20) != 0;
+                self.noise.constant_volume = (val & 0x10) != 0;
+                self.noise.envelope = val & 0x0F;
+            }
+            0x400D => {
+                // Unused
+            }
+            0x400E => {
+                // Mode flag (bit 7) and period index (bits 3-0)
+                self.noise.mode = (val & 0x80) != 0;
+                self.noise.set_period(val & 0x0F);
+            }
+            0x400F => {
+                // Length counter index
+                let len_index = (val >> 3) & 0x1F;
+                self.noise.length_counter = LENGTH_TABLE[len_index as usize];
+            }
+
             // APU Enable register
             0x4015 => {
-                self.pulse1.enabled = (val & 1) != 0;
-                self.pulse2.enabled = (val & 2) != 0;
+                self.pulse1.enabled = (val & 0x01) != 0;
+                self.pulse2.enabled = (val & 0x02) != 0;
+                self.triangle.enabled = (val & 0x04) != 0;
+                self.noise.enabled = (val & 0x08) != 0;
+                // DMC enable at bit 4 (not yet implemented)
             }
 
             // Frame Counter register
@@ -207,7 +264,8 @@ impl APU {
             0x4015 => {
                 // Bit 0: Pulse 1 length counter > 0
                 // Bit 1: Pulse 2 length counter > 0
-                // Bits 2-3: Triangle and Noise (not implemented, return 0)
+                // Bit 2: Triangle length counter > 0
+                // Bit 3: Noise length counter > 0
                 // Bit 4: DMC active (not implemented, return 0)
                 // Bit 5: unused (return 0)
                 // Bit 6: Frame interrupt
@@ -218,6 +276,12 @@ impl APU {
                 }
                 if self.pulse2.length_counter > 0 {
                     status |= 0x02;
+                }
+                if self.triangle.length_counter > 0 {
+                    status |= 0x04;
+                }
+                if self.noise.length_counter > 0 {
+                    status |= 0x08;
                 }
                 if self.irq_pending.get() {
                     status |= 0x40;
@@ -316,17 +380,35 @@ impl APU {
                         if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
                             self.pulse2.length_counter -= 1;
                         }
+                        if self.triangle.length_counter > 0 && !self.triangle.control_flag {
+                            self.triangle.length_counter -= 1;
+                        }
+                        if self.noise.length_counter > 0 && !self.noise.length_counter_halt {
+                            self.noise.length_counter -= 1;
+                        }
+                    }
+
+                    // Clock linear counter (triangle) at every quarter frame
+                    if self.triangle.linear_counter_reload_flag {
+                        self.triangle.linear_counter = self.triangle.linear_counter_reload;
+                    } else if self.triangle.linear_counter > 0 {
+                        self.triangle.linear_counter -= 1;
+                    }
+                    if !self.triangle.control_flag {
+                        self.triangle.linear_counter_reload_flag = false;
                     }
                 }
 
-                // Clock pulse channels
+                // Clock all channels
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
-                acc += s1 + s2;
+                let s3 = self.triangle.clock() as i32;
+                let s4 = self.noise.clock() as i32;
+                acc += s1 + s2 + s3 + s4;
             }
 
             let avg = acc / cycles as i32;
-            let mixed = avg / 2; // simple pulse mix average
+            let mixed = avg / 4; // simple average mix for 4 channels
             out.push(mixed.clamp(-32768, 32767) as i16);
         }
 
