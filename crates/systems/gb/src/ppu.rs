@@ -71,11 +71,11 @@ impl Ppu {
     }
 
     pub fn read_oam(&self, addr: u16) -> u8 {
-        self.oam[(addr & 0xFF) as usize]
+        self.oam[(addr & 0x9F) as usize]
     }
 
     pub fn write_oam(&mut self, addr: u16, val: u8) {
-        self.oam[(addr & 0xFF) as usize] = val;
+        self.oam[(addr & 0x9F) as usize] = val;
     }
 
     /// Render a complete frame (160x144)
@@ -96,6 +96,12 @@ impl Ppu {
         // TODO: Render sprites
 
         frame
+    }
+
+    fn calculate_signed_tile_address(&self, base: u16, tile_index: u8) -> u16 {
+        // In signed mode, tile_index is treated as signed -128 to 127
+        // Base is at $8800, so index 0 would be at $9000 (base + 128 * 16)
+        base + ((tile_index as i8 as i16 + 128) as u16 * 16)
     }
 
     fn render_background(&self, frame: &mut Frame) {
@@ -127,10 +133,11 @@ impl Ppu {
 
                 // Calculate tile data address
                 let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
+                    // Unsigned mode: tiles at $8000-$8FFF
                     tile_data_base + (tile_index as u16 * 16)
                 } else {
-                    // Signed addressing mode
-                    tile_data_base + ((tile_index as i8 as i16 + 128) as u16 * 16)
+                    // Signed mode: tiles at $8800-$97FF, index is signed -128 to 127
+                    self.calculate_signed_tile_address(tile_data_base, tile_index)
                 };
 
                 // Get tile data (2 bytes per row)

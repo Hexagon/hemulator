@@ -1002,7 +1002,7 @@ mod tests {
         cpu.b = 0b10000000;
         cpu.pc = 0;
         cpu.memory.0[0] = 0xCB; // CB prefix
-        cpu.memory.0[1] = 0x47; // BIT 0,A (bit 0 of A)
+        cpu.memory.0[1] = 0x47; // BIT 0,A
         cpu.a = 0b00000001;
         cpu.step();
         assert!(!cpu.get_flag(FLAG_Z)); // Bit 0 is set
