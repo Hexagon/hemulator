@@ -71,8 +71,8 @@
 //!
 //! ## Example: F8 Banking
 //!
-//! ```no_run
-//! // Atari 2600 assembly example
+//! ```text
+//! # Atari 2600 assembly example
 //! LDA $1FF9    ; Switch to bank 1 (the value read is discarded)
 //! JMP SubInBank1
 //!

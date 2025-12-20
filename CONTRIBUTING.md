@@ -2,10 +2,33 @@
 
 Contributions are welcome! Please follow these guidelines:
 
-1. **Code Style**: Run `cargo fmt` before committing
-2. **Linting**: Ensure `cargo clippy --workspace --all-targets -- -D warnings` passes
-3. **Testing**: Add tests for new features and ensure all tests pass
-4. **Documentation**: Update MANUAL.md for user-facing changes, README.md for developer info
+## Pre-Commit Checks (REQUIRED)
+
+Before committing any code, run these checks in order and ensure they all pass:
+
+1. **Formatting**: `cargo fmt --all -- --check`
+   - Must pass with no diff
+   - If it fails, run `cargo fmt --all` to auto-format the code
+
+2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings`
+   - Must pass with no warnings
+   - Fix all clippy warnings before committing
+
+3. **Build**: `cargo build --workspace`
+   - Must compile successfully
+   - Fix any compilation errors before committing
+
+4. **Tests**: `cargo test --workspace`
+   - All tests must pass
+   - Add tests for new features and fix any failing tests
+
+**Important**: These same checks run in CI, so ensuring they pass locally prevents CI failures and speeds up the review process.
+
+## Additional Guidelines
+
+- **Documentation**: Update MANUAL.md for user-facing changes, README.md for developer info
+- **Code Quality**: Write clean, well-documented code with meaningful variable names
+- **Commit Messages**: Use clear, descriptive commit messages
 
 ## Areas for Contribution
 - Additional mapper implementations (MMC5, VRC6, etc.)

@@ -1561,11 +1561,7 @@ mod tests {
         // Since latch is true, this should write low byte
         ppu.write_register(6, 0x50);
         assert!(!ppu.addr_latch.get(), "PPUADDR should clear latch");
-        assert_eq!(
-            ppu.vram_addr.get() & 0xFF,
-            0x50,
-            "Low byte should be set"
-        );
+        assert_eq!(ppu.vram_addr.get() & 0xFF, 0x50, "Low byte should be set");
 
         // Reset and test the other way
         ppu.addr_latch.set(false);
@@ -1647,7 +1643,10 @@ mod tests {
 
         // Set VBlank - should trigger NMI
         ppu.set_vblank(true);
-        assert!(ppu.take_nmi_pending(), "NMI should be pending when VBlank starts with NMI enabled");
+        assert!(
+            ppu.take_nmi_pending(),
+            "NMI should be pending when VBlank starts with NMI enabled"
+        );
 
         // Second call should return false (NMI was taken)
         assert!(!ppu.take_nmi_pending(), "NMI should only fire once");

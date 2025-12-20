@@ -202,7 +202,11 @@ mod tests {
 
         // Bit 3 should be ignored for banking
         axrom.write_prg(0x8000, 0x08, &mut ppu); // 0x08 & 0x07 = 0
-        assert_eq!(axrom.read_prg(0x8000), 0x11, "Bit 3 should not affect banking");
+        assert_eq!(
+            axrom.read_prg(0x8000),
+            0x11,
+            "Bit 3 should not affect banking"
+        );
     }
 
     #[test]
