@@ -258,6 +258,11 @@ impl EmulatorSystem {
 }
 
 fn string_to_key(s: &str) -> Option<Key> {
+    // Return None for empty strings (unmapped keys)
+    if s.is_empty() {
+        return None;
+    }
+    
     match s {
         "Z" => Some(Key::Z),
         "X" => Some(Key::X),
@@ -287,37 +292,68 @@ fn string_to_key(s: &str) -> Option<Key> {
         "Y" => Some(Key::Y),
         "LeftShift" => Some(Key::LeftShift),
         "RightShift" => Some(Key::RightShift),
+        "LeftCtrl" => Some(Key::LeftCtrl),
+        "RightCtrl" => Some(Key::RightCtrl),
         "Enter" => Some(Key::Enter),
         "Space" => Some(Key::Space),
         "Up" => Some(Key::Up),
         "Down" => Some(Key::Down),
         "Left" => Some(Key::Left),
         "Right" => Some(Key::Right),
+        "LeftBracket" => Some(Key::LeftBracket),
+        "RightBracket" => Some(Key::RightBracket),
         _ => None,
     }
 }
 
-fn key_mapping_to_button(key: Key, settings: &Settings) -> Option<u8> {
-    // Map key to button based on settings
-    if Some(key) == string_to_key(&settings.keyboard.a) {
+fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
+    // Map key to button based on mapping
+    if Some(key) == string_to_key(&mapping.a) {
         Some(0)
-    } else if Some(key) == string_to_key(&settings.keyboard.b) {
+    } else if Some(key) == string_to_key(&mapping.b) {
         Some(1)
-    } else if Some(key) == string_to_key(&settings.keyboard.select) {
+    } else if Some(key) == string_to_key(&mapping.select) {
         Some(2)
-    } else if Some(key) == string_to_key(&settings.keyboard.start) {
+    } else if Some(key) == string_to_key(&mapping.start) {
         Some(3)
-    } else if Some(key) == string_to_key(&settings.keyboard.up) {
+    } else if Some(key) == string_to_key(&mapping.up) {
         Some(4)
-    } else if Some(key) == string_to_key(&settings.keyboard.down) {
+    } else if Some(key) == string_to_key(&mapping.down) {
         Some(5)
-    } else if Some(key) == string_to_key(&settings.keyboard.left) {
+    } else if Some(key) == string_to_key(&mapping.left) {
         Some(6)
-    } else if Some(key) == string_to_key(&settings.keyboard.right) {
+    } else if Some(key) == string_to_key(&mapping.right) {
         Some(7)
     } else {
         None
     }
+}
+
+/// Get controller state for a player from current keyboard state
+fn get_controller_state(window: &Window, mapping: &settings::KeyMapping) -> u8 {
+    let keys_to_check: Vec<Key> = vec![
+        string_to_key(&mapping.a),
+        string_to_key(&mapping.b),
+        string_to_key(&mapping.select),
+        string_to_key(&mapping.start),
+        string_to_key(&mapping.up),
+        string_to_key(&mapping.down),
+        string_to_key(&mapping.left),
+        string_to_key(&mapping.right),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let mut state: u8 = 0;
+    for k in keys_to_check.iter() {
+        if window.is_key_down(*k) {
+            if let Some(bit) = key_mapping_to_button(*k, mapping) {
+                state |= 1u8 << bit;
+            }
+        }
+    }
+    state
 }
 
 /// Streaming audio source backed by a channel. When there's no data, it outputs silence to avoid
@@ -996,39 +1032,32 @@ fn main() {
             && !show_speed_selector
             && settings.emulation_speed > 0.0
         {
-            let keys_to_check: Vec<Key> = vec![
-                string_to_key(&settings.keyboard.a),
-                string_to_key(&settings.keyboard.b),
-                string_to_key(&settings.keyboard.select),
-                string_to_key(&settings.keyboard.start),
-                string_to_key(&settings.keyboard.up),
-                string_to_key(&settings.keyboard.down),
-                string_to_key(&settings.keyboard.left),
-                string_to_key(&settings.keyboard.right),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-
-            let mut ctrl0: u8 = 0;
-            for k in keys_to_check.iter() {
-                if window.is_key_down(*k) {
-                    if let Some(bit) = key_mapping_to_button(*k, &settings) {
-                        ctrl0 |= 1u8 << bit;
-                    }
-                }
-            }
-            sys.set_controller(0, ctrl0);
-
-            // Handle keyboard input for PC system
+            // Handle keyboard input for PC system (full keyboard passthrough)
             if let EmulatorSystem::PC(_) = &sys {
-                // Get all keys and send to PC system
-                let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
-                for key in keys {
-                    sys.handle_keyboard(key, true);
+                // Check if host modifier key is pressed
+                let host_modifier_pressed = string_to_key(&settings.input.host_modifier)
+                    .map(|k| window.is_key_down(k))
+                    .unwrap_or(false);
+
+                if !host_modifier_pressed {
+                    // Normal mode: pass all keys to PC
+                    let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
+                    for key in keys {
+                        sys.handle_keyboard(key, true);
+                    }
+                    // Note: Key releases are not easily tracked with minifb's API
+                    // The keyboard buffer in PC system handles this with timeouts
                 }
-                // Note: Key releases are not easily tracked with minifb's API
-                // The keyboard buffer in PC system handles this with timeouts
+                // If host modifier is pressed, function keys are handled by the GUI above
+            } else {
+                // Controller-based systems (NES, GB, Atari, etc.)
+                // Get controller state for each player
+                let ctrl0 = get_controller_state(&window, &settings.input.player1);
+                let ctrl1 = get_controller_state(&window, &settings.input.player2);
+                // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
+                
+                sys.set_controller(0, ctrl0);
+                sys.set_controller(1, ctrl1);
             }
 
             // Step one frame and display
