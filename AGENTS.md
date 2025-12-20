@@ -180,7 +180,7 @@ System-specific implementations that use core components:
       - Mapper tracks latch state changes and applies CHR bank updates after each frame
       - Frame-based rendering means updates happen per-frame, not mid-scanline
       - Games like Punch-Out!! and Fire Emblem should work correctly with per-frame latch switching
-  - All existing tests pass (61 mapper and PPU tests)
+  - All existing tests pass (65 mapper, PPU, and system tests)
 
 - **Game Boy (`emu_gb`)**: Working implementation with CPU integration
   - Uses `cpu_lr35902` from core with GB-specific memory bus
