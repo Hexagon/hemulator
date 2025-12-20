@@ -47,6 +47,7 @@ impl Atari2600Cpu {
     }
 
     /// Replace the bus
+    #[allow(dead_code)]
     pub fn with_bus(mut self, bus: Atari2600Bus) -> Self {
         if let Some(cpu) = self.cpu.take() {
             self.cpu = Some(cpu.with_memory(bus));

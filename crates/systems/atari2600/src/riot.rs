@@ -209,6 +209,7 @@ impl Riot {
     /// Set joystick state (Port A)
     /// Bits: P0 Right, P0 Left, P0 Down, P0 Up, P1 Right, P1 Left, P1 Down, P1 Up
     /// 0 = pressed, 1 = not pressed (active low)
+    #[allow(dead_code)]
     pub fn set_joystick(&mut self, player: u8, direction: u8, pressed: bool) {
         let bit = if player == 0 {
             direction // Player 0: bits 0-3
@@ -229,6 +230,7 @@ impl Riot {
     /// Bit 3: BW/Color (0 = BW, 1 = Color)
     /// Bit 6: Left difficulty (0 = A/Pro, 1 = B/Amateur)
     /// Bit 7: Right difficulty (0 = A/Pro, 1 = B/Amateur)
+    #[allow(dead_code)]
     pub fn set_console_switch(&mut self, bit: u8, pressed: bool) {
         if pressed {
             self.swchb &= !(1 << bit);
