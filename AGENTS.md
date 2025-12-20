@@ -48,6 +48,35 @@ Contains reusable CPU implementations and common traits:
     - Status flags (N, V, B, D, I, Z, C)
   - `ArrayMemory` helper for testing and simple use cases
 
+- **`cpu_8080`**: Intel 8080 CPU implementation
+  - Generic `Memory8080` trait for memory access
+  - Foundation for Z80 and Game Boy CPUs
+  - Stub implementation with basic opcodes (LXI, MOV, XCHG, etc.)
+  - I/O port support (IN/OUT instructions)
+  - Flag register (S, Z, AC, P, C)
+  - Can be used for: Space Invaders, CP/M systems, early arcade games
+
+- **`cpu_z80`**: Zilog Z80 CPU implementation
+  - Generic `MemoryZ80` trait for memory access
+  - Extends 8080 with shadow registers and index registers
+  - Stub implementation with Z80-specific features:
+    - Shadow register set (AF', BC', DE', HL')
+    - Index registers (IX, IY)
+    - Interrupt vector (I) and memory refresh (R) registers
+    - Multiple interrupt modes (IM 0, 1, 2)
+  - Can be used for: Sega Master System, Game Gear, ZX Spectrum, MSX
+
+- **`cpu_lr35902`**: Sharp LR35902 CPU implementation (Game Boy)
+  - Generic `MemoryLr35902` trait for memory access
+  - Z80-like CPU with Game Boy-specific modifications
+  - Stub implementation with GB-specific features:
+    - 8-bit registers: A, F, B, C, D, E, H, L (no shadow registers)
+    - 16-bit registers: SP, PC
+    - Flags: Z (Zero), N (Subtract), H (Half Carry), C (Carry)
+    - IME (Interrupt Master Enable) flag
+    - HALT and STOP instructions
+    - Starts at PC=0x0100 (after boot ROM)
+  - Used by: Game Boy, Game Boy Color, Game Boy Advance (in GB mode)
 - **`cpu_8086`**: Intel 8086 CPU implementation with core instruction set
   - Generic `Memory8086` trait for memory access
   - Segment-based memory addressing (CS, DS, ES, SS)
@@ -153,7 +182,31 @@ System-specific implementations that use core components:
       - Games like Punch-Out!! and Fire Emblem should work correctly with per-frame latch switching
   - All existing tests pass (61 mapper and PPU tests)
 
-- **Game Boy (`emu_gb`)**: Skeleton implementation
+- **Game Boy (`emu_gb`)**: Working implementation with CPU integration
+  - Uses `cpu_lr35902` from core with GB-specific memory bus
+  - `GbSystem` integrates CPU with `GbBus` memory implementation
+  - **Memory Bus** (`GbBus`):
+    - 8KB Work RAM (WRAM) at $C000-$DFFF
+    - 127 bytes High RAM (HRAM) at $FF80-$FFFE
+    - Cartridge ROM support (32KB+ with banking)
+    - Cartridge RAM support (size auto-detected from ROM header)
+    - I/O registers (stub)
+    - Interrupt Enable ($FFFF) and Interrupt Flag ($FF0F) registers
+    - Boot ROM disable support ($FF50)
+  - **Cartridge Support**:
+    - ROM loading with header parsing
+    - RAM size detection (0KB, 8KB, 32KB, 64KB, 128KB)
+    - MBC0 (no mapper) support
+    - Future: MBC1, MBC3, MBC5 implementations
+  - **Timing**:
+    - 4.194304 MHz CPU clock
+    - ~59.73 Hz frame rate
+    - ~70224 cycles per frame
+  - **Features**:
+    - Save state support (CPU registers)
+    - Cartridge mount/unmount
+    - System reset
+  - All tests pass (7 GB system tests)
 
 - **Atari 2600 (`emu_atari2600`)**: 
   - Uses `cpu_6502` from core with Atari 2600-specific bus implementation (6507 variant)

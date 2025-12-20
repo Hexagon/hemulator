@@ -17,24 +17,23 @@ use std::time::{Duration, Instant};
 // System wrapper enum to support multiple emulated systems
 enum EmulatorSystem {
     NES(emu_nes::NesSystem),
+    GameBoy(emu_gb::GbSystem),
     Atari2600(emu_atari2600::Atari2600System),
 }
 
 impl EmulatorSystem {
     fn step_frame(&mut self) -> Result<Frame, Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys
-                .step_frame()
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys
-                .step_frame()
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys.step_frame().map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
     fn reset(&mut self) {
         match self {
             EmulatorSystem::NES(sys) => sys.reset(),
+            EmulatorSystem::GameBoy(sys) => sys.reset(),
             EmulatorSystem::Atari2600(sys) => sys.reset(),
         }
     }
@@ -45,18 +44,16 @@ impl EmulatorSystem {
         data: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            EmulatorSystem::NES(sys) => sys
-                .mount(mount_point_id, data)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
-            EmulatorSystem::Atari2600(sys) => sys
-                .mount(mount_point_id, data)
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::NES(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys.mount(mount_point_id, data).map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
     fn mount_points(&self) -> Vec<emu_core::MountPointInfo> {
         match self {
             EmulatorSystem::NES(sys) => sys.mount_points(),
+            EmulatorSystem::GameBoy(sys) => sys.mount_points(),
             EmulatorSystem::Atari2600(sys) => sys.mount_points(),
         }
     }
@@ -64,6 +61,7 @@ impl EmulatorSystem {
     fn supports_save_states(&self) -> bool {
         match self {
             EmulatorSystem::NES(sys) => sys.supports_save_states(),
+            EmulatorSystem::GameBoy(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari2600(sys) => sys.supports_save_states(),
         }
     }
@@ -71,6 +69,7 @@ impl EmulatorSystem {
     fn save_state(&self) -> serde_json::Value {
         match self {
             EmulatorSystem::NES(sys) => sys.save_state(),
+            EmulatorSystem::GameBoy(sys) => sys.save_state(),
             EmulatorSystem::Atari2600(sys) => sys.save_state(),
         }
     }
@@ -78,20 +77,41 @@ impl EmulatorSystem {
     fn load_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
         match self {
             EmulatorSystem::NES(sys) => sys.load_state(state),
+            EmulatorSystem::GameBoy(sys) => sys.load_state(state),
             EmulatorSystem::Atari2600(sys) => sys.load_state(state),
         }
     }
 
-    // NES-specific methods (return None/default for other systems)
+    // System-specific methods
     fn set_controller(&mut self, port: usize, state: u8) {
-        if let EmulatorSystem::NES(sys) = self {
-            sys.set_controller(port, state);
+        match self {
+            EmulatorSystem::NES(sys) => sys.set_controller(port, state),
+            EmulatorSystem::GameBoy(sys) => {
+                // Game Boy only has one controller (port)
+                // We'll map the standard button IDs to Game Boy buttons
+                // Game Boy buttons: Right, Left, Up, Down, A, B, Select, Start (bits 0-7)
+                if port == 0 {
+                    // Convert from standard mapping (A, B, Select, Start, Up, Down, Left, Right)
+                    // to Game Boy mapping (Right, Left, Up, Down, A, B, Select, Start)
+                    let gb_state = ((state & 0x80) >> 7)  // Right (bit 7 -> bit 0)
+                        | ((state & 0x40) >> 5)           // Left (bit 6 -> bit 1)
+                        | ((state & 0x10) >> 2)           // Up (bit 4 -> bit 2)
+                        | ((state & 0x20) >> 2)           // Down (bit 5 -> bit 3)
+                        | ((state & 0x01) << 4)           // A (bit 0 -> bit 4)
+                        | ((state & 0x02) << 4)           // B (bit 1 -> bit 5)
+                        | ((state & 0x04) << 4)           // Select (bit 2 -> bit 6)
+                        | ((state & 0x08) << 4);          // Start (bit 3 -> bit 7)
+                    sys.set_controller(gb_state);
+                }
+            }
+            EmulatorSystem::Atari2600(_) => {}
         }
     }
 
     fn get_debug_info(&self) -> Option<emu_nes::DebugInfo> {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_debug_info()),
+            EmulatorSystem::GameBoy(_) => None,
             EmulatorSystem::Atari2600(_) => None,
         }
     }
@@ -99,6 +119,7 @@ impl EmulatorSystem {
     fn get_runtime_stats(&self) -> emu_nes::RuntimeStats {
         match self {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
+            EmulatorSystem::GameBoy(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari2600(_) => emu_nes::RuntimeStats::default(),
         }
     }
@@ -106,6 +127,7 @@ impl EmulatorSystem {
     fn timing(&self) -> emu_core::apu::TimingMode {
         match self {
             EmulatorSystem::NES(sys) => sys.timing(),
+            EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
@@ -113,6 +135,7 @@ impl EmulatorSystem {
     fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         match self {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::GameBoy(_) => vec![0; count], // TODO: Implement audio for Game Boy
             EmulatorSystem::Atari2600(_) => vec![0; count], // TODO: Implement audio for Atari 2600
         }
     }
@@ -120,6 +143,7 @@ impl EmulatorSystem {
     fn resolution(&self) -> (usize, usize) {
         match self {
             EmulatorSystem::NES(_) => (256, 240),
+            EmulatorSystem::GameBoy(_) => (160, 144),
             EmulatorSystem::Atari2600(_) => (160, 192),
         }
     }
@@ -304,7 +328,21 @@ fn main() {
                     }
                 }
                 Ok(SystemType::GameBoy) => {
-                    eprintln!("Game Boy ROMs are not yet fully implemented");
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut gb_sys = emu_gb::GbSystem::new();
+                    if let Err(e) = gb_sys.mount("Cartridge", &data) {
+                        eprintln!("Failed to load Game Boy ROM: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        sys = EmulatorSystem::GameBoy(gb_sys);
+                        settings.set_mount_point("Cartridge", p.clone());
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
+                        }
+                        println!("Loaded Game Boy ROM: {}", p);
+                    }
                 }
                 Err(e) => {
                     eprintln!("Unsupported ROM: {}", e);
