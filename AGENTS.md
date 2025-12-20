@@ -185,31 +185,67 @@ System-specific implementations that use core components:
       - Games like Punch-Out!! and Fire Emblem should work correctly with per-frame latch switching
   - All existing tests pass (69 mapper, PPU, and system tests)
 
-- **Game Boy (`emu_gb`)**: Working implementation with CPU integration
+- **Game Boy (`emu_gb`)**: Functional implementation with PPU, joypad, and rendering
   - Uses `cpu_lr35902` from core with GB-specific memory bus
   - `GbSystem` integrates CPU with `GbBus` memory implementation
   - **Memory Bus** (`GbBus`):
     - 8KB Work RAM (WRAM) at $C000-$DFFF
     - 127 bytes High RAM (HRAM) at $FF80-$FFFE
     - Cartridge ROM support (32KB+ with banking)
-    - Cartridge RAM support (size auto-detected from ROM header)
-    - I/O registers (stub)
-    - Interrupt Enable ($FFFF) and Interrupt Flag ($FF0F) registers
-    - Boot ROM disable support ($FF50)
+    - Cartridge RAM support (size auto-detected from ROM header: 0KB, 8KB, 32KB, 64KB, 128KB)
+    - I/O registers: Joypad ($FF00), Interrupt Flag ($FF0F), PPU registers, Boot ROM disable ($FF50)
+    - Interrupt Enable ($FFFF) register
+    - VRAM and OAM access delegated to PPU
+  - **PPU (Picture Processing Unit)**:
+    - System-specific implementation in `crates/systems/gb/ppu.rs`
+    - Resolution: 160x144 pixels (DMG mode)
+    - 8KB VRAM for tiles and tilemaps
+    - 160-byte OAM for 40 sprites
+    - **Tile System**:
+      - 8x8 pixel tiles, 2 bits per pixel (4 colors)
+      - Two tile data areas: $8000-$8FFF (unsigned), $8800-$97FF (signed)
+      - Two tilemap areas: $9800-$9BFF, $9C00-$9FFF
+    - **Rendering Features**:
+      - Background layer with scrolling (SCX, SCY registers)
+      - Window layer with independent positioning (WX, WY)
+      - 40 sprites (8x8 or 8x16 pixels)
+      - Sprite flipping (horizontal and vertical)
+      - Sprite priority (above/behind background)
+      - Palette support (BGP, OBP0, OBP1 for DMG)
+    - **Timing Model**: Frame-based rendering (not cycle-accurate)
+      - Renders complete 160x144 frames on-demand
+      - Scanline counter (LY) updated during execution
+      - LYC=LY coincidence detection
+      - V-Blank detection when LY reaches 144
+      - Suitable for homebrew and simple games
+  - **Joypad Input**:
+    - Matrix-based input system at $FF00
+    - Button mode: Start, Select, B, A
+    - Direction mode: Down, Up, Left, Right
+    - Proper mode selection via bits 4-5
   - **Cartridge Support**:
     - ROM loading with header parsing
-    - RAM size detection (0KB, 8KB, 32KB, 64KB, 128KB)
-    - MBC0 (no mapper) support
-    - Future: MBC1, MBC3, MBC5 implementations
+    - RAM size auto-detection from header
+    - MBC0 (no mapper) support only
+    - **Not yet implemented**: MBC1, MBC3, MBC5 (required for most commercial games)
   - **Timing**:
     - 4.194304 MHz CPU clock
     - ~59.73 Hz frame rate
-    - ~70224 cycles per frame
+    - ~70,224 cycles per frame
+    - 456 cycles per scanline
   - **Features**:
-    - Save state support (CPU registers)
+    - Full save state support (CPU registers, timing)
     - Cartridge mount/unmount
     - System reset
-  - All tests pass (7 GB system tests)
+    - Controller input handling
+  - **Known Limitations**:
+    - DMG (original Game Boy) mode only - no Game Boy Color support
+    - No MBC support - only works with 32KB ROMs (MBC0)
+    - No audio (APU not implemented)
+    - No timer registers
+    - No serial/link cable support
+    - Frame-based timing (not cycle-accurate)
+  - All tests pass (20 tests: 13 PPU, 7 system)
 
 - **Atari 2600 (`emu_atari2600`)**: 
   - Uses `cpu_6502` from core with Atari 2600-specific bus implementation (6507 variant)

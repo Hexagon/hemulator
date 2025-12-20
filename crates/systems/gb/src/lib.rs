@@ -1,16 +1,146 @@
-//! Game Boy system implementation
+//! Game Boy and Game Boy Color system implementation
+//!
+//! This module provides an emulator for the Nintendo Game Boy (DMG) and Game Boy Color (GBC) systems.
+//! The implementation includes CPU emulation (Sharp LR35902), PPU (LCD controller), memory bus with
+//! joypad support, and basic cartridge loading.
+//!
+//! # Architecture
+//!
+//! The Game Boy system consists of several key components:
+//!
+//! ## CPU: Sharp LR35902
+//! - Z80-like CPU with some instructions removed and modified
+//! - 8-bit registers: A, F, B, C, D, E, H, L (no shadow registers like Z80)
+//! - 16-bit registers: SP (stack pointer), PC (program counter)
+//! - Flags: Z (Zero), N (Subtract), H (Half Carry), C (Carry)
+//! - Clock speed: 4.194304 MHz (~4.2 MHz)
+//! - Implementation in `crates/core/src/cpu_lr35902.rs`
+//!
+//! ## PPU (Picture Processing Unit)
+//! - Resolution: 160x144 pixels
+//! - Display modes: DMG (4 shades of gray), CGB (32,768 colors)
+//! - **Current implementation**: DMG mode only
+//! - Supports:
+//!   - Background layer with scrolling (SCX/SCY registers)
+//!   - Window layer (overlay window with separate position)
+//!   - 40 sprites (8x8 or 8x16 pixels)
+//!   - Up to 10 sprites per scanline
+//!   - Sprite priority and transparency
+//!   - Horizontal/vertical sprite flipping
+//! - Tile-based graphics (8x8 pixel tiles, 2 bits per pixel)
+//! - Two tile data areas: $8000-$8FFF and $8800-$97FF
+//! - Two tile map areas: $9800-$9BFF and $9C00-$9FFF
+//!
+//! ## Memory Map
+//! - `$0000-$3FFF`: ROM Bank 0 (16KB, fixed)
+//! - `$4000-$7FFF`: ROM Bank 1-N (16KB, switchable via MBC)
+//! - `$8000-$9FFF`: VRAM (8KB, video RAM)
+//! - `$A000-$BFFF`: External RAM (8KB, switchable via MBC)
+//! - `$C000-$DFFF`: Work RAM (8KB)
+//! - `$E000-$FDFF`: Echo RAM (mirror of $C000-$DDFF)
+//! - `$FE00-$FE9F`: OAM (Object Attribute Memory - 160 bytes)
+//! - `$FF00-$FF7F`: I/O Registers
+//! - `$FF80-$FFFE`: High RAM (127 bytes)
+//! - `$FFFF`: Interrupt Enable register
+//!
+//! ## I/O Registers
+//! - `$FF00`: Joypad input (P1)
+//! - `$FF0F`: Interrupt Flag (IF)
+//! - `$FF40`: LCD Control (LCDC)
+//! - `$FF41`: LCD Status (STAT)
+//! - `$FF42-$FF43`: Scroll registers (SCY, SCX)
+//! - `$FF44`: LCD Y coordinate (LY)
+//! - `$FF45`: LY Compare (LYC)
+//! - `$FF47-$FF49`: Palette registers (BGP, OBP0, OBP1)
+//! - `$FF4A-$FF4B`: Window position (WY, WX)
+//! - `$FF50`: Boot ROM disable
+//! - `$FFFF`: Interrupt Enable (IE)
+//!
+//! ## Joypad Input
+//! The joypad register ($FF00) uses a matrix system:
+//! - Bit 5: Select button keys (0 = selected)
+//! - Bit 4: Select direction keys (0 = selected)
+//! - Bits 3-0: Input bits (0 = pressed, 1 = not pressed)
+//!   - Button mode: Start, Select, B, A
+//!   - Direction mode: Down, Up, Left, Right
+//!
+//! # Timing
+//!
+//! - CPU clock: 4.194304 MHz
+//! - Frame rate: ~59.73 Hz
+//! - Cycles per frame: ~70,224
+//! - Scanline cycles: 456 (114 machine cycles)
+//! - Scanlines per frame: 154 (144 visible + 10 VBlank)
+//!
+//! # Current Implementation Status
+//!
+//! ## Implemented Features
+//! - ✅ CPU: Full LR35902 instruction set
+//! - ✅ PPU: Background rendering with scrolling
+//! - ✅ PPU: Window rendering
+//! - ✅ PPU: Sprite rendering (8x8 and 8x16 modes)
+//! - ✅ PPU: Sprite priority, flipping, and transparency
+//! - ✅ Memory: Full memory map with VRAM/OAM access
+//! - ✅ Joypad: Button input via register $FF00
+//! - ✅ I/O: Essential PPU and joypad registers
+//! - ✅ Save states: Full CPU state preservation
+//!
+//! ## Not Yet Implemented
+//! - ❌ MBC (Memory Bank Controllers): MBC1, MBC3, MBC5
+//! - ❌ Game Boy Color: CGB mode, color palettes
+//! - ❌ Audio: Sound channels and APU
+//! - ❌ Serial: Link cable communication
+//! - ❌ Timer: Programmable timer registers
+//! - ❌ Interrupts: NMI/IRQ handling
+//! - ❌ DMA: OAM DMA transfer
+//!
+//! # Known Limitations
+//!
+//! 1. **Timing Model**: Frame-based rendering (not cycle-accurate)
+//!    - PPU renders entire frames at once
+//!    - Some timing-critical effects may not work
+//!    - Trade-off: Better compatibility vs. perfect accuracy
+//!
+//! 2. **ROM Support**: Only MBC0 (no mapper) cartridges currently work
+//!    - Most commercial games require MBC1, MBC3, or MBC5
+//!    - Homebrew ROMs under 32KB should work
+//!
+//! 3. **Game Boy Color**: Not yet supported
+//!    - DMG (original Game Boy) mode only
+//!    - No color palette support
+//!
+//! # Usage Example
+//!
+//! ```rust,no_run
+//! use emu_core::System;
+//! use emu_gb::GbSystem;
+//!
+//! // Create a new Game Boy system
+//! let mut gb = GbSystem::new();
+//!
+//! // Load a ROM
+//! let rom_data = std::fs::read("game.gb").unwrap();
+//! gb.mount("Cartridge", &rom_data).unwrap();
+//!
+//! // Set controller state (buttons: Right=0, Left=1, Up=2, Down=3, A=4, B=5, Select=6, Start=7)
+//! gb.set_controller(0x00); // All buttons released
+//! gb.set_controller(0x10); // A button pressed
+//!
+//! // Run one frame
+//! let frame = gb.step_frame().unwrap();
+//! assert_eq!(frame.width, 160);
+//! assert_eq!(frame.height, 144);
+//! ```
 
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod bus;
-mod ppu;
+pub(crate) mod ppu;
 
 use bus::GbBus;
-use ppu::Ppu;
 
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
-    ppu: Ppu,
     cart_loaded: bool,
 }
 
@@ -28,7 +158,6 @@ impl GbSystem {
 
         Self {
             cpu,
-            ppu: Ppu::new(),
             cart_loaded: false,
         }
     }
@@ -36,10 +165,7 @@ impl GbSystem {
     /// Set controller state (Game Boy buttons)
     /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
     pub fn set_controller(&mut self, state: u8) {
-        // Game Boy controller is memory-mapped to $FF00 (joypad register)
-        // For now, we'll just store it in the bus
-        // TODO: Implement proper joypad I/O register in bus
-        let _ = state; // Suppress unused warning until we implement joypad register
+        self.cpu.memory.set_buttons(state);
     }
 }
 
@@ -74,13 +200,13 @@ impl System for GbSystem {
             cycles += cpu_cycles;
 
             // Step PPU
-            if self.ppu.step(cpu_cycles) {
+            if self.cpu.memory.ppu.step(cpu_cycles) {
                 // V-Blank started - could trigger NMI here
             }
         }
 
         // Render the frame from PPU
-        Ok(self.ppu.render_frame())
+        Ok(self.cpu.memory.ppu.render_frame())
     }
 
     fn save_state(&self) -> serde_json::Value {
@@ -255,5 +381,28 @@ mod tests {
         let frame = result.unwrap();
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
+    }
+
+    #[test]
+    fn test_gb_controller_input() {
+        let mut sys = GbSystem::new();
+        
+        // Test setting controller state
+        sys.set_controller(0xFF); // All buttons released
+        
+        // Test individual buttons
+        sys.set_controller(0x01); // Right pressed
+        sys.set_controller(0x10); // A pressed
+        sys.set_controller(0x80); // Start pressed
+    }
+
+    #[test]
+    fn test_gb_ppu_registers() {
+        let sys = GbSystem::new();
+        
+        // Verify initial PPU register values
+        assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91);
+        assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC);
+        assert_eq!(sys.cpu.memory.ppu.ly, 0);
     }
 }
