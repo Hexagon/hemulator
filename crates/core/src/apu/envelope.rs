@@ -18,6 +18,10 @@ pub struct Envelope {
     period: u8,
     /// Loop flag (restart envelope when it reaches 0)
     loop_flag: bool,
+    /// Initial volume (for Game Boy)
+    initial_volume: u8,
+    /// Add mode (true = increase, false = decrease)
+    add_mode: bool,
 }
 
 impl Envelope {
@@ -28,23 +32,33 @@ impl Envelope {
             divider: 0,
             period: 0,
             loop_flag: false,
+            initial_volume: 0,
+            add_mode: false,
         }
     }
 
-    /// Clock the envelope (called by frame counter at ~240Hz NTSC)
+    /// Clock the envelope (called by frame counter at ~240Hz NTSC or ~64Hz GB)
     pub fn clock(&mut self) {
         if self.start_flag {
             self.start_flag = false;
-            self.decay_level = 15;
+            self.decay_level = self.initial_volume;
             self.divider = self.period;
         } else if self.divider > 0 {
             self.divider -= 1;
         } else {
             self.divider = self.period;
-            if self.decay_level > 0 {
-                self.decay_level -= 1;
-            } else if self.loop_flag {
-                self.decay_level = 15;
+            if self.add_mode {
+                // Game Boy add mode: increase volume
+                if self.decay_level < 15 {
+                    self.decay_level += 1;
+                }
+            } else {
+                // NES/GB subtract mode: decrease volume
+                if self.decay_level > 0 {
+                    self.decay_level -= 1;
+                } else if self.loop_flag {
+                    self.decay_level = 15;
+                }
             }
         }
     }
@@ -68,6 +82,38 @@ impl Envelope {
     pub fn set_loop(&mut self, loop_flag: bool) {
         self.loop_flag = loop_flag;
     }
+    
+    /// Set all envelope parameters (Game Boy style)
+    pub fn set_params(&mut self, initial_volume: u8, add_mode: bool, period: u8) {
+        self.initial_volume = initial_volume & 0x0F;
+        self.add_mode = add_mode;
+        self.period = period & 0x07;
+    }
+    
+    /// Trigger the envelope (start from initial volume)
+    pub fn trigger(&mut self) {
+        self.start_flag = true;
+    }
+    
+    /// Get the current volume (0-15)
+    pub fn volume(&self) -> u8 {
+        self.decay_level
+    }
+    
+    /// Get the initial volume setting
+    pub fn initial_volume(&self) -> u8 {
+        self.initial_volume
+    }
+    
+    /// Get the add mode flag
+    pub fn add_mode(&self) -> bool {
+        self.add_mode
+    }
+    
+    /// Get the period setting
+    pub fn period(&self) -> u8 {
+        self.period
+    }
 }
 
 impl Default for Envelope {
@@ -83,8 +129,8 @@ mod tests {
     #[test]
     fn envelope_restart_sets_level_to_15() {
         let mut env = Envelope::new();
-        env.set_period(1);
-        env.restart();
+        env.set_params(15, false, 1); // Initial volume 15
+        env.trigger();
         env.clock(); // Process the start flag
         assert_eq!(env.level(), 15);
     }
@@ -92,8 +138,8 @@ mod tests {
     #[test]
     fn envelope_decays_to_zero() {
         let mut env = Envelope::new();
-        env.set_period(0); // Fastest decay
-        env.restart();
+        env.set_params(15, false, 0); // Fastest decay from 15
+        env.trigger();
         env.clock(); // Process start flag, level = 15
 
         // Clock until decay reaches 0
@@ -106,9 +152,9 @@ mod tests {
     #[test]
     fn envelope_loops_when_flag_set() {
         let mut env = Envelope::new();
-        env.set_period(0); // Fastest decay
+        env.set_params(15, false, 0); // Fastest decay from 15
         env.set_loop(true);
-        env.restart();
+        env.trigger();
 
         // First clock processes start flag
         env.clock();
@@ -128,8 +174,8 @@ mod tests {
     #[test]
     fn envelope_period_controls_decay_rate() {
         let mut env = Envelope::new();
-        env.set_period(2); // Slower decay
-        env.restart();
+        env.set_params(15, false, 2); // Slower decay from 15
+        env.trigger();
         env.clock(); // Process start flag, level = 15, divider = 2
 
         env.clock(); // divider = 1

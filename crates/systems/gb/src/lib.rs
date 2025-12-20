@@ -46,6 +46,12 @@
 //! ## I/O Registers
 //! - `$FF00`: Joypad input (P1)
 //! - `$FF0F`: Interrupt Flag (IF)
+//! - `$FF10-$FF14`: APU Pulse 1 (sweep, duty, envelope, frequency)
+//! - `$FF16-$FF19`: APU Pulse 2 (duty, envelope, frequency)
+//! - `$FF1A-$FF1E`: APU Wave (DAC, length, volume, frequency)
+//! - `$FF20-$FF23`: APU Noise (length, envelope, polynomial, control)
+//! - `$FF24-$FF26`: APU Master (volume, panning, power)
+//! - `$FF30-$FF3F`: Wave RAM (16 bytes, 32 x 4-bit samples)
 //! - `$FF40`: LCD Control (LCDC)
 //! - `$FF41`: LCD Status (STAT)
 //! - `$FF42-$FF43`: Scroll registers (SCY, SCX)
@@ -84,11 +90,14 @@
 //! - ✅ Joypad: Button input via register $FF00
 //! - ✅ I/O: Essential PPU and joypad registers
 //! - ✅ Save states: Full CPU state preservation
+//! - ✅ APU: 4 sound channels (pulse 1/2, wave, noise)
+//! - ✅ APU: Frame sequencer and envelope/sweep control
+//! - ✅ APU: Audio sample generation at 44.1 kHz
 //!
 //! ## Not Yet Implemented
 //! - ❌ MBC (Memory Bank Controllers): MBC1, MBC3, MBC5
 //! - ❌ Game Boy Color: CGB mode, color palettes
-//! - ❌ Audio: Sound channels and APU
+//! - ❌ Audio: Frontend integration (APU implemented but not connected)
 //! - ❌ Serial: Link cable communication
 //! - ❌ Timer: Programmable timer registers
 //! - ❌ Interrupts: NMI/IRQ handling
@@ -134,6 +143,7 @@
 
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
+mod apu;
 mod bus;
 pub(crate) mod ppu;
 
