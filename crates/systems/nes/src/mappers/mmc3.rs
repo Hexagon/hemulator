@@ -484,7 +484,7 @@ mod tests {
             "Bank register stores original value"
         );
         // But the actual bank used should be even
-        let expected_bank = (0x05 & 0xFE) % 128; // Masked and wrapped
+        let expected_bank = 0x05 & 0xFE; // Masked and wrapped
         assert_eq!(mmc3.chr_banks[0], expected_bank);
         assert_eq!(mmc3.chr_banks[1], expected_bank + 1);
 
@@ -492,7 +492,7 @@ mod tests {
         mmc3.write_prg(0x8000, 1, &mut ppu); // Select R1
         mmc3.write_prg(0x8001, 0x07, &mut ppu); // Try to set to 7 (odd)
 
-        let expected_bank = (0x07 & 0xFE) % 128;
+        let expected_bank = 0x07 & 0xFE;
         assert_eq!(mmc3.chr_banks[2], expected_bank);
         assert_eq!(mmc3.chr_banks[3], expected_bank + 1);
     }
@@ -711,10 +711,7 @@ mod tests {
 
         // Bank select register should only use lower 3 bits (0-7)
         mmc3.write_prg(0x8000, 0xFF, &mut ppu); // All bits set
-        assert_eq!(
-            mmc3.bank_select, 0x07,
-            "Bank select should mask to 3 bits"
-        );
+        assert_eq!(mmc3.bank_select, 0x07, "Bank select should mask to 3 bits");
 
         // Verify we can still write to bank register 7
         mmc3.write_prg(0x8001, 0x42, &mut ppu);
@@ -825,11 +822,7 @@ mod tests {
         mmc3.write_prg(0x8001, 10, &mut ppu);
 
         // 10 % 4 = 2, so should read bank 2's data
-        assert_eq!(
-            mmc3.read_prg(0x8000),
-            0x12,
-            "Bank should wrap with modulo"
-        );
+        assert_eq!(mmc3.read_prg(0x8000), 0x12, "Bank should wrap with modulo");
     }
 
     #[test]

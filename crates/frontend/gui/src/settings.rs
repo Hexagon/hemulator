@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(settings.input.player1.a, "Z");
         assert_eq!(settings.input.player1.b, "X");
         assert_eq!(settings.input.player2.a, "U");
-        assert_eq!(settings.input.player2.b, "I");
+        assert_eq!(settings.input.player2.b, "O");
         assert_eq!(settings.input.host_modifier, "RightCtrl");
         assert_eq!(settings.window_width, 512);
         assert_eq!(settings.window_height, 480);

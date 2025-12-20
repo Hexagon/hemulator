@@ -264,6 +264,10 @@ mod tests {
 
         // Test with value larger than available banks
         cnrom.write_prg(0x8000, 200, &mut ppu);
-        assert_eq!(ppu.chr[0], (0x10 + (200 % 16)) as u8, "Should wrap high values");
+        assert_eq!(
+            ppu.chr[0],
+            (0x10 + (200 % 16)) as u8,
+            "Should wrap high values"
+        );
     }
 }

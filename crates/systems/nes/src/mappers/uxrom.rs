@@ -121,7 +121,11 @@ mod tests {
 
         // Try to select bank beyond available banks (should wrap)
         uxrom.write_prg(0x8000, 10, &mut ppu); // 10 % 2 = 0
-        assert_eq!(uxrom.read_prg(0x8000), 0x11, "Bank 10 should wrap to bank 0");
+        assert_eq!(
+            uxrom.read_prg(0x8000),
+            0x11,
+            "Bank 10 should wrap to bank 0"
+        );
     }
 
     #[test]
