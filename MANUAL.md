@@ -1,6 +1,6 @@
 # Hemulator User Manual
 
-Welcome to Hemulator, a cross-platform multi-system console emulator focusing on NES and Game Boy emulation.
+Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, Atari 2600, and Game Boy (WIP) emulation.
 
 ## Getting Started
 
@@ -9,7 +9,7 @@ Welcome to Hemulator, a cross-platform multi-system console emulator focusing on
 1. **Launch the emulator**: Double-click `hemu` (or `hemu.exe` on Windows)
 2. **The splash screen appears** with instructions
 3. **Load a ROM**: Press `F3` to open the file browser
-4. **Select your game file** (`.nes` for NES, `.gb`/`.gbc` for Game Boy)
+4. **Select your game file** (`.nes` for NES, `.a26`/`.bin` for Atari 2600, `.gb`/`.gbc` for Game Boy)
 5. **Start playing!** Use the controls listed below
 
 Alternatively, you can provide a ROM path as an argument:
@@ -81,13 +81,16 @@ The emulator window can be resized freely by dragging the window edges or maximi
 
 ## Debug Information (F10)
 
-When a ROM is loaded, press **F10** to display the debug information overlay. This shows:
+When a ROM is loaded, press **F10** to display the debug information overlay.
 
+**For NES games**, this shows:
 - **Mapper**: The cartridge mapper number and name
 - **PRG**: Number of PRG ROM banks (16KB each)
 - **CHR**: Number of CHR ROM banks (8KB each) or "RAM" if using CHR-RAM
 - **Timing**: NTSC or PAL timing mode (auto-detected from ROM header)
 - **FPS**: Current frame rate
+
+**For Atari 2600 games**, debug information is currently limited. Future versions will show cartridge banking information.
 
 This information is useful for troubleshooting compatibility issues or understanding ROM specifications.
 
@@ -142,7 +145,10 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - The emulator verifies that the correct ROM is loaded before allowing state load
 - If you try to load a state with a different ROM mounted, you'll get an error
 
-**NES Save State Support**: Fully supported - save and load states with F5/F6 when a cartridge is loaded
+**Save State Support by System**:
+- **NES**: Fully supported - save and load states with F5/F6 when a cartridge is loaded
+- **Atari 2600**: Fully supported - save and load states with F5/F6
+- **Game Boy**: Not yet implemented (skeleton)
 
 Example structure:
 ```
@@ -157,20 +163,63 @@ saves/
 
 ### NES (Nintendo Entertainment System)
 
-**Coverage**: 86% of all NES games (9 mappers supported)
+**Coverage**: ~90% of all NES games (14 mappers supported)
 
 The emulator supports the following NES mappers:
-- **Mapper 0 (NROM)** - Simple games
-- **Mapper 1 (MMC1/SxROM)** - Tetris, Metroid, The Legend of Zelda
-- **Mapper 2 (UxROM)** - Mega Man, Castlevania, Contra
-- **Mapper 3 (CNROM)** - Gradius, Paperboy
-- **Mapper 4 (MMC3/TxROM)** - Super Mario Bros. 3, Mega Man 3-6
-- **Mapper 7 (AxROM)** - Battletoads, Marble Madness
+- **Mapper 0 (NROM)** - Simple games (~10% of games)
+- **Mapper 1 (MMC1/SxROM)** - Tetris, Metroid, The Legend of Zelda (~28% of games)
+- **Mapper 2 (UxROM)** - Mega Man, Castlevania, Contra (~11% of games)
+- **Mapper 3 (CNROM)** - Gradius, Paperboy (~6.4% of games)
+- **Mapper 4 (MMC3/TxROM)** - Super Mario Bros. 3, Mega Man 3-6 (~24% of games)
+- **Mapper 7 (AxROM)** - Battletoads, Marble Madness (~3.1% of games)
 - **Mapper 9 (MMC2/PxROM)** - Mike Tyson's Punch-Out!!
 - **Mapper 10 (MMC4/FxROM)** - Fire Emblem (Japan)
-- **Mapper 11 (Color Dreams)** - Color Dreams and Wisdom Tree games
+- **Mapper 11 (Color Dreams)** - Color Dreams and Wisdom Tree games (~1.3% of games)
+- **Mapper 34 (BNROM)** - Deadly Towers, homebrew titles
+- **Mapper 66 (GxROM)** - SMB + Duck Hunt, Doraemon (~1.2% of games)
+- **Mapper 71 (Camerica)** - Fire Hawk, Micro Machines (~0.6% of games)
+- **Mapper 79 (NINA-03/06)** - AVE games like Dudes with Attitude, Pyramid
+- **Mapper 206 (Namco 118)** - Dragon Spirit, Famista (~1.8% of games)
 
 **ROM Format**: iNES (.nes files) - automatically detected
+
+**Features**:
+- Full PPU (video) and APU (audio) emulation
+- Save states (F5/F6)
+- NTSC and PAL timing modes (auto-detected)
+- Controller support with customizable key mappings
+
+### Atari 2600
+
+**Coverage**: Most common cartridge formats (2K, 4K, 8K, 12K, 16K, 32K)
+
+The emulator supports the following cartridge banking schemes:
+- **2K ROM** - No banking, simple games like Combat
+- **4K ROM** - No banking, common format for early games like Pac-Man
+- **8K (F8)** - 2x 4KB banks, games like Asteroids, Missile Command
+- **12K (FA)** - 3x 4KB banks, used by some CBS games
+- **16K (F6)** - 4x 4KB banks, games like Donkey Kong, Crystal Castles
+- **32K (F4)** - 8x 4KB banks, later and larger games
+
+**ROM Format**: Raw binary (.a26, .bin files) - automatically detected by size
+
+**Features**:
+- TIA (Television Interface Adapter) video emulation with playfield rendering
+- RIOT (6532) chip emulation for RAM, I/O, and timers
+- Save states (F5/F6)
+- Joystick controls mapped to keyboard (same as NES controls)
+- 160x192 resolution
+
+**Known Limitations**:
+- Audio not yet implemented (sound registers present but silent)
+- Sprite/player graphics not yet rendered (playfield only)
+- Some advanced cartridge formats not supported
+
+**Controls**: The Atari 2600 joystick is mapped to the same keyboard layout as NES:
+- Arrow keys = Joystick directions
+- Z = Fire button
+- Enter = Game Reset (console switch)
+- Left Shift = Game Select (console switch)
 
 ### Game Boy / Game Boy Color
 
@@ -181,15 +230,20 @@ The emulator supports the following NES mappers:
 ## Troubleshooting
 
 ### ROM won't load
-- Ensure the ROM is in iNES format (.nes) for NES games
+- Ensure the ROM is in the correct format:
+  - NES: iNES format (.nes files)
+  - Atari 2600: Raw binary (.a26 or .bin files) - must be 2K, 4K, 8K, 12K, 16K, or 32K in size
+  - Game Boy: GB/GBC format (.gb, .gbc files)
 - Check that the file isn't corrupted
 - Try a different ROM to verify the emulator works
 - Check the console output (if running from terminal) for specific error messages
+- For Atari 2600: Some ROM dumps may have headers that need to be removed - use headerless ROMs
 
 ### Audio issues
 - The emulator requires a working audio output device
 - On Linux, ensure ALSA is properly configured
 - Check your system's audio settings
+- **Note**: Atari 2600 audio is not yet implemented - games will be silent
 
 ### Settings not saving
 - Verify you have write permissions in the emulator directory
