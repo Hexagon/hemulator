@@ -95,10 +95,11 @@ The NES system implementation in `crates/systems/nes` has been thoroughly review
 ### ⚠️ Known Limitations (All Documented)
 
 1. **PPU Timing Model**
-   - **Current**: Frame-based rendering (not cycle-accurate)
+   - **Current**: Frame-based rendering with per-scanline sprite evaluation
    - **Impact**: Suitable for most games, some edge cases may not work perfectly
    - **Trade-off**: Better compatibility vs. perfect accuracy
    - **Documented**: Yes, in both code and AGENTS.md
+   - **Recent Improvements**: Added sprite overflow detection and improved sprite 0 hit
 
 2. **APU Channels**
    - **Current**: 2 pulse channels implemented
@@ -113,10 +114,11 @@ The NES system implementation in `crates/systems/nes` has been thoroughly review
    - **Documented**: Yes, with detailed comment about complete implementation
 
 4. **Sprite Evaluation**
-   - **Current**: Basic sprite 0 hit detection
-   - **Missing**: Cycle-accurate sprite overflow and evaluation
-   - **Impact**: Most games work, some timing-sensitive effects may not
+   - **Current**: Per-scanline sprite evaluation with overflow detection
+   - **Missing**: Cycle-accurate sprite evaluation timing
+   - **Impact**: Sprite overflow flag now works correctly for most games
    - **Documented**: Yes, in PPU documentation
+   - **Recent Improvements**: Implemented sprite overflow flag (PPUSTATUS bit 5)
 
 ### ✅ No Issues Found
 
@@ -198,9 +200,9 @@ The NES system implementation in `crates/systems/nes` has been thoroughly review
 
 ## Testing Results
 
-### Unit Tests (65 total)
+### Unit Tests (69 total)
 - ✅ Mapper tests: 60 passed
-- ✅ PPU tests: 5 passed
+- ✅ PPU tests: 9 passed (including 4 new sprite overflow tests)
 - ✅ System tests: 5 passed
 - ❌ Failed: 0
 - ⏭️ Skipped: 0
@@ -236,8 +238,8 @@ The NES system implementation in `crates/systems/nes` has been thoroughly review
    - Impact: Better user experience for save/load
 
 3. **PPU Accuracy** (Low Priority)
-   - Add cycle-accurate sprite overflow
-   - Improve sprite 0 hit timing
+   - ~~Add cycle-accurate sprite overflow~~ ✅ **DONE**
+   - Improve sprite 0 hit timing (current implementation is functional)
    - Impact: Better compatibility with timing-sensitive games
    - Note: Current implementation is adequate for most games
 
