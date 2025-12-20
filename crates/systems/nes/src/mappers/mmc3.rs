@@ -101,9 +101,27 @@ impl Mmc3 {
         let r5 = (self.bank_regs[5] as usize) % chr_count;
 
         if !self.chr_mode {
-            self.chr_banks = [r0, r0 + 1, r1, r1 + 1, r2, r3, r4, r5];
+            self.chr_banks = [
+                r0,
+                (r0 + 1) % chr_count,
+                r1,
+                (r1 + 1) % chr_count,
+                r2,
+                r3,
+                r4,
+                r5,
+            ];
         } else {
-            self.chr_banks = [r2, r3, r4, r5, r0, r0 + 1, r1, r1 + 1];
+            self.chr_banks = [
+                r2,
+                r3,
+                r4,
+                r5,
+                r0,
+                (r0 + 1) % chr_count,
+                r1,
+                (r1 + 1) % chr_count,
+            ];
         }
 
         self.update_chr_mapping(ppu);
@@ -436,5 +454,455 @@ mod tests {
         mmc3.notify_a12(false);
         mmc3.notify_a12(true);
         assert!(mmc3.take_irq_pending());
+    }
+
+    // ============================================================================
+    // MMC3 Edge Case Tests
+    // ============================================================================
+
+    #[test]
+    fn mmc3_chr_bank_r0_r1_even_alignment() {
+        // R0 and R1 are 2KB banks, so bit 0 should be masked to ensure even alignment
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0x11; 0x10000], // 128KB CHR (128 1KB banks)
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set R0 to an odd value - should be masked to even
+        mmc3.write_prg(0x8000, 0, &mut ppu); // Select R0
+        mmc3.write_prg(0x8001, 0x05, &mut ppu); // Try to set to 5 (odd)
+
+        // R0 should actually be 4 (0x05 & 0xFE = 0x04)
+        assert_eq!(
+            mmc3.bank_regs[0], 0x05,
+            "Bank register stores original value"
+        );
+        // But the actual bank used should be even
+        let expected_bank = (0x05 & 0xFE) % 128; // Masked and wrapped
+        assert_eq!(mmc3.chr_banks[0], expected_bank);
+        assert_eq!(mmc3.chr_banks[1], expected_bank + 1);
+
+        // Set R1 to an odd value
+        mmc3.write_prg(0x8000, 1, &mut ppu); // Select R1
+        mmc3.write_prg(0x8001, 0x07, &mut ppu); // Try to set to 7 (odd)
+
+        let expected_bank = (0x07 & 0xFE) % 128;
+        assert_eq!(mmc3.chr_banks[2], expected_bank);
+        assert_eq!(mmc3.chr_banks[3], expected_bank + 1);
+    }
+
+    #[test]
+    fn mmc3_chr_bank_overflow() {
+        // Test that CHR banks wrap correctly when r0+1 or r1+1 would exceed bank count
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000], // Only 8 1KB banks
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set R0 to 6 (even) - R0+1 would be 7, which is the last valid bank
+        mmc3.write_prg(0x8000, 0, &mut ppu);
+        mmc3.write_prg(0x8001, 6, &mut ppu);
+
+        // Banks 0 and 1 should be 6 and 7
+        assert_eq!(mmc3.chr_banks[0], 6);
+        assert_eq!(mmc3.chr_banks[1], 7);
+
+        // Set R0 to 8 (which wraps to 0 after modulo)
+        mmc3.write_prg(0x8001, 8, &mut ppu);
+        assert_eq!(mmc3.chr_banks[0], 0); // 8 % 8 = 0
+        assert_eq!(mmc3.chr_banks[1], 1); // (8 % 8) + 1 = 1
+    }
+
+    #[test]
+    fn mmc3_prg_mode_switching() {
+        let mut prg = vec![0; 0x10000]; // 8 banks of 8KB
+        for i in 0..8 {
+            prg[i * 0x2000] = (0x11 * (i + 1)) as u8; // Distinctive byte at start of each bank
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set R6 to bank 1, R7 to bank 2
+        mmc3.write_prg(0x8000, 6, &mut ppu);
+        mmc3.write_prg(0x8001, 1, &mut ppu);
+        mmc3.write_prg(0x8000, 7, &mut ppu);
+        mmc3.write_prg(0x8001, 2, &mut ppu);
+
+        // Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
+        assert_eq!(mmc3.read_prg(0x8000), 0x22); // Bank 1
+        assert_eq!(mmc3.read_prg(0xA000), 0x77); // Bank 6 (second last)
+        assert_eq!(mmc3.read_prg(0xC000), 0x33); // Bank 2
+        assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
+
+        // Switch to mode 1 by setting bit 6 of bank select
+        mmc3.write_prg(0x8000, 0x40, &mut ppu);
+
+        // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
+        assert_eq!(mmc3.read_prg(0x8000), 0x77); // Bank 6 (second last)
+        assert_eq!(mmc3.read_prg(0xA000), 0x22); // Bank 1 (R6)
+        assert_eq!(mmc3.read_prg(0xC000), 0x33); // Bank 2 (R7)
+        assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
+    }
+
+    #[test]
+    fn mmc3_chr_mode_switching() {
+        let mut chr = vec![0; 0x4000]; // 16 1KB banks
+        for i in 0..16 {
+            chr[i * 0x0400] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x4000],
+            chr_rom: chr,
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set bank registers
+        mmc3.write_prg(0x8000, 0, &mut ppu);
+        mmc3.write_prg(0x8001, 0, &mut ppu); // R0 = 0 (banks 0-1)
+        mmc3.write_prg(0x8000, 1, &mut ppu);
+        mmc3.write_prg(0x8001, 2, &mut ppu); // R1 = 2 (banks 2-3)
+        mmc3.write_prg(0x8000, 2, &mut ppu);
+        mmc3.write_prg(0x8001, 4, &mut ppu); // R2 = 4
+        mmc3.write_prg(0x8000, 3, &mut ppu);
+        mmc3.write_prg(0x8001, 5, &mut ppu); // R3 = 5
+        mmc3.write_prg(0x8000, 4, &mut ppu);
+        mmc3.write_prg(0x8001, 6, &mut ppu); // R4 = 6
+        mmc3.write_prg(0x8000, 5, &mut ppu);
+        mmc3.write_prg(0x8001, 7, &mut ppu); // R5 = 7
+
+        // Mode 0: [R0, R0+1, R1, R1+1, R2, R3, R4, R5]
+        assert_eq!(mmc3.chr_banks, [0, 1, 2, 3, 4, 5, 6, 7]);
+
+        // Switch to mode 1 by setting bit 7
+        mmc3.write_prg(0x8000, 0x80, &mut ppu);
+
+        // Mode 1: [R2, R3, R4, R5, R0, R0+1, R1, R1+1]
+        assert_eq!(mmc3.chr_banks, [4, 5, 6, 7, 0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn mmc3_irq_disabled_then_reenabled() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch and reload
+        mmc3.write_prg(0xC000, 1, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu); // Enable IRQ
+
+        // Clock to reload
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert_eq!(mmc3.irq_counter, 1);
+
+        // Clock to 0 - should fire
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(mmc3.take_irq_pending());
+
+        // Disable IRQ
+        mmc3.write_prg(0xE000, 0, &mut ppu);
+        assert!(!mmc3.irq_enabled);
+        assert!(!mmc3.irq_pending, "Disabling IRQ should clear pending flag");
+
+        // Clock again - no IRQ should fire
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(!mmc3.take_irq_pending());
+
+        // Re-enable IRQ
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // Counter is now 1, clock to 0 should fire again
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert!(mmc3.take_irq_pending());
+    }
+
+    #[test]
+    fn mmc3_multiple_consecutive_a12_edges() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set IRQ latch to 3
+        mmc3.write_prg(0xC000, 3, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
+        // Only rising edges should clock the counter
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true); // Edge 1: reload to 3
+        assert_eq!(mmc3.irq_counter, 3);
+
+        // Multiple high states shouldn't clock
+        mmc3.notify_a12(true);
+        mmc3.notify_a12(true);
+        assert_eq!(mmc3.irq_counter, 3, "No change without rising edge");
+
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true); // Edge 2: decrement to 2
+        assert_eq!(mmc3.irq_counter, 2);
+
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true); // Edge 3: decrement to 1
+        assert_eq!(mmc3.irq_counter, 1);
+
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true); // Edge 4: decrement to 0, fire IRQ
+        assert_eq!(mmc3.irq_counter, 0);
+        assert!(mmc3.take_irq_pending());
+    }
+
+    #[test]
+    fn mmc3_bank_select_register_wrapping() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Bank select register should only use lower 3 bits (0-7)
+        mmc3.write_prg(0x8000, 0xFF, &mut ppu); // All bits set
+        assert_eq!(
+            mmc3.bank_select, 0x07,
+            "Bank select should mask to 3 bits"
+        );
+
+        // Verify we can still write to bank register 7
+        mmc3.write_prg(0x8001, 0x42, &mut ppu);
+        assert_eq!(mmc3.bank_regs[7], 0x42);
+
+        // Try selecting register 8 (should wrap to 0)
+        mmc3.write_prg(0x8000, 0x08, &mut ppu);
+        assert_eq!(mmc3.bank_select, 0x00, "Register 8 should wrap to 0");
+    }
+
+    #[test]
+    fn mmc3_mirroring_changes() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x4000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal, // Start with horizontal
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let initial_mirroring = ppu.get_mirroring();
+        assert_eq!(initial_mirroring, Mirroring::Horizontal);
+
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Switch to vertical mirroring (bit 0 = 0)
+        mmc3.write_prg(0xA000, 0, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
+
+        // Switch back to horizontal (bit 0 = 1)
+        mmc3.write_prg(0xA000, 1, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+
+        // Verify other bits are ignored
+        mmc3.write_prg(0xA000, 0xFE, &mut ppu); // All bits except bit 0
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::Vertical,
+            "Only bit 0 should matter"
+        );
+    }
+
+    #[test]
+    fn mmc3_irq_reload_clears_counter_immediately() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x2000],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set latch to 5
+        mmc3.write_prg(0xC000, 5, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu); // Reload
+        mmc3.write_prg(0xE001, 0, &mut ppu); // Enable
+
+        // First A12 edge: reload to 5
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert_eq!(mmc3.irq_counter, 5);
+
+        // Decrement a few times
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert_eq!(mmc3.irq_counter, 4);
+
+        // Write to $C001 - should clear counter immediately
+        mmc3.write_prg(0xC001, 0, &mut ppu);
+        assert_eq!(
+            mmc3.irq_counter, 0,
+            "Writing to $C001 should clear counter immediately"
+        );
+        assert!(mmc3.irq_reload, "Reload flag should be set");
+
+        // Next A12 edge should reload from latch
+        mmc3.notify_a12(false);
+        mmc3.notify_a12(true);
+        assert_eq!(mmc3.irq_counter, 5, "Counter should reload from latch");
+        assert!(!mmc3.irq_reload, "Reload flag should be cleared");
+    }
+
+    #[test]
+    fn mmc3_prg_bank_wrapping() {
+        // Test with only 4 banks (32KB ROM)
+        let mut prg = vec![0; 0x8000]; // 4 banks
+        for i in 0..4 {
+            prg[i * 0x2000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Try to set R6 to bank 10 (should wrap to bank 2)
+        mmc3.write_prg(0x8000, 6, &mut ppu);
+        mmc3.write_prg(0x8001, 10, &mut ppu);
+
+        // 10 % 4 = 2, so should read bank 2's data
+        assert_eq!(
+            mmc3.read_prg(0x8000),
+            0x12,
+            "Bank should wrap with modulo"
+        );
+    }
+
+    #[test]
+    fn mmc3_sequential_bank_register_writes() {
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x4000], // 16 banks
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Write to all 8 bank registers in sequence
+        for i in 0..8 {
+            mmc3.write_prg(0x8000, i, &mut ppu); // Select register i
+            mmc3.write_prg(0x8001, (i * 2) as u8, &mut ppu); // Write value i*2
+        }
+
+        // Verify all registers were set correctly
+        for i in 0..8 {
+            assert_eq!(
+                mmc3.bank_regs[i as usize],
+                (i * 2) as u8,
+                "Register {} should be {}",
+                i,
+                i * 2
+            );
+        }
+    }
+
+    #[test]
+    fn mmc3_chr_bank_odd_count_wrapping() {
+        // Test with an odd number of CHR banks to ensure r0+1 and r1+1 wrap correctly
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![0; 0x1C00], // 7 banks (7KB) - odd count
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // chr_count should be 7
+        assert_eq!(mmc3.chr_bank_count(), 7);
+
+        // Set R0 to 6 (even) - (6 & 0xFE) = 6, 6 % 7 = 6, (6+1) % 7 = 0
+        mmc3.write_prg(0x8000, 0, &mut ppu);
+        mmc3.write_prg(0x8001, 6, &mut ppu);
+
+        // Banks should be [6, 0, ...] due to wrapping
+        assert_eq!(mmc3.chr_banks[0], 6);
+        assert_eq!(
+            mmc3.chr_banks[1], 0,
+            "Bank 7 should wrap to 0 for odd bank count"
+        );
+
+        // Set R1 to 4 - (4 & 0xFE) = 4, 4 % 7 = 4, (4+1) % 7 = 5
+        mmc3.write_prg(0x8000, 1, &mut ppu);
+        mmc3.write_prg(0x8001, 4, &mut ppu);
+
+        assert_eq!(mmc3.chr_banks[2], 4);
+        assert_eq!(mmc3.chr_banks[3], 5);
+
+        // Try setting R0 to 8 - (8 & 0xFE) = 8, 8 % 7 = 1, (1+1) % 7 = 2
+        mmc3.write_prg(0x8000, 0, &mut ppu);
+        mmc3.write_prg(0x8001, 8, &mut ppu);
+
+        assert_eq!(mmc3.chr_banks[0], 1, "8 & 0xFE = 8, 8 % 7 = 1");
+        assert_eq!(mmc3.chr_banks[1], 2, "(1 + 1) % 7 = 2");
     }
 }
