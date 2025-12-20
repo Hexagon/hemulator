@@ -889,16 +889,16 @@ impl<M: Memory6502> Cpu6502<M> {
                 } as i16;
                 let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
                 let value = m ^ 0xFF; // one's complement
-                let sum = (self.a as i16) + value + (carry as i16);
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
                 let result = (sum & 0xFF) as u8;
-                // set carry if result didn't borrow (i.e., sum >= 0)
-                if sum >= 0 {
+                // set carry if no borrow occurred (i.e., sum > 0xFF means carry out)
+                if sum > 0xFF {
                     self.status |= 0x01
                 } else {
                     self.status &= !0x01
                 }
-                // overflow detection similar to ADC
-                if (((!(self.a ^ (m as u8))) & (self.a ^ result)) & 0x80) != 0 {
+                // overflow detection for subtraction: V = (A ^ M) & (A ^ result) & 0x80
+                if (((self.a ^ (m as u8)) & (self.a ^ result)) & 0x80) != 0 {
                     self.status |= 0x40;
                 } else {
                     self.status &= !0x40;
@@ -2032,5 +2032,478 @@ mod tests {
         cpu.reset();
         assert_eq!(cpu.step(), 4);
         assert_eq!(cpu.a, 0x99);
+    }
+
+    #[test]
+    fn stack_pointer_wrapping() {
+        // Test stack underflow: SP wraps from 0xFF to 0x00
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x68]); // PLA
+        cpu.reset();
+        cpu.sp = 0xFF; // At top of stack
+        cpu.memory.write(0x0100, 0xAB); // Value at bottom of stack page
+        cpu.step();
+        assert_eq!(cpu.sp, 0x00); // Wrapped to 0
+        assert_eq!(cpu.a, 0xAB);
+
+        // Test stack overflow: SP wraps from 0x00 to 0xFF
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x48]); // PHA
+        cpu2.reset();
+        cpu2.sp = 0x00;
+        cpu2.a = 0xCD;
+        cpu2.step();
+        assert_eq!(cpu2.sp, 0xFF);
+        assert_eq!(cpu2.memory.read(0x0100), 0xCD);
+    }
+
+    #[test]
+    fn zero_page_wrapping_x() {
+        // Test zero page,X wrapping: $FF + X should stay in zero page
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0004, 0x42); // Value at wrapped address
+        cpu.memory.load_program(0x8000, &[0xB5, 0xFF]); // LDA $FF,X
+        cpu.reset();
+        cpu.x = 0x05; // $FF + $05 = $104, should wrap to $04
+        cpu.step();
+        assert_eq!(cpu.a, 0x42);
+
+        // Test zero page,X store wrapping
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x95, 0xFE]); // STA $FE,X
+        cpu2.reset();
+        cpu2.a = 0x88;
+        cpu2.x = 0x03; // $FE + $03 = $101, should wrap to $01
+        cpu2.step();
+        assert_eq!(cpu2.memory.read(0x0001), 0x88);
+        assert_eq!(cpu2.memory.read(0x0101), 0x00); // Should not write here
+    }
+
+    #[test]
+    fn zero_page_wrapping_y() {
+        // Test zero page,Y wrapping
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0002, 0x33);
+        cpu.memory.load_program(0x8000, &[0xB6, 0xFF]); // LDX $FF,Y
+        cpu.reset();
+        cpu.y = 0x03; // $FF + $03 = $102, should wrap to $02
+        cpu.step();
+        assert_eq!(cpu.x, 0x33);
+    }
+
+    #[test]
+    fn adc_overflow_flag_edge_cases() {
+        // Test ADC: $7F + $01 should set V flag (positive overflow)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x69, 0x01]); // ADC #$01
+        cpu.reset();
+        cpu.a = 0x7F;
+        cpu.status &= !0x01; // Clear carry
+        cpu.step();
+        assert_eq!(cpu.a, 0x80);
+        assert_eq!(cpu.status & 0x40, 0x40); // V flag set
+        assert_eq!(cpu.status & 0x80, 0x80); // N flag set (result is negative)
+
+        // Test ADC: $80 + $FF should set V flag (negative overflow)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x69, 0xFF]); // ADC #$FF
+        cpu2.reset();
+        cpu2.a = 0x80;
+        cpu2.status &= !0x01; // Clear carry
+        cpu2.step();
+        assert_eq!(cpu2.a, 0x7F);
+        assert_eq!(cpu2.status & 0x40, 0x40); // V flag set
+        assert_eq!(cpu2.status & 0x01, 0x01); // Carry set
+
+        // Test ADC: $50 + $50 should set V flag
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x8000, &[0x69, 0x50]); // ADC #$50
+        cpu3.reset();
+        cpu3.a = 0x50;
+        cpu3.status &= !0x01;
+        cpu3.step();
+        assert_eq!(cpu3.a, 0xA0);
+        assert_eq!(cpu3.status & 0x40, 0x40); // V flag set
+
+        // Test ADC: $50 + $10 should NOT set V flag
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0x69, 0x10]); // ADC #$10
+        cpu4.reset();
+        cpu4.a = 0x50;
+        cpu4.status &= !0x01;
+        cpu4.step();
+        assert_eq!(cpu4.a, 0x60);
+        assert_eq!(cpu4.status & 0x40, 0x00); // V flag clear
+    }
+
+    #[test]
+    fn sbc_carry_and_overflow_edge_cases() {
+        // Test SBC: $50 - $30 with carry set (no borrow) = $20
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0xE9, 0x30]); // SBC #$30
+        cpu.reset();
+        cpu.a = 0x50;
+        cpu.status |= 0x01; // Set carry (no borrow)
+        cpu.step();
+        assert_eq!(cpu.a, 0x20);
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry should remain set (no borrow)
+        assert_eq!(cpu.status & 0x40, 0x00); // V flag should be clear
+
+        // Test SBC: $50 - $70 with carry set = $E0 (with borrow)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0xE9, 0x70]); // SBC #$70
+        cpu2.reset();
+        cpu2.a = 0x50;
+        cpu2.status |= 0x01; // Set carry
+        cpu2.step();
+        assert_eq!(cpu2.a, 0xE0);
+        assert_eq!(cpu2.status & 0x01, 0x00); // Carry should be clear (borrow occurred)
+
+        // Test SBC: $50 - $B0 with carry set = $A0 (with borrow)
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x8000, &[0xE9, 0xB0]); // SBC #$B0
+        cpu3.reset();
+        cpu3.a = 0x50;
+        cpu3.status |= 0x01;
+        cpu3.step();
+        assert_eq!(cpu3.a, 0xA0);
+        assert_eq!(cpu3.status & 0x01, 0x00); // Carry clear (borrow)
+
+        // Test SBC: $50 - $F0 with carry set = $60 (with borrow)
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0xE9, 0xF0]); // SBC #$F0
+        cpu4.reset();
+        cpu4.a = 0x50;
+        cpu4.status |= 0x01;
+        cpu4.step();
+        assert_eq!(cpu4.a, 0x60);
+        assert_eq!(cpu4.status & 0x01, 0x00); // Carry clear (borrow)
+
+        // Test SBC overflow: $50 - $B0 should set V flag
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.load_program(0x8000, &[0xE9, 0xB0]); // SBC #$B0
+        cpu5.reset();
+        cpu5.a = 0x50;
+        cpu5.status |= 0x01;
+        cpu5.step();
+        assert_eq!(cpu5.status & 0x40, 0x40); // V flag set (signed overflow)
+
+        // Test SBC: $D0 - $70 should set V flag
+        let mem6 = ArrayMemory::new();
+        let mut cpu6 = Cpu6502::new(mem6);
+        cpu6.memory.load_program(0x8000, &[0xE9, 0x70]); // SBC #$70
+        cpu6.reset();
+        cpu6.a = 0xD0;
+        cpu6.status |= 0x01;
+        cpu6.step();
+        assert_eq!(cpu6.a, 0x60);
+        assert_eq!(cpu6.status & 0x40, 0x40); // V flag set
+        assert_eq!(cpu6.status & 0x01, 0x01); // Carry set (no borrow)
+    }
+
+    #[test]
+    fn indirect_x_zero_page_wrapping() {
+        // Test (Indirect,X) with zero page wrapping
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        // Pointer at $FF (wraps): low byte at $FF, high byte at $00
+        cpu.memory.write(0x00FF, 0x00);
+        cpu.memory.write(0x0000, 0x20); // High byte wraps to $00
+        cpu.memory.write(0x2000, 0x77);
+        cpu.memory.load_program(0x8000, &[0xA1, 0xF0]); // LDA ($F0,X)
+        cpu.reset();
+        cpu.x = 0x0F; // $F0 + $0F = $FF
+        cpu.step();
+        assert_eq!(cpu.a, 0x77);
+    }
+
+    #[test]
+    fn branch_forward_and_backward() {
+        // Test branch forward
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(
+            0x8000,
+            &[
+                0xA9, 0x00, // LDA #$00 (sets Z)
+                0xF0, 0x05, // BEQ +5
+                0xA9, 0x01, // LDA #$01 (skipped)
+                0xA9, 0x02, // LDA #$02 (skipped)
+                0xEA, // NOP (skipped)
+                0xA9, 0x03, // LDA #$03 (executed)
+            ],
+        );
+        cpu.reset();
+        cpu.step(); // LDA #$00
+        cpu.step(); // BEQ +5
+        cpu.step(); // LDA #$03
+        assert_eq!(cpu.a, 0x03);
+
+        // Test branch backward (negative offset)
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(
+            0x8000,
+            &[
+                0xA9, 0x01, // LDA #$01    ; addr 0x8000-0x8001
+                0xA9, 0x00, // LDA #$00    ; addr 0x8002-0x8003 (sets Z, target)
+                0xF0, 0xFC, // BEQ -4      ; addr 0x8004-0x8005 (branch back 4 bytes from 0x8006)
+            ],
+        );
+        cpu2.reset();
+        cpu2.step(); // LDA #$01, PC now at 0x8002
+        cpu2.step(); // LDA #$00 (sets Z), PC now at 0x8004
+        cpu2.step(); // BEQ -4: PC becomes 0x8006, then 0x8006 + (-4) = 0x8002
+        assert_eq!(cpu2.pc, 0x8002); // Should branch back to LDA #$00
+    }
+
+    #[test]
+    fn inc_dec_wrapping() {
+        // Test INC wrapping from $FF to $00
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0xFF);
+        cpu.memory.load_program(0x8000, &[0xE6, 0x10]); // INC $10
+        cpu.reset();
+        cpu.step();
+        assert_eq!(cpu.memory.read(0x0010), 0x00);
+        assert_eq!(cpu.status & 0x02, 0x02); // Z flag set
+        assert_eq!(cpu.status & 0x80, 0x00); // N flag clear
+
+        // Test DEC wrapping from $00 to $FF
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x0020, 0x00);
+        cpu2.memory.load_program(0x8000, &[0xC6, 0x20]); // DEC $20
+        cpu2.reset();
+        cpu2.step();
+        assert_eq!(cpu2.memory.read(0x0020), 0xFF);
+        assert_eq!(cpu2.status & 0x02, 0x00); // Z flag clear
+        assert_eq!(cpu2.status & 0x80, 0x80); // N flag set
+
+        // Test INX wrapping
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x8000, &[0xE8]); // INX
+        cpu3.reset();
+        cpu3.x = 0xFF;
+        cpu3.step();
+        assert_eq!(cpu3.x, 0x00);
+        assert_eq!(cpu3.status & 0x02, 0x02); // Z flag set
+
+        // Test DEY wrapping
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0x88]); // DEY
+        cpu4.reset();
+        cpu4.y = 0x00;
+        cpu4.step();
+        assert_eq!(cpu4.y, 0xFF);
+        assert_eq!(cpu4.status & 0x80, 0x80); // N flag set
+    }
+
+    #[test]
+    fn php_plp_b_flag_handling() {
+        // Test that PHP sets the B flag when pushed
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x08, 0x68]); // PHP, PLA
+        cpu.reset();
+        cpu.status = 0x24; // Only bit 5 and I flag
+        cpu.step(); // PHP
+        cpu.step(); // PLA (reads pushed status into A)
+        assert_eq!(cpu.a & 0x10, 0x10); // B flag should be set in pushed value
+        assert_eq!(cpu.a & 0x20, 0x20); // Bit 5 always set
+
+        // Test that PLP doesn't store the B flag
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x48, 0x28]); // PHA, PLP
+        cpu2.reset();
+        cpu2.a = 0xFF; // All flags set including B
+        cpu2.step(); // PHA
+        cpu2.step(); // PLP
+        assert_eq!(cpu2.status & 0x10, 0x00); // B flag should NOT be set in status register
+        assert_eq!(cpu2.status & 0x20, 0x20); // Bit 5 always set
+    }
+
+    #[test]
+    fn bit_instruction_flag_behavior() {
+        // Test BIT sets N and V from memory, Z from A & M
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x10, 0xC0); // Bits 7 and 6 set
+        cpu.memory.load_program(0x8000, &[0x24, 0x10]); // BIT $10
+        cpu.reset();
+        cpu.a = 0x80; // Only bit 7 set
+        cpu.step();
+        assert_eq!(cpu.status & 0x80, 0x80); // N flag set (from memory bit 7)
+        assert_eq!(cpu.status & 0x40, 0x40); // V flag set (from memory bit 6)
+        assert_eq!(cpu.status & 0x02, 0x00); // Z flag clear (A & M != 0)
+
+        // Test BIT with zero result
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0x20, 0x0F); // Lower nibble set
+        cpu2.memory.load_program(0x8000, &[0x24, 0x20]); // BIT $20
+        cpu2.reset();
+        cpu2.a = 0xF0; // Upper nibble set
+        cpu2.step();
+        assert_eq!(cpu2.status & 0x80, 0x00); // N flag clear
+        assert_eq!(cpu2.status & 0x40, 0x00); // V flag clear
+        assert_eq!(cpu2.status & 0x02, 0x02); // Z flag set (A & M == 0)
+    }
+
+    #[test]
+    fn compare_instructions_edge_cases() {
+        // Test CMP with equal values
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0xC9, 0x42]); // CMP #$42
+        cpu.reset();
+        cpu.a = 0x42;
+        cpu.step();
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry set (A >= M)
+        assert_eq!(cpu.status & 0x02, 0x02); // Zero set (A == M)
+
+        // Test CMP with A > M
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0xC9, 0x30]); // CMP #$30
+        cpu2.reset();
+        cpu2.a = 0x50;
+        cpu2.step();
+        assert_eq!(cpu2.status & 0x01, 0x01); // Carry set
+        assert_eq!(cpu2.status & 0x02, 0x00); // Zero clear
+
+        // Test CMP with A < M
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x8000, &[0xC9, 0x50]); // CMP #$50
+        cpu3.reset();
+        cpu3.a = 0x30;
+        cpu3.step();
+        assert_eq!(cpu3.status & 0x01, 0x00); // Carry clear
+        assert_eq!(cpu3.status & 0x02, 0x00); // Zero clear
+        assert_eq!(cpu3.status & 0x80, 0x80); // Negative set (result has bit 7 set)
+
+        // Test CPX edge cases
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0xE0, 0xFF]); // CPX #$FF
+        cpu4.reset();
+        cpu4.x = 0x00;
+        cpu4.step();
+        assert_eq!(cpu4.status & 0x01, 0x00); // Carry clear (X < M)
+
+        // Test CPY edge cases
+        let mem5 = ArrayMemory::new();
+        let mut cpu5 = Cpu6502::new(mem5);
+        cpu5.memory.load_program(0x8000, &[0xC0, 0x00]); // CPY #$00
+        cpu5.reset();
+        cpu5.y = 0x00;
+        cpu5.step();
+        assert_eq!(cpu5.status & 0x01, 0x01); // Carry set (Y >= M)
+        assert_eq!(cpu5.status & 0x02, 0x02); // Zero set (Y == M)
+    }
+
+    #[test]
+    fn shift_rotate_with_zero_and_ff() {
+        // Test ASL with $00
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x0A]); // ASL A
+        cpu.reset();
+        cpu.a = 0x00;
+        cpu.step();
+        assert_eq!(cpu.a, 0x00);
+        assert_eq!(cpu.status & 0x01, 0x00); // Carry clear
+        assert_eq!(cpu.status & 0x02, 0x02); // Zero set
+
+        // Test LSR with $00
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.load_program(0x8000, &[0x4A]); // LSR A
+        cpu2.reset();
+        cpu2.a = 0x00;
+        cpu2.step();
+        assert_eq!(cpu2.a, 0x00);
+        assert_eq!(cpu2.status & 0x01, 0x00); // Carry clear
+        assert_eq!(cpu2.status & 0x02, 0x02); // Zero set
+
+        // Test ROL with $FF and carry set
+        let mem3 = ArrayMemory::new();
+        let mut cpu3 = Cpu6502::new(mem3);
+        cpu3.memory.load_program(0x8000, &[0x2A]); // ROL A
+        cpu3.reset();
+        cpu3.a = 0xFF;
+        cpu3.status |= 0x01; // Set carry
+        cpu3.step();
+        assert_eq!(cpu3.a, 0xFF); // Rotates to $FF with carry in
+        assert_eq!(cpu3.status & 0x01, 0x01); // Carry set
+
+        // Test ROR with $00 and carry set
+        let mem4 = ArrayMemory::new();
+        let mut cpu4 = Cpu6502::new(mem4);
+        cpu4.memory.load_program(0x8000, &[0x6A]); // ROR A
+        cpu4.reset();
+        cpu4.a = 0x00;
+        cpu4.status |= 0x01; // Set carry
+        cpu4.step();
+        assert_eq!(cpu4.a, 0x80); // Carry rotates into bit 7
+        assert_eq!(cpu4.status & 0x01, 0x00); // Carry clear
+        assert_eq!(cpu4.status & 0x80, 0x80); // Negative set
+    }
+
+    #[test]
+    fn nmi_and_irq_interrupt_handling() {
+        // Test NMI pushes PC and status correctly
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0xFFFA, 0x00); // NMI vector low
+        cpu.memory.write(0xFFFB, 0x90); // NMI vector high -> $9000
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.status = 0x24; // Just bit 5 and unused
+        let old_sp = cpu.sp;
+        cpu.trigger_nmi();
+        assert_eq!(cpu.pc, 0x9000); // Jumped to NMI vector
+        assert_eq!(cpu.status & 0x04, 0x04); // I flag set
+        assert_eq!(cpu.sp, old_sp.wrapping_sub(3)); // 3 bytes pushed
+
+        // Verify stack contents (status is pushed last, at SP+1 after all pushes)
+        let pushed_status = cpu.memory.read(0x0100 + (old_sp.wrapping_sub(2)) as u16);
+        assert_eq!(pushed_status & 0x10, 0x00); // B flag clear in NMI
+        assert_eq!(pushed_status & 0x20, 0x20); // Bit 5 set
+
+        // Test IRQ respects I flag
+        let mem2 = ArrayMemory::new();
+        let mut cpu2 = Cpu6502::new(mem2);
+        cpu2.memory.write(0xFFFE, 0x00);
+        cpu2.memory.write(0xFFFF, 0x80);
+        cpu2.reset();
+        cpu2.status |= 0x04; // Set I flag
+        let pc_before = cpu2.pc;
+        cpu2.trigger_irq();
+        assert_eq!(cpu2.pc, pc_before); // Should not jump (I flag set)
+
+        // Test IRQ when I flag clear
+        cpu2.status &= !0x04; // Clear I flag
+        cpu2.trigger_irq();
+        assert_eq!(cpu2.pc, 0x8000); // Should jump to IRQ vector
     }
 }
