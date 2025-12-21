@@ -404,24 +404,29 @@ The emulator supports the following cartridge banking schemes:
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles
     - SET_FILL_COLOR - set fill color for rectangles
-    - SET_SCISSOR - clipping rectangle support
+    - SET_SCISSOR - clipping rectangle support (fully working)
+    - SET_TILE - configure tile descriptors for textures (fully implemented)
+    - SET_TEXTURE_IMAGE - set texture source address (fully implemented)
     - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD)
     - SET_COLOR_IMAGE - accepted but uses internal framebuffer
   - **Stub implementations** (accept but don't fully process):
-    - TEXTURE_RECTANGLE - currently renders as solid rectangle
-    - SET_TILE, LOAD_BLOCK, LOAD_TILE - texture configuration (needs TMEM)
-    - SET_TEXTURE_IMAGE - texture source (needs TMEM)
+    - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs texture sampling)
+    - LOAD_BLOCK, LOAD_TILE - texture loading (needs RDRAM callback integration)
     - SET_OTHER_MODES - rendering modes configuration
+  - **TMEM (Texture Memory)**:
+    - 4KB TMEM buffer allocated
+    - Tile descriptors (8 tiles) fully configured via SET_TILE
+    - Texture image address tracking via SET_TEXTURE_IMAGE
+    - Ready for texture sampling implementation
   - **Not implemented**: 
-    - TMEM (texture memory) - required for actual texture mapping
-    - 3D triangle rasterization with textures
+    - Actual texture sampling and filtering
+    - 3D triangle rasterization with textures (triangle renderer exists but not exposed)
     - Z-buffer depth testing
     - Anti-aliasing and blending
     - Perspective-correct texture mapping
     - Most advanced rendering commands
-  - Triangle rasterizer implemented but not yet exposed via display list commands
   - Can render simple 2D graphics using fill commands
-  - Full game graphics require extensive additional RDP command support
+  - Full game graphics require texture sampling, RSP, and additional RDP features
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
@@ -433,7 +438,7 @@ The emulator supports the following cartridge banking schemes:
 - **Input**: Controller support not implemented
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Basic RDP display list processing is functional. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, complete RDP command set, TMEM, and texture/Z-buffer support.
+- **Status**: Basic RDP display list processing is functional with TMEM support. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, texture sampling, complete RDP command set, and Z-buffer support.
 
 ## Troubleshooting
 
