@@ -1,10 +1,27 @@
+# Visal Studio Code
+.vscode/
+
+# Build artifacts
 target/
 **/*.rs.bk
-**/node_modules/
-**/dist/
+
+# macOS specific files
 .DS_Store
+
+# Log files
 *.log
-roms/
-.vscode/
-config.json
+
+# User-specific files
 saves/
+screenshots/
+state.json
+roms/
+config.json
+
+# Debugging files
+*trace.txt
+*.err
+*.out
+*err.txt
+*out.txt
+debug_log*

@@ -349,7 +349,6 @@ impl<M: Memory8086> Cpu8086<M> {
 
     /// Calculate parity (true if even number of 1 bits in low byte)
     #[inline]
-    #[allow(clippy::manual_is_multiple_of)] // Use % for compatibility with older Rust versions
     fn calc_parity(val: u8) -> bool {
         val.count_ones() % 2 == 0
     }
