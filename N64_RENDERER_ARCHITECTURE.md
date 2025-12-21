@@ -147,50 +147,114 @@ The RDP delegates to renderer:
 - ✅ 6 comprehensive unit tests
 - ✅ Production-ready for all use cases
 
-### OpenGLRdpRenderer (Stub)
+### OpenGLRdpRenderer (Complete)
 - ✅ Feature flag support (`--features opengl`)
-- ✅ Trait implementation with documentation
-- ✅ Stub methods that explain requirements
-- ⏸️ **Not functional** - requires OpenGL context
-- ⏸️ **Blocked by**: Current frontend uses minifb (no GL context exposure)
+- ✅ Full trait implementation with OpenGL 3.3 Core
+- ✅ FBO (Framebuffer Object) for offscreen rendering
+- ✅ Shader programs for flat and Gouraud shading
+- ✅ Hardware depth testing (Z-buffer)
+- ✅ All triangle rendering modes (flat, shaded, Z-buffered, combined)
+- ✅ Fill operations (clear, rectangles)
+- ✅ Scissor test support
+- ✅ Pixel readback for Frame compatibility
+- ✅ Compiles successfully with and without feature flag
+- ✅ All 70 N64 tests pass
+- ⏸️ **Integration pending**: Requires GL context from frontend
 
 ## Future Work
 
-### OpenGLRdpRenderer Implementation Requirements
+### OpenGLRdpRenderer Integration
 
-**Critical blocker**: OpenGL context availability
-- Current frontend uses `minifb` which doesn't expose an OpenGL context
-- Options for full implementation:
-  1. **Headless GL context** (EGL on Linux, WGL on Windows)
-  2. **Frontend migration** to SDL2 or winit+glutin
-  3. **Separate rendering window** with GL context
+**Current Status**: Fully implemented but not yet integrated into system creation.
 
-When implementing the OpenGL renderer:
+**Blocking Issue**: GL context availability
+- OpenGL context comes from SDL2 frontend
+- N64System doesn't have direct access to GL context
+- Need to pass context at system creation or via builder pattern
 
-1. **GL Context Creation**:
+**Integration Options**:
+
+**Option 1: Builder Pattern**
 ```rust
-// Option 1: Headless context (EGL on Linux)
-let display = unsafe { egl::get_display(egl::DEFAULT_DISPLAY) };
-let config = egl::choose_config(...);
-let context = egl::create_context(...);
+// In N64System
+pub struct N64SystemBuilder {
+    gl_context: Option<glow::Context>,
+}
 
-// Option 2: Shared context from GL-capable frontend
-let gl_context = frontend.get_gl_context();
+impl N64SystemBuilder {
+    pub fn with_gl_context(mut self, gl: glow::Context) -> Self {
+        self.gl_context = Some(gl);
+        self
+    }
+    
+    pub fn build(self) -> N64System {
+        let bus = if let Some(gl) = self.gl_context {
+            N64Bus::with_gl_renderer(gl)
+        } else {
+            N64Bus::new()  // Software renderer
+        };
+        // ...
+    }
+}
 ```
 
-2. **Feature flag**: `--features opengl` (already implemented)
+**Option 2: Settings-Based** (Recommended)
+```rust
+// In settings.rs
+pub struct Settings {
+    pub n64_renderer: String, // "software" | "opengl"
+    // ...
+}
 
-3. **OpenGL operations**:
-   - Framebuffer: Use OpenGL FBO (template in stub)
-   - Triangles: Use `glDrawArrays` with vertex buffers (template in stub)
-   - Z-buffer: Use hardware depth testing (`glEnable(GL_DEPTH_TEST)`)
-   - Scissor: Use `glScissor`
+// In main.rs or frontend
+let renderer: Box<dyn RdpRenderer> = if settings.n64_renderer == "opengl" && gl_available {
+    Box::new(OpenGLRdpRenderer::new(gl_context, width, height)?)
+} else {
+    Box::new(SoftwareRdpRenderer::new(width, height))
+};
+```
 
-4. **Shader programs** (documented in stub):
-   - Flat shading: Simple solid color fragment shader
-   - Gouraud shading: Per-vertex color interpolation (varying)
+**Option 3: Dynamic Renderer Factory**
+```rust
+// In RDP
+impl Rdp {
+    pub fn new_with_renderer(renderer: Box<dyn RdpRenderer>) -> Self {
+        // Use provided renderer instead of default
+    }
+}
 
-5. **Integration**: Add `n64_renderer` setting to config.json
+// In frontend
+let renderer = create_renderer(&settings, gl_context);
+let rdp = Rdp::new_with_renderer(renderer);
+```
+
+When implementing the integration:
+
+1. **Add renderer selection to settings**:
+   ```rust
+   // In settings.rs
+   pub n64_renderer: String, // Default: "software"
+   ```
+
+2. **Modify N64System creation** to accept renderer preference:
+   ```rust
+   // Option: Add to N64Bus or N64System::new()
+   pub fn new_with_renderer(renderer_type: &str, gl_context: Option<glow::Context>) -> Self
+   ```
+
+3. **Update frontend** to pass GL context when creating N64System:
+   ```rust
+   // In GUI main loop
+   if system_is_n64 && settings.n64_renderer == "opengl" {
+       let gl = get_gl_context();  // From SDL2 window
+       system = N64System::new_with_gl(gl);
+   }
+   ```
+
+4. **Add UI for renderer selection**:
+   - Settings menu option
+   - Function key toggle (e.g., F11 for renderer switching)
+   - Display current renderer in status bar
 
 ### Settings Integration (Future)
 

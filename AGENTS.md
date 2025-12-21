@@ -567,17 +567,29 @@ System-specific implementations that use core components:
     - Simple address translation (unmapped addresses)
   - **RDP (Reality Display Processor)**:
     - System-specific implementation in `crates/systems/n64/src/rdp.rs`
+    - **Pluggable renderer architecture** via `RdpRenderer` trait:
+      - `SoftwareRdpRenderer`: CPU-based rasterization (always available)
+      - `OpenGLRdpRenderer`: GPU-accelerated rasterization (feature-gated, complete but not integrated)
     - **Uses modular components from `emu_core::graphics`**:
       - `ZBuffer`: Depth buffer for hidden surface removal
       - `ColorOps`: Color interpolation and brightness adjustment
     - Framebuffer support with configurable resolution (default 320x240)
-    - **3D Triangle Rasterization**:
+    - **3D Triangle Rasterization** (both renderers):
       - Flat-shaded triangles (solid color)
       - Gouraud-shaded triangles (per-vertex color interpolation using `ColorOps::lerp`)
       - Z-buffered rendering (uses modular `ZBuffer` component)
       - Combined shading + Z-buffer support
-      - Scanline-based edge walking algorithm
+      - Scanline-based edge walking algorithm (software)
+      - GPU-accelerated rasterization via shaders (OpenGL)
       - Barycentric coordinate interpolation for attributes
+    - **OpenGL Renderer Details** (when enabled with `--features opengl`):
+      - OpenGL 3.3 Core Profile
+      - FBO (Framebuffer Object) for offscreen rendering
+      - Shader programs: `vertex.glsl`, `fragment_flat.glsl`, `fragment_gouraud.glsl`
+      - Hardware depth testing for Z-buffer
+      - Scissor test support
+      - Pixel readback for Frame compatibility
+      - **Not yet integrated**: Requires GL context from frontend (SDL2)
     - **Display List Commands** (wired to processor):
       - 0x08: Non-shaded triangle
       - 0x09: Non-shaded triangle with Z-buffer
@@ -618,6 +630,7 @@ System-specific implementations that use core components:
       - No microcode execution - essential for game rendering
       - Stub implementation with memory and register access
     - **RDP Graphics**: 
+      - OpenGL renderer available with `--features opengl` but not yet integrated
       - No texture mapping (texture structures in place but sampling not implemented)
       - No perspective-correct rasterization
       - No anti-aliasing or blending
@@ -630,7 +643,7 @@ System-specific implementations that use core components:
       - No TLB, cache, or accurate memory timing
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
-  - All tests pass (66 tests: cartridge, RDP with 3D rendering and display list commands, RSP, VI, system integration)
+  - All tests pass (70 tests: cartridge, RDP with 3D rendering and display list commands, RSP, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
