@@ -384,20 +384,41 @@ The emulator supports the following cartridge banking schemes:
 
 ### N64 (Nintendo 64)
 
-**Status**: Basic implementation with RDP graphics processor and VI (Video Interface)
+**Status**: Basic implementation with enhanced RDP graphics processor including 3D triangle rendering
 
-**Coverage**: Limited - CPU and basic RDP/VI implemented, no game rendering yet
+**Coverage**: Limited - CPU and RDP with 3D rendering implemented, no game rendering yet
 
 **ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
 
 **Features**:
 - MIPS R4300i CPU core with complete instruction set
 - Memory bus (4MB RDRAM + PIF + SP memory + RDP/VI registers)
-- RDP (Reality Display Processor) with framebuffer support
+- RDP (Reality Display Processor) with enhanced framebuffer support
+  - **3D triangle rasterization** with flat and Gouraud shading
+  - **Z-buffer (depth buffer)** for hidden surface removal
+  - **Scissor clipping** for efficient rendering
+  - Scanline-based triangle rasterization
 - VI (Video Interface) with display configuration registers
 - ROM loading with automatic byte-order detection and conversion
 - Save states (F5/F6)
 - Resolution: 320x240 pixels (configurable)
+
+**3D Rendering Capabilities**:
+- **Triangle Rendering**:
+  - Flat-shaded triangles (solid color)
+  - Gouraud-shaded triangles (per-vertex color interpolation)
+  - Z-buffered triangles (depth testing for proper occlusion)
+  - Combined shading + Z-buffer rendering
+- **Z-Buffer**:
+  - 16-bit depth buffer (0 = near, 0xFFFF = far)
+  - Per-pixel depth testing
+  - Automatic depth buffer updates
+  - Can be enabled/disabled per triangle
+- **Rasterization Features**:
+  - Scanline-based edge walking
+  - Barycentric coordinate interpolation
+  - Per-pixel color and depth interpolation
+  - Scissor rectangle clipping
 
 **Known Limitations**:
 - **Graphics**: RDP implementation supports basic display list commands
@@ -409,6 +430,9 @@ The emulator supports the following cartridge banking schemes:
     - SET_TEXTURE_IMAGE - set texture source address (fully implemented)
     - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD)
     - SET_COLOR_IMAGE - accepted but uses internal framebuffer
+  - **Triangle commands** (opcodes 0x08-0x0F):
+    - Command placeholders in place for future full implementation
+    - Direct triangle drawing functions available via API
   - **Stub implementations** (accept but don't fully process):
     - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs texture sampling)
     - LOAD_BLOCK, LOAD_TILE - texture loading (needs RDRAM callback integration)
@@ -420,12 +444,12 @@ The emulator supports the following cartridge banking schemes:
     - Ready for texture sampling implementation
   - **Not implemented**: 
     - Actual texture sampling and filtering
-    - 3D triangle rasterization with textures (triangle renderer exists but not exposed)
-    - Z-buffer depth testing
+    - Textured triangle rasterization (only flat/shaded triangles)
     - Anti-aliasing and blending
     - Perspective-correct texture mapping
+    - Display list triangle commands (API exists but not wired to command processor)
     - Most advanced rendering commands
-  - Can render simple 2D graphics using fill commands
+  - Can render 3D wireframe and flat-shaded graphics
   - Full game graphics require texture sampling, RSP, and additional RDP features
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
