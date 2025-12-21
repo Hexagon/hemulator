@@ -101,6 +101,13 @@ impl N64Bus {
         &mut self.vi
     }
 
+    /// Execute pending RSP task if RSP is not halted
+    pub fn process_rsp_task(&mut self) {
+        // Clone RDRAM reference to avoid borrow checker issues
+        let rdram_clone = self.rdram.clone();
+        self.rsp.execute_task(&rdram_clone, &mut self.rdp);
+    }
+
     /// Process pending RDP display list if needed
     pub fn process_rdp_display_list(&mut self) {
         if self.rdp.needs_processing() {
@@ -265,6 +272,12 @@ impl MemoryMips for N64Bus {
             0x0404_0000..=0x0404_001F => {
                 let offset = phys_addr & 0x1F;
                 self.rsp.write_register(offset, val, &mut self.rdram);
+
+                // If SP_STATUS was written (offset 0x10), check if RSP was un-halted
+                // and execute pending task
+                if offset == 0x10 {
+                    self.process_rsp_task();
+                }
             }
             // RDP Command registers (0x04100000 - 0x0410001F)
             0x0410_0000..=0x0410_001F => {
