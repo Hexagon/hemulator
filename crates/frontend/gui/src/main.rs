@@ -490,6 +490,12 @@ fn main() {
     // Load settings
     let mut settings = Settings::load();
 
+    // Save settings immediately to ensure config.json exists
+    // (if it didn't exist, Settings::load() created defaults)
+    if let Err(e) = settings.save() {
+        eprintln!("Warning: Failed to save config.json: {}", e);
+    }
+
     // If no ROM path provided via args, try to load from settings (backward compatibility)
     if rom_path.is_none() {
         // Try new mount_points system first

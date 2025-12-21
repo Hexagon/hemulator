@@ -190,12 +190,9 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Get the config file path relative to the executable
+    /// Get the config file path relative to the current working directory
     pub fn config_path() -> PathBuf {
-        let mut path = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| PathBuf::from("."));
+        let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         path.push("config.json");
         path
     }
