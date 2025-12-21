@@ -20,6 +20,19 @@
 //! 2. Process vertex data, apply transforms
 //! 3. Generate RDP display lists for triangle rendering
 //! 4. Handle lighting, texture coordinates, etc.
+//!
+//! # F3DEX Display List Commands
+//!
+//! Common F3DEX commands (command ID in upper byte):
+//! - 0x01: G_VTX - Load vertices into vertex buffer
+//! - 0x04: G_TRI1 - Draw single triangle
+//! - 0x05: G_TRI2 - Draw two triangles  
+//! - 0x06: G_QUAD - Draw quadrilateral (two triangles)
+//! - 0xDA: G_MTX - Load transformation matrix
+//! - 0xD9: G_GEOMETRYMODE - Set rendering mode flags
+//! - 0xDF: G_ENDDL - End of display list
+//! - 0xBF: G_RDPHALF_1 - RDP command data (part 1)
+//! - 0xE0-0xFF: Various RDP passthrough commands
 
 use super::rdp::Rdp;
 
@@ -143,7 +156,7 @@ impl RspHle {
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
     fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], rdp: &mut Rdp) -> u32 {
-        // Parse display list pointer from DMEM
+        // Parse task structure from DMEM
         // In real F3DEX, the display list address is passed via DMEM at a known offset
 
         // Read task structure from DMEM (typical offset is 0x0000)
@@ -157,40 +170,175 @@ impl RspHle {
         let _ucode_data_size = self.read_u32(dmem, 0x1C);
         let _dram_stack = self.read_u32(dmem, 0x20); // Stack in RDRAM
         let _dram_stack_size = self.read_u32(dmem, 0x24);
-        let output_buff = self.read_u32(dmem, 0x28); // Output buffer (display list)
+        let output_buff = self.read_u32(dmem, 0x28); // Output buffer (RDP display list)
         let output_buff_size = self.read_u32(dmem, 0x2C);
-        let data_ptr = self.read_u32(dmem, 0x30); // Data pointer (display list input)
+        let data_ptr = self.read_u32(dmem, 0x30); // Data pointer (F3DEX display list input)
         let data_size = self.read_u32(dmem, 0x34);
         let _yield_data_ptr = self.read_u32(dmem, 0x38);
         let _yield_data_size = self.read_u32(dmem, 0x3C);
 
-        // Basic implementation: Forward display list commands directly to RDP
-        // This is a simplified approach that skips vertex transformation
-        // Real F3DEX would:
-        // 1. Parse F3DEX display list commands (not RDP commands)
-        // 2. Process vertex data, matrices, textures
-        // 3. Transform vertices using projection and modelview matrices
-        // 4. Generate RDP commands (triangles, texture setup)
-        // 5. Write RDP display list to output_buff
+        // Parse F3DEX display list if data_ptr is provided
+        if data_ptr > 0 && data_size > 0 {
+            self.parse_f3dex_display_list(rdram, data_ptr, data_size, rdp);
+        }
 
-        // For now, if there's an output buffer with data, treat it as an RDP display list
-        // and forward it to the RDP for processing
+        // If there's an output buffer with data (pre-generated RDP commands),
+        // forward it directly to the RDP for processing
         if output_buff > 0 && output_buff_size > 0 {
-            // Trigger RDP to process the generated display list
             rdp.set_dpc_start(output_buff);
             rdp.set_dpc_end(output_buff + output_buff_size);
             rdp.process_display_list(rdram);
         }
 
-        // Also check if there's a data pointer (some games put display lists there)
-        if data_ptr > 0 && data_size > 0 && output_buff == 0 {
-            // Treat data_ptr as a display list to process
-            rdp.set_dpc_start(data_ptr);
-            rdp.set_dpc_end(data_ptr + data_size);
-            rdp.process_display_list(rdram);
-        }
-
         2000 // Average cycles for a graphics task
+    }
+
+    /// Parse F3DEX display list and generate RDP commands
+    fn parse_f3dex_display_list(
+        &mut self,
+        rdram: &[u8],
+        start_addr: u32,
+        _size: u32,
+        rdp: &mut Rdp,
+    ) {
+        let mut addr = start_addr as usize;
+        let max_commands = 1000; // Safety limit to prevent infinite loops
+        let mut commands_processed = 0;
+
+        while addr + 7 < rdram.len() && commands_processed < max_commands {
+            // Read 64-bit F3DEX command
+            let word0 = u32::from_be_bytes([
+                rdram[addr],
+                rdram[addr + 1],
+                rdram[addr + 2],
+                rdram[addr + 3],
+            ]);
+            let word1 = u32::from_be_bytes([
+                rdram[addr + 4],
+                rdram[addr + 5],
+                rdram[addr + 6],
+                rdram[addr + 7],
+            ]);
+
+            let cmd_id = (word0 >> 24) & 0xFF;
+
+            // Process F3DEX command
+            let should_continue = self.execute_f3dex_command(cmd_id, word0, word1, rdram, rdp);
+
+            if !should_continue {
+                break; // G_ENDDL or branch command
+            }
+
+            addr += 8;
+            commands_processed += 1;
+        }
+    }
+
+    /// Execute a single F3DEX display list command
+    /// Returns false if display list should terminate (G_ENDDL)
+    fn execute_f3dex_command(
+        &mut self,
+        cmd_id: u32,
+        word0: u32,
+        word1: u32,
+        rdram: &[u8],
+        rdp: &mut Rdp,
+    ) -> bool {
+        match cmd_id {
+            // G_VTX (0x01) - Load vertices
+            0x01 => {
+                // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
+                // word1: vertex data address in RDRAM
+                let vertex_count = ((word0 >> 12) & 0xFF) as usize;
+                let buffer_index = ((word0 >> 1) & 0x7F) as usize;
+                let vertex_addr = word1;
+
+                // Load vertices from RDRAM into vertex buffer
+                for i in 0..vertex_count.min(32 - buffer_index) {
+                    let vaddr = vertex_addr + (i as u32 * 16);
+                    self.load_vertex(rdram, vaddr, buffer_index + i);
+                }
+                true
+            }
+            // G_TRI1 (0x05) - Draw single triangle
+            0x05 => {
+                // word0: cmd_id | v0_index (bits 16-23) | v1_index (bits 8-15) | v2_index (bits 0-7)
+                let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+                let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+                let v2 = (word0 & 0xFF) as usize / 2;
+
+                if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+                    self.draw_transformed_triangle(v0, v1, v2, rdp);
+                }
+                true
+            }
+            // G_TRI2 (0x06) - Draw two triangles
+            0x06 => {
+                // First triangle
+                let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+                let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+                let v2 = (word0 & 0xFF) as usize / 2;
+
+                if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+                    self.draw_transformed_triangle(v0, v1, v2, rdp);
+                }
+
+                // Second triangle
+                let v3 = ((word1 >> 16) & 0xFF) as usize / 2;
+                let v4 = ((word1 >> 8) & 0xFF) as usize / 2;
+                let v5 = (word1 & 0xFF) as usize / 2;
+
+                if v3 < self.vertex_count && v4 < self.vertex_count && v5 < self.vertex_count {
+                    self.draw_transformed_triangle(v3, v4, v5, rdp);
+                }
+                true
+            }
+            // G_ENDDL (0xDF) - End display list
+            0xDF => false,
+            // RDP passthrough commands (0xE0-0xFF) - forward directly to RDP
+            0xE0..=0xFF => {
+                // These are RDP commands embedded in F3DEX display list
+                // Process them directly (SET_COLOR, SET_SCISSOR, etc.)
+                let _rdp_cmd_id = cmd_id & 0x3F;
+                // Create a small display list with just this command
+                let rdp_dl = [0u8; 8];
+                // Note: We would copy word0/word1 here, but for now this is just a placeholder
+                // In a real implementation, we'd execute the RDP command directly
+                rdp.set_dpc_start(0);
+                rdp.set_dpc_end(8);
+                let _ = rdp_dl; // Suppress unused variable warning
+                true
+            }
+            // Unknown/unsupported command - skip it
+            _ => true,
+        }
+    }
+
+    /// Transform vertices and draw triangle via RDP
+    fn draw_transformed_triangle(&self, v0: usize, v1: usize, v2: usize, rdp: &mut Rdp) {
+        // Get vertices from buffer
+        let vert0 = &self.vertices[v0];
+        let vert1 = &self.vertices[v1];
+        let vert2 = &self.vertices[v2];
+
+        // Transform vertices to screen space
+        let (x0, y0, z0) = self.transform_vertex(vert0);
+        let (x1, y1, z1) = self.transform_vertex(vert1);
+        let (x2, y2, z2) = self.transform_vertex(vert2);
+
+        // Convert vertex colors to ARGB format
+        let c0 = u32::from_be_bytes([0xFF, vert0.color[0], vert0.color[1], vert0.color[2]]);
+        let c1 = u32::from_be_bytes([0xFF, vert1.color[0], vert1.color[1], vert1.color[2]]);
+        let c2 = u32::from_be_bytes([0xFF, vert2.color[0], vert2.color[1], vert2.color[2]]);
+
+        // Draw shaded triangle with Z-buffer (assuming depth values fit in u16)
+        let z0_u16 = z0.clamp(0, 0xFFFF) as u16;
+        let z1_u16 = z1.clamp(0, 0xFFFF) as u16;
+        let z2_u16 = z2.clamp(0, 0xFFFF) as u16;
+
+        rdp.draw_triangle_shaded_zbuffer(
+            x0, y0, z0_u16, c0, x1, y1, z1_u16, c1, x2, y2, z2_u16, c2,
+        );
     }
 
     /// Read 32-bit big-endian value from buffer
@@ -381,5 +529,66 @@ mod tests {
         // Check off-diagonal elements are 0.0
         assert_eq!(matrix[1], 0.0);
         assert_eq!(matrix[4], 0.0);
+    }
+
+    #[test]
+    fn test_f3dex_display_list_parsing() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 1024];
+        let mut rdp = Rdp::new();
+
+        // Create a simple F3DEX display list in RDRAM at address 0x100
+        let dl_addr = 0x100;
+
+        // G_VTX command - Load 3 vertices at address 0x200
+        // word0: cmd(0x01) | count(3 << 12) | index(0)
+        let vtx_cmd_word0: u32 = (0x01 << 24) | (3 << 12);
+        let vtx_cmd_word1: u32 = 0x200; // Vertex data address
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&vtx_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&vtx_cmd_word1.to_be_bytes());
+
+        // Create vertex data at 0x200 (3 vertices * 16 bytes each)
+        // Vertex 0: pos(10,10,0), tex(0,0), color(255,0,0,255) - red
+        let v0_data: [u8; 16] = [
+            0, 10, 0, 10, 0, 0, 0, 0, // x=10, y=10, z=0, flags=0
+            0, 0, 0, 0, // s=0, t=0
+            255, 0, 0, 255, // r=255, g=0, b=0, a=255
+        ];
+        rdram[0x200..0x210].copy_from_slice(&v0_data);
+
+        // Vertex 1: pos(100,10,0), tex(0,0), color(0,255,0,255) - green
+        let v1_data: [u8; 16] = [0, 100, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 255];
+        rdram[0x210..0x220].copy_from_slice(&v1_data);
+
+        // Vertex 2: pos(55,100,0), tex(0,0), color(0,0,255,255) - blue
+        let v2_data: [u8; 16] = [0, 55, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255];
+        rdram[0x220..0x230].copy_from_slice(&v2_data);
+
+        // G_TRI1 command - Draw triangle using vertices 0, 1, 2
+        // word0: cmd(0x05) | v0(0 << 16) | v1(2 << 8) | v2(4)
+        let tri_cmd_word0: u32 = (0x05 << 24) | (2 << 8) | 4;
+        let tri_cmd_word1: u32 = 0;
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&tri_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&tri_cmd_word1.to_be_bytes());
+
+        // G_ENDDL command - End display list
+        let end_cmd_word0: u32 = 0xDF000000;
+        let end_cmd_word1: u32 = 0;
+        rdram[dl_addr + 16..dl_addr + 20].copy_from_slice(&end_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 20..dl_addr + 24].copy_from_slice(&end_cmd_word1.to_be_bytes());
+
+        // Parse the display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 24, &mut rdp);
+
+        // Verify vertices were loaded
+        assert_eq!(hle.vertex_count, 3);
+        assert_eq!(hle.vertices[0].pos[0], 10);
+        assert_eq!(hle.vertices[0].pos[1], 10);
+        assert_eq!(hle.vertices[0].color[0], 255); // Red
+
+        // Note: We can't easily verify the triangle was drawn without checking the framebuffer
+        // but the test ensures the parsing doesn't crash
     }
 }
