@@ -1,6 +1,7 @@
 //! SNES memory bus implementation
 
 use crate::cartridge::Cartridge;
+use crate::ppu::Ppu;
 use crate::SnesError;
 use emu_core::cpu_65c816::Memory65c816;
 
@@ -10,6 +11,8 @@ pub struct SnesBus {
     wram: [u8; 0x20000],
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
+    /// PPU (Picture Processing Unit)
+    ppu: Ppu,
 }
 
 impl SnesBus {
@@ -17,6 +20,7 @@ impl SnesBus {
         Self {
             wram: [0; 0x20000],
             cartridge: None,
+            ppu: Ppu::new(),
         }
     }
 
@@ -31,6 +35,10 @@ impl SnesBus {
 
     pub fn has_cartridge(&self) -> bool {
         self.cartridge.is_some()
+    }
+
+    pub fn ppu(&self) -> &Ppu {
+        &self.ppu
     }
 }
 
@@ -51,7 +59,9 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize],
-                    // Hardware registers
+                    // Hardware registers (PPU: $2100-$213F)
+                    0x2100..=0x213F => self.ppu.read_register(offset),
+                    // Other hardware registers
                     0x2000..=0x5FFF => 0, // Stub
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)
                     0x6000..=0x7FFF if bank < 0x40 => self.wram[(offset - 0x6000) as usize],
@@ -92,7 +102,9 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
-                    // Hardware registers
+                    // Hardware registers (PPU: $2100-$213F)
+                    0x2100..=0x213F => self.ppu.write_register(offset, val),
+                    // Other hardware registers
                     0x2000..=0x5FFF => {} // Stub - ignore writes
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)
                     0x6000..=0x7FFF if bank < 0x40 => {

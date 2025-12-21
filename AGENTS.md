@@ -535,13 +535,24 @@ System-specific implementations that use core components:
     - Cartridge mount/unmount
     - System reset
   - **Known Limitations**:
-    - PPU not implemented - displays black screen (256x224)
-    - APU (SPC700) not implemented - no audio
+    - **PPU**: Minimal implementation - basic tile rendering only
+      - No full PPU modes (Mode 0-7 with proper layer handling)
+      - No sprites (OAM)
+      - No scrolling, windows, or masks
+      - No HDMA effects, mosaic, or color math
+    - **APU (SPC700)**: Not implemented - no audio
     - Controller support not implemented
     - Only LoROM mapping - no HiROM, ExHiROM
     - No enhancement chips (SuperFX, DSP, SA-1, etc.)
     - Frame-based timing (not cycle-accurate)
-  - All tests pass (9 tests: cartridge, system)
+  - **PPU (Picture Processing Unit)**:
+    - Minimal implementation in `crates/systems/snes/ppu.rs`
+    - VRAM access via registers $2116-$2119 (word-addressed, 64KB)
+    - CGRAM (palette) access via $2121-$2122 (256 colors, 15-bit BGR format)
+    - Screen enable/disable via $2100 (force blank + brightness control)
+    - Basic tile rendering from VRAM (8x8 tiles, 2-bit color)
+    - **NOT implemented**: Full PPU modes, sprites, layers, scrolling, windows, effects
+  - All tests pass (15 tests: cartridge, PPU, system)
 
 - **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation
