@@ -6,17 +6,15 @@ use crate::video_processor::{OpenGLProcessor, SoftwareProcessor, VideoProcessor}
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::{Canvas, Texture, TextureCreator};
-use sdl2::video::{GLProfile, Window, WindowContext};
+use sdl2::render::Canvas;
+use sdl2::video::{GLProfile, Window};
 use sdl2::{EventPump, Sdl, VideoSubsystem};
 use std::collections::HashSet;
 use std::error::Error;
 
-pub enum RenderMode<'a> {
+pub enum RenderMode {
     Software {
         canvas: Canvas<Window>,
-        texture_creator: TextureCreator<WindowContext>,
-        texture: Option<Texture<'a>>,
         processor: SoftwareProcessor,
     },
     OpenGL {
@@ -26,10 +24,10 @@ pub enum RenderMode<'a> {
     },
 }
 
-pub struct Sdl2Backend<'a> {
+pub struct Sdl2Backend {
     _sdl_context: Sdl,
     _video_subsystem: VideoSubsystem,
-    render_mode: RenderMode<'a>,
+    render_mode: RenderMode,
     event_pump: EventPump,
     pressed_keys: HashSet<Key>,
     key_pressed_once: HashSet<Key>,
@@ -37,7 +35,7 @@ pub struct Sdl2Backend<'a> {
     current_filter: CrtFilter,
 }
 
-impl<'a> Sdl2Backend<'a> {
+impl Sdl2Backend {
     pub fn new(title: &str, width: usize, height: usize, use_opengl: bool) -> Result<Self, Box<dyn Error>> {
         let sdl_context = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
@@ -80,13 +78,10 @@ impl<'a> Sdl2Backend<'a> {
                 .build()?;
             
             let canvas = window.into_canvas().build()?;
-            let texture_creator = canvas.texture_creator();
             let processor = SoftwareProcessor::new();
             
             RenderMode::Software {
                 canvas,
-                texture_creator,
-                texture: None,
                 processor,
             }
         };
@@ -180,7 +175,7 @@ impl<'a> Sdl2Backend<'a> {
     }
 }
 
-impl<'a> WindowBackend for Sdl2Backend<'a> {
+impl WindowBackend for Sdl2Backend {
     fn is_open(&self) -> bool {
         self.is_open
     }
@@ -202,33 +197,25 @@ impl<'a> WindowBackend for Sdl2Backend<'a> {
                 // Swap buffers
                 window.gl_swap_window();
             }
-            RenderMode::Software { canvas, texture_creator, texture, processor } => {
+            RenderMode::Software { canvas, processor } => {
                 // Process frame with software processor
                 let processed = processor.process_frame(buffer, width, height, self.current_filter)?;
                 
-                // Create or recreate texture if size changed
-                let needs_new_texture = texture.as_ref().map_or(true, |t: &Texture| {
-                    let query = t.query();
-                    query.width != width as u32 || query.height != height as u32
-                });
-                
-                if needs_new_texture {
-                    *texture = Some(texture_creator.create_texture_streaming(
-                        PixelFormatEnum::ARGB8888,
-                        width as u32,
-                        height as u32,
-                    )?);
-                }
+                // Create texture for this frame
+                let texture_creator = canvas.texture_creator();
+                let mut texture = texture_creator.create_texture_streaming(
+                    PixelFormatEnum::ARGB8888,
+                    width as u32,
+                    height as u32,
+                )?;
                 
                 // Update texture with processed buffer
-                if let Some(ref mut tex) = texture {
-                    tex.update(None, bytemuck::cast_slice(&processed), width * 4)?;
-                    
-                    // Clear and render
-                    canvas.clear();
-                    canvas.copy(tex, None, None)?;
-                    canvas.present();
-                }
+                texture.update(None, bytemuck::cast_slice(&processed), width * 4)?;
+                
+                // Clear and render
+                canvas.clear();
+                canvas.copy(&texture, None, None)?;
+                canvas.present();
             }
         }
         
