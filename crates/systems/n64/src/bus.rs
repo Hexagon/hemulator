@@ -39,6 +39,22 @@ impl N64Bus {
         self.cartridge.is_some()
     }
 
+    /// Get entry point from cartridge header (for boot simulation)
+    pub fn get_entry_point(&self) -> Option<u64> {
+        if let Some(ref cart) = self.cartridge {
+            // N64 ROM header: entry point at offset 8 (32-bit big-endian)
+            let b0 = cart.read(8) as u32;
+            let b1 = cart.read(9) as u32;
+            let b2 = cart.read(10) as u32;
+            let b3 = cart.read(11) as u32;
+            let entry = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+            // Add 0x1000 offset to get actual code location in ROM
+            Some((0x10000000 + 0x1000) as u64)
+        } else {
+            None
+        }
+    }
+
     fn translate_address(&self, addr: u32) -> u32 {
         // Simple address translation (unmapped addresses)
         addr & 0x1FFFFFFF

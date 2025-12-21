@@ -15,6 +15,8 @@ These test ROMs are designed to:
 - **Game Boy** - Implementation with smoke test and visible output validation
 - **Game Boy Color** - DMG-compatible mode with smoke test
 - **Atari 2600** - Full implementation with smoke test
+- **SNES** - Implementation with smoke test (65C816 CPU with real execution)
+- **N64** - Implementation with smoke test (MIPS R4300i CPU with real execution)
 
 ## Future Systems
 
@@ -85,11 +87,29 @@ cd rgbds && make && sudo make install
 - Behavior: Sets playfield to alternating pattern ($AA)
 - Expected output: Visible playfield pattern on screen
 
+### SNES (test.sfc)
+- Format: LoROM (32KB with SMC header support)
+- Size: 32KB
+- CPU: WDC 65C816 (16-bit processor)
+- Behavior: Writes alternating 0xAA and 0x55 bytes to WRAM at $7E:0000
+- Expected output: Checkerboard pattern with 50/50 color distribution
+- Test ROM generates code via Python (see build.sh)
+
+### N64 (test.z64)
+- Format: Z64 (big-endian)
+- Size: 1MB  
+- CPU: MIPS R4300i (64-bit RISC processor)
+- Behavior: Writes alternating 0xAA and 0x55 bytes to RDRAM at 0x00000000
+- Expected output: Checkerboard pattern with 50/50 color distribution
+- Test ROM generates code via Python (see build.sh)
+
 ## Integration with Tests
 
 These ROMs are included in the smoke tests for each system crate:
 - `crates/systems/nes/src/lib.rs` - NES smoke test
 - `crates/systems/gb/src/lib.rs` - Game Boy and Game Boy Color smoke tests
 - `crates/systems/atari2600/src/lib.rs` - Atari 2600 smoke test
+- `crates/systems/snes/src/lib.rs` - SNES smoke test
+- `crates/systems/n64/src/lib.rs` - N64 smoke test
 
 The tests load each ROM, run it for a few frames, and verify that the output frame contains expected non-zero pixel data, confirming that the emulator is functioning correctly.

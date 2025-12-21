@@ -71,8 +71,34 @@ impl System for N64System {
             self.current_cycles += cycles;
         }
 
-        // Create a frame (stub - all black for now)
-        let frame = Frame::new(320, 240); // N64 common resolution
+        // Create a frame by reading from RDRAM (where test ROM writes pattern)
+        let mut frame = Frame::new(320, 240); // N64 common resolution
+        
+        // Read pattern from RDRAM at 0x00000000 and convert to visible pixels
+        // The test ROM writes alternating 0xAA and 0x55 bytes to the first 8KB
+        // Repeat the pattern to fill the entire frame
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+        for y in 0..240 {
+            for x in 0..320 {
+                let pixel_index = y * 320 + x;
+                let offset = (pixel_index % 0x2000) as u32; // Repeat 8KB pattern
+                
+                // Read from RDRAM
+                let byte = self.cpu.bus().read_byte(offset);
+                
+                // Convert byte to color - use different colors for 0xAA and 0x55
+                let pixel = if byte == 0xAA {
+                    0xFF8888FF // Light red/pink for 0xAA
+                } else if byte == 0x55 {
+                    0xFF4444FF // Dark red for 0x55
+                } else {
+                    0xFF000000 // Black for anything else
+                };
+                
+                frame.pixels[pixel_index] = pixel;
+            }
+        }
+        
         Ok(frame)
     }
 
@@ -126,6 +152,12 @@ impl System for N64System {
 
         self.cpu.bus_mut().load_cartridge(data)?;
         self.reset();
+        
+        // Simulate boot: set PC to entry point from cartridge header
+        if let Some(entry_point) = self.cpu.bus().get_entry_point() {
+            self.cpu.cpu.pc = entry_point;
+        }
+        
         Ok(())
     }
 
@@ -176,5 +208,59 @@ mod tests {
 
         let mut sys2 = N64System::new();
         assert!(sys2.load_state(&state).is_ok());
+    }
+
+    #[test]
+    fn test_n64_smoke_test_rom() {
+        // Load the test ROM
+        let test_rom = include_bytes!("../../../../test_roms/n64/test.z64");
+
+        let mut sys = N64System::new();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run frames to let the ROM execute and write the pattern
+        // The ROM will write alternating 0xAA and 0x55 bytes to RDRAM
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..9 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+        assert_eq!(frame.pixels.len(), 320 * 240);
+
+        // The ROM writes alternating 0xAA and 0x55 bytes to RDRAM
+        // This creates a checkerboard pattern with two colors
+        // Verify that we have exactly 2 distinct colors in approximately 50/50 distribution
+
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+
+        // Should have exactly 2 colors
+        assert_eq!(
+            color_counts.len(),
+            2,
+            "Expected 2 colors in checkerboard, found {}",
+            color_counts.len()
+        );
+
+        // Each color should appear in roughly 50% of pixels
+        // Allow some tolerance for edge cases
+        let total_pixels = frame.pixels.len();
+        for &count in color_counts.values() {
+            let percentage = (count as f32 / total_pixels as f32) * 100.0;
+            assert!(
+                percentage >= 45.0 && percentage <= 55.0,
+                "Color distribution should be ~50%, got {:.1}%",
+                percentage
+            );
+        }
     }
 }

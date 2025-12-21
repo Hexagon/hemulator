@@ -155,10 +155,14 @@ impl<M: MemoryMips> CpuMips<M> {
 
         match opcode {
             0x00 => self.execute_special(instr),
-            0x0D => self.execute_ori(instr), // ORI
-            0x0F => self.execute_lui(instr), // LUI
-            0x23 => self.execute_lw(instr),  // LW
-            0x2B => self.execute_sw(instr),  // SW
+            0x02 => self.execute_j(instr),     // J - Jump
+            0x05 => self.execute_bne(instr),   // BNE - Branch Not Equal
+            0x09 => self.execute_addiu(instr), // ADDIU - Add Immediate Unsigned
+            0x0D => self.execute_ori(instr),   // ORI
+            0x0F => self.execute_lui(instr),   // LUI
+            0x23 => self.execute_lw(instr),    // LW
+            0x28 => self.execute_sb(instr),    // SB - Store Byte
+            0x2B => self.execute_sw(instr),    // SW
             _ => {
                 // Unimplemented instruction
                 self.cycles += 1;
@@ -241,6 +245,53 @@ impl<M: MemoryMips> CpuMips<M> {
 
         let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
         self.memory.write_word(addr, self.gpr[rt] as u32);
+        self.cycles += 1;
+    }
+
+    /// Execute SB - Store Byte
+    fn execute_sb(&mut self, instr: u32) {
+        let rt = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        let addr = (self.gpr[rs] as i64).wrapping_add(offset as i64) as u32;
+        self.memory.write_byte(addr, (self.gpr[rt] & 0xFF) as u8);
+        self.cycles += 1;
+    }
+
+    /// Execute ADDIU - Add Immediate Unsigned
+    fn execute_addiu(&mut self, instr: u32) {
+        let rt = ((instr >> 16) & 0x1F) as usize;
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let imm = (instr & 0xFFFF) as i16 as i32;
+
+        // Sign-extend immediate and add
+        self.gpr[rt] = (self.gpr[rs] as i32).wrapping_add(imm) as i64 as u64;
+        self.cycles += 1;
+    }
+
+    /// Execute BNE - Branch Not Equal
+    fn execute_bne(&mut self, instr: u32) {
+        let rs = ((instr >> 21) & 0x1F) as usize;
+        let rt = ((instr >> 16) & 0x1F) as usize;
+        let offset = (instr & 0xFFFF) as i16 as i32;
+
+        if self.gpr[rs] != self.gpr[rt] {
+            // Branch: PC + 4 + (offset << 2)
+            // Note: PC already incremented by 4 in step()
+            self.pc = (self.pc as i64 + (offset as i64 * 4)) as u64;
+        }
+        self.cycles += 1;
+    }
+
+    /// Execute J - Jump
+    fn execute_j(&mut self, instr: u32) {
+        let target = instr & 0x03FFFFFF;
+        
+        // Jump: PC = (PC & 0xF0000000) | (target << 2)
+        // Note: PC already incremented by 4 in step(), use PC-4 for calculation
+        let pc_region = (self.pc - 4) & 0xFFFFFFFF_F0000000;
+        self.pc = pc_region | ((target as u64) << 2);
         self.cycles += 1;
     }
 }
