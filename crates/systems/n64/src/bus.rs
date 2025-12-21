@@ -2,6 +2,7 @@
 
 use crate::cartridge::Cartridge;
 use crate::rdp::Rdp;
+use crate::rsp::Rsp;
 use crate::vi::VideoInterface;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
@@ -12,12 +13,12 @@ pub struct N64Bus {
     rdram: Vec<u8>,
     /// 64KB PIF RAM/ROM (boot)
     pif_ram: [u8; 0x800],
-    /// 64KB SP DMEM/IMEM (RSP memory)
-    sp_mem: [u8; 0x2000],
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
     /// RDP (Reality Display Processor)
     rdp: Rdp,
+    /// RSP (Reality Signal Processor)
+    rsp: Rsp,
     /// VI (Video Interface)
     vi: VideoInterface,
 }
@@ -27,9 +28,9 @@ impl N64Bus {
         let mut bus = Self {
             rdram: vec![0; 4 * 1024 * 1024], // 4MB
             pif_ram: [0; 0x800],
-            sp_mem: [0; 0x2000],
             cartridge: None,
             rdp: Rdp::new(),
+            rsp: Rsp::new(),
             vi: VideoInterface::new(),
         };
 
@@ -126,8 +127,16 @@ impl MemoryMips for N64Bus {
         match phys_addr {
             // RDRAM (0x00000000 - 0x003FFFFF)
             0x0000_0000..=0x003F_FFFF => self.rdram[(phys_addr & 0x003FFFFF) as usize],
-            // SP DMEM/IMEM (0x04000000 - 0x04001FFF)
-            0x0400_0000..=0x0400_1FFF => self.sp_mem[(phys_addr & 0x1FFF) as usize],
+            // SP DMEM (0x04000000 - 0x04000FFF)
+            0x0400_0000..=0x0400_0FFF => {
+                let offset = phys_addr & 0xFFF;
+                self.rsp.read_dmem(offset)
+            }
+            // SP IMEM (0x04001000 - 0x04001FFF)
+            0x0400_1000..=0x0400_1FFF => {
+                let offset = phys_addr & 0xFFF;
+                self.rsp.read_imem(offset)
+            }
             // PIF RAM (0x1FC00000 - 0x1FC007FF)
             0x1FC0_0000..=0x1FC0_07FF => self.pif_ram[(phys_addr & 0x7FF) as usize],
             // Cartridge ROM (0x10000000 - 0x1FBFFFFF)
@@ -161,6 +170,11 @@ impl MemoryMips for N64Bus {
                     self.rdram[offset + 2],
                     self.rdram[offset + 3],
                 ])
+            }
+            // RSP registers (0x04040000 - 0x0404001F)
+            0x0404_0000..=0x0404_001F => {
+                let offset = phys_addr & 0x1F;
+                self.rsp.read_register(offset)
             }
             // RDP Command registers (0x04100000 - 0x0410001F)
             0x0410_0000..=0x0410_001F => {
@@ -210,9 +224,15 @@ impl MemoryMips for N64Bus {
             0x0000_0000..=0x003F_FFFF => {
                 self.rdram[(phys_addr & 0x003FFFFF) as usize] = val;
             }
-            // SP DMEM/IMEM
-            0x0400_0000..=0x0400_1FFF => {
-                self.sp_mem[(phys_addr & 0x1FFF) as usize] = val;
+            // SP DMEM (0x04000000 - 0x04000FFF)
+            0x0400_0000..=0x0400_0FFF => {
+                let offset = phys_addr & 0xFFF;
+                self.rsp.write_dmem(offset, val);
+            }
+            // SP IMEM (0x04001000 - 0x04001FFF)
+            0x0400_1000..=0x0400_1FFF => {
+                let offset = phys_addr & 0xFFF;
+                self.rsp.write_imem(offset, val);
             }
             // PIF RAM
             0x1FC0_0000..=0x1FC0_07FF => {
@@ -240,6 +260,11 @@ impl MemoryMips for N64Bus {
                 self.rdram[offset + 1] = bytes[1];
                 self.rdram[offset + 2] = bytes[2];
                 self.rdram[offset + 3] = bytes[3];
+            }
+            // RSP registers (0x04040000 - 0x0404001F)
+            0x0404_0000..=0x0404_001F => {
+                let offset = phys_addr & 0x1F;
+                self.rsp.write_register(offset, val, &mut self.rdram);
             }
             // RDP Command registers (0x04100000 - 0x0410001F)
             0x0410_0000..=0x0410_001F => {

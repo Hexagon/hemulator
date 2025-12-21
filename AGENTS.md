@@ -578,7 +578,10 @@ System-specific implementations that use core components:
     - System reset
     - RDP framebuffer rendering with 3D triangle support and Z-buffer
   - **Known Limitations**:
-    - **RSP (Reality Signal Processor)**: Not implemented - essential for game rendering
+    - **RSP (Reality Signal Processor)**: 
+      - Basic infrastructure implemented (DMEM, IMEM, DMA, registers)
+      - No microcode execution - essential for game rendering
+      - Stub implementation with memory and register access
     - **RDP Graphics**: 
       - No texture mapping (texture structures in place but sampling not implemented)
       - Triangle commands (0x08-0x0F) not yet wired to display list processor

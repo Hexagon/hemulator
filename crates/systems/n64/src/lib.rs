@@ -4,7 +4,9 @@
 //! from `emu_core`, along with N64-specific components:
 //!
 //! - **CPU**: MIPS R4300i (64-bit processor running at 93.75 MHz)
-//! - **RCP**: Reality Co-Processor (graphics and audio - stub implementation)
+//! - **RCP**: Reality Co-Processor (graphics and audio)
+//!   - **RDP**: Reality Display Processor (graphics rasterization)
+//!   - **RSP**: Reality Signal Processor (geometry/audio processing - stub)
 //! - **Memory**: 4MB RDRAM + cartridge ROM
 //! - **Timing**: NTSC (~60 Hz frame rate)
 
@@ -14,6 +16,7 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod rdp;
+mod rsp;
 mod vi;
 
 use bus::N64Bus;
@@ -419,7 +422,7 @@ mod tests {
         // PC should be in range 0x90001000+ (possibly sign-extended to 0xFFFFFFFF90001000+)
         let pc_low = (sys.cpu.cpu.pc & 0xFFFFFFFF) as u32;
         assert!(
-            pc_low >= 0x90001000 && pc_low < 0x90002000,
+            (0x90001000..0x90002000).contains(&pc_low),
             "CPU should be in cartridge ROM after boot, but PC is 0x{:016X} (low 32 bits: 0x{:08X})",
             sys.cpu.cpu.pc,
             pc_low
