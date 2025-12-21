@@ -17,6 +17,8 @@ mod cartridge;
 mod cpu;
 mod rdp;
 mod rdp_renderer;
+#[cfg(feature = "opengl")]
+mod rdp_renderer_opengl;
 mod rdp_renderer_software;
 mod rsp;
 mod vi;
