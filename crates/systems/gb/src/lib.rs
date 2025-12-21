@@ -415,4 +415,34 @@ mod tests {
         assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC);
         assert_eq!(sys.cpu.memory.ppu.ly, 0);
     }
+
+    #[test]
+    fn test_gb_smoke_test_rom() {
+        // Load the test ROM
+        let test_rom = include_bytes!("../../../../test_roms/gb/test.gb");
+        
+        let mut sys = GbSystem::new();
+        
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+        
+        // Run a few frames to let the ROM initialize
+        // This is a basic smoke test - the GB emulator is WIP and may not render correctly yet
+        for _ in 0..10 {
+            let result = sys.step_frame();
+            assert!(result.is_ok(), "Frame execution should not crash");
+        }
+        
+        let frame = sys.step_frame().unwrap();
+        
+        // Verify frame dimensions are correct
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 144);
+        assert_eq!(frame.pixels.len(), 160 * 144);
+        
+        // Basic smoke test: The ROM should load and run without crashing
+        // Note: The GB emulator is still WIP, so we don't validate pixel content yet
+        // This test verifies that the test ROM is valid and the emulator doesn't crash
+    }
 }
