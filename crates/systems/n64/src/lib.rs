@@ -40,6 +40,28 @@ pub enum N64Error {
     InvalidMountPoint(String),
 }
 
+/// Debug information for N64 system
+///
+/// Provides runtime information about the loaded ROM and system state
+/// for display in debug overlays.
+#[derive(Debug, Clone)]
+pub struct DebugInfo {
+    /// ROM name from cartridge header (20 bytes)
+    pub rom_name: String,
+    /// ROM size in megabytes
+    pub rom_size_mb: f32,
+    /// Current PC (program counter)
+    pub pc: u64,
+    /// RSP microcode type
+    pub rsp_microcode: String,
+    /// Number of vertices in RSP vertex buffer
+    pub rsp_vertex_count: usize,
+    /// RDP status flags
+    pub rdp_status: u32,
+    /// Frame buffer resolution
+    pub framebuffer_resolution: String,
+}
+
 /// N64 system implementation
 pub struct N64System {
     cpu: N64Cpu,
@@ -79,6 +101,58 @@ impl N64System {
     /// Update controller 4 state
     pub fn set_controller4(&mut self, state: ControllerState) {
         self.cpu.bus_mut().set_controller4(state);
+    }
+
+    /// Get debug information for the GUI overlay
+    pub fn get_debug_info(&self) -> DebugInfo {
+        let bus = self.cpu.bus();
+
+        // Get ROM name from cartridge header (if available)
+        let rom_name = if let Some(cart) = bus.cartridge() {
+            // N64 ROM header has game name at offset 0x20 (32 bytes into ROM)
+            let name_bytes = cart.read_range(0x20, 20);
+            String::from_utf8_lossy(&name_bytes)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string()
+        } else {
+            "No ROM".to_string()
+        };
+
+        // Get ROM size
+        let rom_size_mb = if let Some(cart) = bus.cartridge() {
+            cart.size() as f32 / (1024.0 * 1024.0)
+        } else {
+            0.0
+        };
+
+        // Get RSP microcode type
+        let rsp_microcode = match bus.rsp().microcode_type() {
+            rsp_hle::MicrocodeType::F3DEX => "F3DEX".to_string(),
+            rsp_hle::MicrocodeType::F3DEX2 => "F3DEX2".to_string(),
+            rsp_hle::MicrocodeType::Audio => "Audio".to_string(),
+            rsp_hle::MicrocodeType::Unknown => "Unknown".to_string(),
+        };
+
+        // Get RSP vertex count
+        let rsp_vertex_count = bus.rsp().vertex_count();
+
+        // Get RDP status
+        let rdp_status = bus.rdp().read_register(0x0C); // DPC_STATUS register
+
+        // Get framebuffer resolution
+        let frame = bus.rdp().get_frame();
+        let framebuffer_resolution = format!("{}x{}", frame.width, frame.height);
+
+        DebugInfo {
+            rom_name,
+            rom_size_mb,
+            pc: self.cpu.cpu.pc,
+            rsp_microcode,
+            rsp_vertex_count,
+            rdp_status,
+            framebuffer_resolution,
+        }
     }
 }
 

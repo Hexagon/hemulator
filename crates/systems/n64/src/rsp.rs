@@ -311,6 +311,16 @@ impl Rsp {
     pub fn microcode(&self) -> super::rsp_hle::MicrocodeType {
         self.hle.microcode()
     }
+
+    /// Get current microcode type
+    pub fn microcode_type(&self) -> super::rsp_hle::MicrocodeType {
+        self.hle.microcode()
+    }
+
+    /// Get vertex count in RSP vertex buffer
+    pub fn vertex_count(&self) -> usize {
+        self.hle.vertex_count()
+    }
 }
 
 impl Default for Rsp {

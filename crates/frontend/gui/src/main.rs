@@ -227,14 +227,17 @@ impl EmulatorSystem {
         // Other systems don't use keyboard input
     }
 
-    fn get_debug_info(&self) -> Option<emu_nes::DebugInfo> {
+    fn get_debug_info_nes(&self) -> Option<emu_nes::DebugInfo> {
         match self {
             EmulatorSystem::NES(sys) => Some(sys.get_debug_info()),
-            EmulatorSystem::GameBoy(_) => None,
-            EmulatorSystem::Atari2600(_) => None,
-            EmulatorSystem::PC(_) => None,
-            EmulatorSystem::SNES(_) => None,
-            EmulatorSystem::N64(_) => None,
+            _ => None,
+        }
+    }
+
+    fn get_debug_info_n64(&self) -> Option<emu_n64::DebugInfo> {
+        match self {
+            EmulatorSystem::N64(sys) => Some(sys.get_debug_info()),
+            _ => None,
         }
     }
 
@@ -972,7 +975,8 @@ fn main() {
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
         if show_debug && rom_loaded {
-            if let Some(debug_info) = sys.get_debug_info() {
+            // Try NES debug info first
+            if let Some(debug_info) = sys.get_debug_info_nes() {
                 let timing_str = match debug_info.timing_mode {
                     emu_core::apu::TimingMode::Ntsc => "NTSC",
                     emu_core::apu::TimingMode::Pal => "PAL",
@@ -987,6 +991,22 @@ fn main() {
                     debug_info.chr_banks,
                     current_fps,
                     sys.get_runtime_stats(),
+                    &settings.video_backend,
+                ));
+            }
+            // Try N64 debug info if NES didn't match
+            else if let Some(debug_info) = sys.get_debug_info_n64() {
+                debug_overlay = Some(ui_render::create_n64_debug_overlay(
+                    width,
+                    height,
+                    &debug_info.rom_name,
+                    debug_info.rom_size_mb,
+                    debug_info.pc,
+                    &debug_info.rsp_microcode,
+                    debug_info.rsp_vertex_count,
+                    debug_info.rdp_status,
+                    &debug_info.framebuffer_resolution,
+                    current_fps,
                     &settings.video_backend,
                 ));
             }

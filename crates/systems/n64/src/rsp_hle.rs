@@ -136,6 +136,11 @@ impl RspHle {
         self.microcode
     }
 
+    /// Get current vertex count in vertex buffer
+    pub fn vertex_count(&self) -> usize {
+        self.vertex_count
+    }
+
     /// Execute HLE task (called when RSP is triggered)
     /// Returns number of cycles consumed
     pub fn execute_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], _rdp: &mut Rdp) -> u32 {
