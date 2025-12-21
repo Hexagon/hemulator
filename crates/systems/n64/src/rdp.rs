@@ -42,10 +42,9 @@
 //! - **3D Triangle Rasterization**:
 //!   - Flat-shaded triangles (solid color)
 //!   - Gouraud-shaded triangles (per-vertex color interpolation)
-//!   - Z-buffered rendering (16-bit depth buffer)
+//!   - Z-buffered rendering (uses modular `ZBuffer` from `emu_core::graphics`)
 //!   - Scanline-based edge walking algorithm
-//! - **Z-Buffer**: 16-bit depth testing for hidden surface removal
-//! - **Color Interpolation**: Linear interpolation in ARGB color space
+//! - **Color Operations**: Uses modular `ColorOps` from `emu_core::graphics`
 //! - Supports basic fill operations and color clearing
 //! - Registers for configuration (color, resolution, etc.)
 //! - Not cycle-accurate; focuses on correct visual output
@@ -57,6 +56,7 @@
 //! - Full blending pipeline
 //! - Accurate timing and synchronization
 
+use emu_core::graphics::{ColorOps, ZBuffer};
 use emu_core::types::Frame;
 
 /// RDP register addresses (relative to 0x04100000)
@@ -123,12 +123,8 @@ pub struct Rdp {
     /// Framebuffer height
     height: u32,
 
-    /// Z-buffer (depth buffer) for hidden surface removal
-    /// Stores depth values as u16 (0 = near, 0xFFFF = far)
-    zbuffer: Vec<u16>,
-
-    /// Z-buffer enabled flag
-    zbuffer_enabled: bool,
+    /// Z-buffer (depth buffer) for hidden surface removal using modular component
+    zbuffer: ZBuffer,
 
     /// Color format
     #[allow(dead_code)] // Reserved for future color format support
@@ -164,13 +160,11 @@ impl Rdp {
 
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
-        let size = (width * height) as usize;
         Self {
             framebuffer: Frame::new(width, height),
             width,
             height,
-            zbuffer: vec![0xFFFF; size], // Initialize to maximum depth (far plane)
-            zbuffer_enabled: false,
+            zbuffer: ZBuffer::new(width, height),
             color_format: ColorFormat::RGBA5551,
             fill_color: 0xFF000000, // Black with full alpha
             scissor: ScissorBox {
@@ -202,8 +196,8 @@ impl Rdp {
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.framebuffer = Frame::new(self.width, self.height);
-        self.zbuffer.fill(0xFFFF); // Reset to maximum depth (far plane)
-        self.zbuffer_enabled = false;
+        self.zbuffer.clear();
+        self.zbuffer.set_enabled(false);
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
@@ -282,34 +276,13 @@ impl Rdp {
     /// Clear the Z-buffer to maximum depth (far plane)
     #[allow(dead_code)] // Public API for future use
     pub fn clear_zbuffer(&mut self) {
-        self.zbuffer.fill(0xFFFF);
+        self.zbuffer.clear();
     }
 
     /// Enable or disable Z-buffer testing
     #[allow(dead_code)] // Public API for future use
     pub fn set_zbuffer_enabled(&mut self, enabled: bool) {
-        self.zbuffer_enabled = enabled;
-    }
-
-    /// Test and update Z-buffer for a pixel
-    /// Returns true if pixel should be drawn (passes depth test)
-    fn zbuffer_test(&mut self, x: u32, y: u32, depth: u16) -> bool {
-        if !self.zbuffer_enabled {
-            return true; // Always pass if Z-buffer disabled
-        }
-
-        let idx = (y * self.width + x) as usize;
-        if idx >= self.zbuffer.len() {
-            return false;
-        }
-
-        // Depth test: closer (smaller) values pass
-        if depth < self.zbuffer[idx] {
-            self.zbuffer[idx] = depth; // Update Z-buffer
-            true
-        } else {
-            false
-        }
+        self.zbuffer.set_enabled(enabled);
     }
 
     /// Draw a flat-shaded triangle (basic rasterization)
@@ -467,7 +440,7 @@ impl Rdp {
                     let z = (z_start + (z_end - z_start) * t) as u16;
 
                     // Z-buffer test
-                    if self.zbuffer_test(x as u32, clip_y as u32, z) {
+                    if self.zbuffer.test_and_update(x as u32, clip_y as u32, z) {
                         self.set_pixel(x as u32, clip_y as u32, color);
                     }
                 }
@@ -516,17 +489,17 @@ impl Rdp {
             };
 
             let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
-            let ca = Self::lerp_color(c0, c2, alpha);
+            let ca = ColorOps::lerp(c0, c2, alpha);
 
             let (xb, cb) = if y < y1 {
                 (
                     x0 as f32 + (x1 - x0) as f32 * beta,
-                    Self::lerp_color(c0, c1, beta),
+                    ColorOps::lerp(c0, c1, beta),
                 )
             } else {
                 (
                     x1 as f32 + (x2 - x1) as f32 * beta,
-                    Self::lerp_color(c1, c2, beta),
+                    ColorOps::lerp(c1, c2, beta),
                 )
             };
 
@@ -556,7 +529,7 @@ impl Rdp {
                     } else {
                         0.0
                     };
-                    let color = Self::lerp_color(c_start, c_end, t);
+                    let color = ColorOps::lerp(c_start, c_end, t);
                     self.set_pixel(x as u32, clip_y as u32, color);
                 }
             }
@@ -607,19 +580,19 @@ impl Rdp {
 
             let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
             let za = z0 as f32 + (z2 as f32 - z0 as f32) * alpha;
-            let ca = Self::lerp_color(c0, c2, alpha);
+            let ca = ColorOps::lerp(c0, c2, alpha);
 
             let (xb, zb, cb) = if y < y1 {
                 (
                     x0 as f32 + (x1 - x0) as f32 * beta,
                     z0 as f32 + (z1 as f32 - z0 as f32) * beta,
-                    Self::lerp_color(c0, c1, beta),
+                    ColorOps::lerp(c0, c1, beta),
                 )
             } else {
                 (
                     x1 as f32 + (x2 - x1) as f32 * beta,
                     z1 as f32 + (z2 as f32 - z1 as f32) * beta,
-                    Self::lerp_color(c1, c2, beta),
+                    ColorOps::lerp(c1, c2, beta),
                 )
             };
 
@@ -650,51 +623,15 @@ impl Rdp {
                         0.0
                     };
                     let z = (z_start + (z_end - z_start) * t) as u16;
-                    let color = Self::lerp_color(c_start, c_end, t);
+                    let color = ColorOps::lerp(c_start, c_end, t);
 
                     // Z-buffer test
-                    if self.zbuffer_test(x as u32, clip_y as u32, z) {
+                    if self.zbuffer.test_and_update(x as u32, clip_y as u32, z) {
                         self.set_pixel(x as u32, clip_y as u32, color);
                     }
                 }
             }
         }
-    }
-
-    /// Linear interpolation of two ARGB colors (format: 0xAARRGGBB)
-    fn lerp_color(c0: u32, c1: u32, t: f32) -> u32 {
-        let a0 = ((c0 >> 24) & 0xFF) as f32;
-        let r0 = ((c0 >> 16) & 0xFF) as f32;
-        let g0 = ((c0 >> 8) & 0xFF) as f32;
-        let b0 = (c0 & 0xFF) as f32;
-
-        let a1 = ((c1 >> 24) & 0xFF) as f32;
-        let r1 = ((c1 >> 16) & 0xFF) as f32;
-        let g1 = ((c1 >> 8) & 0xFF) as f32;
-        let b1 = (c1 & 0xFF) as f32;
-
-        let a = (a0 + (a1 - a0) * t).round() as u32;
-        let r = (r0 + (r1 - r0) * t).round() as u32;
-        let g = (g0 + (g1 - g0) * t).round() as u32;
-        let b = (b0 + (b1 - b0) * t).round() as u32;
-
-        (a << 24) | (r << 16) | (g << 8) | b
-    }
-
-    /// Adjust brightness of an ARGB color by a factor (format: 0xAARRGGBB)
-    /// factor: 1.0 = no change, < 1.0 = darker, > 1.0 = brighter
-    fn adjust_brightness(color: u32, factor: f32) -> u32 {
-        let a = ((color >> 24) & 0xFF) as f32;
-        let r = ((color >> 16) & 0xFF) as f32;
-        let g = ((color >> 8) & 0xFF) as f32;
-        let b = (color & 0xFF) as f32;
-
-        let new_a = a; // Keep alpha unchanged
-        let new_r = (r * factor).min(255.0).round() as u32;
-        let new_g = (g * factor).min(255.0).round() as u32;
-        let new_b = (b * factor).min(255.0).round() as u32;
-
-        ((new_a as u32) << 24) | (new_r << 16) | (new_g << 8) | new_b
     }
 
     /// Get the current framebuffer
@@ -857,8 +794,8 @@ impl Rdp {
 
                 // Create color variations for Gouraud shading demonstration
                 let c0 = self.fill_color;
-                let c1 = Self::adjust_brightness(self.fill_color, 0.8);
-                let c2 = Self::adjust_brightness(self.fill_color, 0.6);
+                let c1 = ColorOps::adjust_brightness(self.fill_color, 0.8);
+                let c2 = ColorOps::adjust_brightness(self.fill_color, 0.6);
 
                 self.draw_triangle_shaded(x0, y0, c0, x1, y1, c1, x2, y2, c2);
             }
@@ -874,8 +811,8 @@ impl Rdp {
 
                 // Create color variations
                 let c0 = self.fill_color;
-                let c1 = Self::adjust_brightness(self.fill_color, 0.8);
-                let c2 = Self::adjust_brightness(self.fill_color, 0.6);
+                let c1 = ColorOps::adjust_brightness(self.fill_color, 0.8);
+                let c2 = ColorOps::adjust_brightness(self.fill_color, 0.6);
 
                 self.draw_triangle_shaded_zbuffer(
                     x0, y0, 0x8000, c0, x1, y1, 0x8000, c1, x2, y2, 0x8000, c2,
@@ -1082,6 +1019,7 @@ mod tests {
         rdp.set_pixel(100, 100, 0xFFFFFFFF); // White
 
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFFFFFFFF);
     }
 
@@ -1170,6 +1108,7 @@ mod tests {
         // Verify the rectangle was filled
         // Check a pixel inside the rectangle (75, 75)
         let idx = (75 * 320 + 75) as usize;
+        let (zx, zy) = (75u32, 75u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFFFF0000);
 
         // Check a pixel outside the rectangle
@@ -1277,6 +1216,7 @@ mod tests {
         // Check that some pixels in the triangle are green
         // Center of triangle should be around (100, 116)
         let idx = (116 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
     }
 
@@ -1302,6 +1242,7 @@ mod tests {
 
         // Verify the rectangle was filled (stub implementation)
         let idx = (75 * 320 + 75) as usize;
+        let (zx, zy) = (75u32, 75u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF0000FF);
     }
 
@@ -1389,40 +1330,47 @@ mod tests {
     fn test_rdp_zbuffer_initialization() {
         let rdp = Rdp::new();
 
-        // Verify Z-buffer is initialized to far plane (0xFFFF)
-        assert_eq!(rdp.zbuffer.len(), 320 * 240);
-        assert!(rdp.zbuffer.iter().all(|&z| z == 0xFFFF));
+        // Verify Z-buffer dimensions
+        assert_eq!(rdp.zbuffer.width(), 320);
+        assert_eq!(rdp.zbuffer.height(), 240);
+
+        // Verify Z-buffer is initialized to far plane (0xFFFF) by checking a few pixels
+        assert_eq!(rdp.zbuffer.read(0, 0), Some(0xFFFF));
+        assert_eq!(rdp.zbuffer.read(100, 100), Some(0xFFFF));
+        assert_eq!(rdp.zbuffer.read(319, 239), Some(0xFFFF));
 
         // Verify Z-buffer is disabled by default
-        assert!(!rdp.zbuffer_enabled);
+        assert!(!rdp.zbuffer.is_enabled());
     }
 
     #[test]
     fn test_rdp_zbuffer_clear() {
         let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
 
-        // Modify some Z-buffer values
-        rdp.zbuffer[0] = 0x1000;
-        rdp.zbuffer[100] = 0x2000;
+        // Modify some Z-buffer values by writing pixels
+        rdp.zbuffer.test_and_update(0, 0, 0x1000);
+        rdp.zbuffer.test_and_update(100, 0, 0x2000);
 
         // Clear Z-buffer
         rdp.clear_zbuffer();
 
         // Verify all values reset to far plane
-        assert!(rdp.zbuffer.iter().all(|&z| z == 0xFFFF));
+        assert_eq!(rdp.zbuffer.read(0, 0), Some(0xFFFF));
+        assert_eq!(rdp.zbuffer.read(100, 0), Some(0xFFFF));
     }
 
     #[test]
     fn test_rdp_zbuffer_enable_disable() {
         let mut rdp = Rdp::new();
 
-        assert!(!rdp.zbuffer_enabled);
+        assert!(!rdp.zbuffer.is_enabled());
 
         rdp.set_zbuffer_enabled(true);
-        assert!(rdp.zbuffer_enabled);
+        assert!(rdp.zbuffer.is_enabled());
 
         rdp.set_zbuffer_enabled(false);
-        assert!(!rdp.zbuffer_enabled);
+        assert!(!rdp.zbuffer.is_enabled());
     }
 
     #[test]
@@ -1431,16 +1379,16 @@ mod tests {
         rdp.set_zbuffer_enabled(true);
 
         // First pixel at depth 0x8000 should pass and update Z-buffer
-        assert!(rdp.zbuffer_test(10, 10, 0x8000));
-        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x8000);
+        assert!(rdp.zbuffer.test_and_update(10, 10, 0x8000));
+        assert_eq!(rdp.zbuffer.read(10, 10).unwrap(), 0x8000);
 
         // Second pixel at depth 0x9000 (farther) should fail
-        assert!(!rdp.zbuffer_test(10, 10, 0x9000));
-        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x8000); // Unchanged
+        assert!(!rdp.zbuffer.test_and_update(10, 10, 0x9000));
+        assert_eq!(rdp.zbuffer.read(10, 10).unwrap(), 0x8000); // Unchanged
 
         // Third pixel at depth 0x7000 (closer) should pass and update
-        assert!(rdp.zbuffer_test(10, 10, 0x7000));
-        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x7000);
+        assert!(rdp.zbuffer.test_and_update(10, 10, 0x7000));
+        assert_eq!(rdp.zbuffer.read(10, 10).unwrap(), 0x7000);
     }
 
     #[test]
@@ -1449,12 +1397,12 @@ mod tests {
         // Z-buffer disabled by default
 
         // All tests should pass when Z-buffer is disabled
-        assert!(rdp.zbuffer_test(10, 10, 0x8000));
-        assert!(rdp.zbuffer_test(10, 10, 0x9000));
-        assert!(rdp.zbuffer_test(10, 10, 0x7000));
+        assert!(rdp.zbuffer.test_and_update(10, 10, 0x8000));
+        assert!(rdp.zbuffer.test_and_update(10, 10, 0x9000));
+        assert!(rdp.zbuffer.test_and_update(10, 10, 0x7000));
 
         // Z-buffer should remain unchanged (at far plane)
-        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0xFFFF);
+        assert_eq!(rdp.zbuffer.read(10, 10).unwrap(), 0xFFFF);
     }
 
     #[test]
@@ -1472,10 +1420,11 @@ mod tests {
 
         // Check that pixels in the triangle are green
         let idx = (116 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
 
         // Check that Z-buffer was updated
-        assert!(rdp.zbuffer[idx] < 0xFFFF);
+        assert!(rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF);
     }
 
     #[test]
@@ -1496,6 +1445,7 @@ mod tests {
 
         // Pixel should remain green (near triangle visible)
         let idx = (116 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
     }
 
@@ -1513,6 +1463,7 @@ mod tests {
 
         // Check that center pixel has interpolated color (between red and blue = purple)
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         let color = rdp.framebuffer.pixels[idx];
 
         // Should have both red and blue components (ARGB format)
@@ -1536,13 +1487,14 @@ mod tests {
 
         // Check that triangle was drawn
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         let color = rdp.framebuffer.pixels[idx];
 
         // Should have interpolated color components
         assert_ne!(color, 0, "Pixel should be colored");
 
         // Check Z-buffer was updated
-        assert!(rdp.zbuffer[idx] < 0xFFFF);
+        assert!(rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF);
     }
 
     #[test]
@@ -1553,7 +1505,7 @@ mod tests {
         let c1 = 0xFF0000FF; // Blue with full alpha
 
         // 50% interpolation should give purple
-        let c_mid = Rdp::lerp_color(c0, c1, 0.5);
+        let c_mid = ColorOps::lerp(c0, c1, 0.5);
         let a = (c_mid >> 24) & 0xFF;
         let r = (c_mid >> 16) & 0xFF;
         let g = (c_mid >> 8) & 0xFF;
@@ -1566,11 +1518,11 @@ mod tests {
         assert!((127..=128).contains(&b), "Blue component should be ~50%");
 
         // 0% should give c0
-        let c_start = Rdp::lerp_color(c0, c1, 0.0);
+        let c_start = ColorOps::lerp(c0, c1, 0.0);
         assert_eq!(c_start, c0);
 
         // 100% should give c1
-        let c_end = Rdp::lerp_color(c0, c1, 1.0);
+        let c_end = ColorOps::lerp(c0, c1, 1.0);
         assert_eq!(c_end, c1);
     }
 
@@ -1580,11 +1532,11 @@ mod tests {
         let color = 0xFFFF8040; // ARGB: Full alpha, R=255, G=128, B=64
 
         // Factor 1.0 should return original color
-        let same = Rdp::adjust_brightness(color, 1.0);
+        let same = ColorOps::adjust_brightness(color, 1.0);
         assert_eq!(same, color);
 
         // Factor 0.5 should halve RGB values
-        let darker = Rdp::adjust_brightness(color, 0.5);
+        let darker = ColorOps::adjust_brightness(color, 0.5);
         let a = (darker >> 24) & 0xFF;
         let r = (darker >> 16) & 0xFF;
         let g = (darker >> 8) & 0xFF;
@@ -1595,7 +1547,7 @@ mod tests {
         assert_eq!(b, 32, "Blue should be halved (32)");
 
         // Factor 2.0 should double but cap at 255
-        let brighter = Rdp::adjust_brightness(0xFF804020, 2.0);
+        let brighter = ColorOps::adjust_brightness(0xFF804020, 2.0);
         let r2 = (brighter >> 16) & 0xFF;
         let g2 = (brighter >> 8) & 0xFF;
         let b2 = brighter & 0xFF;
@@ -1636,6 +1588,7 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         assert_eq!(
             rdp.framebuffer.pixels[idx], 0xFF0000FF,
             "Triangle should be blue"
@@ -1673,13 +1626,17 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         assert_eq!(
             rdp.framebuffer.pixels[idx], 0xFF00FF00,
             "Triangle should be green"
         );
 
         // Verify Z-buffer was updated
-        assert!(rdp.zbuffer[idx] < 0xFFFF, "Z-buffer should be updated");
+        assert!(
+            rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF,
+            "Z-buffer should be updated"
+        );
     }
 
     #[test]
@@ -1712,6 +1669,7 @@ mod tests {
 
         // Verify triangle was drawn with shading (should have some red component)
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         let pixel = rdp.framebuffer.pixels[idx];
         let red = (pixel >> 16) & 0xFF;
         assert!(red > 0, "Triangle should have red component from shading");
@@ -1748,11 +1706,15 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         let pixel = rdp.framebuffer.pixels[idx];
         assert_ne!(pixel, 0, "Triangle should be colored");
 
         // Verify Z-buffer was updated
-        assert!(rdp.zbuffer[idx] < 0xFFFF, "Z-buffer should be updated");
+        assert!(
+            rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF,
+            "Z-buffer should be updated"
+        );
     }
 
     #[test]
@@ -1780,6 +1742,7 @@ mod tests {
 
         // Pixel inside scissor should be colored
         let idx = (100 * 320 + 100) as usize;
+        let (zx, zy) = (100u32, 100u32);
         assert_ne!(rdp.framebuffer.pixels[idx], 0);
     }
 }
