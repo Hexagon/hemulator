@@ -44,38 +44,15 @@ impl N64Bus {
     /// Real N64 PIF ROM is complex, but we only need basic boot functionality
     fn init_pif_rom(&mut self) {
         // PIF ROM starts at 0xBFC00000 (physical 0x1FC00000)
-        // We'll put a simple boot loader that:
-        // 1. Copies 1MB from cartridge ROM (0x10000000) to RDRAM (0x00000000)
-        // 2. Jumps to entry point at 0x80000400 (RDRAM + 0x400, cached)
+        // Simplified boot: Just jump directly to test ROM code in cartridge ROM
+        // Test ROM code is at offset 0x1000 in the ROM file, which maps to 0x10001000
 
         let pif_rom: Vec<u32> = vec![
-            // Copy cartridge to RDRAM (simplified - just set up registers and jump)
-            // In reality, PIF ROM does CRC checks, copies specific regions, etc.
-
-            // li $t0, 0x10000000  # Source: ROM base
-            0x3C081000, // lui $t0, 0x1000
-            // li $t1, 0x00000000  # Dest: RDRAM base
-            0x34090000, // ori $t1, $zero, 0x0000
-            // li $t2, 0x00100000  # Size: 1MB
-            0x3C0A0010, // lui $t2, 0x0010
-            // copy_loop: lw $t3, 0($t0)
-            0x8D0B0000, // lw $t3, 0($t0)
-            // sw $t3, 0($t1)
-            0xAD2B0000, // sw $t3, 0($t1)
-            // addiu $t0, $t0, 4
-            0x25080004, // addiu $t0, $t0, 4
-            // addiu $t1, $t1, 4
-            0x25290004, // addiu $t1, $t1, 4
-            // addiu $t2, $t2, -4
-            0x254AFFFC, // addiu $t2, $t2, -4
-            // bne $t2, $zero, copy_loop
-            0x1540FFF8, // bne $t2, $zero, -8 instructions
-            // nop (delay slot)
-            0x00000000,
-            // Jump to entry point at 0x80000400
-            0x3C088000, // lui $t0, 0x8000
-            0x35080400, // ori $t0, $t0, 0x0400
-            0x01000008, // jr $t0
+            // Jump to test ROM code at 0x10001000 (cartridge ROM + 0x1000)
+            // Using cached address 0x90001000 (KSEG0 cached)
+            0x3C089000, // lui $t0, 0x9000  # Upper 16 bits
+            0x35081000, // ori $t0, $t0, 0x1000  # Lower 16 bits = 0x90001000
+            0x01000008, // jr $t0  # Jump to $t0
             0x00000000, // nop (delay slot)
         ];
 
