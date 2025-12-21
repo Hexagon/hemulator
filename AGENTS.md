@@ -637,6 +637,74 @@ System-specific implementations that use core components:
 
 GUI frontend using minifb and rodio.
 
+#### Video Processing System
+
+The frontend includes a modular video processing architecture that supports multiple rendering backends through the `VideoProcessor` trait.
+
+**Architecture Overview:**
+- **Location**: `crates/frontend/gui/src/video_processor/`
+- **Abstraction**: `VideoProcessor` trait defines common interface for all backends
+- **Backends**:
+  1. **SoftwareProcessor** (default): CPU-based rendering, always available
+  2. **OpenGLProcessor** (optional): GPU-accelerated rendering with shader support
+
+**VideoProcessor Trait:**
+```rust
+pub trait VideoProcessor {
+    fn init(&mut self, width: usize, height: usize) -> VideoResult<()>;
+    fn process_frame(&mut self, buffer: &[u32], width: usize, height: usize, filter: CrtFilter) -> VideoResult<Vec<u32>>;
+    fn resize(&mut self, width: usize, height: usize) -> VideoResult<()>;
+    fn name(&self) -> &str;
+    fn is_hardware_accelerated(&self) -> bool;
+}
+```
+
+**Software Backend (`mod.rs`):**
+- Uses existing CPU-based CRT filter implementation from `crt_filter.rs`
+- Clones input buffer and applies filters in-place
+- No GPU dependencies, maximum compatibility
+- Default choice for all builds
+
+**OpenGL Backend (`opengl.rs`):**
+- Requires feature flag: `--features opengl`
+- Dependencies: `glow`, `glutin`, `glutin-winit`, `raw-window-handle`, `bytemuck`
+- Shader-based CRT effects for better performance
+- Dynamic shader compilation and switching based on active filter
+- GLSL shaders stored in `src/shaders/`:
+  - `vertex.glsl`: Fullscreen quad vertex shader
+  - `fragment_none.glsl`: Passthrough (no filter)
+  - `fragment_scanlines.glsl`: Scanline effect (darkens every other row)
+  - `fragment_phosphor.glsl`: Horizontal phosphor glow
+  - `fragment_crt.glsl`: Combined scanlines + phosphor + brightness boost
+
+**Implementation Details:**
+1. **Texture Management**: Converts ARGB to RGBA, uploads to GPU texture
+2. **Shader Compilation**: Lazy compilation on filter change to save resources
+3. **Uniform Handling**: Sets `uResolution` and `uTexture` uniforms
+4. **Resource Cleanup**: Proper cleanup of GL resources in Drop implementation
+
+**CRT Filter Effects (both backends):**
+- **None**: Direct pixel passthrough
+- **Scanlines**: Darkens every other scanline to 60% brightness
+- **Phosphor**: Horizontal color bleeding (15% neighbor contribution)
+- **CRT Monitor**: Combines scanlines (70% brightness) with phosphor, plus 5% brightness boost on bright lines
+
+**Integration Points:**
+- Settings: `video_backend` field in `config.json` ("software" or "opengl")
+- Main loop: Process frame buffer before sending to minifb window
+- Filter switching: F11 key cycles through CRT filters
+
+**Testing:**
+- Software backend: Comprehensive unit tests (creation, init, processing, filters)
+- OpenGL backend: Compile-time tests via feature flags
+- Both backends tested for build compatibility
+
+**Future Enhancements:**
+- Direct rendering to window (bypass minifb buffer copy)
+- Additional shader effects (curvature, bloom, color correction)
+- Runtime backend switching without restart
+- Custom shader loading from configuration
+
 ## Audio Implementation Guidelines
 
 When implementing audio for a new system or enhancing existing audio:

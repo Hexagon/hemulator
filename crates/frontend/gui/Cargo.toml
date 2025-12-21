@@ -27,3 +27,15 @@ rfd = "0.14"
 png = "0.17"
 rand = "0.8"
 chrono = "0.4"
+
+# OpenGL support (optional)
+glow = { version = "0.13", optional = true }
+glutin = { version = "0.31", optional = true }
+glutin-winit = { version = "0.4", optional = true }
+raw-window-handle = { version = "0.5", optional = true }
+bytemuck = { version = "1.14", optional = true }
+
+[features]
+default = ["software-renderer"]
+software-renderer = []
+opengl = ["glow", "glutin", "glutin-winit", "raw-window-handle", "bytemuck"]

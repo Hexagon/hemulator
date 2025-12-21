@@ -179,6 +179,56 @@ Where n = width × height (typically 256 × 240 = 61,440 pixels for NES)
 
 The selected filter is automatically saved and restored when you restart the emulator.
 
+### Video Processing Backends
+
+Hemulator supports two video processing backends that can be selected based on your system capabilities:
+
+#### Software Renderer (Default)
+- **Description**: CPU-based rendering using traditional software algorithms
+- **Availability**: Always available, no GPU required
+- **CRT Filters**: Implemented in software, applied to frame buffer in memory
+- **Performance**: Suitable for all systems, including those without GPU acceleration
+- **Compatibility**: Maximum compatibility across all platforms
+- **Configuration**: Set `"video_backend": "software"` in `config.json`
+
+#### OpenGL Renderer (Optional)
+- **Description**: GPU-accelerated rendering using OpenGL and GLSL shaders
+- **Availability**: Only available in builds compiled with `--features opengl`
+- **CRT Filters**: Implemented as GLSL shaders, executed on GPU
+- **Performance**: Better performance on systems with capable GPUs, especially for high-resolution displays
+- **Shader Effects**:
+  - All CRT filters (None, Scanlines, Phosphor, CRT Monitor) implemented as fragment shaders
+  - Dynamic shader compilation based on selected filter
+  - Real-time switching without restart
+- **Configuration**: Set `"video_backend": "opengl"` in `config.json`
+- **Requirements**: 
+  - OpenGL 3.3+ compatible GPU
+  - Proper graphics drivers installed
+  - Build compiled with OpenGL support
+
+#### Choosing a Backend
+
+**Use Software Renderer if:**
+- You want maximum compatibility
+- Your system doesn't have a GPU or has limited GPU support
+- You're running on older hardware
+- You're experiencing issues with OpenGL drivers
+
+**Use OpenGL Renderer if:**
+- Your system has a capable GPU
+- You want better performance, especially at higher resolutions
+- You're interested in future shader-based enhancements
+- Your build includes OpenGL support
+
+**Switching Backends:**
+1. Exit the emulator
+2. Open `config.json` in a text editor
+3. Change `"video_backend"` to either `"software"` or `"opengl"`
+4. Save the file
+5. Restart the emulator
+
+The video backend setting is independent of the CRT filter selection - all filters work with both backends, though the OpenGL backend implements them as shaders for better performance.
+
 ### Screenshots (F4)
 
 Press **F4** at any time to capture the current frame and save it as a PNG image.

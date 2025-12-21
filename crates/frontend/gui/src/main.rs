@@ -1,8 +1,9 @@
-mod crt_filter;
+pub mod crt_filter;
 mod rom_detect;
 mod save_state;
 mod settings;
 mod ui_render;
+pub mod video_processor;
 
 use emu_core::{types::Frame, System};
 use minifb::{Key, Window, WindowOptions};
