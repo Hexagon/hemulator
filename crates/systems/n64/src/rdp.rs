@@ -681,6 +681,22 @@ impl Rdp {
         (a << 24) | (r << 16) | (g << 8) | b
     }
 
+    /// Adjust brightness of an ARGB color by a factor (format: 0xAARRGGBB)
+    /// factor: 1.0 = no change, < 1.0 = darker, > 1.0 = brighter
+    fn adjust_brightness(color: u32, factor: f32) -> u32 {
+        let a = ((color >> 24) & 0xFF) as f32;
+        let r = ((color >> 16) & 0xFF) as f32;
+        let g = ((color >> 8) & 0xFF) as f32;
+        let b = (color & 0xFF) as f32;
+
+        let new_a = a; // Keep alpha unchanged
+        let new_r = (r * factor).min(255.0).round() as u32;
+        let new_g = (g * factor).min(255.0).round() as u32;
+        let new_b = (b * factor).min(255.0).round() as u32;
+
+        ((new_a as u32) << 24) | (new_r << 16) | (new_g << 8) | new_b
+    }
+
     /// Get the current framebuffer
     pub fn get_frame(&self) -> &Frame {
         &self.framebuffer
@@ -785,26 +801,85 @@ impl Rdp {
     fn execute_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
         match cmd_id {
             // Triangle commands (0x08-0x0F)
-            // Note: Real N64 triangle commands are much more complex with multiple words
-            // This is a simplified implementation for basic 3D rendering
+            // Note: Real N64 triangle commands have complex formats with edge coefficients
+            // This is a simplified implementation using a custom packed format for basic 3D rendering
 
             // Non-shaded triangle (0x08)
             0x08 => {
-                // Simplified format: word0 contains packed vertex data
-                // This would need to be expanded for full RDP compatibility
-                // For now, this is a placeholder for future implementation
+                // Simplified custom format for testing (not real RDP format):
+                // word0: bits 23-12 = x0, bits 11-0 = y0
+                // word1: bits 31-24 = x1, bits 23-16 = y1, bits 15-8 = x2, bits 7-0 = y2
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                self.draw_triangle(x0, y0, x1, y1, x2, y2, self.fill_color);
             }
             // Non-shaded triangle with Z-buffer (0x09)
             0x09 => {
-                // Simplified format - placeholder for future implementation
+                // Simplified custom format (not real RDP format):
+                // Similar to 0x08 but assumes mid-range depth for all vertices
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                // Use mid-range depth (0x8000) for all vertices in simplified format
+                self.draw_triangle_zbuffer(
+                    x0,
+                    y0,
+                    0x8000,
+                    x1,
+                    y1,
+                    0x8000,
+                    x2,
+                    y2,
+                    0x8000,
+                    self.fill_color,
+                );
             }
             // Shaded triangle (0x0C)
             0x0C => {
-                // Simplified format - placeholder for future implementation
+                // Simplified custom format (not real RDP format):
+                // For testing, extract coordinates from word0/word1
+                // and use fill_color with slight variations for each vertex
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                // Create color variations for Gouraud shading demonstration
+                let c0 = self.fill_color;
+                let c1 = Self::adjust_brightness(self.fill_color, 0.8);
+                let c2 = Self::adjust_brightness(self.fill_color, 0.6);
+
+                self.draw_triangle_shaded(x0, y0, c0, x1, y1, c1, x2, y2, c2);
             }
             // Shaded triangle with Z-buffer (0x0D)
             0x0D => {
-                // Simplified format - placeholder for future implementation
+                // Simplified custom format (not real RDP format):
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                // Create color variations
+                let c0 = self.fill_color;
+                let c1 = Self::adjust_brightness(self.fill_color, 0.8);
+                let c2 = Self::adjust_brightness(self.fill_color, 0.6);
+
+                self.draw_triangle_shaded_zbuffer(
+                    x0, y0, 0x8000, c0, x1, y1, 0x8000, c1, x2, y2, 0x8000, c2,
+                );
             }
             // FILL_RECTANGLE (0x36)
             0x36 => {
@@ -1497,6 +1572,187 @@ mod tests {
         // 100% should give c1
         let c_end = Rdp::lerp_color(c0, c1, 1.0);
         assert_eq!(c_end, c1);
+    }
+
+    #[test]
+    fn test_rdp_adjust_brightness() {
+        // Test brightness adjustment
+        let color = 0xFFFF8040; // ARGB: Full alpha, R=255, G=128, B=64
+
+        // Factor 1.0 should return original color
+        let same = Rdp::adjust_brightness(color, 1.0);
+        assert_eq!(same, color);
+
+        // Factor 0.5 should halve RGB values
+        let darker = Rdp::adjust_brightness(color, 0.5);
+        let a = (darker >> 24) & 0xFF;
+        let r = (darker >> 16) & 0xFF;
+        let g = (darker >> 8) & 0xFF;
+        let b = darker & 0xFF;
+        assert_eq!(a, 255, "Alpha should remain unchanged");
+        assert!((127..=128).contains(&r), "Red should be halved (~128)");
+        assert_eq!(g, 64, "Green should be halved (64)");
+        assert_eq!(b, 32, "Blue should be halved (32)");
+
+        // Factor 2.0 should double but cap at 255
+        let brighter = Rdp::adjust_brightness(0xFF804020, 2.0);
+        let r2 = (brighter >> 16) & 0xFF;
+        let g2 = (brighter >> 8) & 0xFF;
+        let b2 = brighter & 0xFF;
+        assert_eq!(r2, 255, "Red should cap at 255");
+        assert_eq!(g2, 128, "Green should double (128)");
+        assert_eq!(b2, 64, "Blue should double (64)");
+    }
+
+    #[test]
+    fn test_rdp_triangle_command_0x08() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // SET_FILL_COLOR - Blue
+        rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[4..8].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
+
+        // Triangle command 0x08 (non-shaded triangle)
+        // Custom format: word0: bits 23-12 = x0, bits 11-0 = y0
+        //                word1: bits 31-24 = x1, bits 23-16 = y1, bits 15-8 = x2, bits 7-0 = y2
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x08 << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[8..12].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[12..16].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was drawn
+        let idx = (100 * 320 + 100) as usize;
+        assert_eq!(
+            rdp.framebuffer.pixels[idx], 0xFF0000FF,
+            "Triangle should be blue"
+        );
+    }
+
+    #[test]
+    fn test_rdp_triangle_command_0x09() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+        let mut rdram = vec![0u8; 1024];
+
+        // SET_FILL_COLOR - Green
+        rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[4..8].copy_from_slice(&0xFF00FF00u32.to_be_bytes());
+
+        // Triangle command 0x09 (non-shaded triangle with Z-buffer)
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x09 << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[8..12].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[12..16].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was drawn
+        let idx = (100 * 320 + 100) as usize;
+        assert_eq!(
+            rdp.framebuffer.pixels[idx], 0xFF00FF00,
+            "Triangle should be green"
+        );
+
+        // Verify Z-buffer was updated
+        assert!(rdp.zbuffer[idx] < 0xFFFF, "Z-buffer should be updated");
+    }
+
+    #[test]
+    fn test_rdp_triangle_command_0x0c() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // SET_FILL_COLOR - Red (will be used with brightness variations)
+        rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[4..8].copy_from_slice(&0xFFFF0000u32.to_be_bytes());
+
+        // Triangle command 0x0C (shaded triangle)
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x0C << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[8..12].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[12..16].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was drawn with shading (should have some red component)
+        let idx = (100 * 320 + 100) as usize;
+        let pixel = rdp.framebuffer.pixels[idx];
+        let red = (pixel >> 16) & 0xFF;
+        assert!(red > 0, "Triangle should have red component from shading");
+    }
+
+    #[test]
+    fn test_rdp_triangle_command_0x0d() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+        let mut rdram = vec![0u8; 1024];
+
+        // SET_FILL_COLOR - Magenta
+        rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[4..8].copy_from_slice(&0xFFFF00FFu32.to_be_bytes());
+
+        // Triangle command 0x0D (shaded triangle with Z-buffer)
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x0D << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[8..12].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[12..16].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was drawn
+        let idx = (100 * 320 + 100) as usize;
+        let pixel = rdp.framebuffer.pixels[idx];
+        assert_ne!(pixel, 0, "Triangle should be colored");
+
+        // Verify Z-buffer was updated
+        assert!(rdp.zbuffer[idx] < 0xFFFF, "Z-buffer should be updated");
     }
 
     #[test]
