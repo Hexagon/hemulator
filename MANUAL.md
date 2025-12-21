@@ -472,9 +472,9 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: Basic implementation (stub)
+**Status**: Basic implementation with minimal PPU
 
-**Coverage**: Limited - skeleton implementation for testing
+**Coverage**: Limited - infrastructure complete, basic rendering functional
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -483,16 +483,17 @@ The emulator supports the following cartridge banking schemes:
 - Basic memory bus (128KB WRAM + cartridge mapping)
 - LoROM cartridge mapping
 - SMC header detection and removal
+- Minimal PPU with VRAM/CGRAM support and basic tile rendering
 - Save states (F5/F6)
 - Resolution: 256x224 pixels
 
 **Known Limitations**:
-- **Graphics**: PPU not implemented - displays black screen only
+- **Graphics**: Minimal PPU implementation - basic tile rendering only (no sprites, limited tile modes)
 - **Audio**: APU not implemented - silent gameplay
 - **Input**: Controller support not implemented
 - **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
 - **Timing**: Stub implementation - not cycle-accurate
-- **Status**: This is a skeleton implementation for infrastructure testing. Full SNES emulation requires significant PPU and APU work.
+- **Status**: This is a minimal working implementation to demonstrate infrastructure. Full SNES emulation requires significant additional PPU and APU work.
 
 ### N64 (Nintendo 64)
 

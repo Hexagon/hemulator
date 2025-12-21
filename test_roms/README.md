@@ -12,6 +12,7 @@ These test ROMs are designed to:
 ## Current Systems
 
 - **NES** - Full implementation with smoke test
+- **SNES** - Minimal implementation with smoke test
 - **Game Boy** - Implementation with smoke test and visible output validation
 - **Game Boy Color** - DMG-compatible mode with smoke test
 - **Atari 2600** - Full implementation with smoke test
@@ -19,7 +20,7 @@ These test ROMs are designed to:
 
 ## Future Systems
 
-When implementing new systems (SNES, etc.), follow this pattern:
+When implementing new systems, follow this pattern:
 1. Create a subdirectory: `test_roms/<system>/`
 2. Write minimal assembly code that produces visible output
 3. Add build script and built ROM
@@ -34,6 +35,9 @@ Each system has a `build.sh` script that assembles the test ROM from source:
 # NES
 cd nes && ./build.sh
 
+# SNES
+cd snes && ./build.sh
+
 # Game Boy
 cd gb && ./build.sh
 
@@ -47,6 +51,7 @@ cd n64 && ./build.sh
 ## Requirements
 
 - **NES**: cc65 (6502 assembler/linker)
+- **SNES**: cc65 (65816 assembler/linker, compatible with 6502 tools)
 - **Game Boy**: rgbds (GB assembler/linker)
 - **Atari 2600**: dasm (6502 assembler)
 - **N64**: Python 3 (for ROM generation script)
@@ -65,10 +70,17 @@ cd rgbds && make && sudo make install
 ### NES (test.nes)
 - Format: iNES (16-byte header)
 - Mapper: 0 (NROM)
-- PRG-ROM: 1 x 16KB
+- PRG-ROM: 2 x 16KB
 - CHR-ROM: 1 x 8KB
-- Behavior: Fills screen with tile $55 (checkerboard pattern)
+- Behavior: Displays checkerboard pattern with alternating white/red tiles
 - Expected output: Visible checkerboard pattern on screen
+
+### SNES (test.sfc)
+- Format: LoROM (32KB)
+- Internal header: At $FFB0-$FFDF
+- Vectors: At $FFE0-$FFFF
+- Behavior: Initializes PPU, writes tilemap and CHR data, displays pattern
+- Expected output: Basic rendering test (infrastructure verification)
 
 ### Game Boy (test.gb)
 - Format: GB ROM (with Nintendo logo)
@@ -105,8 +117,9 @@ cd rgbds && make && sudo make install
 
 These ROMs are included in the smoke tests for each system crate:
 - `crates/systems/nes/src/lib.rs` - NES smoke test
+- `crates/systems/snes/src/lib.rs` - SNES smoke test
 - `crates/systems/gb/src/lib.rs` - Game Boy and Game Boy Color smoke tests
 - `crates/systems/atari2600/src/lib.rs` - Atari 2600 smoke test
 - `crates/systems/n64/src/lib.rs` - N64 display list smoke test
 
-The tests load each ROM (or manually construct equivalent state for N64), run it for a few frames (or process display lists), and verify that the output frame contains expected non-zero pixel data, confirming that the emulator is functioning correctly.
+The tests load each ROM (or manually construct equivalent state for N64), run it for a few frames (or process display lists), and verify that the output frame contains expected non-zero pixel data (for systems with working rendering) or correct dimensions (for minimal implementations), confirming that the emulator infrastructure is functioning correctly.
