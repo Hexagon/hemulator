@@ -159,7 +159,7 @@ impl EmulatorSystem {
             EmulatorSystem::Atari2600(_) => {}
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
-            EmulatorSystem::N64(_) => {}  // N64 controller support stub
+            EmulatorSystem::N64(_) => {} // N64 controller support stub
         }
     }
 

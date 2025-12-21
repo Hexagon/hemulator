@@ -4,6 +4,7 @@ use crate::N64Error;
 
 /// N64 ROM byte order formats
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::enum_variant_names)]
 enum ByteOrder {
     /// Big-endian (native N64 format, .z64)
     BigEndian,
@@ -29,7 +30,7 @@ impl Cartridge {
 
         // Detect byte order from header
         let byte_order = Self::detect_byte_order(data)?;
-        
+
         // Convert to big-endian if necessary
         let rom = match byte_order {
             ByteOrder::BigEndian => data.to_vec(),
@@ -47,7 +48,7 @@ impl Cartridge {
 
         // Check first 4 bytes for magic value
         match &data[0..4] {
-            [0x80, 0x37, 0x12, 0x40] => Ok(ByteOrder::BigEndian),    // .z64
+            [0x80, 0x37, 0x12, 0x40] => Ok(ByteOrder::BigEndian), // .z64
             [0x40, 0x12, 0x37, 0x80] => Ok(ByteOrder::LittleEndian), // .n64
             [0x37, 0x80, 0x40, 0x12] => Ok(ByteOrder::MiddleEndian), // .v64
             _ => Err(N64Error::InvalidRom(
@@ -93,7 +94,7 @@ mod tests {
     fn test_detect_big_endian() {
         let mut data = vec![0; 0x1000];
         data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
-        
+
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
     }
@@ -102,7 +103,7 @@ mod tests {
     fn test_detect_little_endian() {
         let mut data = vec![0; 0x1000];
         data[0..4].copy_from_slice(&[0x40, 0x12, 0x37, 0x80]);
-        
+
         let cart = Cartridge::load(&data).unwrap();
         // Should be converted to big-endian
         assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
@@ -112,7 +113,7 @@ mod tests {
     fn test_detect_middle_endian() {
         let mut data = vec![0; 0x1000];
         data[0..4].copy_from_slice(&[0x37, 0x80, 0x40, 0x12]);
-        
+
         let cart = Cartridge::load(&data).unwrap();
         // Should be converted to big-endian
         assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
@@ -123,7 +124,7 @@ mod tests {
         let mut data = vec![0; 0x1000];
         data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
         data[4] = 0x42;
-        
+
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.read(4), 0x42);
     }
@@ -132,7 +133,7 @@ mod tests {
     fn test_read_out_of_bounds() {
         let mut data = vec![0; 0x1000];
         data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
-        
+
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.read(0x10000), 0);
     }

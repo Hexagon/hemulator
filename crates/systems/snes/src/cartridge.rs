@@ -9,6 +9,7 @@ pub struct Cartridge {
     /// RAM (if present)
     ram: Vec<u8>,
     /// Header offset (512 bytes if SMC header present)
+    #[allow(dead_code)]
     header_offset: usize,
 }
 
@@ -21,14 +22,10 @@ impl Cartridge {
         }
 
         // Check for SMC header (512 bytes)
-        let header_offset = if data.len() % 1024 == 512 {
-            512
-        } else {
-            0
-        };
+        let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
 
         let rom_data = &data[header_offset..];
-        
+
         // Validate minimum ROM size
         if rom_data.len() < 0x8000 {
             return Err(SnesError::InvalidRom(
@@ -52,7 +49,8 @@ impl Cartridge {
         match bank {
             0x00..=0x7D => {
                 if offset >= 0x8000 {
-                    let rom_offset = ((bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
+                    let rom_offset =
+                        ((bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
                     *self.rom.get(rom_offset).unwrap_or(&0)
                 } else {
                     0
@@ -60,7 +58,8 @@ impl Cartridge {
             }
             0x80..=0xFF => {
                 if offset >= 0x8000 {
-                    let rom_offset = (((bank as usize) - 0x80) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
+                    let rom_offset =
+                        (((bank as usize) - 0x80) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
                     *self.rom.get(rom_offset).unwrap_or(&0)
                 } else {
                     0
@@ -97,11 +96,9 @@ mod tests {
     #[test]
     fn test_load_with_smc_header() {
         let mut data = vec![0; 512 + 0x8000]; // 512-byte header + 32KB ROM
-        // SMC header
-        for i in 0..512 {
-            data[i] = 0xFF;
-        }
-        
+                                              // SMC header
+        data.iter_mut().take(512).for_each(|x| *x = 0xFF);
+
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.header_offset, 512);
         assert_eq!(cart.rom.len(), 0x8000);
@@ -110,7 +107,7 @@ mod tests {
     #[test]
     fn test_load_without_header() {
         let data = vec![0; 0x8000]; // 32KB ROM, no header
-        
+
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.header_offset, 0);
         assert_eq!(cart.rom.len(), 0x8000);
@@ -120,9 +117,9 @@ mod tests {
     fn test_read_rom() {
         let mut data = vec![0; 0x8000];
         data[0] = 0x42; // First byte
-        
+
         let cart = Cartridge::load(&data).unwrap();
-        
+
         // Bank 0, offset $8000 should read first ROM byte
         assert_eq!(cart.read(0x008000), 0x42);
         // Bank 0x80, offset $8000 should also read first ROM byte (mirror)
@@ -133,10 +130,10 @@ mod tests {
     fn test_write_read_ram() {
         let data = vec![0; 0x8000];
         let mut cart = Cartridge::load(&data).unwrap();
-        
+
         // Write to SRAM (bank $70, offset $0000)
         cart.write(0x700000, 0x55);
-        
+
         // Read back (not through normal read since that's ROM-only in our simple implementation)
         assert_eq!(cart.ram[0], 0x55);
     }

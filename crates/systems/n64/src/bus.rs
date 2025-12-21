@@ -54,20 +54,14 @@ impl Default for N64Bus {
 impl MemoryMips for N64Bus {
     fn read_byte(&self, addr: u32) -> u8 {
         let phys_addr = self.translate_address(addr);
-        
+
         match phys_addr {
             // RDRAM (0x00000000 - 0x003FFFFF)
-            0x0000_0000..=0x003F_FFFF => {
-                self.rdram[(phys_addr & 0x003FFFFF) as usize]
-            }
+            0x0000_0000..=0x003F_FFFF => self.rdram[(phys_addr & 0x003FFFFF) as usize],
             // SP DMEM/IMEM (0x04000000 - 0x04001FFF)
-            0x0400_0000..=0x0400_1FFF => {
-                self.sp_mem[(phys_addr & 0x1FFF) as usize]
-            }
+            0x0400_0000..=0x0400_1FFF => self.sp_mem[(phys_addr & 0x1FFF) as usize],
             // PIF RAM (0x1FC00000 - 0x1FC007FF)
-            0x1FC0_0000..=0x1FC0_07FF => {
-                self.pif_ram[(phys_addr & 0x7FF) as usize]
-            }
+            0x1FC0_0000..=0x1FC0_07FF => self.pif_ram[(phys_addr & 0x7FF) as usize],
             // Cartridge ROM (0x10000000 - 0x1FBFFFFF)
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
@@ -88,7 +82,7 @@ impl MemoryMips for N64Bus {
 
     fn read_word(&self, addr: u32) -> u32 {
         let phys_addr = self.translate_address(addr);
-        
+
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
@@ -132,7 +126,7 @@ impl MemoryMips for N64Bus {
 
     fn write_byte(&mut self, addr: u32, val: u8) {
         let phys_addr = self.translate_address(addr);
-        
+
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
@@ -146,7 +140,7 @@ impl MemoryMips for N64Bus {
             0x1FC0_0000..=0x1FC0_07FF => {
                 self.pif_ram[(phys_addr & 0x7FF) as usize] = val;
             }
-            _ => {},
+            _ => {}
         }
     }
 
@@ -158,7 +152,7 @@ impl MemoryMips for N64Bus {
 
     fn write_word(&mut self, addr: u32, val: u32) {
         let phys_addr = self.translate_address(addr);
-        
+
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {

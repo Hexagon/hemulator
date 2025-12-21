@@ -130,7 +130,7 @@ impl System for SnesSystem {
         if mount_point_id != "Cartridge" {
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         self.cpu.bus_mut().load_cartridge(data)?;
         self.reset();
         Ok(())
@@ -140,7 +140,7 @@ impl System for SnesSystem {
         if mount_point_id != "Cartridge" {
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         self.cpu.bus_mut().unload_cartridge();
         Ok(())
     }
@@ -179,7 +179,7 @@ mod tests {
     fn test_save_load_state() {
         let sys = SnesSystem::new();
         let state = sys.save_state();
-        
+
         let mut sys2 = SnesSystem::new();
         assert!(sys2.load_state(&state).is_ok());
     }

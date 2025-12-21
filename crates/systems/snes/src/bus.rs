@@ -93,7 +93,7 @@ impl Memory65c816 for SnesBus {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
                     // Hardware registers
-                    0x2000..=0x5FFF => {}, // Stub - ignore writes
+                    0x2000..=0x5FFF => {} // Stub - ignore writes
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)
                     0x6000..=0x7FFF if bank < 0x40 => {
                         self.wram[(offset - 0x6000) as usize] = val;
@@ -104,7 +104,7 @@ impl Memory65c816 for SnesBus {
                             cart.write(addr, val);
                         }
                     }
-                    _ => {},
+                    _ => {}
                 }
             }
             // Banks $7E-$7F: Full WRAM mirror

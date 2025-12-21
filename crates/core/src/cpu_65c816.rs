@@ -53,12 +53,17 @@ pub struct Cpu65c816<M: Memory65c816> {
 }
 
 // Status register flags
+#[allow(dead_code)]
 const FLAG_NEGATIVE: u8 = 0b1000_0000;
+#[allow(dead_code)]
 const FLAG_OVERFLOW: u8 = 0b0100_0000;
 const FLAG_MEMORY: u8 = 0b0010_0000; // m flag: 0=16-bit A, 1=8-bit A
 const FLAG_INDEX: u8 = 0b0001_0000; // x flag: 0=16-bit X/Y, 1=8-bit X/Y
+#[allow(dead_code)]
 const FLAG_DECIMAL: u8 = 0b0000_1000;
+#[allow(dead_code)]
 const FLAG_IRQ_DISABLE: u8 = 0b0000_0100;
+#[allow(dead_code)]
 const FLAG_ZERO: u8 = 0b0000_0010;
 const FLAG_CARRY: u8 = 0b0000_0001;
 
@@ -74,7 +79,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             dbr: 0,
             pbr: 0,
             pc: 0,
-            status: 0x34, // m=1, x=1, I=1 (start in 8-bit mode)
+            status: 0x34,    // m=1, x=1, I=1 (start in 8-bit mode)
             emulation: true, // Start in emulation mode (6502 compatibility)
             cycles: 0,
             memory,
@@ -122,7 +127,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.status &= !FLAG_CARRY;
                 }
                 self.emulation = old_carry != 0;
-                
+
                 // When switching to emulation mode, force 8-bit mode
                 if self.emulation {
                     self.status |= FLAG_MEMORY | FLAG_INDEX;
@@ -162,6 +167,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
     }
 
     /// Check if index registers are in 8-bit mode
+    #[allow(dead_code)]
     fn is_8bit_xy(&self) -> bool {
         self.emulation || (self.status & FLAG_INDEX) != 0
     }
@@ -233,10 +239,10 @@ mod tests {
         let mut mem = ArrayMemory::new();
         mem.write(0xFFFC, 0x00);
         mem.write(0xFFFD, 0x80);
-        
+
         let mut cpu = Cpu65c816::new(mem);
         cpu.reset();
-        
+
         assert_eq!(cpu.pc, 0x8000);
         assert!(cpu.emulation);
         assert_eq!(cpu.pbr, 0);
@@ -248,10 +254,10 @@ mod tests {
         mem.write(0x8000, 0xEA); // NOP
         mem.write(0xFFFC, 0x00);
         mem.write(0xFFFD, 0x80);
-        
+
         let mut cpu = Cpu65c816::new(mem);
         cpu.reset();
-        
+
         let cycles = cpu.step();
         assert_eq!(cycles, 2);
         assert_eq!(cpu.pc, 0x8001);
@@ -263,16 +269,16 @@ mod tests {
         mem.write(0xFFFC, 0x00);
         mem.write(0xFFFD, 0x80);
         mem.write(0x8000, 0xFB); // XCE
-        
+
         let mut cpu = Cpu65c816::new(mem);
         cpu.reset();
-        
+
         assert!(cpu.emulation);
-        
+
         // Clear carry then XCE to switch to native mode
         cpu.status &= !FLAG_CARRY;
         cpu.pc = 0x8000;
-        
+
         cpu.step();
         assert!(!cpu.emulation);
     }
@@ -281,16 +287,16 @@ mod tests {
     fn test_8bit_16bit_mode_switching() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu65c816::new(mem);
-        
+
         // Start in emulation mode (8-bit)
         assert!(cpu.is_8bit_a());
         assert!(cpu.is_8bit_xy());
-        
+
         // Switch to native mode
         cpu.emulation = false;
         cpu.status &= !FLAG_MEMORY;
         cpu.status &= !FLAG_INDEX;
-        
+
         assert!(!cpu.is_8bit_a());
         assert!(!cpu.is_8bit_xy());
     }
@@ -299,7 +305,7 @@ mod tests {
     fn test_get_set_accumulator_8bit() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu65c816::new(mem);
-        
+
         // In emulation mode (8-bit)
         cpu.set_a(0x1234);
         assert_eq!(cpu.get_a(), 0x34); // Only low byte
@@ -309,11 +315,11 @@ mod tests {
     fn test_get_set_accumulator_16bit() {
         let mem = ArrayMemory::new();
         let mut cpu = Cpu65c816::new(mem);
-        
+
         // Switch to native 16-bit mode
         cpu.emulation = false;
         cpu.status &= !FLAG_MEMORY;
-        
+
         cpu.set_a(0x1234);
         assert_eq!(cpu.get_a(), 0x1234);
     }

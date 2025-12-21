@@ -44,28 +44,28 @@ pub struct CpuMips<M: MemoryMips> {
     /// General-purpose registers (R0-R31)
     /// Note: R0 is always zero
     pub gpr: [u64; 32],
-    
+
     /// Program counter
     pub pc: u64,
-    
+
     /// HI register (for multiply/divide results)
     pub hi: u64,
-    
+
     /// LO register (for multiply/divide results)
     pub lo: u64,
-    
+
     /// Floating-point registers
     pub fpr: [f64; 32],
-    
+
     /// Floating-point control/status register
     pub fcr31: u32,
-    
+
     /// CP0 registers (coprocessor 0 - system control)
     pub cp0: [u64; 32],
-    
+
     /// Total cycles executed
     pub cycles: u64,
-    
+
     /// Memory interface
     pub memory: M,
 }
@@ -118,12 +118,12 @@ impl<M: MemoryMips> CpuMips<M> {
             cycles: 0,
             memory,
         };
-        
+
         // Initialize CP0 registers
         cpu.cp0[CP0_PRID] = 0x0B00; // Processor ID
         cpu.cp0[CP0_STATUS] = 0x3400_0000; // Status register
         cpu.cp0[CP0_CONFIG] = 0x7006_E463; // Config register
-        
+
         cpu
     }
 
@@ -155,10 +155,10 @@ impl<M: MemoryMips> CpuMips<M> {
 
         match opcode {
             0x00 => self.execute_special(instr),
-            0x0D => self.execute_ori(instr),     // ORI
-            0x0F => self.execute_lui(instr),     // LUI
-            0x23 => self.execute_lw(instr),      // LW
-            0x2B => self.execute_sw(instr),      // SW
+            0x0D => self.execute_ori(instr), // ORI
+            0x0F => self.execute_lui(instr), // LUI
+            0x23 => self.execute_lw(instr),  // LW
+            0x2B => self.execute_sw(instr),  // SW
             _ => {
                 // Unimplemented instruction
                 self.cycles += 1;
@@ -177,7 +177,7 @@ impl<M: MemoryMips> CpuMips<M> {
         let rd = ((instr >> 11) & 0x1F) as usize;
         let rs = ((instr >> 21) & 0x1F) as usize;
         let rt = ((instr >> 16) & 0x1F) as usize;
-        let shamt = ((instr >> 6) & 0x1F) as u32;
+        let shamt = (instr >> 6) & 0x1F;
 
         match funct {
             0x00 => {
@@ -187,7 +187,8 @@ impl<M: MemoryMips> CpuMips<M> {
             }
             0x21 => {
                 // ADDU - Add Unsigned
-                self.gpr[rd] = (self.gpr[rs] as u32).wrapping_add(self.gpr[rt] as u32) as i32 as u64;
+                self.gpr[rd] =
+                    (self.gpr[rs] as u32).wrapping_add(self.gpr[rt] as u32) as i32 as u64;
                 self.cycles += 1;
             }
             0x25 => {
@@ -214,7 +215,7 @@ impl<M: MemoryMips> CpuMips<M> {
     /// Execute LUI - Load Upper Immediate
     fn execute_lui(&mut self, instr: u32) {
         let rt = ((instr >> 16) & 0x1F) as usize;
-        let imm = (instr & 0xFFFF) as u32;
+        let imm = instr & 0xFFFF;
 
         self.gpr[rt] = ((imm << 16) as i32) as u64;
         self.cycles += 1;
@@ -320,9 +321,7 @@ impl MemoryMips for ArrayMemory {
     fn write_doubleword(&mut self, addr: u32, val: u64) {
         let addr = addr as usize & 0x7FFFFF;
         let bytes = val.to_be_bytes();
-        for i in 0..8 {
-            self.data[addr + i] = bytes[i];
-        }
+        self.data[addr..(8 + addr)].copy_from_slice(&bytes);
     }
 }
 
@@ -344,7 +343,7 @@ mod tests {
         let mut cpu = CpuMips::new(mem);
         cpu.gpr[1] = 0x1234;
         cpu.reset();
-        
+
         assert_eq!(cpu.pc, 0xBFC0_0000);
         assert_eq!(cpu.gpr[1], 0);
     }
@@ -356,7 +355,7 @@ mod tests {
         cpu.pc = 0;
         cpu.memory.write_word(0, 0x34000000 | 0x1234); // ORI $0, $0, 0x1234
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[0], 0);
     }
 
@@ -367,7 +366,7 @@ mod tests {
         cpu.pc = 0;
         cpu.memory.write_word(0, 0x34010000 | 0x1234); // ORI $1, $0, 0x1234
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[1], 0x1234);
     }
 
@@ -378,7 +377,7 @@ mod tests {
         cpu.pc = 0;
         cpu.memory.write_word(0, 0x3C010000 | 0x1234); // LUI $1, 0x1234
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[1] as u32, 0x12340000);
     }
 
@@ -391,7 +390,7 @@ mod tests {
         cpu.gpr[2] = 20;
         cpu.memory.write_word(0, 0x00221821); // ADDU $3, $1, $2
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[3], 30);
     }
 
@@ -404,7 +403,7 @@ mod tests {
         cpu.gpr[2] = 0x0F;
         cpu.memory.write_word(0, 0x00221825); // OR $3, $1, $2
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[3], 0xFF);
     }
 
@@ -415,15 +414,15 @@ mod tests {
         cpu.pc = 0;
         cpu.gpr[1] = 0x1000;
         cpu.gpr[2] = 0xDEADBEEF;
-        
+
         // SW $2, 0($1) - Store word
         cpu.memory.write_word(0, 0xAC220000);
         cpu.step();
-        
+
         // LW $3, 0($1) - Load word
         cpu.memory.write_word(4, 0x8C230000);
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[3] as u32, 0xDEADBEEF);
     }
 
@@ -437,7 +436,7 @@ mod tests {
         // opcode=0, rs=0, rt=2, rd=2, shamt=2, funct=0
         cpu.memory.write_word(0, 0x00021080);
         cpu.step();
-        
+
         assert_eq!(cpu.gpr[2], 20);
     }
 }

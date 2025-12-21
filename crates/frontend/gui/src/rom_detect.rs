@@ -51,7 +51,7 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // Check for SMC header (512 bytes)
         let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
         let rom_size = data.len() - header_offset;
-        
+
         // SNES ROMs are typically 32KB, 64KB, 128KB, 256KB, 512KB, 1MB, 2MB, 4MB
         if rom_size >= 0x8000 && rom_size.is_power_of_two() && rom_size <= 0x400000 {
             // Additional validation: check for valid SNES header at known locations

@@ -123,7 +123,7 @@ impl System for N64System {
         if mount_point_id != "Cartridge" {
             return Err(N64Error::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         self.cpu.bus_mut().load_cartridge(data)?;
         self.reset();
         Ok(())
@@ -133,7 +133,7 @@ impl System for N64System {
         if mount_point_id != "Cartridge" {
             return Err(N64Error::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         self.cpu.bus_mut().unload_cartridge();
         Ok(())
     }
@@ -173,7 +173,7 @@ mod tests {
     fn test_save_load_state() {
         let sys = N64System::new();
         let state = sys.save_state();
-        
+
         let mut sys2 = N64System::new();
         assert!(sys2.load_state(&state).is_ok());
     }
