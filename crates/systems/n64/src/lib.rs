@@ -15,12 +15,14 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod pif;
 mod rdp;
 mod rdp_renderer;
 #[cfg(feature = "opengl")]
 mod rdp_renderer_opengl;
 mod rdp_renderer_software;
 mod rsp;
+mod rsp_hle;
 mod vi;
 
 use bus::N64Bus;
@@ -45,6 +47,9 @@ pub struct N64System {
     current_cycles: u32,
 }
 
+// Re-export controller types for convenience
+pub use pif::{ControllerButtons, ControllerState};
+
 impl N64System {
     /// Create a new N64 system
     pub fn new() -> Self {
@@ -54,6 +59,26 @@ impl N64System {
             frame_cycles: 1562500, // ~93.75MHz / 60Hz (NTSC)
             current_cycles: 0,
         }
+    }
+
+    /// Update controller 1 state
+    pub fn set_controller1(&mut self, state: ControllerState) {
+        self.cpu.bus_mut().set_controller1(state);
+    }
+
+    /// Update controller 2 state
+    pub fn set_controller2(&mut self, state: ControllerState) {
+        self.cpu.bus_mut().set_controller2(state);
+    }
+
+    /// Update controller 3 state
+    pub fn set_controller3(&mut self, state: ControllerState) {
+        self.cpu.bus_mut().set_controller3(state);
+    }
+
+    /// Update controller 4 state
+    pub fn set_controller4(&mut self, state: ControllerState) {
+        self.cpu.bus_mut().set_controller4(state);
     }
 }
 

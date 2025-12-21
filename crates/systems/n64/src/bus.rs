@@ -1,6 +1,7 @@
 //! N64 memory bus implementation
 
 use crate::cartridge::Cartridge;
+use crate::pif::Pif;
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
 use crate::vi::VideoInterface;
@@ -11,8 +12,8 @@ use emu_core::cpu_mips_r4300i::MemoryMips;
 pub struct N64Bus {
     /// 4MB RDRAM
     rdram: Vec<u8>,
-    /// 64KB PIF RAM/ROM (boot)
-    pif_ram: [u8; 0x800],
+    /// PIF (Peripheral Interface - controllers and boot ROM)
+    pif: Pif,
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
     /// RDP (Reality Display Processor)
@@ -27,47 +28,34 @@ impl N64Bus {
     pub fn new() -> Self {
         let mut bus = Self {
             rdram: vec![0; 4 * 1024 * 1024], // 4MB
-            pif_ram: [0; 0x800],
+            pif: Pif::new(),
             cartridge: None,
             rdp: Rdp::new(),
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
         };
 
-        // Initialize minimal PIF ROM stub for booting
-        // This stub copies cartridge boot code to RDRAM and jumps to it
-        bus.init_pif_rom();
+        // Initialize PIF ROM
+        bus.pif.init_rom();
 
         bus
     }
 
-    /// Initialize minimal PIF ROM stub
-    /// Real N64 PIF ROM is complex, but we only need basic boot functionality
-    fn init_pif_rom(&mut self) {
-        // PIF ROM starts at 0xBFC00000 (physical 0x1FC00000)
-        // Simplified boot: Just jump directly to test ROM code in cartridge ROM
-        // Test ROM code is at offset 0x1000 in the ROM file, which maps to 0x10001000
+    /// Update controller state (for input handling)
+    pub fn set_controller1(&mut self, state: crate::pif::ControllerState) {
+        self.pif.set_controller1(state);
+    }
 
-        let pif_rom: Vec<u32> = vec![
-            // Jump to test ROM code at 0x10001000 (cartridge ROM + 0x1000)
-            // Using cached address 0x90001000 (KSEG0 cached)
-            0x3C089000, // lui $t0, 0x9000  # Upper 16 bits
-            0x35081000, // ori $t0, $t0, 0x1000  # Lower 16 bits = 0x90001000
-            0x01000008, // jr $t0  # Jump to $t0
-            0x00000000, // nop (delay slot)
-        ];
+    pub fn set_controller2(&mut self, state: crate::pif::ControllerState) {
+        self.pif.set_controller2(state);
+    }
 
-        // Write PIF ROM to PIF RAM area (we're using PIF RAM as ROM for simplicity)
-        for (i, &instr) in pif_rom.iter().enumerate() {
-            let offset = i * 4;
-            if offset + 3 < self.pif_ram.len() {
-                let bytes = instr.to_be_bytes();
-                self.pif_ram[offset] = bytes[0];
-                self.pif_ram[offset + 1] = bytes[1];
-                self.pif_ram[offset + 2] = bytes[2];
-                self.pif_ram[offset + 3] = bytes[3];
-            }
-        }
+    pub fn set_controller3(&mut self, state: crate::pif::ControllerState) {
+        self.pif.set_controller3(state);
+    }
+
+    pub fn set_controller4(&mut self, state: crate::pif::ControllerState) {
+        self.pif.set_controller4(state);
     }
 
     pub fn load_cartridge(&mut self, data: &[u8]) -> Result<(), N64Error> {
@@ -99,6 +87,13 @@ impl N64Bus {
     #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
     pub fn vi_mut(&mut self) -> &mut VideoInterface {
         &mut self.vi
+    }
+
+    /// Execute pending RSP task if RSP is not halted
+    pub fn process_rsp_task(&mut self) {
+        // Clone RDRAM reference to avoid borrow checker issues
+        let rdram_clone = self.rdram.clone();
+        self.rsp.execute_task(&rdram_clone, &mut self.rdp);
     }
 
     /// Process pending RDP display list if needed
@@ -138,7 +133,10 @@ impl MemoryMips for N64Bus {
                 self.rsp.read_imem(offset)
             }
             // PIF RAM (0x1FC00000 - 0x1FC007FF)
-            0x1FC0_0000..=0x1FC0_07FF => self.pif_ram[(phys_addr & 0x7FF) as usize],
+            0x1FC0_0000..=0x1FC0_07FF => {
+                let offset = phys_addr & 0x7FF;
+                self.pif.read_ram(offset)
+            }
             // Cartridge ROM (0x10000000 - 0x1FBFFFFF)
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
@@ -236,7 +234,8 @@ impl MemoryMips for N64Bus {
             }
             // PIF RAM
             0x1FC0_0000..=0x1FC0_07FF => {
-                self.pif_ram[(phys_addr & 0x7FF) as usize] = val;
+                let offset = phys_addr & 0x7FF;
+                self.pif.write_ram(offset, val);
             }
             _ => {}
         }
@@ -265,6 +264,12 @@ impl MemoryMips for N64Bus {
             0x0404_0000..=0x0404_001F => {
                 let offset = phys_addr & 0x1F;
                 self.rsp.write_register(offset, val, &mut self.rdram);
+
+                // If SP_STATUS was written (offset 0x10), check if RSP was un-halted
+                // and execute pending task
+                if offset == 0x10 {
+                    self.process_rsp_task();
+                }
             }
             // RDP Command registers (0x04100000 - 0x0410001F)
             0x0410_0000..=0x0410_001F => {

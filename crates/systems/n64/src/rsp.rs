@@ -23,16 +23,17 @@
 //!
 //! # Implementation Status
 //!
-//! This is a **stub implementation** with basic structure:
+//! This implementation uses **High-Level Emulation (HLE)**:
 //! - Memory (DMEM/IMEM) allocated and accessible
 //! - Register interface for DMA and control
-//! - No actual microcode execution (placeholder)
+//! - HLE for common graphics microcodes (F3DEX/F3DEX2)
+//! - Automatic microcode detection when loaded into IMEM
+//! - Task execution via HLE instead of instruction-level emulation
 //!
-//! Full implementation would require:
+//! Low-level instruction execution would require:
 //! - MIPS R4000-based scalar unit interpreter/JIT
 //! - Vector unit emulation with 32x128-bit registers
-//! - Microcode execution and high-level emulation (HLE)
-//! - DMA between RSP memory and RDRAM
+//! - Full microcode execution at instruction level
 
 /// RSP register addresses (relative to 0x04040000)
 #[allow(dead_code)]
@@ -84,6 +85,9 @@ const SP_STATUS_SIG6: u32 = 0x2000; // Signal 6
 #[allow(dead_code)]
 const SP_STATUS_SIG7: u32 = 0x4000; // Signal 7
 
+use super::rdp::Rdp;
+use super::rsp_hle::RspHle;
+
 /// RSP (Reality Signal Processor) state
 pub struct Rsp {
     /// 4KB DMEM (Data Memory)
@@ -105,6 +109,9 @@ pub struct Rsp {
     sp_dma_full: u32,
     sp_dma_busy: u32,
     sp_semaphore: u32,
+
+    /// High-level emulation state
+    hle: RspHle,
 }
 
 impl Rsp {
@@ -122,6 +129,7 @@ impl Rsp {
             sp_dma_full: 0,
             sp_dma_busy: 0,
             sp_semaphore: 0,
+            hle: RspHle::new(),
         }
     }
 
@@ -139,6 +147,7 @@ impl Rsp {
         self.sp_dma_full = 0;
         self.sp_dma_busy = 0;
         self.sp_semaphore = 0;
+        self.hle = RspHle::new();
     }
 
     /// Read from DMEM
@@ -163,6 +172,12 @@ impl Rsp {
     pub fn write_imem(&mut self, offset: u32, value: u8) {
         let addr = (offset & 0xFFF) as usize;
         self.imem[addr] = value;
+
+        // Detect microcode when IMEM is written
+        // (Simplified: only detect after first write, could optimize)
+        if addr == 0 {
+            self.hle.detect_microcode(&self.imem);
+        }
     }
 
     /// Read from RSP register
@@ -246,6 +261,11 @@ impl Rsp {
                 }
             }
         }
+
+        // If we just loaded IMEM, detect microcode
+        if is_imem {
+            self.hle.detect_microcode(&self.imem);
+        }
     }
 
     /// DMA write from RSP memory to RDRAM
@@ -269,13 +289,27 @@ impl Rsp {
         }
     }
 
-    /// Execute RSP microcode (stub - not implemented)
-    /// Real implementation would execute MIPS instructions and vector operations
+    /// Execute RSP task via HLE
+    /// Called when RSP is un-halted by writing to SP_STATUS
+    pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> u32 {
+        // Check if RSP is halted
+        if self.sp_status & SP_STATUS_HALT != 0 {
+            return 0;
+        }
+
+        // Execute HLE task
+        let cycles = self.hle.execute_task(&self.dmem, rdram, rdp);
+
+        // Set broke flag and halt after task completion
+        self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT;
+
+        cycles
+    }
+
+    /// Get current microcode type (for debugging/monitoring)
     #[allow(dead_code)]
-    pub fn step(&mut self) -> u32 {
-        // Stub: Just return 1 cycle
-        // Real implementation would fetch instruction from IMEM[PC] and execute it
-        1
+    pub fn microcode(&self) -> super::rsp_hle::MicrocodeType {
+        self.hle.microcode()
     }
 }
 
