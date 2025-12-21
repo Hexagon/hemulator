@@ -1,6 +1,6 @@
 # Hemulator User Manual
 
-Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, Atari 2600, and Game Boy (WIP) emulation.
+Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, SNES, N64, Atari 2600, Game Boy, and PC/DOS emulation.
 
 ## Getting Started
 
@@ -9,7 +9,13 @@ Welcome to Hemulator, a cross-platform multi-system console emulator supporting 
 1. **Launch the emulator**: Double-click `hemu` (or `hemu.exe` on Windows)
 2. **The splash screen appears** with instructions
 3. **Load a ROM**: Press `F3` to open the file browser
-4. **Select your game file** (`.nes` for NES, `.a26`/`.bin` for Atari 2600, `.gb`/`.gbc` for Game Boy)
+4. **Select your game file**:
+   - `.nes` for NES
+   - `.smc`/`.sfc` for SNES
+   - `.z64`/`.n64`/`.v64` for N64
+   - `.a26`/`.bin` for Atari 2600
+   - `.gb`/`.gbc` for Game Boy
+   - `.com`/`.exe` for PC/DOS
 5. **Start playing!** Use the controls listed below
 
 Alternatively, you can provide a ROM path as an argument:
@@ -352,13 +358,63 @@ The emulator supports the following cartridge banking schemes:
 - Enter = Start
 - Left Shift = Select
 
+### SNES (Super Nintendo Entertainment System)
+
+**Status**: Basic implementation (stub)
+
+**Coverage**: Limited - skeleton implementation for testing
+
+**ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
+
+**Features**:
+- 65C816 CPU core with 16-bit extensions
+- Basic memory bus (128KB WRAM + cartridge mapping)
+- LoROM cartridge mapping
+- SMC header detection and removal
+- Save states (F5/F6)
+- Resolution: 256x224 pixels
+
+**Known Limitations**:
+- **Graphics**: PPU not implemented - displays black screen only
+- **Audio**: APU not implemented - silent gameplay
+- **Input**: Controller support not implemented
+- **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
+- **Timing**: Stub implementation - not cycle-accurate
+- **Status**: This is a skeleton implementation for infrastructure testing. Full SNES emulation requires significant PPU and APU work.
+
+### N64 (Nintendo 64)
+
+**Status**: Basic implementation (stub)
+
+**Coverage**: Limited - skeleton implementation for testing
+
+**ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
+
+**Features**:
+- MIPS R4300i CPU core with basic instruction set
+- Memory bus (4MB RDRAM + PIF + SP memory)
+- ROM loading with automatic byte-order detection and conversion
+- Save states (F5/F6)
+- Resolution: 320x240 pixels
+
+**Known Limitations**:
+- **Graphics**: RCP (Reality Co-Processor) not implemented - displays black screen only
+- **Audio**: Audio interface not implemented - silent gameplay
+- **Input**: Controller support not implemented
+- **Memory**: Basic memory map only - no TLB, cache, or accurate timing
+- **Timing**: Stub implementation - not cycle-accurate
+- **Status**: This is a skeleton implementation for infrastructure testing. Full N64 emulation requires extensive RCP (RSP/RDP) and graphics plugin work.
+
 ## Troubleshooting
 
 ### ROM won't load
 - Ensure the ROM is in the correct format:
   - NES: iNES format (.nes files)
+  - SNES: SMC/SFC format (.smc, .sfc files) - supports 512-byte SMC headers
+  - N64: Z64/N64/V64 format (.z64, .n64, .v64 files) - all byte orders supported
   - Atari 2600: Raw binary (.a26 or .bin files) - must be 2K, 4K, 8K, 12K, 16K, or 32K in size
   - Game Boy: GB/GBC format (.gb, .gbc files)
+  - PC/DOS: COM/EXE format (.com, .exe files)
 - Check that the file isn't corrupted
 - Try a different ROM to verify the emulator works
 - Check the console output (if running from terminal) for specific error messages
