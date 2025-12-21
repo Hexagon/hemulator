@@ -3,18 +3,14 @@
 //! This module provides hardware-accelerated video processing using OpenGL.
 //! It supports shader-based CRT filters and scaling for better performance.
 
-#[cfg(feature = "opengl")]
 use super::VideoProcessor;
-#[cfg(feature = "opengl")]
 use super::VideoResult;
-#[cfg(feature = "opengl")]
 use crate::crt_filter::CrtFilter;
 
-#[cfg(feature = "opengl")]
 use glow::HasContext;
 
 /// OpenGL-based video processor
-#[cfg(feature = "opengl")]
+
 pub struct OpenGLProcessor {
     gl: glow::Context,
     program: glow::Program,
@@ -26,7 +22,7 @@ pub struct OpenGLProcessor {
     current_filter: CrtFilter,
 }
 
-#[cfg(feature = "opengl")]
+
 impl OpenGLProcessor {
     /// Create a new OpenGL processor with the given context
     pub fn new(gl: glow::Context) -> VideoResult<Self> {
@@ -184,7 +180,7 @@ impl OpenGLProcessor {
     }
 }
 
-#[cfg(feature = "opengl")]
+
 impl VideoProcessor for OpenGLProcessor {
     fn init(&mut self, width: usize, height: usize) -> VideoResult<()> {
         self.width = width;
@@ -274,7 +270,7 @@ impl VideoProcessor for OpenGLProcessor {
     }
 }
 
-#[cfg(feature = "opengl")]
+
 impl Drop for OpenGLProcessor {
     fn drop(&mut self) {
         unsafe {
@@ -286,7 +282,7 @@ impl Drop for OpenGLProcessor {
     }
 }
 
-#[cfg(feature = "opengl")]
+
 unsafe fn compile_shader(
     gl: &glow::Context,
     shader_type: u32,

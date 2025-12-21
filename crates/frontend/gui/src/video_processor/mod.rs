@@ -5,9 +5,7 @@
 
 use crate::crt_filter::CrtFilter;
 
-#[cfg(feature = "opengl")]
 mod opengl;
-#[cfg(feature = "opengl")]
 pub use opengl::OpenGLProcessor;
 
 /// Result type for video processor operations
