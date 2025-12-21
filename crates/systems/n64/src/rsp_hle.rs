@@ -84,16 +84,17 @@ pub struct RspHle {
     /// Number of vertices currently loaded
     vertex_count: usize,
 
-    /// Current matrix stack pointer
-    #[allow(dead_code)] // Reserved for future matrix stack implementation
+    /// Current matrix stack pointer (0-9 for 10 levels)
     matrix_stack_ptr: usize,
 
+    /// Matrix stack for modelview matrices (10 levels of 4x4 matrices)
+    /// RSP supports up to 10 levels of matrix nesting for display list calls
+    matrix_stack: [[f32; 16]; 10],
+
     /// Projection matrix (4x4, stored as 16 f32s)
-    #[allow(dead_code)] // Reserved for future vertex transformation
     projection_matrix: [f32; 16],
 
     /// Modelview matrix (4x4, stored as 16 f32s)
-    #[allow(dead_code)] // Reserved for future vertex transformation
     modelview_matrix: [f32; 16],
 
     /// Geometry mode flags
@@ -108,6 +109,7 @@ impl RspHle {
             vertices: [Vertex::default(); 32],
             vertex_count: 0,
             matrix_stack_ptr: 0,
+            matrix_stack: [Self::identity_matrix(); 10],
             projection_matrix: Self::identity_matrix(),
             modelview_matrix: Self::identity_matrix(),
             geometry_mode: 0,
@@ -297,6 +299,28 @@ impl RspHle {
         rdp: &mut Rdp,
     ) -> bool {
         match cmd_id {
+            // G_BRANCH_Z (0xB0) - Conditional branch based on Z-buffer
+            0xB0 => {
+                // word0: cmd_id | vtx (vertex index, bits 11-1) | zval (Z value for comparison)
+                // word1: RDRAM address to branch to if condition is met
+                let vertex_index = ((word0 >> 1) & 0x7FF) as usize / 2;
+                let branch_addr = word1;
+
+                // For now, implement simplified version that always branches
+                // Full implementation would:
+                // 1. Get Z value from specified vertex
+                // 2. Compare with RDP Z-buffer at vertex's screen position
+                // 3. Branch only if Z test passes (vertex is visible)
+                // Since we don't have per-vertex Z-buffer access yet, we conditionally branch
+                // based on whether the vertex is in bounds (simplified heuristic)
+
+                if vertex_index < self.vertex_count {
+                    // Vertex exists, parse the branch target display list
+                    // In a more complete implementation, we'd check Z-buffer value
+                    self.parse_f3dex_display_list(rdram, branch_addr, 10000, rdp);
+                }
+                true
+            }
             // G_VTX (0x01) - Load vertices
             0x01 => {
                 // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
@@ -369,6 +393,21 @@ impl RspHle {
                 }
                 true
             }
+            // G_POPMTX (0xD8) - Pop matrix from stack
+            0xD8 => {
+                // word0: cmd_id | padding
+                // word1: number of matrices to pop (in units of 64 bytes each)
+                let num_matrices = ((word1 >> 6) & 0xFF) as usize; // Divide by 64 to get count
+
+                // Pop the specified number of matrices from the modelview stack
+                for _ in 0..num_matrices.min(self.matrix_stack_ptr) {
+                    if self.matrix_stack_ptr > 0 {
+                        self.matrix_stack_ptr -= 1;
+                        self.modelview_matrix = self.matrix_stack[self.matrix_stack_ptr];
+                    }
+                }
+                true
+            }
             // G_MTX (0xDA) - Load transformation matrix
             0xDA => {
                 // word0: cmd_id | param (push/nopush, load/mul, projection/modelview)
@@ -398,9 +437,11 @@ impl RspHle {
                 } else {
                     // Modelview matrix
                     if push {
-                        // In a full implementation, we'd push current matrix to stack
-                        // For now, we just use a single matrix slot
-                        self.matrix_stack_ptr = (self.matrix_stack_ptr + 1).min(9);
+                        // Push current modelview matrix to stack
+                        if self.matrix_stack_ptr < 10 {
+                            self.matrix_stack[self.matrix_stack_ptr] = self.modelview_matrix;
+                            self.matrix_stack_ptr += 1;
+                        }
                     }
                     if load {
                         // Replace modelview matrix
@@ -461,8 +502,8 @@ impl RspHle {
                 let rdp_cmd_id = (word0 >> 24) & 0x3F;
 
                 // Call RDP's execute_command directly with the command data
-                // This bypasses the need for RDRAM and properly processes embedded RDP commands
-                rdp.execute_rdp_command(rdp_cmd_id, word0, word1);
+                // Pass rdram for texture loading and other DRAM-dependent commands
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1, rdram);
                 true
             }
             // Unknown/unsupported command - skip it
@@ -1110,5 +1151,174 @@ mod tests {
         //         = (3360, -2280, 688318.5)
         assert!(x > 1000); // Should be scaled up significantly
         assert!(z > 10); // Z should also be transformed
+    }
+
+    #[test]
+    fn test_matrix_stack_push_pop() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 2048];
+        let mut rdp = Rdp::new();
+
+        // Create a scaling matrix (scale by 2)
+        let addr1 = 0x200;
+        let scale2_fixed: i32 = 0x00020000; // 2.0 in 16.16 fixed point
+        let one_fixed: i32 = 0x00010000;
+        let zero_fixed: i32 = 0x00000000;
+
+        for i in 0..16 {
+            let value = if i == 0 || i == 5 || i == 10 {
+                scale2_fixed
+            } else if i == 15 {
+                one_fixed
+            } else {
+                zero_fixed
+            };
+            let offset = addr1 + i * 4;
+            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+
+        // Create another matrix (scale by 3)
+        let addr2 = 0x300;
+        let scale3_fixed: i32 = 0x00030000; // 3.0 in 16.16 fixed point
+
+        for i in 0..16 {
+            let value = if i == 0 || i == 5 || i == 10 {
+                scale3_fixed
+            } else if i == 15 {
+                one_fixed
+            } else {
+                zero_fixed
+            };
+            let offset = addr2 + i * 4;
+            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+
+        let dl_addr = 0x100;
+
+        // G_MTX with PUSH - load scale-by-2 matrix
+        let mtx_cmd_word0: u32 = (0xDA << 24) | 0x01; // PUSH flag set
+        let mtx_cmd_word1: u32 = addr1 as u32;
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&mtx_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&mtx_cmd_word1.to_be_bytes());
+
+        // G_MTX with PUSH - load scale-by-3 matrix
+        let mtx_cmd_word0_2: u32 = (0xDA << 24) | 0x01; // PUSH flag set
+        let mtx_cmd_word1_2: u32 = addr2 as u32;
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&mtx_cmd_word0_2.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&mtx_cmd_word1_2.to_be_bytes());
+
+        // G_ENDDL
+        rdram[dl_addr + 16..dl_addr + 20].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 20..dl_addr + 24].copy_from_slice(&0u32.to_be_bytes());
+
+        // Parse display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 24, &mut rdp);
+
+        // After two pushes, stack pointer should be 2
+        assert_eq!(hle.matrix_stack_ptr, 2);
+
+        // Current modelview matrix should be scale-by-3
+        assert_eq!(hle.modelview_matrix[0], 3.0);
+        assert_eq!(hle.modelview_matrix[5], 3.0);
+
+        // Stack should contain identity at [0] and scale-by-2 at [1]
+        assert_eq!(hle.matrix_stack[0][0], 1.0); // Identity
+        assert_eq!(hle.matrix_stack[1][0], 2.0); // Scale-by-2
+    }
+
+    #[test]
+    fn test_g_popmtx_command() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 2048];
+        let mut rdp = Rdp::new();
+
+        // Manually set up a matrix stack state
+        hle.matrix_stack_ptr = 2;
+        hle.matrix_stack[0] = RspHle::identity_matrix();
+        hle.matrix_stack[1] = [
+            2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]; // Scale by 2
+        hle.modelview_matrix = [
+            3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]; // Scale by 3
+
+        let dl_addr = 0x100;
+
+        // G_POPMTX command (0xD8) - pop 1 matrix (64 bytes)
+        let pop_cmd_word0: u32 = 0xD8 << 24;
+        let pop_cmd_word1: u32 = 64; // Pop 1 matrix (64 bytes / 64 = 1)
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&pop_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&pop_cmd_word1.to_be_bytes());
+
+        // G_ENDDL
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        // Parse display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 16, &mut rdp);
+
+        // Stack pointer should be decremented
+        assert_eq!(hle.matrix_stack_ptr, 1);
+
+        // Current modelview matrix should now be scale-by-2 (popped from stack)
+        assert_eq!(hle.modelview_matrix[0], 2.0);
+        assert_eq!(hle.modelview_matrix[5], 2.0);
+    }
+
+    #[test]
+    fn test_g_branch_z_command() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 2048];
+        let mut rdp = Rdp::new();
+
+        // Load a vertex first
+        let vtx_data_addr = 0x300;
+        let vdata: [u8; 16] = [0, 10, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255];
+        rdram[vtx_data_addr..vtx_data_addr + 16].copy_from_slice(&vdata);
+
+        let dl_addr = 0x100;
+
+        // G_VTX - load 1 vertex
+        let vtx_cmd_word0: u32 = (0x01 << 24) | (1 << 12);
+        let vtx_cmd_word1: u32 = vtx_data_addr as u32;
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&vtx_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&vtx_cmd_word1.to_be_bytes());
+
+        // Create a nested display list that will be branched to
+        let branch_target = 0x400;
+        // G_VTX - load another vertex in the branch target at index 1
+        let vtx2_data_addr = 0x500;
+        let vdata2: [u8; 16] = [0, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 128, 128, 128, 255];
+        rdram[vtx2_data_addr..vtx2_data_addr + 16].copy_from_slice(&vdata2);
+
+        // Load 1 vertex at buffer index 1: (1 << 12) for count, (1 << 1) for buffer_index
+        let vtx2_cmd_word0: u32 = (0x01 << 24) | (1 << 12) | (1 << 1);
+        let vtx2_cmd_word1: u32 = vtx2_data_addr as u32;
+        rdram[branch_target..branch_target + 4].copy_from_slice(&vtx2_cmd_word0.to_be_bytes());
+        rdram[branch_target + 4..branch_target + 8].copy_from_slice(&vtx2_cmd_word1.to_be_bytes());
+        rdram[branch_target + 8..branch_target + 12].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[branch_target + 12..branch_target + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        // G_BRANCH_Z - conditional branch to nested DL
+        let branch_cmd_word0: u32 = 0xB0 << 24; // Vertex index 0
+        let branch_cmd_word1: u32 = branch_target as u32;
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&branch_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&branch_cmd_word1.to_be_bytes());
+
+        // G_ENDDL
+        rdram[dl_addr + 16..dl_addr + 20].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 20..dl_addr + 24].copy_from_slice(&0u32.to_be_bytes());
+
+        // Parse display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 24, &mut rdp);
+
+        // Verify that the branch was taken and vertex was loaded
+        assert_eq!(hle.vertex_count, 2);
     }
 }
