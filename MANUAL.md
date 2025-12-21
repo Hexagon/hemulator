@@ -506,6 +506,9 @@ The emulator supports the following cartridge banking schemes:
 - MIPS R4300i CPU core with complete instruction set
 - Memory bus (4MB RDRAM + PIF + SP memory + RDP/VI registers)
 - RDP (Reality Display Processor) with enhanced framebuffer support
+  - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
+  - **Software renderer** (default): Fully functional, high accuracy
+  - **OpenGL renderer** (stub): Architecture in place for future GPU acceleration
   - **3D triangle rasterization** with flat and Gouraud shading
   - **Z-buffer (depth buffer)** for hidden surface removal
   - **Scissor clipping** for efficient rendering
@@ -533,6 +536,12 @@ The emulator supports the following cartridge banking schemes:
   - Scissor rectangle clipping
 
 **Known Limitations**:
+- **Renderer Architecture**:
+  - Software renderer is fully functional (default)
+  - OpenGL renderer is a stub (requires GL context from frontend)
+  - To enable OpenGL stub: build with `--features opengl`
+  - Future OpenGL implementation blocked by minifb's lack of GL context exposure
+  - See `N64_RENDERER_ARCHITECTURE.md` for details on renderer design
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles

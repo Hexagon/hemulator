@@ -1,4 +1,6 @@
-# N64 RDP Renderer Architecture Decision
+# N64 RDP Renderer Architecture
+
+## Status: Software Renderer Complete, OpenGL Stub Available
 
 ## Problem Statement
 
@@ -131,28 +133,66 @@ The RDP delegates to renderer:
 
 ## Testing
 
-- **69 N64 tests pass** with software renderer
+- **70 N64 tests pass** with software renderer (69 original + 1 OpenGL stub test)
 - **6 renderer-specific tests** in SoftwareRdpRenderer
+- **1 OpenGL stub test** verifies error handling without GL context
 - **All pre-commit checks pass**: fmt, clippy, build, test
+- **OpenGL feature flag works**: `cargo build --features opengl` compiles successfully
+
+## Current Implementation Status
+
+### SoftwareRdpRenderer (Complete)
+- ✅ Fully functional CPU-based rasterization
+- ✅ All triangle rendering modes (flat, shaded, Z-buffered)
+- ✅ 6 comprehensive unit tests
+- ✅ Production-ready for all use cases
+
+### OpenGLRdpRenderer (Stub)
+- ✅ Feature flag support (`--features opengl`)
+- ✅ Trait implementation with documentation
+- ✅ Stub methods that explain requirements
+- ⏸️ **Not functional** - requires OpenGL context
+- ⏸️ **Blocked by**: Current frontend uses minifb (no GL context exposure)
 
 ## Future Work
 
-### OpenGLRdpRenderer Implementation
+### OpenGLRdpRenderer Implementation Requirements
+
+**Critical blocker**: OpenGL context availability
+- Current frontend uses `minifb` which doesn't expose an OpenGL context
+- Options for full implementation:
+  1. **Headless GL context** (EGL on Linux, WGL on Windows)
+  2. **Frontend migration** to SDL2 or winit+glutin
+  3. **Separate rendering window** with GL context
 
 When implementing the OpenGL renderer:
 
-1. **Feature flag**: `--features opengl` (optional dependency)
-2. **OpenGL operations**:
-   - Framebuffer: Use OpenGL FBO
-   - Triangles: Use `glDrawArrays` with vertex buffers
+1. **GL Context Creation**:
+```rust
+// Option 1: Headless context (EGL on Linux)
+let display = unsafe { egl::get_display(egl::DEFAULT_DISPLAY) };
+let config = egl::choose_config(...);
+let context = egl::create_context(...);
+
+// Option 2: Shared context from GL-capable frontend
+let gl_context = frontend.get_gl_context();
+```
+
+2. **Feature flag**: `--features opengl` (already implemented)
+
+3. **OpenGL operations**:
+   - Framebuffer: Use OpenGL FBO (template in stub)
+   - Triangles: Use `glDrawArrays` with vertex buffers (template in stub)
    - Z-buffer: Use hardware depth testing (`glEnable(GL_DEPTH_TEST)`)
    - Scissor: Use `glScissor`
-3. **Shader programs**:
+
+4. **Shader programs** (documented in stub):
    - Flat shading: Simple solid color fragment shader
    - Gouraud shading: Per-vertex color interpolation (varying)
-4. **Integration**: Add `video_backend` setting to config.json
 
-### Settings Integration
+5. **Integration**: Add `n64_renderer` setting to config.json
+
+### Settings Integration (Future)
 
 ```rust
 // In settings.rs
@@ -161,12 +201,23 @@ pub struct Settings {
     // ...
 }
 
-// In N64System::new()
+// In N64System::new() or RDP::new()
 let renderer: Box<dyn RdpRenderer> = match settings.n64_renderer.as_str() {
-    "opengl" => Box::new(OpenGLRdpRenderer::new(width, height)),
+    "opengl" if gl_context_available => {
+        OpenGLRdpRenderer::new_with_context(gl_context, width, height)
+            .unwrap_or_else(|_| SoftwareRdpRenderer::new(width, height))
+    }
     _ => Box::new(SoftwareRdpRenderer::new(width, height)),
 };
 ```
+
+### Alternative Approach: Hybrid Rendering
+
+Instead of full OpenGL renderer, consider:
+- Keep software rasterization for accuracy
+- Use OpenGL for post-processing (upscaling, filtering)
+- Leverage existing `VideoProcessor` trait in frontend
+- This avoids GL context dependency in N64 core
 
 ## Comparison with VideoProcessor
 
@@ -179,7 +230,7 @@ Both follow the same pattern but serve different purposes:
 | **Operations** | Triangle rasterization, Z-buffer | CRT filters, scaling |
 | **Input** | Display list commands | Finished frame |
 | **Output** | Rendered frame | Filtered frame |
-| **Implementations** | Software, OpenGL (future) | Software, OpenGL |
+| **Implementations** | Software (complete), OpenGL (stub) | Software, OpenGL |
 
 ## Conclusion
 
