@@ -427,22 +427,71 @@ mod tests {
         assert!(sys.mount("Cartridge", test_rom).is_ok());
         assert!(sys.is_mounted("Cartridge"));
 
-        // Run a few frames to let the ROM initialize
-        // This is a basic smoke test - the GB emulator is WIP and may not render correctly yet
-        for _ in 0..10 {
-            let result = sys.step_frame();
-            assert!(result.is_ok(), "Frame execution should not crash");
+        // Run a few frames to let the ROM initialize and render
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..9 {
+            frame = sys.step_frame().unwrap();
         }
-
-        let frame = sys.step_frame().unwrap();
 
         // Verify frame dimensions are correct
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
         assert_eq!(frame.pixels.len(), 160 * 144);
 
-        // Basic smoke test: The ROM should load and run without crashing
-        // Note: The GB emulator is still WIP, so we don't validate pixel content yet
-        // This test verifies that the test ROM is valid and the emulator doesn't crash
+        // The test ROM fills the screen with a checkerboard pattern.
+        // Verify that the frame contains non-black pixel data.
+        let non_black_pixels = frame
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF000000) // Not black (ARGB format)
+            .count();
+
+        // Should have visible pixels from the test pattern (at least 2000 non-black pixels)
+        assert!(
+            non_black_pixels > 2000,
+            "Expected non-black pixels from test ROM, got {} out of {}",
+            non_black_pixels,
+            160 * 144
+        );
+    }
+
+    #[test]
+    fn test_gbc_smoke_test_rom() {
+        // Load the GBC test ROM
+        let test_rom = include_bytes!("../../../../test_roms/gbc/test.gbc");
+
+        let mut sys = GbSystem::new();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run a few frames to let the ROM initialize and render
+        // Note: This ROM has CGB flag set but should work in DMG mode too
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..9 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions are correct
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 144);
+        assert_eq!(frame.pixels.len(), 160 * 144);
+
+        // The test ROM fills the screen with a checkerboard pattern.
+        // Verify that the frame contains non-black pixel data.
+        let non_black_pixels = frame
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF000000) // Not black (ARGB format)
+            .count();
+
+        // Should have visible pixels from the test pattern (at least 2000 non-black pixels)
+        assert!(
+            non_black_pixels > 2000,
+            "Expected non-black pixels from GBC test ROM in DMG mode, got {} out of {}",
+            non_black_pixels,
+            160 * 144
+        );
     }
 }

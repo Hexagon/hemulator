@@ -12,7 +12,8 @@ These test ROMs are designed to:
 ## Current Systems
 
 - **NES** - Full implementation with smoke test
-- **Game Boy** - WIP implementation with basic smoke test
+- **Game Boy** - Implementation with smoke test and visible output validation
+- **Game Boy Color** - DMG-compatible mode with smoke test
 - **Atari 2600** - Full implementation with smoke test
 
 ## Future Systems
@@ -71,6 +72,13 @@ cd rgbds && make && sudo make install
 - Behavior: Fills screen with tile $00 (checkerboard pattern)
 - Expected output: Visible checkerboard pattern on screen
 
+### Game Boy Color (test.gbc)
+- Format: GBC ROM (CGB flag = 0x80, DMG compatible)
+- Size: 32KB
+- Cartridge type: ROM only (no MBC)
+- Behavior: Same as GB test ROM, runs in DMG mode
+- Expected output: Visible checkerboard pattern on screen
+
 ### Atari 2600 (test.bin)
 - Format: Raw binary
 - Size: 4KB
@@ -81,7 +89,7 @@ cd rgbds && make && sudo make install
 
 These ROMs are included in the smoke tests for each system crate:
 - `crates/systems/nes/src/lib.rs` - NES smoke test
-- `crates/systems/gb/src/lib.rs` - Game Boy smoke test
+- `crates/systems/gb/src/lib.rs` - Game Boy and Game Boy Color smoke tests
 - `crates/systems/atari2600/src/lib.rs` - Atari 2600 smoke test
 
 The tests load each ROM, run it for a few frames, and verify that the output frame contains expected non-zero pixel data, confirming that the emulator is functioning correctly.
