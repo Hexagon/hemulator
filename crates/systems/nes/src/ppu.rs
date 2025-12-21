@@ -524,6 +524,10 @@ impl Ppu {
         let bg_enabled = (self.mask & 0x08) != 0;
         let sprites_enabled = (self.mask & 0x10) != 0;
 
+        // Track which pixels have non-zero background color indices for sprite priority.
+        // True = background has opaque pixel (color index 1-3), False = transparent (color index 0).
+        let mut bg_priority = vec![false; (width * height) as usize];
+
         let bg_pattern_base: usize = if (self.ctrl & 0x10) != 0 {
             0x1000
         } else {
@@ -584,9 +588,14 @@ impl Ppu {
                     let hi_bit = (hi >> bit) & 1;
                     let color_in_tile = (hi_bit << 1) | lo_bit; // 0..3
 
+                    let idx = (y * width + x) as usize;
                     let out = if color_in_tile == 0 {
+                        // Transparent background pixel - sprites with priority can show through
+                        bg_priority[idx] = false;
                         universal_bg
                     } else {
+                        // Opaque background pixel - sprites with priority go behind this
+                        bg_priority[idx] = true;
                         // Background palette layout in palette RAM:
                         // - $00 = universal background
                         // - $01..$03 = BG palette 0
@@ -602,7 +611,7 @@ impl Ppu {
                         nes_palette_rgb(pal_entry)
                     };
 
-                    frame.pixels[(y * width + x) as usize] = out;
+                    frame.pixels[idx] = out;
                 }
             }
         } else {
@@ -691,8 +700,9 @@ impl Ppu {
 
                         let idx = (y as u32 * width + x as u32) as usize;
                         if behind_bg {
-                            // Behind background: only draw if background pixel is universal background.
-                            if frame.pixels[idx] == universal_bg {
+                            // Behind background: only draw if background pixel is transparent (color index 0).
+                            // This is the correct NES sprite priority behavior.
+                            if !bg_priority[idx] {
                                 frame.pixels[idx] = rgb;
                             }
                         } else {
@@ -753,6 +763,9 @@ impl Ppu {
         let sx = self.scroll_x as u32;
         let sy = self.scroll_y as u32;
 
+        // Track background priority for this scanline (for sprite priority).
+        let mut bg_priority = [false; 256];
+
         // Background pixels for this scanline.
         if bg_enabled {
             for x in 0..width {
@@ -791,9 +804,12 @@ impl Ppu {
                 let hi_bit = (hi >> bit) & 1;
                 let color_in_tile = (hi_bit << 1) | lo_bit;
 
+                let idx = (y * width + x) as usize;
                 let out = if color_in_tile == 0 {
+                    bg_priority[x as usize] = false;
                     universal_bg
                 } else {
+                    bg_priority[x as usize] = true;
                     let pal_base = (palette_idx as usize) * 4;
                     let mut pal_entry =
                         self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
@@ -803,7 +819,7 @@ impl Ppu {
                     nes_palette_rgb(pal_entry)
                 };
 
-                frame.pixels[(y * width + x) as usize] = out;
+                frame.pixels[idx] = out;
             }
         } else {
             // Background disabled: fill this scanline with backdrop.
@@ -886,10 +902,9 @@ impl Ppu {
 
                     let idx = (y * width + x as u32) as usize;
 
-                    // Sprite 0 hit detection
+                    // Sprite 0 hit detection - check if background pixel has non-zero color index
                     if i == 0 && bg_enabled && !self.sprite_0_hit.get() {
-                        // Check if background pixel is opaque (approximate by color)
-                        if frame.pixels[idx] != universal_bg && x < 255 {
+                        if bg_priority[x as usize] && x < 255 {
                             // Check left clipping
                             let bg_clip = (self.mask & 0x02) == 0;
                             let spr_clip = (self.mask & 0x04) == 0;
@@ -900,7 +915,8 @@ impl Ppu {
                     }
 
                     if behind_bg {
-                        if frame.pixels[idx] == universal_bg {
+                        // Behind background: only draw if background pixel is transparent (color index 0).
+                        if !bg_priority[x as usize] {
                             frame.pixels[idx] = rgb;
                         }
                     } else {
