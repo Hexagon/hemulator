@@ -3,6 +3,7 @@ mod rom_detect;
 mod save_state;
 mod settings;
 mod ui_render;
+mod video_processor;
 
 use emu_core::{types::Frame, System};
 use minifb::{Key, Window, WindowOptions};

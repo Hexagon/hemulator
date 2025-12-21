@@ -158,12 +158,18 @@ pub struct Settings {
     pub crt_filter: CrtFilter,
     #[serde(default = "default_emulation_speed")]
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
+    #[serde(default = "default_video_backend")]
+    pub video_backend: String, // "software" or "opengl"
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
 }
 
 fn default_emulation_speed() -> f64 {
     1.0
+}
+
+fn default_video_backend() -> String {
+    "software".to_string()
 }
 
 impl Default for Settings {
@@ -177,6 +183,7 @@ impl Default for Settings {
             mount_points: HashMap::new(),
             crt_filter: CrtFilter::default(),
             emulation_speed: 1.0,
+            video_backend: "software".to_string(),
             extra: HashMap::new(),
         }
     }
