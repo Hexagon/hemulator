@@ -1,20 +1,40 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust, supporting NES, Atari 2600, Game Boy, and PC emulation with comprehensive save state management and customizable controls.
+A cross-platform, multi-system console emulator written in Rust, supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation with comprehensive save state management and customizable controls.
 
 ## Features
 
-- 🎮 **NES Emulation**: Full support for ~90%+ of NES games via 14 mapper implementations
-- 🕹️ **Atari 2600 Emulation**: Support for most cartridge formats (2K-32K) with multiple banking schemes
-- 🎲 **Game Boy Emulation**: Work-in-progress support for Game Boy/Game Boy Color ROMs
-- 💻 **PC Emulation**: Basic IBM PC/XT emulation with 8086 CPU (experimental)
+- 🎮 **NES Emulation**: ✅ Fully working - ~90%+ of NES games via 14 mapper implementations
+- 🕹️ **Atari 2600 Emulation**: ✅ Fully working - Most cartridge formats (2K-32K) with multiple banking schemes
+- 🎲 **Game Boy Emulation**: ⚠️ Functional - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
+- 🏰 **SNES Emulation**: 🚧 Basic infrastructure - CPU working, minimal PPU, no APU/input yet
+- 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
+- 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, black screen only
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
 - 🎨 **Video Processing**: Modular architecture supporting both software and OpenGL-accelerated rendering
 - 🎞️ **CRT Filters**: Hardware-accelerated shader-based CRT effects (scanlines, phosphor, full CRT)
-- 🎵 **Audio Support**: Integrated audio playback via rodio (NES audio implemented)
-- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, Game Boy, and DOS executable formats
+- 🎵 **Audio Support**: Integrated audio playback via rodio (NES and Atari 2600 audio implemented)
+- 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, Game Boy, SNES, N64, and DOS executable formats
+
+## System Implementation Status
+
+| System | Status | CPU | Graphics | Audio | Input | Save States | Coverage/Notes |
+|--------|--------|-----|----------|-------|-------|-------------|----------------|
+| **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
+| **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Game Boy** | ⚠️ Functional | LR35902 (Complete) | PPU (Complete) | APU (Not integrated) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported; no audio/timer |
+| **SNES** | 🚧 Basic | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
+| **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
+| **PC (DOS)** | 🧪 Experimental | 8086 (Partial) | VGA (Stub) | ❌ Not implemented | ⚠️ Keyboard passthrough | ❌ | COM/EXE loading; black screen only |
+
+**Legend:**
+- ✅ Fully Working - Production ready with comprehensive features
+- ⚠️ Functional - Core features work but missing some capabilities
+- 🚧 In Development - Active work in progress with partial functionality
+- 🧪 Experimental - Proof of concept or early stage
+- ❌ Not implemented - Component not yet available
 
 ## For Users
 
@@ -75,10 +95,14 @@ See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibi
 
 ## Supported ROM Formats
 
-- **NES**: iNES format (.nes) - automatically detected via header signature
-- **Atari 2600**: Raw binary (.a26, .bin) - detected by size (2K, 4K, 8K, 12K, 16K, 32K)
-- **Game Boy**: GB/GBC format (.gb, .gbc) - skeleton implementation (WIP)
-- **PC/DOS**: COM/EXE executables (.com, .exe) - experimental 8086 emulation
+| System | Format | Detection Method | Status | Notes |
+|--------|--------|------------------|--------|-------|
+| **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90% game coverage |
+| **Atari 2600** | Raw binary (.a26, .bin) | File size | ✅ Fully supported | 2K-32K ROMs |
+| **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | ⚠️ Functional | No audio, ~95% compatible |
+| **SNES** | SMC/SFC (.smc, .sfc) | Header detection | 🚧 Basic | LoROM only, minimal PPU |
+| **N64** | Z64/N64/V64 (.z64, .n64, .v64) | Magic byte + conversion | 🚧 In development | Byte-order auto-detection |
+| **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | Black screen only |
 
 ## Video Processing System
 
@@ -132,10 +156,12 @@ hemulator/
 ├── crates/
 │   ├── core/           # Shared traits and types (System, Frame, save-state)
 │   ├── systems/
-│   │   ├── nes/        # NES emulation (CPU, PPU, APU, mappers)
-│   │   ├── atari2600/  # Atari 2600 emulation (TIA, RIOT, cartridge banking)
-│   │   ├── gb/         # Game Boy emulation (WIP)
-│   │   └── pc/         # IBM PC/XT emulation (8086 CPU, experimental)
+│   │   ├── nes/        # ✅ NES emulation (CPU, PPU, APU, mappers)
+│   │   ├── atari2600/  # ✅ Atari 2600 emulation (TIA, RIOT, cartridge banking)
+│   │   ├── gb/         # ⚠️ Game Boy emulation (functional, no audio)
+│   │   ├── snes/       # 🚧 SNES emulation (basic infrastructure)
+│   │   ├── n64/        # 🚧 N64 emulation (in development, 3D rendering)
+│   │   └── pc/         # 🧪 IBM PC/XT emulation (experimental)
 │   └── frontend/
 │       └── gui/        # GUI frontend (minifb + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
@@ -196,10 +222,12 @@ The project follows a modular architecture:
   - Save state serialization support
   
 - **Systems**: Individual emulator implementations
-  - **NES (`emu_nes`)**: Complete NES emulator with CPU, PPU, APU, and 14 mappers
-  - **Atari 2600 (`emu_atari2600`)**: Atari 2600 with TIA, RIOT, and cartridge banking
-  - **Game Boy (`emu_gb`)**: Work-in-progress Game Boy emulator
-  - **PC (`emu_pc`)**: Experimental IBM PC/XT emulator with 8086 CPU, BIOS stub, and DOS executable support
+  - **NES (`emu_nes`)**: ✅ Complete NES emulator with CPU, PPU, APU, and 14 mappers
+  - **Atari 2600 (`emu_atari2600`)**: ✅ Complete Atari 2600 with TIA, RIOT, and cartridge banking
+  - **Game Boy (`emu_gb`)**: ⚠️ Functional Game Boy emulator (MBC0/1/3/5, no audio/timer)
+  - **SNES (`emu_snes`)**: 🚧 Basic SNES infrastructure (CPU working, minimal PPU)
+  - **N64 (`emu_n64`)**: 🚧 N64 in development (CPU, RDP 3D rendering, RSP HLE)
+  - **PC (`emu_pc`)**: 🧪 Experimental IBM PC/XT emulator with 8086 CPU and BIOS stub
   
 - **Frontend (`emu_gui`)**: GUI application
   - Window management with `minifb`
