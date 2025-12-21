@@ -206,8 +206,11 @@ impl Rdp {
             }
             DPC_END => {
                 self.dpc_end = value & 0x00FFFFFF;
-                // When END is written, trigger DMA processing (simplified)
-                self.process_display_list();
+                // Set flag to indicate display list needs processing (only if there's work to do)
+                // The bus will call process_display_list after this write
+                if self.dpc_start != self.dpc_end {
+                    self.dpc_status &= !DPC_STATUS_CBUF_READY;
+                }
             }
             DPC_STATUS => {
                 // Status register write (control bits)
@@ -229,17 +232,97 @@ impl Rdp {
         }
     }
 
-    /// Process display list commands (simplified stub)
-    fn process_display_list(&mut self) {
-        // In a full implementation, this would:
-        // 1. Read commands from RDRAM between dpc_start and dpc_end
-        // 2. Parse and execute each display list command
-        // 3. Update status registers appropriately
-        //
-        // For now, we just mark the buffer as processed
+    /// Check if display list processing is needed
+    pub fn needs_processing(&self) -> bool {
+        (self.dpc_status & DPC_STATUS_CBUF_READY) == 0 && self.dpc_start != self.dpc_end
+    }
+
+    /// Process display list commands from RDRAM
+    pub fn process_display_list(&mut self, rdram: &[u8]) {
+        // Set DMA busy flag
+        self.dpc_status |= DPC_STATUS_DMA_BUSY;
+        self.dpc_status &= !DPC_STATUS_CBUF_READY;
+
+        // Process commands from dpc_start to dpc_end
+        let mut addr = self.dpc_start as usize;
+        let end = self.dpc_end as usize;
+
+        while addr < end && addr + 7 < rdram.len() {
+            // Read 64-bit command (8 bytes)
+            let cmd_word0 = u32::from_be_bytes([
+                rdram[addr],
+                rdram[addr + 1],
+                rdram[addr + 2],
+                rdram[addr + 3],
+            ]);
+            let cmd_word1 = u32::from_be_bytes([
+                rdram[addr + 4],
+                rdram[addr + 5],
+                rdram[addr + 6],
+                rdram[addr + 7],
+            ]);
+
+            // Extract command ID from top 6 bits of first word
+            let cmd_id = (cmd_word0 >> 24) & 0x3F;
+
+            // Execute command
+            self.execute_command(cmd_id, cmd_word0, cmd_word1);
+
+            // Move to next command (all RDP commands are 8 bytes)
+            addr += 8;
+        }
+
+        // Update current pointer and clear busy flags
         self.dpc_current = self.dpc_end;
         self.dpc_status |= DPC_STATUS_CBUF_READY;
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
+    }
+
+    /// Execute a single RDP command
+    fn execute_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
+        match cmd_id {
+            // FILL_RECTANGLE (0x36)
+            0x36 => {
+                // RDP FILL_RECTANGLE format:
+                // word0: cmd_id(6) | XH(12 bits at bit 14) | YH(12 bits at bit 2)
+                // word1: XL(12 bits at bit 14) | YL(12 bits at bit 2)
+                // Coordinates are in 10.2 fixed point format (divide by 4 to get pixels)
+
+                let xh = ((word0 >> 14) & 0xFFF).div_ceil(4); // Right/end X, round up
+                let yh = ((word0 >> 2) & 0xFFF).div_ceil(4); // Bottom/end Y, round up
+                let xl = ((word1 >> 14) & 0xFFF) / 4; // Left/start X
+                let yl = ((word1 >> 2) & 0xFFF) / 4; // Top/start Y
+
+                // Calculate width and height
+                let width = xh.saturating_sub(xl);
+                let height = yh.saturating_sub(yl);
+
+                self.fill_rect(xl, yl, width, height);
+            }
+            // SET_FILL_COLOR (0x37)
+            0x37 => {
+                // word1 contains the fill color (RGBA)
+                self.fill_color = word1;
+            }
+            // SYNC_FULL (0x29)
+            0x29 => {
+                // Full synchronization - wait for all rendering to complete
+                // In frame-based implementation, this is a no-op
+            }
+            // SET_COLOR_IMAGE (0x3F)
+            0x3F => {
+                // word0: bits 21-19 = format, bits 18-17 = size, bits 11-0 = width-1
+                // word1: DRAM address of color buffer
+                // For now, we ignore this and use our internal framebuffer
+            }
+            // SYNC_PIPE (0x27), SYNC_TILE (0x28), SYNC_LOAD (0x26)
+            0x26..=0x28 => {
+                // Synchronization commands - no-op in frame-based implementation
+            }
+            _ => {
+                // Unknown or unimplemented command - ignore for now
+            }
+        }
     }
 }
 
@@ -326,14 +409,14 @@ mod tests {
         let mut rdp = Rdp::new();
 
         // Test DPC_START register
-        rdp.write_register(DPC_START, 0x00123456);
-        assert_eq!(rdp.read_register(DPC_START), 0x00123456);
+        rdp.write_register(DPC_START, 0x00100000);
+        assert_eq!(rdp.read_register(DPC_START), 0x00100000);
 
-        // Test DPC_END register
-        rdp.write_register(DPC_END, 0x00789ABC);
-        assert_eq!(rdp.read_register(DPC_END), 0x00789ABC);
+        // Test DPC_END register (same as start, so no display list processing)
+        rdp.write_register(DPC_END, 0x00100000);
+        assert_eq!(rdp.read_register(DPC_END), 0x00100000);
 
-        // Test DPC_STATUS register
+        // Test DPC_STATUS register - should still have CBUF_READY since start == end
         let status = rdp.read_register(DPC_STATUS);
         assert_ne!(status, 0); // Should have CBUF_READY bit set
     }
@@ -359,5 +442,90 @@ mod tests {
         assert_eq!(frame.width, 320);
         assert_eq!(frame.height, 240);
         assert_eq!(frame.pixels[0], 0xFF0000FF);
+    }
+
+    #[test]
+    fn test_rdp_display_list_fill_rect() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // Create a display list with FILL_RECTANGLE command
+        // Fill a 100x100 rectangle at (50, 50)
+
+        // SET_FILL_COLOR (0x37) - Red color
+        let set_color_cmd = 0x37000000u32; // Command ID in top bits
+        let color = 0xFFFF0000u32; // RGBA red
+        rdram[0..4].copy_from_slice(&set_color_cmd.to_be_bytes());
+        rdram[4..8].copy_from_slice(&color.to_be_bytes());
+
+        // FILL_RECTANGLE (0x36)
+        // Format: word0: cmd | XH << 14 | YH << 2, word1: XL << 14 | YL << 2
+        // Coordinates in 10.2 fixed point: 50*4=0xC8, 150*4=0x258
+        let rect_cmd_word0: u32 = (0x36 << 24) | (0x258 << 14) | (0x258 << 2); // XH=150, YH=150
+        let rect_cmd_word1: u32 = (0xC8 << 14) | (0xC8 << 2); // XL=50, YL=50
+        rdram[8..12].copy_from_slice(&rect_cmd_word0.to_be_bytes());
+        rdram[12..16].copy_from_slice(&rect_cmd_word1.to_be_bytes());
+
+        // Set up RDP registers to point to display list
+        rdp.write_register(0x00, 0); // DPC_START = 0
+        rdp.write_register(0x04, 16); // DPC_END = 16 (2 commands * 8 bytes)
+
+        // Process the display list
+        rdp.process_display_list(&rdram);
+
+        // Verify the rectangle was filled
+        // Check a pixel inside the rectangle (75, 75)
+        let idx = (75 * 320 + 75) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx], 0xFFFF0000);
+
+        // Check a pixel outside the rectangle
+        assert_eq!(rdp.framebuffer.pixels[0], 0);
+    }
+
+    #[test]
+    fn test_rdp_display_list_sync_commands() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 64];
+
+        // Create a display list with sync commands
+        // SYNC_FULL (0x29)
+        let sync_full = 0x29000000u32;
+        rdram[0..4].copy_from_slice(&sync_full.to_be_bytes());
+        rdram[4..8].copy_from_slice(&[0, 0, 0, 0]);
+
+        // SYNC_PIPE (0x27)
+        let sync_pipe = 0x27000000u32;
+        rdram[8..12].copy_from_slice(&sync_pipe.to_be_bytes());
+        rdram[12..16].copy_from_slice(&[0, 0, 0, 0]);
+
+        rdp.write_register(0x00, 0); // DPC_START
+        rdp.write_register(0x04, 16); // DPC_END
+
+        // Should not panic
+        rdp.process_display_list(&rdram);
+
+        // Verify status updated correctly
+        assert_eq!(rdp.dpc_current, 16);
+        assert!(rdp.read_register(0x0C) & DPC_STATUS_CBUF_READY != 0);
+    }
+
+    #[test]
+    fn test_rdp_needs_processing() {
+        let mut rdp = Rdp::new();
+
+        // Initially should not need processing
+        assert!(!rdp.needs_processing());
+
+        // Set start and end
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+
+        // Now should need processing (CBUF_READY cleared when END written)
+        assert!(rdp.needs_processing());
+
+        // After processing, should not need it anymore
+        let rdram = vec![0u8; 64];
+        rdp.process_display_list(&rdram);
+        assert!(!rdp.needs_processing());
     }
 }

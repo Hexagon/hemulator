@@ -219,4 +219,63 @@ mod tests {
         assert_eq!(frame.width, 320);
         assert_eq!(frame.height, 240);
     }
+
+    #[test]
+    fn test_n64_display_list_smoke_test() {
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+
+        let mut sys = N64System::new();
+        let bus = sys.cpu.bus_mut();
+
+        // Manually write display list commands to RDRAM at 0x00100000
+        // This simulates what the CPU would do after booting
+
+        // Command 1: SET_FILL_COLOR (0x37) - Red (0xFFFF0000)
+        bus.write_word(0x00100000, 0x37000000);
+        bus.write_word(0x00100004, 0xFFFF0000);
+
+        // Command 2: FILL_RECTANGLE (0x36) - 100x100 rectangle at (50,50)
+        // Coordinates in 10.2 fixed point: 50*4=200(0xC8), 150*4=600(0x258)
+        // word0: cmd | XH << 14 | YH << 2
+        // word1: XL << 14 | YL << 2
+        bus.write_word(0x00100008, (0x36 << 24) | (0x258 << 14) | (0x258 << 2)); // XH=150, YH=150
+        bus.write_word(0x0010000C, (0xC8 << 14) | (0xC8 << 2)); // XL=50, YL=50
+
+        // Command 3: SET_FILL_COLOR (0x37) - Green (0xFF00FF00)
+        bus.write_word(0x00100010, 0x37000000);
+        bus.write_word(0x00100014, 0xFF00FF00);
+
+        // Command 4: FILL_RECTANGLE (0x36) - 50x50 rectangle at (160,90)
+        // 160*4=640(0x280), 210*4=840(0x348), 90*4=360(0x168), 140*4=560(0x230)
+        bus.write_word(0x00100018, (0x36 << 24) | (0x348 << 14) | (0x230 << 2)); // XH=210, YH=140
+        bus.write_word(0x0010001C, (0x280 << 14) | (0x168 << 2)); // XL=160, YL=90
+
+        // Command 5: SYNC_FULL (0x29)
+        bus.write_word(0x00100020, 0x29000000);
+        bus.write_word(0x00100024, 0x00000000);
+
+        // Trigger RDP by writing to DPC_START and DPC_END
+        bus.write_word(0x04100000, 0x00100000); // DPC_START
+        bus.write_word(0x04100004, 0x00100028); // DPC_END (40 bytes = 5 commands)
+
+        // Get the rendered frame
+        let frame = sys.cpu.bus().rdp().get_frame();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+
+        // Verify that pixels have been colored by the display list
+        // Red rectangle at (50,50) to (150,150)
+        let red_pixel_idx = (100 * 320 + 100) as usize;
+        let red_pixel = frame.pixels[red_pixel_idx];
+        assert_eq!(red_pixel, 0xFFFF0000, "Expected red pixel at (100,100)");
+
+        // Green rectangle at (160,90) to (210,140)
+        let green_pixel_idx = (115 * 320 + 185) as usize;
+        let green_pixel = frame.pixels[green_pixel_idx];
+        assert_eq!(green_pixel, 0xFF00FF00, "Expected green pixel at (185,115)");
+
+        // Check that a pixel outside both rectangles is still black
+        let black_pixel = frame.pixels[0];
+        assert_eq!(black_pixel, 0, "Expected black pixel at (0,0)");
+    }
 }
