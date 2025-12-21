@@ -903,14 +903,14 @@ impl Ppu {
                     let idx = (y * width + x as u32) as usize;
 
                     // Sprite 0 hit detection - check if background pixel has non-zero color index
-                    if i == 0 && bg_enabled && !self.sprite_0_hit.get() {
-                        if bg_priority[x as usize] && x < 255 {
-                            // Check left clipping
-                            let bg_clip = (self.mask & 0x02) == 0;
-                            let spr_clip = (self.mask & 0x04) == 0;
-                            if !((bg_clip || spr_clip) && x < 8) {
-                                self.sprite_0_hit.set(true);
-                            }
+                    if i == 0 && bg_enabled && !self.sprite_0_hit.get()
+                        && bg_priority[x as usize] && x < 255
+                    {
+                        // Check left clipping
+                        let bg_clip = (self.mask & 0x02) == 0;
+                        let spr_clip = (self.mask & 0x04) == 0;
+                        if !((bg_clip || spr_clip) && x < 8) {
+                            self.sprite_0_hit.set(true);
                         }
                     }
 
