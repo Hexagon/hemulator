@@ -1733,7 +1733,7 @@ mod tests {
         // DADDU $3, $1, $2
         cpu.memory.write_word(0, 0x0022182D);
         cpu.step();
-        assert_eq!(cpu.gpr[3], 0x23456789A1BCDf00);
+        assert_eq!(cpu.gpr[3], 0x23456789A1BCDF00);
     }
 
     #[test]
