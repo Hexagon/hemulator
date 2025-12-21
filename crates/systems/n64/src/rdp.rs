@@ -1019,7 +1019,6 @@ mod tests {
         rdp.set_pixel(100, 100, 0xFFFFFFFF); // White
 
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFFFFFFFF);
     }
 
@@ -1108,7 +1107,6 @@ mod tests {
         // Verify the rectangle was filled
         // Check a pixel inside the rectangle (75, 75)
         let idx = (75 * 320 + 75) as usize;
-        let (zx, zy) = (75u32, 75u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFFFF0000);
 
         // Check a pixel outside the rectangle
@@ -1216,7 +1214,6 @@ mod tests {
         // Check that some pixels in the triangle are green
         // Center of triangle should be around (100, 116)
         let idx = (116 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
     }
 
@@ -1242,7 +1239,6 @@ mod tests {
 
         // Verify the rectangle was filled (stub implementation)
         let idx = (75 * 320 + 75) as usize;
-        let (zx, zy) = (75u32, 75u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF0000FF);
     }
 
@@ -1420,11 +1416,10 @@ mod tests {
 
         // Check that pixels in the triangle are green
         let idx = (116 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
 
         // Check that Z-buffer was updated
-        assert!(rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF);
+        assert!(rdp.zbuffer.read(100, 116).unwrap() < 0xFFFF);
     }
 
     #[test]
@@ -1445,7 +1440,6 @@ mod tests {
 
         // Pixel should remain green (near triangle visible)
         let idx = (116 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 116u32);
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
     }
 
@@ -1463,7 +1457,6 @@ mod tests {
 
         // Check that center pixel has interpolated color (between red and blue = purple)
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         let color = rdp.framebuffer.pixels[idx];
 
         // Should have both red and blue components (ARGB format)
@@ -1487,14 +1480,13 @@ mod tests {
 
         // Check that triangle was drawn
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         let color = rdp.framebuffer.pixels[idx];
 
         // Should have interpolated color components
         assert_ne!(color, 0, "Pixel should be colored");
 
         // Check Z-buffer was updated
-        assert!(rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF);
+        assert!(rdp.zbuffer.read(100, 100).unwrap() < 0xFFFF);
     }
 
     #[test]
@@ -1588,7 +1580,6 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         assert_eq!(
             rdp.framebuffer.pixels[idx], 0xFF0000FF,
             "Triangle should be blue"
@@ -1626,7 +1617,6 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         assert_eq!(
             rdp.framebuffer.pixels[idx], 0xFF00FF00,
             "Triangle should be green"
@@ -1634,7 +1624,7 @@ mod tests {
 
         // Verify Z-buffer was updated
         assert!(
-            rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF,
+            rdp.zbuffer.read(100, 100).unwrap() < 0xFFFF,
             "Z-buffer should be updated"
         );
     }
@@ -1669,7 +1659,6 @@ mod tests {
 
         // Verify triangle was drawn with shading (should have some red component)
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         let pixel = rdp.framebuffer.pixels[idx];
         let red = (pixel >> 16) & 0xFF;
         assert!(red > 0, "Triangle should have red component from shading");
@@ -1706,13 +1695,12 @@ mod tests {
 
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         let pixel = rdp.framebuffer.pixels[idx];
         assert_ne!(pixel, 0, "Triangle should be colored");
 
         // Verify Z-buffer was updated
         assert!(
-            rdp.zbuffer.read(zx, zy).unwrap() < 0xFFFF,
+            rdp.zbuffer.read(100, 100).unwrap() < 0xFFFF,
             "Z-buffer should be updated"
         );
     }
@@ -1742,7 +1730,6 @@ mod tests {
 
         // Pixel inside scissor should be colored
         let idx = (100 * 320 + 100) as usize;
-        let (zx, zy) = (100u32, 100u32);
         assert_ne!(rdp.framebuffer.pixels[idx], 0);
     }
 }
