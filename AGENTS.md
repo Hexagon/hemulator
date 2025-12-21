@@ -137,16 +137,49 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)
   - Generic `MemoryMips` trait for memory access
   - 64-bit MIPS III RISC processor
-  - Comprehensive test coverage (9 unit tests)
+  - Complete instruction set implementation
+  - Comprehensive test coverage (47 unit tests)
   - Used by: Nintendo 64
   - Implementation includes:
     - 32 general-purpose 64-bit registers (R0-R31, R0 always zero)
     - HI/LO registers for multiply/divide
     - CP0 coprocessor registers (system control)
-    - Floating-point registers (FPR)
-    - Core instructions: ORI, LUI, ADDU, OR, LW, SW, SLL
+    - Floating-point registers (FPR) and FCR31 control register
+    - **Complete R-type instructions (SPECIAL opcode 0x00)**:
+      - Shift operations: SLL, SRL, SRA, SLLV, SRLV, SRAV
+      - 64-bit shifts: DSLL, DSRL, DSRA, DSLLV, DSRLV, DSRAV, DSLL32, DSRL32, DSRA32
+      - Jump operations: JR, JALR
+      - Move operations: MFHI, MTHI, MFLO, MTLO
+      - Multiply/Divide: MULT, MULTU, DIV, DIVU
+      - 64-bit multiply/divide: DMULT, DMULTU, DDIV, DDIVU
+      - Arithmetic: ADD, ADDU, SUB, SUBU, DADD, DADDU, DSUB, DSUBU
+      - Logical: AND, OR, XOR, NOR
+      - Compare: SLT, SLTU
+    - **Complete I-type instructions**:
+      - Arithmetic immediate: ADDI, ADDIU, SLTI, SLTIU, DADDI, DADDIU
+      - Logical immediate: ANDI, ORI, XORI
+      - Load operations: LB, LBU, LH, LHU, LW, LWU, LD, LWL, LWR, LDL, LDR
+      - Store operations: SB, SH, SW, SD, SWL, SWR, SDL, SDR
+      - Branch operations: BEQ, BNE, BLEZ, BGTZ, BEQL, BNEL, BLEZL, BGTZL
+    - **REGIMM instructions (opcode 0x01)**:
+      - BLTZ, BGEZ, BLTZL, BGEZL, BLTZAL, BGEZAL, BLTZALL, BGEZALL
+    - **J-type instructions**:
+      - J (Jump), JAL (Jump and Link)
+    - **COP0 (Coprocessor 0) instructions**:
+      - MFC0, MTC0 (move to/from CP0 registers)
+      - TLB instructions: TLBR, TLBWI, TLBWR, TLBP (basic stubs)
+      - ERET (Exception Return)
+    - **COP1 (FPU) instructions**:
+      - MFC1, DMFC1, CFC1 (move from FPU)
+      - MTC1, DMTC1, CTC1 (move to FPU)
+      - Floating-point arithmetic: ADD.fmt, SUB.fmt, MUL.fmt, DIV.fmt
+      - Floating-point operations: SQRT.fmt, ABS.fmt, MOV.fmt, NEG.fmt
+      - Floating-point conversion: CVT.S, CVT.D, CVT.W, CVT.L
+      - Floating-point compare: C.cond.fmt (sets condition bit)
+      - Floating-point branch: BC1F, BC1T
+    - CACHE instruction (NOP for basic emulation)
     - Big-endian memory access
-  - Ready for extension with full MIPS instruction set
+  - Ready for use in Nintendo 64 emulation and other MIPS III systems
   - `ArrayMemory` helper for testing (8MB)
 
 - **`cpu_8086`**: Intel 8086 CPU implementation with core instruction set
@@ -487,9 +520,15 @@ System-specific implementations that use core components:
   - N64 bus includes: 4MB RDRAM, PIF RAM/ROM, SP memory, cartridge ROM
   - **CPU (MIPS R4300i)**:
     - System-specific implementation uses core `cpu_mips_r4300i`
-    - 64-bit MIPS III processor
+    - 64-bit MIPS III processor with complete instruction set
     - 32 general-purpose registers, HI/LO, CP0 coprocessor
-    - Basic instruction set: ORI, LUI, ADDU, OR, LW, SW, SLL
+    - Full instruction set including:
+      - All R-type arithmetic, logical, shift operations
+      - All I-type load/store, immediate, branch operations
+      - J-type jump instructions
+      - 64-bit doubleword operations (DADD, DSUB, DMULT, DDIV, LD, SD, etc.)
+      - Floating-point operations (FPU/COP1)
+      - Coprocessor 0 operations (CP0)
   - **Memory Bus** (`N64Bus`):
     - 4MB RDRAM at 0x00000000-0x003FFFFF
     - 8KB SP DMEM/IMEM at 0x04000000-0x04001FFF (RSP memory)
@@ -515,7 +554,7 @@ System-specific implementations that use core components:
     - Displays black screen (320x240)
     - Controller support not implemented
     - No TLB, cache, or accurate memory timing
-    - Very limited instruction set
+    - Exception handling not fully implemented (no traps on overflow)
     - Frame-based timing (not cycle-accurate)
   - All tests pass (10 tests: cartridge, system)
 
