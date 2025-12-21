@@ -222,16 +222,8 @@ mod tests {
         assert!(sys.mount("Cartridge", test_rom).is_ok());
         assert!(sys.is_mounted("Cartridge"));
 
-        // Since the 65C816 CPU is not fully implemented, manually write the
-        // checkerboard pattern to WRAM that the test ROM would write
-        // The test ROM writes alternating 0xAA and 0x55 bytes
-        let mut pattern = vec![0u8; 0x2000];
-        for i in 0..0x2000 {
-            pattern[i] = if i % 2 == 0 { 0xAA } else { 0x55 };
-        }
-        sys.cpu.bus_mut().write_wram(0, &pattern);
-
-        // Run a few frames
+        // Run frames to let the ROM execute and write the pattern
+        // The ROM will write alternating 0xAA and 0x55 bytes to WRAM
         let mut frame = sys.step_frame().unwrap();
         for _ in 0..9 {
             frame = sys.step_frame().unwrap();
@@ -242,7 +234,8 @@ mod tests {
         assert_eq!(frame.height, 224);
         assert_eq!(frame.pixels.len(), 256 * 224);
 
-        // The pattern in WRAM creates a checkerboard with two colors
+        // The ROM writes alternating 0xAA and 0x55 bytes to WRAM
+        // This creates a checkerboard pattern with two colors
         // Verify that we have exactly 2 distinct colors in approximately 50/50 distribution
 
         use std::collections::HashMap;

@@ -32,13 +32,6 @@ impl SnesBus {
     pub fn has_cartridge(&self) -> bool {
         self.cartridge.is_some()
     }
-
-    /// Write directly to WRAM (for testing purposes)
-    #[cfg(test)]
-    pub fn write_wram(&mut self, offset: usize, data: &[u8]) {
-        let end = (offset + data.len()).min(self.wram.len());
-        self.wram[offset..end].copy_from_slice(&data[..end - offset]);
-    }
 }
 
 impl Default for SnesBus {

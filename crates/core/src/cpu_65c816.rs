@@ -112,10 +112,16 @@ impl<M: Memory65c816> Cpu65c816<M> {
         // Fetch opcode
         let opcode = self.fetch_byte();
 
-        // Decode and execute (stub implementation)
+        // Decode and execute
         match opcode {
-            // NOP
-            0xEA => {
+            // SEI - Set Interrupt Disable
+            0x78 => {
+                self.status |= FLAG_IRQ_DISABLE;
+                self.cycles += 2;
+            }
+            // CLC - Clear Carry
+            0x18 => {
+                self.status &= !FLAG_CARRY;
                 self.cycles += 2;
             }
             // XCE - Exchange Carry and Emulation bits
@@ -137,6 +143,159 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     // Stack pointer high byte forced to 0x01
                     self.s = 0x0100 | (self.s & 0xFF);
                 }
+                self.cycles += 2;
+            }
+            // REP - Reset Processor Status Bits
+            0xC2 => {
+                let mask = self.fetch_byte();
+                self.status &= !mask;
+                self.cycles += 3;
+            }
+            // SEP - Set Processor Status Bits
+            0xE2 => {
+                let mask = self.fetch_byte();
+                self.status |= mask;
+                self.cycles += 3;
+            }
+            // LDA - Load Accumulator (immediate)
+            0xA9 => {
+                if self.is_8bit_a() {
+                    let val = self.fetch_byte() as u16;
+                    self.set_a(val);
+                    self.cycles += 2;
+                } else {
+                    let lo = self.fetch_byte() as u16;
+                    let hi = self.fetch_byte() as u16;
+                    let val = (hi << 8) | lo;
+                    self.set_a(val);
+                    self.cycles += 3;
+                }
+                self.update_nz_flags_a(self.get_a());
+            }
+            // LDX - Load X Register (immediate)
+            0xA2 => {
+                if self.is_8bit_xy() {
+                    let val = self.fetch_byte() as u16;
+                    self.x = val;
+                    self.cycles += 2;
+                } else {
+                    let lo = self.fetch_byte() as u16;
+                    let hi = self.fetch_byte() as u16;
+                    self.x = (hi << 8) | lo;
+                    self.cycles += 3;
+                }
+                self.update_nz_flags_xy(self.x);
+            }
+            // TCS - Transfer Accumulator to Stack Pointer
+            0x1B => {
+                self.s = self.c;
+                self.cycles += 2;
+            }
+            // TCD - Transfer Accumulator to Direct Page
+            0x5B => {
+                self.d = self.c;
+                self.cycles += 2;
+            }
+            // PHA - Push Accumulator
+            0x48 => {
+                if self.is_8bit_a() {
+                    self.push_byte((self.c & 0xFF) as u8);
+                    self.cycles += 3;
+                } else {
+                    self.push_word(self.c);
+                    self.cycles += 4;
+                }
+            }
+            // PLB - Pull Data Bank Register
+            0xAB => {
+                self.dbr = self.pull_byte();
+                self.cycles += 4;
+            }
+            // STA - Store Accumulator (absolute long indexed,X)
+            0x9F => {
+                let lo = self.fetch_byte() as u32;
+                let mid = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let addr = (bank << 16) | (mid << 8) | lo;
+                let addr = addr.wrapping_add(self.x as u32);
+                
+                if self.is_8bit_a() {
+                    self.memory.write(addr, (self.c & 0xFF) as u8);
+                    self.cycles += 5;
+                } else {
+                    self.memory.write(addr, (self.c & 0xFF) as u8);
+                    self.memory.write(addr.wrapping_add(1), ((self.c >> 8) & 0xFF) as u8);
+                    self.cycles += 6;
+                }
+            }
+            // INX - Increment X
+            0xE8 => {
+                if self.is_8bit_xy() {
+                    self.x = (self.x & 0xFF00) | (((self.x & 0xFF) + 1) & 0xFF);
+                } else {
+                    self.x = self.x.wrapping_add(1);
+                }
+                self.update_nz_flags_xy(self.x);
+                self.cycles += 2;
+            }
+            // CPX - Compare X Register (immediate)
+            0xE0 => {
+                if self.is_8bit_xy() {
+                    let val = self.fetch_byte() as u16;
+                    let result = (self.x & 0xFF).wrapping_sub(val);
+                    self.update_nz_flags_xy(result);
+                    if (self.x & 0xFF) >= val {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.cycles += 2;
+                } else {
+                    let lo = self.fetch_byte() as u16;
+                    let hi = self.fetch_byte() as u16;
+                    let val = (hi << 8) | lo;
+                    let result = self.x.wrapping_sub(val);
+                    self.update_nz_flags_xy(result);
+                    if self.x >= val {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.cycles += 3;
+                }
+            }
+            // BNE - Branch if Not Equal (Z=0)
+            0xD0 => {
+                let offset = self.fetch_byte() as i8;
+                if (self.status & FLAG_ZERO) == 0 {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    self.cycles += 3;
+                } else {
+                    self.cycles += 2;
+                }
+            }
+            // BRA - Branch Always
+            0x80 => {
+                let offset = self.fetch_byte() as i8;
+                self.pc = self.pc.wrapping_add(offset as u16);
+                self.cycles += 3;
+            }
+            // WAI - Wait for Interrupt
+            0xCB => {
+                // For now, just consume cycles (interrupt handling not implemented)
+                self.cycles += 3;
+            }
+            // RTI - Return from Interrupt
+            0x40 => {
+                self.status = self.pull_byte();
+                self.pc = self.pull_word();
+                if !self.emulation {
+                    self.pbr = self.pull_byte();
+                }
+                self.cycles += 6;
+            }
+            // NOP
+            0xEA => {
                 self.cycles += 2;
             }
             _ => {
@@ -188,6 +347,89 @@ impl<M: Memory65c816> Cpu65c816<M> {
         } else {
             self.c = val;
         }
+    }
+
+    /// Update N and Z flags for accumulator based on value
+    fn update_nz_flags_a(&mut self, val: u16) {
+        if self.is_8bit_a() {
+            let val = val & 0xFF;
+            if val == 0 {
+                self.status |= FLAG_ZERO;
+            } else {
+                self.status &= !FLAG_ZERO;
+            }
+            if (val & 0x80) != 0 {
+                self.status |= FLAG_NEGATIVE;
+            } else {
+                self.status &= !FLAG_NEGATIVE;
+            }
+        } else {
+            if val == 0 {
+                self.status |= FLAG_ZERO;
+            } else {
+                self.status &= !FLAG_ZERO;
+            }
+            if (val & 0x8000) != 0 {
+                self.status |= FLAG_NEGATIVE;
+            } else {
+                self.status &= !FLAG_NEGATIVE;
+            }
+        }
+    }
+
+    /// Update N and Z flags for index registers based on value
+    fn update_nz_flags_xy(&mut self, val: u16) {
+        if self.is_8bit_xy() {
+            let val = val & 0xFF;
+            if val == 0 {
+                self.status |= FLAG_ZERO;
+            } else {
+                self.status &= !FLAG_ZERO;
+            }
+            if (val & 0x80) != 0 {
+                self.status |= FLAG_NEGATIVE;
+            } else {
+                self.status &= !FLAG_NEGATIVE;
+            }
+        } else {
+            if val == 0 {
+                self.status |= FLAG_ZERO;
+            } else {
+                self.status &= !FLAG_ZERO;
+            }
+            if (val & 0x8000) != 0 {
+                self.status |= FLAG_NEGATIVE;
+            } else {
+                self.status &= !FLAG_NEGATIVE;
+            }
+        }
+    }
+
+    /// Push a byte onto the stack
+    fn push_byte(&mut self, val: u8) {
+        let addr = self.s as u32;
+        self.memory.write(addr, val);
+        self.s = self.s.wrapping_sub(1);
+    }
+
+    /// Push a word onto the stack (high byte first)
+    fn push_word(&mut self, val: u16) {
+        self.push_byte((val >> 8) as u8);
+        self.push_byte(val as u8);
+    }
+
+    /// Pull a byte from the stack
+    fn pull_byte(&mut self) -> u8 {
+        self.s = self.s.wrapping_add(1);
+        let addr = self.s as u32;
+        self.memory.read(addr)
+    }
+
+    /// Pull a word from the stack (low byte first)
+    fn pull_word(&mut self) -> u16 {
+        let lo = self.pull_byte() as u16;
+        let hi = self.pull_byte() as u16;
+        (hi << 8) | lo
     }
 }
 
