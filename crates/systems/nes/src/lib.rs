@@ -814,81 +814,34 @@ mod tests {
         assert_eq!(frame.height, 240);
         assert_eq!(frame.pixels.len(), 256 * 240);
 
-        // The test ROM fills the screen with a checkerboard pattern.
-        // Verify that the frame contains non-zero pixel data (not all black).
-        let non_zero_pixels = frame
-            .pixels
-            .iter()
-            .filter(|&&pixel| pixel != 0xFF000000) // Not black (ARGB format)
-            .count();
+        // The test ROM displays a checkerboard pattern with two alternating colors.
+        // Verify that:
+        // 1. Exactly 2 distinct colors are present
+        // 2. The distribution is approximately 50/50
 
-        // At least 50% of pixels should be non-black for the test pattern
-        assert!(
-            non_zero_pixels > (256 * 240) / 2,
-            "Expected non-black pixels from test ROM, got {} out of {}",
-            non_zero_pixels,
-            256 * 240
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+
+        assert_eq!(
+            color_counts.len(),
+            2,
+            "Expected exactly 2 colors for checkerboard pattern, got {}",
+            color_counts.len()
         );
-    }
-}
 
-#[cfg(test)]
-mod debug_tests {
-    use super::*;
-    
-    #[test]
-    fn test_current_rom_output() {
-        let test_rom = std::fs::read("../../../test_roms/nes/test.nes").unwrap();
-        
-        let mut sys = NesSystem::default();
-        sys.mount("Cartridge", &test_rom).unwrap();
-        
-        // Run 10 frames
-        for _ in 0..10 {
-            sys.step_frame().unwrap();
-        }
-        
-        let frame = sys.step_frame().unwrap();
-        
-        let mut color_counts = std::collections::HashMap::new();
-        for &pixel in &frame.pixels {
-            *color_counts.entry(pixel).or_insert(0) += 1;
-        }
-        
-        println!("Unique colors: {}", color_counts.len());
-        let mut colors: Vec<_> = color_counts.iter().collect();
-        colors.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
-        for (color, count) in colors.iter().take(5) {
-            let pct = (**count as f64 / frame.pixels.len() as f64) * 100.0;
-            println!("  0x{:08X}: {} pixels ({:.1}%)", color, count, pct);
+        // Check that both colors have roughly equal distribution (45-55% each)
+        let total_pixels = frame.pixels.len();
+        for (color, count) in color_counts.iter() {
+            let percentage = (*count as f64 / total_pixels as f64) * 100.0;
+            assert!(
+                percentage >= 45.0 && percentage <= 55.0,
+                "Color 0x{:08X} has {:.1}% of pixels, expected 45-55% for checkerboard",
+                color,
+                percentage
+            );
         }
     }
 }
-
-    #[test]
-    fn test_minimal_rom() {
-        let test_rom = std::fs::read("../../../test_roms/nes/minimal.nes").unwrap();
-        
-        let mut sys = NesSystem::default();
-        sys.mount("Cartridge", &test_rom).unwrap();
-        
-        // Run 10 frames
-        for _ in 0..10 {
-            sys.step_frame().unwrap();
-        }
-        
-        let frame = sys.step_frame().unwrap();
-        
-        let mut color_counts = std::collections::HashMap::new();
-        for &pixel in &frame.pixels {
-            *color_counts.entry(pixel).or_insert(0) += 1;
-        }
-        
-        println!("Minimal ROM - unique colors: {}", color_counts.len());
-        let mut colors: Vec<_> = color_counts.iter().collect();
-        colors.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
-        for (color, count) in colors.iter().take(5) {
-            let pct = (**count as f64 / frame.pixels.len() as f64) * 100.0;
-            println!("  0x{:08X}: {} pixels ({:.1}%)", color, count, pct);
-        }
-    }
