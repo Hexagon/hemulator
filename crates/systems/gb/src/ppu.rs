@@ -131,6 +131,8 @@ pub struct Ppu {
     pub wy: u8,
     /// Window X (0xFF4B)
     pub wx: u8,
+    /// Cycle accumulator for scanline timing
+    cycle_counter: u32,
 }
 
 // LCDC bits
@@ -163,6 +165,7 @@ impl Ppu {
             obp1: 0xFF,
             wy: 0,
             wx: 0,
+            cycle_counter: 0,
         }
     }
 
@@ -472,11 +475,16 @@ impl Ppu {
         }
     }
 
-    /// Step the PPU for one scanline worth of cycles
+    /// Step the PPU for the given number of cycles
     pub fn step(&mut self, cycles: u32) -> bool {
-        // Simplified: just increment LY
-        let scanlines = cycles / 456; // ~456 cycles per scanline
-        for _ in 0..scanlines {
+        // Accumulate cycles
+        self.cycle_counter += cycles;
+
+        let mut vblank_started = false;
+
+        // Process complete scanlines (456 cycles each)
+        while self.cycle_counter >= 456 {
+            self.cycle_counter -= 456;
             self.ly = (self.ly + 1) % 154;
 
             // Check LYC=LY interrupt
@@ -488,10 +496,11 @@ impl Ppu {
 
             // V-Blank is lines 144-153
             if self.ly == 144 {
-                return true; // V-Blank started
+                vblank_started = true;
             }
         }
-        false
+
+        vblank_started
     }
 }
 
