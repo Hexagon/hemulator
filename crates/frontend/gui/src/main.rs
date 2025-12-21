@@ -507,7 +507,7 @@ fn main() {
         }
     }
 
-    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::new(emu_nes::NesSystem::default()));
+    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
 
