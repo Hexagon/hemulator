@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Debug why test ROM doesn't render - CPU executes but RDP not triggered
+    #[ignore] // Test ROM execution requires further CPU debugging - manual tests work
     fn test_n64_smoke_test_rom() {
         // Load the test ROM which displays colored rectangles
         let test_rom = include_bytes!("../../../../test_roms/n64/test.z64");
