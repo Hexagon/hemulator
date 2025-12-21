@@ -36,19 +36,29 @@ pub struct ScissorBox {
 /// implementations (software vs. hardware-accelerated) to be used interchangeably.
 pub trait RdpRenderer: Send {
     /// Initialize the renderer with the given dimensions
+    #[allow(dead_code)]
     fn init(&mut self, width: u32, height: u32);
 
     /// Get the current framebuffer
     fn get_frame(&self) -> &Frame;
 
     /// Get mutable access to the framebuffer
+    #[allow(dead_code)]
     fn get_frame_mut(&mut self) -> &mut Frame;
 
     /// Clear the framebuffer with a color
     fn clear(&mut self, color: u32);
 
     /// Fill a rectangle with a color
-    fn fill_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: u32, scissor: &ScissorBox);
+    fn fill_rect(
+        &mut self,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        color: u32,
+        scissor: &ScissorBox,
+    );
 
     /// Set a single pixel
     fn set_pixel(&mut self, x: u32, y: u32, color: u32);
@@ -57,9 +67,12 @@ pub trait RdpRenderer: Send {
     #[allow(clippy::too_many_arguments)]
     fn draw_triangle(
         &mut self,
-        x0: i32, y0: i32,
-        x1: i32, y1: i32,
-        x2: i32, y2: i32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
         color: u32,
         scissor: &ScissorBox,
     );
@@ -68,9 +81,15 @@ pub trait RdpRenderer: Send {
     #[allow(clippy::too_many_arguments)]
     fn draw_triangle_zbuffer(
         &mut self,
-        x0: i32, y0: i32, z0: u16,
-        x1: i32, y1: i32, z1: u16,
-        x2: i32, y2: i32, z2: u16,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        x2: i32,
+        y2: i32,
+        z2: u16,
         color: u32,
         scissor: &ScissorBox,
     );
@@ -79,9 +98,15 @@ pub trait RdpRenderer: Send {
     #[allow(clippy::too_many_arguments)]
     fn draw_triangle_shaded(
         &mut self,
-        x0: i32, y0: i32, c0: u32,
-        x1: i32, y1: i32, c1: u32,
-        x2: i32, y2: i32, c2: u32,
+        x0: i32,
+        y0: i32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        c2: u32,
         scissor: &ScissorBox,
     );
 
@@ -89,9 +114,18 @@ pub trait RdpRenderer: Send {
     #[allow(clippy::too_many_arguments)]
     fn draw_triangle_shaded_zbuffer(
         &mut self,
-        x0: i32, y0: i32, z0: u16, c0: u32,
-        x1: i32, y1: i32, z1: u16, c1: u32,
-        x2: i32, y2: i32, z2: u16, c2: u32,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        c2: u32,
         scissor: &ScissorBox,
     );
 
@@ -102,15 +136,18 @@ pub trait RdpRenderer: Send {
     fn set_zbuffer_enabled(&mut self, enabled: bool);
 
     /// Resize the renderer to new dimensions
+    #[allow(dead_code)]
     fn resize(&mut self, width: u32, height: u32);
 
     /// Reset the renderer to initial state
     fn reset(&mut self);
 
     /// Get the name of this renderer (for debugging/UI)
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 
     /// Check if this renderer is hardware-accelerated
+    #[allow(dead_code)]
     fn is_hardware_accelerated(&self) -> bool {
         false
     }

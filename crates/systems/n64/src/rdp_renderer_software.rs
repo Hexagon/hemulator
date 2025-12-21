@@ -49,7 +49,15 @@ impl RdpRenderer for SoftwareRdpRenderer {
         }
     }
 
-    fn fill_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: u32, scissor: &ScissorBox) {
+    fn fill_rect(
+        &mut self,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        color: u32,
+        scissor: &ScissorBox,
+    ) {
         // Apply scissor clipping
         let x_start = x.max(scissor.x_min);
         let y_start = y.max(scissor.y_min);
@@ -82,9 +90,12 @@ impl RdpRenderer for SoftwareRdpRenderer {
 
     fn draw_triangle(
         &mut self,
-        x0: i32, y0: i32,
-        x1: i32, y1: i32,
-        x2: i32, y2: i32,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
         color: u32,
         scissor: &ScissorBox,
     ) {
@@ -137,9 +148,7 @@ impl RdpRenderer for SoftwareRdpRenderer {
             // Clip to scissor bounds
             let clip_x_start = x_start.max(scissor.x_min as i32);
             let clip_x_end = x_end.min(scissor.x_max as i32);
-            let clip_y = y
-                .max(scissor.y_min as i32)
-                .min(scissor.y_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
 
             if clip_y < 0 || clip_y >= self.height as i32 {
                 continue;
@@ -155,9 +164,15 @@ impl RdpRenderer for SoftwareRdpRenderer {
 
     fn draw_triangle_zbuffer(
         &mut self,
-        x0: i32, y0: i32, z0: u16,
-        x1: i32, y1: i32, z1: u16,
-        x2: i32, y2: i32, z2: u16,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        x2: i32,
+        y2: i32,
+        z2: u16,
         color: u32,
         scissor: &ScissorBox,
     ) {
@@ -209,9 +224,7 @@ impl RdpRenderer for SoftwareRdpRenderer {
             // Clip to scissor bounds
             let clip_x_start = x_start.max(scissor.x_min as i32);
             let clip_x_end = x_end.min(scissor.x_max as i32);
-            let clip_y = y
-                .max(scissor.y_min as i32)
-                .min(scissor.y_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
 
             if clip_y < 0 || clip_y >= self.height as i32 {
                 continue;
@@ -239,9 +252,15 @@ impl RdpRenderer for SoftwareRdpRenderer {
 
     fn draw_triangle_shaded(
         &mut self,
-        x0: i32, y0: i32, c0: u32,
-        x1: i32, y1: i32, c1: u32,
-        x2: i32, y2: i32, c2: u32,
+        x0: i32,
+        y0: i32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        c2: u32,
         scissor: &ScissorBox,
     ) {
         // Sort vertices by Y coordinate
@@ -292,9 +311,7 @@ impl RdpRenderer for SoftwareRdpRenderer {
             // Clip to scissor bounds
             let clip_x_start = x_start.max(scissor.x_min as i32);
             let clip_x_end = x_end.min(scissor.x_max as i32);
-            let clip_y = y
-                .max(scissor.y_min as i32)
-                .min(scissor.y_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
 
             if clip_y < 0 || clip_y >= self.height as i32 {
                 continue;
@@ -318,9 +335,18 @@ impl RdpRenderer for SoftwareRdpRenderer {
 
     fn draw_triangle_shaded_zbuffer(
         &mut self,
-        x0: i32, y0: i32, z0: u16, c0: u32,
-        x1: i32, y1: i32, z1: u16, c1: u32,
-        x2: i32, y2: i32, z2: u16, c2: u32,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        c2: u32,
         scissor: &ScissorBox,
     ) {
         // Sort vertices by Y coordinate
@@ -374,9 +400,7 @@ impl RdpRenderer for SoftwareRdpRenderer {
             // Clip to scissor bounds
             let clip_x_start = x_start.max(scissor.x_min as i32);
             let clip_x_end = x_end.min(scissor.x_max as i32);
-            let clip_y = y
-                .max(scissor.y_min as i32)
-                .min(scissor.y_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
 
             if clip_y < 0 || clip_y >= self.height as i32 {
                 continue;
@@ -450,7 +474,7 @@ mod tests {
     fn test_software_renderer_clear() {
         let mut renderer = SoftwareRdpRenderer::new(320, 240);
         renderer.clear(0xFFFF0000);
-        
+
         let frame = renderer.get_frame();
         for pixel in &frame.pixels {
             assert_eq!(*pixel, 0xFFFF0000);
@@ -466,14 +490,14 @@ mod tests {
             x_max: 320,
             y_max: 240,
         };
-        
+
         renderer.fill_rect(10, 10, 20, 20, 0xFF00FF00, &scissor);
-        
+
         let frame = renderer.get_frame();
         // Check pixel inside rectangle
         let idx = (15 * 320 + 15) as usize;
         assert_eq!(frame.pixels[idx], 0xFF00FF00);
-        
+
         // Check pixel outside rectangle
         assert_eq!(frame.pixels[0], 0);
     }
@@ -482,7 +506,7 @@ mod tests {
     fn test_software_renderer_set_pixel() {
         let mut renderer = SoftwareRdpRenderer::new(320, 240);
         renderer.set_pixel(100, 100, 0xFFFFFFFF);
-        
+
         let frame = renderer.get_frame();
         let idx = (100 * 320 + 100) as usize;
         assert_eq!(frame.pixels[idx], 0xFFFFFFFF);
@@ -497,9 +521,9 @@ mod tests {
             x_max: 320,
             y_max: 240,
         };
-        
+
         renderer.draw_triangle(100, 50, 150, 150, 50, 150, 0xFF00FF00, &scissor);
-        
+
         let frame = renderer.get_frame();
         // Check center of triangle should be green
         let idx = (116 * 320 + 100) as usize;
@@ -510,32 +534,24 @@ mod tests {
     fn test_software_renderer_zbuffer() {
         let mut renderer = SoftwareRdpRenderer::new(320, 240);
         renderer.set_zbuffer_enabled(true);
-        
+
         let scissor = ScissorBox {
             x_min: 0,
             y_min: 0,
             x_max: 320,
             y_max: 240,
         };
-        
+
         // Draw near triangle
         renderer.draw_triangle_zbuffer(
-            100, 50, 0x4000,
-            150, 150, 0x4000,
-            50, 150, 0x4000,
-            0xFF00FF00,
-            &scissor,
+            100, 50, 0x4000, 150, 150, 0x4000, 50, 150, 0x4000, 0xFF00FF00, &scissor,
         );
-        
+
         // Draw far triangle (should be occluded)
         renderer.draw_triangle_zbuffer(
-            100, 50, 0xC000,
-            150, 150, 0xC000,
-            50, 150, 0xC000,
-            0xFFFF0000,
-            &scissor,
+            100, 50, 0xC000, 150, 150, 0xC000, 50, 150, 0xC000, 0xFFFF0000, &scissor,
         );
-        
+
         let frame = renderer.get_frame();
         // Pixel should be green (near triangle visible)
         let idx = (116 * 320 + 100) as usize;

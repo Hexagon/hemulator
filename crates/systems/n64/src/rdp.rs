@@ -226,7 +226,8 @@ impl Rdp {
     /// Fill a rectangle with the current fill color
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn fill_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        self.renderer.fill_rect(x, y, width, height, self.fill_color, &self.scissor);
+        self.renderer
+            .fill_rect(x, y, width, height, self.fill_color, &self.scissor);
     }
 
     /// Set a pixel at the given coordinates
@@ -252,7 +253,8 @@ impl Rdp {
     #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)] // Triangle vertices need 6 coordinates + color
     fn draw_triangle(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) {
-        self.renderer.draw_triangle(x0, y0, x1, y1, x2, y2, color, &self.scissor);
+        self.renderer
+            .draw_triangle(x0, y0, x1, y1, x2, y2, color, &self.scissor);
     }
 
     /// Draw a flat-shaded triangle with Z-buffer support
@@ -272,7 +274,19 @@ impl Rdp {
         z2: u16,
         color: u32,
     ) {
-        self.renderer.draw_triangle_zbuffer(x0, y0, z0, x1, y1, z1, x2, y2, z2, color, &self.scissor);
+        self.renderer.draw_triangle_zbuffer(
+            x0,
+            y0,
+            z0,
+            x1,
+            y1,
+            z1,
+            x2,
+            y2,
+            z2,
+            color,
+            &self.scissor,
+        );
     }
 
     /// Draw a Gouraud-shaded triangle (per-vertex color interpolation)
@@ -291,7 +305,8 @@ impl Rdp {
         y2: i32,
         c2: u32,
     ) {
-        self.renderer.draw_triangle_shaded(x0, y0, c0, x1, y1, c1, x2, y2, c2, &self.scissor);
+        self.renderer
+            .draw_triangle_shaded(x0, y0, c0, x1, y1, c1, x2, y2, c2, &self.scissor);
     }
 
     /// Draw a Gouraud-shaded triangle with Z-buffer support
@@ -312,7 +327,21 @@ impl Rdp {
         z2: u16,
         c2: u32,
     ) {
-        self.renderer.draw_triangle_shaded_zbuffer(x0, y0, z0, c0, x1, y1, z1, c1, x2, y2, z2, c2, &self.scissor);
+        self.renderer.draw_triangle_shaded_zbuffer(
+            x0,
+            y0,
+            z0,
+            c0,
+            x1,
+            y1,
+            z1,
+            c1,
+            x2,
+            y2,
+            z2,
+            c2,
+            &self.scissor,
+        );
     }
 
     /// Get the current framebuffer
@@ -1011,10 +1040,10 @@ mod tests {
         let mut rdp = Rdp::new();
         // Z-buffer should start disabled
         rdp.set_zbuffer_enabled(false);
-        
+
         // Should be able to enable it
         rdp.set_zbuffer_enabled(true);
-        
+
         // And disable it again
         rdp.set_zbuffer_enabled(false);
         // Test passes if no panics occur
@@ -1024,7 +1053,7 @@ mod tests {
     fn test_rdp_zbuffer_clear() {
         let mut rdp = Rdp::new();
         rdp.set_zbuffer_enabled(true);
-        
+
         // Should be able to clear the Z-buffer
         rdp.clear_zbuffer();
         // Test passes if no panics occur
@@ -1046,7 +1075,7 @@ mod tests {
         // Check that pixels in the triangle are green
         let idx = (116 * 320 + 100) as usize;
         assert_eq!(rdp.get_frame().pixels[idx], 0xFF00FF00);
-        
+
         // Z-buffer functionality is tested in rdp_renderer_software tests
     }
 
@@ -1112,7 +1141,7 @@ mod tests {
 
         // Should have interpolated color components
         assert_ne!(color, 0, "Pixel should be colored");
-        
+
         // Z-buffer functionality is tested in rdp_renderer_software tests
     }
 
@@ -1208,7 +1237,8 @@ mod tests {
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
         assert_eq!(
-            rdp.get_frame().pixels[idx], 0xFF0000FF,
+            rdp.get_frame().pixels[idx],
+            0xFF0000FF,
             "Triangle should be blue"
         );
     }
@@ -1245,10 +1275,11 @@ mod tests {
         // Verify triangle was drawn
         let idx = (100 * 320 + 100) as usize;
         assert_eq!(
-            rdp.get_frame().pixels[idx], 0xFF00FF00,
+            rdp.get_frame().pixels[idx],
+            0xFF00FF00,
             "Triangle should be green"
         );
-        
+
         // Z-buffer functionality is tested in rdp_renderer_software tests
     }
 
@@ -1320,7 +1351,7 @@ mod tests {
         let idx = (100 * 320 + 100) as usize;
         let pixel = rdp.get_frame().pixels[idx];
         assert_ne!(pixel, 0, "Triangle should be colored");
-        
+
         // Z-buffer functionality is tested in rdp_renderer_software tests
     }
 
