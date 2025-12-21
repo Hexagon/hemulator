@@ -903,8 +903,11 @@ impl Ppu {
                     let idx = (y * width + x as u32) as usize;
 
                     // Sprite 0 hit detection - check if background pixel has non-zero color index
-                    if i == 0 && bg_enabled && !self.sprite_0_hit.get()
-                        && bg_priority[x as usize] && x < 255
+                    if i == 0
+                        && bg_enabled
+                        && !self.sprite_0_hit.get()
+                        && bg_priority[x as usize]
+                        && x < 255
                     {
                         // Check left clipping
                         let bg_clip = (self.mask & 0x02) == 0;

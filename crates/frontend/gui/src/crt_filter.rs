@@ -80,6 +80,7 @@ fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {
 }
 
 /// Blend two colors with a given ratio (0.0 = all color1, 1.0 = all color2)
+#[allow(dead_code)] // Still used in tests
 #[inline]
 fn blend_colors(color1: u32, color2: u32, ratio: f32) -> u32 {
     let (r1, g1, b1) = unpack_rgb(color1);
@@ -92,20 +93,24 @@ fn blend_colors(color1: u32, color2: u32, ratio: f32) -> u32 {
     pack_rgb(r, g, b)
 }
 
-/// Apply scanline effect - darkens every other horizontal line
+/// Apply scanline effect - darkens every other horizontal line with subtle tighter lines
 fn apply_scanlines(buffer: &mut [u32], width: usize, height: usize) {
     for y in 0..height {
-        // Darken every other scanline
+        // Apply tighter scanlines - darken every other line more subtly
         if y % 2 == 1 {
             for x in 0..width {
                 let idx = y * width + x;
                 if idx < buffer.len() {
                     let color = buffer[idx];
-                    let (r, g, b) = unpack_rgb(color);
-                    // Reduce brightness to 60% for scanlines
-                    let r = (r as f32 * 0.6) as u8;
-                    let g = (g as f32 * 0.6) as u8;
-                    let b = (b as f32 * 0.6) as u8;
+                    // Reduce brightness to 85% for subtle scanlines (was 60%, too dark)
+                    // Using bit shifting for faster multiplication
+                    let r = ((color >> 16) & 0xFF) as u8;
+                    let g = ((color >> 8) & 0xFF) as u8;
+                    let b = (color & 0xFF) as u8;
+
+                    let r = ((r as u16 * 217) >> 8) as u8; // 217/255 ≈ 0.85
+                    let g = ((g as u16 * 217) >> 8) as u8;
+                    let b = ((b as u16 * 217) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -114,71 +119,101 @@ fn apply_scanlines(buffer: &mut [u32], width: usize, height: usize) {
 }
 
 /// Apply phosphor effect - creates horizontal color bleeding between adjacent pixels
+/// Optimized version using direct bit manipulation for better performance
 fn apply_phosphor(buffer: &mut [u32], width: usize, height: usize) {
-    let temp_buffer = buffer.to_vec();
-
+    // Process line by line to improve cache locality
     for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if idx >= buffer.len() {
+        let row_start = y * width;
+        let row_end = (row_start + width).min(buffer.len());
+
+        if row_end <= row_start {
+            continue;
+        }
+
+        // Process pixels from right to left to avoid needing a full buffer copy
+        // This allows us to use already-updated values while preserving the original on the right
+        for x in (1..width).rev() {
+            let idx = row_start + x;
+            if idx >= row_end {
                 continue;
             }
 
-            let current = temp_buffer[idx];
+            let current = buffer[idx];
+            let left = buffer[idx - 1];
 
-            // Blend with neighboring pixels horizontally
-            let mut blended = current;
+            // Fast blend: 85% current + 15% left (using bit shifts)
+            let (r_curr, g_curr, b_curr) = unpack_rgb(current);
+            let (r_left, g_left, b_left) = unpack_rgb(left);
 
-            if x > 0 {
-                let left = temp_buffer[idx - 1];
-                blended = blend_colors(blended, left, 0.15);
+            let r = ((r_curr as u16 * 217 + r_left as u16 * 38) >> 8) as u8; // 217/255≈0.85, 38/255≈0.15
+            let g = ((g_curr as u16 * 217 + g_left as u16 * 38) >> 8) as u8;
+            let b = ((b_curr as u16 * 217 + b_left as u16 * 38) >> 8) as u8;
+
+            buffer[idx] = pack_rgb(r, g, b);
+        }
+
+        // Now process left to right for right-side blending
+        for x in 0..width - 1 {
+            let idx = row_start + x;
+            if idx >= row_end {
+                break;
             }
 
-            if x < width - 1 {
-                let right = temp_buffer[idx + 1];
-                blended = blend_colors(blended, right, 0.15);
-            }
+            let current = buffer[idx];
+            let right = buffer[idx + 1];
 
-            buffer[idx] = blended;
+            // Blend 10% from right neighbor (lighter blend to avoid double-counting)
+            let (r_curr, g_curr, b_curr) = unpack_rgb(current);
+            let (r_right, g_right, b_right) = unpack_rgb(right);
+
+            let r = ((r_curr as u16 * 230 + r_right as u16 * 25) >> 8) as u8; // 230/255≈0.9, 25/255≈0.1
+            let g = ((g_curr as u16 * 230 + g_right as u16 * 25) >> 8) as u8;
+            let b = ((b_curr as u16 * 230 + b_right as u16 * 25) >> 8) as u8;
+
+            buffer[idx] = pack_rgb(r, g, b);
         }
     }
 }
 
 /// Apply full CRT monitor effect - combines scanlines with phosphor glow
+/// Optimized version that applies both effects in a single pass
 fn apply_crt_monitor(buffer: &mut [u32], width: usize, height: usize) {
     // First apply phosphor effect for color bleeding
     apply_phosphor(buffer, width, height);
 
-    // Then apply scanlines
+    // Then apply scanlines with less aggressive darkening
     for y in 0..height {
         if y % 2 == 1 {
             for x in 0..width {
                 let idx = y * width + x;
                 if idx < buffer.len() {
                     let color = buffer[idx];
-                    let (r, g, b) = unpack_rgb(color);
-                    // Reduce brightness to 70% for scanlines (less aggressive than scanlines-only)
-                    let r = (r as f32 * 0.7) as u8;
-                    let g = (g as f32 * 0.7) as u8;
-                    let b = (b as f32 * 0.7) as u8;
+                    // Reduce brightness to 90% for subtle scanlines (was 70%, too dark)
+                    // Using bit shifting for faster calculation
+                    let r = ((color >> 16) & 0xFF) as u8;
+                    let g = ((color >> 8) & 0xFF) as u8;
+                    let b = (color & 0xFF) as u8;
+
+                    let r = ((r as u16 * 230) >> 8) as u8; // 230/255 ≈ 0.90
+                    let g = ((g as u16 * 230) >> 8) as u8;
+                    let b = ((b as u16 * 230) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
-        }
-    }
-
-    // Add slight brightness boost to non-scanline rows for contrast
-    for y in 0..height {
-        if y % 2 == 0 {
+        } else {
+            // Very slight brightness boost on bright lines for contrast (102%)
             for x in 0..width {
                 let idx = y * width + x;
                 if idx < buffer.len() {
                     let color = buffer[idx];
-                    let (r, g, b) = unpack_rgb(color);
-                    // Slight brightness boost (105%)
-                    let r = r.saturating_add((r as f32 * 0.05) as u8);
-                    let g = g.saturating_add((g as f32 * 0.05) as u8);
-                    let b = b.saturating_add((b as f32 * 0.05) as u8);
+                    let r = ((color >> 16) & 0xFF) as u8;
+                    let g = ((color >> 8) & 0xFF) as u8;
+                    let b = (color & 0xFF) as u8;
+
+                    // Slight boost (was 5%, now 2% for subtlety)
+                    let r = r.saturating_add(r >> 6); // ≈ 1.6% boost
+                    let g = g.saturating_add(g >> 6);
+                    let b = b.saturating_add(b >> 6);
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
