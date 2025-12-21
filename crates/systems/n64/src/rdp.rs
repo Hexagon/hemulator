@@ -90,6 +90,21 @@ struct ScissorBox {
     y_max: u32,
 }
 
+/// Texture tile descriptor
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Fields reserved for future texture mapping implementation
+struct TileDescriptor {
+    format: u32,    // Texture format (RGBA, CI, IA, I)
+    size: u32,      // Texel size (4bit, 8bit, 16bit, 32bit)
+    line: u32,      // Pitch in 64-bit words
+    tmem_addr: u32, // TMEM address (in 64-bit words)
+    palette: u32,   // Palette number for CI textures
+    s_mask: u32,    // S coordinate mask for wrapping
+    t_mask: u32,    // T coordinate mask for wrapping
+    s_shift: u32,   // S coordinate shift
+    t_shift: u32,   // T coordinate shift
+}
+
 /// RDP state and framebuffer
 pub struct Rdp {
     /// Current framebuffer
@@ -110,6 +125,15 @@ pub struct Rdp {
 
     /// Scissor box for clipping
     scissor: ScissorBox,
+
+    /// TMEM (Texture Memory) - 4KB buffer
+    tmem: [u8; 4096],
+
+    /// Texture tile descriptors (8 tiles)
+    tiles: [TileDescriptor; 8],
+
+    /// Current texture image address in RDRAM
+    texture_image_addr: u32,
 
     /// DPC registers
     dpc_start: u32,
@@ -138,6 +162,19 @@ impl Rdp {
                 x_max: width,
                 y_max: height,
             },
+            tmem: [0; 4096],
+            tiles: [TileDescriptor {
+                format: 0,
+                size: 0,
+                line: 0,
+                tmem_addr: 0,
+                palette: 0,
+                s_mask: 0,
+                t_mask: 0,
+                s_shift: 0,
+                t_shift: 0,
+            }; 8],
+            texture_image_addr: 0,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -155,6 +192,19 @@ impl Rdp {
             x_max: self.width,
             y_max: self.height,
         };
+        self.tmem.fill(0);
+        self.tiles = [TileDescriptor {
+            format: 0,
+            size: 0,
+            line: 0,
+            tmem_addr: 0,
+            palette: 0,
+            s_mask: 0,
+            t_mask: 0,
+            s_shift: 0,
+            t_shift: 0,
+        }; 8];
+        self.texture_image_addr = 0;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -449,23 +499,56 @@ impl Rdp {
             // SET_TILE (0x35)
             0x35 => {
                 // Configure tile descriptor (texture format, size, palette)
-                // Stub: accept but don't process yet (needs TMEM implementation)
+                // word0: cmd | format(3) | size(2) | line(9) | tmem_addr(9)
+                // word1: tile(3) | palette(4) | ct(1) | mt(1) | mask_t(4) | shift_t(4) | cs(1) | ms(1) | mask_s(4) | shift_s(4)
+                let format = (word0 >> 21) & 0x07;
+                let size = (word0 >> 19) & 0x03;
+                let line = (word0 >> 9) & 0x1FF;
+                let tmem_addr = word0 & 0x1FF;
+
+                let tile_num = ((word1 >> 24) & 0x07) as usize;
+                let palette = (word1 >> 20) & 0x0F;
+                let mask_t = (word1 >> 14) & 0x0F;
+                let shift_t = (word1 >> 10) & 0x0F;
+                let mask_s = (word1 >> 4) & 0x0F;
+                let shift_s = word1 & 0x0F;
+
+                if tile_num < 8 {
+                    self.tiles[tile_num] = TileDescriptor {
+                        format,
+                        size,
+                        line,
+                        tmem_addr,
+                        palette,
+                        s_mask: mask_s,
+                        t_mask: mask_t,
+                        s_shift: shift_s,
+                        t_shift: shift_t,
+                    };
+                }
             }
             // SET_TEXTURE_IMAGE (0x3D)
             0x3D => {
                 // Set source address for texture loading
-                // word1 contains DRAM address
-                // Stub: accept but don't process yet (needs TMEM implementation)
+                // word0: cmd | format(3) | size(2) | width(10)
+                // word1: DRAM address
+                self.texture_image_addr = word1 & 0x00FFFFFF;
             }
             // LOAD_BLOCK (0x33)
             0x33 => {
                 // Load texture block from DRAM to TMEM
-                // Stub: accept but don't process yet (needs TMEM implementation)
+                // word0: cmd | uls(12) | ult(12)
+                // word1: tile(3) | texels(12) | dxt(12)
+                // This is a simplified implementation - would need RDRAM access callback
+                // For now, this is a placeholder that accepts the command
             }
             // LOAD_TILE (0x34)
             0x34 => {
                 // Load texture tile from DRAM to TMEM
-                // Stub: accept but don't process yet (needs TMEM implementation)
+                // word0: cmd | uls(12) | ult(12)
+                // word1: tile(3) | lrs(12) | lrt(12)
+                // This is a simplified implementation - would need RDRAM access callback
+                // For now, this is a placeholder that accepts the command
             }
             // SYNC_FULL (0x29)
             0x29 => {
@@ -772,5 +855,85 @@ mod tests {
         // Verify the rectangle was filled (stub implementation)
         let idx = (75 * 320 + 75) as usize;
         assert_eq!(rdp.framebuffer.pixels[idx], 0xFF0000FF);
+    }
+
+    #[test]
+    fn test_rdp_set_tile_command() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 64];
+
+        // SET_TILE (0x35) - configure tile 0
+        // format=RGBA(0), size=16bit(2), line=32, tmem_addr=0
+        let format = 0u32;
+        let size = 2u32;
+        let line = 32u32;
+        let tmem_addr = 0u32;
+        let set_tile_cmd: u32 =
+            (0x35 << 24) | (format << 21) | (size << 19) | (line << 9) | tmem_addr;
+        // tile=0, palette=0, mask_t=5, shift_t=0, mask_s=5, shift_s=0
+        let tile = 0u32;
+        let palette = 0u32;
+        let mask_t = 5u32;
+        let shift_t = 0u32;
+        let mask_s = 5u32;
+        let shift_s = 0u32;
+        let set_tile_data: u32 = (tile << 24)
+            | (palette << 20)
+            | (mask_t << 14)
+            | (shift_t << 10)
+            | (mask_s << 4)
+            | shift_s;
+        rdram[0..4].copy_from_slice(&set_tile_cmd.to_be_bytes());
+        rdram[4..8].copy_from_slice(&set_tile_data.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 8);
+        rdp.process_display_list(&rdram);
+
+        // Verify tile descriptor was set
+        assert_eq!(rdp.tiles[0].format, 0);
+        assert_eq!(rdp.tiles[0].size, 2);
+        assert_eq!(rdp.tiles[0].line, 32);
+        assert_eq!(rdp.tiles[0].tmem_addr, 0);
+        assert_eq!(rdp.tiles[0].s_mask, 5);
+        assert_eq!(rdp.tiles[0].t_mask, 5);
+    }
+
+    #[test]
+    fn test_rdp_set_texture_image() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 64];
+
+        // SET_TEXTURE_IMAGE (0x3D)
+        // format=RGBA, size=16bit, width=31
+        let format = 0u32;
+        let size = 2u32;
+        let width = 31u32;
+        let set_tex_img_cmd: u32 = (0x3D << 24) | (format << 21) | (size << 19) | width;
+        let tex_addr: u32 = 0x00200000; // Texture address in RDRAM
+        rdram[0..4].copy_from_slice(&set_tex_img_cmd.to_be_bytes());
+        rdram[4..8].copy_from_slice(&tex_addr.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 8);
+        rdp.process_display_list(&rdram);
+
+        // Verify texture image address was set
+        assert_eq!(rdp.texture_image_addr, 0x00200000);
+    }
+
+    #[test]
+    fn test_rdp_tmem_initialized() {
+        let rdp = Rdp::new();
+
+        // Verify TMEM is zero-initialized
+        assert_eq!(rdp.tmem.len(), 4096);
+        assert!(rdp.tmem.iter().all(|&b| b == 0));
+
+        // Verify tiles are initialized
+        for tile in &rdp.tiles {
+            assert_eq!(tile.format, 0);
+            assert_eq!(tile.size, 0);
+        }
     }
 }
