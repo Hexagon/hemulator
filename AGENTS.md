@@ -676,14 +676,59 @@ pub struct GbApu {
 
 ## Documentation Structure
 
-- **README.md**: Developer-focused documentation (building, architecture, contributing)
-- **MANUAL.md**: End-user manual with usage instructions, controls, troubleshooting, and known limitations
+All documentation is maintained in the root-level markdown files. **Do NOT create files in a `docs/` directory**.
+
+- **README.md**: Developer-focused documentation
+  - Building instructions and quick start
+  - Project architecture overview
+  - NES mapper support details
+  - Supported ROM formats
+  - Development and testing guidelines
+  - Target audience: Contributors and developers setting up the project
+
+- **MANUAL.md**: End-user manual
   - Included in all release packages
-  - Keep separate from README to focus on user needs
-  - Update when adding user-facing features or changing controls
-  - Contains "Known Limitations" sections for each system - update these when fixing issues
-- **CONTRIBUTING.md**: Contribution guidelines for developers
+  - Getting started and controls
+  - Configuration and settings
+  - System-specific information (features, limitations, controls)
+  - Troubleshooting and system requirements
+  - **Update when**: Adding user-facing features, changing controls, or fixing system limitations
+  - **Contains**: "Known Limitations" sections for each system - update these when fixing issues
+  - Target audience: End users running the emulator
+
+- **CONTRIBUTING.md**: Contribution guidelines
+  - Pre-commit check requirements (fmt, clippy, build, test)
+  - Development workflow and code quality standards
+  - Debug environment variables
+  - Areas for contribution
+  - Target audience: External contributors
+
 - **AGENTS.md**: This file - guidance for automated agents and CI
+  - Project structure and architecture details
+  - Implementation philosophy and best practices
+  - Test ROM requirements and smoke testing
+  - Audio/PPU implementation guidelines
+  - Settings system and release packaging
+  - Debug environment variables (comprehensive reference)
+  - Target audience: Automated agents, CI systems, and maintainers
+
+### Documentation Routing
+
+When adding new documentation, use this routing guide:
+
+| Content Type | File | Examples |
+|--------------|------|----------|
+| **User-facing features** | MANUAL.md | Controls, settings, filters, save states, troubleshooting |
+| **System limitations (user impact)** | MANUAL.md | "Game X won't work because Y", "Feature Z not supported" |
+| **Developer setup** | README.md | Build commands, quick start, project overview |
+| **Architecture details** | AGENTS.md | System modules, CPU implementations, mapper internals |
+| **Implementation guidelines** | AGENTS.md | How to add mappers, audio implementation patterns |
+| **Contribution workflow** | CONTRIBUTING.md | Pre-commit checks, coding standards, PR process |
+| **Debug tooling** | CONTRIBUTING.md | Basic debug variable usage for contributors |
+| **Debug tooling (comprehensive)** | AGENTS.md | All debug variables with full context for agents |
+| **CI/Agent instructions** | AGENTS.md | Test requirements, build artifacts, automation guidelines |
+
+**Never create a `docs/` directory**. All documentation belongs in the four root-level files listed above.
 
 ## Release Packaging
 
