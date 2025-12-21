@@ -360,9 +360,9 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - If you try to load a state with a different ROM mounted, you'll get an error
 
 **Save State Support by System**:
-- **NES**: Fully supported - save and load states with F5/F6 when a cartridge is loaded
-- **Atari 2600**: Fully supported - save and load states with F5/F6
-- **Game Boy**: Not yet implemented (skeleton)
+- **NES**: Fully supported - save and load states with F5-F9 when a cartridge is loaded
+- **Atari 2600**: Fully supported - save and load states with F5-F9
+- **Game Boy**: Fully supported - save and load states with F5-F9
 
 Example structure:
 ```
@@ -440,9 +440,9 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: Functional implementation with PPU, joypad, and rendering
+**Status**: Functional implementation with PPU, joypad, rendering, and MBC mappers
 
-**Coverage**: Homebrew ROMs and simple games (32KB ROMs, MBC0 only)
+**Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
@@ -450,17 +450,23 @@ The emulator supports the following cartridge banking schemes:
 - Full PPU (Picture Processing Unit) rendering: background, window, sprites
 - Resolution: 160x144 pixels (DMG mode)
 - Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority
+- **MBC (Memory Bank Controller) Support**:
+  - MBC0: No mapper (32KB ROMs)
+  - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
+  - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
+  - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
 - Joypad input with matrix selection
-- Save states (F5/F6)
+- Save states (F5-F9)
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **MBC Support**: Only MBC0 (no mapper) - works with 32KB ROMs only. MBC1/MBC3/MBC5 needed for 95%+ of commercial games
+- **MBC2**: Not implemented (~1% of games) - rare mapper with built-in 512×4 bits RAM
 - **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **Audio**: APU implementation exists but not integrated with frontend (silent gameplay)
 - **Timer**: Timer registers not implemented - games relying on timer interrupts won't work
 - **Interrupts**: Registers exist but interrupt handling not fully wired
-- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for homebrew and simple games
+- **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
