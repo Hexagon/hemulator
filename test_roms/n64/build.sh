@@ -68,8 +68,8 @@ def mips_instr(opcode):
 rom.extend(mips_instr(0x3C1D801F))  # lui $sp, 0x801F
 rom.extend(mips_instr(0x37BDFFF0))  # ori $sp, $sp, 0xFFF0
 
-# li $t0, 0x00100000 (lui $t0, 0x0010; ori $t0, $t0, 0x0000)
-rom.extend(mips_instr(0x3C080010))  # lui $t0, 0x0010
+# li $t0, 0x80100000 (KSEG0 cached RDRAM + 0x100000)
+rom.extend(mips_instr(0x3C088010))  # lui $t0, 0x8010
 rom.extend(mips_instr(0x35080000))  # ori $t0, $t0, 0x0000
 
 # Command 1: SET_FILL_COLOR - Red
@@ -113,20 +113,23 @@ rom.extend(mips_instr(0xAD090020))  # sw $t1, 32($t0)
 rom.extend(mips_instr(0xAD000024))  # sw $zero, 36($t0)
 
 # Trigger RDP
-# li $t0, 0x04100000
-rom.extend(mips_instr(0x3C080410))  # lui $t0, 0x0410
-# li $t1, 0x00100000 (DPC_START)
+# li $t0, 0xA4100000 (KSEG1 unmapped RDP register base)
+rom.extend(mips_instr(0x3C08A410))  # lui $t0, 0xA410
+# li $t1, 0x00100000 (DPC_START - physical RDRAM address)
 rom.extend(mips_instr(0x3C090010))  # lui $t1, 0x0010
 rom.extend(mips_instr(0xAD090000))  # sw $t1, 0($t0) - DPC_START
-# li $t1, 0x00100028 (DPC_END)
+# li $t1, 0x00100028 (DPC_END - physical RDRAM address, 40 bytes)
 rom.extend(mips_instr(0x3C090010))  # lui $t1, 0x0010
 rom.extend(mips_instr(0x35290028))  # ori $t1, $t1, 0x0028
 rom.extend(mips_instr(0xAD090004))  # sw $t1, 4($t0) - DPC_END
 
 # Infinite loop
 # loop: j loop; nop
-loop_offset = len(rom) - 0x1000  # Relative to boot code start
-rom.extend(mips_instr(0x08000000 | (loop_offset >> 2)))  # j loop
+# The J instruction jumps to (PC+4)[31:28] | (target << 2)
+# We want to jump to the current instruction, which is at offset from start of boot code
+loop_pc = 0x90001000 + (len(rom) - 0x1000)  # Absolute address in KSEG0
+loop_target = loop_pc >> 2  # Divide by 4 for jump target
+rom.extend(mips_instr(0x08000000 | (loop_target & 0x3FFFFFF)))  # j loop
 rom.extend(mips_instr(0x00000000))  # nop (delay slot)
 
 # Pad to 1MB minimum

@@ -269,10 +269,10 @@ mod tests {
 
         // Command 2: FILL_RECTANGLE (0x36) - 100x100 rectangle at (50,50)
         // Coordinates in 10.2 fixed point: 50*4=200(0xC8), 150*4=600(0x258)
-        // word0: cmd | XH << 14 | YH << 2
-        // word1: XL << 14 | YL << 2
-        bus.write_word(0x00100008, (0x36 << 24) | (0x258 << 14) | (0x258 << 2)); // XH=150, YH=150
-        bus.write_word(0x0010000C, (0xC8 << 14) | (0xC8 << 2)); // XL=50, YL=50
+        // word0: cmd(8) | XH(12) | YH(12)
+        // word1: XL(12) | YL(12)
+        bus.write_word(0x00100008, (0x36 << 24) | (0x258 << 12) | 0x258); // XH=150, YH=150
+        bus.write_word(0x0010000C, (0xC8 << 12) | 0xC8); // XL=50, YL=50
 
         // Command 3: SET_FILL_COLOR (0x37) - Green (0xFF00FF00)
         bus.write_word(0x00100010, 0x37000000);
@@ -280,8 +280,8 @@ mod tests {
 
         // Command 4: FILL_RECTANGLE (0x36) - 50x50 rectangle at (160,90)
         // 160*4=640(0x280), 210*4=840(0x348), 90*4=360(0x168), 140*4=560(0x230)
-        bus.write_word(0x00100018, (0x36 << 24) | (0x348 << 14) | (0x230 << 2)); // XH=210, YH=140
-        bus.write_word(0x0010001C, (0x280 << 14) | (0x168 << 2)); // XL=160, YL=90
+        bus.write_word(0x00100018, (0x36 << 24) | (0x348 << 12) | 0x230); // XH=210, YH=140
+        bus.write_word(0x0010001C, (0x280 << 12) | 0x168); // XL=160, YL=90
 
         // Command 5: SYNC_FULL (0x29)
         bus.write_word(0x00100020, 0x29000000);
