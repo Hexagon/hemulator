@@ -9,6 +9,21 @@ These test ROMs are designed to:
 2. Provide deterministic output for automated testing
 3. Serve as reference implementations for new systems
 
+## Current Systems
+
+- **NES** - Full implementation with smoke test
+- **Game Boy** - WIP implementation with basic smoke test
+- **Atari 2600** - Full implementation with smoke test
+
+## Future Systems
+
+When implementing new systems (SNES, GBC, etc.), follow this pattern:
+1. Create a subdirectory: `test_roms/<system>/`
+2. Write minimal assembly code that produces visible output
+3. Add build script and built ROM
+4. Add smoke test to system crate
+5. Update this README and AGENTS.md
+
 ## Building
 
 Each system has a `build.sh` script that assembles the test ROM from source:

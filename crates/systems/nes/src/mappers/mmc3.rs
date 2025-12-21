@@ -711,10 +711,7 @@ mod tests {
 
         // Bank select register should only use lower 3 bits (0-7)
         mmc3.write_prg(0x8000, 0xFF, &mut ppu); // All bits set
-        assert_eq!(
-            mmc3.bank_select, 0x07,
-            "Bank select should mask to 3 bits"
-        );
+        assert_eq!(mmc3.bank_select, 0x07, "Bank select should mask to 3 bits");
 
         // Verify we can still write to bank register 7
         mmc3.write_prg(0x8001, 0x42, &mut ppu);
@@ -825,11 +822,7 @@ mod tests {
         mmc3.write_prg(0x8001, 10, &mut ppu);
 
         // 10 % 4 = 2, so should read bank 2's data
-        assert_eq!(
-            mmc3.read_prg(0x8000),
-            0x12,
-            "Bank should wrap with modulo"
-        );
+        assert_eq!(mmc3.read_prg(0x8000), 0x12, "Bank should wrap with modulo");
     }
 
     #[test]

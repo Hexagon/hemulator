@@ -2261,7 +2261,8 @@ mod tests {
             &[
                 0xA9, 0x01, // LDA #$01    ; addr 0x8000-0x8001
                 0xA9, 0x00, // LDA #$00    ; addr 0x8002-0x8003 (sets Z, target)
-                0xF0, 0xFC, // BEQ -4      ; addr 0x8004-0x8005 (branch back 4 bytes from 0x8006)
+                0xF0,
+                0xFC, // BEQ -4      ; addr 0x8004-0x8005 (branch back 4 bytes from 0x8006)
             ],
         );
         cpu2.reset();

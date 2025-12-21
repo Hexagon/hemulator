@@ -264,7 +264,10 @@ mod tests {
         mmc1.write_prg(0x8000, 1, &mut ppu);
 
         // Control register should not have changed yet
-        assert_eq!(mmc1.control, 0x0C, "Partial write should not update register");
+        assert_eq!(
+            mmc1.control, 0x0C,
+            "Partial write should not update register"
+        );
         assert_eq!(mmc1.write_count, 3, "Write count should be 3");
     }
 
@@ -334,7 +337,11 @@ mod tests {
         }
 
         // In fix-first mode: bank 0 at $8000, selected bank at $C000
-        assert_eq!(mmc1.read_prg(0x8000), 0x10, "First bank should be fixed at $8000");
+        assert_eq!(
+            mmc1.read_prg(0x8000),
+            0x10,
+            "First bank should be fixed at $8000"
+        );
         assert_eq!(mmc1.read_prg(0xC000), 0x12, "Bank 2 should be at $C000");
     }
 
