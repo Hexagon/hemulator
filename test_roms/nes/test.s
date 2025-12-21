@@ -68,16 +68,16 @@ RESET:
     
     ; Fill 960 tiles (30 rows * 32 columns) with alternating pattern
     ldx #30                 ; 30 rows
+    lda #0                  ; Start with tile 0
 row_loop:
     ldy #32                 ; 32 columns
 col_loop:
-    ; Alternate between tile 0 and tile 1
-    txa                     ; Row number in X
-    eor #$FF                ; Invert for alternating rows
-    and #$01                ; Get bit 0
-    sta $2007               ; Write tile index (0 or 1)
+    sta $2007               ; Write current tile index (0 or 1)
+    eor #$01                ; Toggle between 0 and 1
     dey
     bne col_loop
+    ; At end of row, toggle again so next row starts with opposite tile
+    eor #$01
     dex
     bne row_loop
     
