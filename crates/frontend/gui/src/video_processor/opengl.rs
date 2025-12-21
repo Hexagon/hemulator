@@ -10,7 +10,6 @@ use crate::crt_filter::CrtFilter;
 use glow::HasContext;
 
 /// OpenGL-based video processor
-
 pub struct OpenGLProcessor {
     gl: glow::Context,
     program: glow::Program,
@@ -21,7 +20,6 @@ pub struct OpenGLProcessor {
     height: usize,
     current_filter: CrtFilter,
 }
-
 
 impl OpenGLProcessor {
     /// Create a new OpenGL processor with the given context
@@ -180,7 +178,6 @@ impl OpenGLProcessor {
     }
 }
 
-
 impl VideoProcessor for OpenGLProcessor {
     fn init(&mut self, width: usize, height: usize) -> VideoResult<()> {
         self.width = width;
@@ -270,7 +267,6 @@ impl VideoProcessor for OpenGLProcessor {
     }
 }
 
-
 impl Drop for OpenGLProcessor {
     fn drop(&mut self) {
         unsafe {
@@ -281,7 +277,6 @@ impl Drop for OpenGLProcessor {
         }
     }
 }
-
 
 unsafe fn compile_shader(
     gl: &glow::Context,

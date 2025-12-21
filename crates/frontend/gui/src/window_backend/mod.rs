@@ -13,46 +13,110 @@ pub use sdl2_backend::Sdl2Backend;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
     // Function keys
-    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
-    
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+
     // Number keys
-    Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9,
-    
+    Key0,
+    Key1,
+    Key2,
+    Key3,
+    Key4,
+    Key5,
+    Key6,
+    Key7,
+    Key8,
+    Key9,
+
     // Letter keys
-    A, B, C, D, E, F, G, H, I, J, K, L, M,
-    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-    
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+
     // Arrow keys
-    Up, Down, Left, Right,
-    
+    Up,
+    Down,
+    Left,
+    Right,
+
     // Special keys
-    Escape, Enter, Space, Tab, Backspace,
-    LeftShift, RightShift, LeftCtrl, RightCtrl, LeftAlt, RightAlt,
+    Escape,
+    Enter,
+    Space,
+    Tab,
+    Backspace,
+    LeftShift,
+    RightShift,
+    LeftCtrl,
+    RightCtrl,
+    LeftAlt,
+    RightAlt,
 }
 
 /// Window backend trait
 pub trait WindowBackend {
     /// Check if window is still open
     fn is_open(&self) -> bool;
-    
+
     /// Check if a key is currently pressed
     fn is_key_down(&self, key: Key) -> bool;
-    
+
     /// Check if a key was just pressed (with repeat control)
     fn is_key_pressed(&self, key: Key, allow_repeat: bool) -> bool;
-    
+
     /// Update window with new frame buffer
     /// Buffer format: ARGB (0xAARRGGBB)
-    fn update_with_buffer(&mut self, buffer: &[u32], width: usize, height: usize) -> Result<(), Box<dyn Error>>;
-    
+    fn update_with_buffer(
+        &mut self,
+        buffer: &[u32],
+        width: usize,
+        height: usize,
+    ) -> Result<(), Box<dyn Error>>;
+
     /// Get current window size
     fn get_size(&self) -> (usize, usize);
-    
+
     /// Process window events (for event-based backends like winit)
     fn poll_events(&mut self);
-    
+
     /// Get the backend name (for debugging)
     fn name(&self) -> &str;
+
+    /// Downcast to Any for accessing backend-specific methods
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Convert a string key name to our unified Key enum

@@ -23,25 +23,16 @@ fn main() {
     println!("  Filters: None, Scanlines, Phosphor, CRT Monitor");
     println!("  Architecture: Modular VideoProcessor trait");
 
-    #[cfg(feature = "opengl")]
-    {
-        println!("\nOpenGL Support: ENABLED");
-        println!("  OpenGL Processor: Available (GPU-based)");
-        println!("  Shaders: GLSL 330 core");
-        println!("  Filters: Implemented as fragment shaders");
-        println!("  Dependencies: glow, glutin, bytemuck");
-    }
-
-    #[cfg(not(feature = "opengl"))]
-    {
-        println!("\nOpenGL Support: DISABLED");
-        println!("  To enable: cargo build --features opengl");
-    }
+    println!("\nOpenGL Support: ENABLED");
+    println!("  OpenGL Processor: Available (GPU-based)");
+    println!("  Shaders: GLSL 330 core");
+    println!("  Filters: Implemented as fragment shaders");
+    println!("  Dependencies: glow, SDL2");
 
     println!("\nConfiguration:");
     println!("  Set video_backend in config.json:");
     println!("    - \"software\" for CPU-based rendering");
-    println!("    - \"opengl\" for GPU-based rendering (if compiled with --features opengl)");
+    println!("    - \"opengl\" for GPU-accelerated rendering");
 
     println!("\nShader Files (OpenGL backend):");
     println!("  - src/shaders/vertex.glsl");
