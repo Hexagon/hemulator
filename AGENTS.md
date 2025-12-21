@@ -662,7 +662,7 @@ System-specific implementations that use core components:
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
       - Audio not implemented - silent gameplay
-  - All tests pass (82 tests: cartridge, RDP with 3D rendering and display list commands, RSP HLE, PIF/controllers, VI, system integration)
+  - All tests pass (81 tests passing, 1 ignored: cartridge, RDP with 3D rendering and display list commands, RSP HLE, PIF/controllers, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)

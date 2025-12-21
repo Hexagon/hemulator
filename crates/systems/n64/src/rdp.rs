@@ -531,14 +531,14 @@ impl Rdp {
             // FILL_RECTANGLE (0x36)
             0x36 => {
                 // RDP FILL_RECTANGLE format:
-                // word0: cmd_id(6) | XH(12 bits at bit 14) | YH(12 bits at bit 2)
-                // word1: XL(12 bits at bit 14) | YL(12 bits at bit 2)
+                // word0: cmd_id(8) | XH(12 bits) | YH(12 bits)
+                // word1: XL(12 bits at bit 12) | YL(12 bits)
                 // Coordinates are in 10.2 fixed point format (divide by 4 to get pixels)
 
-                let xh = ((word0 >> 14) & 0xFFF).div_ceil(4); // Right/end X, round up
-                let yh = ((word0 >> 2) & 0xFFF).div_ceil(4); // Bottom/end Y, round up
-                let xl = ((word1 >> 14) & 0xFFF) / 4; // Left/start X
-                let yl = ((word1 >> 2) & 0xFFF) / 4; // Top/start Y
+                let xh = ((word0 >> 12) & 0xFFF).div_ceil(4); // Right/end X, round up
+                let yh = (word0 & 0xFFF).div_ceil(4); // Bottom/end Y, round up
+                let xl = ((word1 >> 12) & 0xFFF) / 4; // Left/start X
+                let yl = (word1 & 0xFFF) / 4; // Top/start Y
 
                 // Calculate width and height
                 let width = xh.saturating_sub(xl);
@@ -800,10 +800,10 @@ mod tests {
         rdram[4..8].copy_from_slice(&color.to_be_bytes());
 
         // FILL_RECTANGLE (0x36)
-        // Format: word0: cmd | XH << 14 | YH << 2, word1: XL << 14 | YL << 2
+        // Format: word0: cmd(8) | XH(12) | YH(12), word1: XL(12) | YL(12)
         // Coordinates in 10.2 fixed point: 50*4=0xC8, 150*4=0x258
-        let rect_cmd_word0: u32 = (0x36 << 24) | (0x258 << 14) | (0x258 << 2); // XH=150, YH=150
-        let rect_cmd_word1: u32 = (0xC8 << 14) | (0xC8 << 2); // XL=50, YL=50
+        let rect_cmd_word0: u32 = (0x36 << 24) | (0x258 << 12) | 0x258; // XH=150, YH=150
+        let rect_cmd_word1: u32 = (0xC8 << 12) | 0xC8; // XL=50, YL=50
         rdram[8..12].copy_from_slice(&rect_cmd_word0.to_be_bytes());
         rdram[12..16].copy_from_slice(&rect_cmd_word1.to_be_bytes());
 
@@ -891,8 +891,8 @@ mod tests {
 
         // FILL_RECTANGLE covering (5,5) to (150,150)
         // Should be clipped to scissor bounds (10,10) to (100,100)
-        let rect_cmd: u32 = (0x36 << 24) | ((150 * 4) << 14) | ((150 * 4) << 2);
-        let rect_data: u32 = ((5 * 4) << 14) | ((5 * 4) << 2);
+        let rect_cmd: u32 = (0x36 << 24) | ((150 * 4) << 12) | (150 * 4);
+        let rect_data: u32 = ((5 * 4) << 12) | (5 * 4);
         rdram[16..20].copy_from_slice(&rect_cmd.to_be_bytes());
         rdram[20..24].copy_from_slice(&rect_data.to_be_bytes());
 
