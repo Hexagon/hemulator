@@ -497,15 +497,25 @@ The emulator supports the following cartridge banking schemes:
 
 ### N64 (Nintendo 64)
 
-**Status**: Basic implementation with enhanced RDP graphics processor including 3D triangle rendering
+**Status**: Active development - CPU, RDP, RSP HLE, and controller support implemented
 
-**Coverage**: Limited - CPU and RDP with 3D rendering implemented, no game rendering yet
+**Coverage**: Limited - Core components functional, working towards game compatibility
 
 **ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
 
 **Features**:
 - MIPS R4300i CPU core with complete instruction set
 - Memory bus (4MB RDRAM + PIF + SP memory + RDP/VI registers)
+- **PIF (Peripheral Interface)** - Controller support
+  - 4 controller ports with full button mapping
+  - All 14 buttons supported: A, B, Z, Start, D-pad (4), L, R, C-buttons (4)
+  - Analog stick with full range (-128 to 127 on X/Y axes)
+  - Controller command protocol for game communication
+- **RSP (Reality Signal Processor)** - High-Level Emulation
+  - Microcode detection (F3DEX/F3DEX2/Audio)
+  - Vertex buffer management (32 vertices)
+  - Matrix transformation infrastructure
+  - Task execution framework for graphics microcode
 - RDP (Reality Display Processor) with enhanced framebuffer support
   - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
   - **Software renderer** (default): Fully functional, high accuracy
@@ -535,6 +545,18 @@ The emulator supports the following cartridge banking schemes:
   - Barycentric coordinate interpolation
   - Per-pixel color and depth interpolation
   - Scissor rectangle clipping
+
+**Controller Mapping**:
+For N64 games, the standard controller mappings apply with these button equivalents:
+- **A** = Z key (Player 1) / U key (Player 2)
+- **B** = X key (Player 1) / O key (Player 2)
+- **Start** = Enter (Player 1) / P (Player 2)
+- **D-pad** = Arrow keys (Player 1) / I/J/K/L (Player 2)
+- **L/R** = (Not yet mapped - will be added in future update)
+- **C-buttons** = (Not yet mapped - will be added in future update)
+- **Analog stick** = (Not yet mapped - will be added in future update)
+
+*Note: Controller mappings can be customized in `config.json`. Full analog stick and shoulder button support coming soon.*
 
 **Known Limitations**:
 - **Renderer Architecture**:
@@ -572,19 +594,26 @@ The emulator supports the following cartridge banking schemes:
     - Display list triangle commands (API exists but not wired to command processor)
     - Most advanced rendering commands
   - Can render 3D wireframe and flat-shaded graphics
-  - Full game graphics require texture sampling, RSP, and additional RDP features
+  - Full game graphics require texture sampling, RSP display list parsing, and additional RDP features
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
   - Scanline tracking and interrupt support in place but not active
-- **RSP**: Reality Signal Processor not implemented - no geometry processing or microcode execution
-  - Display lists must be pre-formatted RDP commands
-  - No vertex transformation, lighting, or display list generation
+- **RSP**: High-Level Emulation implemented but not yet processing game display lists
+  - Microcode detection working (F3DEX, F3DEX2, Audio)
+  - Vertex buffer and transformation infrastructure in place
+  - Display list parsing not yet implemented
+  - No vertex transformation, lighting, or RDP command generation yet
+  - Future: Will process vertex data and generate RDP triangle commands
 - **Audio**: Audio interface not implemented - silent gameplay
-- **Input**: Controller support not implemented
+- **Input**: Controller infrastructure complete, needs frontend integration
+  - All 14 buttons defined and working (A, B, Z, Start, D-pad, L, R, C-buttons)
+  - Analog stick support implemented (-128 to 127 range)
+  - PIF command protocol functional
+  - Frontend keyboard/gamepad mapping not yet connected
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Basic RDP display list processing is functional with TMEM support. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, texture sampling, complete RDP command set, and Z-buffer support.
+- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE, PIF). Next steps: RSP display list parsing, texture sampling, frontend controller integration. Test ROMs can run and render basic graphics.
 
 ## Troubleshooting
 

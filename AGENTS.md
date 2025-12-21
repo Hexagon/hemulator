@@ -637,9 +637,12 @@ System-specific implementations that use core components:
     - RDP framebuffer rendering with 3D triangle support and Z-buffer
   - **Known Limitations**:
     - **RSP (Reality Signal Processor)**: 
-      - Basic infrastructure implemented (DMEM, IMEM, DMA, registers)
-      - No microcode execution - essential for game rendering
-      - Stub implementation with memory and register access
+      - High-Level Emulation (HLE) implemented
+      - Microcode detection working (F3DEX, F3DEX2, Audio)
+      - Vertex buffer and transformation infrastructure in place
+      - Display list parsing not yet implemented
+      - No vertex transformation or RDP command generation yet
+      - Future: Will process game display lists and generate RDP triangles
     - **RDP Graphics**: 
       - OpenGL renderer available with `--features opengl` but not yet integrated
       - No texture mapping (texture structures in place but sampling not implemented)
@@ -649,12 +652,17 @@ System-specific implementations that use core components:
       - No sub-pixel accuracy
       - No edge AA or coverage calculation
     - **System**:
-      - Displays test patterns only - no actual game graphics without RSP
-      - Controller support not implemented
+      - Displays test patterns only - no actual game graphics without RSP display list parsing
+      - Controller support implemented but needs frontend integration
+        - All 14 buttons defined (A, B, Z, Start, D-pad, L, R, C-buttons)
+        - Analog stick support complete (-128 to 127 range)
+        - PIF command protocol functional
+        - Frontend keyboard/gamepad mapping not yet connected
       - No TLB, cache, or accurate memory timing
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
-  - All tests pass (70 tests: cartridge, RDP with 3D rendering and display list commands, RSP, VI, system integration)
+      - Audio not implemented - silent gameplay
+  - All tests pass (82 tests: cartridge, RDP with 3D rendering and display list commands, RSP HLE, PIF/controllers, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
