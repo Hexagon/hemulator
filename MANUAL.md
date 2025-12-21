@@ -399,17 +399,24 @@ The emulator supports the following cartridge banking schemes:
 - Resolution: 320x240 pixels (configurable)
 
 **Known Limitations**:
-- **Graphics**: RDP partially implemented - framebuffer only, no texture mapping or 3D rendering
-  - Basic fill operations work (clear, rectangles, pixels)
-  - No display list command processing
-  - No Z-buffer, textures, or anti-aliasing
-  - Displays blank screen (no actual game graphics rendered)
-- **RSP**: Reality Signal Processor not implemented - no geometry processing or display list generation
+- **Graphics**: RDP implementation supports basic display list commands
+  - FILL_RECTANGLE command working (solid color rectangles)
+  - SET_FILL_COLOR command working (set fill color for rectangles)
+  - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD) implemented as no-ops
+  - SET_COLOR_IMAGE command accepted but ignored (uses internal framebuffer)
+  - **Not implemented**: Texture mapping, 3D triangle rasterization, Z-buffer, anti-aliasing, blending
+  - **Not implemented**: TMEM (texture memory), texture loading commands
+  - **Not implemented**: Most advanced rendering commands
+  - Can render simple 2D graphics using fill commands
+  - Full game graphics require extensive additional RDP command support
+- **RSP**: Reality Signal Processor not implemented - no geometry processing or microcode execution
+  - Display lists must be pre-formatted RDP commands
+  - No vertex transformation, lighting, or display list generation
 - **Audio**: Audio interface not implemented - silent gameplay
 - **Input**: Controller support not implemented
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: This is a foundational implementation. Full N64 emulation requires RSP microcode execution, complete RDP command processing, and texture/Z-buffer support.
+- **Status**: Basic RDP display list processing is now functional. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, complete RDP command set, and texture/Z-buffer support.
 
 ## Troubleshooting
 
