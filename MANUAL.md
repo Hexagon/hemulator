@@ -384,31 +384,48 @@ The emulator supports the following cartridge banking schemes:
 
 ### N64 (Nintendo 64)
 
-**Status**: Basic implementation with RDP graphics processor
+**Status**: Basic implementation with RDP graphics processor and VI (Video Interface)
 
-**Coverage**: Limited - CPU and basic RDP implemented, no game rendering yet
+**Coverage**: Limited - CPU and basic RDP/VI implemented, no game rendering yet
 
 **ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
 
 **Features**:
 - MIPS R4300i CPU core with complete instruction set
-- Memory bus (4MB RDRAM + PIF + SP memory + RDP registers)
+- Memory bus (4MB RDRAM + PIF + SP memory + RDP/VI registers)
 - RDP (Reality Display Processor) with framebuffer support
+- VI (Video Interface) with display configuration registers
 - ROM loading with automatic byte-order detection and conversion
 - Save states (F5/F6)
 - Resolution: 320x240 pixels (configurable)
 
 **Known Limitations**:
 - **Graphics**: RDP implementation supports basic display list commands
-  - FILL_RECTANGLE command working (solid color rectangles)
-  - SET_FILL_COLOR command working (set fill color for rectangles)
-  - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD) implemented as no-ops
-  - SET_COLOR_IMAGE command accepted but ignored (uses internal framebuffer)
-  - **Not implemented**: Texture mapping, 3D triangle rasterization, Z-buffer, anti-aliasing, blending
-  - **Not implemented**: TMEM (texture memory), texture loading commands
-  - **Not implemented**: Most advanced rendering commands
+  - **Working commands**:
+    - FILL_RECTANGLE - solid color rectangles
+    - SET_FILL_COLOR - set fill color for rectangles
+    - SET_SCISSOR - clipping rectangle support
+    - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD)
+    - SET_COLOR_IMAGE - accepted but uses internal framebuffer
+  - **Stub implementations** (accept but don't fully process):
+    - TEXTURE_RECTANGLE - currently renders as solid rectangle
+    - SET_TILE, LOAD_BLOCK, LOAD_TILE - texture configuration (needs TMEM)
+    - SET_TEXTURE_IMAGE - texture source (needs TMEM)
+    - SET_OTHER_MODES - rendering modes configuration
+  - **Not implemented**: 
+    - TMEM (texture memory) - required for actual texture mapping
+    - 3D triangle rasterization with textures
+    - Z-buffer depth testing
+    - Anti-aliasing and blending
+    - Perspective-correct texture mapping
+    - Most advanced rendering commands
+  - Triangle rasterizer implemented but not yet exposed via display list commands
   - Can render simple 2D graphics using fill commands
   - Full game graphics require extensive additional RDP command support
+- **VI (Video Interface)**: Registers implemented but not fully integrated
+  - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
+  - Not yet used for actual display output (uses RDP internal framebuffer)
+  - Scanline tracking and interrupt support in place but not active
 - **RSP**: Reality Signal Processor not implemented - no geometry processing or microcode execution
   - Display lists must be pre-formatted RDP commands
   - No vertex transformation, lighting, or display list generation
@@ -416,7 +433,7 @@ The emulator supports the following cartridge banking schemes:
 - **Input**: Controller support not implemented
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Basic RDP display list processing is now functional. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, complete RDP command set, and texture/Z-buffer support.
+- **Status**: Basic RDP display list processing is functional. Games can render simple 2D graphics. Full N64 emulation requires RSP implementation, complete RDP command set, TMEM, and texture/Z-buffer support.
 
 ## Troubleshooting
 
