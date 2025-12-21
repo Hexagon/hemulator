@@ -658,20 +658,25 @@ System-specific implementations that use core components:
     - **RSP (Reality Signal Processor)**: 
       - High-Level Emulation (HLE) implemented
       - Microcode detection working (F3DEX, F3DEX2, Audio)
-      - Vertex buffer and transformation infrastructure in place
-      - Display list parsing not yet implemented
-      - No vertex transformation or RDP command generation yet
-      - Future: Will process game display lists and generate RDP triangles
+      - Vertex buffer and transformation infrastructure complete
+      - Display list parsing fully implemented (F3DEX commands)
+      - Full matrix transformation pipeline with 10-level stack (G_MTX, G_POPMTX)
+      - Conditional branching support (G_BRANCH_Z)
+      - Vertex transformation and RDP command generation working
+      - Triangle rendering commands (G_TRI1, G_TRI2, G_QUAD) operational
     - **RDP Graphics**: 
       - OpenGL renderer available with `--features opengl` but not yet integrated
-      - No texture mapping (texture structures in place but sampling not implemented)
+      - **Texture mapping (TMEM loading) fully implemented**:
+        - LOAD_BLOCK and LOAD_TILE commands working
+        - Texture sampling for RGBA16/RGBA32 formats
+        - 4KB TMEM with proper tile descriptor management
+        - Ready for textured triangle rendering (not yet integrated)
       - No perspective-correct rasterization
       - No anti-aliasing or blending
-      - TMEM (texture memory) allocated but not used for sampling
       - No sub-pixel accuracy
       - No edge AA or coverage calculation
     - **System**:
-      - Displays test patterns only - no actual game graphics without RSP display list parsing
+      - Can render transformed 3D graphics with vertex colors
       - Controller support implemented but needs frontend integration
         - All 14 buttons defined (A, B, Z, Start, D-pad, L, R, C-buttons)
         - Analog stick support complete (-128 to 127 range)
@@ -681,7 +686,7 @@ System-specific implementations that use core components:
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
       - Audio not implemented - silent gameplay
-  - All tests pass (81 tests passing, 1 ignored: cartridge, RDP with 3D rendering and display list commands, RSP HLE, PIF/controllers, VI, system integration)
+  - All tests pass (97 tests passing, 1 ignored: cartridge, RDP with 3D rendering, display list commands, texture loading, RSP HLE with matrix stack and branching, PIF/controllers, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)

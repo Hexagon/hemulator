@@ -445,7 +445,7 @@ impl Rdp {
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
 
             // Execute command
-            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1);
+            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
 
             // Move to next command (all RDP commands are 8 bytes)
             addr += 8;
@@ -457,8 +457,148 @@ impl Rdp {
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
     }
 
+    /// Load texture data from RDRAM to TMEM (used by LOAD_BLOCK and LOAD_TILE)
+    fn load_texture_to_tmem(
+        &mut self,
+        rdram: &[u8],
+        tile: usize,
+        s_start: u32,
+        t_start: u32,
+        s_end: u32,
+        t_end: u32,
+    ) {
+        if tile >= 8 {
+            return;
+        }
+
+        let tile_desc = &self.tiles[tile];
+        let size = tile_desc.size;
+        let tmem_addr = (tile_desc.tmem_addr * 8) as usize; // Convert from 64-bit words to bytes
+
+        // Calculate bytes per texel based on size
+        let bytes_per_texel = match size {
+            0 => 1, // 4-bit (actually 0.5, but we'll handle specially)
+            1 => 1, // 8-bit
+            2 => 2, // 16-bit
+            3 => 4, // 32-bit
+            _ => 2,
+        };
+
+        // Width and height in texels
+        let width = (s_end - s_start + 1) as usize;
+        let height = (t_end - t_start + 1) as usize;
+
+        // Source address in RDRAM
+        let src_addr = self.texture_image_addr as usize;
+
+        // For LOAD_BLOCK and LOAD_TILE, we copy data linearly
+        // Calculate total bytes to copy
+        let total_texels = width * height;
+        let total_bytes = if size == 0 {
+            total_texels.div_ceil(2) // 4-bit: two texels per byte
+        } else {
+            total_texels * bytes_per_texel
+        };
+
+        // Bounds check and copy
+        let bytes_to_copy = total_bytes.min(self.tmem.len() - tmem_addr);
+        let src_end = (src_addr + bytes_to_copy).min(rdram.len());
+
+        if src_addr < rdram.len() && tmem_addr < self.tmem.len() {
+            let actual_bytes = (src_end - src_addr).min(bytes_to_copy);
+            self.tmem[tmem_addr..tmem_addr + actual_bytes]
+                .copy_from_slice(&rdram[src_addr..src_addr + actual_bytes]);
+        }
+    }
+
+    /// Sample a texel from TMEM at the given tile and texture coordinates
+    /// Returns RGBA8888 color
+    #[allow(dead_code)] // Will be used for textured triangle rendering
+    fn sample_texture(&self, tile: usize, s: u32, t: u32) -> u32 {
+        if tile >= 8 {
+            return 0xFFFF00FF; // Return magenta for invalid tile (debugging)
+        }
+
+        let tile_desc = &self.tiles[tile];
+        let format = tile_desc.format;
+        let size = tile_desc.size;
+        let tmem_addr = (tile_desc.tmem_addr * 8) as usize;
+
+        // Apply wrapping/clamping based on mask
+        let s_masked = if tile_desc.s_mask > 0 {
+            s & ((1 << tile_desc.s_mask) - 1)
+        } else {
+            s
+        };
+        let t_masked = if tile_desc.t_mask > 0 {
+            t & ((1 << tile_desc.t_mask) - 1)
+        } else {
+            t
+        };
+
+        // Calculate bytes per texel
+        let bytes_per_texel = match size {
+            0 => 0.5, // 4-bit (two texels per byte)
+            1 => 1.0, // 8-bit
+            2 => 2.0, // 16-bit
+            3 => 4.0, // 32-bit
+            _ => 2.0,
+        };
+
+        // Calculate texel offset
+        let line_width = tile_desc.line * 8; // Convert from 64-bit words to bytes
+        let texel_offset = if size == 0 {
+            // 4-bit texels: special handling
+            (t_masked * line_width + s_masked / 2) as usize
+        } else {
+            (t_masked * line_width + s_masked * bytes_per_texel as u32) as usize
+        };
+        let addr = tmem_addr + texel_offset;
+
+        // Sample based on format and size
+        if addr >= self.tmem.len() {
+            return 0xFFFF00FF; // Magenta for out of bounds
+        }
+
+        match (format, size) {
+            // RGBA 16-bit (5-5-5-1)
+            (0, 2) => {
+                if addr + 1 < self.tmem.len() {
+                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let r = ((texel >> 11) & 0x1F) as u32;
+                    let g = ((texel >> 6) & 0x1F) as u32;
+                    let b = ((texel >> 1) & 0x1F) as u32;
+                    let a = (texel & 0x01) as u32;
+                    // Convert 5-bit to 8-bit
+                    let r8 = (r * 255 / 31) & 0xFF;
+                    let g8 = (g * 255 / 31) & 0xFF;
+                    let b8 = (b * 255 / 31) & 0xFF;
+                    let a8 = if a != 0 { 0xFF } else { 0x00 };
+                    (a8 << 24) | (r8 << 16) | (g8 << 8) | b8
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // RGBA 32-bit (8-8-8-8)
+            (0, 3) => {
+                if addr + 3 < self.tmem.len() {
+                    u32::from_be_bytes([
+                        self.tmem[addr],
+                        self.tmem[addr + 1],
+                        self.tmem[addr + 2],
+                        self.tmem[addr + 3],
+                    ])
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // Other formats not yet implemented - return white
+            _ => 0xFFFFFFFF,
+        }
+    }
+
     /// Execute a single RDP command
-    pub fn execute_rdp_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
+    pub fn execute_rdp_command(&mut self, cmd_id: u32, word0: u32, word1: u32, rdram: &[u8]) {
         match cmd_id {
             // Triangle commands (0x08-0x0F)
             // Note: Real N64 triangle commands have complex formats with edge coefficients
@@ -647,16 +787,32 @@ impl Rdp {
                 // Load texture block from DRAM to TMEM
                 // word0: cmd | uls(12) | ult(12)
                 // word1: tile(3) | texels(12) | dxt(12)
-                // This is a simplified implementation - would need RDRAM access callback
-                // For now, this is a placeholder that accepts the command
+                let uls = (word0 >> 12) & 0xFFF; // S coordinate (start)
+                let ult = word0 & 0xFFF; // T coordinate (start)
+                let tile = ((word1 >> 24) & 0x07) as usize;
+                let texels = (word1 >> 12) & 0xFFF; // Number of texels to load
+
+                // Calculate end coordinates based on texels count
+                // LOAD_BLOCK loads a linear block of texels
+                let lrs = uls + texels;
+                let lrt = ult;
+
+                // Load texture data from RDRAM to TMEM
+                self.load_texture_to_tmem(rdram, tile, uls, ult, lrs, lrt);
             }
             // LOAD_TILE (0x34)
             0x34 => {
                 // Load texture tile from DRAM to TMEM
                 // word0: cmd | uls(12) | ult(12)
                 // word1: tile(3) | lrs(12) | lrt(12)
-                // This is a simplified implementation - would need RDRAM access callback
-                // For now, this is a placeholder that accepts the command
+                let uls = (word0 >> 12) & 0xFFF; // S coordinate (start)
+                let ult = word0 & 0xFFF; // T coordinate (start)
+                let tile = ((word1 >> 24) & 0x07) as usize;
+                let lrs = (word1 >> 12) & 0xFFF; // S coordinate (end)
+                let lrt = word1 & 0xFFF; // T coordinate (end)
+
+                // Load texture data from RDRAM to TMEM
+                self.load_texture_to_tmem(rdram, tile, uls, ult, lrs, lrt);
             }
             // SYNC_FULL (0x29)
             0x29 => {
@@ -1394,5 +1550,181 @@ mod tests {
         // Pixel inside scissor should be colored
         let idx = (100 * 320 + 100) as usize;
         assert_ne!(rdp.get_frame().pixels[idx], 0);
+    }
+
+    #[test]
+    fn test_rdp_texture_loading_load_tile() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 8192]; // Larger buffer for texture data
+
+        // Set up a texture image in RDRAM (8x8 RGBA16 texture)
+        let texture_addr = 0x1000;
+        for i in 0..64 {
+            // Create a simple checkerboard pattern
+            let color = if (i / 8 + i % 8) % 2 == 0 {
+                0xF801u16 // Red (RGBA5551: 11111 00000 00000 1)
+            } else {
+                0x07E1u16 // Green (RGBA5551: 00000 11111 00000 1)
+            };
+            let offset = texture_addr + i * 2;
+            rdram[offset..offset + 2].copy_from_slice(&color.to_be_bytes());
+        }
+
+        // Set up tile descriptor for tile 0
+        rdp.tiles[0] = TileDescriptor {
+            format: 0,    // RGBA
+            size: 2,      // 16-bit
+            line: 8,      // 8 texels per line = 1 64-bit word (8 texels * 2 bytes / 8)
+            tmem_addr: 0, // Start at TMEM address 0
+            palette: 0,
+            s_mask: 3, // 2^3 = 8 texels wide
+            t_mask: 3, // 2^3 = 8 texels tall
+            s_shift: 0,
+            t_shift: 0,
+        };
+
+        // Set texture image address
+        rdp.texture_image_addr = texture_addr as u32;
+
+        let dl_addr = 0x100;
+
+        // SET_TEXTURE_IMAGE (0x3D) - set source texture
+        let set_tex_img: u32 = (0x3D << 24) | (2 << 19) | 8; // format=RGBA(default 0), size=16bit, width=8
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&set_tex_img.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&(texture_addr as u32).to_be_bytes());
+
+        // SET_TILE (0x35) - configure tile 0
+        let set_tile: u32 = (0x35 << 24) | (2 << 19) | (8 << 9); // format=RGBA(default 0), size=16bit, line=8, tmem=0
+        let set_tile_data: u32 = (3 << 4) | 3; // tile=0, mask_s=3, mask_t=3
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&set_tile.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&set_tile_data.to_be_bytes());
+
+        // LOAD_TILE (0x34) - load 8x8 texture
+        let load_tile: u32 = 0x34 << 24; // uls=0, ult=0
+        let load_tile_data: u32 = (7 << 12) | 7; // tile=0, lrs=7, lrt=7
+        rdram[dl_addr + 16..dl_addr + 20].copy_from_slice(&load_tile.to_be_bytes());
+        rdram[dl_addr + 20..dl_addr + 24].copy_from_slice(&load_tile_data.to_be_bytes());
+
+        rdp.write_register(0x00, dl_addr as u32);
+        rdp.write_register(0x04, (dl_addr + 24) as u32);
+        rdp.process_display_list(&rdram);
+
+        // Verify texture was loaded to TMEM (check first few texels)
+        // First texel should be red (0xF801 in RGBA5551)
+        assert_eq!(rdp.tmem[0], 0xF8);
+        assert_eq!(rdp.tmem[1], 0x01);
+
+        // Second texel should be green (0x07E1)
+        assert_eq!(rdp.tmem[2], 0x07);
+        assert_eq!(rdp.tmem[3], 0xE1);
+    }
+
+    #[test]
+    fn test_rdp_texture_loading_load_block() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 16384]; // Larger buffer
+
+        // Set up a simple texture (16 texels of RGBA16)
+        let texture_addr = 0x2000;
+        for i in 0..16 {
+            let color = 0xFC00u16 + i as u16; // Varying red shades
+            let offset = texture_addr + i * 2;
+            rdram[offset..offset + 2].copy_from_slice(&color.to_be_bytes());
+        }
+
+        rdp.tiles[0] = TileDescriptor {
+            format: 0,
+            size: 2, // 16-bit
+            line: 2, // 2 64-bit words per line (16 bytes = 8 texels)
+            tmem_addr: 0,
+            palette: 0,
+            s_mask: 0,
+            t_mask: 0,
+            s_shift: 0,
+            t_shift: 0,
+        };
+
+        rdp.texture_image_addr = texture_addr as u32;
+
+        let dl_addr = 0x100;
+
+        // SET_TEXTURE_IMAGE
+        let set_tex_img: u32 = 0x3D << 24;
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&set_tex_img.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&(texture_addr as u32).to_be_bytes());
+
+        // LOAD_BLOCK (0x33) - load 16 texels
+        let load_block: u32 = 0x33 << 24;
+        let load_block_data: u32 = 15 << 12; // tile=0, texels=15 (load 16 texels)
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&load_block.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&load_block_data.to_be_bytes());
+
+        rdp.write_register(0x00, dl_addr as u32);
+        rdp.write_register(0x04, (dl_addr + 16) as u32);
+        rdp.process_display_list(&rdram);
+
+        // Verify first texel was loaded
+        assert_eq!(rdp.tmem[0], 0xFC);
+        assert_eq!(rdp.tmem[1], 0x00);
+
+        // Verify last texel (texel 15)
+        assert_eq!(rdp.tmem[30], 0xFC);
+        assert_eq!(rdp.tmem[31], 0x0F);
+    }
+
+    #[test]
+    fn test_rdp_texture_sampling() {
+        let mut rdp = Rdp::new();
+
+        // Set up a simple 2x2 texture in TMEM manually
+        rdp.tiles[0] = TileDescriptor {
+            format: 0, // RGBA
+            size: 2,   // 16-bit
+            line: 1,   // 1 64-bit word = 4 texels (2x2)
+            tmem_addr: 0,
+            palette: 0,
+            s_mask: 1, // 2^1 = 2 texels wide
+            t_mask: 1, // 2^1 = 2 texels tall
+            s_shift: 0,
+            t_shift: 0,
+        };
+
+        // Fill TMEM with test pattern
+        // (0,0) = Red (0xF801)
+        rdp.tmem[0] = 0xF8;
+        rdp.tmem[1] = 0x01;
+        // (1,0) = Green (0x07E1)
+        rdp.tmem[2] = 0x07;
+        rdp.tmem[3] = 0xE1;
+        // (0,1) = Blue (0x003F)
+        rdp.tmem[8] = 0x00;
+        rdp.tmem[9] = 0x3F;
+        // (1,1) = White (0xFFFF)
+        rdp.tmem[10] = 0xFF;
+        rdp.tmem[11] = 0xFF;
+
+        // Sample texels
+        let color_00 = rdp.sample_texture(0, 0, 0);
+        let color_10 = rdp.sample_texture(0, 1, 0);
+        let color_01 = rdp.sample_texture(0, 0, 1);
+        let color_11 = rdp.sample_texture(0, 1, 1);
+
+        // Verify colors (approximately - 5-bit to 8-bit conversion may vary)
+        // Red should have high R, low G/B
+        assert!((color_00 >> 16) & 0xFF > 200); // Red channel
+        assert!((color_00 >> 8) & 0xFF < 50); // Green channel
+
+        // Green should have high G, low R/B
+        assert!((color_10 >> 8) & 0xFF > 200); // Green channel
+        assert!((color_10 >> 16) & 0xFF < 50); // Red channel
+
+        // Blue should have high B, low R/G
+        assert!(color_01 & 0xFF > 200); // Blue channel
+        assert!((color_01 >> 16) & 0xFF < 50); // Red channel
+
+        // White should have all channels high
+        assert!((color_11 >> 16) & 0xFF > 200); // Red
+        assert!((color_11 >> 8) & 0xFF > 200); // Green
+        assert!(color_11 & 0xFF > 200); // Blue
     }
 }

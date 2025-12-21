@@ -596,23 +596,23 @@ For N64 games, the standard controller mappings apply with these button equivale
     - Command placeholders in place for future full implementation
     - Direct triangle drawing functions available via API
   - **Stub implementations** (accept but don't fully process):
-    - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs texture sampling)
-    - LOAD_BLOCK, LOAD_TILE - texture loading (needs RDRAM callback integration)
+    - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs advanced sampling)
     - SET_OTHER_MODES - rendering modes configuration
-  - **TMEM (Texture Memory)**:
-    - 4KB TMEM buffer allocated
+  - **TMEM (Texture Memory)**: ✅ Fully implemented
+    - 4KB TMEM buffer with texture loading via LOAD_BLOCK and LOAD_TILE
     - Tile descriptors (8 tiles) fully configured via SET_TILE
     - Texture image address tracking via SET_TEXTURE_IMAGE
-    - Ready for texture sampling implementation
+    - Texture sampling for RGBA16 and RGBA32 formats
+    - Ready for textured triangle rendering
   - **Not implemented**: 
-    - Actual texture sampling and filtering
-    - Textured triangle rasterization (only flat/shaded triangles)
+    - Textured triangle rasterization (texture sampling works but not integrated with triangle rendering yet)
+    - Advanced texture formats (CI, IA, I)
     - Anti-aliasing and blending
     - Perspective-correct texture mapping
     - Display list triangle commands (API exists but not wired to command processor)
     - Most advanced rendering commands
   - Can render 3D wireframe and flat-shaded graphics
-  - Full game graphics require texture sampling, RSP display list parsing, and additional RDP features
+  - Full game graphics require textured triangle rendering, RSP display list parsing, and additional RDP features
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
@@ -622,19 +622,19 @@ For N64 games, the standard controller mappings apply with these button equivale
     - Microcode detection (F3DEX, F3DEX2, Audio)
     - Vertex buffer management (32 vertices)
     - Full matrix transformation pipeline (projection, modelview, viewport)
+    - **10-level matrix stack** with push/pop operations (G_MTX, G_POPMTX)
     - Display list parsing with command execution
-    - Matrix loading (G_MTX) with LOAD/MUL modes
+    - Matrix loading (G_MTX) with LOAD/MUL/PUSH modes
     - Geometry mode control (G_GEOMETRYMODE)
     - Triangle rendering commands (G_TRI1, G_TRI2, G_QUAD)
     - Display list branching (G_DL) for nested lists
+    - **Conditional branching (G_BRANCH_Z)** for Z-buffer-based culling
     - RDP command passthrough (0xE0-0xFF range)
     - Vertex transformation with perspective projection
     - RDP triangle command generation
   - ⚠️ **Limitations**:
-    - Matrix stack limited (tracks pointer but no full 10-level stack)
     - No lighting calculations
     - No texture coordinate generation
-    - Conditional branching (G_BRANCH_Z) not implemented
     - Some advanced F3DEX2 commands missing
 - **Audio**: Audio interface not implemented - silent gameplay
 - **Input**: Controller infrastructure complete, needs frontend integration
@@ -644,7 +644,7 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Frontend keyboard/gamepad mapping not yet connected
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP can now parse display lists, transform vertices, and generate RDP commands. Next steps: texture mapping (TMEM), lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics.
+- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. TMEM texture loading fully implemented. Next steps: textured triangle rendering, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics.
 
 ## Troubleshooting
 
