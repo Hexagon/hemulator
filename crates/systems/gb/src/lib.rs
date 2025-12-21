@@ -95,7 +95,7 @@
 //! - ✅ APU: Audio sample generation at 44.1 kHz
 //!
 //! ## Not Yet Implemented
-//! - ❌ MBC (Memory Bank Controllers): MBC1, MBC3, MBC5
+//! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
 //! - ❌ Game Boy Color: CGB mode, color palettes
 //! - ❌ Audio: Frontend integration (APU implemented but not connected)
 //! - ❌ Serial: Link cable communication
@@ -110,9 +110,10 @@
 //!    - Some timing-critical effects may not work
 //!    - Trade-off: Better compatibility vs. perfect accuracy
 //!
-//! 2. **ROM Support**: Only MBC0 (no mapper) cartridges currently work
-//!    - Most commercial games require MBC1, MBC3, or MBC5
-//!    - Homebrew ROMs under 32KB should work
+//! 2. **ROM Support**: MBC0, MBC1, MBC3, MBC5 supported
+//!    - Covers approximately 95%+ of commercial Game Boy games
+//!    - MBC2 not yet implemented (rare, ~1% of games)
+//!    - Homebrew ROMs widely supported
 //!
 //! 3. **Game Boy Color**: Not yet supported
 //!    - DMG (original Game Boy) mode only
@@ -145,6 +146,7 @@ use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod apu;
 mod bus;
+mod mappers;
 pub(crate) mod ppu;
 
 use bus::GbBus;

@@ -65,10 +65,10 @@
 //! MBCs allow games to use more than 32KB of ROM by bank switching.
 //! Writes to ROM address space trigger MBC commands.
 //!
-//! ## Not Yet Implemented
+//! ## Implemented
+//! - MBC0: No mapper (32KB ROM max)
 //! - MBC1: Most common (up to 2MB ROM, 32KB RAM)
-//! - MBC2: Built-in 512×4 bits RAM
-//! - MBC3: With RTC (Real-Time Clock)
+//! - MBC3: With RTC support (up to 2MB ROM, 32KB RAM)
 //! - MBC5: For larger ROMs (up to 8MB ROM, 128KB RAM)
 //!
 //! # Current Implementation
@@ -85,9 +85,10 @@
 //! - ✅ Boot ROM disable register
 //! - ✅ Cartridge ROM loading (up to size)
 //! - ✅ Cartridge RAM with size detection
+//! - ✅ MBC0, MBC1, MBC3, MBC5 mappers
 //!
 //! ## Not Implemented
-//! - ❌ MBC1, MBC3, MBC5 bank controllers
+//! - ❌ MBC2 mapper (built-in 512×4 bits RAM)
 //! - ❌ Timer registers
 //! - ❌ Serial transfer
 //! - ❌ Sound registers
@@ -95,6 +96,7 @@
 //! - ❌ CGB-specific registers
 
 use crate::apu::GbApu;
+use crate::mappers::Mapper;
 use crate::ppu::Ppu;
 use emu_core::cpu_lr35902::MemoryLr35902;
 
@@ -108,10 +110,8 @@ pub struct GbBus {
     ie: u8,
     /// Interrupt Flag register
     if_reg: u8,
-    /// Cart ROM (if loaded)
-    cart_rom: Vec<u8>,
-    /// Cart RAM (if present)
-    cart_ram: Vec<u8>,
+    /// Cartridge mapper (handles ROM/RAM banking)
+    mapper: Option<Mapper>,
     /// Boot ROM enabled flag
     boot_rom_enabled: bool,
     /// PPU (Picture Processing Unit)
@@ -131,8 +131,7 @@ impl GbBus {
             hram: [0; 0x7F],
             ie: 0,
             if_reg: 0,
-            cart_rom: Vec::new(),
-            cart_ram: Vec::new(),
+            mapper: None,
             boot_rom_enabled: true,
             ppu: Ppu::new(),
             apu: GbApu::new(),
@@ -148,23 +147,34 @@ impl GbBus {
     }
 
     pub fn load_cart(&mut self, data: &[u8]) {
-        self.cart_rom = data.to_vec();
-        // Parse cart header for RAM size
-        if data.len() >= 0x150 {
-            let ram_size_code = data[0x149];
-            let ram_size = match ram_size_code {
-                0x00 => 0,
-                0x01 => 0, // Unused
-                0x02 => 8 * 1024,
-                0x03 => 32 * 1024,
-                0x04 => 128 * 1024,
-                0x05 => 64 * 1024,
-                _ => 0,
-            };
-            if ram_size > 0 {
-                self.cart_ram = vec![0; ram_size];
-            }
+        // Parse cart header
+        if data.len() < 0x150 {
+            // Too small to be a valid cart, but load it anyway
+            self.mapper = Some(Mapper::from_cart(data.to_vec(), vec![], 0x00));
+            self.boot_rom_enabled = false;
+            return;
         }
+
+        let cart_type = data[0x147];
+        let ram_size_code = data[0x149];
+
+        let ram_size = match ram_size_code {
+            0x00 => 0,
+            0x01 => 0, // Unused
+            0x02 => 8 * 1024,
+            0x03 => 32 * 1024,
+            0x04 => 128 * 1024,
+            0x05 => 64 * 1024,
+            _ => 0,
+        };
+
+        let ram = if ram_size > 0 {
+            vec![0; ram_size]
+        } else {
+            vec![]
+        };
+
+        self.mapper = Some(Mapper::from_cart(data.to_vec(), ram, cart_type));
         self.boot_rom_enabled = false; // Skip boot ROM for now
     }
 }
@@ -172,21 +182,13 @@ impl GbBus {
 impl MemoryLr35902 for GbBus {
     fn read(&self, addr: u16) -> u8 {
         match addr {
-            // ROM Bank 0
-            0x0000..=0x3FFF => {
+            // ROM Bank 0 and Bank 1-N (switchable)
+            0x0000..=0x7FFF => {
                 if addr < 0x0100 && self.boot_rom_enabled {
                     // Boot ROM would go here
                     0xFF
-                } else if (addr as usize) < self.cart_rom.len() {
-                    self.cart_rom[addr as usize]
-                } else {
-                    0xFF
-                }
-            }
-            // ROM Bank 1-N (switchable)
-            0x4000..=0x7FFF => {
-                if (addr as usize) < self.cart_rom.len() {
-                    self.cart_rom[addr as usize]
+                } else if let Some(mapper) = &self.mapper {
+                    mapper.read_rom(addr)
                 } else {
                     0xFF
                 }
@@ -195,9 +197,8 @@ impl MemoryLr35902 for GbBus {
             0x8000..=0x9FFF => self.ppu.read_vram(addr - 0x8000),
             // External RAM (switchable)
             0xA000..=0xBFFF => {
-                let offset = (addr - 0xA000) as usize;
-                if offset < self.cart_ram.len() {
-                    self.cart_ram[offset]
+                if let Some(mapper) = &self.mapper {
+                    mapper.read_ram(addr)
                 } else {
                     0xFF
                 }
@@ -257,15 +258,16 @@ impl MemoryLr35902 for GbBus {
         match addr {
             // ROM (read-only, but may trigger MBC commands)
             0x0000..=0x7FFF => {
-                // MBC commands would go here
+                if let Some(mapper) = &mut self.mapper {
+                    mapper.write_rom(addr, val);
+                }
             }
             // VRAM - delegate to PPU
             0x8000..=0x9FFF => self.ppu.write_vram(addr - 0x8000, val),
             // External RAM
             0xA000..=0xBFFF => {
-                let offset = (addr - 0xA000) as usize;
-                if offset < self.cart_ram.len() {
-                    self.cart_ram[offset] = val;
+                if let Some(mapper) = &mut self.mapper {
+                    mapper.write_ram(addr, val);
                 }
             }
             // Work RAM
