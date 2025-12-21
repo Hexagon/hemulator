@@ -4,9 +4,9 @@ mod save_state;
 mod settings;
 mod ui_render;
 pub mod video_processor;
+pub mod window_backend;
 
 use emu_core::{types::Frame, System};
-use minifb::{Key, Window, WindowOptions};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -16,6 +16,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
+use window_backend::{string_to_key, Key, Sdl2Backend, WindowBackend};
 
 // System wrapper enum to support multiple emulated systems
 #[allow(clippy::large_enum_variant)]
@@ -164,55 +165,54 @@ impl EmulatorSystem {
         }
     }
 
-    fn handle_keyboard(&mut self, key: minifb::Key, pressed: bool) {
+    #[allow(dead_code)]
+    fn handle_keyboard(&mut self, key: Key, pressed: bool) {
         if let EmulatorSystem::PC(sys) = self {
-            // Map minifb keys to PC scancodes
+            // Map keys to PC scancodes
             let scancode = match key {
-                minifb::Key::A => Some(emu_pc::SCANCODE_A),
-                minifb::Key::B => Some(emu_pc::SCANCODE_B),
-                minifb::Key::C => Some(emu_pc::SCANCODE_C),
-                minifb::Key::D => Some(emu_pc::SCANCODE_D),
-                minifb::Key::E => Some(emu_pc::SCANCODE_E),
-                minifb::Key::F => Some(emu_pc::SCANCODE_F),
-                minifb::Key::G => Some(emu_pc::SCANCODE_G),
-                minifb::Key::H => Some(emu_pc::SCANCODE_H),
-                minifb::Key::I => Some(emu_pc::SCANCODE_I),
-                minifb::Key::J => Some(emu_pc::SCANCODE_J),
-                minifb::Key::K => Some(emu_pc::SCANCODE_K),
-                minifb::Key::L => Some(emu_pc::SCANCODE_L),
-                minifb::Key::M => Some(emu_pc::SCANCODE_M),
-                minifb::Key::N => Some(emu_pc::SCANCODE_N),
-                minifb::Key::O => Some(emu_pc::SCANCODE_O),
-                minifb::Key::P => Some(emu_pc::SCANCODE_P),
-                minifb::Key::Q => Some(emu_pc::SCANCODE_Q),
-                minifb::Key::R => Some(emu_pc::SCANCODE_R),
-                minifb::Key::S => Some(emu_pc::SCANCODE_S),
-                minifb::Key::T => Some(emu_pc::SCANCODE_T),
-                minifb::Key::U => Some(emu_pc::SCANCODE_U),
-                minifb::Key::V => Some(emu_pc::SCANCODE_V),
-                minifb::Key::W => Some(emu_pc::SCANCODE_W),
-                minifb::Key::X => Some(emu_pc::SCANCODE_X),
-                minifb::Key::Y => Some(emu_pc::SCANCODE_Y),
-                minifb::Key::Z => Some(emu_pc::SCANCODE_Z),
-                minifb::Key::Key0 => Some(emu_pc::SCANCODE_0),
-                minifb::Key::Key1 => Some(emu_pc::SCANCODE_1),
-                minifb::Key::Key2 => Some(emu_pc::SCANCODE_2),
-                minifb::Key::Key3 => Some(emu_pc::SCANCODE_3),
-                minifb::Key::Key4 => Some(emu_pc::SCANCODE_4),
-                minifb::Key::Key5 => Some(emu_pc::SCANCODE_5),
-                minifb::Key::Key6 => Some(emu_pc::SCANCODE_6),
-                minifb::Key::Key7 => Some(emu_pc::SCANCODE_7),
-                minifb::Key::Key8 => Some(emu_pc::SCANCODE_8),
-                minifb::Key::Key9 => Some(emu_pc::SCANCODE_9),
-                minifb::Key::Space => Some(emu_pc::SCANCODE_SPACE),
-                minifb::Key::Enter => Some(emu_pc::SCANCODE_ENTER),
-                minifb::Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
-                minifb::Key::Tab => Some(emu_pc::SCANCODE_TAB),
-                minifb::Key::LeftShift | minifb::Key::RightShift => {
-                    Some(emu_pc::SCANCODE_LEFT_SHIFT)
-                }
-                minifb::Key::LeftCtrl | minifb::Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
-                minifb::Key::LeftAlt | minifb::Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
+                Key::A => Some(emu_pc::SCANCODE_A),
+                Key::B => Some(emu_pc::SCANCODE_B),
+                Key::C => Some(emu_pc::SCANCODE_C),
+                Key::D => Some(emu_pc::SCANCODE_D),
+                Key::E => Some(emu_pc::SCANCODE_E),
+                Key::F => Some(emu_pc::SCANCODE_F),
+                Key::G => Some(emu_pc::SCANCODE_G),
+                Key::H => Some(emu_pc::SCANCODE_H),
+                Key::I => Some(emu_pc::SCANCODE_I),
+                Key::J => Some(emu_pc::SCANCODE_J),
+                Key::K => Some(emu_pc::SCANCODE_K),
+                Key::L => Some(emu_pc::SCANCODE_L),
+                Key::M => Some(emu_pc::SCANCODE_M),
+                Key::N => Some(emu_pc::SCANCODE_N),
+                Key::O => Some(emu_pc::SCANCODE_O),
+                Key::P => Some(emu_pc::SCANCODE_P),
+                Key::Q => Some(emu_pc::SCANCODE_Q),
+                Key::R => Some(emu_pc::SCANCODE_R),
+                Key::S => Some(emu_pc::SCANCODE_S),
+                Key::T => Some(emu_pc::SCANCODE_T),
+                Key::U => Some(emu_pc::SCANCODE_U),
+                Key::V => Some(emu_pc::SCANCODE_V),
+                Key::W => Some(emu_pc::SCANCODE_W),
+                Key::X => Some(emu_pc::SCANCODE_X),
+                Key::Y => Some(emu_pc::SCANCODE_Y),
+                Key::Z => Some(emu_pc::SCANCODE_Z),
+                Key::Key0 => Some(emu_pc::SCANCODE_0),
+                Key::Key1 => Some(emu_pc::SCANCODE_1),
+                Key::Key2 => Some(emu_pc::SCANCODE_2),
+                Key::Key3 => Some(emu_pc::SCANCODE_3),
+                Key::Key4 => Some(emu_pc::SCANCODE_4),
+                Key::Key5 => Some(emu_pc::SCANCODE_5),
+                Key::Key6 => Some(emu_pc::SCANCODE_6),
+                Key::Key7 => Some(emu_pc::SCANCODE_7),
+                Key::Key8 => Some(emu_pc::SCANCODE_8),
+                Key::Key9 => Some(emu_pc::SCANCODE_9),
+                Key::Space => Some(emu_pc::SCANCODE_SPACE),
+                Key::Enter => Some(emu_pc::SCANCODE_ENTER),
+                Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
+                Key::Tab => Some(emu_pc::SCANCODE_TAB),
+                Key::LeftShift | Key::RightShift => Some(emu_pc::SCANCODE_LEFT_SHIFT),
+                Key::LeftCtrl | Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
+                Key::LeftAlt | Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
                 _ => None,
             };
 
@@ -294,55 +294,6 @@ impl EmulatorSystem {
     }
 }
 
-fn string_to_key(s: &str) -> Option<Key> {
-    // Return None for empty strings (unmapped keys)
-    if s.is_empty() {
-        return None;
-    }
-
-    match s {
-        "Z" => Some(Key::Z),
-        "X" => Some(Key::X),
-        "A" => Some(Key::A),
-        "B" => Some(Key::B),
-        "C" => Some(Key::C),
-        "D" => Some(Key::D),
-        "E" => Some(Key::E),
-        "F" => Some(Key::F),
-        "G" => Some(Key::G),
-        "H" => Some(Key::H),
-        "I" => Some(Key::I),
-        "J" => Some(Key::J),
-        "K" => Some(Key::K),
-        "L" => Some(Key::L),
-        "M" => Some(Key::M),
-        "N" => Some(Key::N),
-        "O" => Some(Key::O),
-        "P" => Some(Key::P),
-        "Q" => Some(Key::Q),
-        "R" => Some(Key::R),
-        "S" => Some(Key::S),
-        "T" => Some(Key::T),
-        "U" => Some(Key::U),
-        "V" => Some(Key::V),
-        "W" => Some(Key::W),
-        "Y" => Some(Key::Y),
-        "LeftShift" => Some(Key::LeftShift),
-        "RightShift" => Some(Key::RightShift),
-        "LeftCtrl" => Some(Key::LeftCtrl),
-        "RightCtrl" => Some(Key::RightCtrl),
-        "Enter" => Some(Key::Enter),
-        "Space" => Some(Key::Space),
-        "Up" => Some(Key::Up),
-        "Down" => Some(Key::Down),
-        "Left" => Some(Key::Left),
-        "Right" => Some(Key::Right),
-        "LeftBracket" => Some(Key::LeftBracket),
-        "RightBracket" => Some(Key::RightBracket),
-        _ => None,
-    }
-}
-
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
     // Map key to button based on mapping
     if Some(key) == string_to_key(&mapping.a) {
@@ -367,7 +318,7 @@ fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8>
 }
 
 /// Get controller state for a player from current keyboard state
-fn get_controller_state(window: &Window, mapping: &settings::KeyMapping) -> u8 {
+fn get_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMapping) -> u8 {
     let keys_to_check: Vec<Key> = vec![
         string_to_key(&mapping.a),
         string_to_key(&mapping.b),
@@ -680,25 +631,21 @@ fn main() {
     let window_width = settings.window_width.max(width);
     let window_height = settings.window_height.max(height);
 
-    let mut window = match Window::new(
+    // Determine whether to use OpenGL or software rendering
+    let use_opengl = settings.video_backend == "opengl";
+
+    let mut window: Box<dyn WindowBackend> = match Sdl2Backend::new(
         "Hemulator - Multi-System Emulator",
         window_width,
         window_height,
-        WindowOptions {
-            resize: true,
-            ..WindowOptions::default()
-        },
+        use_opengl,
     ) {
-        Ok(w) => w,
+        Ok(w) => Box::new(w),
         Err(e) => {
             eprintln!("Failed to create window: {}", e);
             return;
         }
     };
-
-    // Note: minifb 0.25 doesn't provide a way to programmatically set window size
-    // The window uses default sizing, but users can resize it freely via OS controls
-    // The size is tracked and saved in settings (could be used with future minifb versions)
 
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
@@ -795,8 +742,11 @@ fn main() {
     }
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Poll events at the start of each frame
+        window.poll_events();
+
         // Toggle help overlay (F1)
-        if window.is_key_pressed(Key::F1, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::F1, false) {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
@@ -805,7 +755,7 @@ fn main() {
         }
 
         // Toggle speed selector (F2)
-        if window.is_key_pressed(Key::F2, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::F2, false) {
             show_speed_selector = !show_speed_selector;
             show_help = false; // Close help if open
             show_slot_selector = false; // Close slot selector if open
@@ -814,7 +764,7 @@ fn main() {
         }
 
         // Toggle debug overlay (F10)
-        if window.is_key_pressed(Key::F10, minifb::KeyRepeat::No) && rom_loaded {
+        if window.is_key_pressed(Key::F10, false) && rom_loaded {
             show_debug = !show_debug;
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open
@@ -822,8 +772,12 @@ fn main() {
         }
 
         // Cycle CRT filter (F11)
-        if window.is_key_pressed(Key::F11, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::F11, false) {
             settings.crt_filter = settings.crt_filter.next();
+            // Update the backend's filter setting
+            if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+                sdl2_backend.set_filter(settings.crt_filter);
+            }
             if let Err(e) = settings.save() {
                 eprintln!("Warning: Failed to save CRT filter setting: {}", e);
             }
@@ -835,17 +789,17 @@ fn main() {
             // Check for speed selection (0-5) or cancel (ESC)
             let mut selected_speed: Option<f64> = None;
 
-            if window.is_key_pressed(Key::Key0, minifb::KeyRepeat::No) {
+            if window.is_key_pressed(Key::Key0, false) {
                 selected_speed = Some(0.0); // Pause
-            } else if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key1, false) {
                 selected_speed = Some(0.25);
-            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key2, false) {
                 selected_speed = Some(0.5);
-            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key3, false) {
                 selected_speed = Some(1.0);
-            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key4, false) {
                 selected_speed = Some(2.0);
-            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key5, false) {
                 selected_speed = Some(10.0);
             }
 
@@ -864,15 +818,15 @@ fn main() {
             // Check for slot selection (1-5) or cancel (ESC)
             let mut selected_slot: Option<u8> = None;
 
-            if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+            if window.is_key_pressed(Key::Key1, false) {
                 selected_slot = Some(1);
-            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key2, false) {
                 selected_slot = Some(2);
-            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key3, false) {
                 selected_slot = Some(3);
-            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key4, false) {
                 selected_slot = Some(4);
-            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key5, false) {
                 selected_slot = Some(5);
             }
 
@@ -925,23 +879,23 @@ fn main() {
             // Check for mount point selection
             let mut selected_index: Option<usize> = None;
 
-            if window.is_key_pressed(Key::Key1, minifb::KeyRepeat::No) {
+            if window.is_key_pressed(Key::Key1, false) {
                 selected_index = Some(0);
-            } else if window.is_key_pressed(Key::Key2, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key2, false) {
                 selected_index = Some(1);
-            } else if window.is_key_pressed(Key::Key3, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key3, false) {
                 selected_index = Some(2);
-            } else if window.is_key_pressed(Key::Key4, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key4, false) {
                 selected_index = Some(3);
-            } else if window.is_key_pressed(Key::Key5, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key5, false) {
                 selected_index = Some(4);
-            } else if window.is_key_pressed(Key::Key6, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key6, false) {
                 selected_index = Some(5);
-            } else if window.is_key_pressed(Key::Key7, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key7, false) {
                 selected_index = Some(6);
-            } else if window.is_key_pressed(Key::Key8, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key8, false) {
                 selected_index = Some(7);
-            } else if window.is_key_pressed(Key::Key9, minifb::KeyRepeat::No) {
+            } else if window.is_key_pressed(Key::Key9, false) {
                 selected_index = Some(8);
             }
 
@@ -1032,13 +986,13 @@ fn main() {
         }
 
         // Check for reset key (F12)
-        if window.is_key_pressed(Key::F12, minifb::KeyRepeat::No) && rom_loaded {
+        if window.is_key_pressed(Key::F12, false) && rom_loaded {
             sys.reset();
             println!("System reset");
         }
 
         // Check for open ROM dialog (F3)
-        if window.is_key_pressed(Key::F3, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::F3, false) {
             let mount_points = sys.mount_points();
 
             // If system has only one mount point, go directly to file dialog
@@ -1087,7 +1041,7 @@ fn main() {
         }
 
         // Check for screenshot key (F4)
-        if window.is_key_pressed(Key::F4, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::F4, false) {
             match save_screenshot(&buffer, width, height, sys.system_name()) {
                 Ok(path) => println!("Screenshot saved to: {}", path),
                 Err(e) => eprintln!("Failed to save screenshot: {}", e),
@@ -1095,7 +1049,7 @@ fn main() {
         }
 
         // F5 - Show save state slot selector
-        if rom_loaded && window.is_key_pressed(Key::F5, minifb::KeyRepeat::No) {
+        if rom_loaded && window.is_key_pressed(Key::F5, false) {
             if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "SAVE";
@@ -1106,7 +1060,7 @@ fn main() {
         }
 
         // F6 - Show load state slot selector
-        if rom_loaded && window.is_key_pressed(Key::F6, minifb::KeyRepeat::No) {
+        if rom_loaded && window.is_key_pressed(Key::F6, false) {
             if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "LOAD";
@@ -1126,28 +1080,15 @@ fn main() {
             && !show_speed_selector
             && settings.emulation_speed > 0.0
         {
-            // Handle keyboard input for PC system (full keyboard passthrough)
-            if let EmulatorSystem::PC(_) = &sys {
-                // Check if host modifier key is pressed
-                let host_modifier_pressed = string_to_key(&settings.input.host_modifier)
-                    .map(|k| window.is_key_down(k))
-                    .unwrap_or(false);
-
-                if !host_modifier_pressed {
-                    // Normal mode: pass all keys to PC
-                    let keys = window.get_keys_pressed(minifb::KeyRepeat::Yes);
-                    for key in keys {
-                        sys.handle_keyboard(key, true);
-                    }
-                    // Note: Key releases are not easily tracked with minifb's API
-                    // The keyboard buffer in PC system handles this with timeouts
-                }
-                // If host modifier is pressed, function keys are handled by the GUI above
-            } else {
+            // Handle keyboard input for PC system
+            // PC keyboard events are handled via the handle_keyboard method in EmulatorSystem
+            // which is called from the event loop based on key press/release events.
+            // For other systems, we poll controller state.
+            if !matches!(&sys, EmulatorSystem::PC(_)) {
                 // Controller-based systems (NES, GB, Atari, etc.)
                 // Get controller state for each player
-                let ctrl0 = get_controller_state(&window, &settings.input.player1);
-                let ctrl1 = get_controller_state(&window, &settings.input.player2);
+                let ctrl0 = get_controller_state(window.as_ref(), &settings.input.player1);
+                let ctrl1 = get_controller_state(window.as_ref(), &settings.input.player2);
                 // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
 
                 sys.set_controller(0, ctrl0);
