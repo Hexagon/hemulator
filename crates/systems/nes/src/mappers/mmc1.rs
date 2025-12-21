@@ -291,7 +291,7 @@ mod tests {
 
         // Switch to 32KB mode (control bits [3:2] = 00 or 01)
         // Write 0x00 to control: mirroring=single lower, CHR=8KB, PRG=32KB
-        for i in 0..5 {
+        for _i in 0..5 {
             mmc1.write_prg(0x8000, 0, &mut ppu);
         }
         assert_eq!(mmc1.control, 0x00);

@@ -12,6 +12,14 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
   - Build the workspace (`cargo build --workspace`).
   - Run unit/integration tests (`cargo test`).
   - Optionally run benchmarks in a separate job.
+- **Pre-commit checks** (REQUIRED before committing any code):
+  1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
+  2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
+  3. **Build**: `cargo build --workspace` - Must compile successfully
+  4. **Tests**: `cargo test --workspace` - All tests must pass
+  - Run these checks in order and fix any issues before committing
+  - If any check fails, fix the issues and re-run all checks
+  - These same checks run in CI, so ensuring they pass locally prevents CI failures
 - **Implementation philosophy**:
   - **Always prefer full, tested implementations** of each module/component, even if all parts aren't immediately used
   - **Especially important** when other not-yet-implemented systems will use the features
