@@ -307,9 +307,12 @@ The emulator supports the following cartridge banking schemes:
 - 160x192 resolution
 
 **Known Limitations**:
-- Audio not yet implemented (sound registers present but silent)
-- Sprite/player graphics not yet rendered (playfield only)
-- Some advanced cartridge formats not supported
+- **Audio**: Registers stored but waveform synthesis not yet implemented (silent gameplay)
+- **Player/Missile Sizing**: NUSIZ registers stored but size/duplication modes not applied
+- **Horizontal Motion**: HMxx registers stored but fine positioning not applied
+- **Collision Detection**: Registers exist but always return 0
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **Banking**: Most common schemes supported; some exotic formats (DPC, FE, 3F, E0) not yet implemented
 
 **Controls**: The Atari 2600 joystick is mapped to the same keyboard layout as NES:
 - Arrow keys = Joystick directions
@@ -319,9 +322,35 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: Work in progress (skeleton implementation)
+**Status**: Functional implementation with PPU, joypad, and rendering
+
+**Coverage**: Homebrew ROMs and simple games (32KB ROMs, MBC0 only)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
+
+**Features**:
+- Full PPU (Picture Processing Unit) rendering: background, window, sprites
+- Resolution: 160x144 pixels (DMG mode)
+- Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority
+- Joypad input with matrix selection
+- Save states (F5/F6)
+- Frame-based timing (~59.73 Hz)
+
+**Known Limitations**:
+- **MBC Support**: Only MBC0 (no mapper) - works with 32KB ROMs only. MBC1/MBC3/MBC5 needed for 95%+ of commercial games
+- **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
+- **Audio**: APU implementation exists but not integrated with frontend (silent gameplay)
+- **Timer**: Timer registers not implemented - games relying on timer interrupts won't work
+- **Interrupts**: Registers exist but interrupt handling not fully wired
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for homebrew and simple games
+- **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit
+
+**Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
+- Arrow keys = D-pad
+- Z = A button
+- X = B button
+- Enter = Start
+- Left Shift = Select
 
 ## Troubleshooting
 
