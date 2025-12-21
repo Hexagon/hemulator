@@ -445,7 +445,7 @@ impl Rdp {
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
 
             // Execute command
-            self.execute_command(cmd_id, cmd_word0, cmd_word1);
+            self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1);
 
             // Move to next command (all RDP commands are 8 bytes)
             addr += 8;
@@ -458,7 +458,7 @@ impl Rdp {
     }
 
     /// Execute a single RDP command
-    fn execute_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
+    pub fn execute_rdp_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
         match cmd_id {
             // Triangle commands (0x08-0x0F)
             // Note: Real N64 triangle commands have complex formats with edge coefficients
