@@ -448,4 +448,28 @@ mod tests {
             160 * 192
         );
     }
+
+    #[test]
+    fn test_audio_generation() {
+        let mut sys = Atari2600System::new();
+
+        // Load the test ROM
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+        sys.reset();
+
+        // Run a few frames to get the system started
+        for _ in 0..10 {
+            sys.step_frame().unwrap();
+        }
+
+        // Generate audio samples
+        let samples = sys.get_audio_samples(1000);
+
+        // Verify we got the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // Audio system should be working - just verify it doesn't crash
+        // and returns valid i16 samples (the type system already ensures this)
+    }
 }
