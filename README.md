@@ -36,6 +36,20 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - 🧪 Experimental - Proof of concept or early stage
 - ❌ Not implemented - Component not yet available
 
+### Which System Should I Use?
+
+**Ready for gaming:**
+- ✅ **NES** - Best experience, ~90% game compatibility, full audio
+- ✅ **Atari 2600** - Complete implementation, all features working
+
+**Playable but limited:**
+- ⚠️ **Game Boy** - Graphics work great, but no sound or timer (most games playable)
+
+**Not ready for gaming:**
+- 🚧 **SNES** - Infrastructure only, very limited functionality
+- 🚧 **N64** - Development in progress, can render 3D graphics but few games work
+- 🧪 **PC/DOS** - Experimental only, black screen
+
 ## For Users
 
 Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See [MANUAL.md](MANUAL.md) for complete usage instructions.

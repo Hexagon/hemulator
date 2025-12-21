@@ -279,7 +279,16 @@ Contains reusable CPU implementations and common traits:
 
 ### System Modules (`crates/systems/`)
 
-System-specific implementations that use core components:
+System-specific implementations that use core components. Current implementation status:
+
+- ✅ **NES** - Fully working (~90% game coverage)
+- ✅ **Atari 2600** - Fully working (complete TIA/RIOT/audio)
+- ⚠️ **Game Boy** - Functional (graphics/input work, missing audio/timer)
+- 🚧 **SNES** - Basic (CPU only, minimal PPU)
+- 🚧 **N64** - In development (3D rendering functional)
+- 🧪 **PC** - Experimental (COM/EXE loading only)
+
+Detailed implementation notes:
 
 - **NES (`emu_nes`)**: 
   - Uses `cpu_6502` from core with NES-specific bus implementation
