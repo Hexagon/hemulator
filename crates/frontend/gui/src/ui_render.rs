@@ -528,6 +528,55 @@ pub fn create_n64_debug_overlay(
     buffer
 }
 
+/// Create a debug info overlay for Atari 2600
+#[allow(clippy::too_many_arguments)]
+pub fn create_atari2600_debug_overlay(
+    width: usize,
+    height: usize,
+    rom_size: usize,
+    banking_scheme: &str,
+    current_bank: usize,
+    scanline: u16,
+    fps: f64,
+    video_backend: &str,
+) -> Vec<u32> {
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let size_line = format!("ROM Size: {} bytes", rom_size);
+    let bank_line = format!("Banking: {} (cur {})", banking_scheme, current_bank);
+    let scan_line = format!("Scanline: {}", scanline);
+    let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO - Atari 2600",
+        "",
+        &size_line,
+        &bank_line,
+        &scan_line,
+        &fps_line,
+        &video_line,
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
 /// Create a mount point selection overlay
 pub fn create_mount_point_selector(
     width: usize,

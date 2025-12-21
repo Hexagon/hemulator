@@ -241,6 +241,12 @@ impl EmulatorSystem {
         }
     }
 
+    fn get_debug_info_atari2600(&self) -> Option<emu_atari2600::DebugInfo> {
+        match self {
+            EmulatorSystem::Atari2600(sys) => sys.debug_info(),
+            _ => None,
+        }
+    }
     fn get_runtime_stats(&self) -> emu_nes::RuntimeStats {
         match self {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
@@ -991,6 +997,19 @@ fn main() {
                     debug_info.chr_banks,
                     current_fps,
                     sys.get_runtime_stats(),
+                    &settings.video_backend,
+                ));
+            }
+            // Try Atari 2600 debug info
+            else if let Some(debug_info) = sys.get_debug_info_atari2600() {
+                debug_overlay = Some(ui_render::create_atari2600_debug_overlay(
+                    width,
+                    height,
+                    debug_info.rom_size,
+                    &debug_info.banking_scheme,
+                    debug_info.current_bank,
+                    debug_info.scanline,
+                    current_fps,
                     &settings.video_backend,
                 ));
             }
