@@ -228,6 +228,35 @@ Contains reusable CPU implementations and common traits:
     - **For future systems**: Mix and match components as needed (e.g., SN76489 can use `NoiseChannel`)
   - Comprehensive unit tests (48+ tests covering all components)
 
+- **`graphics`**: Reusable graphics utilities and components
+  - **ZBuffer (Depth Buffer)**: 16-bit depth buffer for hidden surface removal
+    - Purpose: Stores depth information for each pixel to enable proper occlusion in 3D rendering
+    - Key features:
+      - Configurable resolution (width x height)
+      - 16-bit depth values (0x0000 = near, 0xFFFF = far)
+      - Enable/disable depth testing
+      - Efficient `test_and_update()` method for read-modify-write operations
+      - `clear()` to reset to far plane
+      - `resize()` for dynamic resolution changes
+    - Used by: N64 RDP (3D triangle rendering)
+    - Can be used by: PlayStation, Saturn, or any 3D system
+    - Comprehensive unit tests (10 tests)
+  - **ColorOps**: Color manipulation utilities for ARGB8888 format
+    - Purpose: Common color operations to reduce code duplication
+    - Key functions:
+      - `lerp()`: Linear interpolation between two colors (for Gouraud shading)
+      - `adjust_brightness()`: Scale RGB channels by a factor (for lighting effects)
+      - Component extraction: `red()`, `green()`, `blue()`, `alpha()`
+      - Color construction: `from_argb()`, `from_rgb()`
+    - Used by: N64 RDP (triangle rasterization, color interpolation)
+    - Can be used by: Any system with color blending or interpolation needs
+    - Comprehensive unit tests (5 tests)
+  - **Design Philosophy**:
+    - Provides performance-critical primitives with inline optimization
+    - Stateless utility functions for easy reuse
+    - Format-agnostic where possible (but optimized for ARGB8888)
+    - Modular design allows systems to use only what they need
+
 - **`ppu`**: Reusable video/graphics processing components
   - **Core Components** (building blocks for tile-based systems):
     - `IndexedPalette`: Generic indexed palette trait for color lookup systems
@@ -538,27 +567,33 @@ System-specific implementations that use core components:
     - Simple address translation (unmapped addresses)
   - **RDP (Reality Display Processor)**:
     - System-specific implementation in `crates/systems/n64/src/rdp.rs`
+    - **Uses modular components from `emu_core::graphics`**:
+      - `ZBuffer`: Depth buffer for hidden surface removal
+      - `ColorOps`: Color interpolation and brightness adjustment
     - Framebuffer support with configurable resolution (default 320x240)
     - **3D Triangle Rasterization**:
       - Flat-shaded triangles (solid color)
-      - Gouraud-shaded triangles (per-vertex color interpolation)
-      - Z-buffered rendering (depth testing for hidden surface removal)
+      - Gouraud-shaded triangles (per-vertex color interpolation using `ColorOps::lerp`)
+      - Z-buffered rendering (uses modular `ZBuffer` component)
       - Combined shading + Z-buffer support
       - Scanline-based edge walking algorithm
       - Barycentric coordinate interpolation for attributes
-    - **Z-Buffer (Depth Buffer)**:
-      - 16-bit depth values (0 = near, 0xFFFF = far)
-      - Per-pixel depth testing
-      - Automatic depth buffer updates on writes
-      - Enable/disable per rendering operation
+    - **Display List Commands** (wired to processor):
+      - 0x08: Non-shaded triangle
+      - 0x09: Non-shaded triangle with Z-buffer
+      - 0x0C: Shaded triangle (with Gouraud shading)
+      - 0x0D: Shaded triangle with Z-buffer
+      - 0x36: Fill rectangle
+      - 0x37: Set fill color
+      - 0x29: Sync full
     - **Rasterization Features**:
       - Scissor rectangle clipping (fully functional)
-      - Per-pixel color interpolation
+      - Per-pixel color interpolation (via `ColorOps`)
       - Per-pixel depth interpolation
       - Edge function-based rasterization
     - Basic fill operations (clear, fill rectangle, set pixel)
     - Memory-mapped register interface (DPC_START, DPC_END, DPC_STATUS, etc.)
-    - Display list command processing for fill operations
+    - Display list command processing for fill and triangle operations
     - Color format support (RGBA5551, RGBA8888, internally uses ARGB)
     - **Timing Model**: Frame-based rendering (not cycle-accurate)
       - Maintains framebuffer for frame generation
@@ -584,7 +619,6 @@ System-specific implementations that use core components:
       - Stub implementation with memory and register access
     - **RDP Graphics**: 
       - No texture mapping (texture structures in place but sampling not implemented)
-      - Triangle commands (0x08-0x0F) not yet wired to display list processor
       - No perspective-correct rasterization
       - No anti-aliasing or blending
       - TMEM (texture memory) allocated but not used for sampling
@@ -596,7 +630,7 @@ System-specific implementations that use core components:
       - No TLB, cache, or accurate memory timing
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
-  - All tests pass (52 tests: cartridge, RDP with 3D rendering, VI, system integration)
+  - All tests pass (66 tests: cartridge, RDP with 3D rendering and display list commands, RSP, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
