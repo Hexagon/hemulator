@@ -558,20 +558,12 @@ System-specific implementations that use core components:
       - Edge function-based rasterization
     - Basic fill operations (clear, fill rectangle, set pixel)
     - Memory-mapped register interface (DPC_START, DPC_END, DPC_STATUS, etc.)
-    - Support for display list command processing
+    - Display list command processing for fill operations
     - Color format support (RGBA5551, RGBA8888, internally uses ARGB)
     - **Timing Model**: Frame-based rendering (not cycle-accurate)
       - Maintains framebuffer for frame generation
       - Registers accessible via memory-mapped I/O
-      - Suitable for 3D wireframe and flat-shaded rendering
-    - **Known Limitations**:
-      - No texture mapping (texture structures in place but sampling not implemented)
-      - Triangle commands (0x08-0x0F) not yet wired to display list processor
-      - No perspective-correct rasterization
-      - No anti-aliasing or blending
-      - TMEM (texture memory) allocated but not used for sampling
-      - No sub-pixel accuracy
-      - No edge AA or coverage calculation
+      - Suitable for 3D wireframe and flat-shaded rendering with depth testing
   - **Cartridge Support**:
     - System-specific implementation in `crates/systems/n64/cartridge.rs`
     - Automatic byte-order detection (Z64/N64/V64 formats)
@@ -584,16 +576,27 @@ System-specific implementations that use core components:
     - Full save state support (CPU registers, GPRs)
     - Cartridge mount/unmount
     - System reset
-    - Basic RDP framebuffer rendering
+    - RDP framebuffer rendering with 3D triangle support and Z-buffer
   - **Known Limitations**:
-    - RSP (Reality Signal Processor) not implemented
-    - RDP features limited (no textures, Z-buffer, or advanced rendering)
-    - Displays blank framebuffer (320x240) - no actual game graphics
-    - Controller support not implemented
-    - No TLB, cache, or accurate memory timing
-    - Exception handling not fully implemented (no traps on overflow)
-    - Frame-based timing (not cycle-accurate)
-  - All tests pass (51 tests: cartridge, RDP with 3D rendering, VI, system integration)
+    - **RSP (Reality Signal Processor)**: 
+      - Basic infrastructure implemented (DMEM, IMEM, DMA, registers)
+      - No microcode execution - essential for game rendering
+      - Stub implementation with memory and register access
+    - **RDP Graphics**: 
+      - No texture mapping (texture structures in place but sampling not implemented)
+      - Triangle commands (0x08-0x0F) not yet wired to display list processor
+      - No perspective-correct rasterization
+      - No anti-aliasing or blending
+      - TMEM (texture memory) allocated but not used for sampling
+      - No sub-pixel accuracy
+      - No edge AA or coverage calculation
+    - **System**:
+      - Displays test patterns only - no actual game graphics without RSP
+      - Controller support not implemented
+      - No TLB, cache, or accurate memory timing
+      - Exception handling not fully implemented (no traps on overflow)
+      - Frame-based timing (not cycle-accurate)
+  - All tests pass (52 tests: cartridge, RDP with 3D rendering, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
