@@ -9,6 +9,8 @@ pub enum SystemType {
     GameBoy,
     Atari2600,
     PC,
+    SNES,
+    N64,
 }
 
 #[derive(Debug)]
@@ -28,6 +30,36 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check for NES (iNES format)
     if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
         return Ok(SystemType::NES);
+    }
+
+    // Check for N64 (magic bytes)
+    if data.len() >= 4 {
+        match &data[0..4] {
+            [0x80, 0x37, 0x12, 0x40] | // .z64
+            [0x40, 0x12, 0x37, 0x80] | // .n64
+            [0x37, 0x80, 0x40, 0x12]   // .v64
+            => {
+                return Ok(SystemType::N64);
+            }
+            _ => {}
+        }
+    }
+
+    // Check for SNES (SMC header or size-based detection)
+    // SNES ROMs are typically multiples of 32KB (with optional 512-byte SMC header)
+    if data.len() >= 0x8000 {
+        // Check for SMC header (512 bytes)
+        let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
+        let rom_size = data.len() - header_offset;
+
+        // SNES ROMs are typically 32KB, 64KB, 128KB, 256KB, 512KB, 1MB, 2MB, 4MB
+        if rom_size >= 0x8000 && rom_size.is_power_of_two() && rom_size <= 0x400000 {
+            // Additional validation: check for valid SNES header at known locations
+            // LoROM: $7FC0-$7FFF, HiROM: $FFC0-$FFFF
+            // For now, we'll accept any power-of-2 sized ROM >= 32KB as potentially SNES
+            // This is a heuristic and may need refinement
+            return Ok(SystemType::SNES);
+        }
     }
 
     // Check for DOS executable (MZ header)
@@ -79,12 +111,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64)"
             .to_string(),
     })
 }
@@ -146,5 +178,45 @@ mod tests {
         // Larger COM file
         let data = vec![0u8; 1000];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::PC);
+    }
+
+    #[test]
+    fn test_detect_snes_rom() {
+        // 32KB SNES ROM (minimum size)
+        let data = vec![0u8; 0x8000];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SNES);
+
+        // 64KB SNES ROM
+        let data = vec![0u8; 0x10000];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SNES);
+
+        // 1MB SNES ROM
+        let data = vec![0u8; 0x100000];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SNES);
+
+        // SNES ROM with SMC header (512 bytes + 32KB)
+        let data = vec![0u8; 512 + 0x8000];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SNES);
+    }
+
+    #[test]
+    fn test_detect_n64_z64() {
+        let mut data = vec![0u8; 0x100000]; // 1MB ROM
+        data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::N64);
+    }
+
+    #[test]
+    fn test_detect_n64_n64() {
+        let mut data = vec![0u8; 0x100000]; // 1MB ROM
+        data[0..4].copy_from_slice(&[0x40, 0x12, 0x37, 0x80]);
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::N64);
+    }
+
+    #[test]
+    fn test_detect_n64_v64() {
+        let mut data = vec![0u8; 0x100000]; // 1MB ROM
+        data[0..4].copy_from_slice(&[0x37, 0x80, 0x40, 0x12]);
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::N64);
     }
 }

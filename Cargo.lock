@@ -598,8 +598,10 @@ dependencies = [
  "emu_atari2600",
  "emu_core",
  "emu_gb",
+ "emu_n64",
  "emu_nes",
  "emu_pc",
+ "emu_snes",
  "env_logger",
  "log",
  "minifb",
@@ -610,6 +612,16 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "emu_n64"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -624,6 +636,16 @@ dependencies = [
 
 [[package]]
 name = "emu_pc"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "emu_snes"
 version = "0.1.0"
 dependencies = [
  "emu_core",
