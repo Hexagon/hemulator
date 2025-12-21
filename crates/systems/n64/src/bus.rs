@@ -1,6 +1,7 @@
 //! N64 memory bus implementation
 
 use crate::cartridge::Cartridge;
+use crate::rdp::Rdp;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
 
@@ -14,6 +15,8 @@ pub struct N64Bus {
     sp_mem: [u8; 0x2000],
     /// Cartridge (optional)
     cartridge: Option<Cartridge>,
+    /// RDP (Reality Display Processor)
+    rdp: Rdp,
 }
 
 impl N64Bus {
@@ -23,6 +26,7 @@ impl N64Bus {
             pif_ram: [0; 0x800],
             sp_mem: [0; 0x2000],
             cartridge: None,
+            rdp: Rdp::new(),
         }
     }
 
@@ -37,6 +41,14 @@ impl N64Bus {
 
     pub fn has_cartridge(&self) -> bool {
         self.cartridge.is_some()
+    }
+
+    pub fn rdp(&self) -> &Rdp {
+        &self.rdp
+    }
+
+    pub fn rdp_mut(&mut self) -> &mut Rdp {
+        &mut self.rdp
     }
 
     fn translate_address(&self, addr: u32) -> u32 {
@@ -93,6 +105,11 @@ impl MemoryMips for N64Bus {
                     self.rdram[offset + 2],
                     self.rdram[offset + 3],
                 ])
+            }
+            // RDP Command registers (0x04100000 - 0x0410001F)
+            0x0410_0000..=0x0410_001F => {
+                let offset = phys_addr & 0x1F;
+                self.rdp.read_register(offset)
             }
             // Cartridge ROM
             0x1000_0000..=0x1FBF_FFFF => {
@@ -162,6 +179,11 @@ impl MemoryMips for N64Bus {
                 self.rdram[offset + 1] = bytes[1];
                 self.rdram[offset + 2] = bytes[2];
                 self.rdram[offset + 3] = bytes[3];
+            }
+            // RDP Command registers (0x04100000 - 0x0410001F)
+            0x0410_0000..=0x0410_001F => {
+                let offset = phys_addr & 0x1F;
+                self.rdp.write_register(offset, val);
             }
             _ => {
                 let bytes = val.to_be_bytes();

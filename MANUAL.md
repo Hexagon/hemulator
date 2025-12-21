@@ -384,26 +384,32 @@ The emulator supports the following cartridge banking schemes:
 
 ### N64 (Nintendo 64)
 
-**Status**: Basic implementation (stub)
+**Status**: Basic implementation with RDP graphics processor
 
-**Coverage**: Limited - skeleton implementation for testing
+**Coverage**: Limited - CPU and basic RDP implemented, no game rendering yet
 
 **ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
 
 **Features**:
-- MIPS R4300i CPU core with basic instruction set
-- Memory bus (4MB RDRAM + PIF + SP memory)
+- MIPS R4300i CPU core with complete instruction set
+- Memory bus (4MB RDRAM + PIF + SP memory + RDP registers)
+- RDP (Reality Display Processor) with framebuffer support
 - ROM loading with automatic byte-order detection and conversion
 - Save states (F5/F6)
-- Resolution: 320x240 pixels
+- Resolution: 320x240 pixels (configurable)
 
 **Known Limitations**:
-- **Graphics**: RCP (Reality Co-Processor) not implemented - displays black screen only
+- **Graphics**: RDP partially implemented - framebuffer only, no texture mapping or 3D rendering
+  - Basic fill operations work (clear, rectangles, pixels)
+  - No display list command processing
+  - No Z-buffer, textures, or anti-aliasing
+  - Displays blank screen (no actual game graphics rendered)
+- **RSP**: Reality Signal Processor not implemented - no geometry processing or display list generation
 - **Audio**: Audio interface not implemented - silent gameplay
 - **Input**: Controller support not implemented
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
-- **Timing**: Stub implementation - not cycle-accurate
-- **Status**: This is a skeleton implementation for infrastructure testing. Full N64 emulation requires extensive RCP (RSP/RDP) and graphics plugin work.
+- **Timing**: Frame-based implementation - not cycle-accurate
+- **Status**: This is a foundational implementation. Full N64 emulation requires RSP microcode execution, complete RDP command processing, and texture/Z-buffer support.
 
 ## Troubleshooting
 
