@@ -279,4 +279,63 @@ mod tests {
         let black_pixel = frame.pixels[0];
         assert_eq!(black_pixel, 0, "Expected black pixel at (0,0)");
     }
+
+    #[test]
+    fn test_n64_3d_rendering_demo() {
+        // Demonstrate 3D triangle rendering with Z-buffer
+        let mut sys = N64System::new();
+
+        // Enable Z-buffer and clear it
+        sys.cpu.bus_mut().rdp_mut().set_zbuffer_enabled(true);
+        sys.cpu.bus_mut().rdp_mut().clear_zbuffer();
+
+        // Draw a 3D scene with multiple triangles at different depths
+        // This simulates a simple 3D pyramid
+
+        // Back face (far) - Red triangle
+        sys.cpu.bus_mut().rdp_mut().draw_triangle_zbuffer(
+            160, 80, 0xC000, // Top vertex (far)
+            220, 180, 0xC000, // Bottom-right
+            100, 180, 0xC000,     // Bottom-left
+            0xFFFF0000, // Red
+        );
+
+        // Left face (medium depth) - Green triangle
+        sys.cpu.bus_mut().rdp_mut().draw_triangle_zbuffer(
+            160, 80, 0x8000, // Top vertex (medium)
+            100, 180, 0x8000, // Bottom-left
+            80, 140, 0x8000,     // Side vertex
+            0xFF00FF00, // Green
+        );
+
+        // Right face (near) - Blue triangle with Gouraud shading
+        // Demonstrates both Z-buffer and color interpolation
+        sys.cpu.bus_mut().rdp_mut().draw_triangle_shaded_zbuffer(
+            160, 80, 0x6000, 0xFF0000FF, // Top: Blue, near
+            220, 180, 0x6000, 0xFF00FFFF, // Bottom-right: Cyan, near
+            240, 140, 0x6000, 0xFFFF00FF, // Side: Magenta, near
+        );
+
+        // Get the rendered frame
+        let frame = sys.cpu.bus().rdp().get_frame();
+
+        // Verify the scene was rendered
+        // Check that the near blue face is visible (should have blue component)
+        let near_pixel_idx = (120 * 320 + 200) as usize;
+        let near_pixel = frame.pixels[near_pixel_idx];
+        let blue_component = near_pixel & 0xFF;
+        assert!(
+            blue_component > 0,
+            "Expected blue component in near triangle"
+        );
+
+        // Check that far pixels exist but may be occluded
+        let far_pixel_idx = (120 * 320 + 160) as usize;
+        let far_pixel = frame.pixels[far_pixel_idx];
+        assert_ne!(far_pixel, 0, "Expected some color in the rendered scene");
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+    }
 }

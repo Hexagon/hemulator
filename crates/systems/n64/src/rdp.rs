@@ -30,24 +30,31 @@
 //! The RDP executes display list commands prepared by the RSP. Common commands include:
 //! - **Fill Rectangle**: Fast solid color rectangle fills
 //! - **Texture Rectangle**: Textured rectangle rendering
-//! - **Triangle**: Textured or shaded triangle rendering
+//! - **Triangle**: Textured or shaded triangle rendering (0x08-0x0F)
 //! - **Set Combine Mode**: Configure color/alpha blending
 //! - **Set Scissor**: Define rendering bounds
 //! - **Sync**: Wait for rendering completion
 //!
 //! # Implementation Details
 //!
-//! This is a **simplified frame-based implementation** suitable for basic rendering:
+//! This is a **simplified frame-based implementation** suitable for 3D rendering:
 //! - Maintains a framebuffer with configurable resolution
+//! - **3D Triangle Rasterization**:
+//!   - Flat-shaded triangles (solid color)
+//!   - Gouraud-shaded triangles (per-vertex color interpolation)
+//!   - Z-buffered rendering (16-bit depth buffer)
+//!   - Scanline-based edge walking algorithm
+//! - **Z-Buffer**: 16-bit depth testing for hidden surface removal
+//! - **Color Interpolation**: Linear interpolation in ARGB color space
 //! - Supports basic fill operations and color clearing
 //! - Registers for configuration (color, resolution, etc.)
 //! - Not cycle-accurate; focuses on correct visual output
 //!
 //! Full RDP emulation would require:
 //! - Complete display list command execution
-//! - Texture cache and TMEM (texture memory)
+//! - Texture cache and TMEM (texture memory) sampling
 //! - Perspective-correct rasterization
-//! - Z-buffer and blending pipeline
+//! - Full blending pipeline
 //! - Accurate timing and synchronization
 
 use emu_core::types::Frame;
