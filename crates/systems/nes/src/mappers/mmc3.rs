@@ -41,6 +41,11 @@ pub struct Mmc3 {
     irq_enabled: bool,
     irq_pending: bool,
     last_a12: bool,
+    /// PRG RAM protection register ($A001)
+    /// Bit 7: 1=Enable chip, 0=Disable chip
+    /// Bit 6: 0=Allow writes, 1=Deny writes
+    /// Default: 0x80 (enabled, writable) to match common emulator behavior
+    prg_ram_protect: u8,
 }
 
 impl Mmc3 {
@@ -60,6 +65,9 @@ impl Mmc3 {
             irq_enabled: false,
             irq_pending: false,
             last_a12: false,
+            // Default to enabled and writable to match common emulator behavior
+            // and previous "always on" behavior of NesBus.
+            prg_ram_protect: 0x80,
         };
         m.apply_banks(ppu);
         // Respect initial mirroring from header until mapper writes override it.
@@ -83,12 +91,24 @@ impl Mmc3 {
         let bank6 = (self.bank_regs[6] as usize) % prg_count;
         let bank7 = (self.bank_regs[7] as usize) % prg_count;
 
+        // CRITICAL: PRG bank ordering (DO NOT CHANGE - fixes Super Mario Bros. 3 and other games)
+        // The key difference between mode 0 and mode 1 is WHERE the fixed banks appear,
+        // while R6 and R7 swap positions between $A000 and $C000.
+        //
+        // This was verified against:
+        // - NESdev wiki MMC3 documentation
+        // - Mesen2 MMC3.cpp implementation
+        // - Actual testing with Super Mario Bros. 3 (requires correct banking)
+        //
+        // Common mistake: Swapping R7 with second_last in mode 0, which breaks SMB3!
         if !self.prg_mode {
-            // Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
-            self.prg_banks = [bank6, second_last, bank7, last];
+            // Mode 0: R6 at $8000, R7 at $A000, (-2) at $C000, (-1) at $E000
+            // R7 MUST be at $A000, not $C000
+            self.prg_banks = [bank6, bank7, second_last, last];
         } else {
-            // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
-            self.prg_banks = [second_last, bank6, bank7, last];
+            // Mode 1: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
+            // R7 stays at $A000, R6 moves to $C000
+            self.prg_banks = [second_last, bank7, bank6, last];
         }
 
         // CHR banking (1KB units with two 2KB registers)
@@ -189,7 +209,10 @@ impl Mmc3 {
                     };
                     ppu.set_mirroring(mir);
                 } else {
-                    // PRG RAM protect (ignored)
+                    // PRG RAM protect ($A001)
+                    // Bit 7: 1=Enable chip, 0=Disable chip
+                    // Bit 6: 0=Allow writes, 1=Deny writes
+                    self.prg_ram_protect = val;
                 }
             }
             0xC000..=0xDFFF => {
@@ -227,7 +250,9 @@ impl Mmc3 {
                 true // Decremented
             };
 
-            // "New"/Sharp behavior: trigger IRQ when counter DECREMENTS to 0, not when RELOADED to 0.
+            // MMC3B/C (Sharp/new) behavior: trigger IRQ only when counter DECREMENTS to 0.
+            // MMC3A (NEC/old/alternate) behavior would trigger when counter==0 regardless of reload.
+            // We use MMC3B/C by default as it's more common and matches most emulator behavior.
             if self.irq_counter == 0 && self.irq_enabled && did_decrement {
                 self.irq_pending = true;
             }
@@ -236,13 +261,20 @@ impl Mmc3 {
     }
 
     pub fn take_irq_pending(&mut self) -> bool {
-        let was = self.irq_pending;
-        self.irq_pending = false;
-        was
+        self.irq_pending
     }
 
     pub fn prg_rom(&self) -> &[u8] {
         &self.prg_rom
+    }
+
+    #[allow(dead_code)] // Part of mapper API, not yet integrated with bus
+    pub fn wram_access(&self) -> (bool, bool) {
+        // Bit 7: 1=Enable, 0=Disable
+        // Bit 6: 0=Write Allow, 1=Write Deny
+        let enabled = (self.prg_ram_protect & 0x80) != 0;
+        let write_allow = (self.prg_ram_protect & 0x40) == 0;
+        (enabled, enabled && write_allow)
     }
 }
 
@@ -445,6 +477,10 @@ mod tests {
         mmc3.notify_a12(true);
         assert!(mmc3.take_irq_pending());
 
+        // Acknowledge IRQ (disable then enable)
+        mmc3.write_prg(0xE000, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu);
+
         // Third A12 edge: counter is 0, reload to 1
         mmc3.notify_a12(false);
         mmc3.notify_a12(true);
@@ -549,19 +585,19 @@ mod tests {
         mmc3.write_prg(0x8000, 7, &mut ppu);
         mmc3.write_prg(0x8001, 2, &mut ppu);
 
-        // Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
-        assert_eq!(mmc3.read_prg(0x8000), 0x22); // Bank 1
-        assert_eq!(mmc3.read_prg(0xA000), 0x77); // Bank 6 (second last)
-        assert_eq!(mmc3.read_prg(0xC000), 0x33); // Bank 2
+        // Mode 0: R6 at $8000, R7 at $A000, (-2) at $C000, (-1) at $E000
+        assert_eq!(mmc3.read_prg(0x8000), 0x22); // Bank 1 (R6)
+        assert_eq!(mmc3.read_prg(0xA000), 0x33); // Bank 2 (R7)
+        assert_eq!(mmc3.read_prg(0xC000), 0x77); // Bank 6 (second last)
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
 
         // Switch to mode 1 by setting bit 6 of bank select
         mmc3.write_prg(0x8000, 0x40, &mut ppu);
 
-        // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
+        // Mode 1: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
         assert_eq!(mmc3.read_prg(0x8000), 0x77); // Bank 6 (second last)
-        assert_eq!(mmc3.read_prg(0xA000), 0x22); // Bank 1 (R6)
-        assert_eq!(mmc3.read_prg(0xC000), 0x33); // Bank 2 (R7)
+        assert_eq!(mmc3.read_prg(0xA000), 0x33); // Bank 2 (R7)
+        assert_eq!(mmc3.read_prg(0xC000), 0x22); // Bank 1 (R6)
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
     }
 
@@ -897,5 +933,170 @@ mod tests {
 
         assert_eq!(mmc3.chr_banks[0], 1, "8 & 0xFE = 8, 8 % 7 = 1");
         assert_eq!(mmc3.chr_banks[1], 2, "(1 + 1) % 7 = 2");
+    }
+
+    // ============================================================================
+    // CRITICAL REGRESSION TESTS - DO NOT DELETE OR MODIFY
+    // These tests verify fixes for Super Mario Bros. 3 and other games
+    // ============================================================================
+
+    #[test]
+    fn regression_mmc3_prg_r7_at_a000_mode0() {
+        // REGRESSION TEST: Verify R7 is at $A000 in mode 0, not at $C000
+        // This was the bug that broke Super Mario Bros. 3
+        // Reference: Fixed 2024-12-21
+        let mut prg = vec![0; 0x10000]; // 8 banks
+        for i in 0..8 {
+            prg[i * 0x2000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set R6=2, R7=3
+        mmc3.write_prg(0x8000, 6, &mut ppu);
+        mmc3.write_prg(0x8001, 2, &mut ppu);
+        mmc3.write_prg(0x8000, 7, &mut ppu);
+        mmc3.write_prg(0x8001, 3, &mut ppu);
+
+        // Ensure we're in mode 0
+        assert!(!mmc3.prg_mode);
+
+        // Mode 0 MUST be: R6 at $8000, R7 at $A000, (-2) at $C000, (-1) at $E000
+        assert_eq!(
+            mmc3.read_prg(0x8000),
+            0x12,
+            "Mode 0: R6 (bank 2) must be at $8000"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xA000),
+            0x13,
+            "Mode 0: R7 (bank 3) MUST be at $A000 - this is critical for SMB3!"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xC000),
+            0x16,
+            "Mode 0: Bank 6 (second last) must be at $C000"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xE000),
+            0x17,
+            "Mode 0: Bank 7 (last) must be at $E000"
+        );
+    }
+
+    #[test]
+    fn regression_mmc3_prg_r7_at_a000_mode1() {
+        // REGRESSION TEST: Verify R7 stays at $A000 in mode 1, R6 moves to $C000
+        // Reference: Fixed 2024-12-21
+        let mut prg = vec![0; 0x10000]; // 8 banks
+        for i in 0..8 {
+            prg[i * 0x2000] = (0x10 + i) as u8;
+        }
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Set R6=2, R7=3
+        mmc3.write_prg(0x8000, 6, &mut ppu);
+        mmc3.write_prg(0x8001, 2, &mut ppu);
+        mmc3.write_prg(0x8000, 7, &mut ppu);
+        mmc3.write_prg(0x8001, 3, &mut ppu);
+
+        // Switch to mode 1
+        mmc3.write_prg(0x8000, 0x40, &mut ppu);
+        assert!(mmc3.prg_mode);
+
+        // Mode 1 MUST be: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
+        assert_eq!(
+            mmc3.read_prg(0x8000),
+            0x16,
+            "Mode 1: Bank 6 (second last) must be at $8000"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xA000),
+            0x13,
+            "Mode 1: R7 (bank 3) MUST stay at $A000"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xC000),
+            0x12,
+            "Mode 1: R6 (bank 2) must be at $C000"
+        );
+        assert_eq!(
+            mmc3.read_prg(0xE000),
+            0x17,
+            "Mode 1: Bank 7 (last) must be at $E000"
+        );
+    }
+
+    #[test]
+    fn regression_mmc3_prg_ram_protection_default() {
+        // REGRESSION TEST: Verify PRG RAM protection defaults to enabled+writable
+        // Reference: Fixed 2024-12-21
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mmc3 = Mmc3::new(cart, &mut ppu);
+
+        let (enabled, writable) = mmc3.wram_access();
+        assert!(enabled, "PRG RAM should be enabled by default");
+        assert!(writable, "PRG RAM should be writable by default");
+    }
+
+    #[test]
+    fn regression_mmc3_prg_ram_protection_write() {
+        // REGRESSION TEST: Verify PRG RAM protection register ($A001) works correctly
+        // Reference: Fixed 2024-12-21
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Disable chip (bit 7 = 0)
+        mmc3.write_prg(0xA001, 0x00, &mut ppu);
+        let (enabled, writable) = mmc3.wram_access();
+        assert!(!enabled, "PRG RAM should be disabled when bit 7 is 0");
+        assert!(!writable, "PRG RAM should not be writable when disabled");
+
+        // Enable chip, deny writes (bit 7 = 1, bit 6 = 1)
+        mmc3.write_prg(0xA001, 0xC0, &mut ppu);
+        let (enabled, writable) = mmc3.wram_access();
+        assert!(enabled, "PRG RAM should be enabled when bit 7 is 1");
+        assert!(!writable, "PRG RAM writes should be denied when bit 6 is 1");
+
+        // Enable chip, allow writes (bit 7 = 1, bit 6 = 0)
+        mmc3.write_prg(0xA001, 0x80, &mut ppu);
+        let (enabled, writable) = mmc3.wram_access();
+        assert!(enabled, "PRG RAM should be enabled when bit 7 is 1");
+        assert!(writable, "PRG RAM writes should be allowed when bit 6 is 0");
     }
 }
