@@ -791,4 +791,43 @@ mod tests {
             assert_eq!(bus.read(0x4016) & 1, 0); // Right
         }
     }
+
+    #[test]
+    fn test_nes_smoke_test_rom() {
+        // Load the test ROM
+        let test_rom = include_bytes!("../../../../test_roms/nes/test.nes");
+
+        let mut sys = NesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run a few frames to let the ROM initialize and render
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..9 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 240);
+        assert_eq!(frame.pixels.len(), 256 * 240);
+
+        // The test ROM fills the screen with a checkerboard pattern.
+        // Verify that the frame contains non-zero pixel data (not all black).
+        let non_zero_pixels = frame
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF000000) // Not black (ARGB format)
+            .count();
+
+        // At least 50% of pixels should be non-black for the test pattern
+        assert!(
+            non_zero_pixels > (256 * 240) / 2,
+            "Expected non-black pixels from test ROM, got {} out of {}",
+            non_zero_pixels,
+            256 * 240
+        );
+    }
 }

@@ -29,6 +29,27 @@ Purpose: guidance for automated agents and maintainers about CI, formatting, and
 - **Permissions & safety**:
   - Agents must not add or distribute ROMs or other copyrighted game data.
   - Agents may run tests that do not require ROMs; for ROM-based tests, maintainers must provide legal test ROMs off-repo.
+  - **Exception**: Simple test ROMs created from scratch for smoke testing are allowed and required.
+- **Test ROM requirements**:
+  - **Every system MUST have a basic test ROM** in `test_roms/<system>/` for smoke testing.
+  - Test ROMs must be minimal, created from scratch (not copyrighted), and built from assembly source.
+  - Each test ROM directory must include:
+    - Assembly source code (`.s`, `.asm`)
+    - Build script (`build.sh`)
+    - Built ROM file for CI/testing
+  - Test ROMs should produce deterministic, verifiable output (e.g., known pixel pattern).
+  - If implementing a new system, create a test ROM before adding smoke tests.
+  - **Building test ROMs**:
+    - NES: Use `cc65` (ca65 assembler, ld65 linker)
+    - Game Boy: Use `rgbds` (rgbasm assembler, rgblink linker, rgbfix for header)
+    - Atari 2600: Use `dasm` assembler
+    - Install on Ubuntu: `sudo apt-get install cc65 dasm libpng-dev && git clone https://github.com/gbdev/rgbds.git && cd rgbds && make && sudo make install`
+  - See `test_roms/README.md` for detailed instructions and specifications.
+- **Smoke tests**:
+  - Each system crate must include a smoke test using its test ROM.
+  - Smoke tests verify basic functionality: ROM loading, execution, and frame rendering.
+  - Tests should check frame dimensions and pixel data for expected patterns.
+  - See existing smoke tests in `crates/systems/*/src/lib.rs` for examples.
 - **Cross-platform notes**:
   - Frontend uses `minifb` and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
   - For macOS specifics, `rodio` may require additional CI setup; document platform checks in CI config.
