@@ -13,6 +13,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod rdp;
 
 use bus::N64Bus;
 use cpu::N64Cpu;
@@ -59,6 +60,7 @@ impl System for N64System {
 
     fn reset(&mut self) {
         self.cpu.reset();
+        self.cpu.bus_mut().rdp_mut().reset();
         self.current_cycles = 0;
     }
 
@@ -71,8 +73,8 @@ impl System for N64System {
             self.current_cycles += cycles;
         }
 
-        // Create a frame (stub - all black for now)
-        let frame = Frame::new(320, 240); // N64 common resolution
+        // Get frame from RDP
+        let frame = self.cpu.bus().rdp().get_frame().clone();
         Ok(frame)
     }
 
@@ -176,5 +178,45 @@ mod tests {
 
         let mut sys2 = N64System::new();
         assert!(sys2.load_state(&state).is_ok());
+    }
+
+    #[test]
+    fn test_rdp_integration() {
+        let sys = N64System::new();
+        let frame = sys.cpu.bus().rdp().get_frame();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+        assert_eq!(frame.pixels.len(), 320 * 240);
+    }
+
+    #[test]
+    fn test_rdp_register_access() {
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+
+        let mut sys = N64System::new();
+        let bus = sys.cpu.bus_mut();
+
+        // Write to RDP START register
+        bus.write_word(0x04100000, 0x00123456);
+        assert_eq!(bus.read_word(0x04100000), 0x00123456);
+
+        // Write to RDP END register
+        bus.write_word(0x04100004, 0x00789ABC);
+        assert_eq!(bus.read_word(0x04100004), 0x00789ABC);
+
+        // Read STATUS register
+        let status = bus.read_word(0x0410000C);
+        assert_ne!(status, 0); // Should have CBUF_READY bit set
+    }
+
+    #[test]
+    fn test_step_frame_returns_rdp_frame() {
+        let mut sys = N64System::new();
+        let result = sys.step_frame();
+        assert!(result.is_ok());
+
+        let frame = result.unwrap();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
     }
 }

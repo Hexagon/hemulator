@@ -514,10 +514,10 @@ System-specific implementations that use core components:
     - Frame-based timing (not cycle-accurate)
   - All tests pass (9 tests: cartridge, system)
 
-- **N64 (`emu_n64`)**: Basic implementation (skeleton)
+- **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation
   - `N64Cpu` wraps `CpuMips<N64Bus>` to provide N64-specific interface
-  - N64 bus includes: 4MB RDRAM, PIF RAM/ROM, SP memory, cartridge ROM
+  - N64 bus includes: 4MB RDRAM, PIF RAM/ROM, SP memory, cartridge ROM, RDP registers
   - **CPU (MIPS R4300i)**:
     - System-specific implementation uses core `cpu_mips_r4300i`
     - 64-bit MIPS III processor with complete instruction set
@@ -532,9 +532,27 @@ System-specific implementations that use core components:
   - **Memory Bus** (`N64Bus`):
     - 4MB RDRAM at 0x00000000-0x003FFFFF
     - 8KB SP DMEM/IMEM at 0x04000000-0x04001FFF (RSP memory)
+    - RDP Command registers at 0x04100000-0x0410001F
     - 2KB PIF RAM at 0x1FC00000-0x1FC007FF (boot ROM area)
     - Cartridge ROM at 0x10000000-0x1FBFFFFF
     - Simple address translation (unmapped addresses)
+  - **RDP (Reality Display Processor)**:
+    - System-specific implementation in `crates/systems/n64/src/rdp.rs`
+    - Framebuffer support with configurable resolution (default 320x240)
+    - Basic fill operations (clear, fill rectangle, set pixel)
+    - Memory-mapped register interface (DPC_START, DPC_END, DPC_STATUS, etc.)
+    - Support for display list command processing (stub)
+    - Color format support (RGBA5551, RGBA8888)
+    - **Timing Model**: Frame-based rendering (not cycle-accurate)
+      - Maintains framebuffer for frame generation
+      - Registers accessible via memory-mapped I/O
+      - Suitable for basic rendering; advanced features not yet implemented
+    - **Known Limitations**:
+      - No texture mapping or Z-buffer
+      - No perspective-correct rasterization
+      - No anti-aliasing or blending
+      - Display list commands not fully processed
+      - TMEM (texture memory) not implemented
   - **Cartridge Support**:
     - System-specific implementation in `crates/systems/n64/cartridge.rs`
     - Automatic byte-order detection (Z64/N64/V64 formats)
@@ -547,16 +565,17 @@ System-specific implementations that use core components:
     - Full save state support (CPU registers, GPRs)
     - Cartridge mount/unmount
     - System reset
+    - Basic RDP framebuffer rendering
   - **Known Limitations**:
-    - RCP (Reality Co-Processor) not implemented - no graphics or audio
     - RSP (Reality Signal Processor) not implemented
-    - RDP (Reality Display Processor) not implemented
-    - Displays black screen (320x240)
+    - RDP features limited (no textures, Z-buffer, or advanced rendering)
+    - Displays blank framebuffer (320x240) - no actual game graphics
     - Controller support not implemented
     - No TLB, cache, or accurate memory timing
     - Exception handling not fully implemented (no traps on overflow)
     - Frame-based timing (not cycle-accurate)
-  - All tests pass (10 tests: cartridge, system)
+  - All tests pass (22 tests: cartridge, RDP, system integration)
+
 
 ### Frontend (`crates/frontend/gui`)
 
