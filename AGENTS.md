@@ -367,8 +367,25 @@ System-specific implementations that use core components:
   - **Cartridge Support**:
     - ROM loading with header parsing
     - RAM size auto-detection from header
-    - MBC0 (no mapper) support only
-    - **Not yet implemented**: MBC1, MBC3, MBC5 (required for most commercial games)
+    - **Mappers (Memory Bank Controllers)**:
+      - MBC0 (no mapper): 32KB ROM, no banking
+      - MBC1: Most common mapper (~70% of games)
+        - Up to 2MB ROM (128 banks)
+        - Up to 32KB RAM (4 banks)
+        - ROM/RAM banking modes
+        - RAM enable control
+      - MBC3: Popular for games with saves
+        - Up to 2MB ROM (128 banks)
+        - Up to 32KB RAM (4 banks)
+        - RTC (Real-Time Clock) registers (stubbed - clock doesn't tick)
+        - RAM enable control
+      - MBC5: Advanced mapper for large ROMs
+        - Up to 8MB ROM (512 banks)
+        - Up to 128KB RAM (16 banks)
+        - 9-bit ROM banking
+        - RAM enable control
+    - **Coverage**: Approximately 95%+ of Game Boy games supported
+    - **Not yet implemented**: MBC2 (rare, ~1% of games with built-in 512×4 bits RAM)
   - **APU (Audio Processing Unit)**:
     - System-specific implementation in `crates/systems/gb/apu.rs`
     - Uses reusable components from `core/apu`
@@ -415,12 +432,13 @@ System-specific implementations that use core components:
     - Audio synthesis (not yet integrated with frontend)
   - **Known Limitations**:
     - DMG (original Game Boy) mode only - no Game Boy Color support
-    - No MBC support - only works with 32KB ROMs (MBC0)
+    - MBC2 mapper not implemented (rare, ~1% of games)
     - Audio output not yet connected to frontend (requires GUI audio integration)
     - No timer registers
     - No serial/link cable support
     - Frame-based timing (not cycle-accurate)
-  - All tests pass (27 tests: 13 PPU, 7 APU, 7 system)
+    - RTC in MBC3 doesn't actually count time (registers are accessible but static)
+  - All tests pass (68 tests: 13 PPU, 7 APU, 7 system, 41 mapper tests)
 
 - **Atari 2600 (`emu_atari2600`)**: 
   - Uses `cpu_6502` from core with Atari 2600-specific bus implementation (6507 variant)
