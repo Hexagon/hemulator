@@ -106,6 +106,39 @@ Contains reusable CPU implementations and common traits:
     - HALT and STOP instructions
     - Starts at PC=0x0100 (after boot ROM)
   - Used by: Game Boy, Game Boy Color, Game Boy Advance (in GB mode)
+
+- **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
+  - Generic `Memory65c816` trait for memory access
+  - 16-bit extension of the 6502
+  - Comprehensive test coverage (8 unit tests)
+  - Can be used by: SNES, Apple IIGS, etc.
+  - Implementation includes:
+    - 16-bit accumulator (C) and index registers (X, Y)
+    - 8/16-bit mode switching via status flags (m, x)
+    - 24-bit address space (16MB via DBR, PBR)
+    - Emulation mode for 6502 compatibility
+    - Direct page register (D)
+    - Stack pointer (S)
+    - XCE instruction for mode switching
+    - Status flags (N, V, m, x, D, I, Z, C, e)
+  - Ready for extension with full 65C816 instruction set
+  - `ArrayMemory` helper for testing (16MB address space)
+
+- **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)
+  - Generic `MemoryMips` trait for memory access
+  - 64-bit MIPS III RISC processor
+  - Comprehensive test coverage (9 unit tests)
+  - Used by: Nintendo 64
+  - Implementation includes:
+    - 32 general-purpose 64-bit registers (R0-R31, R0 always zero)
+    - HI/LO registers for multiply/divide
+    - CP0 coprocessor registers (system control)
+    - Floating-point registers (FPR)
+    - Core instructions: ORI, LUI, ADDU, OR, LW, SW, SLL
+    - Big-endian memory access
+  - Ready for extension with full MIPS instruction set
+  - `ArrayMemory` helper for testing (8MB)
+
 - **`cpu_8086`**: Intel 8086 CPU implementation with core instruction set
   - Generic `Memory8086` trait for memory access
   - Segment-based memory addressing (CS, DS, ES, SS)
@@ -401,6 +434,80 @@ System-specific implementations that use core components:
     - 640x400 frame buffer (text mode 80x25 equivalent)
     - Currently renders black screen (video hardware not implemented)
   - All tests pass (22 tests total)
+
+- **SNES (`emu_snes`)**: Basic implementation (skeleton)
+  - Uses `cpu_65c816` from core with SNES-specific bus implementation
+  - `SnesCpu` wraps `Cpu65c816<SnesBus>` to provide SNES-specific interface
+  - SNES bus includes: 128KB WRAM, cartridge ROM/RAM, hardware registers (stub)
+  - **CPU (65C816)**:
+    - System-specific implementation uses core `cpu_65c816`
+    - 16-bit processor with 8/16-bit mode switching
+    - Registers: C (accumulator), X, Y, S (stack), D (direct page), DBR, PBR
+    - Emulation mode for 6502 compatibility
+    - Native mode for 16-bit operations
+  - **Memory Bus** (`SnesBus`):
+    - 128KB WRAM at banks $7E-$7F (full) and mirrors in $00-$3F, $80-$BF
+    - Hardware registers at $2000-$5FFF (stub - not functional)
+    - Cartridge ROM mapped at $8000-$FFFF in various banks
+    - LoROM mapping: ROM at banks $00-$7D, $80-$FF
+  - **Cartridge Support**:
+    - System-specific implementation in `crates/systems/snes/cartridge.rs`
+    - SMC header detection (512 bytes) and automatic removal
+    - LoROM mapping (basic)
+    - 32KB SRAM support
+  - **Timing**:
+    - CPU: ~3.58 MHz (NTSC)
+    - ~89,342 cycles per frame (~60 Hz)
+  - **Features**:
+    - Full save state support (CPU registers)
+    - Cartridge mount/unmount
+    - System reset
+  - **Known Limitations**:
+    - PPU not implemented - displays black screen (256x224)
+    - APU (SPC700) not implemented - no audio
+    - Controller support not implemented
+    - Only LoROM mapping - no HiROM, ExHiROM
+    - No enhancement chips (SuperFX, DSP, SA-1, etc.)
+    - Frame-based timing (not cycle-accurate)
+  - All tests pass (9 tests: cartridge, system)
+
+- **N64 (`emu_n64`)**: Basic implementation (skeleton)
+  - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation
+  - `N64Cpu` wraps `CpuMips<N64Bus>` to provide N64-specific interface
+  - N64 bus includes: 4MB RDRAM, PIF RAM/ROM, SP memory, cartridge ROM
+  - **CPU (MIPS R4300i)**:
+    - System-specific implementation uses core `cpu_mips_r4300i`
+    - 64-bit MIPS III processor
+    - 32 general-purpose registers, HI/LO, CP0 coprocessor
+    - Basic instruction set: ORI, LUI, ADDU, OR, LW, SW, SLL
+  - **Memory Bus** (`N64Bus`):
+    - 4MB RDRAM at 0x00000000-0x003FFFFF
+    - 8KB SP DMEM/IMEM at 0x04000000-0x04001FFF (RSP memory)
+    - 2KB PIF RAM at 0x1FC00000-0x1FC007FF (boot ROM area)
+    - Cartridge ROM at 0x10000000-0x1FBFFFFF
+    - Simple address translation (unmapped addresses)
+  - **Cartridge Support**:
+    - System-specific implementation in `crates/systems/n64/cartridge.rs`
+    - Automatic byte-order detection (Z64/N64/V64 formats)
+    - Conversion to big-endian for emulation
+    - Magic byte validation: 0x80371240
+  - **Timing**:
+    - CPU: 93.75 MHz
+    - ~1,562,500 cycles per frame (~60 Hz)
+  - **Features**:
+    - Full save state support (CPU registers, GPRs)
+    - Cartridge mount/unmount
+    - System reset
+  - **Known Limitations**:
+    - RCP (Reality Co-Processor) not implemented - no graphics or audio
+    - RSP (Reality Signal Processor) not implemented
+    - RDP (Reality Display Processor) not implemented
+    - Displays black screen (320x240)
+    - Controller support not implemented
+    - No TLB, cache, or accurate memory timing
+    - Very limited instruction set
+    - Frame-based timing (not cycle-accurate)
+  - All tests pass (10 tests: cartridge, system)
 
 ### Frontend (`crates/frontend/gui`)
 
