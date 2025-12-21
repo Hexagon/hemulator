@@ -604,7 +604,9 @@ dependencies = [
 name = "emu_n64"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "emu_core",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
