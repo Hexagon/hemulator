@@ -458,14 +458,15 @@ System-specific implementations that use core components:
       - Renders complete 160x192 frames on-demand
       - TIA state updated during CPU execution
       - Suitable for most games; timing-critical effects may not work perfectly
-    - **Audio Registers**: Stored but synthesis not yet implemented (2 channels, control/frequency/volume)
-      - **Future Implementation**: Will use `PolynomialCounter` from `core/apu`
+    - **Audio Synthesis**: Complete implementation using `PolynomialCounter` from `core/apu`
+      - 2 audio channels with polynomial waveform generation
       - Each channel has:
         - AUDC (4 bits): Waveform type selector (0-15 different waveforms)
         - AUDF (5 bits): Frequency divider (0-31)
         - AUDV (4 bits): Volume (0-15)
       - Waveform types include pure tones, buzzy sounds, white noise, and combinations
       - Polynomial counters (4-bit and 5-bit) create waveforms via LFSR feedback
+      - Audio output integrated with frontend (44.1 kHz sampling)
       - See `crates/core/src/apu/polynomial.rs` for implementation details
     - **Known Limitations**:
       - Player/missile sizing (NUSIZ) stored but not applied

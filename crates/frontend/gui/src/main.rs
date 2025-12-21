@@ -264,10 +264,10 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
             EmulatorSystem::GameBoy(_) => vec![0; count], // TODO: Implement audio for Game Boy
-            EmulatorSystem::Atari2600(_) => vec![0; count], // TODO: Implement audio for Atari 2600
-            EmulatorSystem::PC(_) => vec![0; count],      // TODO: Implement audio for PC
-            EmulatorSystem::SNES(_) => vec![0; count],    // TODO: Implement audio for SNES
-            EmulatorSystem::N64(_) => vec![0; count],     // TODO: Implement audio for N64
+            EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
+            EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
+            EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
+            EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
         }
     }
 

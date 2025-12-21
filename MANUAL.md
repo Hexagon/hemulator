@@ -419,13 +419,13 @@ The emulator supports the following cartridge banking schemes:
 
 **Features**:
 - TIA (Television Interface Adapter) video emulation with playfield rendering
+- TIA audio emulation with 2 channels (polynomial waveform synthesis)
 - RIOT (6532) chip emulation for RAM, I/O, and timers
 - Save states (F5/F6)
 - Joystick controls mapped to keyboard (same as NES controls)
 - 160x192 resolution
 
 **Known Limitations**:
-- **Audio**: Registers stored but waveform synthesis not yet implemented (silent gameplay)
 - **Player/Missile Sizing**: NUSIZ registers stored but size/duplication modes not applied
 - **Horizontal Motion**: HMxx registers stored but fine positioning not applied
 - **Collision Detection**: Registers exist but always return 0
@@ -640,7 +640,7 @@ For N64 games, the standard controller mappings apply with these button equivale
 - The emulator requires a working audio output device
 - On Linux, ensure ALSA is properly configured
 - Check your system's audio settings
-- **Note**: Atari 2600 audio is not yet implemented - games will be silent
+- Game Boy audio is not yet connected to the frontend
 
 ### Settings not saving
 - Verify you have write permissions in the emulator directory
