@@ -831,3 +831,64 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    
+    #[test]
+    fn test_current_rom_output() {
+        let test_rom = std::fs::read("../../../test_roms/nes/test.nes").unwrap();
+        
+        let mut sys = NesSystem::default();
+        sys.mount("Cartridge", &test_rom).unwrap();
+        
+        // Run 10 frames
+        for _ in 0..10 {
+            sys.step_frame().unwrap();
+        }
+        
+        let frame = sys.step_frame().unwrap();
+        
+        let mut color_counts = std::collections::HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+        
+        println!("Unique colors: {}", color_counts.len());
+        let mut colors: Vec<_> = color_counts.iter().collect();
+        colors.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        for (color, count) in colors.iter().take(5) {
+            let pct = (**count as f64 / frame.pixels.len() as f64) * 100.0;
+            println!("  0x{:08X}: {} pixels ({:.1}%)", color, count, pct);
+        }
+    }
+}
+
+    #[test]
+    fn test_minimal_rom() {
+        let test_rom = std::fs::read("../../../test_roms/nes/minimal.nes").unwrap();
+        
+        let mut sys = NesSystem::default();
+        sys.mount("Cartridge", &test_rom).unwrap();
+        
+        // Run 10 frames
+        for _ in 0..10 {
+            sys.step_frame().unwrap();
+        }
+        
+        let frame = sys.step_frame().unwrap();
+        
+        let mut color_counts = std::collections::HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
+        
+        println!("Minimal ROM - unique colors: {}", color_counts.len());
+        let mut colors: Vec<_> = color_counts.iter().collect();
+        colors.sort_by_key(|(_, count)| std::cmp::Reverse(**count));
+        for (color, count) in colors.iter().take(5) {
+            let pct = (**count as f64 / frame.pixels.len() as f64) * 100.0;
+            println!("  0x{:08X}: {} pixels ({:.1}%)", color, count, pct);
+        }
+    }
