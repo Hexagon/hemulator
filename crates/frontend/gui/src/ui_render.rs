@@ -385,6 +385,7 @@ pub fn create_debug_overlay(
     chr_banks: usize,
     fps: f64,
     runtime: emu_nes::RuntimeStats,
+    video_backend: &str,
 ) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
@@ -398,6 +399,7 @@ pub fn create_debug_overlay(
     let mapper_line = format!("Mapper: {} ({})", mapper_number, mapper_name);
     let timing_line = format!("Timing: {}", timing_mode);
     let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
 
     let pc_line = format!("PC: 0x{:04X}", runtime.pc);
     let vec_line = format!(
@@ -434,6 +436,7 @@ pub fn create_debug_overlay(
         &chr_line,
         &timing_line,
         &fps_line,
+        &video_line,
         "",
         &pc_line,
         &vec_line,

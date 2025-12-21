@@ -987,6 +987,7 @@ fn main() {
                     debug_info.chr_banks,
                     current_fps,
                     sys.get_runtime_stats(),
+                    &settings.video_backend,
                 ));
             }
         }
