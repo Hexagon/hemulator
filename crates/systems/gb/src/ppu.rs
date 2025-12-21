@@ -479,9 +479,9 @@ impl Ppu {
     pub fn step(&mut self, cycles: u32) -> bool {
         // Accumulate cycles
         self.cycle_counter += cycles;
-        
+
         let mut vblank_started = false;
-        
+
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
@@ -499,7 +499,7 @@ impl Ppu {
                 vblank_started = true;
             }
         }
-        
+
         vblank_started
     }
 }
