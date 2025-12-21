@@ -110,18 +110,28 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
   - Generic `Memory65c816` trait for memory access
   - 16-bit extension of the 6502
-  - Comprehensive test coverage (8 unit tests)
+  - Comprehensive test coverage (29 unit tests)
   - Can be used by: SNES, Apple IIGS, etc.
-  - Implementation includes:
+  - Complete implementation includes:
     - 16-bit accumulator (C) and index registers (X, Y)
     - 8/16-bit mode switching via status flags (m, x)
     - 24-bit address space (16MB via DBR, PBR)
     - Emulation mode for 6502 compatibility
     - Direct page register (D)
     - Stack pointer (S)
-    - XCE instruction for mode switching
+    - All arithmetic instructions (ADC, SBC) in both 8-bit and 16-bit modes
+    - All logical instructions (AND, ORA, EOR) with mode-aware operation
+    - All shift/rotate instructions (ASL, LSR, ROL, ROR) supporting both modes
+    - All load/store instructions (LDA, LDX, LDY, STA, STX, STY) with 8/16-bit modes
+    - All transfer instructions (TAX, TAY, TXA, TYA, TSX, TXS)
+    - All increment/decrement instructions (INC, DEC, INX, INY, DEX, DEY)
+    - All compare instructions (CMP, CPX, CPY) with mode-aware comparison
+    - All branch instructions (BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS)
+    - All stack instructions (PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY)
+    - Jump and subroutine instructions (JMP, JSR, RTS, RTI)
+    - Mode control instructions (XCE, REP, SEP)
+    - All status flag instructions (CLC, SEC, CLI, SEI, CLV, CLD, SED)
     - Status flags (N, V, m, x, D, I, Z, C, e)
-  - Ready for extension with full 65C816 instruction set
   - `ArrayMemory` helper for testing (16MB address space)
 
 - **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)
