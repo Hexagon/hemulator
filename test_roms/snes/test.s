@@ -38,19 +38,25 @@
     .word $0000
     
 .segment "VECTORS"
-    ; Native mode vectors
-    .word $0000             ; Unused
-    .word $0000             ; Unused
-    .word NMI               ; NMI
-    .word RESET             ; RESET
-    .word IRQ               ; IRQ/BRK
+    ; Native mode vectors ($FFE0-$FFEF)
+    .word $0000             ; $FFE0 - unused
+    .word $0000             ; $FFE2 - unused
+    .word NMI               ; $FFE4 - COP (reuse NMI)
+    .word $0000             ; $FFE6 - BRK (unused)
+    .word $0000             ; $FFE8 - ABORT (unused)
+    .word NMI               ; $FFEA - NMI
+    .word $0000             ; $FFEC - reserved
+    .word IRQ               ; $FFEE - IRQ
     
-    ; Emulation mode vectors
-    .word $0000             ; Unused
-    .word $0000             ; Unused  
-    .word NMI               ; NMI
-    .word RESET             ; RESET
-    .word IRQ               ; IRQ/BRK
+    ; Emulation mode vectors ($FFF0-$FFFF)
+    .word $0000             ; $FFF0 - unused
+    .word $0000             ; $FFF2 - unused  
+    .word NMI               ; $FFF4 - COP (reuse NMI)
+    .word $0000             ; $FFF6 - reserved
+    .word $0000             ; $FFF8 - ABORT (unused)
+    .word NMI               ; $FFFA - NMI
+    .word RESET             ; $FFFC - RESET (entry point!)
+    .word IRQ               ; $FFFE - IRQ/BRK
 
 .segment "CODE"
 
