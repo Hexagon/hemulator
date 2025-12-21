@@ -545,7 +545,7 @@ impl Rdp {
             0x36 => {
                 // RDP FILL_RECTANGLE format (verified from test ROM):
                 // word0: cmd_id(bits 31-24) | XH(bits 23-12) | YH(bits 11-0) - END coordinates
-                // word1: XL(bits 31-16) | YL(bits 15-0) - START coordinates  
+                // word1: XL(bits 31-16) | YL(bits 15-0) - START coordinates
                 // Coordinates are in 10.2 fixed point format (divide by 4 to get pixels)
 
                 let xh = ((word0 >> 12) & 0xFFF).div_ceil(4); // Right/end X, round up

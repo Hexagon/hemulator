@@ -43,7 +43,7 @@ impl SnesBus {
     pub fn ppu(&self) -> &Ppu {
         &self.ppu
     }
-    
+
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
     }
@@ -73,10 +73,10 @@ impl Memory65c816 for SnesBus {
                         // Bit 7: VBlank flag (set during VBlank)
                         // Bit 6: HBlank flag
                         // For simplicity, alternate VBlank every ~30 frames (simulate ~60Hz at ~2Hz toggle)
-                        if (self.frame_counter / 30) % 2 == 0 {
-                            0x80  // VBlank
+                        if (self.frame_counter / 30).is_multiple_of(2) {
+                            0x80 // VBlank
                         } else {
-                            0x00  // Not in VBlank
+                            0x00 // Not in VBlank
                         }
                     }
                     // Other hardware registers

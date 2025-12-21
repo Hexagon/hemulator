@@ -172,7 +172,7 @@ impl RspHle {
         // 3. Transform vertices using projection and modelview matrices
         // 4. Generate RDP commands (triangles, texture setup)
         // 5. Write RDP display list to output_buff
-        
+
         // For now, if there's an output buffer with data, treat it as an RDP display list
         // and forward it to the RDP for processing
         if output_buff > 0 && output_buff_size > 0 {
@@ -181,7 +181,7 @@ impl RspHle {
             rdp.set_dpc_end(output_buff + output_buff_size);
             rdp.process_display_list(rdram);
         }
-        
+
         // Also check if there's a data pointer (some games put display lists there)
         if data_ptr > 0 && data_size > 0 && output_buff == 0 {
             // Treat data_ptr as a display list to process
