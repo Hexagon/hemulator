@@ -19,15 +19,15 @@ use std::time::{Duration, Instant};
 use window_backend::{string_to_key, Key, Sdl2Backend, WindowBackend};
 
 // System wrapper enum to support multiple emulated systems
-#[allow(clippy::large_enum_variant)]
+// Box large variants to prevent stack overflow
 #[allow(clippy::upper_case_acronyms)]
 enum EmulatorSystem {
-    NES(emu_nes::NesSystem),
-    GameBoy(emu_gb::GbSystem),
-    Atari2600(emu_atari2600::Atari2600System),
-    PC(emu_pc::PcSystem),
-    SNES(emu_snes::SnesSystem),
-    N64(emu_n64::N64System),
+    NES(Box<emu_nes::NesSystem>),
+    GameBoy(Box<emu_gb::GbSystem>),
+    Atari2600(Box<emu_atari2600::Atari2600System>),
+    PC(Box<emu_pc::PcSystem>),
+    SNES(Box<emu_snes::SnesSystem>),
+    N64(Box<emu_n64::N64System>),
 }
 
 impl EmulatorSystem {
@@ -501,7 +501,7 @@ fn main() {
         }
     }
 
-    let mut sys: EmulatorSystem = EmulatorSystem::NES(emu_nes::NesSystem::default());
+    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::new(emu_nes::NesSystem::default()));
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
 
@@ -520,7 +520,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::NES(nes_sys);
+                        sys = EmulatorSystem::NES(Box::new(nes_sys));
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone()); // Keep for backward compat
                         if let Err(e) = settings.save() {
@@ -537,7 +537,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::Atari2600(a2600_sys);
+                        sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone());
                         if let Err(e) = settings.save() {
@@ -554,7 +554,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::GameBoy(gb_sys);
+                        sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone());
                         if let Err(e) = settings.save() {
@@ -571,7 +571,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::PC(pc_sys);
+                        sys = EmulatorSystem::PC(Box::new(pc_sys));
                         settings.set_mount_point("Executable", p.clone());
                         settings.last_rom_path = Some(p.clone());
                         if let Err(e) = settings.save() {
@@ -588,7 +588,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::SNES(snes_sys);
+                        sys = EmulatorSystem::SNES(Box::new(snes_sys));
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone());
                         if let Err(e) = settings.save() {
@@ -605,7 +605,7 @@ fn main() {
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
-                        sys = EmulatorSystem::N64(n64_sys);
+                        sys = EmulatorSystem::N64(Box::new(n64_sys));
                         settings.set_mount_point("Cartridge", p.clone());
                         settings.last_rom_path = Some(p.clone());
                         if let Err(e) = settings.save() {
