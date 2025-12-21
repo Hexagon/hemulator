@@ -465,6 +465,69 @@ pub fn create_debug_overlay(
     buffer
 }
 
+/// Create a debug info overlay for N64
+#[allow(clippy::too_many_arguments)]
+pub fn create_n64_debug_overlay(
+    width: usize,
+    height: usize,
+    rom_name: &str,
+    rom_size_mb: f32,
+    pc: u64,
+    rsp_microcode: &str,
+    rsp_vertex_count: usize,
+    rdp_status: u32,
+    framebuffer_resolution: &str,
+    fps: f64,
+    video_backend: &str,
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let rom_line = format!("ROM: {}", rom_name);
+    let size_line = format!("Size: {:.1} MB", rom_size_mb);
+    let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
+
+    let pc_line = format!("PC: 0x{:016X}", pc);
+    let rsp_line = format!("RSP: {} microcode", rsp_microcode);
+    let vtx_line = format!("VTX: {} vertices loaded", rsp_vertex_count);
+    let rdp_line = format!("RDP: status=0x{:08X}", rdp_status);
+    let fb_line = format!("FB: {}", framebuffer_resolution);
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO - N64",
+        "",
+        &rom_line,
+        &size_line,
+        &fps_line,
+        &video_line,
+        "",
+        &pc_line,
+        &rsp_line,
+        &vtx_line,
+        &rdp_line,
+        &fb_line,
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
 /// Create a mount point selection overlay
 pub fn create_mount_point_selector(
     width: usize,

@@ -78,6 +78,18 @@ impl Cartridge {
     pub fn read(&self, offset: u32) -> u8 {
         *self.rom.get(offset as usize).unwrap_or(&0)
     }
+
+    /// Read a range of bytes from ROM
+    pub fn read_range(&self, offset: u32, len: usize) -> Vec<u8> {
+        let start = offset as usize;
+        let end = (start + len).min(self.rom.len());
+        self.rom.get(start..end).unwrap_or(&[]).to_vec()
+    }
+
+    /// Get ROM size in bytes
+    pub fn size(&self) -> usize {
+        self.rom.len()
+    }
 }
 
 #[cfg(test)]

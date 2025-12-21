@@ -71,12 +71,25 @@ impl N64Bus {
         self.cartridge.is_some()
     }
 
+    pub fn cartridge(&self) -> Option<&Cartridge> {
+        self.cartridge.as_ref()
+    }
+
     pub fn rdp(&self) -> &Rdp {
         &self.rdp
     }
 
     pub fn rdp_mut(&mut self) -> &mut Rdp {
         &mut self.rdp
+    }
+
+    pub fn rsp(&self) -> &Rsp {
+        &self.rsp
+    }
+
+    #[allow(dead_code)] // Reserved for future use
+    pub fn rsp_mut(&mut self) -> &mut Rsp {
+        &mut self.rsp
     }
 
     #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
