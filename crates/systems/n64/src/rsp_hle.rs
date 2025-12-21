@@ -976,7 +976,7 @@ mod tests {
 
         // G_MTX command (0xDA) - load modelview matrix
         // param: G_MTX_MODELVIEW | G_MTX_LOAD (0x00)
-        let mtx_cmd_word0: u32 = (0xDA << 24) | 0x00; // Load modelview
+        let mtx_cmd_word0: u32 = 0xDA << 24; // Load modelview (param = 0x00)
         let mtx_cmd_word1: u32 = addr as u32; // Matrix address
         rdram[dl_addr..dl_addr + 4].copy_from_slice(&mtx_cmd_word0.to_be_bytes());
         rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&mtx_cmd_word1.to_be_bytes());
@@ -1069,7 +1069,7 @@ mod tests {
         let dl_addr = 0x100;
 
         // G_DL command (0xDE) - call nested display list
-        let dl_cmd_word0: u32 = (0xDE << 24) | 0x00; // G_DL_PUSH
+        let dl_cmd_word0: u32 = 0xDE << 24; // G_DL_PUSH (param = 0x00)
         let dl_cmd_word1: u32 = nested_dl_addr as u32;
         rdram[dl_addr..dl_addr + 4].copy_from_slice(&dl_cmd_word0.to_be_bytes());
         rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&dl_cmd_word1.to_be_bytes());

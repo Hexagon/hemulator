@@ -520,7 +520,19 @@ The emulator supports the following cartridge banking schemes:
 - **RSP (Reality Signal Processor)** - High-Level Emulation
   - Microcode detection (F3DEX/F3DEX2/Audio)
   - Vertex buffer management (32 vertices)
-  - Matrix transformation infrastructure
+  - **Full matrix transformation pipeline**:
+    - 4x4 projection and modelview matrices
+    - Matrix loading from RDRAM (16.16 fixed-point format)
+    - Matrix multiplication (LOAD and MUL modes)
+    - Complete vertex transformation: modelview → projection → perspective divide → viewport
+  - **F3DEX display list commands**:
+    - G_VTX (0x01) - Load vertices
+    - G_TRI1 (0x05), G_TRI2 (0x06), G_QUAD (0x07) - Triangle/quad rendering
+    - G_MTX (0xDA) - Load transformation matrices
+    - G_GEOMETRYMODE (0xD9) - Set rendering flags
+    - G_DL (0xDE) - Display list branching (nested display lists)
+    - G_ENDDL (0xDF) - End display list
+    - RDP passthrough (0xE0-0xFF) - Embedded RDP commands
   - Task execution framework for graphics microcode
 - RDP (Reality Display Processor) with enhanced framebuffer support
   - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
@@ -605,12 +617,25 @@ For N64 games, the standard controller mappings apply with these button equivale
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
   - Scanline tracking and interrupt support in place but not active
-- **RSP**: High-Level Emulation implemented but not yet processing game display lists
-  - Microcode detection working (F3DEX, F3DEX2, Audio)
-  - Vertex buffer and transformation infrastructure in place
-  - Display list parsing not yet implemented
-  - No vertex transformation, lighting, or RDP command generation yet
-  - Future: Will process vertex data and generate RDP triangle commands
+- **RSP**: High-Level Emulation with F3DEX display list processing
+  - ✅ **Implemented**:
+    - Microcode detection (F3DEX, F3DEX2, Audio)
+    - Vertex buffer management (32 vertices)
+    - Full matrix transformation pipeline (projection, modelview, viewport)
+    - Display list parsing with command execution
+    - Matrix loading (G_MTX) with LOAD/MUL modes
+    - Geometry mode control (G_GEOMETRYMODE)
+    - Triangle rendering commands (G_TRI1, G_TRI2, G_QUAD)
+    - Display list branching (G_DL) for nested lists
+    - RDP command passthrough (0xE0-0xFF range)
+    - Vertex transformation with perspective projection
+    - RDP triangle command generation
+  - ⚠️ **Limitations**:
+    - Matrix stack limited (tracks pointer but no full 10-level stack)
+    - No lighting calculations
+    - No texture coordinate generation
+    - Conditional branching (G_BRANCH_Z) not implemented
+    - Some advanced F3DEX2 commands missing
 - **Audio**: Audio interface not implemented - silent gameplay
 - **Input**: Controller infrastructure complete, needs frontend integration
   - All 14 buttons defined and working (A, B, Z, Start, D-pad, L, R, C-buttons)
@@ -619,7 +644,7 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Frontend keyboard/gamepad mapping not yet connected
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE, PIF). Next steps: RSP display list parsing, texture sampling, frontend controller integration. Test ROMs can run and render basic graphics.
+- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP can now parse display lists, transform vertices, and generate RDP commands. Next steps: texture mapping (TMEM), lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics.
 
 ## Troubleshooting
 
