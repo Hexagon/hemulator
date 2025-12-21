@@ -2,7 +2,7 @@
 
 Purpose: guidance for automated agents and maintainers about CI, formatting, and safety.
 
-- **Keep track of the work**: Keep a todo in TODO.md
+- **Keep track of known limitations**: Document known limitations and missing features in MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
   - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
   - **CLI removed**: There is no CLI frontend, only the GUI
@@ -459,13 +459,13 @@ pub struct GbApu {
 ## Documentation Structure
 
 - **README.md**: Developer-focused documentation (building, architecture, contributing)
-- **MANUAL.md**: End-user manual with usage instructions, controls, troubleshooting
+- **MANUAL.md**: End-user manual with usage instructions, controls, troubleshooting, and known limitations
   - Included in all release packages
   - Keep separate from README to focus on user needs
   - Update when adding user-facing features or changing controls
+  - Contains "Known Limitations" sections for each system - update these when fixing issues
 - **CONTRIBUTING.md**: Contribution guidelines for developers
 - **AGENTS.md**: This file - guidance for automated agents and CI
-- **TODO.md**: Work tracking and future plans
 
 ## Release Packaging
 
