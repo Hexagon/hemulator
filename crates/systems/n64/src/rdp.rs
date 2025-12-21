@@ -81,6 +81,15 @@ pub enum ColorFormat {
     RGBA8888,
 }
 
+/// Scissor box for clipping
+#[derive(Debug, Clone, Copy)]
+struct ScissorBox {
+    x_min: u32,
+    y_min: u32,
+    x_max: u32,
+    y_max: u32,
+}
+
 /// RDP state and framebuffer
 pub struct Rdp {
     /// Current framebuffer
@@ -98,6 +107,9 @@ pub struct Rdp {
 
     /// Fill color (RGBA8888)
     fill_color: u32,
+
+    /// Scissor box for clipping
+    scissor: ScissorBox,
 
     /// DPC registers
     dpc_start: u32,
@@ -120,6 +132,12 @@ impl Rdp {
             height,
             color_format: ColorFormat::RGBA5551,
             fill_color: 0xFF000000, // Black with full alpha
+            scissor: ScissorBox {
+                x_min: 0,
+                y_min: 0,
+                x_max: width,
+                y_max: height,
+            },
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -131,6 +149,12 @@ impl Rdp {
     pub fn reset(&mut self) {
         self.framebuffer = Frame::new(self.width, self.height);
         self.fill_color = 0xFF000000;
+        self.scissor = ScissorBox {
+            x_min: 0,
+            y_min: 0,
+            x_max: self.width,
+            y_max: self.height,
+        };
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -154,11 +178,19 @@ impl Rdp {
     /// Fill a rectangle with the current fill color
     #[allow(dead_code)] // Used in tests and reserved for future display list commands
     pub fn fill_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        let x_end = (x + width).min(self.width);
-        let y_end = (y + height).min(self.height);
+        // Apply scissor clipping
+        let x_start = x.max(self.scissor.x_min);
+        let y_start = y.max(self.scissor.y_min);
+        let x_end = (x + width).min(self.scissor.x_max).min(self.width);
+        let y_end = (y + height).min(self.scissor.y_max).min(self.height);
 
-        for py in y..y_end {
-            for px in x..x_end {
+        // Skip if rectangle is completely clipped
+        if x_start >= x_end || y_start >= y_end {
+            return;
+        }
+
+        for py in y_start..y_end {
+            for px in x_start..x_end {
                 let idx = (py * self.width + px) as usize;
                 if idx < self.framebuffer.pixels.len() {
                     self.framebuffer.pixels[idx] = self.fill_color;
@@ -174,6 +206,76 @@ impl Rdp {
             let idx = (y * self.width + x) as usize;
             if idx < self.framebuffer.pixels.len() {
                 self.framebuffer.pixels[idx] = color;
+            }
+        }
+    }
+
+    /// Draw a flat-shaded triangle (basic rasterization)
+    /// This is a simplified implementation for basic 3D rendering
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)] // Triangle vertices need 6 coordinates + color
+    fn draw_triangle(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) {
+        // Sort vertices by Y coordinate (y0 <= y1 <= y2)
+        let (mut x0, mut y0, mut x1, mut y1, mut x2, mut y2) = (x0, y0, x1, y1, x2, y2);
+
+        if y0 > y1 {
+            std::mem::swap(&mut y0, &mut y1);
+            std::mem::swap(&mut x0, &mut x1);
+        }
+        if y1 > y2 {
+            std::mem::swap(&mut y1, &mut y2);
+            std::mem::swap(&mut x1, &mut x2);
+        }
+        if y0 > y1 {
+            std::mem::swap(&mut y0, &mut y1);
+            std::mem::swap(&mut x0, &mut x1);
+        }
+
+        // Edge walking - simplified scanline rasterization
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let xb = if y < y1 {
+                x0 as f32 + (x1 - x0) as f32 * beta
+            } else {
+                x1 as f32 + (x2 - x1) as f32 * beta
+            };
+
+            let x_start = xa.min(xb) as i32;
+            let x_end = xa.max(xb) as i32;
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(self.scissor.x_min as i32);
+            let clip_x_end = x_end.min(self.scissor.x_max as i32);
+            let clip_y = y
+                .max(self.scissor.y_min as i32)
+                .min(self.scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    self.set_pixel(x as u32, clip_y as u32, color);
+                }
             }
         }
     }
@@ -303,6 +405,67 @@ impl Rdp {
             0x37 => {
                 // word1 contains the fill color (RGBA)
                 self.fill_color = word1;
+            }
+            // SET_SCISSOR (0x2D)
+            0x2D => {
+                // word0: bits 23-12 = XH (right), bits 11-0 = YH (bottom) in 10.2 fixed point
+                // word1: bits 23-12 = XL (left), bits 11-0 = YL (top) in 10.2 fixed point
+                let x_max = ((word0 >> 12) & 0xFFF) / 4;
+                let y_max = (word0 & 0xFFF) / 4;
+                let x_min = ((word1 >> 12) & 0xFFF) / 4;
+                let y_min = (word1 & 0xFFF) / 4;
+
+                self.scissor = ScissorBox {
+                    x_min,
+                    y_min,
+                    x_max,
+                    y_max,
+                };
+            }
+            // TEXTURE_RECTANGLE (0x24)
+            0x24 => {
+                // Texture rectangle command - for now, just fill with fill color
+                // Real implementation would load and sample texture from TMEM
+                // word0: cmd | XH(12) | YH(12)
+                // word1: tile(3) | XL(12) | YL(12)
+                // This is a basic stub implementation
+                let xh = ((word0 >> 12) & 0xFFF) / 4;
+                let yh = (word0 & 0xFFF) / 4;
+                let xl = ((word1 >> 12) & 0xFFF) / 4;
+                let yl = (word1 & 0xFFF) / 4;
+
+                let width = xh.saturating_sub(xl);
+                let height = yh.saturating_sub(yl);
+
+                // Stub: render as solid rectangle with current fill color
+                self.fill_rect(xl, yl, width, height);
+            }
+            // SET_OTHER_MODES (0x2F - full 64-bit command)
+            0x2F => {
+                // Configure rendering modes (cycle type, alpha blend, Z-buffer, etc.)
+                // For now, we just accept and ignore these settings
+                // Full implementation would configure the rendering pipeline
+            }
+            // SET_TILE (0x35)
+            0x35 => {
+                // Configure tile descriptor (texture format, size, palette)
+                // Stub: accept but don't process yet (needs TMEM implementation)
+            }
+            // SET_TEXTURE_IMAGE (0x3D)
+            0x3D => {
+                // Set source address for texture loading
+                // word1 contains DRAM address
+                // Stub: accept but don't process yet (needs TMEM implementation)
+            }
+            // LOAD_BLOCK (0x33)
+            0x33 => {
+                // Load texture block from DRAM to TMEM
+                // Stub: accept but don't process yet (needs TMEM implementation)
+            }
+            // LOAD_TILE (0x34)
+            0x34 => {
+                // Load texture tile from DRAM to TMEM
+                // Stub: accept but don't process yet (needs TMEM implementation)
             }
             // SYNC_FULL (0x29)
             0x29 => {
@@ -527,5 +690,87 @@ mod tests {
         let rdram = vec![0u8; 64];
         rdp.process_display_list(&rdram);
         assert!(!rdp.needs_processing());
+    }
+
+    #[test]
+    fn test_rdp_scissor_command() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 64];
+
+        // Create a display list with SET_SCISSOR command
+        // SET_SCISSOR (0x2D) - set to (10,10) to (100,100)
+        // Format: word0: cmd(8) | XH(12 bits at bit 12) | YH(12 bits)
+        //         word1: XL(12 bits at bit 12) | YL(12 bits)
+        // Coordinates in 10.2 fixed point: multiply by 4
+        let set_scissor_cmd: u32 = (0x2D << 24) | ((100 * 4) << 12) | (100 * 4);
+        let set_scissor_data: u32 = ((10 * 4) << 12) | (10 * 4);
+        rdram[0..4].copy_from_slice(&set_scissor_cmd.to_be_bytes());
+        rdram[4..8].copy_from_slice(&set_scissor_data.to_be_bytes());
+
+        // SET_FILL_COLOR - Red
+        rdram[8..12].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[12..16].copy_from_slice(&0xFFFF0000u32.to_be_bytes());
+
+        // FILL_RECTANGLE covering (5,5) to (150,150)
+        // Should be clipped to scissor bounds (10,10) to (100,100)
+        let rect_cmd: u32 = (0x36 << 24) | ((150 * 4) << 14) | ((150 * 4) << 2);
+        let rect_data: u32 = ((5 * 4) << 14) | ((5 * 4) << 2);
+        rdram[16..20].copy_from_slice(&rect_cmd.to_be_bytes());
+        rdram[20..24].copy_from_slice(&rect_data.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 24);
+        rdp.process_display_list(&rdram);
+
+        // Check that pixels inside scissor bounds are red
+        let idx_inside = (50 * 320 + 50) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx_inside], 0xFFFF0000);
+
+        // Check that pixels outside scissor bounds (but inside rectangle) are still black
+        let idx_outside = (5 * 320 + 5) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx_outside], 0);
+
+        // Check another pixel outside scissor (105, 105) - outside max bounds
+        let idx_outside2 = (105 * 320 + 105) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx_outside2], 0);
+    }
+
+    #[test]
+    fn test_rdp_triangle_rendering() {
+        let mut rdp = Rdp::new();
+
+        // Draw a simple triangle
+        rdp.set_fill_color(0xFF00FF00); // Green
+        rdp.draw_triangle(100, 50, 150, 150, 50, 150, 0xFF00FF00);
+
+        // Check that some pixels in the triangle are green
+        // Center of triangle should be around (100, 116)
+        let idx = (116 * 320 + 100) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
+    }
+
+    #[test]
+    fn test_rdp_texture_rectangle_stub() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 64];
+
+        // SET_FILL_COLOR - Blue (for stub texture rect)
+        rdram[0..4].copy_from_slice(&0x37000000u32.to_be_bytes());
+        rdram[4..8].copy_from_slice(&0xFF0000FFu32.to_be_bytes());
+
+        // TEXTURE_RECTANGLE (0x24) - stub implementation fills with solid color
+        // Coordinates: (50,50) to (100,100)
+        let tex_rect_cmd: u32 = (0x24 << 24) | ((100 * 4) << 12) | (100 * 4);
+        let tex_rect_data: u32 = ((50 * 4) << 12) | (50 * 4); // tile=0, coords
+        rdram[8..12].copy_from_slice(&tex_rect_cmd.to_be_bytes());
+        rdram[12..16].copy_from_slice(&tex_rect_data.to_be_bytes());
+
+        rdp.write_register(0x00, 0);
+        rdp.write_register(0x04, 16);
+        rdp.process_display_list(&rdram);
+
+        // Verify the rectangle was filled (stub implementation)
+        let idx = (75 * 320 + 75) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx], 0xFF0000FF);
     }
 }

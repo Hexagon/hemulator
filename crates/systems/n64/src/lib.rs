@@ -14,6 +14,7 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod rdp;
+mod vi;
 
 use bus::N64Bus;
 use cpu::N64Cpu;
