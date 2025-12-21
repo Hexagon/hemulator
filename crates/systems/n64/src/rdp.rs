@@ -116,6 +116,13 @@ pub struct Rdp {
     /// Framebuffer height
     height: u32,
 
+    /// Z-buffer (depth buffer) for hidden surface removal
+    /// Stores depth values as u16 (0 = near, 0xFFFF = far)
+    zbuffer: Vec<u16>,
+
+    /// Z-buffer enabled flag
+    zbuffer_enabled: bool,
+
     /// Color format
     #[allow(dead_code)] // Reserved for future color format support
     color_format: ColorFormat,
@@ -150,10 +157,13 @@ impl Rdp {
 
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
+        let size = (width * height) as usize;
         Self {
             framebuffer: Frame::new(width, height),
             width,
             height,
+            zbuffer: vec![0xFFFF; size], // Initialize to maximum depth (far plane)
+            zbuffer_enabled: false,
             color_format: ColorFormat::RGBA5551,
             fill_color: 0xFF000000, // Black with full alpha
             scissor: ScissorBox {
@@ -185,6 +195,8 @@ impl Rdp {
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.framebuffer = Frame::new(self.width, self.height);
+        self.zbuffer.fill(0xFFFF); // Reset to maximum depth (far plane)
+        self.zbuffer_enabled = false;
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
@@ -260,6 +272,39 @@ impl Rdp {
         }
     }
 
+    /// Clear the Z-buffer to maximum depth (far plane)
+    #[allow(dead_code)] // Public API for future use
+    pub fn clear_zbuffer(&mut self) {
+        self.zbuffer.fill(0xFFFF);
+    }
+
+    /// Enable or disable Z-buffer testing
+    #[allow(dead_code)] // Public API for future use
+    pub fn set_zbuffer_enabled(&mut self, enabled: bool) {
+        self.zbuffer_enabled = enabled;
+    }
+
+    /// Test and update Z-buffer for a pixel
+    /// Returns true if pixel should be drawn (passes depth test)
+    fn zbuffer_test(&mut self, x: u32, y: u32, depth: u16) -> bool {
+        if !self.zbuffer_enabled {
+            return true; // Always pass if Z-buffer disabled
+        }
+
+        let idx = (y * self.width + x) as usize;
+        if idx >= self.zbuffer.len() {
+            return false;
+        }
+
+        // Depth test: closer (smaller) values pass
+        if depth < self.zbuffer[idx] {
+            self.zbuffer[idx] = depth; // Update Z-buffer
+            true
+        } else {
+            false
+        }
+    }
+
     /// Draw a flat-shaded triangle (basic rasterization)
     /// This is a simplified implementation for basic 3D rendering
     #[allow(dead_code)]
@@ -328,6 +373,305 @@ impl Rdp {
                 }
             }
         }
+    }
+
+    /// Draw a flat-shaded triangle with Z-buffer support
+    /// depth values are u16 (0 = near, 0xFFFF = far)
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        color: u32,
+    ) {
+        // Sort vertices by Y coordinate
+        let mut verts = [(x0, y0, z0), (x1, y1, z1), (x2, y2, z2)];
+        verts.sort_by_key(|v| v.1);
+        let [(x0, y0, z0), (x1, y1, z1), (x2, y2, z2)] = verts;
+
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let za = z0 as f32 + (z2 as f32 - z0 as f32) * alpha;
+
+            let (xb, zb) = if y < y1 {
+                (
+                    x0 as f32 + (x1 - x0) as f32 * beta,
+                    z0 as f32 + (z1 as f32 - z0 as f32) * beta,
+                )
+            } else {
+                (
+                    x1 as f32 + (x2 - x1) as f32 * beta,
+                    z1 as f32 + (z2 as f32 - z1 as f32) * beta,
+                )
+            };
+
+            let (x_start, x_end, z_start, z_end) = if xa < xb {
+                (xa as i32, xb as i32, za, zb)
+            } else {
+                (xb as i32, xa as i32, zb, za)
+            };
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(self.scissor.x_min as i32);
+            let clip_x_end = x_end.min(self.scissor.x_max as i32);
+            let clip_y = y
+                .max(self.scissor.y_min as i32)
+                .min(self.scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            // Interpolate Z across scanline
+            let span_width = x_end - x_start;
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    let t = if span_width > 0 {
+                        (x - x_start) as f32 / span_width as f32
+                    } else {
+                        0.0
+                    };
+                    let z = (z_start + (z_end - z_start) * t) as u16;
+
+                    // Z-buffer test
+                    if self.zbuffer_test(x as u32, clip_y as u32, z) {
+                        self.set_pixel(x as u32, clip_y as u32, color);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw a Gouraud-shaded triangle (per-vertex color interpolation)
+    /// Colors are RGBA8888 format
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_shaded(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        c2: u32,
+    ) {
+        // Sort vertices by Y coordinate
+        let mut verts = [(x0, y0, c0), (x1, y1, c1), (x2, y2, c2)];
+        verts.sort_by_key(|v| v.1);
+        let [(x0, y0, c0), (x1, y1, c1), (x2, y2, c2)] = verts;
+
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let ca = Self::lerp_color(c0, c2, alpha);
+
+            let (xb, cb) = if y < y1 {
+                (
+                    x0 as f32 + (x1 - x0) as f32 * beta,
+                    Self::lerp_color(c0, c1, beta),
+                )
+            } else {
+                (
+                    x1 as f32 + (x2 - x1) as f32 * beta,
+                    Self::lerp_color(c1, c2, beta),
+                )
+            };
+
+            let (x_start, x_end, c_start, c_end) = if xa < xb {
+                (xa as i32, xb as i32, ca, cb)
+            } else {
+                (xb as i32, xa as i32, cb, ca)
+            };
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(self.scissor.x_min as i32);
+            let clip_x_end = x_end.min(self.scissor.x_max as i32);
+            let clip_y = y
+                .max(self.scissor.y_min as i32)
+                .min(self.scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            // Interpolate color across scanline
+            let span_width = x_end - x_start;
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    let t = if span_width > 0 {
+                        (x - x_start) as f32 / span_width as f32
+                    } else {
+                        0.0
+                    };
+                    let color = Self::lerp_color(c_start, c_end, t);
+                    self.set_pixel(x as u32, clip_y as u32, color);
+                }
+            }
+        }
+    }
+
+    /// Draw a Gouraud-shaded triangle with Z-buffer support
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_shaded_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        c0: u32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        c1: u32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        c2: u32,
+    ) {
+        // Sort vertices by Y coordinate
+        let mut verts = [(x0, y0, z0, c0), (x1, y1, z1, c1), (x2, y2, z2, c2)];
+        verts.sort_by_key(|v| v.1);
+        let [(x0, y0, z0, c0), (x1, y1, z1, c1), (x2, y2, z2, c2)] = verts;
+
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let za = z0 as f32 + (z2 as f32 - z0 as f32) * alpha;
+            let ca = Self::lerp_color(c0, c2, alpha);
+
+            let (xb, zb, cb) = if y < y1 {
+                (
+                    x0 as f32 + (x1 - x0) as f32 * beta,
+                    z0 as f32 + (z1 as f32 - z0 as f32) * beta,
+                    Self::lerp_color(c0, c1, beta),
+                )
+            } else {
+                (
+                    x1 as f32 + (x2 - x1) as f32 * beta,
+                    z1 as f32 + (z2 as f32 - z1 as f32) * beta,
+                    Self::lerp_color(c1, c2, beta),
+                )
+            };
+
+            let (x_start, x_end, z_start, z_end, c_start, c_end) = if xa < xb {
+                (xa as i32, xb as i32, za, zb, ca, cb)
+            } else {
+                (xb as i32, xa as i32, zb, za, cb, ca)
+            };
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(self.scissor.x_min as i32);
+            let clip_x_end = x_end.min(self.scissor.x_max as i32);
+            let clip_y = y
+                .max(self.scissor.y_min as i32)
+                .min(self.scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            // Interpolate Z and color across scanline
+            let span_width = x_end - x_start;
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    let t = if span_width > 0 {
+                        (x - x_start) as f32 / span_width as f32
+                    } else {
+                        0.0
+                    };
+                    let z = (z_start + (z_end - z_start) * t) as u16;
+                    let color = Self::lerp_color(c_start, c_end, t);
+
+                    // Z-buffer test
+                    if self.zbuffer_test(x as u32, clip_y as u32, z) {
+                        self.set_pixel(x as u32, clip_y as u32, color);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Linear interpolation of two ARGB colors (format: 0xAARRGGBB)
+    fn lerp_color(c0: u32, c1: u32, t: f32) -> u32 {
+        let a0 = ((c0 >> 24) & 0xFF) as f32;
+        let r0 = ((c0 >> 16) & 0xFF) as f32;
+        let g0 = ((c0 >> 8) & 0xFF) as f32;
+        let b0 = (c0 & 0xFF) as f32;
+
+        let a1 = ((c1 >> 24) & 0xFF) as f32;
+        let r1 = ((c1 >> 16) & 0xFF) as f32;
+        let g1 = ((c1 >> 8) & 0xFF) as f32;
+        let b1 = (c1 & 0xFF) as f32;
+
+        let a = (a0 + (a1 - a0) * t).round() as u32;
+        let r = (r0 + (r1 - r0) * t).round() as u32;
+        let g = (g0 + (g1 - g0) * t).round() as u32;
+        let b = (b0 + (b1 - b0) * t).round() as u32;
+
+        (a << 24) | (r << 16) | (g << 8) | b
     }
 
     /// Get the current framebuffer
@@ -433,6 +777,28 @@ impl Rdp {
     /// Execute a single RDP command
     fn execute_command(&mut self, cmd_id: u32, word0: u32, word1: u32) {
         match cmd_id {
+            // Triangle commands (0x08-0x0F)
+            // Note: Real N64 triangle commands are much more complex with multiple words
+            // This is a simplified implementation for basic 3D rendering
+
+            // Non-shaded triangle (0x08)
+            0x08 => {
+                // Simplified format: word0 contains packed vertex data
+                // This would need to be expanded for full RDP compatibility
+                // For now, this is a placeholder for future implementation
+            }
+            // Non-shaded triangle with Z-buffer (0x09)
+            0x09 => {
+                // Simplified format - placeholder for future implementation
+            }
+            // Shaded triangle (0x0C)
+            0x0C => {
+                // Simplified format - placeholder for future implementation
+            }
+            // Shaded triangle with Z-buffer (0x0D)
+            0x0D => {
+                // Simplified format - placeholder for future implementation
+            }
             // FILL_RECTANGLE (0x36)
             0x36 => {
                 // RDP FILL_RECTANGLE format:
@@ -935,5 +1301,222 @@ mod tests {
             assert_eq!(tile.format, 0);
             assert_eq!(tile.size, 0);
         }
+    }
+
+    #[test]
+    fn test_rdp_zbuffer_initialization() {
+        let rdp = Rdp::new();
+
+        // Verify Z-buffer is initialized to far plane (0xFFFF)
+        assert_eq!(rdp.zbuffer.len(), 320 * 240);
+        assert!(rdp.zbuffer.iter().all(|&z| z == 0xFFFF));
+
+        // Verify Z-buffer is disabled by default
+        assert!(!rdp.zbuffer_enabled);
+    }
+
+    #[test]
+    fn test_rdp_zbuffer_clear() {
+        let mut rdp = Rdp::new();
+
+        // Modify some Z-buffer values
+        rdp.zbuffer[0] = 0x1000;
+        rdp.zbuffer[100] = 0x2000;
+
+        // Clear Z-buffer
+        rdp.clear_zbuffer();
+
+        // Verify all values reset to far plane
+        assert!(rdp.zbuffer.iter().all(|&z| z == 0xFFFF));
+    }
+
+    #[test]
+    fn test_rdp_zbuffer_enable_disable() {
+        let mut rdp = Rdp::new();
+
+        assert!(!rdp.zbuffer_enabled);
+
+        rdp.set_zbuffer_enabled(true);
+        assert!(rdp.zbuffer_enabled);
+
+        rdp.set_zbuffer_enabled(false);
+        assert!(!rdp.zbuffer_enabled);
+    }
+
+    #[test]
+    fn test_rdp_zbuffer_test() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+
+        // First pixel at depth 0x8000 should pass and update Z-buffer
+        assert!(rdp.zbuffer_test(10, 10, 0x8000));
+        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x8000);
+
+        // Second pixel at depth 0x9000 (farther) should fail
+        assert!(!rdp.zbuffer_test(10, 10, 0x9000));
+        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x8000); // Unchanged
+
+        // Third pixel at depth 0x7000 (closer) should pass and update
+        assert!(rdp.zbuffer_test(10, 10, 0x7000));
+        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0x7000);
+    }
+
+    #[test]
+    fn test_rdp_zbuffer_test_disabled() {
+        let mut rdp = Rdp::new();
+        // Z-buffer disabled by default
+
+        // All tests should pass when Z-buffer is disabled
+        assert!(rdp.zbuffer_test(10, 10, 0x8000));
+        assert!(rdp.zbuffer_test(10, 10, 0x9000));
+        assert!(rdp.zbuffer_test(10, 10, 0x7000));
+
+        // Z-buffer should remain unchanged (at far plane)
+        assert_eq!(rdp.zbuffer[(10 * 320 + 10) as usize], 0xFFFF);
+    }
+
+    #[test]
+    fn test_rdp_triangle_zbuffer() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+
+        // Draw a triangle with Z-buffer
+        rdp.draw_triangle_zbuffer(
+            100, 50, 0x8000, // Top vertex
+            150, 150, 0x8000, // Bottom-right vertex
+            50, 150, 0x8000,     // Bottom-left vertex
+            0xFF00FF00, // Green color
+        );
+
+        // Check that pixels in the triangle are green
+        let idx = (116 * 320 + 100) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
+
+        // Check that Z-buffer was updated
+        assert!(rdp.zbuffer[idx] < 0xFFFF);
+    }
+
+    #[test]
+    fn test_rdp_triangle_zbuffer_occlusion() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+
+        // Draw a near triangle (small Z value = close to camera)
+        rdp.draw_triangle_zbuffer(
+            100, 50, 0x4000, 150, 150, 0x4000, 50, 150, 0x4000, 0xFF00FF00, // Green
+        );
+
+        // Draw a far triangle (large Z value = far from camera) at same location
+        // This should be occluded by the first triangle
+        rdp.draw_triangle_zbuffer(
+            100, 50, 0xC000, 150, 150, 0xC000, 50, 150, 0xC000, 0xFFFF0000, // Red
+        );
+
+        // Pixel should remain green (near triangle visible)
+        let idx = (116 * 320 + 100) as usize;
+        assert_eq!(rdp.framebuffer.pixels[idx], 0xFF00FF00);
+    }
+
+    #[test]
+    fn test_rdp_triangle_shaded() {
+        let mut rdp = Rdp::new();
+
+        // Draw a triangle with Gouraud shading
+        // Top vertex: Red (0xFFFF0000), Bottom vertices: Blue (0xFF0000FF)
+        rdp.draw_triangle_shaded(
+            100, 50, 0xFFFF0000, // Top: Red
+            150, 150, 0xFF0000FF, // Bottom-right: Blue
+            50, 150, 0xFF0000FF, // Bottom-left: Blue
+        );
+
+        // Check that center pixel has interpolated color (between red and blue = purple)
+        let idx = (100 * 320 + 100) as usize;
+        let color = rdp.framebuffer.pixels[idx];
+
+        // Should have both red and blue components (ARGB format)
+        let r = (color >> 16) & 0xFF;
+        let b = color & 0xFF;
+        assert!(r > 0x00, "Should have red component");
+        assert!(b > 0x00, "Should have blue component");
+    }
+
+    #[test]
+    fn test_rdp_triangle_shaded_zbuffer() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+
+        // Draw a shaded triangle with Z-buffer
+        rdp.draw_triangle_shaded_zbuffer(
+            100, 50, 0x8000, 0xFFFF0000, // Top: Red
+            150, 150, 0x8000, 0xFF00FF00, // Bottom-right: Green
+            50, 150, 0x8000, 0xFF0000FF, // Bottom-left: Blue
+        );
+
+        // Check that triangle was drawn
+        let idx = (100 * 320 + 100) as usize;
+        let color = rdp.framebuffer.pixels[idx];
+
+        // Should have interpolated color components
+        assert_ne!(color, 0, "Pixel should be colored");
+
+        // Check Z-buffer was updated
+        assert!(rdp.zbuffer[idx] < 0xFFFF);
+    }
+
+    #[test]
+    fn test_rdp_color_interpolation() {
+        // Test linear color interpolation
+        // ARGB format: 0xAARRGGBB
+        let c0 = 0xFFFF0000; // Red with full alpha
+        let c1 = 0xFF0000FF; // Blue with full alpha
+
+        // 50% interpolation should give purple
+        let c_mid = Rdp::lerp_color(c0, c1, 0.5);
+        let a = (c_mid >> 24) & 0xFF;
+        let r = (c_mid >> 16) & 0xFF;
+        let g = (c_mid >> 8) & 0xFF;
+        let b = c_mid & 0xFF;
+
+        assert_eq!(a, 255, "Alpha should be full");
+        // Allow for rounding: 127 or 128 are both valid for 50%
+        assert!((127..=128).contains(&r), "Red component should be ~50%");
+        assert_eq!(g, 0, "Green component should be 0");
+        assert!((127..=128).contains(&b), "Blue component should be ~50%");
+
+        // 0% should give c0
+        let c_start = Rdp::lerp_color(c0, c1, 0.0);
+        assert_eq!(c_start, c0);
+
+        // 100% should give c1
+        let c_end = Rdp::lerp_color(c0, c1, 1.0);
+        assert_eq!(c_end, c1);
+    }
+
+    #[test]
+    fn test_rdp_triangle_scissor_clipping() {
+        let mut rdp = Rdp::new();
+
+        // Set scissor to small region (50,50) to (150,150)
+        rdp.scissor = ScissorBox {
+            x_min: 50,
+            y_min: 50,
+            x_max: 150,
+            y_max: 150,
+        };
+
+        // Draw triangle that extends beyond scissor region
+        rdp.draw_triangle_shaded(
+            100, 20, 0xFFFF0000, // Top (outside scissor)
+            200, 200, 0xFF00FF00, // Bottom-right (outside scissor)
+            0, 200, 0xFF0000FF, // Bottom-left (outside scissor)
+        );
+
+        // Pixels outside scissor should be black
+        assert_eq!(rdp.framebuffer.pixels[(20 * 320 + 100) as usize], 0);
+        assert_eq!(rdp.framebuffer.pixels[(200 * 320 + 200) as usize], 0);
+
+        // Pixel inside scissor should be colored
+        let idx = (100 * 320 + 100) as usize;
+        assert_ne!(rdp.framebuffer.pixels[idx], 0);
     }
 }

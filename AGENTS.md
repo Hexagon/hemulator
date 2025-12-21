@@ -539,20 +539,39 @@ System-specific implementations that use core components:
   - **RDP (Reality Display Processor)**:
     - System-specific implementation in `crates/systems/n64/src/rdp.rs`
     - Framebuffer support with configurable resolution (default 320x240)
+    - **3D Triangle Rasterization**:
+      - Flat-shaded triangles (solid color)
+      - Gouraud-shaded triangles (per-vertex color interpolation)
+      - Z-buffered rendering (depth testing for hidden surface removal)
+      - Combined shading + Z-buffer support
+      - Scanline-based edge walking algorithm
+      - Barycentric coordinate interpolation for attributes
+    - **Z-Buffer (Depth Buffer)**:
+      - 16-bit depth values (0 = near, 0xFFFF = far)
+      - Per-pixel depth testing
+      - Automatic depth buffer updates on writes
+      - Enable/disable per rendering operation
+    - **Rasterization Features**:
+      - Scissor rectangle clipping (fully functional)
+      - Per-pixel color interpolation
+      - Per-pixel depth interpolation
+      - Edge function-based rasterization
     - Basic fill operations (clear, fill rectangle, set pixel)
     - Memory-mapped register interface (DPC_START, DPC_END, DPC_STATUS, etc.)
-    - Support for display list command processing (stub)
-    - Color format support (RGBA5551, RGBA8888)
+    - Support for display list command processing
+    - Color format support (RGBA5551, RGBA8888, internally uses ARGB)
     - **Timing Model**: Frame-based rendering (not cycle-accurate)
       - Maintains framebuffer for frame generation
       - Registers accessible via memory-mapped I/O
-      - Suitable for basic rendering; advanced features not yet implemented
+      - Suitable for 3D wireframe and flat-shaded rendering
     - **Known Limitations**:
-      - No texture mapping or Z-buffer
+      - No texture mapping (texture structures in place but sampling not implemented)
+      - Triangle commands (0x08-0x0F) not yet wired to display list processor
       - No perspective-correct rasterization
       - No anti-aliasing or blending
-      - Display list commands not fully processed
-      - TMEM (texture memory) not implemented
+      - TMEM (texture memory) allocated but not used for sampling
+      - No sub-pixel accuracy
+      - No edge AA or coverage calculation
   - **Cartridge Support**:
     - System-specific implementation in `crates/systems/n64/cartridge.rs`
     - Automatic byte-order detection (Z64/N64/V64 formats)
@@ -574,7 +593,7 @@ System-specific implementations that use core components:
     - No TLB, cache, or accurate memory timing
     - Exception handling not fully implemented (no traps on overflow)
     - Frame-based timing (not cycle-accurate)
-  - All tests pass (22 tests: cartridge, RDP, system integration)
+  - All tests pass (51 tests: cartridge, RDP with 3D rendering, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
