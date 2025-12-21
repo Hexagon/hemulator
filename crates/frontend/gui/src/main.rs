@@ -24,6 +24,8 @@ enum EmulatorSystem {
     GameBoy(emu_gb::GbSystem),
     Atari2600(emu_atari2600::Atari2600System),
     PC(emu_pc::PcSystem),
+    SNES(emu_snes::SnesSystem),
+    N64(emu_n64::N64System),
 }
 
 impl EmulatorSystem {
@@ -41,6 +43,12 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SNES(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::N64(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -50,6 +58,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(sys) => sys.reset(),
             EmulatorSystem::Atari2600(sys) => sys.reset(),
             EmulatorSystem::PC(sys) => sys.reset(),
+            EmulatorSystem::SNES(sys) => sys.reset(),
+            EmulatorSystem::N64(sys) => sys.reset(),
         }
     }
 
@@ -71,6 +81,12 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SNES(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::N64(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -80,6 +96,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(sys) => sys.mount_points(),
             EmulatorSystem::Atari2600(sys) => sys.mount_points(),
             EmulatorSystem::PC(sys) => sys.mount_points(),
+            EmulatorSystem::SNES(sys) => sys.mount_points(),
+            EmulatorSystem::N64(sys) => sys.mount_points(),
         }
     }
 
@@ -89,6 +107,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(sys) => sys.supports_save_states(),
             EmulatorSystem::Atari2600(sys) => sys.supports_save_states(),
             EmulatorSystem::PC(sys) => sys.supports_save_states(),
+            EmulatorSystem::SNES(sys) => sys.supports_save_states(),
+            EmulatorSystem::N64(sys) => sys.supports_save_states(),
         }
     }
 
@@ -98,6 +118,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(sys) => sys.save_state(),
             EmulatorSystem::Atari2600(sys) => sys.save_state(),
             EmulatorSystem::PC(sys) => sys.save_state(),
+            EmulatorSystem::SNES(sys) => sys.save_state(),
+            EmulatorSystem::N64(sys) => sys.save_state(),
         }
     }
 
@@ -107,6 +129,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(sys) => sys.load_state(state),
             EmulatorSystem::Atari2600(sys) => sys.load_state(state),
             EmulatorSystem::PC(sys) => sys.load_state(state),
+            EmulatorSystem::SNES(sys) => sys.load_state(state),
+            EmulatorSystem::N64(sys) => sys.load_state(state),
         }
     }
 
@@ -134,6 +158,8 @@ impl EmulatorSystem {
             }
             EmulatorSystem::Atari2600(_) => {}
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
+            EmulatorSystem::SNES(_) => {} // SNES controller support stub
+            EmulatorSystem::N64(_) => {}  // N64 controller support stub
         }
     }
 
@@ -206,6 +232,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => None,
             EmulatorSystem::Atari2600(_) => None,
             EmulatorSystem::PC(_) => None,
+            EmulatorSystem::SNES(_) => None,
+            EmulatorSystem::N64(_) => None,
         }
     }
 
@@ -215,6 +243,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::Atari2600(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::PC(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::SNES(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::N64(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -224,6 +254,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::Atari2600(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::N64(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -233,6 +265,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => vec![0; count], // TODO: Implement audio for Game Boy
             EmulatorSystem::Atari2600(_) => vec![0; count], // TODO: Implement audio for Atari 2600
             EmulatorSystem::PC(_) => vec![0; count],      // TODO: Implement audio for PC
+            EmulatorSystem::SNES(_) => vec![0; count],    // TODO: Implement audio for SNES
+            EmulatorSystem::N64(_) => vec![0; count],     // TODO: Implement audio for N64
         }
     }
 
@@ -242,6 +276,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => (160, 144),
             EmulatorSystem::Atari2600(_) => (160, 192),
             EmulatorSystem::PC(_) => (640, 400),
+            EmulatorSystem::SNES(_) => (256, 224),
+            EmulatorSystem::N64(_) => (320, 240),
         }
     }
 
@@ -251,6 +287,8 @@ impl EmulatorSystem {
             EmulatorSystem::GameBoy(_) => "gameboy",
             EmulatorSystem::Atari2600(_) => "atari2600",
             EmulatorSystem::PC(_) => "pc",
+            EmulatorSystem::SNES(_) => "snes",
+            EmulatorSystem::N64(_) => "n64",
         }
     }
 }
@@ -588,6 +626,40 @@ fn main() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
                         println!("Loaded PC executable: {}", p);
+                    }
+                }
+                Ok(SystemType::SNES) => {
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut snes_sys = emu_snes::SnesSystem::new();
+                    if let Err(e) = snes_sys.mount("Cartridge", &data) {
+                        eprintln!("Failed to load SNES ROM: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        sys = EmulatorSystem::SNES(snes_sys);
+                        settings.set_mount_point("Cartridge", p.clone());
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
+                        }
+                        println!("Loaded SNES ROM: {}", p);
+                    }
+                }
+                Ok(SystemType::N64) => {
+                    rom_hash = Some(GameSaves::rom_hash(&data));
+                    let mut n64_sys = emu_n64::N64System::new();
+                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                        eprintln!("Failed to load N64 ROM: {}", e);
+                        rom_hash = None;
+                    } else {
+                        rom_loaded = true;
+                        sys = EmulatorSystem::N64(n64_sys);
+                        settings.set_mount_point("Cartridge", p.clone());
+                        settings.last_rom_path = Some(p.clone());
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save settings: {}", e);
+                        }
+                        println!("Loaded N64 ROM: {}", p);
                     }
                 }
                 Err(e) => {
