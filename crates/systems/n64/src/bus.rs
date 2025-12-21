@@ -2,6 +2,7 @@
 
 use crate::cartridge::Cartridge;
 use crate::rdp::Rdp;
+use crate::vi::VideoInterface;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
 
@@ -17,6 +18,8 @@ pub struct N64Bus {
     cartridge: Option<Cartridge>,
     /// RDP (Reality Display Processor)
     rdp: Rdp,
+    /// VI (Video Interface)
+    vi: VideoInterface,
 }
 
 impl N64Bus {
@@ -27,6 +30,7 @@ impl N64Bus {
             sp_mem: [0; 0x2000],
             cartridge: None,
             rdp: Rdp::new(),
+            vi: VideoInterface::new(),
         };
 
         // Initialize minimal PIF ROM stub for booting
@@ -109,6 +113,16 @@ impl N64Bus {
         &mut self.rdp
     }
 
+    #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
+    pub fn vi(&self) -> &VideoInterface {
+        &self.vi
+    }
+
+    #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
+    pub fn vi_mut(&mut self) -> &mut VideoInterface {
+        &mut self.vi
+    }
+
     /// Process pending RDP display list if needed
     pub fn process_rdp_display_list(&mut self) {
         if self.rdp.needs_processing() {
@@ -175,6 +189,11 @@ impl MemoryMips for N64Bus {
             0x0410_0000..=0x0410_001F => {
                 let offset = phys_addr & 0x1F;
                 self.rdp.read_register(offset)
+            }
+            // VI registers (0x04400000 - 0x04400037)
+            0x0440_0000..=0x0440_0037 => {
+                let offset = phys_addr & 0x3F;
+                self.vi.read_register(offset)
             }
             // Cartridge ROM
             0x1000_0000..=0x1FBF_FFFF => {
@@ -254,6 +273,11 @@ impl MemoryMips for N64Bus {
                 if offset == 0x04 {
                     self.process_rdp_display_list();
                 }
+            }
+            // VI registers (0x04400000 - 0x04400037)
+            0x0440_0000..=0x0440_0037 => {
+                let offset = phys_addr & 0x3F;
+                self.vi.write_register(offset, val);
             }
             _ => {
                 let bytes = val.to_be_bytes();
