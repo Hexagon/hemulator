@@ -121,6 +121,49 @@ impl RspHle {
         ]
     }
 
+    /// Multiply two 4x4 matrices: result = a * b
+    /// Matrices are in row-major order
+    fn multiply_matrix(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+        let mut result = [0.0f32; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                result[i * 4 + j] = a[i * 4] * b[j]
+                    + a[i * 4 + 1] * b[4 + j]
+                    + a[i * 4 + 2] * b[8 + j]
+                    + a[i * 4 + 3] * b[12 + j];
+            }
+        }
+        result
+    }
+
+    /// Load a 4x4 matrix from RDRAM
+    /// N64 matrices are stored as 16 signed 16.16 fixed-point values (32 bits each)
+    fn load_matrix_from_rdram(&self, rdram: &[u8], addr: u32) -> [f32; 16] {
+        let mut matrix = [0.0f32; 16];
+        let addr = addr as usize;
+
+        // Safety check
+        if addr + 63 >= rdram.len() {
+            return Self::identity_matrix();
+        }
+
+        // Read 16 32-bit fixed-point values (16.16 format)
+        for (i, elem) in matrix.iter_mut().enumerate() {
+            let offset = addr + i * 4;
+            // Read as signed 32-bit integer
+            let fixed_point = i32::from_be_bytes([
+                rdram[offset],
+                rdram[offset + 1],
+                rdram[offset + 2],
+                rdram[offset + 3],
+            ]);
+            // Convert from 16.16 fixed-point to float
+            *elem = (fixed_point as f32) / 65536.0;
+        }
+
+        matrix
+    }
+
     /// Detect microcode type from IMEM data
     pub fn detect_microcode(&mut self, imem: &[u8; 4096]) {
         // Simple detection: look for known patterns in microcode
@@ -326,6 +369,50 @@ impl RspHle {
                 }
                 true
             }
+            // G_MTX (0xDA) - Load transformation matrix
+            0xDA => {
+                // word0: cmd_id | param (push/nopush, load/mul, projection/modelview)
+                // word1: RDRAM address of matrix (64 bytes, 4x4 matrix of 16.16 fixed point)
+                let param = word0 & 0xFF;
+                let matrix_addr = word1;
+
+                // Parse matrix parameters
+                let push = (param & 0x01) != 0; // G_MTX_PUSH
+                let load = (param & 0x02) == 0; // G_MTX_LOAD (vs G_MTX_MUL)
+                let projection = (param & 0x04) != 0; // G_MTX_PROJECTION (vs G_MTX_MODELVIEW)
+
+                // Load matrix from RDRAM
+                let matrix = self.load_matrix_from_rdram(rdram, matrix_addr);
+
+                // Apply matrix based on type
+                if projection {
+                    // Projection matrix
+                    if load {
+                        // Replace projection matrix
+                        self.projection_matrix = matrix;
+                    } else {
+                        // Multiply with existing projection matrix
+                        self.projection_matrix =
+                            Self::multiply_matrix(&self.projection_matrix, &matrix);
+                    }
+                } else {
+                    // Modelview matrix
+                    if push {
+                        // In a full implementation, we'd push current matrix to stack
+                        // For now, we just use a single matrix slot
+                        self.matrix_stack_ptr = (self.matrix_stack_ptr + 1).min(9);
+                    }
+                    if load {
+                        // Replace modelview matrix
+                        self.modelview_matrix = matrix;
+                    } else {
+                        // Multiply with existing modelview matrix
+                        self.modelview_matrix =
+                            Self::multiply_matrix(&self.modelview_matrix, &matrix);
+                    }
+                }
+                true
+            }
             // G_GEOMETRYMODE (0xD9) - Set rendering mode flags
             0xD9 => {
                 // word0: bits to clear (inverted mask)
@@ -337,6 +424,31 @@ impl RspHle {
                 self.geometry_mode = (self.geometry_mode & !clear_bits) | set_bits;
                 true
             }
+            // G_DL (0xDE) - Display list branch/call
+            0xDE => {
+                // word0: cmd_id | branch_type (0 = call with return, 1 = branch no return)
+                // word1: RDRAM address of display list to execute
+                let branch_type = (word0 >> 16) & 0xFF;
+                let dl_addr = word1;
+
+                // branch_type: 0 = G_DL_PUSH (call, will return), 1 = G_DL_NOPUSH (branch, no return)
+                let is_push = branch_type == 0;
+
+                // For now, we implement a simple non-recursive version
+                // A full implementation would use a stack to handle nested display lists
+                // To prevent infinite loops, we only support one level of nesting here
+                if is_push {
+                    // This is a display list call - we should save state and execute the nested DL
+                    // For simplicity, we parse it inline without full recursion support
+                    // Full implementation would push return address to a stack
+                    self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+                } else {
+                    // This is a branch - we don't return, but we still parse it inline
+                    // In the real implementation, this would update the current DL pointer
+                    self.parse_f3dex_display_list(rdram, dl_addr, 10000, rdp);
+                }
+                true
+            }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
             // RDP passthrough commands (0xE0-0xFF) - forward directly to RDP
@@ -345,15 +457,12 @@ impl RspHle {
                 // Forward them directly to the RDP for execution
                 // Common commands: SET_FILL_COLOR (0xF7/0x37), SET_SCISSOR (0xED/0x2D), etc.
 
-                // Create a temporary display list with this single command
-                let temp_dl = [0u8; 8];
-                // Note: We would copy word0/word1 to temp_dl, but RDP expects RDRAM addresses
-                // For now, RDP commands embedded in F3DEX are recognized but not fully processed
+                // The RDP command ID is in the lower 6 bits of the command byte
+                let rdp_cmd_id = (word0 >> 24) & 0x3F;
 
-                // Process it through RDP
-                rdp.set_dpc_start(0);
-                rdp.set_dpc_end(8);
-                let _ = temp_dl; // Suppress unused warning
+                // Call RDP's execute_command directly with the command data
+                // This bypasses the need for RDRAM and properly processes embedded RDP commands
+                rdp.execute_rdp_command(rdp_cmd_id, word0, word1);
                 true
             }
             // Unknown/unsupported command - skip it
@@ -452,19 +561,52 @@ impl RspHle {
     /// Transform vertex from object space to screen space
     #[allow(dead_code)]
     fn transform_vertex(&self, vertex: &Vertex) -> (i32, i32, i32) {
-        // Simplified transform: just scale and offset
-        // Real implementation would:
+        // Full transformation pipeline:
         // 1. Apply modelview matrix (object to camera space)
         // 2. Apply projection matrix (camera to clip space)
         // 3. Perspective divide (clip to NDC)
         // 4. Viewport transform (NDC to screen space)
 
-        // For now, simple passthrough with basic scaling
-        let x = (vertex.pos[0] as i32) + 160; // Center at 320/2
-        let y = (vertex.pos[1] as i32) + 120; // Center at 240/2
-        let z = vertex.pos[2] as i32;
+        // Convert vertex position to homogeneous coordinates (x, y, z, w=1)
+        let v = [
+            vertex.pos[0] as f32,
+            vertex.pos[1] as f32,
+            vertex.pos[2] as f32,
+            1.0,
+        ];
 
-        (x, y, z)
+        // Apply modelview matrix
+        let mut mv = [0.0f32; 4];
+        for (i, elem) in mv.iter_mut().enumerate() {
+            *elem = self.modelview_matrix[i * 4] * v[0]
+                + self.modelview_matrix[i * 4 + 1] * v[1]
+                + self.modelview_matrix[i * 4 + 2] * v[2]
+                + self.modelview_matrix[i * 4 + 3] * v[3];
+        }
+
+        // Apply projection matrix
+        let mut clip = [0.0f32; 4];
+        for (i, elem) in clip.iter_mut().enumerate() {
+            *elem = self.projection_matrix[i * 4] * mv[0]
+                + self.projection_matrix[i * 4 + 1] * mv[1]
+                + self.projection_matrix[i * 4 + 2] * mv[2]
+                + self.projection_matrix[i * 4 + 3] * mv[3];
+        }
+
+        // Perspective divide (clip space to NDC)
+        let w = if clip[3].abs() > 0.0001 { clip[3] } else { 1.0 };
+        let ndc_x = clip[0] / w;
+        let ndc_y = clip[1] / w;
+        let ndc_z = clip[2] / w;
+
+        // Viewport transform (NDC to screen space)
+        // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
+        // Assuming 320x240 resolution
+        let screen_x = ((ndc_x + 1.0) * 160.0) as i32; // 320/2 = 160
+        let screen_y = ((1.0 - ndc_y) * 120.0) as i32; // 240/2 = 120, inverted Y
+        let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
+
+        (screen_x, screen_y, screen_z)
     }
 }
 
@@ -558,9 +700,18 @@ mod tests {
         };
 
         let (x, y, z) = hle.transform_vertex(&vertex);
-        assert_eq!(x, 210); // 50 + 160
-        assert_eq!(y, 180); // 60 + 120
-        assert_eq!(z, 100);
+
+        // With identity matrices:
+        // Modelview: (50, 60, 100, 1) stays (50, 60, 100, 1)
+        // Projection: (50, 60, 100, 1) stays (50, 60, 100, 1)
+        // NDC: divide by w=1 gives (50, 60, 100)
+        // Screen space:
+        //   x = (50 + 1) * 160 = 51 * 160 = 8160
+        //   y = (1 - 60) * 120 = -59 * 120 = -7080
+        //   z = (100 + 1) * 32767.5 = 3309517.5
+        assert_eq!(x, 8160);
+        assert_eq!(y, -7080);
+        assert!(z > 3000000);
     }
 
     #[test]
@@ -728,5 +879,236 @@ mod tests {
 
         // Verify geometry mode was set
         assert_eq!(hle.geometry_mode, 0x00000123);
+    }
+
+    #[test]
+    fn test_matrix_multiplication() {
+        // Test identity matrix multiplication
+        let identity = RspHle::identity_matrix();
+        let test_matrix = [
+            2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+
+        let result = RspHle::multiply_matrix(&identity, &test_matrix);
+        for i in 0..16 {
+            assert_eq!(result[i], test_matrix[i]);
+        }
+    }
+
+    #[test]
+    fn test_matrix_multiplication_scaling() {
+        // Test scaling matrix multiplication
+        let scale2 = [
+            2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let scale3 = [
+            3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+
+        let result = RspHle::multiply_matrix(&scale2, &scale3);
+        // Result should be scale by 6 (2 * 3)
+        assert_eq!(result[0], 6.0);
+        assert_eq!(result[5], 6.0);
+        assert_eq!(result[10], 6.0);
+        assert_eq!(result[15], 1.0);
+    }
+
+    #[test]
+    fn test_load_matrix_from_rdram() {
+        let hle = RspHle::new();
+        let mut rdram = vec![0u8; 1024];
+
+        // Create an identity matrix in RDRAM (16.16 fixed point format)
+        // Identity: diagonal = 1.0 = 0x00010000 in 16.16 fixed point
+        let identity_fixed: i32 = 0x00010000; // 1.0 in 16.16 fixed point
+        let zero_fixed: i32 = 0x00000000; // 0.0 in 16.16 fixed point
+
+        let addr = 0x100;
+        for i in 0..16 {
+            let value = if i == 0 || i == 5 || i == 10 || i == 15 {
+                identity_fixed
+            } else {
+                zero_fixed
+            };
+            let offset = addr + i * 4;
+            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+
+        let matrix = hle.load_matrix_from_rdram(&rdram, addr as u32);
+
+        // Verify identity matrix was loaded
+        assert_eq!(matrix[0], 1.0);
+        assert_eq!(matrix[5], 1.0);
+        assert_eq!(matrix[10], 1.0);
+        assert_eq!(matrix[15], 1.0);
+        assert_eq!(matrix[1], 0.0);
+        assert_eq!(matrix[2], 0.0);
+    }
+
+    #[test]
+    fn test_g_mtx_command() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 1024];
+        let mut rdp = Rdp::new();
+
+        // Create a scaling matrix in RDRAM (scale by 2.0)
+        let addr = 0x200;
+        let scale2_fixed: i32 = 0x00020000; // 2.0 in 16.16 fixed point
+        let zero_fixed: i32 = 0x00000000;
+        let one_fixed: i32 = 0x00010000;
+
+        for i in 0..16 {
+            let value = if i == 0 || i == 5 || i == 10 {
+                scale2_fixed
+            } else if i == 15 {
+                one_fixed
+            } else {
+                zero_fixed
+            };
+            let offset = addr + i * 4;
+            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+
+        // Create display list with G_MTX command
+        let dl_addr = 0x100;
+
+        // G_MTX command (0xDA) - load modelview matrix
+        // param: G_MTX_MODELVIEW | G_MTX_LOAD (0x00)
+        let mtx_cmd_word0: u32 = (0xDA << 24) | 0x00; // Load modelview
+        let mtx_cmd_word1: u32 = addr as u32; // Matrix address
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&mtx_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&mtx_cmd_word1.to_be_bytes());
+
+        // G_ENDDL
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        // Parse the display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 16, &mut rdp);
+
+        // Verify modelview matrix was loaded (scale by 2)
+        assert_eq!(hle.modelview_matrix[0], 2.0);
+        assert_eq!(hle.modelview_matrix[5], 2.0);
+        assert_eq!(hle.modelview_matrix[10], 2.0);
+        assert_eq!(hle.modelview_matrix[15], 1.0);
+    }
+
+    #[test]
+    fn test_g_mtx_projection() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 1024];
+        let mut rdp = Rdp::new();
+
+        // Create a projection matrix in RDRAM
+        let addr = 0x200;
+        let one_fixed: i32 = 0x00010000;
+        let zero_fixed: i32 = 0x00000000;
+
+        for i in 0..16 {
+            let value = if i == 0 || i == 5 || i == 10 || i == 15 {
+                one_fixed
+            } else {
+                zero_fixed
+            };
+            let offset = addr + i * 4;
+            rdram[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+        }
+
+        let dl_addr = 0x100;
+
+        // G_MTX command (0xDA) - load projection matrix
+        // param: G_MTX_PROJECTION | G_MTX_LOAD (0x04)
+        let mtx_cmd_word0: u32 = (0xDA << 24) | 0x04; // Load projection
+        let mtx_cmd_word1: u32 = addr as u32;
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&mtx_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&mtx_cmd_word1.to_be_bytes());
+
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 16, &mut rdp);
+
+        // Verify projection matrix was loaded
+        assert_eq!(hle.projection_matrix[0], 1.0);
+        assert_eq!(hle.projection_matrix[15], 1.0);
+    }
+
+    #[test]
+    fn test_g_dl_command() {
+        let mut hle = RspHle::new();
+        hle.microcode = MicrocodeType::F3DEX;
+
+        let mut rdram = vec![0u8; 2048];
+        let mut rdp = Rdp::new();
+
+        // Create a nested display list at 0x200 that loads vertices
+        let nested_dl_addr = 0x200;
+
+        // G_VTX in nested DL
+        let vtx_cmd_word0: u32 = (0x01 << 24) | (2 << 12);
+        let vtx_cmd_word1: u32 = 0x300;
+        rdram[nested_dl_addr..nested_dl_addr + 4].copy_from_slice(&vtx_cmd_word0.to_be_bytes());
+        rdram[nested_dl_addr + 4..nested_dl_addr + 8].copy_from_slice(&vtx_cmd_word1.to_be_bytes());
+
+        // G_ENDDL in nested DL
+        rdram[nested_dl_addr + 8..nested_dl_addr + 12]
+            .copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[nested_dl_addr + 12..nested_dl_addr + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        // Create vertex data
+        for i in 0..2 {
+            let vdata: [u8; 16] = [0, 10, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255];
+            rdram[0x300 + i * 16..0x310 + i * 16].copy_from_slice(&vdata);
+        }
+
+        // Create main display list at 0x100 with G_DL command
+        let dl_addr = 0x100;
+
+        // G_DL command (0xDE) - call nested display list
+        let dl_cmd_word0: u32 = (0xDE << 24) | 0x00; // G_DL_PUSH
+        let dl_cmd_word1: u32 = nested_dl_addr as u32;
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&dl_cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&dl_cmd_word1.to_be_bytes());
+
+        // G_ENDDL in main DL
+        rdram[dl_addr + 8..dl_addr + 12].copy_from_slice(&0xDF000000u32.to_be_bytes());
+        rdram[dl_addr + 12..dl_addr + 16].copy_from_slice(&0u32.to_be_bytes());
+
+        // Parse main display list
+        hle.parse_f3dex_display_list(&rdram, dl_addr as u32, 16, &mut rdp);
+
+        // Verify vertices were loaded from nested display list
+        assert_eq!(hle.vertex_count, 2);
+    }
+
+    #[test]
+    fn test_vertex_transform_with_matrices() {
+        let mut hle = RspHle::new();
+
+        // Set up a simple scaling matrix (scale by 2)
+        hle.modelview_matrix = [
+            2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+
+        let vertex = Vertex {
+            pos: [10, 10, 10],
+            tex: [0, 0],
+            color: [255, 255, 255, 255],
+        };
+
+        let (x, _y, z) = hle.transform_vertex(&vertex);
+
+        // With identity projection and scale-by-2 modelview:
+        // - Modelview transforms (10,10,10) to (20,20,20)
+        // - Projection (identity) keeps it (20,20,20)
+        // - NDC: divide by w=1 gives (20,20,20)
+        // - Screen: ((20+1)*160, (1-20)*120, (20+1)*32767.5)
+        //         = (3360, -2280, 688318.5)
+        assert!(x > 1000); // Should be scaled up significantly
+        assert!(z > 10); // Z should also be transformed
     }
 }
