@@ -350,7 +350,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Calculate parity (true if even number of 1 bits in low byte)
     #[inline]
     fn calc_parity(val: u8) -> bool {
-        val.count_ones() % 2 == 0
+        val.count_ones().is_multiple_of(2)
     }
 
     /// Update flags after 8-bit arithmetic/logic operation
