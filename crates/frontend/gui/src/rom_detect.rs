@@ -45,6 +45,17 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         }
     }
 
+    // Check for Game Boy (check BEFORE SNES due to overlapping size ranges)
+    // Game Boy ROMs have a Nintendo logo at 0x104-0x133 and a header checksum at 0x14D
+    if data.len() >= 0x150 {
+        // Check for the Nintendo logo bytes (partial check for first few bytes)
+        let logo_start = &data[0x104..0x108];
+        // Standard GB/GBC logo starts with 0xCE 0xED 0x66 0x66
+        if logo_start == [0xCE, 0xED, 0x66, 0x66] {
+            return Ok(SystemType::GameBoy);
+        }
+    }
+
     // Check for SNES (SMC header or size-based detection)
     // SNES ROMs are typically multiples of 32KB (with optional 512-byte SMC header)
     if data.len() >= 0x8000 {
@@ -74,17 +85,6 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // Could be a COM file - check if it's not another format first
         // If we get here and it's a reasonable size, tentatively classify as PC
         // but continue checking other formats
-    }
-
-    // Check for Game Boy
-    // Game Boy ROMs have a Nintendo logo at 0x104-0x133 and a header checksum at 0x14D
-    if data.len() >= 0x150 {
-        // Check for the Nintendo logo bytes (partial check for first few bytes)
-        let logo_start = &data[0x104..0x108];
-        // Standard GB/GBC logo starts with 0xCE 0xED 0x66 0x66
-        if logo_start == [0xCE, 0xED, 0x66, 0x66] {
-            return Ok(SystemType::GameBoy);
-        }
     }
 
     // Check for Atari 2600

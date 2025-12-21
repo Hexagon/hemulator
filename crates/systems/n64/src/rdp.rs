@@ -403,6 +403,19 @@ impl Rdp {
         (self.dpc_status & DPC_STATUS_CBUF_READY) == 0 && self.dpc_start != self.dpc_end
     }
 
+    /// Set DPC_START register (for RSP to trigger display list processing)
+    pub fn set_dpc_start(&mut self, addr: u32) {
+        self.dpc_start = addr & 0x00FFFFFF;
+    }
+
+    /// Set DPC_END register (for RSP to trigger display list processing)
+    pub fn set_dpc_end(&mut self, addr: u32) {
+        self.dpc_end = addr & 0x00FFFFFF;
+        if self.dpc_start != self.dpc_end {
+            self.dpc_status &= !DPC_STATUS_CBUF_READY;
+        }
+    }
+
     /// Process display list commands from RDRAM
     pub fn process_display_list(&mut self, rdram: &[u8]) {
         // Set DMA busy flag
@@ -530,15 +543,15 @@ impl Rdp {
             }
             // FILL_RECTANGLE (0x36)
             0x36 => {
-                // RDP FILL_RECTANGLE format:
-                // word0: cmd_id(8) | XH(12 bits) | YH(12 bits)
-                // word1: XL(12 bits at bit 12) | YL(12 bits)
+                // RDP FILL_RECTANGLE format (verified from test ROM):
+                // word0: cmd_id(bits 31-24) | XH(bits 23-12) | YH(bits 11-0) - END coordinates
+                // word1: XL(bits 31-16) | YL(bits 15-0) - START coordinates  
                 // Coordinates are in 10.2 fixed point format (divide by 4 to get pixels)
 
                 let xh = ((word0 >> 12) & 0xFFF).div_ceil(4); // Right/end X, round up
                 let yh = (word0 & 0xFFF).div_ceil(4); // Bottom/end Y, round up
-                let xl = ((word1 >> 12) & 0xFFF) / 4; // Left/start X
-                let yl = (word1 & 0xFFF) / 4; // Top/start Y
+                let xl = (word1 >> 16) / 4; // Left/start X
+                let yl = (word1 & 0xFFFF) / 4; // Top/start Y
 
                 // Calculate width and height
                 let width = xh.saturating_sub(xl);

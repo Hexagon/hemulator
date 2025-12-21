@@ -142,10 +142,9 @@ impl RspHle {
     }
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
-    fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], _rdp: &mut Rdp) -> u32 {
+    fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], rdp: &mut Rdp) -> u32 {
         // Parse display list pointer from DMEM
         // In real F3DEX, the display list address is passed via DMEM at a known offset
-        // For stub implementation, we'll just return cycles
 
         // Read task structure from DMEM (typical offset is 0x0000)
         let _task_type = self.read_u32(dmem, 0x00);
@@ -158,23 +157,38 @@ impl RspHle {
         let _ucode_data_size = self.read_u32(dmem, 0x1C);
         let _dram_stack = self.read_u32(dmem, 0x20); // Stack in RDRAM
         let _dram_stack_size = self.read_u32(dmem, 0x24);
-        let _output_buff = self.read_u32(dmem, 0x28); // Output buffer (display list)
-        let _output_buff_size = self.read_u32(dmem, 0x2C);
-        let _data_ptr = self.read_u32(dmem, 0x30); // Data pointer (display list input)
-        let _data_size = self.read_u32(dmem, 0x34);
+        let output_buff = self.read_u32(dmem, 0x28); // Output buffer (display list)
+        let output_buff_size = self.read_u32(dmem, 0x2C);
+        let data_ptr = self.read_u32(dmem, 0x30); // Data pointer (display list input)
+        let data_size = self.read_u32(dmem, 0x34);
         let _yield_data_ptr = self.read_u32(dmem, 0x38);
         let _yield_data_size = self.read_u32(dmem, 0x3C);
 
-        // Stub: In a full implementation, we would:
-        // 1. Parse the display list from data_ptr in RDRAM
+        // Basic implementation: Forward display list commands directly to RDP
+        // This is a simplified approach that skips vertex transformation
+        // Real F3DEX would:
+        // 1. Parse F3DEX display list commands (not RDP commands)
         // 2. Process vertex data, matrices, textures
         // 3. Transform vertices using projection and modelview matrices
         // 4. Generate RDP commands (triangles, texture setup)
         // 5. Write RDP display list to output_buff
-
-        // For now, just return estimated cycles
-        // Real F3DEX execution varies but typically 1000-5000 cycles per task
-        let _ = rdram; // Suppress unused warning
+        
+        // For now, if there's an output buffer with data, treat it as an RDP display list
+        // and forward it to the RDP for processing
+        if output_buff > 0 && output_buff_size > 0 {
+            // Trigger RDP to process the generated display list
+            rdp.set_dpc_start(output_buff);
+            rdp.set_dpc_end(output_buff + output_buff_size);
+            rdp.process_display_list(rdram);
+        }
+        
+        // Also check if there's a data pointer (some games put display lists there)
+        if data_ptr > 0 && data_size > 0 && output_buff == 0 {
+            // Treat data_ptr as a display list to process
+            rdp.set_dpc_start(data_ptr);
+            rdp.set_dpc_end(data_ptr + data_size);
+            rdp.process_display_list(rdram);
+        }
 
         2000 // Average cycles for a graphics task
     }

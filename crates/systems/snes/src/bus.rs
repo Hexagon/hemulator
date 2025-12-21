@@ -13,6 +13,8 @@ pub struct SnesBus {
     cartridge: Option<Cartridge>,
     /// PPU (Picture Processing Unit)
     ppu: Ppu,
+    /// Frame counter for VBlank emulation
+    frame_counter: u64,
 }
 
 impl SnesBus {
@@ -21,6 +23,7 @@ impl SnesBus {
             wram: [0; 0x20000],
             cartridge: None,
             ppu: Ppu::new(),
+            frame_counter: 0,
         }
     }
 
@@ -39,6 +42,10 @@ impl SnesBus {
 
     pub fn ppu(&self) -> &Ppu {
         &self.ppu
+    }
+    
+    pub fn tick_frame(&mut self) {
+        self.frame_counter += 1;
     }
 }
 
@@ -61,6 +68,17 @@ impl Memory65c816 for SnesBus {
                     0x0000..=0x1FFF => self.wram[offset as usize],
                     // Hardware registers (PPU: $2100-$213F)
                     0x2100..=0x213F => self.ppu.read_register(offset),
+                    // $4212 - HVBJOY - H/V Blank and Joypad Status
+                    0x4212 => {
+                        // Bit 7: VBlank flag (set during VBlank)
+                        // Bit 6: HBlank flag
+                        // For simplicity, alternate VBlank every ~30 frames (simulate ~60Hz at ~2Hz toggle)
+                        if (self.frame_counter / 30) % 2 == 0 {
+                            0x80  // VBlank
+                        } else {
+                            0x00  // Not in VBlank
+                        }
+                    }
                     // Other hardware registers
                     0x2000..=0x5FFF => 0, // Stub
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)

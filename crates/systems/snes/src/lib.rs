@@ -67,6 +67,9 @@ impl System for SnesSystem {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         self.current_cycles = 0;
 
+        // Tick the frame counter for VBlank emulation
+        self.cpu.cpu.memory.tick_frame();
+
         // Execute CPU cycles for one frame
         while self.current_cycles < self.frame_cycles {
             let cycles = self.cpu.step();

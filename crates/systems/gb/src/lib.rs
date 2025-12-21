@@ -213,7 +213,10 @@ impl System for GbSystem {
 
             // Step PPU
             if self.cpu.memory.ppu.step(cpu_cycles) {
-                // V-Blank started - could trigger NMI here
+                // V-Blank started - wake CPU from HALT
+                // Real hardware would trigger VBlank interrupt here
+                // For now, just wake from halt to keep games running
+                self.cpu.halted = false;
             }
         }
 

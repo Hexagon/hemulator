@@ -71,18 +71,20 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         }
     }
 
-    /// Reset the CPU
+    /// Reset the CPU to post-boot-ROM state
+    /// These are the register values after the Game Boy boot ROM completes
     pub fn reset(&mut self) {
-        self.a = 0;
-        self.f = 0;
-        self.b = 0;
-        self.c = 0;
-        self.d = 0;
-        self.e = 0;
-        self.h = 0;
-        self.l = 0;
-        self.sp = 0;
-        self.pc = 0x100; // Game Boy starts at 0x100
+        // Post-boot ROM register values for DMG (original Game Boy)
+        self.a = 0x01; // 0x11 for CGB, 0xFF for Game Boy Pocket
+        self.f = 0xB0; // Flags: Z=1, N=0, H=1, C=1
+        self.b = 0x00;
+        self.c = 0x13;
+        self.d = 0x00;
+        self.e = 0xD8;
+        self.h = 0x01;
+        self.l = 0x4D;
+        self.sp = 0xFFFE;
+        self.pc = 0x100; // Game Boy entry point after boot ROM
         self.ime = false;
         self.halted = false;
         self.stopped = false;
