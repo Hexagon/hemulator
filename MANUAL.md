@@ -375,8 +375,20 @@ saves/
 
 ## Supported Systems
 
+This emulator supports 6 different retro gaming systems. Here's a quick overview:
+
+| System | Status | What Works | What's Missing | Recommended For |
+|--------|--------|------------|----------------|-----------------|
+| **NES** | ✅ Fully Working | Everything | - | Playing NES games |
+| **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
+| **Game Boy** | ⚠️ Functional | Graphics, input, saves | Audio, timer | Playing most GB games (silent) |
+| **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
+| **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
+| **PC/DOS** | 🧪 Experimental | COM/EXE loading | Display, most features | Not recommended |
+
 ### NES (Nintendo Entertainment System)
 
+**Status**: ✅ Fully Working  
 **Coverage**: ~90% of all NES games (14 mappers supported)
 
 The emulator supports the following NES mappers:
@@ -405,6 +417,7 @@ The emulator supports the following NES mappers:
 
 ### Atari 2600
 
+**Status**: ✅ Fully Working  
 **Coverage**: Most common cartridge formats (2K, 4K, 8K, 12K, 16K, 32K)
 
 The emulator supports the following cartridge banking schemes:
@@ -440,8 +453,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: Functional implementation with PPU, joypad, rendering, and MBC mappers
-
+**Status**: ⚠️ Functional (Core features work, audio/timer missing)  
 **Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
@@ -478,9 +490,8 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: Basic implementation with minimal PPU
-
-**Coverage**: Limited - infrastructure complete, basic rendering functional
+**Status**: 🚧 Basic (Infrastructure only - not ready for gaming)  
+**Coverage**: Very limited - CPU works, minimal rendering only
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -503,9 +514,8 @@ The emulator supports the following cartridge banking schemes:
 
 ### N64 (Nintendo 64)
 
-**Status**: Active development - CPU, RDP, RSP HLE, and controller support implemented
-
-**Coverage**: Limited - Core components functional, working towards game compatibility
+**Status**: 🚧 In Development (3D rendering works, limited game support)  
+**Coverage**: Very limited - Core components functional, working towards game compatibility
 
 **ROM Format**: Z64/N64/V64 (.z64, .n64, .v64 files) - automatically detected with byte-order conversion
 
