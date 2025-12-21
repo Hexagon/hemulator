@@ -1144,7 +1144,7 @@ fn main() {
             // Step one frame and display
             match sys.step_frame() {
                 Ok(f) => {
-                    buffer = f.pixels.clone();
+                    buffer = f.pixels; // Move instead of clone
 
                     // Apply CRT filter if not showing overlays
                     if !show_help && !show_slot_selector {
