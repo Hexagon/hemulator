@@ -11,6 +11,8 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
+- 🎨 **Video Processing**: Modular architecture supporting both software and OpenGL-accelerated rendering
+- 🎞️ **CRT Filters**: Hardware-accelerated shader-based CRT effects (scanlines, phosphor, full CRT)
 - 🎵 **Audio Support**: Integrated audio playback via rodio (NES audio implemented)
 - 📁 **ROM Auto-Detection**: Automatically detects NES (iNES), Atari 2600, Game Boy, and DOS executable formats
 
@@ -77,6 +79,51 @@ See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibi
 - **Atari 2600**: Raw binary (.a26, .bin) - detected by size (2K, 4K, 8K, 12K, 16K, 32K)
 - **Game Boy**: GB/GBC format (.gb, .gbc) - skeleton implementation (WIP)
 - **PC/DOS**: COM/EXE executables (.com, .exe) - experimental 8086 emulation
+
+## Video Processing System
+
+Hemulator features a modular video processing architecture that supports multiple rendering backends:
+
+### Software Renderer (Default)
+- **CPU-based rendering**: Uses traditional software rendering for maximum compatibility
+- **CRT Filters**: CPU-based implementation of CRT effects
+- **Cross-platform**: Works on all systems without GPU requirements
+- **Default backend**: Automatically selected if OpenGL is unavailable
+
+### OpenGL Renderer (Optional)
+- **Hardware-accelerated**: Utilizes GPU for faster rendering and effects
+- **Shader-based filters**: CRT effects implemented as GLSL shaders for superior performance
+- **Available effects**:
+  - **None**: Direct pixel output
+  - **Scanlines**: Horizontal scan lines effect (darkens every other line)
+  - **Phosphor**: Horizontal color bleeding/glow between pixels
+  - **CRT Monitor**: Combines scanlines and phosphor for authentic CRT appearance
+- **Dynamic switching**: Shaders are compiled and switched on-the-fly based on selected filter
+
+### Building with OpenGL Support
+
+```bash
+# Build with OpenGL support enabled
+cargo build --release --features opengl
+
+# Or run directly with OpenGL
+cargo run --release --features opengl -p emu_gui
+```
+
+### Architecture
+The video processing system uses the `VideoProcessor` trait to abstract rendering backends:
+- `SoftwareProcessor`: CPU-based rendering using the existing CRT filter code
+- `OpenGLProcessor`: GPU-accelerated rendering using GLSL shaders
+- Both backends implement the same interface, allowing seamless switching
+- Configuration stored in `config.json` (`video_backend`: "software" or "opengl")
+
+### Shader Files
+GLSL shaders are located in `crates/frontend/gui/src/shaders/`:
+- `vertex.glsl`: Vertex shader (fullscreen quad)
+- `fragment_none.glsl`: Passthrough fragment shader (no filter)
+- `fragment_scanlines.glsl`: Scanlines effect
+- `fragment_phosphor.glsl`: Phosphor glow effect
+- `fragment_crt.glsl`: Combined CRT effect (scanlines + phosphor)
 
 ## Project Structure
 

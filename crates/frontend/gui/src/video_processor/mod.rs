@@ -11,21 +11,23 @@ mod opengl;
 pub use opengl::OpenGLProcessor;
 
 /// Result type for video processor operations
+#[allow(dead_code)]
 pub type VideoResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// Video processor trait - abstraction for different rendering backends
+#[allow(dead_code)]
 pub trait VideoProcessor {
     /// Initialize the video processor with the given dimensions
     fn init(&mut self, width: usize, height: usize) -> VideoResult<()>;
 
     /// Process a frame buffer with the current filter settings
-    /// 
+    ///
     /// # Arguments
     /// * `buffer` - Input frame buffer (ARGB format, 0xAARRGGBB)
     /// * `width` - Frame width
     /// * `height` - Frame height
     /// * `filter` - CRT filter to apply
-    /// 
+    ///
     /// # Returns
     /// Processed frame buffer ready for display
     fn process_frame(
@@ -49,9 +51,11 @@ pub trait VideoProcessor {
 }
 
 /// Software-based video processor (current implementation)
+#[allow(dead_code)]
 pub struct SoftwareProcessor;
 
 impl SoftwareProcessor {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
@@ -117,7 +121,7 @@ mod tests {
         let buffer = vec![0xFFFFFFFF; 256 * 240];
         let result = processor.process_frame(&buffer, 256, 240, CrtFilter::None);
         assert!(result.is_ok());
-        
+
         let processed = result.unwrap();
         assert_eq!(processed.len(), 256 * 240);
     }
@@ -130,7 +134,7 @@ mod tests {
         let buffer = vec![0xFFFFFFFF; 256 * 240];
         let result = processor.process_frame(&buffer, 256, 240, CrtFilter::Scanlines);
         assert!(result.is_ok());
-        
+
         let processed = result.unwrap();
         // Scanlines should darken every other row
         assert_eq!(processed.len(), 256 * 240);

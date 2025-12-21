@@ -6,9 +6,9 @@
 #[cfg(feature = "opengl")]
 use super::VideoProcessor;
 #[cfg(feature = "opengl")]
-use crate::crt_filter::CrtFilter;
-#[cfg(feature = "opengl")]
 use super::VideoResult;
+#[cfg(feature = "opengl")]
+use crate::crt_filter::CrtFilter;
 
 #[cfg(feature = "opengl")]
 use glow::HasContext;
@@ -37,7 +37,7 @@ impl OpenGLProcessor {
                 glow::VERTEX_SHADER,
                 include_str!("../shaders/vertex.glsl"),
             )?;
-            
+
             let fragment_shader = compile_shader(
                 &gl,
                 glow::FRAGMENT_SHADER,
@@ -107,10 +107,26 @@ impl OpenGLProcessor {
             // Create texture
             let texture = gl.create_texture()?;
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-            gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
 
             Ok(Self {
                 gl,
@@ -148,11 +164,7 @@ impl OpenGLProcessor {
             CrtFilter::CrtMonitor => include_str!("../shaders/fragment_crt.glsl"),
         };
 
-        let fragment_shader = compile_shader(
-            &self.gl,
-            glow::FRAGMENT_SHADER,
-            fragment_source,
-        )?;
+        let fragment_shader = compile_shader(&self.gl, glow::FRAGMENT_SHADER, fragment_source)?;
 
         self.program = self.gl.create_program()?;
         self.gl.attach_shader(self.program, vertex_shader);
@@ -193,7 +205,7 @@ impl VideoProcessor for OpenGLProcessor {
 
             // Upload texture
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            
+
             // Convert ARGB to RGBA for OpenGL
             let mut rgba_buffer = Vec::with_capacity(buffer.len() * 4);
             for pixel in buffer {
@@ -222,12 +234,13 @@ impl VideoProcessor for OpenGLProcessor {
             // Render to default framebuffer
             self.gl.use_program(Some(self.program));
             self.gl.bind_vertex_array(Some(self.vao));
-            
+
             // Set uniforms
             if let Some(loc) = self.gl.get_uniform_location(self.program, "uResolution") {
-                self.gl.uniform_2_f32(Some(&loc), width as f32, height as f32);
+                self.gl
+                    .uniform_2_f32(Some(&loc), width as f32, height as f32);
             }
-            
+
             if let Some(loc) = self.gl.get_uniform_location(self.program, "uTexture") {
                 self.gl.uniform_1_i32(Some(&loc), 0);
             }
