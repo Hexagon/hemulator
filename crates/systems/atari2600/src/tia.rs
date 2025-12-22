@@ -614,11 +614,11 @@ impl Tia {
         if self.pixel >= 228 {
             self.pixel -= 228; // Wrap pixel properly (was = 0, which loses remainders)
             let old_scanline = self.scanline;
-            
+
             // Latch the state of the OLD scanline BEFORE advancing to the new one
             // This ensures we capture the final state of the scanline after all register writes
             self.latch_scanline_state(old_scanline);
-            
+
             self.scanline += 1;
 
             self.scanline_counter = self.scanline_counter.saturating_add(1);
@@ -662,15 +662,18 @@ impl Tia {
         let debug = std::env::var("EMU_LOG_VISIBLE_START")
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(false);
-            
+
         for i in 1..262 {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
-            
+
             if debug && i < 100 {
-                eprintln!("[VISIBLE] scanline {} prev.vblank={} cur.vblank={}", i, prev.vblank, cur.vblank);
+                eprintln!(
+                    "[VISIBLE] scanline {} prev.vblank={} cur.vblank={}",
+                    i, prev.vblank, cur.vblank
+                );
             }
-            
+
             if prev.vblank && !cur.vblank {
                 if debug {
                     eprintln!("[VISIBLE] Found transition at scanline {}", i);

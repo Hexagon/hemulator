@@ -447,48 +447,77 @@ mod tests {
         // - Tile 0: White (all pixels color index 0)
         // - Tile 1: Dark gray (all pixels color index 1, represents "red" on monochrome DMG)
         // Each tile is 8x8 pixels, screen is 20x18 tiles
-        
+
         // Expected colors (ARGB format):
         const WHITE: u32 = 0xFFFFFFFF;
         const DARK_GRAY: u32 = 0xFF555555; // Represents "red" on monochrome Game Boy
-        
+
         // Verify checkerboard pattern horizontally (first row, y=0)
         // First tile (x=0-7) should be white
         for x in 0..8 {
             let pixel = frame.pixels[x];
-            assert_eq!(pixel, WHITE, "Expected white pixel at ({},0), got 0x{:08X}", x, pixel);
+            assert_eq!(
+                pixel, WHITE,
+                "Expected white pixel at ({},0), got 0x{:08X}",
+                x, pixel
+            );
         }
         // Second tile (x=8-15) should be dark gray
         for x in 8..16 {
             let pixel = frame.pixels[x];
-            assert_eq!(pixel, DARK_GRAY, "Expected dark gray pixel at ({},0), got 0x{:08X}", x, pixel);
+            assert_eq!(
+                pixel, DARK_GRAY,
+                "Expected dark gray pixel at ({},0), got 0x{:08X}",
+                x, pixel
+            );
         }
         // Third tile (x=16-23) should be white (pattern continues)
         for x in 16..24 {
             let pixel = frame.pixels[x];
-            assert_eq!(pixel, WHITE, "Expected white pixel at ({},0), got 0x{:08X}", x, pixel);
+            assert_eq!(
+                pixel, WHITE,
+                "Expected white pixel at ({},0), got 0x{:08X}",
+                x, pixel
+            );
         }
-        
+
         // Verify checkerboard pattern vertically (first column, x=0)
         // First tile row (y=0-7) should be white
         for y in 0..8 {
             let pixel = frame.pixels[y * 160];
-            assert_eq!(pixel, WHITE, "Expected white pixel at (0,{}), got 0x{:08X}", y, pixel);
+            assert_eq!(
+                pixel, WHITE,
+                "Expected white pixel at (0,{}), got 0x{:08X}",
+                y, pixel
+            );
         }
         // Second tile row (y=8-15) should be dark gray (checkerboard alternates by row)
         for y in 8..16 {
             let pixel = frame.pixels[y * 160];
-            assert_eq!(pixel, DARK_GRAY, "Expected dark gray pixel at (0,{}), got 0x{:08X}", y, pixel);
+            assert_eq!(
+                pixel, DARK_GRAY,
+                "Expected dark gray pixel at (0,{}), got 0x{:08X}",
+                y, pixel
+            );
         }
-        
+
         // Verify there are exactly two colors in the frame
         let mut colors = std::collections::HashSet::new();
         for &pixel in &frame.pixels {
             colors.insert(pixel);
         }
-        assert_eq!(colors.len(), 2, "Expected exactly 2 colors, got {}: {:?}", colors.len(), colors);
+        assert_eq!(
+            colors.len(),
+            2,
+            "Expected exactly 2 colors, got {}: {:?}",
+            colors.len(),
+            colors
+        );
         assert!(colors.contains(&WHITE), "Missing white color");
-        assert!(colors.contains(&DARK_GRAY), "Missing dark gray color (representing red)");
+        assert!(
+            colors.contains(&DARK_GRAY),
+            "Missing dark gray color (representing red)"
+        );
     }
 
     #[test]
