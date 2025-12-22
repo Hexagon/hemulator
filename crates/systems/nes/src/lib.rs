@@ -42,11 +42,14 @@
 //! ## APU Features
 //!
 //! - 2 pulse channels with duty cycle control
+//! - **Sweep units** for frequency modulation (pitch bending) on both pulse channels
+//! - Triangle channel with 32-step waveform
+//! - Noise channel with pseudo-random LFSR
 //! - Length counter and envelope support
 //! - Frame counter (4-step and 5-step modes)
 //! - APU IRQ support (frame counter)
 //! - 44.1 kHz audio output
-//! - Note: Triangle, noise, and DMC channels not yet implemented
+//! - Note: DMC channel not yet implemented
 //!
 //! ## Timing Model
 //!
