@@ -8,6 +8,7 @@
 mod bios;
 mod bus;
 mod cpu;
+mod disk;
 mod keyboard;
 mod video;
 
@@ -65,6 +66,7 @@ impl PcSystem {
     }
 
     /// Load a DOS executable into memory
+    #[allow(dead_code)]
     fn load_executable(&mut self, data: &[u8]) -> Result<(), PcError> {
         // Check for MZ header (DOS .EXE)
         if data.len() >= 2 && &data[0..2] == b"MZ" {

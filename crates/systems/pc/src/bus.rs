@@ -7,6 +7,7 @@
 //! - 0xC0000-0xFFFFF: ROM area (256KB)
 //! - 0xF0000-0xFFFFF: BIOS ROM (64KB)
 
+use crate::disk::DiskController;
 use crate::keyboard::Keyboard;
 use emu_core::cpu_8086::Memory8086;
 
@@ -28,6 +29,8 @@ pub struct PcBus {
     floppy_b: Option<Vec<u8>>,
     /// Hard drive image
     hard_drive: Option<Vec<u8>>,
+    /// Disk controller
+    disk_controller: DiskController,
 }
 
 impl PcBus {
@@ -42,6 +45,7 @@ impl PcBus {
             floppy_a: None,
             floppy_b: None,
             hard_drive: None,
+            disk_controller: DiskController::new(),
         }
     }
 
@@ -51,9 +55,11 @@ impl PcBus {
         self.ram.fill(0);
         self.vram.fill(0);
         self.keyboard.clear();
+        self.disk_controller.reset();
     }
 
     /// Load an executable at a specific address
+    #[allow(dead_code)]
     pub fn load_executable(&mut self, data: Vec<u8>) {
         self.executable = Some(data);
     }
@@ -67,6 +73,7 @@ impl PcBus {
     }
 
     /// Get a reference to the executable data
+    #[allow(dead_code)]
     pub fn executable(&self) -> Option<&[u8]> {
         self.executable.as_deref()
     }
@@ -119,6 +126,36 @@ impl PcBus {
     /// Get reference to hard drive
     pub fn hard_drive(&self) -> Option<&[u8]> {
         self.hard_drive.as_deref()
+    }
+
+    /// Get mutable reference to hard drive (for write operations)
+    #[allow(dead_code)]
+    pub fn hard_drive_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.hard_drive.as_mut()
+    }
+
+    /// Get mutable reference to floppy A (for write operations)
+    #[allow(dead_code)]
+    pub fn floppy_a_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.floppy_a.as_mut()
+    }
+
+    /// Get mutable reference to floppy B (for write operations)
+    #[allow(dead_code)]
+    pub fn floppy_b_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.floppy_b.as_mut()
+    }
+
+    /// Get reference to disk controller
+    #[allow(dead_code)]
+    pub fn disk_controller(&self) -> &DiskController {
+        &self.disk_controller
+    }
+
+    /// Get mutable reference to disk controller
+    #[allow(dead_code)]
+    pub fn disk_controller_mut(&mut self) -> &mut DiskController {
+        &mut self.disk_controller
     }
 }
 
