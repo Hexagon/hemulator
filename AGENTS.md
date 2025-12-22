@@ -110,7 +110,7 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
   - Generic `Memory65c816` trait for memory access
   - 16-bit extension of the 6502
-  - **225/256 opcodes implemented (87.9% coverage)**
+  - **255/256 opcodes implemented (99.6% coverage)**
   - Comprehensive test coverage (29 unit tests)
   - Can be used by: SNES, Apple IIGS, etc.
   - Implementation includes:
@@ -120,13 +120,13 @@ Contains reusable CPU implementations and common traits:
     - Emulation mode for 6502 compatibility
     - Direct page register (D)
     - Stack pointer (S)
-    - **Arithmetic instructions**: ADC, SBC with multiple addressing modes (immediate, dp, abs, dp,X, abs,X, abs,Y, (dp,X), (dp),Y, (dp))
-    - **Logical instructions**: AND, ORA, EOR with comprehensive addressing modes including (dp,X), long modes, and stack-relative
+    - **Arithmetic instructions**: ADC, SBC with all addressing modes including long and stack-relative
+    - **Logical instructions**: AND, ORA, EOR with all addressing modes including long and stack-relative
     - **Shift/rotate instructions**: ASL, LSR, ROL, ROR (accumulator AND memory modes: dp, abs, dp,X, abs,X)
-    - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with extended addressing modes
+    - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with all addressing modes including long and stack-relative
     - **Transfer instructions**: TAX, TAY, TXA, TYA, TSX, TXS, TCD, TDC, TCS, TSC, TXY, TYX
     - **Increment/decrement**: INC, DEC (accumulator and memory with dp, abs, dp,X, abs,X modes), INX, INY, DEX, DEY
-    - **Compare instructions**: CMP, CPX, CPY with multiple addressing modes including (dp,X)
+    - **Compare instructions**: CMP, CPX, CPY with all addressing modes including long and stack-relative
     - **BIT instruction**: Complete with all addressing modes (immediate, dp, abs, dp,X, abs,X)
     - **Branch instructions**: BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, BRL
     - **Stack instructions**: PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY, PHD, PLD, PHB, PLB, PHK, PEA, PEI, PER
@@ -135,9 +135,8 @@ Contains reusable CPU implementations and common traits:
     - **Mode control**: XCE (emulation toggle), REP (reset status bits), SEP (set status bits)
     - **Status flag instructions**: CLC, SEC, CLI, SEI, CLV, CLD, SED
     - **Status flags**: N, V, m, x, D, I, Z, C, e
-  - **Known limitations** (31 opcodes remaining):
-    - Some long addressing modes for arithmetic/load-store not yet implemented
-    - Some stack-relative modes not yet implemented
+  - **Known limitations** (1 opcode remaining):
+    - Only BRK (0x00) not yet implemented (rarely used in SNES programs)
   - `ArrayMemory` helper for testing (16MB address space)
 
 - **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)
