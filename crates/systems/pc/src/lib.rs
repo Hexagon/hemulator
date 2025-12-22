@@ -206,35 +206,88 @@ impl System for PcSystem {
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
-        vec![MountPointInfo {
-            id: "Executable".to_string(),
-            name: "DOS Executable".to_string(),
-            extensions: vec!["com".to_string(), "exe".to_string()],
-            required: true,
-        }]
+        vec![
+            MountPointInfo {
+                id: "BIOS".to_string(),
+                name: "BIOS ROM".to_string(),
+                extensions: vec!["bin".to_string(), "rom".to_string()],
+                required: false, // Has default BIOS
+            },
+            MountPointInfo {
+                id: "FloppyA".to_string(),
+                name: "Floppy Drive A:".to_string(),
+                extensions: vec!["img".to_string(), "ima".to_string()],
+                required: false,
+            },
+            MountPointInfo {
+                id: "FloppyB".to_string(),
+                name: "Floppy Drive B:".to_string(),
+                extensions: vec!["img".to_string(), "ima".to_string()],
+                required: false,
+            },
+            MountPointInfo {
+                id: "HardDrive".to_string(),
+                name: "Hard Drive C:".to_string(),
+                extensions: vec!["img".to_string(), "vhd".to_string()],
+                required: false,
+            },
+        ]
     }
 
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
-        if mount_point_id != "Executable" {
-            return Err(PcError::InvalidMountPoint(mount_point_id.to_string()));
+        match mount_point_id {
+            "BIOS" => {
+                self.cpu.bus_mut().load_bios(data);
+                Ok(())
+            }
+            "FloppyA" => {
+                self.cpu.bus_mut().mount_floppy_a(data.to_vec());
+                Ok(())
+            }
+            "FloppyB" => {
+                self.cpu.bus_mut().mount_floppy_b(data.to_vec());
+                Ok(())
+            }
+            "HardDrive" => {
+                self.cpu.bus_mut().mount_hard_drive(data.to_vec());
+                Ok(())
+            }
+            _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
         }
-
-        self.load_executable(data)?;
-        Ok(())
     }
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
-        if mount_point_id != "Executable" {
-            return Err(PcError::InvalidMountPoint(mount_point_id.to_string()));
+        match mount_point_id {
+            "BIOS" => {
+                // Reload default BIOS
+                let bios = generate_minimal_bios();
+                self.cpu.bus_mut().load_bios(&bios);
+                Ok(())
+            }
+            "FloppyA" => {
+                self.cpu.bus_mut().unmount_floppy_a();
+                Ok(())
+            }
+            "FloppyB" => {
+                self.cpu.bus_mut().unmount_floppy_b();
+                Ok(())
+            }
+            "HardDrive" => {
+                self.cpu.bus_mut().unmount_hard_drive();
+                Ok(())
+            }
+            _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
         }
-
-        // Reset the system when unmounting
-        self.reset();
-        Ok(())
     }
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
-        mount_point_id == "Executable" && self.cpu.bus().executable().is_some()
+        match mount_point_id {
+            "BIOS" => true, // BIOS always mounted (has default)
+            "FloppyA" => self.cpu.bus().floppy_a().is_some(),
+            "FloppyB" => self.cpu.bus().floppy_b().is_some(),
+            "HardDrive" => self.cpu.bus().hard_drive().is_some(),
+            _ => false,
+        }
     }
 }
 
@@ -267,8 +320,11 @@ mod tests {
         // Simple COM program: MOV AX, 0x1234; HLT
         let program = vec![0xB8, 0x34, 0x12, 0xF4];
 
+        // Load executable via the old method (kept for backward compatibility)
         assert!(sys.load_executable(&program).is_ok());
-        assert!(sys.is_mounted("Executable"));
+        
+        // Check that BIOS is always mounted (has default)
+        assert!(sys.is_mounted("BIOS"));
     }
 
     #[test]
@@ -288,11 +344,24 @@ mod tests {
         let sys = PcSystem::new();
         let mps = sys.mount_points();
 
-        assert_eq!(mps.len(), 1);
-        assert_eq!(mps[0].id, "Executable");
-        assert!(mps[0].required);
-        assert!(mps[0].extensions.contains(&"com".to_string()));
-        assert!(mps[0].extensions.contains(&"exe".to_string()));
+        assert_eq!(mps.len(), 4);
+        
+        // Check BIOS mount point
+        assert_eq!(mps[0].id, "BIOS");
+        assert!(!mps[0].required); // Has default
+        assert!(mps[0].extensions.contains(&"bin".to_string()));
+        
+        // Check Floppy A
+        assert_eq!(mps[1].id, "FloppyA");
+        assert!(!mps[1].required);
+        
+        // Check Floppy B
+        assert_eq!(mps[2].id, "FloppyB");
+        assert!(!mps[2].required);
+        
+        // Check Hard Drive
+        assert_eq!(mps[3].id, "HardDrive");
+        assert!(!mps[3].required);
     }
 
     #[test]
@@ -300,6 +369,34 @@ mod tests {
         let mut sys = PcSystem::new();
         let result = sys.mount("InvalidMount", &[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mount_floppy() {
+        let mut sys = PcSystem::new();
+        
+        // Create a minimal floppy image (360KB standard floppy)
+        let floppy_data = vec![0xF6; 368640]; // 360KB
+        
+        assert!(sys.mount("FloppyA", &floppy_data).is_ok());
+        assert!(sys.is_mounted("FloppyA"));
+        
+        sys.unmount("FloppyA").unwrap();
+        assert!(!sys.is_mounted("FloppyA"));
+    }
+
+    #[test]
+    fn test_mount_hard_drive() {
+        let mut sys = PcSystem::new();
+        
+        // Create a minimal hard drive image (1MB)
+        let hd_data = vec![0; 1024 * 1024];
+        
+        assert!(sys.mount("HardDrive", &hd_data).is_ok());
+        assert!(sys.is_mounted("HardDrive"));
+        
+        sys.unmount("HardDrive").unwrap();
+        assert!(!sys.is_mounted("HardDrive"));
     }
 
     #[test]
