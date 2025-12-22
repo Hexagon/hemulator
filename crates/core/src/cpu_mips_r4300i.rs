@@ -146,6 +146,12 @@ impl<M: MemoryMips> CpuMips<M> {
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
 
+        // Check for pending interrupts before fetching instruction
+        if self.check_interrupts() {
+            // Interrupt was handled, return early
+            return (self.cycles - start_cycles) as u32;
+        }
+
         // Fetch instruction
         let instr = self.memory.read_word(self.pc as u32);
         self.pc = self.pc.wrapping_add(4);
@@ -208,6 +214,68 @@ impl<M: MemoryMips> CpuMips<M> {
         self.gpr[0] = 0;
 
         (self.cycles - start_cycles) as u32
+    }
+
+    /// Check for pending interrupts and handle if enabled
+    /// Returns true if an interrupt was handled
+    fn check_interrupts(&mut self) -> bool {
+        // Check if interrupts are globally enabled (IE bit in Status register)
+        let status = self.cp0[CP0_STATUS];
+        let ie = status & 0x01;
+        let exl = (status >> 1) & 0x01;
+        let erl = (status >> 2) & 0x01;
+
+        // Interrupts are enabled if IE=1 and EXL=0 and ERL=0
+        if ie == 0 || exl != 0 || erl != 0 {
+            return false;
+        }
+
+        // Check if any interrupts are pending and unmasked
+        let cause = self.cp0[CP0_CAUSE];
+        let im = (status >> 8) & 0xFF; // Interrupt mask in Status
+        let ip = (cause >> 8) & 0xFF; // Interrupt pending in Cause
+
+        // Check if any unmasked interrupt is pending
+        if (im & ip) != 0 {
+            self.handle_exception(0); // Exception code 0 = Interrupt
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle an exception/interrupt
+    fn handle_exception(&mut self, exception_code: u64) {
+        // Set EXL bit in Status register (disable further interrupts)
+        self.cp0[CP0_STATUS] |= 0x02; // Set EXL bit
+
+        // Save return address in EPC (current PC, not incremented)
+        self.cp0[CP0_EPC] = self.pc;
+
+        // Set exception code in Cause register
+        self.cp0[CP0_CAUSE] &= !0x7C; // Clear exception code bits (2-6)
+        self.cp0[CP0_CAUSE] |= (exception_code << 2) & 0x7C;
+
+        // Jump to exception vector
+        // Normal exception vector is at 0x80000180
+        self.pc = 0x80000180;
+
+        self.cycles += 1; // Exception handling takes cycles
+    }
+
+    /// Set a pending interrupt in the Cause register (called by memory interface)
+    pub fn set_interrupt(&mut self, interrupt_bit: u8) {
+        // Interrupt pending bits are in Cause register bits 8-15
+        let bit = 1u64 << (8 + interrupt_bit);
+        self.cp0[CP0_CAUSE] |= bit;
+    }
+
+    /// Clear a pending interrupt in the Cause register
+    #[allow(dead_code)] // Reserved for future use
+    pub fn clear_interrupt(&mut self, interrupt_bit: u8) {
+        // Interrupt pending bits are in Cause register bits 8-15
+        let bit = 1u64 << (8 + interrupt_bit);
+        self.cp0[CP0_CAUSE] &= !bit;
     }
 
     /// Execute SPECIAL opcode instructions (opcode = 0x00)
