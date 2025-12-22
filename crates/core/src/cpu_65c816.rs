@@ -1569,6 +1569,182 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 3;
                 }
             }
+            0x24 => {
+                // BIT direct page - sets Z, N, V flags
+                let addr = self.fetch_byte() as u32 + self.d as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    // N and V flags come from bits 7 and 6 of the memory value
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x40 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 3;
+                } else {
+                    let val = self.read_word(addr);
+                    let result = self.c & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    // N and V flags come from bits 15 and 14 of the memory value
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x4000 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 4;
+                }
+            }
+            0x2C => {
+                // BIT absolute - sets Z, N, V flags
+                let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x40 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    let result = self.c & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x4000 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 5;
+                }
+            }
+            0x34 => {
+                // BIT dp,X - sets Z, N, V flags
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x40 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    let result = self.c & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x4000 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 5;
+                }
+            }
+            0x3C => {
+                // BIT abs,X - sets Z, N, V flags
+                let base = self.fetch_word() as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x40 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    let result = self.c & val;
+                    if result == 0 {
+                        self.status |= FLAG_ZERO;
+                    } else {
+                        self.status &= !FLAG_ZERO;
+                    }
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_NEGATIVE;
+                    } else {
+                        self.status &= !FLAG_NEGATIVE;
+                    }
+                    if val & 0x4000 != 0 {
+                        self.status |= FLAG_OVERFLOW;
+                    } else {
+                        self.status &= !FLAG_OVERFLOW;
+                    }
+                    self.cycles += 5;
+                }
+            }
 
             // TXA - Transfer X to A
             0x8A => {
