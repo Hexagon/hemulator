@@ -427,6 +427,206 @@ impl RdpRenderer for SoftwareRdpRenderer {
         }
     }
 
+    fn draw_triangle_textured(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
+    ) {
+        // Sort vertices by Y coordinate
+        let mut verts = [(x0, y0, s0, t0), (x1, y1, s1, t1), (x2, y2, s2, t2)];
+        verts.sort_by_key(|v| v.1);
+        let [(x0, y0, s0, t0), (x1, y1, s1, t1), (x2, y2, s2, t2)] = verts;
+
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let sa = s0 + (s2 - s0) * alpha;
+            let ta = t0 + (t2 - t0) * alpha;
+
+            let (xb, sb, tb) = if y < y1 {
+                (
+                    x0 as f32 + (x1 - x0) as f32 * beta,
+                    s0 + (s1 - s0) * beta,
+                    t0 + (t1 - t0) * beta,
+                )
+            } else {
+                (
+                    x1 as f32 + (x2 - x1) as f32 * beta,
+                    s1 + (s2 - s1) * beta,
+                    t1 + (t2 - t1) * beta,
+                )
+            };
+
+            let (x_start, x_end, s_start, s_end, t_start, t_end) = if xa < xb {
+                (xa as i32, xb as i32, sa, sb, ta, tb)
+            } else {
+                (xb as i32, xa as i32, sb, sa, tb, ta)
+            };
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(scissor.x_min as i32);
+            let clip_x_end = x_end.min(scissor.x_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            // Interpolate texture coordinates across scanline
+            let span_width = x_end - x_start;
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    let t_param = if span_width > 0 {
+                        (x - x_start) as f32 / span_width as f32
+                    } else {
+                        0.0
+                    };
+                    let s = s_start + (s_end - s_start) * t_param;
+                    let t = t_start + (t_end - t_start) * t_param;
+
+                    let color = texture(s, t);
+                    self.set_pixel(x as u32, clip_y as u32, color);
+                }
+            }
+        }
+    }
+
+    fn draw_triangle_textured_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
+    ) {
+        // Sort vertices by Y coordinate
+        let mut verts = [
+            (x0, y0, z0, s0, t0),
+            (x1, y1, z1, s1, t1),
+            (x2, y2, z2, s2, t2),
+        ];
+        verts.sort_by_key(|v| v.1);
+        let [(x0, y0, z0, s0, t0), (x1, y1, z1, s1, t1), (x2, y2, z2, s2, t2)] = verts;
+
+        let total_height = y2 - y0;
+        if total_height == 0 {
+            return; // Degenerate triangle
+        }
+
+        // Split triangle into top and bottom halves
+        for y in y0..=y2 {
+            let segment_height = if y < y1 { y1 - y0 } else { y2 - y1 };
+            if segment_height == 0 {
+                continue;
+            }
+
+            let alpha = (y - y0) as f32 / total_height as f32;
+            let beta = if y < y1 {
+                (y - y0) as f32 / (y1 - y0) as f32
+            } else {
+                (y - y1) as f32 / (y2 - y1) as f32
+            };
+
+            let xa = x0 as f32 + (x2 - x0) as f32 * alpha;
+            let za = z0 as f32 + (z2 as f32 - z0 as f32) * alpha;
+            let sa = s0 + (s2 - s0) * alpha;
+            let ta = t0 + (t2 - t0) * alpha;
+
+            let (xb, zb, sb, tb) = if y < y1 {
+                (
+                    x0 as f32 + (x1 - x0) as f32 * beta,
+                    z0 as f32 + (z1 as f32 - z0 as f32) * beta,
+                    s0 + (s1 - s0) * beta,
+                    t0 + (t1 - t0) * beta,
+                )
+            } else {
+                (
+                    x1 as f32 + (x2 - x1) as f32 * beta,
+                    z1 as f32 + (z2 as f32 - z1 as f32) * beta,
+                    s1 + (s2 - s1) * beta,
+                    t1 + (t2 - t1) * beta,
+                )
+            };
+
+            let (x_start, x_end, z_start, z_end, s_start, s_end, t_start, t_end) = if xa < xb {
+                (xa as i32, xb as i32, za, zb, sa, sb, ta, tb)
+            } else {
+                (xb as i32, xa as i32, zb, za, sb, sa, tb, ta)
+            };
+
+            // Clip to scissor bounds
+            let clip_x_start = x_start.max(scissor.x_min as i32);
+            let clip_x_end = x_end.min(scissor.x_max as i32);
+            let clip_y = y.max(scissor.y_min as i32).min(scissor.y_max as i32);
+
+            if clip_y < 0 || clip_y >= self.height as i32 {
+                continue;
+            }
+
+            // Interpolate Z and texture coordinates across scanline
+            let span_width = x_end - x_start;
+            for x in clip_x_start..=clip_x_end {
+                if x >= 0 && x < self.width as i32 {
+                    let t_param = if span_width > 0 {
+                        (x - x_start) as f32 / span_width as f32
+                    } else {
+                        0.0
+                    };
+                    let z = (z_start + (z_end - z_start) * t_param) as u16;
+                    let s = s_start + (s_end - s_start) * t_param;
+                    let t = t_start + (t_end - t_start) * t_param;
+
+                    // Z-buffer test
+                    if self.zbuffer.test_and_update(x as u32, clip_y as u32, z) {
+                        let color = texture(s, t);
+                        self.set_pixel(x as u32, clip_y as u32, color);
+                    }
+                }
+            }
+        }
+    }
+
     fn clear_zbuffer(&mut self) {
         self.zbuffer.clear();
     }
@@ -555,6 +755,109 @@ mod tests {
         let frame = renderer.get_frame();
         // Pixel should be green (near triangle visible)
         let idx = (116 * 320 + 100) as usize;
+        assert_eq!(frame.pixels[idx], 0xFF00FF00);
+    }
+
+    #[test]
+    fn test_software_renderer_textured_triangle() {
+        let mut renderer = SoftwareRdpRenderer::new(320, 240);
+        let scissor = ScissorBox {
+            x_min: 0,
+            y_min: 0,
+            x_max: 320,
+            y_max: 240,
+        };
+
+        // Simple checkerboard texture sampler
+        let texture = |s: f32, t: f32| -> u32 {
+            let si = s as u32;
+            let ti = t as u32;
+            if (si ^ ti) & 1 == 0 {
+                0xFFFFFFFF // White
+            } else {
+                0xFF000000 // Black
+            }
+        };
+
+        // Draw textured triangle
+        renderer.draw_triangle_textured(
+            100, 50, 0.0, 0.0, // v0: top
+            150, 150, 10.0, 10.0, // v1: bottom-right
+            50, 150, 0.0, 10.0, // v2: bottom-left
+            &texture, &scissor,
+        );
+
+        let frame = renderer.get_frame();
+        // Check that triangle was rendered (some pixels should be non-zero)
+        let idx = (100 * 320 + 100) as usize;
+        let pixel = frame.pixels[idx];
+        // Should be either white or black from texture
+        assert!(pixel == 0xFFFFFFFF || pixel == 0xFF000000);
+    }
+
+    #[test]
+    fn test_software_renderer_textured_triangle_zbuffer() {
+        let mut renderer = SoftwareRdpRenderer::new(320, 240);
+        renderer.set_zbuffer_enabled(true);
+
+        let scissor = ScissorBox {
+            x_min: 0,
+            y_min: 0,
+            x_max: 320,
+            y_max: 240,
+        };
+
+        // Red texture sampler
+        let red_texture = |_s: f32, _t: f32| -> u32 { 0xFFFF0000 };
+
+        // Green texture sampler
+        let green_texture = |_s: f32, _t: f32| -> u32 { 0xFF00FF00 };
+
+        // Draw far red textured triangle
+        renderer.draw_triangle_textured_zbuffer(
+            100,
+            50,
+            0xC000,
+            0.0,
+            0.0,
+            150,
+            150,
+            0xC000,
+            10.0,
+            10.0,
+            50,
+            150,
+            0xC000,
+            0.0,
+            10.0,
+            &red_texture,
+            &scissor,
+        );
+
+        // Draw near green textured triangle (should occlude red)
+        renderer.draw_triangle_textured_zbuffer(
+            100,
+            50,
+            0x4000,
+            0.0,
+            0.0,
+            150,
+            150,
+            0x4000,
+            10.0,
+            10.0,
+            50,
+            150,
+            0x4000,
+            0.0,
+            10.0,
+            &green_texture,
+            &scissor,
+        );
+
+        let frame = renderer.get_frame();
+        // Center pixel should be green (near triangle visible)
+        let idx = (100 * 320 + 100) as usize;
         assert_eq!(frame.pixels[idx], 0xFF00FF00);
     }
 }

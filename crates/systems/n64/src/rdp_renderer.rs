@@ -129,6 +129,50 @@ pub trait RdpRenderer: Send {
         scissor: &ScissorBox,
     );
 
+    /// Draw a textured triangle (with per-vertex texture coordinates)
+    /// Texture coordinates (s, t) are in texel space (0-width, 0-height)
+    #[allow(clippy::too_many_arguments)]
+    fn draw_triangle_textured(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32, // Texture sampling function
+        scissor: &ScissorBox,
+    );
+
+    /// Draw a textured triangle with Z-buffer
+    #[allow(clippy::too_many_arguments)]
+    fn draw_triangle_textured_zbuffer(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32, // Texture sampling function
+        scissor: &ScissorBox,
+    );
+
     /// Clear the Z-buffer to maximum depth (far plane)
     fn clear_zbuffer(&mut self);
 
