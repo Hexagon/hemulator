@@ -518,8 +518,10 @@ impl System for NesSystem {
             }
         }
 
-        // VBlank end
+        // VBlank end / Pre-render scanline start
+        // Clear sprite flags (sprite 0 hit and sprite overflow) at start of pre-render scanline
         if let Some(b) = self.cpu.bus_mut() {
+            b.ppu.clear_sprite_flags();
             b.ppu.set_vblank(false);
         }
 
