@@ -130,10 +130,9 @@ impl Ppu {
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(256, 224); // SNES resolution
 
-        // If screen is blanked, return black frame
-        if (self.screen_display & 0x80) != 0 {
-            return frame;
-        }
+        // NOTE: We render even when screen is blanked (bit 7 set)
+        // This is not hardware-accurate but allows commercial ROMs to display
+        // something during boot sequences before they unblank the screen
 
         // Very simple rendering: interpret VRAM as a direct color pattern
         // This is a stub - real SNES PPU would decode tiles, tilemaps, etc.

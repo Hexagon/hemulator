@@ -247,6 +247,14 @@ impl EmulatorSystem {
             _ => None,
         }
     }
+
+    fn get_debug_info_snes(&self) -> Option<emu_snes::DebugInfo> {
+        match self {
+            EmulatorSystem::SNES(sys) => Some(sys.get_debug_info()),
+            _ => None,
+        }
+    }
+
     fn get_runtime_stats(&self) -> emu_nes::RuntimeStats {
         match self {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
@@ -823,6 +831,14 @@ fn main() {
                     println!("RDP Status: 0x{:08X}", debug_info.rdp_status);
                     println!("Framebuffer: {}", debug_info.framebuffer_resolution);
                 }
+                // Try SNES debug info
+                else if let Some(debug_info) = sys.get_debug_info_snes() {
+                    println!("System: SNES");
+                    println!("ROM Size: {} KB", debug_info.rom_size / 1024);
+                    println!("Header: {}", if debug_info.has_smc_header { "SMC (512 bytes)" } else { "None" });
+                    println!("PC: 0x{:02X}:{:04X}", debug_info.pbr, debug_info.pc);
+                    println!("Mode: {}", if debug_info.emulation_mode { "Emulation (6502)" } else { "Native (65C816)" });
+                }
                 
                 println!("FPS: {:.1}", current_fps);
                 println!("Video Backend: {}", settings.video_backend);
@@ -1069,6 +1085,20 @@ fn main() {
                     debug_info.rsp_vertex_count,
                     debug_info.rdp_status,
                     &debug_info.framebuffer_resolution,
+                    current_fps,
+                    &settings.video_backend,
+                ));
+            }
+            // Try SNES debug info
+            else if let Some(debug_info) = sys.get_debug_info_snes() {
+                debug_overlay = Some(ui_render::create_snes_debug_overlay(
+                    width,
+                    height,
+                    debug_info.rom_size,
+                    debug_info.has_smc_header,
+                    debug_info.pc,
+                    debug_info.pbr,
+                    debug_info.emulation_mode,
                     current_fps,
                     &settings.video_backend,
                 ));

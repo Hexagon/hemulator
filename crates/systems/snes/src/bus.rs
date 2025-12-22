@@ -47,6 +47,22 @@ impl SnesBus {
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
     }
+
+    pub fn get_rom_size(&self) -> usize {
+        if let Some(ref cart) = self.cartridge {
+            cart.rom_size()
+        } else {
+            0
+        }
+    }
+
+    pub fn has_smc_header(&self) -> bool {
+        if let Some(ref cart) = self.cartridge {
+            cart.has_smc_header()
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for SnesBus {

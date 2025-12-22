@@ -577,6 +577,72 @@ pub fn create_atari2600_debug_overlay(
     buffer
 }
 
+/// Create a debug info overlay for SNES
+#[allow(clippy::too_many_arguments)]
+pub fn create_snes_debug_overlay(
+    width: usize,
+    height: usize,
+    rom_size: usize,
+    has_smc_header: bool,
+    pc: u16,
+    pbr: u8,
+    emulation_mode: bool,
+    fps: f64,
+    video_backend: &str,
+) -> Vec<u32> {
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let rom_kb = rom_size / 1024;
+    let size_line = format!("ROM: {} KB", rom_kb);
+    let header_line = if has_smc_header {
+        "Header: SMC (512 bytes)"
+    } else {
+        "Header: None"
+    };
+    let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
+
+    let pc_line = format!("PC: 0x{:02X}:{:04X}", pbr, pc);
+    let mode_line = if emulation_mode {
+        "Mode: Emulation (6502)"
+    } else {
+        "Mode: Native (65C816)"
+    };
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO - SNES",
+        "",
+        &size_line,
+        header_line,
+        &fps_line,
+        &video_line,
+        "",
+        &pc_line,
+        mode_line,
+        "",
+        "WARNING: Minimal PPU",
+        "Most games will not display correctly",
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
 /// Create a mount point selection overlay
 pub fn create_mount_point_selector(
     width: usize,

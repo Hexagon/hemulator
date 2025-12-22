@@ -31,6 +31,15 @@ pub enum SnesError {
     InvalidMountPoint(String),
 }
 
+/// Debug information for SNES system
+pub struct DebugInfo {
+    pub rom_size: usize,
+    pub has_smc_header: bool,
+    pub pc: u16,
+    pub pbr: u8,
+    pub emulation_mode: bool,
+}
+
 /// SNES system implementation
 pub struct SnesSystem {
     cpu: SnesCpu,
@@ -46,6 +55,25 @@ impl SnesSystem {
             cpu: SnesCpu::new(bus),
             frame_cycles: 89342, // ~3.58MHz / 60Hz (NTSC)
             current_cycles: 0,
+        }
+    }
+
+    /// Get debug information for the SNES system
+    pub fn get_debug_info(&self) -> DebugInfo {
+        let bus = self.cpu.bus();
+        let cartridge_info = if bus.has_cartridge() {
+            // Try to get cartridge info from the bus
+            (bus.get_rom_size(), bus.has_smc_header())
+        } else {
+            (0, false)
+        };
+
+        DebugInfo {
+            rom_size: cartridge_info.0,
+            has_smc_header: cartridge_info.1,
+            pc: self.cpu.cpu.pc,
+            pbr: self.cpu.cpu.pbr,
+            emulation_mode: self.cpu.cpu.emulation,
         }
     }
 }

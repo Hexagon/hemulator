@@ -1015,7 +1015,15 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
 
             _ => {
-                // Unimplemented instruction
+                // Unimplemented instruction - log and skip
+                if std::env::var("EMU_LOG_UNKNOWN_OPS").unwrap_or_default() == "1" {
+                    eprintln!(
+                        "Unknown 65C816 opcode: 0x{:02X} at PC=0x{:02X}:{:04X}",
+                        opcode, self.pbr, self.pc.wrapping_sub(1)
+                    );
+                }
+                // Skip this instruction to avoid infinite loop
+                // This is a placeholder - real implementation would need proper opcode decoding
                 self.cycles += 2;
             }
         }

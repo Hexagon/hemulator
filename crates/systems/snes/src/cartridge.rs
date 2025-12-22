@@ -9,7 +9,6 @@ pub struct Cartridge {
     /// RAM (if present)
     ram: Vec<u8>,
     /// Header offset (512 bytes if SMC header present)
-    #[allow(dead_code)]
     header_offset: usize,
 }
 
@@ -80,6 +79,14 @@ impl Cartridge {
                 self.ram[ram_offset] = val;
             }
         }
+    }
+
+    pub fn rom_size(&self) -> usize {
+        self.rom.len()
+    }
+
+    pub fn has_smc_header(&self) -> bool {
+        self.header_offset == 512
     }
 }
 
