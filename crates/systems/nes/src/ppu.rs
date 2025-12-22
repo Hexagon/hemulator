@@ -621,7 +621,16 @@ impl Ppu {
             }
         }
 
-        // Sprite pass (minimal)
+        // Sprite pass - correct NES sprite priority implementation.
+        //
+        // The NES PPU handles sprite priority in a specific way:
+        // 1. Sprites are drawn front-to-back (OAM 0→63) into a sprite buffer
+        // 2. First opaque pixel at each X coordinate wins (regardless of priority bit)
+        // 3. Priority bit determines whether sprite pixel replaces background in final composition
+        //
+        // Critical edge case: A back-priority sprite at lower OAM index can hide a
+        // front-priority sprite at higher index, even though the back-priority sprite
+        // itself may be hidden behind opaque background.
         if sprites_enabled {
             let sprite_size_16 = (self.ctrl & 0x20) != 0;
             let sprite_pattern_base: usize = if (self.ctrl & 0x08) != 0 {
@@ -630,8 +639,13 @@ impl Ppu {
                 0x0000
             };
 
-            // NES draws sprites in reverse OAM order for priority; this is a simplification.
-            for i in (0..64usize).rev() {
+            // Sprite buffer: stores (color, priority) for each pixel.
+            // None = no sprite pixel, Some((rgb, behind_bg)) = sprite pixel with priority.
+            let mut sprite_buffer: Vec<Option<(u32, bool)>> = vec![None; (width * height) as usize];
+
+            // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
+            // First opaque pixel at each position wins.
+            for i in 0..64usize {
                 let o = i * 4;
                 let y_pos = self.oam[o] as i16 + 1; // OAM Y is sprite top minus 1
                 let tile = self.oam[o + 1];
@@ -688,26 +702,32 @@ impl Ppu {
                             continue; // transparent
                         }
 
-                        // Sprite palette layout:
-                        // - $10 is sprite "universal" (mirrors $00), and $11..$13 are palette 0 colors, etc.
-                        let pal_base = 0x11 + pal * 4;
-                        let mut pal_entry =
-                            self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
-                        if (self.mask & 0x01) != 0 {
-                            pal_entry &= 0x30; // grayscale
-                        }
-                        let rgb = nes_palette_rgb(pal_entry);
-
                         let idx = (y as u32 * width + x as u32) as usize;
-                        if behind_bg {
-                            // Behind background: only draw if background pixel is transparent (color index 0).
-                            // This is the correct NES sprite priority behavior.
-                            if !bg_priority[idx] {
-                                frame.pixels[idx] = rgb;
+
+                        // Only write if no sprite pixel has been written yet (first opaque pixel wins)
+                        if sprite_buffer[idx].is_none() {
+                            // Sprite palette layout:
+                            // - $10 is sprite "universal" (mirrors $00), and $11..$13 are palette 0 colors, etc.
+                            let pal_base = 0x11 + pal * 4;
+                            let mut pal_entry =
+                                self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
+                            if (self.mask & 0x01) != 0 {
+                                pal_entry &= 0x30; // grayscale
                             }
-                        } else {
-                            frame.pixels[idx] = rgb;
+                            let rgb = nes_palette_rgb(pal_entry);
+                            sprite_buffer[idx] = Some((rgb, behind_bg));
                         }
+                    }
+                }
+            }
+
+            // Composite sprite buffer with background using priority rules.
+            for idx in 0..(width * height) as usize {
+                if let Some((sprite_color, behind_bg)) = sprite_buffer[idx] {
+                    // Sprite pixel is opaque.
+                    // Draw it if: front priority OR background is transparent.
+                    if !behind_bg || !bg_priority[idx] {
+                        frame.pixels[idx] = sprite_color;
                     }
                 }
             }
@@ -829,7 +849,12 @@ impl Ppu {
             }
         }
 
-        // Sprites affecting this scanline.
+        // Sprites affecting this scanline - correct NES sprite priority implementation.
+        //
+        // The NES PPU handles sprite priority in a specific way:
+        // 1. Sprites are drawn front-to-back (OAM 0→63) into a sprite buffer
+        // 2. First opaque pixel at each X coordinate wins (regardless of priority bit)
+        // 3. Priority bit determines whether sprite pixel replaces background in final composition
         if sprites_enabled {
             let sprite_size_16 = (self.ctrl & 0x20) != 0;
             let sprite_pattern_base: usize = if (self.ctrl & 0x08) != 0 {
@@ -838,7 +863,13 @@ impl Ppu {
                 0x0000
             };
 
-            for i in (0..64usize).rev() {
+            // Sprite buffer for this scanline: stores (color, priority, sprite_index) for each pixel.
+            // None = no sprite pixel, Some((rgb, behind_bg, sprite_idx)) = sprite pixel with priority and index.
+            let mut sprite_buffer: [Option<(u32, bool, usize)>; 256] = [None; 256];
+
+            // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
+            // First opaque pixel at each position wins.
+            for i in 0..64usize {
                 let o = i * 4;
                 let y_pos = self.oam[o] as i16 + 1;
                 let tile = self.oam[o + 1];
@@ -892,21 +923,32 @@ impl Ppu {
                         continue;
                     }
 
-                    let pal_base = 0x11 + pal * 4;
-                    let mut pal_entry =
-                        self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
-                    if (self.mask & 0x01) != 0 {
-                        pal_entry &= 0x30;
-                    }
-                    let rgb = nes_palette_rgb(pal_entry);
+                    let x_idx = x as usize;
 
+                    // Only write if no sprite pixel has been written yet (first opaque pixel wins)
+                    if sprite_buffer[x_idx].is_none() {
+                        let pal_base = 0x11 + pal * 4;
+                        let mut pal_entry =
+                            self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
+                        if (self.mask & 0x01) != 0 {
+                            pal_entry &= 0x30;
+                        }
+                        let rgb = nes_palette_rgb(pal_entry);
+                        sprite_buffer[x_idx] = Some((rgb, behind_bg, i));
+                    }
+                }
+            }
+
+            // Composite sprite buffer with background using priority rules and detect sprite 0 hit.
+            for x in 0..width as usize {
+                if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
                     let idx = (y * width + x as u32) as usize;
 
-                    // Sprite 0 hit detection - check if background pixel has non-zero color index
-                    if i == 0
+                    // Sprite 0 hit detection - check if sprite 0 pixel overlaps opaque background
+                    if sprite_idx == 0
                         && bg_enabled
                         && !self.sprite_0_hit.get()
-                        && bg_priority[x as usize]
+                        && bg_priority[x]
                         && x < 255
                     {
                         // Check left clipping
@@ -917,13 +959,10 @@ impl Ppu {
                         }
                     }
 
-                    if behind_bg {
-                        // Behind background: only draw if background pixel is transparent (color index 0).
-                        if !bg_priority[x as usize] {
-                            frame.pixels[idx] = rgb;
-                        }
-                    } else {
-                        frame.pixels[idx] = rgb;
+                    // Sprite pixel is opaque.
+                    // Draw it if: front priority OR background is transparent.
+                    if !behind_bg || !bg_priority[x] {
+                        frame.pixels[idx] = sprite_color;
                     }
                 }
             }
@@ -1975,6 +2014,291 @@ mod tests {
         assert!(
             !ppu.take_nmi_pending(),
             "NMI should NOT fire if VBlank is already true (no edge)"
+        );
+    }
+
+    // ============================================================================
+    // Sprite Priority Tests
+    // ============================================================================
+
+    #[test]
+    fn test_sprite_priority_lower_oam_index_wins() {
+        // Test that sprite with lower OAM index hides sprite with higher OAM index,
+        // regardless of priority bits.
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Enable sprite rendering ONLY (no background)
+        ppu.ctrl = 0x00; // 8x8 sprites, pattern table at $0000
+        ppu.mask = 0x10; // Show sprites only
+
+        // Set up a simple sprite pattern (solid square)
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF; // Low plane
+            ppu.chr[i + 8] = 0xFF; // High plane (color 3)
+        }
+
+        // Set up palettes
+        ppu.palette[0x11] = 0x0F; // Sprite 0 palette - black
+        ppu.palette[0x12] = 0x0F;
+        ppu.palette[0x13] = 0x30; // Color 3 - white
+        ppu.palette[0x15] = 0x0F; // Sprite 1 palette
+        ppu.palette[0x16] = 0x0F;
+        ppu.palette[0x17] = 0x16; // Color 3 - red
+
+        // Sprite 0: Front priority, at (8, 8), palette 0 (white)
+        // Covers Y=8-15, X=8-15
+        ppu.oam[0] = 7; // Y position (rendered at Y+1 = 8)
+        ppu.oam[1] = 0; // Tile 0
+        ppu.oam[2] = 0x00; // Front priority, palette 0
+        ppu.oam[3] = 8; // X position
+
+        // Sprite 1: Front priority, at (10, 10), palette 1 (red)
+        // Covers Y=10-17, X=10-17
+        ppu.oam[4] = 9; // Y position (rendered at Y+1 = 10)
+        ppu.oam[5] = 0; // Tile 0
+        ppu.oam[6] = 0x01; // Front priority, palette 1
+        ppu.oam[7] = 10; // X position
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // At pixel (10, 10), sprite 0 should win (white), not sprite 1 (red)
+        // This is in the overlap area.
+        let pixel_10_10 = frame.pixels[10 * 256 + 10];
+        assert_eq!(
+            pixel_10_10,
+            nes_palette_rgb(0x30),
+            "Lower OAM index (sprite 0) should hide higher OAM index (sprite 1)"
+        );
+
+        // At pixel (12, 12), sprite 0 should still win (in overlap area)
+        let pixel_12_12 = frame.pixels[12 * 256 + 12];
+        assert_eq!(
+            pixel_12_12,
+            nes_palette_rgb(0x30),
+            "Sprite 0 should cover overlapping area"
+        );
+
+        // At pixel (16, 16), only sprite 1 is present (beyond sprite 0's range), so it should be red
+        let pixel_16_16 = frame.pixels[16 * 256 + 16];
+        assert_eq!(
+            pixel_16_16,
+            nes_palette_rgb(0x16),
+            "Sprite 1 should be visible where sprite 0 doesn't overlap"
+        );
+
+        // At pixel (8, 8), only sprite 0 is present, so it should be white
+        let pixel_8_8 = frame.pixels[8 * 256 + 8];
+        assert_eq!(
+            pixel_8_8,
+            nes_palette_rgb(0x30),
+            "Sprite 0 should be visible at its top-left corner"
+        );
+    }
+
+    #[test]
+    fn test_sprite_priority_back_priority_sprite_hides_front_priority() {
+        // Test the critical edge case: A back-priority sprite at lower OAM index
+        // can hide a front-priority sprite at higher index, even though the
+        // back-priority sprite itself may be hidden behind opaque background.
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Enable background and sprite rendering
+        ppu.ctrl = 0x00; // 8x8 sprites, pattern table at $0000
+        ppu.mask = 0x18; // Show background and sprites
+
+        // Set up background tile with opaque pixels
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF; // Low plane
+            ppu.chr[i + 8] = 0x00; // High plane (color 1)
+        }
+
+        // Set up sprite pattern (solid)
+        for i in 16..24 {
+            ppu.chr[i] = 0xFF; // Low plane
+            ppu.chr[i + 8] = 0xFF; // High plane (color 3)
+        }
+
+        // Set up palettes
+        ppu.palette[0] = 0x0F; // Universal background - black
+        ppu.palette[1] = 0x1C; // BG color 1 - blue
+        ppu.palette[0x11] = 0x0F;
+        ppu.palette[0x12] = 0x0F;
+        ppu.palette[0x13] = 0x30; // Sprite 0 color 3 - white
+        ppu.palette[0x15] = 0x0F;
+        ppu.palette[0x16] = 0x0F;
+        ppu.palette[0x17] = 0x16; // Sprite 1 color 3 - red
+
+        // Set up background tile at (8,8)
+        ppu.vram[0] = 0; // Use tile 0 for background
+
+        // Sprite 0: Back priority (behind BG), at (8, 8), palette 0 (white)
+        // Covers Y=8-15, X=8-15
+        ppu.oam[0] = 7; // Y position
+        ppu.oam[1] = 1; // Tile 1 (sprite pattern)
+        ppu.oam[2] = 0x20; // Back priority, palette 0
+        ppu.oam[3] = 8; // X position
+
+        // Sprite 1: Front priority, at (10, 10), palette 1 (red)
+        // Covers Y=10-17, X=10-17
+        ppu.oam[4] = 9; // Y position
+        ppu.oam[5] = 1; // Tile 1
+        ppu.oam[6] = 0x01; // Front priority, palette 1
+        ppu.oam[7] = 10; // X position
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // At pixel (10, 10):
+        // - Background is opaque (blue)
+        // - Sprite 0 (back priority) is in sprite buffer at this position
+        // - Sprite 1 (front priority) is NOT in sprite buffer (sprite 0 won)
+        // - Since sprite 0 has back priority and BG is opaque, BG should show (blue)
+        let pixel_10_10 = frame.pixels[10 * 256 + 10];
+        assert_eq!(
+            pixel_10_10,
+            nes_palette_rgb(0x1C),
+            "Back-priority sprite 0 should hide front-priority sprite 1, allowing BG to show"
+        );
+
+        // At pixel (12, 12), same situation
+        let pixel_12_12 = frame.pixels[12 * 256 + 12];
+        assert_eq!(pixel_12_12, nes_palette_rgb(0x1C), "BG should show through");
+
+        // At pixel (16, 16), only sprite 1 is in buffer, and it has front priority
+        // so it should be visible (red) over the background
+        let pixel_16_16 = frame.pixels[16 * 256 + 16];
+        assert_eq!(
+            pixel_16_16,
+            nes_palette_rgb(0x16),
+            "Sprite 1 should be visible where sprite 0 doesn't overlap"
+        );
+    }
+
+    #[test]
+    fn test_sprite_priority_front_over_transparent_bg() {
+        // Test that front-priority sprites always show over transparent background
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Enable sprite rendering (no background)
+        ppu.ctrl = 0x00;
+        ppu.mask = 0x10; // Sprites only
+
+        // Set up sprite pattern
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0xFF;
+        }
+
+        // Set up palette
+        ppu.palette[0x11] = 0x0F;
+        ppu.palette[0x12] = 0x0F;
+        ppu.palette[0x13] = 0x30; // White
+
+        // Sprite with front priority
+        ppu.oam[0] = 7;
+        ppu.oam[1] = 0;
+        ppu.oam[2] = 0x00; // Front priority
+        ppu.oam[3] = 8;
+
+        let frame = ppu.render_frame();
+
+        // Sprite should be visible over transparent background
+        let pixel = frame.pixels[8 * 256 + 8];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x30),
+            "Front-priority sprite should show over transparent BG"
+        );
+    }
+
+    #[test]
+    fn test_sprite_priority_back_over_transparent_bg() {
+        // Test that back-priority sprites show over transparent background
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Enable sprite rendering (no background)
+        ppu.ctrl = 0x00;
+        ppu.mask = 0x10; // Sprites only
+
+        // Set up sprite pattern
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0xFF;
+        }
+
+        // Set up palette
+        ppu.palette[0x11] = 0x0F;
+        ppu.palette[0x12] = 0x0F;
+        ppu.palette[0x13] = 0x30; // White
+
+        // Sprite with back priority
+        ppu.oam[0] = 7;
+        ppu.oam[1] = 0;
+        ppu.oam[2] = 0x20; // Back priority
+        ppu.oam[3] = 8;
+
+        let frame = ppu.render_frame();
+
+        // Back-priority sprite should still show over transparent background
+        let pixel = frame.pixels[8 * 256 + 8];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x30),
+            "Back-priority sprite should show over transparent BG"
+        );
+    }
+
+    #[test]
+    fn test_sprite_priority_back_behind_opaque_bg() {
+        // Test that back-priority sprites hide behind opaque background
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.chr_is_ram = true;
+
+        // Enable background and sprites
+        ppu.ctrl = 0x00;
+        ppu.mask = 0x18;
+
+        // Background pattern (opaque)
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0x00; // Color 1
+        }
+
+        // Sprite pattern
+        for i in 16..24 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0xFF; // Color 3
+        }
+
+        // Palettes
+        ppu.palette[0] = 0x0F; // Universal BG
+        ppu.palette[1] = 0x1C; // BG color 1 - blue
+        ppu.palette[0x11] = 0x0F;
+        ppu.palette[0x12] = 0x0F;
+        ppu.palette[0x13] = 0x30; // Sprite color 3 - white
+
+        // Background tile
+        ppu.vram[0] = 0;
+
+        // Back-priority sprite
+        ppu.oam[0] = 7;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0x20; // Back priority
+        ppu.oam[3] = 8;
+
+        let frame = ppu.render_frame();
+
+        // Background should be visible, not sprite
+        let pixel = frame.pixels[8 * 256 + 8];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x1C),
+            "Back-priority sprite should hide behind opaque BG"
         );
     }
 }
