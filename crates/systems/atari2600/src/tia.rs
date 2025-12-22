@@ -614,6 +614,11 @@ impl Tia {
         if self.pixel >= 228 {
             self.pixel -= 228; // Wrap pixel properly (was = 0, which loses remainders)
             let old_scanline = self.scanline;
+
+            // Latch the state of the OLD scanline BEFORE advancing to the new one
+            // This ensures we capture the final state of the scanline after all register writes
+            self.latch_scanline_state(old_scanline);
+
             self.scanline += 1;
 
             self.scanline_counter = self.scanline_counter.saturating_add(1);
@@ -629,10 +634,6 @@ impl Tia {
             {
                 eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
             }
-
-            // DON'T latch here - we latch when registers are written (in write()).
-            // Latching here captures the NEW scanline's initial state BEFORE the game
-            // writes graphics data for it, resulting in all-zero/stale data being rendered.
         }
     }
 
@@ -658,14 +659,32 @@ impl Tia {
     /// Try to infer the start of the visible picture area based on VBLANK timing
     pub fn visible_window_start_scanline(&self) -> u16 {
         // Find where VBLANK transitions from true to false
+        let debug = std::env::var("EMU_LOG_VISIBLE_START")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
         for i in 1..262 {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
+
+            if debug && i < 100 {
+                eprintln!(
+                    "[VISIBLE] scanline {} prev.vblank={} cur.vblank={}",
+                    i, prev.vblank, cur.vblank
+                );
+            }
+
             if prev.vblank && !cur.vblank {
+                if debug {
+                    eprintln!("[VISIBLE] Found transition at scanline {}", i);
+                }
                 return i as u16;
             }
         }
         // Fallback: common NTSC visible start is around scanline ~37-40
+        if debug {
+            eprintln!("[VISIBLE] No transition found, using fallback 40");
+        }
         40
     }
 
@@ -863,16 +882,19 @@ impl Tia {
 
     /// Check if a pixel is part of the playfield
     fn is_playfield_pixel(state: &ScanlineState, x: usize) -> bool {
-        // Playfield is 40 bits wide, mirrored or repeated
+        // Playfield is 40 bits wide, each bit controls 4 pixels
+        // Playfield is mirrored or repeated for left/right halves
         if x < 80 {
-            // Left half
-            Self::get_playfield_bit(state, x / 2)
+            // Left half: pixels 0-79, bits 0-19
+            // Each bit covers 4 pixels
+            Self::get_playfield_bit(state, x / 4)
         } else {
-            // Right half
-            let bit_pos = (x - 80) / 2;
+            // Right half: pixels 80-159, bits 0-19 (mirrored or repeated)
+            // Each bit covers 4 pixels
+            let bit_pos = (x - 80) / 4;
             if state.playfield_reflect {
                 // Mirrored
-                Self::get_playfield_bit(state, 39 - bit_pos)
+                Self::get_playfield_bit(state, 19 - bit_pos)
             } else {
                 // Repeated
                 Self::get_playfield_bit(state, bit_pos)

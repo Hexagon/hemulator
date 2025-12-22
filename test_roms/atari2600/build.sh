@@ -1,12 +1,23 @@
 #!/bin/bash
-# Build script for Atari 2600 test ROM
+# Build script for Atari 2600 test ROMs
 
 set -e
 
-echo "Building Atari 2600 test ROM..."
+echo "Building Atari 2600 test ROMs..."
 
-# Assemble (output 4K ROM)
+# Build the basic test ROM
+echo "  Building test.bin..."
 dasm test.asm -f3 -otest.bin
 
-echo "Atari 2600 test ROM built: test.bin"
-ls -lh test.bin
+# Build the checkerboard test ROM
+echo "  Building checkerboard.bin..."
+dasm checkerboard.asm -f3 -ocheckerboard.bin
+
+# Build the timer test ROM (if it doesn't already exist as .bin)
+if [ -f "test_timer.asm" ]; then
+    echo "  Building test_timer.bin..."
+    dasm test_timer.asm -f3 -otest_timer.bin
+fi
+
+echo "Atari 2600 test ROMs built successfully:"
+ls -lh *.bin
