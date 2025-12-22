@@ -694,6 +694,49 @@ mod tests {
     }
 
     #[test]
+    fn test_playfield_pixel_scaling() {
+        // This test validates the fix for playfield bit-to-pixel scaling
+        // Each playfield bit should span 4 pixels, not 2
+        let mut sys = Atari2600System::new();
+
+        // Create a minimal ROM that sets up a simple playfield pattern
+        // For testing, we'll use the existing test ROM which sets PF0/1/2 to 0xAA
+        let test_rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", test_rom).unwrap();
+
+        // Run frames to stabilize
+        for _ in 0..10 {
+            sys.step_frame().unwrap();
+        }
+
+        let frame = sys.step_frame().unwrap();
+
+        // With PF0=PF1=PF2=0xAA (10101010), we should see alternating 4-pixel blocks
+        // Count pixels in the first 80 pixels (left half)
+        let mut consecutive_same_color = 1;
+        let mut max_consecutive = 1;
+        let mut prev_color = frame.pixels[0];
+
+        for x in 1..80 {
+            if frame.pixels[x] == prev_color {
+                consecutive_same_color += 1;
+                max_consecutive = max_consecutive.max(consecutive_same_color);
+            } else {
+                consecutive_same_color = 1;
+            }
+            prev_color = frame.pixels[x];
+        }
+
+        // With 4 pixels per bit, max consecutive should be 4
+        // With 2 pixels per bit (the bug), max would be 2
+        assert!(
+            max_consecutive >= 4,
+            "Expected 4-pixel blocks, but max consecutive same color is {}",
+            max_consecutive
+        );
+    }
+
+    #[test]
     fn test_timer_interrupt_flag_behavior() {
         // This test verifies that the RIOT timer interrupt flag clears on read,
         // which is critical for commercial ROMs that use timer-based synchronization

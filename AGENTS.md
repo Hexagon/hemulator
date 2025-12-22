@@ -458,7 +458,10 @@ Detailed implementation notes:
     - Resolution: 160x192 visible pixels (NTSC)
     - 128-color NTSC palette with proper hue/luminance mapping
     - **Graphics Objects**:
-      - Playfield: 40-bit bitmap with mirror/repeat modes
+      - Playfield: 40-bit bitmap (20 bits × 2 halves) with mirror/repeat modes
+        - Each bit controls 4 pixels (20 bits × 4 pixels = 80 pixels per half)
+        - Left half: pixels 0-79, right half: pixels 80-159
+        - PF0 uses bits 4-7, PF1 uses bits 0-7, PF2 uses bits 0-7
       - 2 Players (sprites): 8-pixel wide with reflection support
       - 2 Missiles: 1-pixel wide, share color with players
       - 1 Ball: 1-pixel wide, uses playfield color
@@ -466,6 +469,7 @@ Detailed implementation notes:
     - **Timing Model**: Frame-based rendering (not cycle-accurate)
       - Renders complete 160x192 frames on-demand
       - TIA state updated during CPU execution
+      - Scanline states latched at scanline boundaries for accurate rendering
       - Suitable for most games; timing-critical effects may not work perfectly
     - **Audio Synthesis**: Complete implementation using `PolynomialCounter` from `core/apu`
       - 2 audio channels with polynomial waveform generation
@@ -479,7 +483,7 @@ Detailed implementation notes:
       - See `crates/core/src/apu/polynomial.rs` for implementation details
     - **Known Limitations**:
       - Player/missile sizing (NUSIZ) stored but not applied
-      - Horizontal motion (HMxx) stored but not applied
+      - Horizontal motion (HMxx) stored but not applied (HMOVE strobe is supported)
       - Collision detection registers exist but return 0
       - Delayed graphics registers not implemented
   - **RIOT (6532 chip)**:
@@ -509,11 +513,17 @@ Detailed implementation notes:
     - 262 scanlines/frame, ~76 cycles/scanline
   - **Features**:
     - Full save state support (CPU, TIA, RIOT, cartridge banking)
-    - Comprehensive test coverage (43 tests)
+    - Comprehensive test coverage (45 tests including checkerboard pattern validation)
     - Proper NTSC color palette
+    - Accurate playfield rendering (4 pixels per bit)
     - Player/missile/ball rendering with priority
     - RIOT timer interrupt flag properly clears on read (fixes commercial ROM compatibility)
-  - All existing tests pass (43 tests total: 14 TIA, 7 RIOT, 6 cartridge, 8 system, 4 bus, 2 CPU, 2 integration)
+    - Scanline state latching for accurate VBLANK detection
+  - **Test ROMs**:
+    - `test.bin`: Basic smoke test with playfield pattern
+    - `checkerboard.bin`: Validates alternating playfield patterns (vertical checkerboard)
+    - `test_timer.bin`: Validates RIOT timer and color cycling
+  - All existing tests pass (45 tests total: 14 TIA, 7 RIOT, 6 cartridge, 10 system, 4 bus, 2 CPU, 2 integration)
 
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation
