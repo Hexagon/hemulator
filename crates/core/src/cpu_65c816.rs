@@ -295,6 +295,122 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 }
             }
+            0x07 => {
+                // ORA [dp] indirect long
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x0F => {
+                // ORA absolute long
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x17 => {
+                // ORA [dp],Y indirect long indexed
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x1F => {
+                // ORA absolute long,X
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x03 => {
+                // ORA stack relative
+                let offset = self.fetch_byte() as u32;
+                let addr = (self.s as u32).wrapping_add(offset);
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 5;
+                }
+            }
+            0x13 => {
+                // ORA (sr,S),Y
+                let offset = self.fetch_byte() as u32;
+                let ptr = (self.s as u32).wrapping_add(offset);
+                let base = self.read_word(ptr) as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 8;
+                }
+            }
 
             // ASL - Arithmetic Shift Left
             0x0A => {
@@ -588,6 +704,122 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.c &= val;
                     self.set_zn_16(self.c);
                     self.cycles += 6;
+                }
+            }
+            0x27 => {
+                // AND [dp] indirect long
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x2F => {
+                // AND absolute long
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x37 => {
+                // AND [dp],Y indirect long indexed
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x3F => {
+                // AND absolute long,X
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x23 => {
+                // AND stack relative
+                let offset = self.fetch_byte() as u32;
+                let addr = (self.s as u32).wrapping_add(offset);
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 5;
+                }
+            }
+            0x33 => {
+                // AND (sr,S),Y
+                let offset = self.fetch_byte() as u32;
+                let ptr = (self.s as u32).wrapping_add(offset);
+                let base = self.read_word(ptr) as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 & val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c &= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 8;
                 }
             }
 
@@ -908,6 +1140,122 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.c ^= val;
                     self.set_zn_16(self.c);
                     self.cycles += 6;
+                }
+            }
+            0x47 => {
+                // EOR [dp] indirect long
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x4F => {
+                // EOR absolute long
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let addr = (bank << 16) | (hi << 8) | lo;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x57 => {
+                // EOR [dp],Y indirect long indexed
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let lo = self.read(dp) as u32;
+                let hi = self.read(dp + 1) as u32;
+                let bank = self.read(dp + 2) as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
+            0x5F => {
+                // EOR absolute long,X
+                let lo = self.fetch_byte() as u32;
+                let hi = self.fetch_byte() as u32;
+                let bank = self.fetch_byte() as u32;
+                let base = (bank << 16) | (hi << 8) | lo;
+                let addr = base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 6;
+                }
+            }
+            0x43 => {
+                // EOR stack relative
+                let offset = self.fetch_byte() as u32;
+                let addr = (self.s as u32).wrapping_add(offset);
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 5;
+                }
+            }
+            0x53 => {
+                // EOR (sr,S),Y
+                let offset = self.fetch_byte() as u32;
+                let ptr = (self.s as u32).wrapping_add(offset);
+                let base = self.read_word(ptr) as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.y as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 8;
                 }
             }
 
