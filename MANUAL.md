@@ -25,6 +25,49 @@ Alternatively, you can provide a ROM path as an argument:
 
 The emulator will remember your last ROM and automatically load it next time you start.
 
+### Advanced Command-Line Options
+
+**PC/XT Slot-Based Loading**:
+
+For PC/XT emulation, you can specify disk images for specific drive slots:
+
+```bash
+# Load PC with a floppy disk in drive A:
+./hemu --slot2 bootdisk.img
+
+# Load PC with both floppy and hard drive
+./hemu --slot2 boot.img --slot4 harddrive.img
+
+# Load custom BIOS and disks
+./hemu --slot1 custom_bios.bin --slot2 floppy.img --slot4 hdd.img
+```
+
+**Slot Mapping for PC/XT**:
+- `--slot1 <file>`: BIOS ROM (default BIOS used if not specified)
+- `--slot2 <file>`: Floppy Drive A:
+- `--slot3 <file>`: Floppy Drive B:
+- `--slot4 <file>`: Hard Drive C:
+- `--slot5 <file>`: Reserved for future use
+
+**Creating Blank Disk Images**:
+
+Create blank floppy or hard drive images for use with PC/XT emulation:
+
+```bash
+# Create a 1.44MB floppy disk
+./hemu --create-blank-disk mydisk.img 1.44m
+
+# Create a 20MB hard drive
+./hemu --create-blank-disk harddrive.img 20m
+```
+
+**Supported Disk Formats**:
+- Floppy: `360k`, `720k`, `1.2m`, `1.44m`
+- Hard Drive: `10m`, `20m`, `40m`
+
+**Other Options**:
+- `--keep-logs`: Preserve debug logging environment variables (for development)
+
 ## Controls
 
 ### Multi-Player Support
@@ -695,10 +738,23 @@ For N64 games, the standard controller mappings apply with these button equivale
 - Save states (F5/F6)
 
 **Mount Point Usage**:
-To mount a custom BIOS or disk image:
-1. Press F3 to open mount point selector
-2. Select the desired slot (BIOS, FloppyA, FloppyB, or HardDrive)
-3. Choose the file to mount
+
+There are two ways to mount disk images and BIOS:
+
+1. **GUI Method** (F3 key):
+   - Press F3 to open mount point selector
+   - Select the desired slot (BIOS, FloppyA, FloppyB, or HardDrive)
+   - Choose the file to mount
+
+2. **Command-Line Method** (Recommended for quick loading):
+   - Use `--slot1` through `--slot4` to load files directly
+   - See "Advanced Command-Line Options" section for examples
+   - Example: `./hemu --slot2 boot.img --slot4 hdd.img`
+
+**Creating Disk Images**:
+- Use `--create-blank-disk <path> <format>` to create blank disks
+- See "Advanced Command-Line Options" section for supported formats
+- Example: `./hemu --create-blank-disk floppy.img 1.44m`
 
 **Keyboard Input**:
 - All keyboard keys are passed through to the emulated PC
