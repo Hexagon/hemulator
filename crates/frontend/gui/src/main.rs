@@ -474,24 +474,180 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
     dialog
 }
 
-fn main() {
-    // The NES core has some env-var gated debug logging that can produce massive output
-    // (and effectively stall the GUI). Disable those by default for the GUI process.
-    // Use `--keep-logs` to preserve current env-var behavior.
-    let mut args = env::args().skip(1);
-    let mut keep_logs = false;
-    let mut rom_path: Option<String> = None;
-    for a in args.by_ref() {
-        if a == "--keep-logs" {
-            keep_logs = true;
-            continue;
+/// Command-line arguments for the emulator
+#[derive(Debug, Default)]
+struct CliArgs {
+    keep_logs: bool,
+    rom_path: Option<String>,
+    slot1: Option<String>,                       // BIOS or primary file
+    slot2: Option<String>,                       // FloppyA
+    slot3: Option<String>,                       // FloppyB
+    slot4: Option<String>,                       // HardDrive
+    slot5: Option<String>,                       // Reserved for future use
+    create_blank_disk: Option<(String, String)>, // (path, format)
+}
+
+impl CliArgs {
+    /// Parse command-line arguments
+    fn parse() -> Self {
+        let mut args = CliArgs::default();
+        let mut arg_iter = env::args().skip(1);
+
+        while let Some(arg) = arg_iter.next() {
+            match arg.as_str() {
+                "--keep-logs" => {
+                    args.keep_logs = true;
+                }
+                "--slot1" => {
+                    args.slot1 = arg_iter.next();
+                }
+                "--slot2" => {
+                    args.slot2 = arg_iter.next();
+                }
+                "--slot3" => {
+                    args.slot3 = arg_iter.next();
+                }
+                "--slot4" => {
+                    args.slot4 = arg_iter.next();
+                }
+                "--slot5" => {
+                    args.slot5 = arg_iter.next();
+                }
+                "--create-blank-disk" => {
+                    if let Some(path) = arg_iter.next() {
+                        if let Some(format) = arg_iter.next() {
+                            args.create_blank_disk = Some((path, format));
+                        }
+                    }
+                }
+                _ => {
+                    // First non-flag argument is treated as ROM path for backward compatibility
+                    if args.rom_path.is_none() && !arg.starts_with("--") {
+                        args.rom_path = Some(arg);
+                    }
+                }
+            }
         }
-        if rom_path.is_none() {
-            rom_path = Some(a);
+
+        args
+    }
+
+    /// Print usage information
+    fn print_usage() {
+        eprintln!("Usage: hemu [OPTIONS] [ROM_FILE]");
+        eprintln!();
+        eprintln!("Options:");
+        eprintln!("  --keep-logs              Preserve debug logging environment variables");
+        eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
+        eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
+        eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
+        eprintln!("  --slot4 <file>           Load file into slot 4 (Hard Drive for PC)");
+        eprintln!("  --slot5 <file>           Load file into slot 5 (reserved)");
+        eprintln!("  --create-blank-disk <path> <format>");
+        eprintln!("                           Create a blank disk image");
+        eprintln!();
+        eprintln!("Disk formats:");
+        eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
+        eprintln!("  10m, 20m, 40m            Hard drive formats");
+        eprintln!();
+        eprintln!("Examples:");
+        eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!(
+            "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
+        );
+        eprintln!(
+            "  hemu --slot2 boot.img --slot4 hdd.img         # Load PC with floppy and hard drive"
+        );
+        eprintln!("  hemu --create-blank-disk floppy.img 1.44m      # Create 1.44MB floppy image");
+        eprintln!(
+            "  hemu --create-blank-disk hdd.img 20m           # Create 20MB hard drive image"
+        );
+    }
+}
+
+fn main() {
+    // Parse command-line arguments
+    let cli_args = CliArgs::parse();
+
+    // Handle --create-blank-disk command
+    if let Some((path, format_str)) = &cli_args.create_blank_disk {
+        match format_str.to_lowercase().as_str() {
+            "360k" => {
+                let disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy360K);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 360KB floppy disk: {}", path);
+                std::process::exit(0);
+            }
+            "720k" => {
+                let disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy720K);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 720KB floppy disk: {}", path);
+                std::process::exit(0);
+            }
+            "1.2m" => {
+                let disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_2M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 1.2MB floppy disk: {}", path);
+                std::process::exit(0);
+            }
+            "1.44m" => {
+                let disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 1.44MB floppy disk: {}", path);
+                std::process::exit(0);
+            }
+            "10m" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive10M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 10MB hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            "20m" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 20MB hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            "40m" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive40M);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 40MB hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("Error: Unknown disk format '{}'", format_str);
+                eprintln!();
+                CliArgs::print_usage();
+                std::process::exit(1);
+            }
         }
     }
 
-    if !keep_logs {
+    // The NES core has some env-var gated debug logging that can produce massive output
+    // (and effectively stall the GUI). Disable those by default for the GUI process.
+    // Use `--keep-logs` to preserve current env-var behavior.
+    if !cli_args.keep_logs {
         env::remove_var("EMU_LOG_PPU_WRITES");
         env::remove_var("EMU_LOG_UNKNOWN_OPS");
     }
@@ -505,16 +661,14 @@ fn main() {
         eprintln!("Warning: Failed to save config.json: {}", e);
     }
 
-    // If no ROM path provided via args, try to load from settings (backward compatibility)
-    if rom_path.is_none() {
+    // Determine ROM path: CLI argument takes precedence over settings
+    let rom_path = cli_args.rom_path.or_else(|| {
         // Try new mount_points system first
-        if let Some(cartridge_path) = settings.get_mount_point("Cartridge") {
-            rom_path = Some(cartridge_path.clone());
-        } else if let Some(ref path) = settings.last_rom_path {
-            // Fall back to old last_rom_path for backward compatibility
-            rom_path = Some(path.clone());
-        }
-    }
+        settings
+            .get_mount_point("Cartridge")
+            .cloned()
+            .or_else(|| settings.last_rom_path.clone())
+    });
 
     let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
@@ -635,6 +789,97 @@ fn main() {
             },
             Err(e) => {
                 eprintln!("Failed to read ROM file: {}", e);
+            }
+        }
+    }
+
+    // Handle slot-based loading (primarily for PC system)
+    // If any slot arguments are provided, auto-select PC mode if no ROM was loaded
+    let has_slot_args = cli_args.slot1.is_some()
+        || cli_args.slot2.is_some()
+        || cli_args.slot3.is_some()
+        || cli_args.slot4.is_some()
+        || cli_args.slot5.is_some();
+
+    if has_slot_args && !rom_loaded {
+        // Auto-select PC mode when slot files are provided
+        let pc_sys = emu_pc::PcSystem::new();
+        sys = EmulatorSystem::PC(Box::new(pc_sys));
+        rom_loaded = true;
+        println!("Auto-selected PC mode for slot-based loading");
+    }
+
+    // Load slot files for PC system
+    if let EmulatorSystem::PC(ref mut pc_sys) = sys {
+        // Slot 1: BIOS
+        if let Some(ref slot1_path) = cli_args.slot1 {
+            match fs::read(slot1_path) {
+                Ok(data) => {
+                    if let Err(e) = pc_sys.mount("BIOS", &data) {
+                        eprintln!("Failed to mount BIOS from slot 1: {}", e);
+                    } else {
+                        settings.set_mount_point("BIOS", slot1_path.clone());
+                        println!("Loaded BIOS from slot 1: {}", slot1_path);
+                    }
+                }
+                Err(e) => eprintln!("Failed to read slot 1 file: {}", e),
+            }
+        }
+
+        // Slot 2: Floppy A
+        if let Some(ref slot2_path) = cli_args.slot2 {
+            match fs::read(slot2_path) {
+                Ok(data) => {
+                    if let Err(e) = pc_sys.mount("FloppyA", &data) {
+                        eprintln!("Failed to mount Floppy A from slot 2: {}", e);
+                    } else {
+                        settings.set_mount_point("FloppyA", slot2_path.clone());
+                        println!("Loaded Floppy A from slot 2: {}", slot2_path);
+                    }
+                }
+                Err(e) => eprintln!("Failed to read slot 2 file: {}", e),
+            }
+        }
+
+        // Slot 3: Floppy B
+        if let Some(ref slot3_path) = cli_args.slot3 {
+            match fs::read(slot3_path) {
+                Ok(data) => {
+                    if let Err(e) = pc_sys.mount("FloppyB", &data) {
+                        eprintln!("Failed to mount Floppy B from slot 3: {}", e);
+                    } else {
+                        settings.set_mount_point("FloppyB", slot3_path.clone());
+                        println!("Loaded Floppy B from slot 3: {}", slot3_path);
+                    }
+                }
+                Err(e) => eprintln!("Failed to read slot 3 file: {}", e),
+            }
+        }
+
+        // Slot 4: Hard Drive
+        if let Some(ref slot4_path) = cli_args.slot4 {
+            match fs::read(slot4_path) {
+                Ok(data) => {
+                    if let Err(e) = pc_sys.mount("HardDrive", &data) {
+                        eprintln!("Failed to mount Hard Drive from slot 4: {}", e);
+                    } else {
+                        settings.set_mount_point("HardDrive", slot4_path.clone());
+                        println!("Loaded Hard Drive from slot 4: {}", slot4_path);
+                    }
+                }
+                Err(e) => eprintln!("Failed to read slot 4 file: {}", e),
+            }
+        }
+
+        // Slot 5: Reserved for future use
+        if cli_args.slot5.is_some() {
+            eprintln!("Warning: Slot 5 is reserved for future use and will be ignored");
+        }
+
+        // Save settings if any slot was loaded
+        if has_slot_args {
+            if let Err(e) = settings.save() {
+                eprintln!("Warning: Failed to save settings: {}", e);
             }
         }
     }
