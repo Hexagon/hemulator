@@ -110,7 +110,7 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
   - Generic `Memory65c816` trait for memory access
   - 16-bit extension of the 6502
-  - **181/256 opcodes implemented (70.7% coverage)**
+  - **187/256 opcodes implemented (73.0% coverage)**
   - Comprehensive test coverage (29 unit tests)
   - Can be used by: SNES, Apple IIGS, etc.
   - Implementation includes:
@@ -120,13 +120,13 @@ Contains reusable CPU implementations and common traits:
     - Emulation mode for 6502 compatibility
     - Direct page register (D)
     - Stack pointer (S)
-    - **Arithmetic instructions**: ADC, SBC with multiple addressing modes (immediate, dp, abs, dp,X, abs,X, abs,Y, (dp),Y, (dp))
-    - **Logical instructions**: AND, ORA, EOR with comprehensive addressing modes
+    - **Arithmetic instructions**: ADC, SBC with multiple addressing modes (immediate, dp, abs, dp,X, abs,X, abs,Y, (dp,X), (dp),Y, (dp))
+    - **Logical instructions**: AND, ORA, EOR with comprehensive addressing modes including (dp,X)
     - **Shift/rotate instructions**: ASL, LSR, ROL, ROR (accumulator modes)
     - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with extended addressing modes
     - **Transfer instructions**: TAX, TAY, TXA, TYA, TSX, TXS, TCD, TDC, TCS, TSC, TXY, TYX
     - **Increment/decrement**: INC, DEC (accumulator and memory with dp, abs, dp,X, abs,X modes), INX, INY, DEX, DEY
-    - **Compare instructions**: CMP, CPX, CPY with multiple addressing modes
+    - **Compare instructions**: CMP, CPX, CPY with multiple addressing modes including (dp,X)
     - **Branch instructions**: BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, BRL
     - **Stack instructions**: PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY, PHD, PLD, PHB, PLB, PHK, PEA, PEI, PER
     - **Jump instructions**: JMP (absolute, long, indirect variants), JSR (absolute, long, indirect,X), JSL, RTS, RTI, RTL
@@ -134,7 +134,7 @@ Contains reusable CPU implementations and common traits:
     - **Mode control**: XCE (emulation toggle), REP (reset status bits), SEP (set status bits)
     - **Status flag instructions**: CLC, SEC, CLI, SEI, CLV, CLD, SED
     - **Status flags**: N, V, m, x, D, I, Z, C, e
-  - **Known limitations** (75 opcodes remaining):
+  - **Known limitations** (69 opcodes remaining):
     - Some long addressing modes (24-bit) not yet implemented
     - Stack relative and SR indirect,Y modes partially implemented
     - Some memory operation variants (ASL/LSR/ROL/ROR on memory) not yet implemented

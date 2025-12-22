@@ -646,6 +646,24 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 }
             }
+            0x41 => {
+                // EOR (dp,X)
+                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
+                let ptr_addr = self.read_word(dp) as u32;
+                let addr = ((self.dbr as u32) << 16) + ptr_addr;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 ^ val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c ^= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
             0x52 => {
                 // EOR (dp)
                 let dp = self.fetch_byte() as u32 + self.d as u32;
@@ -796,6 +814,21 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     let val = self.read_word(addr);
                     self.adc_16(val);
                     self.cycles += 6;
+                }
+            }
+            0x61 => {
+                // ADC (dp,X)
+                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
+                let ptr_addr = self.read_word(dp) as u32;
+                let addr = ((self.dbr as u32) << 16) + ptr_addr;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    self.adc_8(val);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.adc_16(val);
+                    self.cycles += 7;
                 }
             }
             0x72 => {
@@ -1578,6 +1611,21 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 }
             }
+            0xC1 => {
+                // CMP (dp,X)
+                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
+                let ptr_addr = self.read_word(dp) as u32;
+                let addr = ((self.dbr as u32) << 16) + ptr_addr;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    self.compare_8((self.c & 0xFF) as u8, val);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.compare_16(self.c, val);
+                    self.cycles += 7;
+                }
+            }
             0xD2 => {
                 // CMP (dp)
                 let dp = self.fetch_byte() as u32 + self.d as u32;
@@ -1780,6 +1828,21 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     let val = self.read_word(addr);
                     self.sbc_16(val);
                     self.cycles += 6;
+                }
+            }
+            0xE1 => {
+                // SBC (dp,X)
+                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
+                let ptr_addr = self.read_word(dp) as u32;
+                let addr = ((self.dbr as u32) << 16) + ptr_addr;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    self.sbc_8(val);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.sbc_16(val);
+                    self.cycles += 7;
                 }
             }
             0xF2 => {
