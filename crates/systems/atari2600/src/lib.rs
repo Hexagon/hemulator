@@ -314,14 +314,14 @@ impl System for Atari2600System {
         if let Some(bus) = self.cpu.bus() {
             // Dynamically determine visible window based on VBLANK timing
             let visible_start = bus.tia.visible_window_start_scanline();
-            
+
             if std::env::var("EMU_LOG_ATARI_FRAME")
                 .map(|v| v == "1" || v.to_lowercase() == "true")
                 .unwrap_or(false)
             {
                 eprintln!("[ATARI RENDER] visible_start={}", visible_start);
             }
-            
+
             // Render 192 visible scanlines
             for visible_line in 0..192 {
                 let tia_scanline = (visible_start + visible_line as u16) % 262;
