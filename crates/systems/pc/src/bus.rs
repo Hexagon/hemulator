@@ -7,6 +7,7 @@
 //! - 0xC0000-0xFFFFF: ROM area (256KB)
 //! - 0xF0000-0xFFFFF: BIOS ROM (64KB)
 
+use crate::disk::DiskController;
 use crate::keyboard::Keyboard;
 use emu_core::cpu_8086::Memory8086;
 
@@ -18,10 +19,18 @@ pub struct PcBus {
     vram: Vec<u8>,
     /// ROM area (256KB) - includes BIOS
     rom: Vec<u8>,
-    /// Loaded executable data
+    /// Loaded executable data (deprecated, kept for backward compatibility)
     executable: Option<Vec<u8>>,
     /// Keyboard controller
     pub keyboard: Keyboard,
+    /// Floppy A disk image
+    floppy_a: Option<Vec<u8>>,
+    /// Floppy B disk image
+    floppy_b: Option<Vec<u8>>,
+    /// Hard drive image
+    hard_drive: Option<Vec<u8>>,
+    /// Disk controller
+    disk_controller: DiskController,
 }
 
 impl PcBus {
@@ -33,6 +42,10 @@ impl PcBus {
             rom: vec![0; 0x40000],  // 256KB
             executable: None,
             keyboard: Keyboard::new(),
+            floppy_a: None,
+            floppy_b: None,
+            hard_drive: None,
+            disk_controller: DiskController::new(),
         }
     }
 
@@ -42,9 +55,11 @@ impl PcBus {
         self.ram.fill(0);
         self.vram.fill(0);
         self.keyboard.clear();
+        self.disk_controller.reset();
     }
 
     /// Load an executable at a specific address
+    #[allow(dead_code)]
     pub fn load_executable(&mut self, data: Vec<u8>) {
         self.executable = Some(data);
     }
@@ -58,6 +73,7 @@ impl PcBus {
     }
 
     /// Get a reference to the executable data
+    #[allow(dead_code)]
     pub fn executable(&self) -> Option<&[u8]> {
         self.executable.as_deref()
     }
@@ -65,6 +81,81 @@ impl PcBus {
     /// Get a reference to the video RAM (for rendering)
     pub fn vram(&self) -> &[u8] {
         &self.vram
+    }
+
+    /// Mount floppy A disk image
+    pub fn mount_floppy_a(&mut self, data: Vec<u8>) {
+        self.floppy_a = Some(data);
+    }
+
+    /// Unmount floppy A
+    pub fn unmount_floppy_a(&mut self) {
+        self.floppy_a = None;
+    }
+
+    /// Get reference to floppy A
+    pub fn floppy_a(&self) -> Option<&[u8]> {
+        self.floppy_a.as_deref()
+    }
+
+    /// Mount floppy B disk image
+    pub fn mount_floppy_b(&mut self, data: Vec<u8>) {
+        self.floppy_b = Some(data);
+    }
+
+    /// Unmount floppy B
+    pub fn unmount_floppy_b(&mut self) {
+        self.floppy_b = None;
+    }
+
+    /// Get reference to floppy B
+    pub fn floppy_b(&self) -> Option<&[u8]> {
+        self.floppy_b.as_deref()
+    }
+
+    /// Mount hard drive image
+    pub fn mount_hard_drive(&mut self, data: Vec<u8>) {
+        self.hard_drive = Some(data);
+    }
+
+    /// Unmount hard drive
+    pub fn unmount_hard_drive(&mut self) {
+        self.hard_drive = None;
+    }
+
+    /// Get reference to hard drive
+    pub fn hard_drive(&self) -> Option<&[u8]> {
+        self.hard_drive.as_deref()
+    }
+
+    /// Get mutable reference to hard drive (for write operations)
+    #[allow(dead_code)]
+    pub fn hard_drive_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.hard_drive.as_mut()
+    }
+
+    /// Get mutable reference to floppy A (for write operations)
+    #[allow(dead_code)]
+    pub fn floppy_a_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.floppy_a.as_mut()
+    }
+
+    /// Get mutable reference to floppy B (for write operations)
+    #[allow(dead_code)]
+    pub fn floppy_b_mut(&mut self) -> Option<&mut Vec<u8>> {
+        self.floppy_b.as_mut()
+    }
+
+    /// Get reference to disk controller
+    #[allow(dead_code)]
+    pub fn disk_controller(&self) -> &DiskController {
+        &self.disk_controller
+    }
+
+    /// Get mutable reference to disk controller
+    #[allow(dead_code)]
+    pub fn disk_controller_mut(&mut self) -> &mut DiskController {
+        &mut self.disk_controller
     }
 }
 
@@ -230,5 +321,34 @@ mod tests {
 
         assert!(bus.executable().is_some());
         assert_eq!(bus.executable().unwrap(), &exe);
+    }
+
+    #[test]
+    fn test_floppy_mount_unmount() {
+        let mut bus = PcBus::new();
+
+        assert!(bus.floppy_a().is_none());
+
+        let floppy = vec![0xF6; 1440 * 1024]; // 1.44MB floppy
+        bus.mount_floppy_a(floppy.clone());
+
+        assert!(bus.floppy_a().is_some());
+        assert_eq!(bus.floppy_a().unwrap().len(), 1440 * 1024);
+
+        bus.unmount_floppy_a();
+        assert!(bus.floppy_a().is_none());
+    }
+
+    #[test]
+    fn test_hard_drive_mount() {
+        let mut bus = PcBus::new();
+
+        assert!(bus.hard_drive().is_none());
+
+        let hd = vec![0; 10 * 1024 * 1024]; // 10MB hard drive
+        bus.mount_hard_drive(hd.clone());
+
+        assert!(bus.hard_drive().is_some());
+        assert_eq!(bus.hard_drive().unwrap().len(), 10 * 1024 * 1024);
     }
 }
