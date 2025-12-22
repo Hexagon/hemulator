@@ -207,6 +207,24 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 5;
                 }
             }
+            0x01 => {
+                // ORA (dp,X)
+                let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
+                let ptr_addr = self.read_word(dp) as u32;
+                let addr = ((self.dbr as u32) << 16) + ptr_addr;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let result = (self.c & 0xFF) as u8 | val;
+                    self.c = (self.c & 0xFF00) | result as u16;
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c |= val;
+                    self.set_zn_16(self.c);
+                    self.cycles += 7;
+                }
+            }
             0x1D => {
                 // ORA absolute,X
                 let base = self.fetch_word() as u32;
@@ -1207,7 +1225,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             }
 
             // Additional LDA addressing modes
-            0x01 => {
+            0xA1 => {
                 // LDA (dp,X)
                 let dp = (self.fetch_byte() as u32 + self.d as u32 + self.x as u32) & 0xFFFF;
                 let ptr_addr = self.read_word(dp) as u32;
@@ -1224,7 +1242,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 7;
                 }
             }
-            0x11 => {
+            0xB1 => {
                 // LDA (dp),Y
                 let dp = self.fetch_byte() as u32 + self.d as u32;
                 let base = self.read_word(dp) as u32;
@@ -1241,7 +1259,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 }
             }
-            0x12 => {
+            0xB2 => {
                 // LDA (dp)
                 let dp = self.fetch_byte() as u32 + self.d as u32;
                 let ptr_addr = self.read_word(dp) as u32;

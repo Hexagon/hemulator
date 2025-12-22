@@ -110,28 +110,34 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
   - Generic `Memory65c816` trait for memory access
   - 16-bit extension of the 6502
+  - **181/256 opcodes implemented (70.7% coverage)**
   - Comprehensive test coverage (29 unit tests)
   - Can be used by: SNES, Apple IIGS, etc.
-  - Complete implementation includes:
+  - Implementation includes:
     - 16-bit accumulator (C) and index registers (X, Y)
     - 8/16-bit mode switching via status flags (m, x)
     - 24-bit address space (16MB via DBR, PBR)
     - Emulation mode for 6502 compatibility
     - Direct page register (D)
     - Stack pointer (S)
-    - All arithmetic instructions (ADC, SBC) in both 8-bit and 16-bit modes
-    - All logical instructions (AND, ORA, EOR) with mode-aware operation
-    - All shift/rotate instructions (ASL, LSR, ROL, ROR) supporting both modes
-    - All load/store instructions (LDA, LDX, LDY, STA, STX, STY) with 8/16-bit modes
-    - All transfer instructions (TAX, TAY, TXA, TYA, TSX, TXS)
-    - All increment/decrement instructions (INC, DEC, INX, INY, DEX, DEY)
-    - All compare instructions (CMP, CPX, CPY) with mode-aware comparison
-    - All branch instructions (BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS)
-    - All stack instructions (PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY)
-    - Jump and subroutine instructions (JMP, JSR, RTS, RTI)
-    - Mode control instructions (XCE, REP, SEP)
-    - All status flag instructions (CLC, SEC, CLI, SEI, CLV, CLD, SED)
-    - Status flags (N, V, m, x, D, I, Z, C, e)
+    - **Arithmetic instructions**: ADC, SBC with multiple addressing modes (immediate, dp, abs, dp,X, abs,X, abs,Y, (dp),Y, (dp))
+    - **Logical instructions**: AND, ORA, EOR with comprehensive addressing modes
+    - **Shift/rotate instructions**: ASL, LSR, ROL, ROR (accumulator modes)
+    - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with extended addressing modes
+    - **Transfer instructions**: TAX, TAY, TXA, TYA, TSX, TXS, TCD, TDC, TCS, TSC, TXY, TYX
+    - **Increment/decrement**: INC, DEC (accumulator and memory with dp, abs, dp,X, abs,X modes), INX, INY, DEX, DEY
+    - **Compare instructions**: CMP, CPX, CPY with multiple addressing modes
+    - **Branch instructions**: BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, BRL
+    - **Stack instructions**: PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY, PHD, PLD, PHB, PLB, PHK, PEA, PEI, PER
+    - **Jump instructions**: JMP (absolute, long, indirect variants), JSR (absolute, long, indirect,X), JSL, RTS, RTI, RTL
+    - **65C816-specific**: XCE, REP, SEP, XBA, STZ, TSB, TRB, MVN, MVP, COP, BIT immediate, WAI, STP, WDM
+    - **Mode control**: XCE (emulation toggle), REP (reset status bits), SEP (set status bits)
+    - **Status flag instructions**: CLC, SEC, CLI, SEI, CLV, CLD, SED
+    - **Status flags**: N, V, m, x, D, I, Z, C, e
+  - **Known limitations** (75 opcodes remaining):
+    - Some long addressing modes (24-bit) not yet implemented
+    - Stack relative and SR indirect,Y modes partially implemented
+    - Some memory operation variants (ASL/LSR/ROL/ROR on memory) not yet implemented
   - `ArrayMemory` helper for testing (16MB address space)
 
 - **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)
