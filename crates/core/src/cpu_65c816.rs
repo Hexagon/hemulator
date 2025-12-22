@@ -320,6 +320,116 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 }
                 self.cycles += 2;
             }
+            0x06 => {
+                // ASL direct page
+                let addr = self.fetch_byte() as u32 + self.d as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 6;
+                }
+            }
+            0x0E => {
+                // ASL absolute
+                let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x16 => {
+                // ASL dp,X
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x1E => {
+                // ASL absolute,X
+                let base = self.fetch_word() as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val << 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 8;
+                }
+            }
 
             // CLC - Clear Carry
             0x18 => {
@@ -507,6 +617,124 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.set_zn_16(self.c);
                 }
                 self.cycles += 2;
+            }
+            0x26 => {
+                // ROL direct page
+                let addr = self.fetch_byte() as u32 + self.d as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 6;
+                }
+            }
+            0x2E => {
+                // ROL absolute
+                let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x36 => {
+                // ROL dp,X
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x3E => {
+                // ROL absolute,X
+                let base = self.fetch_word() as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x80 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 1 } else { 0 };
+                    let result = (val << 1) | carry_in;
+                    if val & 0x8000 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 8;
+                }
             }
 
             // SEC - Set Carry
@@ -707,6 +935,116 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 }
                 self.cycles += 2;
             }
+            0x46 => {
+                // LSR direct page
+                let addr = self.fetch_byte() as u32 + self.d as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 6;
+                }
+            }
+            0x4E => {
+                // LSR absolute
+                let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x56 => {
+                // LSR dp,X
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x5E => {
+                // LSR absolute,X
+                let base = self.fetch_word() as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    let result = val >> 1;
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 8;
+                }
+            }
 
             // CLI - Clear Interrupt Disable
             0x58 => {
@@ -881,6 +1219,124 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.set_zn_16(self.c);
                 }
                 self.cycles += 2;
+            }
+            0x66 => {
+                // ROR direct page
+                let addr = self.fetch_byte() as u32 + self.d as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 5;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 6;
+                }
+            }
+            0x6E => {
+                // ROR absolute
+                let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x76 => {
+                // ROR dp,X
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 6;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 7;
+                }
+            }
+            0x7E => {
+                // ROR absolute,X
+                let base = self.fetch_word() as u32;
+                let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write(addr, result);
+                    self.set_zn_8(result);
+                    self.cycles += 7;
+                } else {
+                    let val = self.read_word(addr);
+                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let result = (val >> 1) | carry_in;
+                    if val & 1 != 0 {
+                        self.status |= FLAG_CARRY;
+                    } else {
+                        self.status &= !FLAG_CARRY;
+                    }
+                    self.write_word(addr, result);
+                    self.set_zn_16(result);
+                    self.cycles += 8;
+                }
             }
 
             // SEI - Set Interrupt Disable
