@@ -613,4 +613,46 @@ mod tests {
         // Audio system should be working - just verify it doesn't crash
         // and returns valid i16 samples (the type system already ensures this)
     }
+
+    #[test]
+    fn test_timer_interrupt_flag_behavior() {
+        // This test verifies that the RIOT timer interrupt flag clears on read,
+        // which is critical for commercial ROMs that use timer-based synchronization
+        let mut sys = Atari2600System::new();
+
+        // Load test ROM (any ROM will do, we're testing RIOT directly)
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+        sys.reset();
+
+        // Access the RIOT directly through the bus
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Set timer to expire quickly (2 cycles with 1-clock interval)
+            bus.riot.write(0x0294, 2); // TIM1T
+
+            // Initially, flag should be clear
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00);
+
+            // Clock until timer expires
+            bus.riot.clock(2);
+
+            // Flag should now be set
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x80);
+
+            // Reading TIMINT should clear the flag (this is the critical fix)
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00);
+
+            // Verify flag stays cleared
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00);
+
+            // Set timer again and verify the cycle works
+            bus.riot.write(0x0294, 3);
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after write
+            bus.riot.clock(3);
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x80); // Set after expiry
+            assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after read
+        } else {
+            panic!("Could not access bus");
+        }
+    }
 }
