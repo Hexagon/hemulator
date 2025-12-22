@@ -180,7 +180,7 @@ impl Atari2600System {
                 rom_size: cart.size(),
                 banking_scheme: format!("{:?}", cart.scheme()),
                 current_bank: cart.current_bank(),
-                scanline: bus.tia.get_scanline(),
+                scanline: bus.tia.get_scanline_counter(),
             })
         })
     }
@@ -200,7 +200,7 @@ pub struct DebugInfo {
     pub rom_size: usize,
     pub banking_scheme: String,
     pub current_bank: usize,
-    pub scanline: u16,
+    pub scanline: u64,
 }
 
 impl System for Atari2600System {
@@ -215,31 +215,172 @@ impl System for Atari2600System {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // Atari 2600 runs at ~1.19 MHz (NTSC)
-        // 262 scanlines per frame, ~76 cycles per scanline = ~19,912 cycles per frame
-        const CYCLES_PER_FRAME: u32 = 19912;
-
+        // Atari 2600 NTSC: 262 scanlines per frame
+        // Instead of running for a fixed cycle count, run until we've completed 262 scanlines
         let mut frame = Frame::new(160, 192);
-        let mut cycles_this_frame = 0u32;
 
-        // Execute until we've completed a frame
-        while cycles_this_frame < CYCLES_PER_FRAME {
+        // Clear per-frame debug stats
+        if let Some(bus) = self.cpu.bus_mut() {
+            bus.tia.reset_write_stats();
+        }
+
+        let start_scanline = self
+            .cpu
+            .bus()
+            .map(|bus| bus.tia.get_scanline())
+            .unwrap_or(0);
+
+        let mut scanlines_completed = 0u16;
+        let mut last_scanline = start_scanline;
+        let mut cpu_steps = 0u64;
+        const MAX_CPU_STEPS: u64 = 50_000; // Safety limit
+
+        // Run until we've advanced exactly 262 scanlines (one full NTSC frame)
+        while scanlines_completed < 262 {
             let cycles = self.cpu.step();
+            cpu_steps += 1;
+
+            // Safety check to prevent infinite loops
+            if cpu_steps > MAX_CPU_STEPS {
+                eprintln!(
+                    "[ATARI] Warning: Exceeded max CPU steps ({}) while waiting for 262 scanlines. Completed: {}, Current scanline: {}",
+                    MAX_CPU_STEPS, scanlines_completed, last_scanline
+                );
+                break;
+            }
 
             // Clock the TIA and RIOT
             if let Some(bus) = self.cpu.bus_mut() {
                 bus.clock(cycles);
+
+                // Handle WSYNC - CPU halts until end of current scanline
+                if bus.take_wsync_request() {
+                    let extra = bus.tia.cpu_cycles_until_scanline_end();
+                    bus.clock(extra);
+                    self.cycles += extra as u64;
+                }
+
+                let scanline = bus.tia.get_scanline();
+
+                // Count scanline advances (including wraps from 261 to 0)
+                if scanline != last_scanline {
+                    if scanline < last_scanline {
+                        // Wrapped from 261 to 0
+                        scanlines_completed += (262 - last_scanline) + scanline;
+                    } else {
+                        scanlines_completed += scanline - last_scanline;
+                    }
+                }
+                last_scanline = scanline;
+            } else {
+                // No bus -> can't advance time; bail rather than spinning forever
+                break;
             }
 
-            cycles_this_frame += cycles;
             self.cycles += cycles as u64;
+        }
+
+        // Debug: log frame completion
+        if std::env::var("EMU_LOG_ATARI_FRAME")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false)
+        {
+            let final_scanline = self.cpu.bus().map(|b| b.tia.get_scanline()).unwrap_or(0);
+            let tia_stats = self
+                .cpu
+                .bus()
+                .map(|b| b.tia.write_stats())
+                .unwrap_or_default();
+            eprintln!(
+                "[ATARI FRAME] Completed: {} scanlines, {} CPU steps, final scanline: {} | TIA writes: total={} vsync={} vblank={} pf={} grp0={} grp1={} colors={} | nonzero: pf={} grp0={} grp1={} colors={}",
+                scanlines_completed,
+                cpu_steps,
+                final_scanline,
+                tia_stats.0,
+                tia_stats.1,
+                tia_stats.2,
+                tia_stats.3,
+                tia_stats.4,
+                tia_stats.5,
+                tia_stats.6,
+                tia_stats.7,
+                tia_stats.8,
+                tia_stats.9,
+                tia_stats.10
+            );
         }
 
         // Render the frame
         if let Some(bus) = self.cpu.bus() {
-            // Render visible scanlines (40-231 are visible on NTSC)
-            for line in 0..192 {
-                bus.tia.render_scanline(&mut frame.pixels, line);
+            // Dynamically determine visible window based on VBLANK timing
+            let visible_start = bus.tia.visible_window_start_scanline();
+            
+            if std::env::var("EMU_LOG_ATARI_FRAME")
+                .map(|v| v == "1" || v.to_lowercase() == "true")
+                .unwrap_or(false)
+            {
+                eprintln!("[ATARI RENDER] visible_start={}", visible_start);
+            }
+            
+            // Render 192 visible scanlines
+            for visible_line in 0..192 {
+                let tia_scanline = (visible_start + visible_line as u16) % 262;
+                bus.tia
+                    .render_scanline(&mut frame.pixels, visible_line, tia_scanline);
+            }
+        }
+
+        if std::env::var("EMU_LOG_ATARI_FRAME_PIXELS")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false)
+        {
+            let non_black = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+
+            let mut scanlines_with_pf = 0u32;
+            let mut scanlines_with_grp = 0u32;
+            let mut all_scanlines_with_pf = 0u32;
+            let mut all_scanlines_with_grp = 0u32;
+            let mut final_colors = None;
+
+            if let Some(bus) = self.cpu.bus() {
+                final_colors = Some((
+                    bus.tia.get_scanline(),
+                    bus.tia.visible_window_start_scanline(),
+                ));
+
+                let (pf, grp) = bus
+                    .tia
+                    .debug_visible_scanline_activity(bus.tia.visible_window_start_scanline());
+                scanlines_with_pf = pf;
+                scanlines_with_grp = grp;
+
+                let (all_pf, all_grp) = bus.tia.debug_all_scanline_activity();
+                all_scanlines_with_pf = all_pf;
+                all_scanlines_with_grp = all_grp;
+            }
+
+            if let Some((frame_scanline, visible_start)) = final_colors {
+                eprintln!(
+                    "[ATARI FRAME PIXELS] non_black={} total={} | visible_start={} frame_scanline={} | scanlines_with_pf={} scanlines_with_grp={} | all_scanlines_with_pf={} all_scanlines_with_grp={}",
+                    non_black,
+                    frame.pixels.len(),
+                    visible_start,
+                    frame_scanline,
+                    scanlines_with_pf,
+                    scanlines_with_grp
+                    ,all_scanlines_with_pf
+                    ,all_scanlines_with_grp
+                );
+            } else {
+                eprintln!(
+                    "[ATARI FRAME PIXELS] non_black={} total={} | scanlines_with_pf={} scanlines_with_grp={} | all_scanlines_with_pf={} all_scanlines_with_grp={}",
+                    non_black,
+                    frame.pixels.len(),
+                    scanlines_with_pf,
+                    scanlines_with_grp
+                    ,all_scanlines_with_pf
+                    ,all_scanlines_with_grp
+                );
             }
         }
 

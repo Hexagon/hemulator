@@ -116,6 +116,7 @@
 //! The implemented schemes cover the vast majority of commercially released Atari 2600 games.
 
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -144,12 +145,12 @@ pub enum BankingScheme {
 }
 
 /// Atari 2600 cartridge
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Cartridge {
     /// ROM data
     rom: Vec<u8>,
     /// Current bank number
-    current_bank: usize,
+    current_bank: Cell<usize>,
     /// Banking scheme
     scheme: BankingScheme,
 }
@@ -161,7 +162,7 @@ impl Cartridge {
 
         Ok(Self {
             rom,
-            current_bank: 0,
+            current_bank: Cell::new(0),
             scheme,
         })
     }
@@ -181,6 +182,10 @@ impl Cartridge {
 
     /// Read from cartridge address space
     pub fn read(&self, addr: u16) -> u8 {
+        // Many Atari 2600 bank-switch schemes are triggered by *reads* from hot-spot addresses.
+        // Because the CPU memory interface is `read(&self)`, we use interior mutability.
+        self.maybe_bank_switch(addr);
+
         match self.scheme {
             BankingScheme::Rom2K => {
                 // 2K ROM mapped to $F800-$FFFF (mirrored)
@@ -196,78 +201,70 @@ impl Cartridge {
                 // 8K F8: Two 4K banks
                 // Bank switching at $1FF8 (bank 0) and $1FF9 (bank 1)
                 let offset = (addr & 0x0FFF) as usize;
-                let bank_offset = self.current_bank * 4096;
+                let bank_offset = self.current_bank.get() * 4096;
                 self.rom[bank_offset + offset]
             }
             BankingScheme::FA => {
                 // 12K FA: Three 4K banks
                 let offset = (addr & 0x0FFF) as usize;
-                let bank_offset = self.current_bank * 4096;
+                let bank_offset = self.current_bank.get() * 4096;
                 self.rom[bank_offset + offset]
             }
             BankingScheme::F6 => {
                 // 16K F6: Four 4K banks
                 let offset = (addr & 0x0FFF) as usize;
-                let bank_offset = self.current_bank * 4096;
+                let bank_offset = self.current_bank.get() * 4096;
                 self.rom[bank_offset + offset]
             }
             BankingScheme::F4 => {
                 // 32K F4: Eight 4K banks
                 let offset = (addr & 0x0FFF) as usize;
-                let bank_offset = self.current_bank * 4096;
+                let bank_offset = self.current_bank.get() * 4096;
                 self.rom[bank_offset + offset]
             }
         }
     }
 
+    fn maybe_bank_switch(&self, addr: u16) {
+        // Address is already masked to 13 bits by the bus, so hot-spots are in $1FF4-$1FFB.
+        match self.scheme {
+            BankingScheme::Rom2K | BankingScheme::Rom4K => {}
+            BankingScheme::F8 => match addr {
+                0x1FF8 => self.current_bank.set(0),
+                0x1FF9 => self.current_bank.set(1),
+                _ => {}
+            },
+            BankingScheme::FA => match addr {
+                0x1FF8 => self.current_bank.set(0),
+                0x1FF9 => self.current_bank.set(1),
+                0x1FFA => self.current_bank.set(2),
+                _ => {}
+            },
+            BankingScheme::F6 => match addr {
+                0x1FF6 => self.current_bank.set(0),
+                0x1FF7 => self.current_bank.set(1),
+                0x1FF8 => self.current_bank.set(2),
+                0x1FF9 => self.current_bank.set(3),
+                _ => {}
+            },
+            BankingScheme::F4 => match addr {
+                0x1FF4 => self.current_bank.set(0),
+                0x1FF5 => self.current_bank.set(1),
+                0x1FF6 => self.current_bank.set(2),
+                0x1FF7 => self.current_bank.set(3),
+                0x1FF8 => self.current_bank.set(4),
+                0x1FF9 => self.current_bank.set(5),
+                0x1FFA => self.current_bank.set(6),
+                0x1FFB => self.current_bank.set(7),
+                _ => {}
+            },
+        }
+    }
+
     /// Write to cartridge (for bank switching)
     pub fn write(&mut self, addr: u16) {
-        match self.scheme {
-            BankingScheme::Rom2K | BankingScheme::Rom4K => {
-                // No banking
-            }
-            BankingScheme::F8 => {
-                // F8 banking: $1FF8 = bank 0, $1FF9 = bank 1
-                match addr {
-                    0x1FF8 => self.current_bank = 0,
-                    0x1FF9 => self.current_bank = 1,
-                    _ => {}
-                }
-            }
-            BankingScheme::FA => {
-                // FA banking: $1FF8, $1FF9, $1FFA
-                match addr {
-                    0x1FF8 => self.current_bank = 0,
-                    0x1FF9 => self.current_bank = 1,
-                    0x1FFA => self.current_bank = 2,
-                    _ => {}
-                }
-            }
-            BankingScheme::F6 => {
-                // F6 banking: $1FF6-$1FF9
-                match addr {
-                    0x1FF6 => self.current_bank = 0,
-                    0x1FF7 => self.current_bank = 1,
-                    0x1FF8 => self.current_bank = 2,
-                    0x1FF9 => self.current_bank = 3,
-                    _ => {}
-                }
-            }
-            BankingScheme::F4 => {
-                // F4 banking: $1FF4-$1FFB
-                match addr {
-                    0x1FF4 => self.current_bank = 0,
-                    0x1FF5 => self.current_bank = 1,
-                    0x1FF6 => self.current_bank = 2,
-                    0x1FF7 => self.current_bank = 3,
-                    0x1FF8 => self.current_bank = 4,
-                    0x1FF9 => self.current_bank = 5,
-                    0x1FFA => self.current_bank = 6,
-                    0x1FFB => self.current_bank = 7,
-                    _ => {}
-                }
-            }
-        }
+        // Some carts also switch on writes; keep this for compatibility.
+        self.maybe_bank_switch(addr);
     }
 
     /// Get the current banking scheme
@@ -277,7 +274,7 @@ impl Cartridge {
 
     /// Get the current bank number
     pub fn current_bank(&self) -> usize {
-        self.current_bank
+        self.current_bank.get()
     }
 
     /// Get ROM size

@@ -21,6 +21,8 @@ pub struct Atari2600Bus {
     pub riot: Riot,
     #[serde(skip)]
     pub cartridge: Option<Cartridge>,
+    #[serde(skip)]
+    wsync_request: bool,
 }
 
 impl Default for Atari2600Bus {
@@ -36,6 +38,7 @@ impl Atari2600Bus {
             tia: Tia::new(),
             riot: Riot::new(),
             cartridge: None,
+            wsync_request: false,
         }
     }
 
@@ -48,6 +51,14 @@ impl Atari2600Bus {
     pub fn reset(&mut self) {
         self.tia.reset();
         self.riot.reset();
+        self.wsync_request = false;
+    }
+
+    /// Check if WSYNC was requested and clear the flag
+    pub fn take_wsync_request(&mut self) -> bool {
+        let requested = self.wsync_request;
+        self.wsync_request = false;
+        requested
     }
 
     /// Clock the bus (TIA and RIOT)
@@ -107,7 +118,13 @@ impl Memory6502 for Atari2600Bus {
 
         match addr {
             // TIA write registers
-            0x0000..=0x002C => self.tia.write((addr & 0x3F) as u8, val),
+            0x0000..=0x002C => {
+                // Check if this is a WSYNC write
+                if (addr & 0x3F) == 0x02 {
+                    self.wsync_request = true;
+                }
+                self.tia.write((addr & 0x3F) as u8, val);
+            }
             0x002D..=0x003F => {} // Unused
 
             // TIA write (mirrored) / RIOT RAM (mirrored at 0x00-0x7F)
@@ -115,6 +132,10 @@ impl Memory6502 for Atari2600Bus {
             // The 6507 bus allows simultaneous writes to both chips in this range.
             // This is intentional hardware behavior - not a bug in the emulator.
             0x0040..=0x007F => {
+                // WSYNC is mirrored too (e.g., $42)
+                if (addr & 0x3F) == 0x02 {
+                    self.wsync_request = true;
+                }
                 self.tia.write((addr & 0x3F) as u8, val);
                 self.riot.write(addr, val);
             }

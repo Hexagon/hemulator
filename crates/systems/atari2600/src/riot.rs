@@ -172,7 +172,7 @@ impl Riot {
             swcha_ddr: 0,
             swcha: 0xFF, // Joysticks unpressed
             swchb_ddr: 0,
-            swchb: 0x0B, // Console switches (default: no switches pressed)
+            swchb: 0xFF, // Console switches unpressed/high (active low)
         }
     }
 
@@ -186,7 +186,7 @@ impl Riot {
         self.swcha_ddr = 0;
         self.swcha = 0xFF;
         self.swchb_ddr = 0;
-        self.swchb = 0x0B;
+        self.swchb = 0xFF;
     }
 
     /// Read from RIOT  address space

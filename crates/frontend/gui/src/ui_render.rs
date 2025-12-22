@@ -536,7 +536,7 @@ pub fn create_atari2600_debug_overlay(
     rom_size: usize,
     banking_scheme: &str,
     current_bank: usize,
-    scanline: u16,
+    scanline: u64,
     fps: f64,
     video_backend: &str,
 ) -> Vec<u32> {

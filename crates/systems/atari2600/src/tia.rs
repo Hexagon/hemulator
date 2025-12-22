@@ -114,6 +114,33 @@
 use emu_core::apu::PolynomialCounter;
 use serde::{Deserialize, Serialize};
 
+/// Per-scanline snapshot of TIA state for rendering
+#[derive(Debug, Clone, Copy, Default)]
+struct ScanlineState {
+    vblank: bool,
+    pf0: u8,
+    pf1: u8,
+    pf2: u8,
+    playfield_reflect: bool,
+    playfield_priority: bool,
+    colubk: u8,
+    colupf: u8,
+    colup0: u8,
+    colup1: u8,
+    grp0: u8,
+    grp1: u8,
+    player0_x: u8,
+    player1_x: u8,
+    player0_reflect: bool,
+    player1_reflect: bool,
+    enam0: bool,
+    enam1: bool,
+    missile0_x: u8,
+    missile1_x: u8,
+    enabl: bool,
+    ball_x: u8,
+}
+
 /// TIA chip state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tia {
@@ -164,6 +191,14 @@ pub struct Tia {
     scanline: u16,
     pixel: u16,
 
+    // Monotonic scanline counter for debug/telemetry (does not wrap)
+    #[serde(skip)]
+    scanline_counter: u64,
+
+    // Per-scanline state snapshots for rendering
+    #[serde(skip)]
+    scanline_states: Vec<ScanlineState>,
+
     // Audio channels
     #[serde(skip)]
     audio0: PolynomialCounter,
@@ -177,6 +212,30 @@ pub struct Tia {
     audf1: u8,
     audv0: u8,
     audv1: u8,
+
+    // Debug/write statistics (per-frame; managed by system)
+    #[serde(skip)]
+    writes_total: u64,
+    #[serde(skip)]
+    writes_vsync: u64,
+    #[serde(skip)]
+    writes_vblank: u64,
+    #[serde(skip)]
+    writes_pf: u64,
+    #[serde(skip)]
+    writes_pf_nonzero: u64,
+    #[serde(skip)]
+    writes_grp0: u64,
+    #[serde(skip)]
+    writes_grp0_nonzero: u64,
+    #[serde(skip)]
+    writes_grp1: u64,
+    #[serde(skip)]
+    writes_grp1_nonzero: u64,
+    #[serde(skip)]
+    writes_colors: u64,
+    #[serde(skip)]
+    writes_colors_nonzero: u64,
 }
 
 impl Default for Tia {
@@ -186,6 +245,22 @@ impl Default for Tia {
 }
 
 impl Tia {
+    // Horizontal timing: ~68 color clocks of horizontal blank, 160 visible
+    const HBLANK_COLOR_CLOCKS: i16 = 68;
+
+    /// Get current visible x position (accounting for horizontal blank)
+    fn current_visible_x(&self) -> u8 {
+        let x = (self.pixel as i16) - Self::HBLANK_COLOR_CLOCKS;
+        x.clamp(0, 159) as u8
+    }
+
+    /// Apply horizontal motion to a position
+    fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
+        let p = pos as i16;
+        let m = motion as i16;
+        (p + m).clamp(0, 159) as u8
+    }
+
     /// Create a new TIA chip
     pub fn new() -> Self {
         Self {
@@ -221,6 +296,10 @@ impl Tia {
             scanline: 0,
             pixel: 0,
 
+            scanline_counter: 0,
+
+            scanline_states: vec![ScanlineState::default(); 262],
+
             audio0: PolynomialCounter::new(),
             audio1: PolynomialCounter::new(),
 
@@ -230,7 +309,83 @@ impl Tia {
             audf1: 0,
             audv0: 0,
             audv1: 0,
+
+            writes_total: 0,
+            writes_vsync: 0,
+            writes_vblank: 0,
+            writes_pf: 0,
+            writes_pf_nonzero: 0,
+            writes_grp0: 0,
+            writes_grp0_nonzero: 0,
+            writes_grp1: 0,
+            writes_grp1_nonzero: 0,
+            writes_colors: 0,
+            writes_colors_nonzero: 0,
         }
+    }
+
+    pub fn reset_write_stats(&mut self) {
+        self.writes_total = 0;
+        self.writes_vsync = 0;
+        self.writes_vblank = 0;
+        self.writes_pf = 0;
+        self.writes_pf_nonzero = 0;
+        self.writes_grp0 = 0;
+        self.writes_grp0_nonzero = 0;
+        self.writes_grp1 = 0;
+        self.writes_grp1_nonzero = 0;
+        self.writes_colors = 0;
+        self.writes_colors_nonzero = 0;
+    }
+
+    pub fn write_stats(&self) -> (u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64) {
+        (
+            self.writes_total,
+            self.writes_vsync,
+            self.writes_vblank,
+            self.writes_pf,
+            self.writes_grp0,
+            self.writes_grp1,
+            self.writes_colors,
+            self.writes_pf_nonzero,
+            self.writes_grp0_nonzero,
+            self.writes_grp1_nonzero,
+            self.writes_colors_nonzero,
+        )
+    }
+
+    /// Get a monotonically increasing scanline counter (increments once per scanline)
+    pub fn get_scanline_counter(&self) -> u64 {
+        self.scanline_counter
+    }
+
+    /// Latch current TIA state for a scanline (for later rendering)
+    fn latch_scanline_state(&mut self, scanline: u16) {
+        let idx = (scanline as usize).min(261);
+        self.scanline_states[idx] = ScanlineState {
+            vblank: self.vblank,
+            pf0: self.pf0,
+            pf1: self.pf1,
+            pf2: self.pf2,
+            playfield_reflect: self.playfield_reflect,
+            playfield_priority: self.playfield_priority,
+            colubk: self.colubk,
+            colupf: self.colupf,
+            colup0: self.colup0,
+            colup1: self.colup1,
+            grp0: self.grp0,
+            grp1: self.grp1,
+            player0_x: self.player0_x,
+            player1_x: self.player1_x,
+            player0_reflect: self.player0_reflect,
+            player1_reflect: self.player1_reflect,
+            enam0: self.enam0,
+            enam1: self.enam1,
+            missile0_x: self.missile0_x,
+            missile1_x: self.missile1_x,
+            enabl: self.enabl,
+            ball_x: self.ball_x,
+        };
     }
 
     /// Reset TIA to power-on state
@@ -240,9 +395,29 @@ impl Tia {
 
     /// Write to TIA register
     pub fn write(&mut self, addr: u8, val: u8) {
+        self.writes_total = self.writes_total.saturating_add(1);
+        
+        // Comprehensive write logging (first 1000 writes only)
+        if self.writes_total <= 1000
+            && std::env::var("EMU_LOG_TIA_ALL_WRITES")
+                .map(|v| v == "1" || v.to_lowercase() == "true")
+                .unwrap_or(false)
+        {
+            eprintln!(
+                "[TIA WRITE #{}] addr=0x{:02X} val=0x{:02X} scanline={}",
+                self.writes_total, addr, val, self.scanline
+            );
+        }
+        
         match addr {
-            0x00 => self.vsync = (val & 0x02) != 0,
-            0x01 => self.vblank = (val & 0x02) != 0,
+            0x00 => {
+                self.writes_vsync = self.writes_vsync.saturating_add(1);
+                self.vsync = (val & 0x02) != 0;
+            }
+            0x01 => {
+                self.writes_vblank = self.writes_vblank.saturating_add(1);
+                self.vblank = (val & 0x02) != 0;
+            }
             0x02 => {} // WSYNC - handled by bus
             0x03 => {} // RSYNC
 
@@ -254,10 +429,34 @@ impl Tia {
             0x05 => {
                 // NUSIZ1 - Player 1 number and size
             }
-            0x06 => self.colup0 = val,
-            0x07 => self.colup1 = val,
-            0x08 => self.colupf = val,
-            0x09 => self.colubk = val,
+            0x06 => {
+                self.writes_colors = self.writes_colors.saturating_add(1);
+                if val != 0 {
+                    self.writes_colors_nonzero = self.writes_colors_nonzero.saturating_add(1);
+                }
+                self.colup0 = val;
+            }
+            0x07 => {
+                self.writes_colors = self.writes_colors.saturating_add(1);
+                if val != 0 {
+                    self.writes_colors_nonzero = self.writes_colors_nonzero.saturating_add(1);
+                }
+                self.colup1 = val;
+            }
+            0x08 => {
+                self.writes_colors = self.writes_colors.saturating_add(1);
+                if val != 0 {
+                    self.writes_colors_nonzero = self.writes_colors_nonzero.saturating_add(1);
+                }
+                self.colupf = val;
+            }
+            0x09 => {
+                self.writes_colors = self.writes_colors.saturating_add(1);
+                if val != 0 {
+                    self.writes_colors_nonzero = self.writes_colors_nonzero.saturating_add(1);
+                }
+                self.colubk = val;
+            }
 
             // Playfield control
             0x0A => {
@@ -275,16 +474,34 @@ impl Tia {
             }
 
             // Playfield
-            0x0D => self.pf0 = val,
-            0x0E => self.pf1 = val,
-            0x0F => self.pf2 = val,
+            0x0D => {
+                self.writes_pf = self.writes_pf.saturating_add(1);
+                if val != 0 {
+                    self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
+                }
+                self.pf0 = val;
+            }
+            0x0E => {
+                self.writes_pf = self.writes_pf.saturating_add(1);
+                if val != 0 {
+                    self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
+                }
+                self.pf1 = val;
+            }
+            0x0F => {
+                self.writes_pf = self.writes_pf.saturating_add(1);
+                if val != 0 {
+                    self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
+                }
+                self.pf2 = val;
+            }
 
-            // Player position resets
-            0x10 => self.player0_x = (self.pixel as u8).wrapping_sub(5),
-            0x11 => self.player1_x = (self.pixel as u8).wrapping_sub(5),
-            0x12 => self.missile0_x = (self.pixel as u8).wrapping_sub(4),
-            0x13 => self.missile1_x = (self.pixel as u8).wrapping_sub(4),
-            0x14 => self.ball_x = (self.pixel as u8).wrapping_sub(4),
+            // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
+            0x10 => self.player0_x = self.current_visible_x(),
+            0x11 => self.player1_x = self.current_visible_x(),
+            0x12 => self.missile0_x = self.current_visible_x(),
+            0x13 => self.missile1_x = self.current_visible_x(),
+            0x14 => self.ball_x = self.current_visible_x(),
 
             // Audio
             0x15 => {
@@ -313,8 +530,38 @@ impl Tia {
             }
 
             // Player graphics
-            0x1B => self.grp0 = val,
-            0x1C => self.grp1 = val,
+            0x1B => {
+                self.writes_grp0 = self.writes_grp0.saturating_add(1);
+                if val != 0 {
+                    self.writes_grp0_nonzero = self.writes_grp0_nonzero.saturating_add(1);
+                    if std::env::var("EMU_LOG_TIA_GRP")
+                        .map(|v| v == "1" || v.to_lowercase() == "true")
+                        .unwrap_or(false)
+                    {
+                        eprintln!(
+                            "[TIA] GRP0 = 0x{:02X} at scanline {}",
+                            val, self.scanline
+                        );
+                    }
+                }
+                self.grp0 = val;
+            }
+            0x1C => {
+                self.writes_grp1 = self.writes_grp1.saturating_add(1);
+                if val != 0 {
+                    self.writes_grp1_nonzero = self.writes_grp1_nonzero.saturating_add(1);
+                    if std::env::var("EMU_LOG_TIA_GRP")
+                        .map(|v| v == "1" || v.to_lowercase() == "true")
+                        .unwrap_or(false)
+                    {
+                        eprintln!(
+                            "[TIA] GRP1 = 0x{:02X} at scanline {}",
+                            val, self.scanline
+                        );
+                    }
+                }
+                self.grp1 = val;
+            }
 
             // Enable missiles and ball
             0x1D => self.enam0 = (val & 0x02) != 0,
@@ -328,6 +575,15 @@ impl Tia {
             0x23 => self.hmm1 = (val as i8) >> 4,
             0x24 => self.hmbl = (val as i8) >> 4,
 
+            // Apply horizontal motion (HMOVE)
+            0x2A => {
+                self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
+                self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
+                self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
+                self.missile1_x = self.apply_motion(self.missile1_x, self.hmm1);
+                self.ball_x = self.apply_motion(self.ball_x, self.hmbl);
+            }
+
             // Clear horizontal motion
             0x2B => {
                 self.hmp0 = 0;
@@ -339,6 +595,10 @@ impl Tia {
 
             _ => {}
         }
+
+        // Latch state for current scanline after register write
+        // (games often write graphics data during the scanline)
+        self.latch_scanline_state(self.scanline);
     }
 
     /// Read from TIA register (collision detection)
@@ -358,13 +618,36 @@ impl Tia {
         self.pixel += 3; // 3 color clocks per CPU cycle
 
         if self.pixel >= 228 {
-            self.pixel = 0;
+            self.pixel -= 228;  // Wrap pixel properly (was = 0, which loses remainders)
+            let old_scanline = self.scanline;
             self.scanline += 1;
+
+            self.scanline_counter = self.scanline_counter.saturating_add(1);
 
             if self.scanline >= 262 {
                 self.scanline = 0;
             }
+
+            // Debug logging
+            if std::env::var("EMU_LOG_SCANLINE")
+                .map(|v| v == "1" || v.to_lowercase() == "true")
+                .unwrap_or(false)
+            {
+                eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
+            }
+            
+            // DON'T latch here - we latch when registers are written (in write()).
+            // Latching here captures the NEW scanline's initial state BEFORE the game
+            // writes graphics data for it, resulting in all-zero/stale data being rendered.
         }
+    }
+
+    /// Calculate CPU cycles remaining until end of scanline (for WSYNC)
+    pub fn cpu_cycles_until_scanline_end(&self) -> u32 {
+        let pixel = self.pixel.min(227) as u32;
+        let remaining_color_clocks = 228u32.saturating_sub(pixel);
+        let extra = remaining_color_clocks.div_ceil(3);
+        extra.max(1)
     }
 
     /// Check if in VBLANK
@@ -378,22 +661,85 @@ impl Tia {
         self.scanline
     }
 
-    /// Render a single scanline to the given buffer
-    /// Returns the scanline number rendered
-    pub fn render_scanline(&self, buffer: &mut [u32], line: usize) {
-        if line >= 192 {
+    /// Try to infer the start of the visible picture area based on VBLANK timing
+    pub fn visible_window_start_scanline(&self) -> u16 {
+        // Find where VBLANK transitions from true to false
+        for i in 1..262 {
+            let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
+            let cur = self.scanline_states.get(i).copied().unwrap_or_default();
+            if prev.vblank && !cur.vblank {
+                return i as u16;
+            }
+        }
+        // Fallback: common NTSC visible start is around scanline ~37-40
+        40
+    }
+
+    /// Debug helper: count how many of the 192 visible scanlines have any playfield/player bits.
+    pub fn debug_visible_scanline_activity(&self, visible_start: u16) -> (u32, u32) {
+        let mut scanlines_with_pf = 0u32;
+        let mut scanlines_with_grp = 0u32;
+
+        for visible_line in 0..192u16 {
+            let tia_scanline = (visible_start + visible_line) % 262;
+            let state = self
+                .scanline_states
+                .get(tia_scanline as usize)
+                .copied()
+                .unwrap_or_default();
+
+            if state.pf0 != 0 || state.pf1 != 0 || state.pf2 != 0 {
+                scanlines_with_pf += 1;
+            }
+            if state.grp0 != 0 || state.grp1 != 0 {
+                scanlines_with_grp += 1;
+            }
+        }
+
+        (scanlines_with_pf, scanlines_with_grp)
+    }
+
+    /// Debug helper: count PF/GRP activity across all 262 scanlines.
+    pub fn debug_all_scanline_activity(&self) -> (u32, u32) {
+        let mut scanlines_with_pf = 0u32;
+        let mut scanlines_with_grp = 0u32;
+
+        for scanline in 0..262usize {
+            let state = self.scanline_states.get(scanline).copied().unwrap_or_default();
+            if state.pf0 != 0 || state.pf1 != 0 || state.pf2 != 0 {
+                scanlines_with_pf += 1;
+            }
+            if state.grp0 != 0 || state.grp1 != 0 {
+                scanlines_with_grp += 1;
+            }
+        }
+
+        (scanlines_with_pf, scanlines_with_grp)
+    }
+
+    /// Render a single visible scanline using latched state
+    /// `visible_line` is 0-191, `tia_scanline` is the actual TIA scanline (0-261)
+    pub fn render_scanline(&self, buffer: &mut [u32], visible_line: usize, tia_scanline: u16) {
+        if visible_line >= 192 {
             return; // Only visible lines
         }
 
+        // Get latched state for this scanline
+        let state = self
+            .scanline_states
+            .get((tia_scanline as usize).min(261))
+            .copied()
+            .unwrap_or_default();
+
         // Atari 2600 has 160 pixels per scanline
         for x in 0..160 {
-            let color = self.get_pixel_color(x, line);
-            buffer[line * 160 + x] = color;
+            let color = Self::get_pixel_color(&state, x);
+            buffer[visible_line * 160 + x] = color;
         }
     }
 
-    /// Get the color of a pixel at the given position
-    fn get_pixel_color(&self, x: usize, _line: usize) -> u32 {
+    /// Get the color of a pixel at the given position using latched state
+    fn get_pixel_color(state: &ScanlineState, x: usize) -> u32 {
         // Priority order (when playfield priority is off):
         // 1. Player 0, Missile 0
         // 2. Player 1, Missile 1
@@ -408,69 +754,69 @@ impl Tia {
         // 4. Background
 
         // Check players and missiles first (if priority is normal)
-        if !self.playfield_priority {
+        if !state.playfield_priority {
             // Check Player 0
-            if self.is_player_pixel(0, x) {
-                return ntsc_to_rgb(self.colup0);
+            if Self::is_player_pixel(state, 0, x) {
+                return ntsc_to_rgb(state.colup0);
             }
 
             // Check Missile 0
-            if self.is_missile_pixel(0, x) {
-                return ntsc_to_rgb(self.colup0);
+            if Self::is_missile_pixel(state, 0, x) {
+                return ntsc_to_rgb(state.colup0);
             }
 
             // Check Player 1
-            if self.is_player_pixel(1, x) {
-                return ntsc_to_rgb(self.colup1);
+            if Self::is_player_pixel(state, 1, x) {
+                return ntsc_to_rgb(state.colup1);
             }
 
             // Check Missile 1
-            if self.is_missile_pixel(1, x) {
-                return ntsc_to_rgb(self.colup1);
+            if Self::is_missile_pixel(state, 1, x) {
+                return ntsc_to_rgb(state.colup1);
             }
 
             // Check Ball
-            if self.is_ball_pixel(x) {
-                return ntsc_to_rgb(self.colupf);
+            if Self::is_ball_pixel(state, x) {
+                return ntsc_to_rgb(state.colupf);
             }
         }
 
         // Check playfield
-        if self.is_playfield_pixel(x) {
-            return ntsc_to_rgb(self.colupf);
+        if Self::is_playfield_pixel(state, x) {
+            return ntsc_to_rgb(state.colupf);
         }
 
         // Check Ball (if playfield priority)
-        if self.playfield_priority && self.is_ball_pixel(x) {
-            return ntsc_to_rgb(self.colupf);
+        if state.playfield_priority && Self::is_ball_pixel(state, x) {
+            return ntsc_to_rgb(state.colupf);
         }
 
         // Check players and missiles (if playfield priority)
-        if self.playfield_priority {
-            if self.is_player_pixel(0, x) {
-                return ntsc_to_rgb(self.colup0);
+        if state.playfield_priority {
+            if Self::is_player_pixel(state, 0, x) {
+                return ntsc_to_rgb(state.colup0);
             }
-            if self.is_missile_pixel(0, x) {
-                return ntsc_to_rgb(self.colup0);
+            if Self::is_missile_pixel(state, 0, x) {
+                return ntsc_to_rgb(state.colup0);
             }
-            if self.is_player_pixel(1, x) {
-                return ntsc_to_rgb(self.colup1);
+            if Self::is_player_pixel(state, 1, x) {
+                return ntsc_to_rgb(state.colup1);
             }
-            if self.is_missile_pixel(1, x) {
-                return ntsc_to_rgb(self.colup1);
+            if Self::is_missile_pixel(state, 1, x) {
+                return ntsc_to_rgb(state.colup1);
             }
         }
 
         // Background color
-        ntsc_to_rgb(self.colubk)
+        ntsc_to_rgb(state.colubk)
     }
 
     /// Check if a player pixel is visible at the given x position
-    fn is_player_pixel(&self, player: usize, x: usize) -> bool {
+    fn is_player_pixel(state: &ScanlineState, player: usize, x: usize) -> bool {
         let (grp, pos, reflect) = if player == 0 {
-            (self.grp0, self.player0_x, self.player0_reflect)
+            (state.grp0, state.player0_x, state.player0_reflect)
         } else {
-            (self.grp1, self.player1_x, self.player1_reflect)
+            (state.grp1, state.player1_x, state.player1_reflect)
         };
 
         // Calculate pixel offset from player position
@@ -490,11 +836,11 @@ impl Tia {
     }
 
     /// Check if a missile pixel is visible at the given x position
-    fn is_missile_pixel(&self, missile: usize, x: usize) -> bool {
+    fn is_missile_pixel(state: &ScanlineState, missile: usize, x: usize) -> bool {
         let (enabled, pos) = if missile == 0 {
-            (self.enam0, self.missile0_x)
+            (state.enam0, state.missile0_x)
         } else {
-            (self.enam1, self.missile1_x)
+            (state.enam1, state.missile1_x)
         };
 
         if !enabled {
@@ -507,46 +853,46 @@ impl Tia {
     }
 
     /// Check if the ball pixel is visible at the given x position
-    fn is_ball_pixel(&self, x: usize) -> bool {
-        if !self.enabl {
+    fn is_ball_pixel(state: &ScanlineState, x: usize) -> bool {
+        if !state.enabl {
             return false;
         }
 
         // Ball is 1 pixel wide by default
-        let offset = x.wrapping_sub(self.ball_x as usize);
+        let offset = x.wrapping_sub(state.ball_x as usize);
         offset < 1
     }
 
     /// Check if a pixel is part of the playfield
-    fn is_playfield_pixel(&self, x: usize) -> bool {
+    fn is_playfield_pixel(state: &ScanlineState, x: usize) -> bool {
         // Playfield is 40 bits wide, mirrored or repeated
         if x < 80 {
             // Left half
-            self.get_playfield_bit(x / 2)
+            Self::get_playfield_bit(state, x / 2)
         } else {
             // Right half
             let bit_pos = (x - 80) / 2;
-            if self.playfield_reflect {
+            if state.playfield_reflect {
                 // Mirrored
-                self.get_playfield_bit(39 - bit_pos)
+                Self::get_playfield_bit(state, 39 - bit_pos)
             } else {
                 // Repeated
-                self.get_playfield_bit(bit_pos)
+                Self::get_playfield_bit(state, bit_pos)
             }
         }
     }
 
     /// Get a single bit from the playfield
-    fn get_playfield_bit(&self, bit: usize) -> bool {
+    fn get_playfield_bit(state: &ScanlineState, bit: usize) -> bool {
         if bit < 4 {
             // PF0 (bits 4-7 map to playfield bits 0-3)
-            (self.pf0 & (0x10 << bit)) != 0
+            (state.pf0 & (0x10 << bit)) != 0
         } else if bit < 12 {
             // PF1 (bits 7-0 map to playfield bits 4-11)
-            (self.pf1 & (0x80 >> (bit - 4))) != 0
+            (state.pf1 & (0x80 >> (bit - 4))) != 0
         } else if bit < 20 {
             // PF2 (bits 0-7 map to playfield bits 12-19)
-            (self.pf2 & (0x01 << (bit - 12))) != 0
+            (state.pf2 & (0x01 << (bit - 12))) != 0
         } else {
             false
         }
@@ -769,7 +1115,7 @@ mod tests {
         let mut frame = vec![0u32; 160];
 
         // Render a scanline
-        tia.render_scanline(&mut frame, 0);
+        tia.render_scanline(&mut frame, 0, 0);
 
         // Player should be visible at x=80-87
         assert_ne!(frame[80], ntsc_to_rgb(0)); // Should be player color, not background
@@ -786,7 +1132,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
-        tia.render_scanline(&mut frame, 0);
+        tia.render_scanline(&mut frame, 0, 0);
 
         // Missile should be visible at x=50
         assert_ne!(frame[50], ntsc_to_rgb(0));
@@ -802,7 +1148,7 @@ mod tests {
         tia.write(0x08, 0x0E); // COLUPF - white
 
         let mut frame = vec![0u32; 160];
-        tia.render_scanline(&mut frame, 0);
+        tia.render_scanline(&mut frame, 0, 0);
 
         // Ball should be visible at x=100
         assert_ne!(frame[100], ntsc_to_rgb(0));
@@ -823,14 +1169,14 @@ mod tests {
 
         let mut frame = vec![0u32; 160];
 
-        // Without priority, player should be in front
-        tia.playfield_priority = false;
-        tia.render_scanline(&mut frame, 0);
+        // Without priority, player should be in front (CTRLPF bit 2 = 0)
+        tia.write(0x0A, 0x00);
+        tia.render_scanline(&mut frame, 0, 0);
         let player_color = frame[0];
 
-        // With priority, playfield should be in front
-        tia.playfield_priority = true;
-        tia.render_scanline(&mut frame, 0);
+        // With priority, playfield should be in front (CTRLPF bit 2 = 1)
+        tia.write(0x0A, 0x04);
+        tia.render_scanline(&mut frame, 0, 0);
         let pf_color = frame[0];
 
         // Colors should be different
@@ -847,12 +1193,13 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame_normal = vec![0u32; 160];
-        tia.player0_reflect = false;
-        tia.render_scanline(&mut frame_normal, 0);
+        // REFP0 bit 3 controls reflection
+        tia.write(0x0B, 0x00);
+        tia.render_scanline(&mut frame_normal, 0, 0);
 
         let mut frame_reflect = vec![0u32; 160];
-        tia.player0_reflect = true;
-        tia.render_scanline(&mut frame_reflect, 0);
+        tia.write(0x0B, 0x08);
+        tia.render_scanline(&mut frame_reflect, 0, 0);
 
         // The patterns should be different
         assert_ne!(frame_normal[80], frame_reflect[80]);
