@@ -147,9 +147,12 @@ impl VideoInterface {
     }
 
     /// Update current scanline (called per frame)
-    #[allow(dead_code)] // Reserved for future use
-    pub fn update_scanline(&mut self, scanline: u32) {
+    /// Returns true if scanline matches VI_INTR and interrupt should be triggered
+    pub fn update_scanline(&mut self, scanline: u32) -> bool {
         self.current = scanline;
+        
+        // Check if scanline matches interrupt line
+        scanline == (self.intr >> 1) // VI_INTR is stored as scanline * 2
     }
 
     /// Get the framebuffer origin address
@@ -268,5 +271,35 @@ mod tests {
         // Test writing new values (PAL mode)
         vi.write_register(VI_V_SYNC, 0x0271);
         assert_eq!(vi.read_register(VI_V_SYNC), 0x0271);
+    }
+
+    #[test]
+    fn test_vi_interrupt_generation() {
+        let mut vi = VideoInterface::new();
+        
+        // Set interrupt line to scanline 100 (stored as 200 in VI_INTR)
+        vi.write_register(VI_INTR, 200);
+        
+        // Update to different scanline - no interrupt
+        assert!(!vi.update_scanline(50));
+        
+        // Update to matching scanline - interrupt triggered
+        assert!(vi.update_scanline(100));
+        
+        // Update past the interrupt line - no interrupt
+        assert!(!vi.update_scanline(150));
+    }
+
+    #[test]
+    fn test_vi_intr_register() {
+        let mut vi = VideoInterface::new();
+        
+        // VI_INTR stores the scanline * 2
+        vi.write_register(VI_INTR, 0x200); // Scanline 256
+        assert_eq!(vi.read_register(VI_INTR), 0x200);
+        
+        // Verify masking (10 bits)
+        vi.write_register(VI_INTR, 0xFFFFFFFF);
+        assert_eq!(vi.read_register(VI_INTR), 0x3FF);
     }
 }

@@ -15,6 +15,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod mi;
 mod pif;
 mod rdp;
 mod rdp_renderer;
@@ -174,10 +175,30 @@ impl System for N64System {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         self.current_cycles = 0;
 
-        // Execute CPU cycles for one frame
-        while self.current_cycles < self.frame_cycles {
-            let cycles = self.cpu.step();
-            self.current_cycles += cycles;
+        // NTSC has 262 scanlines per frame
+        const SCANLINES_PER_FRAME: u32 = 262;
+        let cycles_per_scanline = self.frame_cycles / SCANLINES_PER_FRAME;
+
+        // Execute CPU cycles for one frame, updating VI scanline
+        for scanline in 0..SCANLINES_PER_FRAME {
+            let target_cycles = (scanline + 1) * cycles_per_scanline;
+            
+            // Execute CPU until we reach the cycles for this scanline
+            while self.current_cycles < target_cycles {
+                let cycles = self.cpu.step();
+                self.current_cycles += cycles;
+            }
+            
+            // Update VI scanline and check for interrupt
+            let bus = self.cpu.bus_mut();
+            if bus.vi_mut().update_scanline(scanline) {
+                // VI interrupt triggered - set interrupt in MI
+                bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+                
+                // Set interrupt pending bit in CPU's Cause register
+                // VI interrupt is typically mapped to hardware interrupt 3 (bit 11 in Cause)
+                self.cpu.cpu.set_interrupt(3);
+            }
         }
 
         // Get frame from RDP
@@ -255,6 +276,7 @@ impl System for N64System {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use emu_core::cpu_mips_r4300i::MemoryMips;
 
     #[test]
     fn test_system_creation() {
@@ -531,4 +553,141 @@ mod tests {
             pc_low
         );
     }
+
+    #[test]
+    fn test_mi_register_access() {
+        // Test that MI registers can be accessed through memory bus
+        let mut sys = N64System::new();
+        let bus = sys.cpu.bus_mut();
+
+        // Test reading MI_VERSION
+        let version = bus.read_word(0x04300004);
+        assert_eq!(version, 0x02020102);
+
+        // Test writing to MI_INTR_MASK (enable VI interrupt)
+        bus.write_word(0x0430000C, 0x0800); // Set VI interrupt mask
+        let mask = bus.read_word(0x0430000C);
+        assert_eq!(mask, 0x08); // VI interrupt bit should be set
+
+        // Test reading MI_INTR (should be 0 initially)
+        let intr = bus.read_word(0x04300008);
+        assert_eq!(intr, 0);
+    }
+
+    #[test]
+    fn test_vi_interrupt_generation() {
+        // Test that VI generates interrupts when scanline matches VI_INTR
+        let mut sys = N64System::new();
+        
+        // Enable VI interrupt in MI_INTR_MASK
+        sys.cpu.bus_mut().write_word(0x0430000C, 0x0800);
+        
+        // Set VI_INTR to trigger on scanline 100 (stored as 200)
+        sys.cpu.bus_mut().write_word(0x0440000C, 200);
+        
+        // Initially no interrupt
+        let intr = sys.cpu.bus().read_word(0x04300008);
+        assert_eq!(intr, 0, "No interrupt should be pending initially");
+        
+        // Manually trigger VI interrupt by updating scanline
+        let should_trigger = sys.cpu.bus_mut().vi_mut().update_scanline(100);
+        assert!(should_trigger, "VI should signal interrupt on scanline 100");
+        
+        // Set the interrupt in MI
+        if should_trigger {
+            sys.cpu.bus_mut().mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+        }
+        
+        // Verify interrupt is now pending
+        let intr = sys.cpu.bus().read_word(0x04300008);
+        assert_eq!(intr, 0x08, "VI interrupt should be pending");
+        
+        // Verify MI reports pending interrupt
+        assert!(sys.cpu.bus().mi().has_pending_interrupt());
+    }
+
+    #[test]
+    fn test_interrupt_acknowledge() {
+        // Test that writing to MI_INTR clears the interrupt
+        let mut sys = N64System::new();
+        
+        // Set VI interrupt
+        sys.cpu.bus_mut().mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+        let intr = sys.cpu.bus().read_word(0x04300008);
+        assert_eq!(intr, 0x08);
+        
+        // Clear interrupt by writing to MI_INTR
+        sys.cpu.bus_mut().write_word(0x04300008, 0x08);
+        let intr = sys.cpu.bus().read_word(0x04300008);
+        assert_eq!(intr, 0, "Interrupt should be cleared");
+    }
+
+    #[test]
+    fn test_cpu_interrupt_handling() {
+        // Test that CPU responds to interrupts
+        let mut sys = N64System::new();
+        
+        // Enable interrupts in CPU Status register
+        // Set IE (bit 0) and enable interrupt 3 (VI) in IM field (bit 11)
+        let status = sys.cpu.cpu.cp0[12]; // CP0_STATUS
+        sys.cpu.cpu.cp0[12] = status | 0x01 | (1 << 11); // IE=1, IM3=1
+        
+        // Set a known PC
+        sys.cpu.cpu.pc = 0x80000000;
+        
+        // Trigger an interrupt in CPU
+        sys.cpu.cpu.set_interrupt(3); // VI interrupt
+        
+        // Check that interrupt is pending in Cause register
+        let cause = sys.cpu.cpu.cp0[13]; // CP0_CAUSE
+        assert_ne!(cause & (1 << 11), 0, "Interrupt 3 should be pending in Cause");
+        
+        // Execute one instruction - should handle interrupt
+        let old_pc = sys.cpu.cpu.pc;
+        sys.cpu.step();
+        
+        // After interrupt, PC should be at exception vector
+        assert_eq!(sys.cpu.cpu.pc, 0x80000180, "PC should jump to exception vector");
+        
+        // EPC should contain the return address
+        let epc = sys.cpu.cpu.cp0[14]; // CP0_EPC
+        assert_eq!(epc, old_pc, "EPC should contain return address");
+        
+        // EXL bit should be set in Status
+        let status = sys.cpu.cpu.cp0[12];
+        assert_ne!(status & 0x02, 0, "EXL bit should be set in Status");
+    }
+
+    #[test]
+    fn test_full_interrupt_flow() {
+        // Integration test: VI generates interrupt, MI propagates it, CPU handles it
+        let mut sys = N64System::new();
+        
+        // Setup: Enable interrupts in CPU and MI
+        let status = sys.cpu.cpu.cp0[12];
+        sys.cpu.cpu.cp0[12] = status | 0x01 | (1 << 11); // IE=1, IM3=1
+        sys.cpu.bus_mut().write_word(0x0430000C, 0x0800); // Enable VI in MI
+        
+        // Set VI_INTR to trigger on scanline 50
+        sys.cpu.bus_mut().write_word(0x0440000C, 100); // Scanline 50 * 2
+        
+        // Set a known PC
+        sys.cpu.cpu.pc = 0x80000000;
+        let old_pc = sys.cpu.cpu.pc;
+        
+        // Trigger VI interrupt manually (simulating what happens during frame execution)
+        let should_trigger = sys.cpu.bus_mut().vi_mut().update_scanline(50);
+        assert!(should_trigger);
+        
+        sys.cpu.bus_mut().mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+        sys.cpu.cpu.set_interrupt(3);
+        
+        // Execute instruction - should handle interrupt
+        sys.cpu.step();
+        
+        // Verify interrupt was handled
+        assert_eq!(sys.cpu.cpu.pc, 0x80000180, "PC should be at exception vector");
+        assert_eq!(sys.cpu.cpu.cp0[14], old_pc, "EPC should contain return address");
+    }
 }
+

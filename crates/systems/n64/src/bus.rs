@@ -1,6 +1,7 @@
 //! N64 memory bus implementation
 
 use crate::cartridge::Cartridge;
+use crate::mi::MipsInterface;
 use crate::pif::Pif;
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
@@ -22,6 +23,8 @@ pub struct N64Bus {
     rsp: Rsp,
     /// VI (Video Interface)
     vi: VideoInterface,
+    /// MI (MIPS Interface - interrupt controller)
+    mi: MipsInterface,
 }
 
 impl N64Bus {
@@ -33,6 +36,7 @@ impl N64Bus {
             rdp: Rdp::new(),
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
+            mi: MipsInterface::new(),
         };
 
         // Initialize PIF ROM
@@ -100,6 +104,14 @@ impl N64Bus {
     #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
     pub fn vi_mut(&mut self) -> &mut VideoInterface {
         &mut self.vi
+    }
+
+    pub fn mi(&self) -> &MipsInterface {
+        &self.mi
+    }
+
+    pub fn mi_mut(&mut self) -> &mut MipsInterface {
+        &mut self.mi
     }
 
     /// Execute pending RSP task if RSP is not halted
@@ -191,6 +203,11 @@ impl MemoryMips for N64Bus {
             0x0410_0000..=0x0410_001F => {
                 let offset = phys_addr & 0x1F;
                 self.rdp.read_register(offset)
+            }
+            // MI registers (0x04300000 - 0x0430000F)
+            0x0430_0000..=0x0430_000F => {
+                let offset = phys_addr & 0x0F;
+                self.mi.read_register(offset)
             }
             // VI registers (0x04400000 - 0x04400037)
             0x0440_0000..=0x0440_0037 => {
@@ -293,6 +310,11 @@ impl MemoryMips for N64Bus {
                 if offset == 0x04 {
                     self.process_rdp_display_list();
                 }
+            }
+            // MI registers (0x04300000 - 0x0430000F)
+            0x0430_0000..=0x0430_000F => {
+                let offset = phys_addr & 0x0F;
+                self.mi.write_register(offset, val);
             }
             // VI registers (0x04400000 - 0x04400037)
             0x0440_0000..=0x0440_0037 => {
