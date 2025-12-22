@@ -289,15 +289,15 @@ mod tests {
     #[test]
     fn test_floppy_mount_unmount() {
         let mut bus = PcBus::new();
-        
+
         assert!(bus.floppy_a().is_none());
-        
+
         let floppy = vec![0xF6; 1440 * 1024]; // 1.44MB floppy
         bus.mount_floppy_a(floppy.clone());
-        
+
         assert!(bus.floppy_a().is_some());
         assert_eq!(bus.floppy_a().unwrap().len(), 1440 * 1024);
-        
+
         bus.unmount_floppy_a();
         assert!(bus.floppy_a().is_none());
     }
@@ -305,12 +305,12 @@ mod tests {
     #[test]
     fn test_hard_drive_mount() {
         let mut bus = PcBus::new();
-        
+
         assert!(bus.hard_drive().is_none());
-        
+
         let hd = vec![0; 10 * 1024 * 1024]; // 10MB hard drive
         bus.mount_hard_drive(hd.clone());
-        
+
         assert!(bus.hard_drive().is_some());
         assert_eq!(bus.hard_drive().unwrap().len(), 10 * 1024 * 1024);
     }

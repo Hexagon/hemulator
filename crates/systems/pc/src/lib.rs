@@ -322,7 +322,7 @@ mod tests {
 
         // Load executable via the old method (kept for backward compatibility)
         assert!(sys.load_executable(&program).is_ok());
-        
+
         // Check that BIOS is always mounted (has default)
         assert!(sys.is_mounted("BIOS"));
     }
@@ -345,20 +345,20 @@ mod tests {
         let mps = sys.mount_points();
 
         assert_eq!(mps.len(), 4);
-        
+
         // Check BIOS mount point
         assert_eq!(mps[0].id, "BIOS");
         assert!(!mps[0].required); // Has default
         assert!(mps[0].extensions.contains(&"bin".to_string()));
-        
+
         // Check Floppy A
         assert_eq!(mps[1].id, "FloppyA");
         assert!(!mps[1].required);
-        
+
         // Check Floppy B
         assert_eq!(mps[2].id, "FloppyB");
         assert!(!mps[2].required);
-        
+
         // Check Hard Drive
         assert_eq!(mps[3].id, "HardDrive");
         assert!(!mps[3].required);
@@ -374,13 +374,13 @@ mod tests {
     #[test]
     fn test_mount_floppy() {
         let mut sys = PcSystem::new();
-        
+
         // Create a minimal floppy image (360KB standard floppy)
         let floppy_data = vec![0xF6; 368640]; // 360KB
-        
+
         assert!(sys.mount("FloppyA", &floppy_data).is_ok());
         assert!(sys.is_mounted("FloppyA"));
-        
+
         sys.unmount("FloppyA").unwrap();
         assert!(!sys.is_mounted("FloppyA"));
     }
@@ -388,13 +388,13 @@ mod tests {
     #[test]
     fn test_mount_hard_drive() {
         let mut sys = PcSystem::new();
-        
+
         // Create a minimal hard drive image (1MB)
         let hd_data = vec![0; 1024 * 1024];
-        
+
         assert!(sys.mount("HardDrive", &hd_data).is_ok());
         assert!(sys.is_mounted("HardDrive"));
-        
+
         sys.unmount("HardDrive").unwrap();
         assert!(!sys.is_mounted("HardDrive"));
     }
