@@ -62,7 +62,7 @@ MainLoop:
     
     ; Wait for timer to expire by checking TIMINT
 WaitTimer:
-    lda TIMINT      ; Read timer status (should clear flag if set)
+    lda TIMINT      ; Read timer status (clears flag unconditionally)
     bmi TimerDone   ; Branch if bit 7 set (timer expired)
     jmp WaitTimer   ; Keep waiting
     
