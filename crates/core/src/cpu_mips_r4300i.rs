@@ -224,17 +224,17 @@ impl<M: MemoryMips> CpuMips<M> {
         let ie = status & 0x01;
         let exl = (status >> 1) & 0x01;
         let erl = (status >> 2) & 0x01;
-        
+
         // Interrupts are enabled if IE=1 and EXL=0 and ERL=0
         if ie == 0 || exl != 0 || erl != 0 {
             return false;
         }
-        
+
         // Check if any interrupts are pending and unmasked
         let cause = self.cp0[CP0_CAUSE];
         let im = (status >> 8) & 0xFF; // Interrupt mask in Status
         let ip = (cause >> 8) & 0xFF; // Interrupt pending in Cause
-        
+
         // Check if any unmasked interrupt is pending
         if (im & ip) != 0 {
             self.handle_exception(0); // Exception code 0 = Interrupt
@@ -248,18 +248,18 @@ impl<M: MemoryMips> CpuMips<M> {
     fn handle_exception(&mut self, exception_code: u64) {
         // Set EXL bit in Status register (disable further interrupts)
         self.cp0[CP0_STATUS] |= 0x02; // Set EXL bit
-        
+
         // Save return address in EPC (current PC, not incremented)
         self.cp0[CP0_EPC] = self.pc;
-        
+
         // Set exception code in Cause register
         self.cp0[CP0_CAUSE] &= !0x7C; // Clear exception code bits (2-6)
         self.cp0[CP0_CAUSE] |= (exception_code << 2) & 0x7C;
-        
+
         // Jump to exception vector
         // Normal exception vector is at 0x80000180
         self.pc = 0x80000180;
-        
+
         self.cycles += 1; // Exception handling takes cycles
     }
 

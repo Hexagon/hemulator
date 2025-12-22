@@ -106,6 +106,7 @@ impl N64Bus {
         &mut self.vi
     }
 
+    #[allow(dead_code)] // Reserved for future use
     pub fn mi(&self) -> &MipsInterface {
         &self.mi
     }

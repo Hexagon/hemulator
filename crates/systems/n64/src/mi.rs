@@ -94,7 +94,7 @@ impl MipsInterface {
                 // Bit 11: clear DP interrupt (bit 2)
                 // Bit 12: clear RDRAM reg mode (bit 3)
                 // Bit 13: set RDRAM reg mode (bit 3)
-                
+
                 if value & (1 << 7) != 0 {
                     self.mode &= !(1 << 0); // Clear init mode
                 }
@@ -128,10 +128,10 @@ impl MipsInterface {
                 // MI_INTR_MASK has special write behavior for setting/clearing bits:
                 // Bits 0-5: clear corresponding mask bit
                 // Bits 8-13: set corresponding mask bit
-                
+
                 // Clear mask bits (bits 0-5)
                 self.intr_mask &= !(value & 0x3F);
-                
+
                 // Set mask bits (bits 8-13 correspond to mask bits 0-5)
                 let set_bits = (value >> 8) & 0x3F;
                 self.intr_mask |= set_bits;
@@ -152,11 +152,13 @@ impl MipsInterface {
     }
 
     /// Check if any interrupts are pending and unmasked
+    #[allow(dead_code)] // Used in tests
     pub fn has_pending_interrupt(&self) -> bool {
         (self.intr & self.intr_mask) != 0
     }
 
     /// Get the current interrupt status (masked)
+    #[allow(dead_code)] // Used in tests
     pub fn get_pending_interrupts(&self) -> u32 {
         self.intr & self.intr_mask
     }
@@ -186,9 +188,9 @@ mod tests {
         let mut mi = MipsInterface::new();
         mi.set_interrupt(MI_INTR_VI);
         mi.write_register(MI_INTR_MASK, 0x0800); // Enable VI interrupt
-        
+
         mi.reset();
-        
+
         assert_eq!(mi.read_register(MI_INTR), 0);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0);
     }
@@ -196,10 +198,10 @@ mod tests {
     #[test]
     fn test_mi_set_interrupt() {
         let mut mi = MipsInterface::new();
-        
+
         mi.set_interrupt(MI_INTR_VI);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_VI);
-        
+
         mi.set_interrupt(MI_INTR_SP);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_VI | MI_INTR_SP);
     }
@@ -207,10 +209,10 @@ mod tests {
     #[test]
     fn test_mi_clear_interrupt() {
         let mut mi = MipsInterface::new();
-        
+
         mi.set_interrupt(MI_INTR_VI | MI_INTR_SP);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_VI | MI_INTR_SP);
-        
+
         mi.clear_interrupt(MI_INTR_VI);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_SP);
     }
@@ -218,10 +220,10 @@ mod tests {
     #[test]
     fn test_mi_intr_write_clears() {
         let mut mi = MipsInterface::new();
-        
+
         mi.set_interrupt(MI_INTR_VI | MI_INTR_SP);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_VI | MI_INTR_SP);
-        
+
         // Writing to MI_INTR clears the specified bits
         mi.write_register(MI_INTR, MI_INTR_VI);
         assert_eq!(mi.read_register(MI_INTR), MI_INTR_SP);
@@ -230,15 +232,15 @@ mod tests {
     #[test]
     fn test_mi_intr_mask_write() {
         let mut mi = MipsInterface::new();
-        
+
         // Set VI interrupt mask (bit 8 in write corresponds to mask bit 3)
         mi.write_register(MI_INTR_MASK, 0x0800);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x08);
-        
+
         // Set SP interrupt mask (bit 8 in write corresponds to mask bit 0)
         mi.write_register(MI_INTR_MASK, 0x0100);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x09); // Both VI and SP
-        
+
         // Clear VI interrupt mask (bit 3)
         mi.write_register(MI_INTR_MASK, 0x08);
         assert_eq!(mi.read_register(MI_INTR_MASK), 0x01); // Only SP
@@ -247,18 +249,18 @@ mod tests {
     #[test]
     fn test_mi_has_pending_interrupt() {
         let mut mi = MipsInterface::new();
-        
+
         // No interrupt pending
         assert!(!mi.has_pending_interrupt());
-        
+
         // Set interrupt but no mask
         mi.set_interrupt(MI_INTR_VI);
         assert!(!mi.has_pending_interrupt());
-        
+
         // Enable mask
         mi.write_register(MI_INTR_MASK, 0x0800);
         assert!(mi.has_pending_interrupt());
-        
+
         // Clear interrupt
         mi.write_register(MI_INTR, MI_INTR_VI);
         assert!(!mi.has_pending_interrupt());
@@ -267,13 +269,13 @@ mod tests {
     #[test]
     fn test_mi_get_pending_interrupts() {
         let mut mi = MipsInterface::new();
-        
+
         // Set multiple interrupts
         mi.set_interrupt(MI_INTR_VI | MI_INTR_SP | MI_INTR_AI);
-        
+
         // Enable only VI and SP masks
         mi.write_register(MI_INTR_MASK, 0x0900); // Bits 8 and 11
-        
+
         // Should only get VI and SP as pending (masked)
         let pending = mi.get_pending_interrupts();
         assert_eq!(pending, MI_INTR_VI | MI_INTR_SP);
@@ -282,11 +284,11 @@ mod tests {
     #[test]
     fn test_mi_mode_register() {
         let mut mi = MipsInterface::new();
-        
+
         // Set init mode (bit 8 in write)
         mi.write_register(MI_MODE, 1 << 8);
         assert_eq!(mi.read_register(MI_MODE) & 0x01, 0x01);
-        
+
         // Clear init mode (bit 7 in write)
         mi.write_register(MI_MODE, 1 << 7);
         assert_eq!(mi.read_register(MI_MODE) & 0x01, 0x00);
@@ -296,10 +298,10 @@ mod tests {
     fn test_mi_version_readonly() {
         let mut mi = MipsInterface::new();
         let version = mi.read_register(MI_VERSION);
-        
+
         // Try to write to version register
         mi.write_register(MI_VERSION, 0xDEADBEEF);
-        
+
         // Should still have original value
         assert_eq!(mi.read_register(MI_VERSION), version);
     }
