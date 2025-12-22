@@ -396,7 +396,7 @@ impl Tia {
     /// Write to TIA register
     pub fn write(&mut self, addr: u8, val: u8) {
         self.writes_total = self.writes_total.saturating_add(1);
-        
+
         // Comprehensive write logging (first 1000 writes only)
         if self.writes_total <= 1000
             && std::env::var("EMU_LOG_TIA_ALL_WRITES")
@@ -408,7 +408,7 @@ impl Tia {
                 self.writes_total, addr, val, self.scanline
             );
         }
-        
+
         match addr {
             0x00 => {
                 self.writes_vsync = self.writes_vsync.saturating_add(1);
@@ -538,10 +538,7 @@ impl Tia {
                         .map(|v| v == "1" || v.to_lowercase() == "true")
                         .unwrap_or(false)
                     {
-                        eprintln!(
-                            "[TIA] GRP0 = 0x{:02X} at scanline {}",
-                            val, self.scanline
-                        );
+                        eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
                 self.grp0 = val;
@@ -554,10 +551,7 @@ impl Tia {
                         .map(|v| v == "1" || v.to_lowercase() == "true")
                         .unwrap_or(false)
                     {
-                        eprintln!(
-                            "[TIA] GRP1 = 0x{:02X} at scanline {}",
-                            val, self.scanline
-                        );
+                        eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
                 self.grp1 = val;
@@ -618,7 +612,7 @@ impl Tia {
         self.pixel += 3; // 3 color clocks per CPU cycle
 
         if self.pixel >= 228 {
-            self.pixel -= 228;  // Wrap pixel properly (was = 0, which loses remainders)
+            self.pixel -= 228; // Wrap pixel properly (was = 0, which loses remainders)
             let old_scanline = self.scanline;
             self.scanline += 1;
 
@@ -635,7 +629,7 @@ impl Tia {
             {
                 eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
             }
-            
+
             // DON'T latch here - we latch when registers are written (in write()).
             // Latching here captures the NEW scanline's initial state BEFORE the game
             // writes graphics data for it, resulting in all-zero/stale data being rendered.
@@ -705,7 +699,11 @@ impl Tia {
         let mut scanlines_with_grp = 0u32;
 
         for scanline in 0..262usize {
-            let state = self.scanline_states.get(scanline).copied().unwrap_or_default();
+            let state = self
+                .scanline_states
+                .get(scanline)
+                .copied()
+                .unwrap_or_default();
             if state.pf0 != 0 || state.pf1 != 0 || state.pf2 != 0 {
                 scanlines_with_pf += 1;
             }

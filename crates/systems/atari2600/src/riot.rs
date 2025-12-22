@@ -59,7 +59,10 @@
 //! - **TIM64T** ($296): Set timer with 64 clock interval
 //! - **T1024T** ($297): Set timer with 1024 clock interval
 //! - **INTIM** ($284): Read current timer value
-//! - **TIMINT** ($285): Read timer underflow flag (bit 7)
+//! - **TIMINT** ($285): Read timer underflow flag (bit 7), clears flag on read
+//!
+//! **Important**: Reading TIMINT/INSTAT clears the underflow flag as a hardware side effect.
+//! This allows games to detect when the timer has expired between checks.
 //!
 //! **Usage**: Games use the timer for frame synchronization. A common pattern is:
 //! 1. Set timer at start of frame (e.g., `STA TIM64T`)
@@ -100,6 +103,7 @@
 //! rather than directly manipulating the I/O port registers.
 
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 
 mod serde_arrays {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -122,6 +126,26 @@ mod serde_arrays {
     }
 }
 
+mod serde_cell_bool {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::cell::Cell;
+
+    pub fn serialize<S>(cell: &Cell<bool>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        cell.get().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Cell<bool>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let val = bool::deserialize(deserializer)?;
+        Ok(Cell::new(val))
+    }
+}
+
 /// RIOT chip state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Riot {
@@ -138,8 +162,9 @@ pub struct Riot {
     /// Cycles until next timer decrement
     timer_cycles: u16,
 
-    /// Timer interrupt flag
-    timer_underflow: bool,
+    /// Timer interrupt flag (cleared when TIMINT/INSTAT is read)
+    #[serde(with = "serde_cell_bool")]
+    timer_underflow: Cell<bool>,
 
     /// Port A data direction register (0 = input, 1 = output)
     swcha_ddr: u8,
@@ -168,7 +193,7 @@ impl Riot {
             timer: 0,
             timer_interval: 1,
             timer_cycles: 0,
-            timer_underflow: false,
+            timer_underflow: Cell::new(false),
             swcha_ddr: 0,
             swcha: 0xFF, // Joysticks unpressed
             swchb_ddr: 0,
@@ -182,7 +207,7 @@ impl Riot {
         self.timer = 0;
         self.timer_interval = 1;
         self.timer_cycles = 0;
-        self.timer_underflow = false;
+        self.timer_underflow.set(false);
         self.swcha_ddr = 0;
         self.swcha = 0xFF;
         self.swchb_ddr = 0;
@@ -207,8 +232,10 @@ impl Riot {
                     0x03 => self.swchb_ddr,
                     0x04 | 0x06 => self.timer, // INTIM
                     0x05 | 0x07 => {
-                        // TIMINT/INSTAT
-                        if self.timer_underflow {
+                        // TIMINT/INSTAT - reading clears the underflow flag
+                        let flag = self.timer_underflow.get();
+                        self.timer_underflow.set(false);
+                        if flag {
                             0x80
                         } else {
                             0x00
@@ -243,28 +270,28 @@ impl Riot {
                         self.timer = val;
                         self.timer_interval = 1;
                         self.timer_cycles = 0;
-                        self.timer_underflow = false;
+                        self.timer_underflow.set(false);
                     }
                     0x15 => {
                         // TIM8T
                         self.timer = val;
                         self.timer_interval = 8;
                         self.timer_cycles = 0;
-                        self.timer_underflow = false;
+                        self.timer_underflow.set(false);
                     }
                     0x16 => {
                         // TIM64T
                         self.timer = val;
                         self.timer_interval = 64;
                         self.timer_cycles = 0;
-                        self.timer_underflow = false;
+                        self.timer_underflow.set(false);
                     }
                     0x17 => {
                         // T1024T
                         self.timer = val;
                         self.timer_interval = 1024;
                         self.timer_cycles = 0;
-                        self.timer_underflow = false;
+                        self.timer_underflow.set(false);
                     }
                     _ => {}
                 }
@@ -284,14 +311,14 @@ impl Riot {
                 // Decrement timer
                 if self.timer == 0 {
                     // Timer at 0, wrap around
-                    self.timer_underflow = true;
+                    self.timer_underflow.set(true);
                     self.timer_interval = 1; // After underflow, decrement every cycle
                     self.timer = 0xFF;
                 } else {
                     self.timer = self.timer.wrapping_sub(1);
                     // Check if we just hit 0
                     if self.timer == 0 {
-                        self.timer_underflow = true;
+                        self.timer_underflow.set(true);
                         self.timer_interval = 1;
                         self.timer = 0xFF;
                     }
@@ -367,6 +394,36 @@ mod tests {
         riot.clock(9);
         assert_eq!(riot.read(0x0284), 0xFF); // Should wrap to 0xFF
         assert_eq!(riot.read(0x0285) & 0x80, 0x80); // Underflow flag set at $285
+    }
+
+    #[test]
+    fn test_riot_timer_interrupt_flag_clears_on_read() {
+        let mut riot = Riot::new();
+
+        // Set timer to 2 with 1 clock interval
+        riot.write(0x0294, 2);
+
+        // Initially, underflow flag should be clear
+        assert_eq!(riot.read(0x0285) & 0x80, 0x00);
+
+        // Clock until timer expires
+        riot.clock(2);
+
+        // Underflow flag should now be set
+        assert_eq!(riot.read(0x0285) & 0x80, 0x80);
+
+        // Reading TIMINT should clear the flag
+        // Second read should return flag cleared
+        assert_eq!(riot.read(0x0285) & 0x80, 0x00);
+
+        // Verify flag stays cleared on subsequent reads
+        assert_eq!(riot.read(0x0285) & 0x80, 0x00);
+
+        // Also test with INSTAT mirror at $287
+        riot.write(0x0294, 1);
+        riot.clock(1);
+        assert_eq!(riot.read(0x0287) & 0x80, 0x80); // Flag set
+        assert_eq!(riot.read(0x0287) & 0x80, 0x00); // Flag cleared by read
     }
 
     #[test]

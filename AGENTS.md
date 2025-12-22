@@ -487,6 +487,10 @@ Detailed implementation notes:
     - 128 bytes of RAM with proper mirroring at $00-$7F, $80-$FF, $100-$17F
     - Programmable interval timer (1, 8, 64, 1024 clock intervals)
     - Timer underflow detection and interrupt flag
+    - **IMPORTANT**: Reading TIMINT/INSTAT clears the interrupt flag (hardware side effect)
+      - Critical for commercial ROMs that use timer-based frame synchronization
+      - Games set timer → do work → wait for TIMINT flag → repeat
+      - Flag auto-clears on read to enable detection of next expiration
     - I/O ports for joystick (SWCHA) and console switches (SWCHB)
     - Data direction registers (SWACNT, SWBCNT)
   - **Cartridge Banking**:
@@ -505,10 +509,11 @@ Detailed implementation notes:
     - 262 scanlines/frame, ~76 cycles/scanline
   - **Features**:
     - Full save state support (CPU, TIA, RIOT, cartridge banking)
-    - Comprehensive test coverage (39 tests)
+    - Comprehensive test coverage (43 tests)
     - Proper NTSC color palette
     - Player/missile/ball rendering with priority
-  - All existing tests pass (39 tests total: 14 TIA, 6 RIOT, 6 cartridge, 7 system, 4 bus, 2 CPU)
+    - RIOT timer interrupt flag properly clears on read (fixes commercial ROM compatibility)
+  - All existing tests pass (43 tests total: 14 TIA, 7 RIOT, 6 cartridge, 8 system, 4 bus, 2 CPU, 2 integration)
 
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation
