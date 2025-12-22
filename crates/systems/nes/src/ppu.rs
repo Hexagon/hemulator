@@ -761,6 +761,8 @@ impl Ppu {
 
         let bg_enabled = (self.mask & 0x08) != 0;
         let sprites_enabled = (self.mask & 0x10) != 0;
+        let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
+        let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
         // Perform sprite evaluation for this scanline to determine sprite overflow
         if sprites_enabled {
@@ -789,6 +791,8 @@ impl Ppu {
         // Background pixels for this scanline.
         if bg_enabled {
             for x in 0..width {
+                // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
+                let should_render_bg = show_bg_left || x >= 8;
                 let wx = x + sx;
                 let wy = y + sy;
 
@@ -825,7 +829,12 @@ impl Ppu {
                 let color_in_tile = (hi_bit << 1) | lo_bit;
 
                 let idx = (y * width + x) as usize;
-                let out = if color_in_tile == 0 {
+                let out = if !should_render_bg {
+                    // Leftmost 8 pixels are clipped - use black
+                    bg_priority[x as usize] = false;
+                    0x00000000 // Black
+                } else if color_in_tile == 0 {
+                    // Tile color is 0 (backdrop)
                     bg_priority[x as usize] = false;
                     universal_bg
                 } else {
@@ -942,6 +951,9 @@ impl Ppu {
             // Composite sprite buffer with background using priority rules and detect sprite 0 hit.
             for x in 0..width as usize {
                 if let Some((sprite_color, behind_bg, sprite_idx)) = sprite_buffer[x] {
+                    // Clip leftmost 8 pixels if PPUMASK bit 2 is clear
+                    let should_render_sprite = show_sprites_left || x >= 8;
+
                     let idx = (y * width + x as u32) as usize;
 
                     // Sprite 0 hit detection - check if sprite 0 pixel overlaps opaque background
@@ -951,17 +963,15 @@ impl Ppu {
                         && bg_priority[x]
                         && x < 255
                     {
-                        // Check left clipping
-                        let bg_clip = (self.mask & 0x02) == 0;
-                        let spr_clip = (self.mask & 0x04) == 0;
-                        if !((bg_clip || spr_clip) && x < 8) {
+                        // Check left clipping - sprite 0 hit doesn't occur in clipped region
+                        if show_bg_left && show_sprites_left || x >= 8 {
                             self.sprite_0_hit.set(true);
                         }
                     }
 
                     // Sprite pixel is opaque.
-                    // Draw it if: front priority OR background is transparent.
-                    if !behind_bg || !bg_priority[x] {
+                    // Draw it if: clipping allows it AND (front priority OR background is transparent).
+                    if should_render_sprite && (!behind_bg || !bg_priority[x]) {
                         frame.pixels[idx] = sprite_color;
                     }
                 }
