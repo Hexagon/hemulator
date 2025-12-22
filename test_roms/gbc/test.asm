@@ -66,61 +66,39 @@ Start:
     xor a
     ldh [$FF40], a         ; LCDC = 0
     
-    ; Clear VRAM
+    ; Tile 0: White (color index 0 = bitplane0=0, bitplane1=0)
     ld hl, $8000
-    ld bc, $2000
-.clearVRAM:
-    ld [hl+], a
-    dec bc
-    ld a, b
-    or c
-    jr nz, .clearVRAM
+    xor a                  ; a = 0
+    ld b, 16
+.t0:
+    ld [hl+], a            ; Fill 16 bytes with 0
+    dec b
+    jr nz, .t0
     
-    ; Write test pattern to tile data ($8000-$8010)
-    ; Tile $00: Checkerboard pattern
-    ld hl, $8000
-    ld a, $AA
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $55
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $AA
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $55
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $AA
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $55
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $AA
-    ld [hl+], a
-    ld a, $00
-    ld [hl+], a
-    ld a, $55
+    ; Tile 1: Dark (color index 3 = bitplane0=1, bitplane1=1)
+    ; We need both bitplanes set to 0xFF for full dark/black
+    ld hl, $8010
+    ld a, $FF
+    ld b, 16
+.t1:
+    ld [hl+], a            ; Fill 16 bytes with $FF (both bitplanes)
+    dec b
+    jr nz, .t1
     
-    ; Fill tilemap with tile $00
+    ; Fill tilemap: alternating 0 and 1 in checkerboard pattern
     ld hl, $9800
-    ld bc, $0400           ; 1024 bytes
-.fillTilemap:
-    xor a                  ; Tile $00
+    ld c, 18               ; rows (Full screen is 18 tiles vertically)
+.row:
+    ld b, 20               ; cols (Full screen is 20 tiles horizontally)
+    ld a, c
+    and 1                  ; Start pattern based on row number (ensures checkerboard)
+.col:
     ld [hl+], a
-    dec bc
-    ld a, b
-    or c
-    jr nz, .fillTilemap
+    xor 1                  ; Toggle between 0 and 1
+    dec b
+    jr nz, .col
+    dec c
+    jr nz, .row
     
     ; Set palette (DMG-compatible mode - works on both DMG and CGB)
     ld a, %11100100        ; 3=black, 2=dark gray, 1=light gray, 0=white

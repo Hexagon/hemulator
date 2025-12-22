@@ -26,45 +26,44 @@ Start:
     xor a
     ldh [$FF40], a
     
-    ; Tile 0: White
+    ; Tile 0: White (color index 0 = bitplane0=0, bitplane1=0)
     ld hl, $8000
-    xor a
+    xor a                  ; a = 0
     ld b, 16
 .t0:
-    ld [hl+], a
+    ld [hl+], a            ; Fill 16 bytes with 0
     dec b
     jr nz, .t0
     
-    ; Tile 1: Dark (all $FF)
+    ; Tile 1: Dark (color index 3 = bitplane0=1, bitplane1=1)
+    ; We need both bitplanes set to 0xFF for full dark/black
     ld hl, $8010
-    xor a
-    ld b, 8
-.t1a:
-    ld [hl+], a
-    dec b
-    jr nz, .t1a
     ld a, $FF
-    ld b, 8
-.t1b:
-    ld [hl+], a
+    ld b, 16
+.t1:
+    ld [hl+], a            ; Fill 16 bytes with $FF (both bitplanes)
     dec b
-    jr nz, .t1b
+    jr nz, .t1
     
-    ; Fill tilemap: alternating 0 and 1
+    ; Fill tilemap: alternating 0 and 1 in checkerboard pattern
     ld hl, $9800
-    ld c, 18               ; rows
+    ld c, 18               ; rows (Full screen is 18 tiles vertically)
 .row:
-    ld b, 20               ; cols
+    ld b, 20               ; cols (Full screen is 20 tiles horizontally)
     ld a, c
-    and 1
+    and 1                  ; Start pattern based on row number (ensures checkerboard)
 .col:
     ld [hl+], a
-    xor 1
+    xor 1                  ; Toggle between 0 and 1
     dec b
     jr nz, .col
     dec c
     jr nz, .row
     
+    ; Set palette: Map color 0 to white (palette color 0), color 3 to dark/black (palette color 3)
+    ; Palette format: bits [7:6]=color3, [5:4]=color2, [3:2]=color1, [1:0]=color0
+    ; We want: color 0→white(0b00), color 1→light gray(0b01), color 2→dark gray(0b10), color 3→black(0b11)
+    ; So: 0b11100100 = 0xE4
     ld a, %11100100
     ldh [$FF47], a
     
