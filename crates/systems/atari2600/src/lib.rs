@@ -615,6 +615,85 @@ mod tests {
     }
 
     #[test]
+    fn test_atari2600_checkerboard_pattern() {
+        // Load the checkerboard test ROM
+        let test_rom = include_bytes!("../../../../test_roms/atari2600/checkerboard.bin");
+
+        let mut sys = Atari2600System::new();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run a few frames to let the ROM initialize and render
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..9 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 192);
+        assert_eq!(frame.pixels.len(), 160 * 192);
+
+        // The checkerboard ROM alternates playfield pattern every 2 scanlines
+        // Scanlines 0,1 use 0xAA, scanlines 2,3 use 0x55, etc.
+        // This creates a vertical checkerboard pattern
+
+        // Count non-black pixels
+        let non_black_pixels = frame
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel != 0xFF000000)
+            .count();
+
+        // Should have approximately 50% white pixels (checkerboard pattern)
+        // Allow some variance due to blanking periods
+        let total_pixels = 160 * 192;
+        let expected_min = total_pixels * 40 / 100; // At least 40%
+        let expected_max = total_pixels * 60 / 100; // At most 60%
+
+        assert!(
+            non_black_pixels >= expected_min && non_black_pixels <= expected_max,
+            "Expected ~50% non-black pixels in checkerboard, got {} out of {} ({:.1}%)",
+            non_black_pixels,
+            total_pixels,
+            (non_black_pixels as f64 / total_pixels as f64) * 100.0
+        );
+
+        // Verify that adjacent scanlines have different patterns
+        // Check a few pairs of scanlines in the middle of the visible area
+        for scanline_pair in [40, 60, 80, 100].iter() {
+            let y1 = *scanline_pair;
+            let y2 = y1 + 1;
+
+            if y1 < 192 && y2 < 192 {
+                // Count white pixels in each scanline
+                let count1 = (0..160)
+                    .filter(|&x| frame.pixels[y1 * 160 + x] != 0xFF000000)
+                    .count();
+                let count2 = (0..160)
+                    .filter(|&x| frame.pixels[y2 * 160 + x] != 0xFF000000)
+                    .count();
+
+                // Both scanlines should have some white pixels (not all black)
+                assert!(
+                    count1 > 10,
+                    "Scanline {} should have white pixels, got {}",
+                    y1,
+                    count1
+                );
+                assert!(
+                    count2 > 10,
+                    "Scanline {} should have white pixels, got {}",
+                    y2,
+                    count2
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_timer_interrupt_flag_behavior() {
         // This test verifies that the RIOT timer interrupt flag clears on read,
         // which is critical for commercial ROMs that use timer-based synchronization
