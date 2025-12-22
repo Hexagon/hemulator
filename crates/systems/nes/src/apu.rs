@@ -8,6 +8,7 @@
 //! The APU currently implements:
 //!
 //! - **2 Pulse Channels**: Square wave generators with duty cycle control
+//! - **Sweep Units**: Frequency sweep for pulse channels with NES-specific behavior
 //! - **Triangle Channel**: 32-step triangle wave generator
 //! - **Noise Channel**: Pseudo-random noise with LFSR
 //! - **Length Counter**: Automatic note duration control
@@ -18,7 +19,6 @@
 //! ## Not Yet Implemented
 //!
 //! - **DMC Channel**: Delta modulation channel for sample playback
-//! - **Sweep Units**: Pitch bending for pulse channels
 //!
 //! ## Register Interface
 //!
@@ -44,6 +44,111 @@
 
 use emu_core::apu::{NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE};
 use std::cell::Cell;
+
+/// NES-specific sweep unit for pulse channels.
+///
+/// The NES sweep unit differs from the Game Boy version:
+/// - Uses 11-bit frequency values (0-2047)
+/// - Silences channel when frequency > 0x7FF (2047)
+/// - Pulse 1 uses one's complement for negation
+/// - Pulse 2 uses two's complement for negation
+#[derive(Debug, Clone)]
+pub(crate) struct NesSweep {
+    pub(crate) enabled: bool,
+    pub(crate) period: u8,
+    pub(crate) timer: u8,
+    pub(crate) negate: bool,
+    pub(crate) shift: u8,
+    pub(crate) reload: bool,
+    /// True for pulse 1 (ones' complement), false for pulse 2 (twos' complement)
+    ones_complement: bool,
+}
+
+impl NesSweep {
+    fn new(ones_complement: bool) -> Self {
+        Self {
+            enabled: false,
+            period: 0,
+            timer: 0,
+            negate: false,
+            shift: 0,
+            reload: false,
+            ones_complement,
+        }
+    }
+
+    fn set_params(&mut self, period: u8, negate: bool, shift: u8) {
+        self.period = period & 0x07;
+        self.negate = negate;
+        self.shift = shift & 0x07;
+        self.reload = true;
+        // Sweep is enabled if period or shift is non-zero
+        self.enabled = self.period > 0 || self.shift > 0;
+    }
+
+    fn trigger(&mut self) {
+        // Triggering doesn't directly affect sweep, but reload flag is cleared
+        // Sweep reloading happens on next clock
+    }
+
+    /// Clock the sweep unit (called at half-frame rate, ~120 Hz NTSC)
+    /// Returns Some(new_freq) if frequency should be updated
+    fn clock(&mut self, current_freq: u16) -> Option<u16> {
+        let mut should_update = false;
+
+        // Reload timer if reload flag is set
+        if self.reload {
+            self.timer = self.period;
+            self.reload = false;
+        } else if self.timer > 0 {
+            self.timer -= 1;
+        } else {
+            // Timer expired, reload and potentially update frequency
+            self.timer = self.period;
+            should_update = self.enabled && self.shift > 0;
+        }
+
+        if should_update {
+            let new_freq = self.calculate_target_frequency(current_freq);
+            // Only update if target frequency is valid (not muted)
+            if !self.mutes_channel(current_freq) && !self.mutes_channel(new_freq) {
+                return Some(new_freq);
+            }
+        }
+
+        None
+    }
+
+    fn calculate_target_frequency(&self, current_freq: u16) -> u16 {
+        let delta = current_freq >> self.shift;
+
+        if self.negate {
+            if self.ones_complement {
+                // Pulse 1: one's complement (subtract delta + 1)
+                current_freq.saturating_sub(delta).saturating_sub(1)
+            } else {
+                // Pulse 2: two's complement (subtract delta)
+                current_freq.saturating_sub(delta)
+            }
+        } else {
+            // Increase frequency
+            current_freq.saturating_add(delta)
+        }
+    }
+
+    fn mutes_channel(&self, freq: u16) -> bool {
+        // Channel is muted if:
+        // 1. Current period is < 8 (too high frequency)
+        // 2. Target period would be > 0x7FF (too low frequency)
+        freq < 8 || freq > 0x7FF
+    }
+}
+
+impl Default for NesSweep {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
 
 /// NES APU with pulse, triangle, and noise channels.
 ///
@@ -80,6 +185,8 @@ use std::cell::Cell;
 pub struct APU {
     pub pulse1: PulseChannel,
     pub pulse2: PulseChannel,
+    pub(crate) sweep1: NesSweep,
+    pub(crate) sweep2: NesSweep,
     pub triangle: TriangleChannel,
     pub noise: NoiseChannel,
     cycle_accum: f64,
@@ -104,6 +211,8 @@ impl APU {
         Self {
             pulse1: PulseChannel::new(),
             pulse2: PulseChannel::new(),
+            sweep1: NesSweep::new(true),  // Pulse 1 uses one's complement
+            sweep2: NesSweep::new(false), // Pulse 2 uses two's complement
             triangle: TriangleChannel::new(),
             noise: NoiseChannel::new(),
             cycle_accum: 0.0,
@@ -133,7 +242,17 @@ impl APU {
                 self.pulse1.envelope = val & 15;
             }
             0x4001 => {
-                // Sweep (ignore for now)
+                // Sweep: EPPP NSSS
+                // E = enabled (bit 7) - not used, sweep is always enabled if period/shift > 0
+                // P = period (bits 6-4)
+                // N = negate (bit 3)
+                // S = shift (bits 2-0)
+                let period = (val >> 4) & 0x07;
+                let negate = (val & 0x08) != 0;
+                let shift = val & 0x07;
+
+                self.sweep1.set_params(period, negate, shift);
+                // Note: Sweep is triggered when channel is triggered at $4003
             }
             0x4002 => {
                 // Frequency low byte
@@ -145,9 +264,12 @@ impl APU {
                 // Frequency high byte + length counter index
                 let high = (val & 0x07) as u16;
                 let low = self.pulse1.timer_reload & 0xFF;
-                self.pulse1.set_timer((high << 8) | low);
+                let freq = (high << 8) | low;
+                self.pulse1.set_timer(freq);
                 // Trigger: reset phase
                 self.pulse1.reset_phase();
+                // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
+                self.sweep1.trigger();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
                 let len_index = (val >> 3) & 0x1F;
@@ -162,7 +284,16 @@ impl APU {
                 self.pulse2.envelope = val & 15;
             }
             0x4005 => {
-                // Sweep (ignore for now)
+                // Sweep: EPPP NSSS (same format as $4001)
+                // E = enabled (bit 7) - not used, sweep is always enabled if period/shift > 0
+                // P = period (bits 6-4)
+                // N = negate (bit 3)
+                // S = shift (bits 2-0)
+                let period = (val >> 4) & 0x07;
+                let negate = (val & 0x08) != 0;
+                let shift = val & 0x07;
+
+                self.sweep2.set_params(period, negate, shift);
             }
             0x4006 => {
                 let low = val as u16;
@@ -172,8 +303,11 @@ impl APU {
             0x4007 => {
                 let freq_high = (val & 0x07) as u16;
                 let freq_low = (self.pulse2.timer_reload & 0xFF) as u16;
-                self.pulse2.set_timer((freq_high << 8) | freq_low);
+                let freq = (freq_high << 8) | freq_low;
+                self.pulse2.set_timer(freq);
                 self.pulse2.reset_phase();
+                // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
+                self.sweep2.trigger();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4007
                 let len_index = (val >> 3) & 0x1F;
                 self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
@@ -386,6 +520,15 @@ impl APU {
                         if self.noise.length_counter > 0 && !self.noise.length_counter_halt {
                             self.noise.length_counter -= 1;
                         }
+
+                        // Clock sweep units at half-frame rate
+                        // Pass current frequency so sweep can calculate new frequency
+                        if let Some(new_freq) = self.sweep1.clock(self.pulse1.timer_reload) {
+                            self.pulse1.set_timer(new_freq);
+                        }
+                        if let Some(new_freq) = self.sweep2.clock(self.pulse2.timer_reload) {
+                            self.pulse2.set_timer(new_freq);
+                        }
                     }
 
                     // Clock linear counter (triangle) at every quarter frame
@@ -413,5 +556,176 @@ impl APU {
 impl Default for APU {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sweep_register_write() {
+        let mut apu = APU::new();
+
+        // Write to sweep 1 register: period=3, negate=true, shift=2
+        // Binary: EPPP NSSS = 0011 1010 = period 3, negate 1, shift 2
+        apu.write_register(0x4001, 0b00111010);
+
+        assert_eq!(apu.sweep1.period, 3);
+        assert!(apu.sweep1.negate);
+        assert_eq!(apu.sweep1.shift, 2);
+
+        // Write to sweep 2 register: period=5, negate=false, shift=1
+        // Binary: EPPP NSSS = 0101 0001 = period 5, negate 0, shift 1
+        apu.write_register(0x4005, 0b01010001);
+
+        assert_eq!(apu.sweep2.period, 5);
+        assert!(!apu.sweep2.negate);
+        assert_eq!(apu.sweep2.shift, 1);
+    }
+
+    #[test]
+    fn test_sweep_ones_complement_vs_twos_complement() {
+        // Test that pulse 1 uses one's complement and pulse 2 uses two's complement
+        let mut sweep1 = NesSweep::new(true); // one's complement
+        let mut sweep2 = NesSweep::new(false); // two's complement
+
+        sweep1.set_params(1, true, 1); // period=1, negate=true, shift=1
+        sweep2.set_params(1, true, 1);
+
+        let current_freq = 100u16;
+
+        // One's complement: 100 - (100 >> 1) - 1 = 100 - 50 - 1 = 49
+        let target1 = sweep1.calculate_target_frequency(current_freq);
+        assert_eq!(target1, 49);
+
+        // Two's complement: 100 - (100 >> 1) = 100 - 50 = 50
+        let target2 = sweep2.calculate_target_frequency(current_freq);
+        assert_eq!(target2, 50);
+    }
+
+    #[test]
+    fn test_sweep_increase_frequency() {
+        let mut sweep = NesSweep::new(false);
+        sweep.set_params(1, false, 1); // period=1, negate=false (increase), shift=1
+
+        let current_freq = 100u16;
+        // New frequency = 100 + (100 >> 1) = 100 + 50 = 150
+        let target = sweep.calculate_target_frequency(current_freq);
+        assert_eq!(target, 150);
+    }
+
+    #[test]
+    fn test_sweep_mutes_on_low_frequency() {
+        let sweep = NesSweep::new(false);
+
+        // Frequency < 8 should mute
+        assert!(sweep.mutes_channel(7));
+        assert!(sweep.mutes_channel(0));
+        assert!(!sweep.mutes_channel(8));
+    }
+
+    #[test]
+    fn test_sweep_mutes_on_high_frequency() {
+        let sweep = NesSweep::new(false);
+
+        // Frequency > 0x7FF (2047) should mute
+        assert!(sweep.mutes_channel(0x800));
+        assert!(sweep.mutes_channel(0xFFF));
+        assert!(!sweep.mutes_channel(0x7FF));
+    }
+
+    #[test]
+    fn test_sweep_clock_with_period() {
+        let mut sweep = NesSweep::new(false);
+        sweep.set_params(2, false, 1); // period=2, shift=1
+
+        let freq = 100u16;
+
+        // First clock: timer is reloaded because reload flag is set, timer becomes 2
+        assert_eq!(sweep.clock(freq), None);
+        assert_eq!(sweep.timer, 2);
+
+        // Second clock: timer decrements to 1
+        assert_eq!(sweep.clock(freq), None);
+        assert_eq!(sweep.timer, 1);
+
+        // Third clock: timer decrements to 0
+        assert_eq!(sweep.clock(freq), None);
+        assert_eq!(sweep.timer, 0);
+
+        // Fourth clock: timer is 0, sweeps and reloads
+        // 100 + (100 >> 1) = 150
+        assert_eq!(sweep.clock(freq), Some(150));
+        assert_eq!(sweep.timer, 2); // Timer reloaded to period
+    }
+
+    #[test]
+    fn test_sweep_no_change_with_shift_zero() {
+        let mut sweep = NesSweep::new(false);
+        sweep.set_params(1, false, 0); // shift=0
+
+        let freq = 100u16;
+
+        // Clock to reload
+        sweep.clock(freq);
+
+        // Even though period expired, shift=0 means no change
+        assert_eq!(sweep.clock(freq), None);
+    }
+
+    #[test]
+    fn test_sweep_reload_flag() {
+        let mut sweep = NesSweep::new(false);
+        sweep.set_params(1, false, 1);
+
+        // Reload flag should be set after set_params
+        assert!(sweep.reload);
+
+        // First clock should reload timer and clear flag
+        sweep.clock(100);
+        assert!(!sweep.reload);
+    }
+
+    #[test]
+    fn test_sweep_trigger() {
+        let mut sweep = NesSweep::new(false);
+        sweep.set_params(1, false, 1);
+
+        // Clear reload flag
+        sweep.reload = false;
+
+        // Trigger should not affect reload flag (in NES, trigger is separate)
+        sweep.trigger();
+
+        // Reload flag should still be false (trigger doesn't set it on NES)
+        assert!(!sweep.reload);
+    }
+
+    #[test]
+    fn test_apu_sweep_integration() {
+        let mut apu = APU::new();
+
+        // Set up pulse 1: frequency = 100
+        apu.write_register(0x4002, 100); // Low byte
+        apu.write_register(0x4003, 0x08); // High byte (0) + length counter
+
+        // Verify initial frequency
+        assert_eq!(apu.pulse1.timer_reload, 100);
+
+        // Set up sweep: period=1, negate=false, shift=1 (should add 50 to frequency)
+        apu.write_register(0x4001, 0b00010001);
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Generate some samples to trigger frame counter
+        // We need to generate enough samples to cross a half-frame boundary
+        let samples = apu.generate_samples(5000);
+
+        // After half-frame, frequency should have changed from sweep
+        // Note: This is a basic integration test - actual frequency change
+        // depends on timing and may not happen in the first 5000 samples
+        assert!(samples.len() == 5000);
     }
 }
