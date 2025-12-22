@@ -384,7 +384,7 @@ This emulator supports 6 different retro gaming systems. Here's a quick overview
 | **Game Boy** | ⚠️ Functional | Graphics, input, saves | Audio, timer | Playing most GB games (silent) |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
-| **PC/DOS** | 🧪 Experimental | COM/EXE loading | Display, most features | Not recommended |
+| **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS | Full disk I/O, graphics modes, boot | Development/testing |
 
 ### NES (Nintendo Entertainment System)
 
@@ -655,6 +655,74 @@ For N64 games, the standard controller mappings apply with these button equivale
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
 - **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. TMEM texture loading fully implemented. Next steps: textured triangle rendering, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics.
+
+### PC/DOS (IBM PC/XT)
+
+**Status**: 🧪 Experimental (Modular architecture with disk support)  
+**Coverage**: Basic emulation - Custom BIOS, multi-slot mount system
+
+**File Formats**: 
+- Executable: COM/EXE (.com, .exe files)
+- BIOS: Binary ROM (.bin, .rom files)
+- Floppy disks: Disk images (.img, .ima files)
+- Hard drives: Disk images (.img, .vhd files)
+
+**Features**:
+- **8086 CPU core** with complete instruction set
+  - All MOV, arithmetic (ADD, SUB, CMP, INC, DEC), and logical operations (AND, OR, XOR)
+  - Control flow (JMP, conditional jumps, CALL, RET)
+  - Stack operations (PUSH, POP)
+  - Flag manipulation (CLC, STC, CLI, STI, etc.)
+  - See `AGENTS.md` for full instruction set details
+- **Memory bus** (640KB RAM, 128KB VRAM, 256KB ROM)
+- **Custom BIOS** built from assembly source
+  - 64KB BIOS ROM with INT 13h disk services
+  - Source: `test_roms/pc/bios.asm`
+  - Build script: `test_roms/pc/build.sh` (requires NASM)
+  - Replaceable via BIOS mount point
+- **Modular mount point system**:
+  1. **BIOS** (Slot 1) - Custom or replacement BIOS ROM (`.bin`, `.rom`)
+  2. **Floppy A** - Floppy disk drive A: (`.img`, `.ima`)
+  3. **Floppy B** - Floppy disk drive B: (`.img`, `.ima`)
+  4. **Hard Drive C** - Hard disk drive C: (`.img`, `.vhd`)
+- **Disk controller** with INT 13h support
+  - Floppy geometry: 1.44MB format (80 cylinders, 18 sectors, 2 heads)
+  - Hard drive geometry: 10MB format (306 cylinders, 17 sectors, 4 heads)
+  - LBA (Logical Block Address) calculation
+  - Read/write operations to disk images
+- **CGA video** (640x400 text mode)
+- **Keyboard input** with full passthrough
+- Save states (F5/F6)
+
+**Mount Point Usage**:
+To mount a custom BIOS or disk image:
+1. Press F3 to open mount point selector
+2. Select the desired slot (BIOS, FloppyA, FloppyB, or HardDrive)
+3. Choose the file to mount
+
+**Keyboard Input**:
+- All keyboard keys are passed through to the emulated PC
+- Use **Right Ctrl** as host modifier to access emulator function keys (F1-F12)
+- See "PC/DOS Keyboard Input" section for details
+
+**Known Limitations**:
+- **BIOS**: Minimal implementation - INT 13h disk services are stubs
+  - Disk operations return success but don't actually read/write disk data yet
+  - Future: Full INT 13h implementation with actual disk I/O
+- **Display**: Basic CGA text mode only
+  - 80x25 character display in text mode
+  - No graphics modes, no colors yet
+- **Input**: Keyboard passthrough works, but:
+  - No mouse support
+  - No serial/parallel port emulation
+- **Disk I/O**: Infrastructure in place but not yet connected to BIOS
+  - Disk controller implemented with read/write support
+  - BIOS INT 13h handlers exist but return stubs
+  - Next step: Wire disk controller to BIOS interrupts
+- **No audio**: PC speaker not implemented
+- **No timer**: PIT (Programmable Interval Timer) not implemented
+- **Timing**: Frame-based execution - not cycle-accurate
+- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading.
 
 ## Troubleshooting
 
