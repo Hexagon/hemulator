@@ -165,6 +165,82 @@ impl Default for DiskController {
     }
 }
 
+/// Standard floppy disk formats
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloppyFormat {
+    /// 360KB - 5.25" DD (40 tracks, 9 sectors, 2 heads)
+    Floppy360K,
+    /// 720KB - 3.5" DD (80 tracks, 9 sectors, 2 heads)
+    Floppy720K,
+    /// 1.2MB - 5.25" HD (80 tracks, 15 sectors, 2 heads)
+    Floppy1_2M,
+    /// 1.44MB - 3.5" HD (80 tracks, 18 sectors, 2 heads)
+    Floppy1_44M,
+}
+
+impl FloppyFormat {
+    /// Get the size in bytes for this format
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            FloppyFormat::Floppy360K => 368640,   // 360 * 1024
+            FloppyFormat::Floppy720K => 737280,   // 720 * 1024
+            FloppyFormat::Floppy1_2M => 1228800,  // 1200 * 1024
+            FloppyFormat::Floppy1_44M => 1474560, // 1440 * 1024
+        }
+    }
+
+    /// Get the geometry (cylinders, sectors_per_track, heads) for this format
+    pub fn geometry(&self) -> (u16, u8, u8) {
+        match self {
+            FloppyFormat::Floppy360K => (40, 9, 2),
+            FloppyFormat::Floppy720K => (80, 9, 2),
+            FloppyFormat::Floppy1_2M => (80, 15, 2),
+            FloppyFormat::Floppy1_44M => (80, 18, 2),
+        }
+    }
+}
+
+/// Standard hard drive formats
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardDriveFormat {
+    /// 10MB hard drive (306 cylinders, 17 sectors, 4 heads)
+    HardDrive10M,
+    /// 20MB hard drive (612 cylinders, 17 sectors, 4 heads)
+    HardDrive20M,
+    /// 40MB hard drive (980 cylinders, 17 sectors, 5 heads)
+    HardDrive40M,
+}
+
+impl HardDriveFormat {
+    /// Get the size in bytes for this format
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            HardDriveFormat::HardDrive10M => 10653696, // ~10MB
+            HardDriveFormat::HardDrive20M => 21307392, // ~20MB
+            HardDriveFormat::HardDrive40M => 42618880, // ~40MB
+        }
+    }
+
+    /// Get the geometry (cylinders, sectors_per_track, heads) for this format
+    pub fn geometry(&self) -> (u16, u8, u8) {
+        match self {
+            HardDriveFormat::HardDrive10M => (306, 17, 4),
+            HardDriveFormat::HardDrive20M => (612, 17, 4),
+            HardDriveFormat::HardDrive40M => (980, 17, 5),
+        }
+    }
+}
+
+/// Create a blank floppy disk image
+pub fn create_blank_floppy(format: FloppyFormat) -> Vec<u8> {
+    vec![0; format.size_bytes()]
+}
+
+/// Create a blank hard drive image
+pub fn create_blank_hard_drive(format: HardDriveFormat) -> Vec<u8> {
+    vec![0; format.size_bytes()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +375,54 @@ mod tests {
 
         controller.reset();
         assert_eq!(controller.status(), 0);
+    }
+
+    #[test]
+    fn test_create_blank_floppy_360k() {
+        let disk = create_blank_floppy(FloppyFormat::Floppy360K);
+        assert_eq!(disk.len(), 368640);
+        assert_eq!(disk[0], 0);
+        assert_eq!(disk[disk.len() - 1], 0);
+    }
+
+    #[test]
+    fn test_create_blank_floppy_720k() {
+        let disk = create_blank_floppy(FloppyFormat::Floppy720K);
+        assert_eq!(disk.len(), 737280);
+    }
+
+    #[test]
+    fn test_create_blank_floppy_1_44m() {
+        let disk = create_blank_floppy(FloppyFormat::Floppy1_44M);
+        assert_eq!(disk.len(), 1474560);
+    }
+
+    #[test]
+    fn test_create_blank_hard_drive_10m() {
+        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive10M);
+        assert_eq!(disk.len(), 10653696);
+        assert_eq!(disk[0], 0);
+    }
+
+    #[test]
+    fn test_create_blank_hard_drive_20m() {
+        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive20M);
+        assert_eq!(disk.len(), 21307392);
+    }
+
+    #[test]
+    fn test_floppy_format_geometry() {
+        let (c, s, h) = FloppyFormat::Floppy1_44M.geometry();
+        assert_eq!(c, 80);
+        assert_eq!(s, 18);
+        assert_eq!(h, 2);
+    }
+
+    #[test]
+    fn test_hard_drive_format_geometry() {
+        let (c, s, h) = HardDriveFormat::HardDrive10M.geometry();
+        assert_eq!(c, 306);
+        assert_eq!(s, 17);
+        assert_eq!(h, 4);
     }
 }

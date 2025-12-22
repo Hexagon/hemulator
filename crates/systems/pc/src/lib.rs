@@ -20,6 +20,7 @@ use serde_json::Value;
 use thiserror::Error;
 use video::CgaVideo;
 
+pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
 
 #[derive(Debug, Error)]
@@ -431,5 +432,61 @@ mod tests {
         let frame = result.unwrap();
         assert_eq!(frame.width, 640);
         assert_eq!(frame.height, 400);
+    }
+
+    #[test]
+    fn test_mount_multiple_disks() {
+        let mut sys = PcSystem::new();
+
+        // Create disk images
+        let floppy_a = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_44M);
+        let floppy_b = crate::create_blank_floppy(crate::FloppyFormat::Floppy720K);
+        let hard_drive = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive10M);
+
+        // Mount all disks
+        assert!(sys.mount("FloppyA", &floppy_a).is_ok());
+        assert!(sys.mount("FloppyB", &floppy_b).is_ok());
+        assert!(sys.mount("HardDrive", &hard_drive).is_ok());
+
+        // Verify all are mounted
+        assert!(sys.is_mounted("FloppyA"));
+        assert!(sys.is_mounted("FloppyB"));
+        assert!(sys.is_mounted("HardDrive"));
+
+        // Unmount all
+        assert!(sys.unmount("FloppyA").is_ok());
+        assert!(sys.unmount("FloppyB").is_ok());
+        assert!(sys.unmount("HardDrive").is_ok());
+
+        // Verify all are unmounted
+        assert!(!sys.is_mounted("FloppyA"));
+        assert!(!sys.is_mounted("FloppyB"));
+        assert!(!sys.is_mounted("HardDrive"));
+    }
+
+    #[test]
+    fn test_create_blank_disks() {
+        // Test all floppy formats
+        let floppy_360k = crate::create_blank_floppy(crate::FloppyFormat::Floppy360K);
+        assert_eq!(floppy_360k.len(), 368640);
+
+        let floppy_720k = crate::create_blank_floppy(crate::FloppyFormat::Floppy720K);
+        assert_eq!(floppy_720k.len(), 737280);
+
+        let floppy_1_2m = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_2M);
+        assert_eq!(floppy_1_2m.len(), 1228800);
+
+        let floppy_1_44m = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_44M);
+        assert_eq!(floppy_1_44m.len(), 1474560);
+
+        // Test all hard drive formats
+        let hd_10m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive10M);
+        assert_eq!(hd_10m.len(), 10653696);
+
+        let hd_20m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive20M);
+        assert_eq!(hd_20m.len(), 21307392);
+
+        let hd_40m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive40M);
+        assert_eq!(hd_40m.len(), 42618880);
     }
 }
