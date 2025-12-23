@@ -17,6 +17,24 @@ mod cpu;
 mod ppu;
 pub mod ppu_renderer;
 
+/// SNES controller button constants
+pub mod controller {
+    /// SNES controller button bit positions (for 16-bit button state)
+    /// Button layout: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+    pub const B: u16 = 1 << 15; // 0x8000
+    pub const Y: u16 = 1 << 14; // 0x4000
+    pub const SELECT: u16 = 1 << 13; // 0x2000
+    pub const START: u16 = 1 << 12; // 0x1000
+    pub const UP: u16 = 1 << 11; // 0x0800
+    pub const DOWN: u16 = 1 << 10; // 0x0400
+    pub const LEFT: u16 = 1 << 9; // 0x0200
+    pub const RIGHT: u16 = 1 << 8; // 0x0100
+    pub const A: u16 = 1 << 7; // 0x0080
+    pub const X: u16 = 1 << 6; // 0x0040
+    pub const L: u16 = 1 << 5; // 0x0020
+    pub const R: u16 = 1 << 4; // 0x0010
+}
+
 use bus::SnesBus;
 use cpu::SnesCpu;
 use emu_core::{types::Frame, MountPointInfo, System};
@@ -79,6 +97,13 @@ impl SnesSystem {
             pbr: self.cpu.cpu.pbr,
             emulation_mode: self.cpu.cpu.emulation,
         }
+    }
+
+    /// Set controller state for player 1 or 2 (idx: 0 or 1)
+    /// Button layout (16 bits): B Y Select Start Up Down Left Right A X L R 0 0 0 0
+    /// Example: 0x8000 = B button, 0x0080 = A button
+    pub fn set_controller(&mut self, idx: usize, state: u16) {
+        self.cpu.bus_mut().set_controller(idx, state);
     }
 }
 
@@ -296,5 +321,40 @@ mod tests {
                 .map(|c| format!("0x{:08X}", c))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_controller_api() {
+        let mut snes = SnesSystem::new();
+
+        // Test setting controller with button constants
+        snes.set_controller(0, controller::A | controller::B);
+
+        // Verify the state was set in the bus
+        let bus = snes.cpu.bus();
+        assert_eq!(bus.controller_state[0], controller::A | controller::B);
+    }
+
+    #[test]
+    fn test_controller_buttons() {
+        let mut snes = SnesSystem::new();
+
+        // Test individual buttons
+        snes.set_controller(0, controller::START);
+        assert_eq!(snes.cpu.bus().controller_state[0], 0x1000);
+
+        // Test multiple buttons
+        snes.set_controller(
+            0,
+            controller::A | controller::B | controller::UP | controller::DOWN,
+        );
+        assert_eq!(snes.cpu.bus().controller_state[0], 0x8C80);
+
+        // Test controller 2
+        snes.set_controller(
+            1,
+            controller::X | controller::Y | controller::L | controller::R,
+        );
+        assert_eq!(snes.cpu.bus().controller_state[1], 0x4070);
     }
 }

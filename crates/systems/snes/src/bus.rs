@@ -4,6 +4,7 @@ use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 use crate::SnesError;
 use emu_core::cpu_65c816::Memory65c816;
+use std::cell::Cell;
 
 /// SNES memory bus
 pub struct SnesBus {
@@ -15,6 +16,13 @@ pub struct SnesBus {
     ppu: Ppu,
     /// Frame counter for VBlank emulation
     frame_counter: u64,
+    /// Controller state (16 bits per controller)
+    /// Button mapping: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+    pub controller_state: [u16; 2],
+    /// Controller shift registers for serial readout
+    controller_shift: [Cell<u16>; 2],
+    /// Controller strobe state
+    controller_strobe: bool,
 }
 
 impl SnesBus {
@@ -24,6 +32,9 @@ impl SnesBus {
             cartridge: None,
             ppu: Ppu::new(),
             frame_counter: 0,
+            controller_state: [0; 2],
+            controller_shift: [Cell::new(0), Cell::new(0)],
+            controller_strobe: false,
         }
     }
 
@@ -46,6 +57,14 @@ impl SnesBus {
 
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
+    }
+
+    /// Set controller state (16 buttons) for controller `idx` (0 or 1).
+    /// Button layout: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+    pub fn set_controller(&mut self, idx: usize, state: u16) {
+        if idx < 2 {
+            self.controller_state[idx] = state;
+        }
     }
 
     pub fn get_rom_size(&self) -> usize {
@@ -84,10 +103,48 @@ impl Memory65c816 for SnesBus {
                     0x0000..=0x1FFF => self.wram[offset as usize],
                     // Hardware registers (PPU: $2100-$213F)
                     0x2100..=0x213F => self.ppu.read_register(offset),
+                    // $4016 - JOYSER0 - Controller 1 Serial Data
+                    0x4016 => {
+                        // Bit 0: Serial data for controller 1
+                        // Bits 1-7: Open bus (typically 0)
+                        if self.controller_strobe {
+                            // While strobed, return bit 0 of the current state
+                            (self.controller_state[0] & 1) as u8
+                        } else {
+                            // Shift out the latched state
+                            let cur = self.controller_shift[0].get();
+                            let bit = (cur & 1) as u8;
+                            self.controller_shift[0].set(cur >> 1);
+                            bit
+                        }
+                    }
+                    // $4017 - JOYSER1 - Controller 2 Serial Data
+                    0x4017 => {
+                        // Bit 0: Serial data for controller 2
+                        // Bits 1-4: Not used (0x1E if nothing connected)
+                        if self.controller_strobe {
+                            (self.controller_state[1] & 1) as u8
+                        } else {
+                            let cur = self.controller_shift[1].get();
+                            let bit = (cur & 1) as u8;
+                            self.controller_shift[1].set(cur >> 1);
+                            bit
+                        }
+                    }
+                    // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (set during VBlank)
+                    0x4218 => (self.controller_state[0] & 0xFF) as u8, // JOY1L
+                    0x4219 => ((self.controller_state[0] >> 8) & 0xFF) as u8, // JOY1H
+                    0x421A => (self.controller_state[1] & 0xFF) as u8, // JOY2L
+                    0x421B => ((self.controller_state[1] >> 8) & 0xFF) as u8, // JOY2H
+                    0x421C => 0,                                       // JOY3L (not implemented)
+                    0x421D => 0,                                       // JOY3H (not implemented)
+                    0x421E => 0,                                       // JOY4L (not implemented)
+                    0x421F => 0,                                       // JOY4H (not implemented)
                     // $4212 - HVBJOY - H/V Blank and Joypad Status
                     0x4212 => {
                         // Bit 7: VBlank flag (set during VBlank)
                         // Bit 6: HBlank flag
+                        // Bit 0: Auto-joypad read in progress (0 = finished)
                         // For simplicity, alternate VBlank every ~30 frames (simulate ~60Hz at ~2Hz toggle)
                         if (self.frame_counter / 30).is_multiple_of(2) {
                             0x80 // VBlank
@@ -138,6 +195,18 @@ impl Memory65c816 for SnesBus {
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
                     // Hardware registers (PPU: $2100-$213F)
                     0x2100..=0x213F => self.ppu.write_register(offset, val),
+                    // $4016 - JOYWR - Controller Strobe
+                    0x4016 => {
+                        // Bit 0: Controller strobe (1 = latch, 0 = shift)
+                        let old_strobe = self.controller_strobe;
+                        self.controller_strobe = (val & 1) != 0;
+
+                        // On falling edge (1 -> 0), latch the controller state
+                        if old_strobe && !self.controller_strobe {
+                            self.controller_shift[0].set(self.controller_state[0]);
+                            self.controller_shift[1].set(self.controller_state[1]);
+                        }
+                    }
                     // Other hardware registers
                     0x2000..=0x5FFF => {} // Stub - ignore writes
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)
@@ -165,5 +234,91 @@ impl Memory65c816 for SnesBus {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_controller_registers() {
+        let mut bus = SnesBus::new();
+
+        // Set controller 1 state: B button (bit 15)
+        bus.set_controller(0, 0x8000);
+
+        // Read auto-joypad registers
+        let joy1l = bus.read(0x4218);
+        let joy1h = bus.read(0x4219);
+        assert_eq!(joy1l, 0x00);
+        assert_eq!(joy1h, 0x80); // B button
+    }
+
+    #[test]
+    fn test_controller_serial_read() {
+        let mut bus = SnesBus::new();
+
+        // Set controller state: A button (bit 7)
+        bus.set_controller(0, 0x0080);
+
+        // Latch state
+        bus.write(0x4016, 1);
+        bus.write(0x4016, 0);
+
+        // Read bits serially (SNES sends LSB first)
+        let mut bits_read = 0u16;
+        for i in 0..16 {
+            let bit = bus.read(0x4016) & 1;
+            bits_read |= (bit as u16) << i;
+        }
+
+        assert_eq!(bits_read, 0x0080); // Should match the A button state
+    }
+
+    #[test]
+    fn test_controller_strobe() {
+        let mut bus = SnesBus::new();
+
+        // Set controller state
+        bus.set_controller(0, 0x1234);
+
+        // Strobe on - should read current bit 0
+        bus.write(0x4016, 1);
+        let bit_strobed = bus.read(0x4016) & 1;
+        assert_eq!(bit_strobed, 0); // bit 0 of 0x1234 is 0
+
+        // Strobe off - latch and shift
+        bus.write(0x4016, 0);
+
+        // Read first bit
+        let bit0 = bus.read(0x4016) & 1;
+        assert_eq!(bit0, 0); // LSB of 0x1234
+    }
+
+    #[test]
+    fn test_dual_controllers() {
+        let mut bus = SnesBus::new();
+
+        // Set different states for both controllers
+        bus.set_controller(0, 0xAAAA);
+        bus.set_controller(1, 0x5555);
+
+        // Read auto-joypad registers
+        assert_eq!(bus.read(0x4218), 0xAA); // JOY1L
+        assert_eq!(bus.read(0x4219), 0xAA); // JOY1H
+        assert_eq!(bus.read(0x421A), 0x55); // JOY2L
+        assert_eq!(bus.read(0x421B), 0x55); // JOY2H
+
+        // Latch both controllers
+        bus.write(0x4016, 1);
+        bus.write(0x4016, 0);
+
+        // Read first bits from both controllers
+        let bit1_0 = bus.read(0x4016) & 1;
+        let bit2_0 = bus.read(0x4017) & 1;
+
+        assert_eq!(bit1_0, 0); // LSB of 0xAAAA
+        assert_eq!(bit2_0, 1); // LSB of 0x5555
     }
 }
