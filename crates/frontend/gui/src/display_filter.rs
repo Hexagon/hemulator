@@ -126,10 +126,10 @@ fn apply_sony_trinitron(buffer: &mut [u32], width: usize, height: usize) {
                     let g = ((color >> 8) & 0xFF) as u8;
                     let b = (color & 0xFF) as u8;
 
-                    // Very subtle scanlines (92% brightness)
-                    let r = ((r as u16 * 235) >> 8) as u8;
-                    let g = ((g as u16 * 235) >> 8) as u8;
-                    let b = ((b as u16 * 235) >> 8) as u8;
+                    // Very subtle scanlines (95% brightness)
+                    let r = ((r as u16 * 243) >> 8) as u8;
+                    let g = ((g as u16 * 243) >> 8) as u8;
+                    let b = ((b as u16 * 243) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -288,8 +288,8 @@ fn apply_ibm5151(buffer: &mut [u32], width: usize, height: usize) {
             let (_, g_curr, _) = unpack_rgb(current);
             let (_, g_left, _) = unpack_rgb(left);
 
-            // Strong glow effect (20% from left neighbor)
-            let g = ((g_curr as u16 * 204 + g_left as u16 * 51) >> 8) as u8;
+            // Moderate glow effect (12% from left neighbor)
+            let g = ((g_curr as u16 * 225 + g_left as u16 * 31) >> 8) as u8;
 
             buffer[idx] = pack_rgb(
                 ((g as u16 * 30) >> 8) as u8,
@@ -308,10 +308,10 @@ fn apply_ibm5151(buffer: &mut [u32], width: usize, height: usize) {
                     let color = buffer[idx];
                     let (r, g, b) = unpack_rgb(color);
 
-                    // Moderate scanlines (80% brightness)
-                    let r = ((r as u16 * 204) >> 8) as u8;
-                    let g = ((g as u16 * 204) >> 8) as u8;
-                    let b = ((b as u16 * 204) >> 8) as u8;
+                    // Subtle scanlines (90% brightness)
+                    let r = ((r as u16 * 230) >> 8) as u8;
+                    let g = ((g as u16 * 230) >> 8) as u8;
+                    let b = ((b as u16 * 230) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -344,10 +344,10 @@ fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
             let (r_curr, g_curr, b_curr) = unpack_rgb(current);
             let (r_left, g_left, b_left) = unpack_rgb(left);
 
-            // Medium blend (15% from left)
-            let r = ((r_curr as u16 * 217 + r_left as u16 * 38) >> 8) as u8;
-            let g = ((g_curr as u16 * 217 + g_left as u16 * 38) >> 8) as u8;
-            let b = ((b_curr as u16 * 217 + b_left as u16 * 38) >> 8) as u8;
+            // Subtle blend (10% from left)
+            let r = ((r_curr as u16 * 230 + r_left as u16 * 26) >> 8) as u8;
+            let g = ((g_curr as u16 * 230 + g_left as u16 * 26) >> 8) as u8;
+            let b = ((b_curr as u16 * 230 + b_left as u16 * 26) >> 8) as u8;
 
             buffer[idx] = pack_rgb(r, g, b);
         }
@@ -362,10 +362,10 @@ fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
                     let color = buffer[idx];
                     let (r, g, b) = unpack_rgb(color);
 
-                    // Moderate scanlines (75% brightness)
-                    let r = ((r as u16 * 191) >> 8) as u8;
-                    let g = ((g as u16 * 191) >> 8) as u8;
-                    let b = ((b as u16 * 191) >> 8) as u8;
+                    // Subtle scanlines (85% brightness)
+                    let r = ((r as u16 * 217) >> 8) as u8;
+                    let g = ((g as u16 * 217) >> 8) as u8;
+                    let b = ((b as u16 * 217) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -426,8 +426,8 @@ fn apply_sharp_lcd(buffer: &mut [u32], width: usize, height: usize) {
                 // Convert to luminance with reduced contrast
                 let lum = ((r as u16 * 77 + g as u16 * 150 + b as u16 * 29) >> 8) as u8;
 
-                // Reduce contrast (compress range to 64-192 instead of 0-255)
-                let lum = 64 + ((lum as u16 * 128) >> 8);
+                // Reduce contrast slightly (compress range to 32-224 instead of 0-255)
+                let lum = 32 + ((lum as u16 * 192) >> 8);
 
                 // LCD has slight blue/green tint
                 let r = ((lum * 90) >> 8) as u8; // Less red
@@ -489,10 +489,10 @@ fn apply_sharp_lcd(buffer: &mut [u32], width: usize, height: usize) {
                     let color = buffer[idx];
                     let (r, g, b) = unpack_rgb(color);
 
-                    // Darken border pixels
-                    let r = ((r as u16 * 179) >> 8) as u8; // 70% brightness
-                    let g = ((g as u16 * 179) >> 8) as u8;
-                    let b = ((b as u16 * 179) >> 8) as u8;
+                    // Slightly darken border pixels
+                    let r = ((r as u16 * 217) >> 8) as u8; // 85% brightness
+                    let g = ((g as u16 * 217) >> 8) as u8;
+                    let b = ((b as u16 * 217) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -524,7 +524,7 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
                 let dx = x as f32 - center_x;
                 let dy = y as f32 - center_y;
                 let dist = (dx * dx + dy * dy).sqrt();
-                let vignette = 1.0 - ((dist / max_dist) * 0.4); // 40% darkening at edges
+                let vignette = 1.0 - ((dist / max_dist) * 0.25); // 25% darkening at edges
 
                 // Apply vignette
                 lum = (lum as f32 * vignette) as u8;
@@ -543,10 +543,10 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
                     let color = buffer[idx];
                     let (r, g, b) = unpack_rgb(color);
 
-                    // Heavy scanlines (50% brightness)
-                    let r = r >> 1;
-                    let g = g >> 1;
-                    let b = b >> 1;
+                    // Moderate scanlines (70% brightness)
+                    let r = ((r as u16 * 179) >> 8) as u8;
+                    let g = ((g as u16 * 179) >> 8) as u8;
+                    let b = ((b as u16 * 179) >> 8) as u8;
                     buffer[idx] = pack_rgb(r, g, b);
                 }
             }
@@ -561,10 +561,10 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
                 let color = buffer[idx];
                 let (r, g, b) = unpack_rgb(color);
 
-                // Compress dynamic range (vintage TVs had limited contrast)
-                let r = 32 + ((r as u16 * 192) >> 8);
-                let g = 32 + ((g as u16 * 192) >> 8);
-                let b = 32 + ((b as u16 * 192) >> 8);
+                // Slightly compress dynamic range (vintage TVs had limited contrast)
+                let r = 16 + ((r as u16 * 224) >> 8);
+                let g = 16 + ((g as u16 * 224) >> 8);
+                let b = 16 + ((b as u16 * 224) >> 8);
 
                 buffer[idx] = pack_rgb(r as u8, g as u8, b as u8);
             }
