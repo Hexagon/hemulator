@@ -11,6 +11,10 @@ mod cpu;
 mod disk;
 mod keyboard;
 mod video;
+mod video_adapter;
+mod video_adapter_cga_graphics; // CGA graphics modes with mode switching
+mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
+mod video_adapter_software;
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
@@ -22,12 +26,14 @@ use emu_core::{
 };
 use serde_json::Value;
 use thiserror::Error;
-use video::CgaVideo;
+use video_adapter::VideoAdapter;
+use video_adapter_software::SoftwareCgaAdapter;
 
 pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external use
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
+pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA graphics adapter and modes
 
 #[derive(Debug, Error)]
 pub enum PcError {
@@ -44,7 +50,7 @@ pub struct PcSystem {
     cpu: PcCpu,
     cycles: u64,
     frame_cycles: u64,
-    video: CgaVideo,
+    video: Box<dyn VideoAdapter>,
 }
 
 impl Default for PcSystem {
@@ -73,7 +79,7 @@ impl PcSystem {
             cpu,
             cycles: 0,
             frame_cycles: 0,
-            video: CgaVideo::new(),
+            video: Box::new(SoftwareCgaAdapter::new()),
         }
     }
 
@@ -195,7 +201,7 @@ impl System for PcSystem {
         self.ensure_boot_sector_loaded();
 
         // Create frame buffer for text mode 80x25 (640x400 pixels)
-        let mut frame = Frame::new(640, 400);
+        let mut frame = Frame::new(self.video.fb_width() as u32, self.video.fb_height() as u32);
 
         let mut cycles_this_frame = 0u32;
 

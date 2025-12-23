@@ -598,10 +598,53 @@ Detailed implementation notes:
   - **Timing**:
     - 4.77 MHz CPU clock (IBM PC standard)
     - ~79,500 cycles per frame at 60 Hz
+  - **Video Adapter (Modular Architecture)**:
+    - System-specific implementation in `crates/systems/pc/src/video_adapter*.rs`
+    - **Trait-based abstraction** following N64's RdpRenderer pattern:
+      - `VideoAdapter` trait: Common interface for all rendering backends
+      - `SoftwareCgaAdapter`: CPU-based CGA text mode (80x25) renderer
+      - `CgaGraphicsAdapter`: CGA graphics modes with runtime mode switching
+        - **Text Mode**: 80x25 characters (640x400 pixels)
+        - **Graphics Mode 4**: 320x200, 4 colors (2 bits per pixel)
+        - **Graphics Mode 6**: 640x200, 2 colors (1 bit per pixel)
+      - Future support for hardware-accelerated adapters (OpenGL, Vulkan)
+    - **Design Benefits**:
+      - Clean separation: PcSystem manages state, adapter handles rendering
+      - Pluggable backends: Easy to swap implementations at runtime
+      - Mode switching: Graphics adapter supports multiple CGA modes
+      - Consistent with other systems' modular renderer architecture
+    - **Software CGA Adapter**:
+      - Resolution: 640x400 pixels (80x25 characters, 8x16 font)
+      - 16-color CGA palette with proper RGB mapping
+      - Text mode rendering with attribute bytes (foreground/background)
+      - Character cell format: 2 bytes per cell (ASCII + attribute)
+      - IBM PC 8x16 font (simplified, basic ASCII coverage)
+    - **CGA Graphics Adapter**:
+      - Mode switching support (text/graphics modes)
+      - **Graphics Mode 4** (320x200, 4-color):
+        - 2 bits per pixel
+        - Palette: Black, Cyan, Magenta, White
+        - Interlaced scanline addressing (even/odd at different offsets)
+        - Uses 16KB VRAM
+      - **Graphics Mode 6** (640x200, 2-color):
+        - 1 bit per pixel (black and white)
+        - Interlaced scanline addressing
+        - Uses 16KB VRAM
+      - Pixel-level drawing support for graphics modes
+      - Compatible with VideoAdapter trait for easy switching
+    - **Backward Compatibility**:
+      - Legacy `CgaVideo` type alias (deprecated)
+      - Re-exports from `video.rs` for existing code
+    - **Future Enhancements**:
+      - Additional CGA palettes (green/red/brown)
+      - EGA/VGA adapter implementations
+      - Hardware-accelerated rendering backends
   - **Display**:
-    - 640x400 frame buffer (text mode 80x25 equivalent)
-    - Currently renders black screen (video hardware not implemented)
-  - All tests pass (22 tests total)
+    - Multiple display modes via CGA graphics adapter
+    - Text mode: 640x400 (80x25 characters)
+    - Graphics modes: 320x200 4-color, 640x200 2-color
+  - All tests pass (93 tests total)
+
 
 - **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)
   - Uses `cpu_65c816` from core with SNES-specific bus implementation
@@ -934,6 +977,75 @@ pub struct GbApu {
 - **Mixing levels**: Balance channel volumes to avoid clipping or distortion
 - **State management**: Save/restore APU state for save states
 - **Test coverage**: Write tests before implementing to verify correctness
+
+## PC Video Adapter Implementation Guidelines
+
+When implementing a new video adapter for the PC system or enhancing existing adapters:
+
+### Component Selection
+
+1. **Identify the graphics hardware**: Research the target adapter's specifications
+   - Resolution modes (text mode, graphics modes)
+   - Color depth and palette support
+   - Hardware features (scrolling, sprites, character sets)
+   - Memory layout and register interface
+
+2. **Choose the implementation approach**:
+   - **Software rendering**: CPU-based, maximum compatibility, easier debugging
+   - **Hardware rendering**: GPU-accelerated, better performance for complex effects
+   - Follow the `VideoAdapter` trait pattern
+
+3. **Understand the modular architecture**:
+   - **VideoAdapter trait** (`video_adapter.rs`): Common interface for all adapters
+   - **SoftwareCgaAdapter** (`video_adapter_software.rs`): Reference implementation
+   - **PcSystem**: Uses `Box<dyn VideoAdapter>` for pluggable backends
+
+### Implementation Steps
+
+1. **Create adapter structure** in `crates/systems/pc/src/video_adapter_*.rs`
+2. **Implement the `VideoAdapter` trait**:
+   ```rust
+   pub trait VideoAdapter: Send {
+       fn init(&mut self, width: usize, height: usize);
+       fn get_frame(&self) -> &Frame;
+       fn get_frame_mut(&mut self) -> &mut Frame;
+       fn fb_width(&self) -> usize;
+       fn fb_height(&self) -> usize;
+       fn render(&self, vram: &[u8], pixels: &mut [u32]);
+       fn reset(&mut self);
+       fn name(&self) -> &str;
+       fn is_hardware_accelerated(&self) -> bool;
+       fn resize(&mut self, width: usize, height: usize);
+   }
+   ```
+3. **Handle VRAM format correctly**: CGA text mode uses 2 bytes per character (ASCII + attribute)
+4. **Implement color mapping**: Convert hardware color values to ARGB8888 format
+5. **Add comprehensive tests**: Test each mode, color, and rendering feature
+6. **Update module exports**: Add to `lib.rs` module list
+
+### Example Adapters to Implement
+
+- **EGA/VGA Text Mode**: 16 colors, multiple font sizes
+- **CGA Graphics Mode**: 320x200 4-color, 640x200 2-color
+- **VGA Graphics Mode**: 320x200 256-color (Mode 13h)
+- **Hardware-Accelerated CGA**: OpenGL/Vulkan backend for text mode
+
+### Testing Strategy
+
+- Test all supported modes independently
+- Test color palette accuracy (compare against real hardware)
+- Test text rendering with various fonts and attributes
+- Test graphics mode pixel accuracy
+- Test adapter switching at runtime
+- Add integration tests with known output patterns
+
+### Common Pitfalls
+
+- **Color format confusion**: Ensure consistent ARGB8888 output
+- **VRAM layout errors**: Verify byte ordering and memory layout
+- **Font rendering**: Use correct glyph data for character sets
+- **Framebuffer size**: Match resolution to actual output dimensions
+- **Thread safety**: Ensure adapter is `Send` for trait object compatibility
 
 ## Documentation Structure
 

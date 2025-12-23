@@ -1,269 +1,33 @@
-//! PC video hardware implementation
+//! PC video hardware implementation (deprecated - use video_adapter modules)
 //!
-//! This module implements basic CGA text mode (80x25) video output.
-//! The video buffer is located at 0xB8000 in memory.
+//! This module is kept for backward compatibility. New code should use the
+//! modular video adapter system:
+//! - `video_adapter::VideoAdapter` trait
+//! - `video_adapter_software::SoftwareCgaAdapter` implementation
+//!
+//! The video adapter system follows the same pattern as N64's RdpRenderer,
+//! allowing for both software and hardware-accelerated rendering.
 
-/// CGA text mode colors
-#[derive(Debug, Clone, Copy)]
-#[repr(u8)]
-pub enum CgaColor {
-    Black = 0,
-    Blue = 1,
-    Green = 2,
-    Cyan = 3,
-    Red = 4,
-    Magenta = 5,
-    Brown = 6,
-    LightGray = 7,
-    DarkGray = 8,
-    LightBlue = 9,
-    LightGreen = 10,
-    LightCyan = 11,
-    LightRed = 12,
-    LightMagenta = 13,
-    Yellow = 14,
-    White = 15,
-}
+// Re-export items from the new modular system for compatibility
+#[allow(unused_imports)] // Re-exported for public API
+pub use crate::video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode};
+#[allow(unused_imports)] // Re-exported for public API
+pub use crate::video_adapter_software::{CgaColor, SoftwareCgaAdapter};
 
-impl CgaColor {
-    /// Convert CGA color to RGB888
-    pub fn to_rgb(self) -> u32 {
-        match self {
-            CgaColor::Black => 0xFF000000,
-            CgaColor::Blue => 0xFF0000AA,
-            CgaColor::Green => 0xFF00AA00,
-            CgaColor::Cyan => 0xFF00AAAA,
-            CgaColor::Red => 0xFFAA0000,
-            CgaColor::Magenta => 0xFFAA00AA,
-            CgaColor::Brown => 0xFFAA5500,
-            CgaColor::LightGray => 0xFFAAAAAA,
-            CgaColor::DarkGray => 0xFF555555,
-            CgaColor::LightBlue => 0xFF5555FF,
-            CgaColor::LightGreen => 0xFF55FF55,
-            CgaColor::LightCyan => 0xFF55FFFF,
-            CgaColor::LightRed => 0xFFFF5555,
-            CgaColor::LightMagenta => 0xFFFF55FF,
-            CgaColor::Yellow => 0xFFFFFF55,
-            CgaColor::White => 0xFFFFFFFF,
-        }
-    }
-
-    /// Create from 4-bit color value
-    pub fn from_u8(val: u8) -> Self {
-        match val & 0x0F {
-            0 => CgaColor::Black,
-            1 => CgaColor::Blue,
-            2 => CgaColor::Green,
-            3 => CgaColor::Cyan,
-            4 => CgaColor::Red,
-            5 => CgaColor::Magenta,
-            6 => CgaColor::Brown,
-            7 => CgaColor::LightGray,
-            8 => CgaColor::DarkGray,
-            9 => CgaColor::LightBlue,
-            10 => CgaColor::LightGreen,
-            11 => CgaColor::LightCyan,
-            12 => CgaColor::LightRed,
-            13 => CgaColor::LightMagenta,
-            14 => CgaColor::Yellow,
-            _ => CgaColor::White,
-        }
-    }
-}
-
-/// CGA text mode video controller
-pub struct CgaVideo {
-    /// Text mode width in characters
-    width: usize,
-    /// Text mode height in characters
-    height: usize,
-    /// Character width in pixels
-    char_width: usize,
-    /// Character height in pixels
-    char_height: usize,
-}
-
-impl CgaVideo {
-    /// Create a new CGA video controller for 80x25 text mode
-    pub fn new() -> Self {
-        Self {
-            width: 80,
-            height: 25,
-            char_width: 8,
-            char_height: 16,
-        }
-    }
-
-    /// Get the framebuffer width in pixels
-    pub fn fb_width(&self) -> usize {
-        self.width * self.char_width
-    }
-
-    /// Get the framebuffer height in pixels
-    pub fn fb_height(&self) -> usize {
-        self.height * self.char_height
-    }
-
-    /// Render text mode from video memory to a pixel buffer
-    ///
-    /// The video memory is expected to be in CGA text mode format:
-    /// Each character cell consists of 2 bytes:
-    /// - Byte 0: ASCII character code
-    /// - Byte 1: Attribute byte (bits 0-3: foreground color, bits 4-7: background color)
-    pub fn render(&self, vram: &[u8], pixels: &mut [u32]) {
-        // Ensure we have enough VRAM for 80x25 text mode (4000 bytes)
-        let required_vram = self.width * self.height * 2;
-        if vram.len() < required_vram {
-            return;
-        }
-
-        // Clear the framebuffer to black
-        pixels.fill(0xFF000000);
-
-        // Render each character cell
-        for row in 0..self.height {
-            for col in 0..self.width {
-                let cell_offset = (row * self.width + col) * 2;
-                let char_code = vram[cell_offset];
-                let attr = vram[cell_offset + 1];
-
-                let fg_color = CgaColor::from_u8(attr & 0x0F);
-                let bg_color = CgaColor::from_u8((attr >> 4) & 0x0F);
-
-                self.render_char(
-                    char_code,
-                    fg_color,
-                    bg_color,
-                    col * self.char_width,
-                    row * self.char_height,
-                    pixels,
-                );
-            }
-        }
-    }
-
-    /// Render a single character at the specified pixel position
-    fn render_char(
-        &self,
-        char_code: u8,
-        fg_color: CgaColor,
-        bg_color: CgaColor,
-        x: usize,
-        y: usize,
-        pixels: &mut [u32],
-    ) {
-        let fg_rgb = fg_color.to_rgb();
-        let bg_rgb = bg_color.to_rgb();
-
-        // Use IBM PC 8x16 font data
-        let glyph = get_font_glyph(char_code);
-
-        for row in 0..self.char_height {
-            let byte_idx = row.min(glyph.len() - 1);
-            let bits = glyph[byte_idx];
-
-            for col in 0..self.char_width {
-                let pixel_x = x + col;
-                let pixel_y = y + row;
-
-                if pixel_y >= self.fb_height() || pixel_x >= self.fb_width() {
-                    continue;
-                }
-
-                let pixel_idx = pixel_y * self.fb_width() + pixel_x;
-                if pixel_idx >= pixels.len() {
-                    continue;
-                }
-
-                // Check if this pixel should be foreground or background
-                let bit = (bits >> (7 - col)) & 1;
-                pixels[pixel_idx] = if bit == 1 { fg_rgb } else { bg_rgb };
-            }
-        }
-    }
-}
-
-impl Default for CgaVideo {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Get font glyph data for a character (simplified 8x16 font)
-/// This is a simplified version - a real implementation would use the full IBM PC font ROM
-fn get_font_glyph(char_code: u8) -> &'static [u8] {
-    // Basic 8x16 bitmap font for common ASCII characters
-    // Each character is 16 bytes, one byte per row, MSB on the left
-    static FONT_DATA: [[u8; 16]; 256] = generate_basic_font();
-
-    let glyph = &FONT_DATA[char_code as usize];
-
-    // If the glyph is all zeros (except for space which should be blank),
-    // use a simple box pattern for undefined characters
-    if char_code != 0x20 && glyph.iter().all(|&b| b == 0) {
-        // Return a reference to a static box pattern
-        static BOX_GLYPH: [u8; 16] = [
-            0x00, 0x7E, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00,
-            0x00, 0x00,
-        ];
-        &BOX_GLYPH
-    } else {
-        glyph
-    }
-}
-
-/// Generate a basic font covering essential ASCII characters
-const fn generate_basic_font() -> [[u8; 16]; 256] {
-    let mut font = [[0u8; 16]; 256];
-
-    // We'll define some basic characters here
-    // This is a simplified implementation - ideally would use full IBM PC font ROM data
-
-    // Space (0x20)
-    font[0x20] = [0x00; 16];
-
-    // Exclamation mark (0x21) - '!'
-    font[0x21] = [
-        0x00, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    // Letter 'A' (0x41)
-    font[0x41] = [
-        0x00, 0x00, 0x18, 0x3C, 0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x66, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    // Letter 'H' (0x48)
-    font[0x48] = [
-        0x00, 0x00, 0x66, 0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x66, 0x66, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    // Letter 'e' (0x65)
-    font[0x65] = [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x66, 0x66, 0x7E, 0x60, 0x60, 0x3E, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    // Letter 'l' (0x6C)
-    font[0x6C] = [
-        0x00, 0x00, 0x38, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    // Letter 'o' (0x6F)
-    font[0x6F] = [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00, 0x00, 0x00,
-        0x00,
-    ];
-
-    font
-}
+/// Legacy type alias for backward compatibility
+///
+/// DEPRECATED: Use `SoftwareCgaAdapter` directly or work with `VideoAdapter` trait
+#[deprecated(
+    since = "0.2.0",
+    note = "Use SoftwareCgaAdapter or VideoAdapter trait instead"
+)]
+#[allow(dead_code)] // Kept for backward compatibility
+pub type CgaVideo = SoftwareCgaAdapter;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::video_adapter::VideoAdapter;
 
     #[test]
     fn test_cga_color_to_rgb() {
@@ -281,6 +45,7 @@ mod tests {
 
     #[test]
     fn test_cga_video_creation() {
+        #[allow(deprecated)]
         let video = CgaVideo::new();
         assert_eq!(video.fb_width(), 640);
         assert_eq!(video.fb_height(), 400);
@@ -288,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_render_empty_vram() {
-        let video = CgaVideo::new();
+        let video = SoftwareCgaAdapter::new();
         let vram = vec![0u8; 4000];
         let mut pixels = vec![0u32; 640 * 400];
 
@@ -300,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_render_hello_world() {
-        let video = CgaVideo::new();
+        let video = SoftwareCgaAdapter::new();
         let mut vram = vec![0u8; 4000];
 
         // Write "Hello" at position 0
@@ -322,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_render_colored_text() {
-        let video = CgaVideo::new();
+        let video = SoftwareCgaAdapter::new();
         let mut vram = vec![0u8; 4000];
 
         // Write 'A' with light green on blue background
