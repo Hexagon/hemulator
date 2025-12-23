@@ -630,4 +630,62 @@ mod tests {
         assert_eq!(bus.read_ram(0x7C00), 0x00);
         assert_eq!(bus.read_ram(0x7C00 + 510), 0x00);
     }
+
+    #[test]
+    fn test_boot_sector_smoke_test() {
+        // This test uses the test boot sector from test_roms/pc/boot.bin
+        // The boot sector writes "BOOT OK" to video memory
+        let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_roms/pc/boot.bin");
+        
+        // Skip if boot.bin doesn't exist (not built yet)
+        if !std::path::Path::new(boot_bin_path).exists() {
+            eprintln!("Skipping boot sector smoke test: {} not found", boot_bin_path);
+            eprintln!("Build with: cd test_roms/pc && ./build_boot.sh");
+            return;
+        }
+
+        let boot_sector = std::fs::read(boot_bin_path).expect("Failed to read boot.bin");
+        assert_eq!(boot_sector.len(), 512, "Boot sector should be exactly 512 bytes");
+
+        // Create a floppy image with the boot sector
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        floppy[0..512].copy_from_slice(&boot_sector);
+
+        // Create system and mount floppy
+        let mut sys = PcSystem::new();
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Run for a few frames to let the boot code execute
+        for _ in 0..5 {
+            let _ = sys.step_frame();
+        }
+
+        // Check that "BOOT OK" was written to video memory
+        // Video memory is at 0xB8000, which is offset 0x18000 in VRAM
+        // Each character is 2 bytes: character + attribute
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Verify "BOOT OK" (each char followed by green attribute 0x02)
+        if vram.len() > text_offset + 14 {
+            assert_eq!(vram[text_offset], b'B');
+            assert_eq!(vram[text_offset + 1], 0x02);
+            assert_eq!(vram[text_offset + 2], b'O');
+            assert_eq!(vram[text_offset + 3], 0x02);
+            assert_eq!(vram[text_offset + 4], b'O');
+            assert_eq!(vram[text_offset + 5], 0x02);
+            assert_eq!(vram[text_offset + 6], b'T');
+            assert_eq!(vram[text_offset + 7], 0x02);
+            assert_eq!(vram[text_offset + 8], b' ');
+            assert_eq!(vram[text_offset + 9], 0x02);
+            assert_eq!(vram[text_offset + 10], b'O');
+            assert_eq!(vram[text_offset + 11], 0x02);
+            assert_eq!(vram[text_offset + 12], b'K');
+            assert_eq!(vram[text_offset + 13], 0x02);
+            println!("Boot sector smoke test passed: BOOT OK displayed");
+        } else {
+            panic!("VRAM too small");
+        }
+    }
 }
