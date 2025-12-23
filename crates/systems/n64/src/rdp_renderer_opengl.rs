@@ -715,6 +715,51 @@ impl RdpRenderer for OpenGLRdpRenderer {
         }
     }
 
+    fn draw_triangle_textured(
+        &mut self,
+        _x0: i32,
+        _y0: i32,
+        _s0: f32,
+        _t0: f32,
+        _x1: i32,
+        _y1: i32,
+        _s1: f32,
+        _t1: f32,
+        _x2: i32,
+        _y2: i32,
+        _s2: f32,
+        _t2: f32,
+        _texture: &dyn Fn(f32, f32) -> u32,
+        _scissor: &ScissorBox,
+    ) {
+        // TODO: Implement OpenGL textured triangle rendering
+        // For now, this is a stub - textured rendering not yet supported in OpenGL backend
+    }
+
+    fn draw_triangle_textured_zbuffer(
+        &mut self,
+        _x0: i32,
+        _y0: i32,
+        _z0: u16,
+        _s0: f32,
+        _t0: f32,
+        _x1: i32,
+        _y1: i32,
+        _z1: u16,
+        _s1: f32,
+        _t1: f32,
+        _x2: i32,
+        _y2: i32,
+        _z2: u16,
+        _s2: f32,
+        _t2: f32,
+        _texture: &dyn Fn(f32, f32) -> u32,
+        _scissor: &ScissorBox,
+    ) {
+        // TODO: Implement OpenGL textured triangle rendering with Z-buffer
+        // For now, this is a stub - textured rendering not yet supported in OpenGL backend
+    }
+
     fn clear_zbuffer(&mut self) {
         unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));

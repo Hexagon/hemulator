@@ -681,6 +681,102 @@ impl Rdp {
                     x0, y0, 0x8000, c0, x1, y1, 0x8000, c1, x2, y2, 0x8000, c2,
                 );
             }
+            // Textured triangle (0x0A) - custom format for texture mapping demo
+            0x0A => {
+                // Simplified custom format:
+                // word0: bits 23-12 = x0, bits 11-0 = y0
+                // word1: bits 31-24 = x1, bits 23-16 = y1, bits 15-8 = x2, bits 7-0 = y2
+                // Texture coordinates: simple mapping based on vertex position
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                // Generate simple texture coordinates based on vertex positions
+                // Use normalized coordinates [0, 1] based on screen position
+                let s0 = (x0 as f32 / self.width as f32) * 64.0; // Scale to texture size
+                let t0 = (y0 as f32 / self.height as f32) * 64.0;
+                let s1 = (x1 as f32 / self.width as f32) * 64.0;
+                let t1 = (y1 as f32 / self.height as f32) * 64.0;
+                let s2 = (x2 as f32 / self.width as f32) * 64.0;
+                let t2 = (y2 as f32 / self.height as f32) * 64.0;
+
+                // Use tile 0 for texture sampling
+                let tile = 0;
+                let rdp_ref = self as *const Self;
+                let texture_sampler = move |s: f32, t: f32| -> u32 {
+                    unsafe { (*rdp_ref).sample_texture(tile, s as u32, t as u32) }
+                };
+
+                self.renderer.draw_triangle_textured(
+                    x0,
+                    y0,
+                    s0,
+                    t0,
+                    x1,
+                    y1,
+                    s1,
+                    t1,
+                    x2,
+                    y2,
+                    s2,
+                    t2,
+                    &texture_sampler,
+                    &self.scissor,
+                );
+            }
+            // Textured triangle with Z-buffer (0x0B)
+            0x0B => {
+                // Similar to 0x0A but with Z-buffer testing
+                let x0 = ((word0 >> 12) & 0xFFF) as i32;
+                let y0 = (word0 & 0xFFF) as i32;
+                let x1 = ((word1 >> 24) & 0xFF) as i32;
+                let y1 = ((word1 >> 16) & 0xFF) as i32;
+                let x2 = ((word1 >> 8) & 0xFF) as i32;
+                let y2 = (word1 & 0xFF) as i32;
+
+                // Generate texture coordinates
+                let s0 = (x0 as f32 / self.width as f32) * 64.0;
+                let t0 = (y0 as f32 / self.height as f32) * 64.0;
+                let s1 = (x1 as f32 / self.width as f32) * 64.0;
+                let t1 = (y1 as f32 / self.height as f32) * 64.0;
+                let s2 = (x2 as f32 / self.width as f32) * 64.0;
+                let t2 = (y2 as f32 / self.height as f32) * 64.0;
+
+                // Mid-range depth for all vertices
+                let z0 = 0x8000u16;
+                let z1 = 0x8000u16;
+                let z2 = 0x8000u16;
+
+                // Use tile 0 for texture sampling
+                let tile = 0;
+                let rdp_ref = self as *const Self;
+                let texture_sampler = move |s: f32, t: f32| -> u32 {
+                    unsafe { (*rdp_ref).sample_texture(tile, s as u32, t as u32) }
+                };
+
+                self.renderer.draw_triangle_textured_zbuffer(
+                    x0,
+                    y0,
+                    z0,
+                    s0,
+                    t0,
+                    x1,
+                    y1,
+                    z1,
+                    s1,
+                    t1,
+                    x2,
+                    y2,
+                    z2,
+                    s2,
+                    t2,
+                    &texture_sampler,
+                    &self.scissor,
+                );
+            }
             // FILL_RECTANGLE (0x36)
             0x36 => {
                 // RDP FILL_RECTANGLE format (verified from test ROM):
@@ -1726,5 +1822,126 @@ mod tests {
         assert!((color_11 >> 16) & 0xFF > 200); // Red
         assert!((color_11 >> 8) & 0xFF > 200); // Green
         assert!(color_11 & 0xFF > 200); // Blue
+    }
+
+    #[test]
+    fn test_rdp_textured_triangle_command_0x0a() {
+        let mut rdp = Rdp::new();
+        let mut rdram = vec![0u8; 0x400000];
+
+        // Set up a simple texture in TMEM
+        rdp.tiles[0] = TileDescriptor {
+            format: 0, // RGBA
+            size: 2,   // 16-bit
+            line: 8,   // 8 64-bit words per line (64 bytes = 32 texels)
+            tmem_addr: 0,
+            palette: 0,
+            s_mask: 6, // 64 texels width (2^6)
+            t_mask: 6, // 64 texels height (2^6)
+            s_shift: 0,
+            t_shift: 0,
+        };
+
+        // Fill TMEM with a simple pattern (checkerboard)
+        for i in 0..2048 {
+            // 4KB / 2 bytes per texel
+            let color: u16 = if (i / 32) % 2 == (i % 32) % 2 {
+                0xFFFF // White
+            } else {
+                0x0001 // Black with alpha
+            };
+            rdp.tmem[i * 2] = (color >> 8) as u8;
+            rdp.tmem[i * 2 + 1] = (color & 0xFF) as u8;
+        }
+
+        // Create display list with textured triangle command
+        let dl_addr = 0x100;
+
+        // Textured triangle command 0x0A
+        // word0: bits 23-12 = x0, bits 11-0 = y0
+        // word1: bits 31-24 = x1, bits 23-16 = y1, bits 15-8 = x2, bits 7-0 = y2
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x0A << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        // Process the display list
+        rdp.write_register(0x00, dl_addr as u32);
+        rdp.write_register(0x04, (dl_addr + 8) as u32);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was rendered with texture
+        let frame = rdp.get_frame();
+        // Check center of triangle - should have texture pattern (either white or black)
+        let idx = (100 * 320 + 100) as usize;
+        let pixel = frame.pixels[idx];
+        // Should be from texture pattern - either white or black
+        assert!(pixel != 0); // Should have been rendered
+    }
+
+    #[test]
+    fn test_rdp_textured_triangle_zbuffer_command_0x0b() {
+        let mut rdp = Rdp::new();
+        rdp.set_zbuffer_enabled(true);
+        let mut rdram = vec![0u8; 0x400000];
+
+        // Set up texture in TMEM
+        rdp.tiles[0] = TileDescriptor {
+            format: 0,
+            size: 2,
+            line: 8,
+            tmem_addr: 0,
+            palette: 0,
+            s_mask: 6,
+            t_mask: 6,
+            s_shift: 0,
+            t_shift: 0,
+        };
+
+        // Fill with solid red texture
+        for i in 0..2048 {
+            let color: u16 = 0xF801; // Red in RGB5551
+            rdp.tmem[i * 2] = (color >> 8) as u8;
+            rdp.tmem[i * 2 + 1] = (color & 0xFF) as u8;
+        }
+
+        let dl_addr = 0x100;
+
+        // Textured triangle with Z-buffer command 0x0B
+        let x0 = 100u32;
+        let y0 = 50u32;
+        let x1 = 150u32;
+        let y1 = 150u32;
+        let x2 = 50u32;
+        let y2 = 150u32;
+
+        let cmd_word0 = (0x0B << 24) | ((x0 & 0xFFF) << 12) | (y0 & 0xFFF);
+        let cmd_word1 =
+            ((x1 & 0xFF) << 24) | ((y1 & 0xFF) << 16) | ((x2 & 0xFF) << 8) | (y2 & 0xFF);
+
+        rdram[dl_addr..dl_addr + 4].copy_from_slice(&cmd_word0.to_be_bytes());
+        rdram[dl_addr + 4..dl_addr + 8].copy_from_slice(&cmd_word1.to_be_bytes());
+
+        rdp.write_register(0x00, dl_addr as u32);
+        rdp.write_register(0x04, (dl_addr + 8) as u32);
+        rdp.process_display_list(&rdram);
+
+        // Verify triangle was rendered
+        let frame = rdp.get_frame();
+        let idx = (100 * 320 + 100) as usize;
+        let pixel = frame.pixels[idx];
+        // Should be red from texture
+        assert!(pixel != 0);
+        // Check that red channel is high
+        assert!((pixel >> 16) & 0xFF > 200);
     }
 }

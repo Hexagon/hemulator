@@ -1671,7 +1671,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 let addr = self.fetch_byte() as u32 + self.d as u32;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x80
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1683,7 +1687,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 5;
                 } else {
                     let val = self.read_word(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x8000
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1700,7 +1708,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 let addr = ((self.dbr as u32) << 16) + self.fetch_word() as u32;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x80
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1712,7 +1724,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 } else {
                     let val = self.read_word(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x8000
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1730,7 +1746,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 let addr = dp + self.x as u32;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x80
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1742,7 +1762,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 6;
                 } else {
                     let val = self.read_word(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x8000
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1760,7 +1784,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 let addr = ((self.dbr as u32) << 16) + base + self.x as u32;
                 if self.is_8bit_a() {
                     let val = self.read(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x80 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x80
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -1772,7 +1800,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 7;
                 } else {
                     let val = self.read_word(addr);
-                    let carry_in = if self.status & FLAG_CARRY != 0 { 0x8000 } else { 0 };
+                    let carry_in = if self.status & FLAG_CARRY != 0 {
+                        0x8000
+                    } else {
+                        0
+                    };
                     let result = (val >> 1) | carry_in;
                     if val & 1 != 0 {
                         self.status |= FLAG_CARRY;
@@ -4018,18 +4050,18 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 // MVP - Block Move Negative (decrement)
                 let src_bank = self.fetch_byte();
                 let dst_bank = self.fetch_byte();
-                
+
                 let src_addr = ((src_bank as u32) << 16) | (self.x as u32);
                 let dst_addr = ((dst_bank as u32) << 16) | (self.y as u32);
-                
+
                 let val = self.read(src_addr);
                 self.write(dst_addr, val);
-                
+
                 self.c = self.c.wrapping_sub(1);
                 self.x = self.x.wrapping_sub(1);
                 self.y = self.y.wrapping_sub(1);
                 self.dbr = dst_bank;
-                
+
                 if self.c != 0xFFFF {
                     self.pc = self.pc.wrapping_sub(3); // Repeat instruction
                 }
@@ -4039,18 +4071,18 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 // MVN - Block Move Next (increment)
                 let src_bank = self.fetch_byte();
                 let dst_bank = self.fetch_byte();
-                
+
                 let src_addr = ((src_bank as u32) << 16) | (self.x as u32);
                 let dst_addr = ((dst_bank as u32) << 16) | (self.y as u32);
-                
+
                 let val = self.read(src_addr);
                 self.write(dst_addr, val);
-                
+
                 self.c = self.c.wrapping_sub(1);
                 self.x = self.x.wrapping_add(1);
                 self.y = self.y.wrapping_add(1);
                 self.dbr = dst_bank;
-                
+
                 if self.c != 0xFFFF {
                     self.pc = self.pc.wrapping_sub(3); // Repeat instruction
                 }
@@ -4066,21 +4098,6 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 // STP - Stop Processor
                 // For now, just consume cycles (proper implementation would halt)
                 self.cycles += 3;
-            }
-
-            _ => {
-                // Unimplemented instruction - log and skip
-                if std::env::var("EMU_LOG_UNKNOWN_OPS").unwrap_or_default() == "1" {
-                    eprintln!(
-                        "Unknown 65C816 opcode: 0x{:02X} at PC=0x{:02X}:{:04X}",
-                        opcode,
-                        self.pbr,
-                        self.pc.wrapping_sub(1)
-                    );
-                }
-                // Skip this instruction to avoid infinite loop
-                // This is a placeholder - real implementation would need proper opcode decoding
-                self.cycles += 2;
             }
         }
 

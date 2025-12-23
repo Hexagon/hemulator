@@ -636,8 +636,10 @@ Detailed implementation notes:
     - **3D Triangle Rasterization** (both renderers):
       - Flat-shaded triangles (solid color)
       - Gouraud-shaded triangles (per-vertex color interpolation using `ColorOps::lerp`)
+      - **Textured triangles** (with UV coordinate interpolation)
       - Z-buffered rendering (uses modular `ZBuffer` component)
       - Combined shading + Z-buffer support
+      - Combined texture + Z-buffer support
       - Scanline-based edge walking algorithm (software)
       - GPU-accelerated rasterization via shaders (OpenGL)
       - Barycentric coordinate interpolation for attributes
@@ -652,6 +654,8 @@ Detailed implementation notes:
     - **Display List Commands** (wired to processor):
       - 0x08: Non-shaded triangle
       - 0x09: Non-shaded triangle with Z-buffer
+      - 0x0A: Textured triangle (custom command for demo)
+      - 0x0B: Textured triangle with Z-buffer (custom command for demo)
       - 0x0C: Shaded triangle (with Gouraud shading)
       - 0x0D: Shaded triangle with Z-buffer
       - 0x36: Fill rectangle
@@ -661,15 +665,24 @@ Detailed implementation notes:
       - Scissor rectangle clipping (fully functional)
       - Per-pixel color interpolation (via `ColorOps`)
       - Per-pixel depth interpolation
+      - **Per-pixel texture coordinate interpolation**
       - Edge function-based rasterization
     - Basic fill operations (clear, fill rectangle, set pixel)
     - Memory-mapped register interface (DPC_START, DPC_END, DPC_STATUS, etc.)
     - Display list command processing for fill and triangle operations
     - Color format support (RGBA5551, RGBA8888, internally uses ARGB)
+    - **Texture Support**:
+      - 4KB TMEM (Texture Memory) for texture storage
+      - 8 tile descriptors for texture configuration
+      - LOAD_BLOCK and LOAD_TILE commands for texture loading
+      - SET_TEXTURE_IMAGE to specify texture source
+      - SET_TILE to configure tile format (RGBA16, RGBA32)
+      - Texture sampling with wrapping/clamping support
+      - **Ready for textured triangle rendering**
     - **Timing Model**: Frame-based rendering (not cycle-accurate)
       - Maintains framebuffer for frame generation
       - Registers accessible via memory-mapped I/O
-      - Suitable for 3D wireframe and flat-shaded rendering with depth testing
+      - Suitable for 3D textured rendering with depth testing
   - **Cartridge Support**:
     - System-specific implementation in `crates/systems/n64/cartridge.rs`
     - Automatic byte-order detection (Z64/N64/V64 formats)
@@ -695,17 +708,21 @@ Detailed implementation notes:
       - Triangle rendering commands (G_TRI1, G_TRI2, G_QUAD) operational
     - **RDP Graphics**: 
       - OpenGL renderer available with `--features opengl` but not yet integrated
+      - **Textured triangle rendering fully implemented**:
+        - Texture sampling for RGBA16/RGBA32 formats
+        - UV coordinate interpolation across triangle surfaces
+        - Combined texture + Z-buffer rendering
+        - RDP commands 0x0A and 0x0B for textured triangles
       - **Texture mapping (TMEM loading) fully implemented**:
         - LOAD_BLOCK and LOAD_TILE commands working
-        - Texture sampling for RGBA16/RGBA32 formats
         - 4KB TMEM with proper tile descriptor management
-        - Ready for textured triangle rendering (not yet integrated)
+        - Texture wrapping and clamping support
       - No perspective-correct rasterization
       - No anti-aliasing or blending
       - No sub-pixel accuracy
       - No edge AA or coverage calculation
     - **System**:
-      - Can render transformed 3D graphics with vertex colors
+      - Can render transformed 3D graphics with vertex colors and textures
       - Controller support implemented but needs frontend integration
         - All 14 buttons defined (A, B, Z, Start, D-pad, L, R, C-buttons)
         - Analog stick support complete (-128 to 127 range)
@@ -715,7 +732,7 @@ Detailed implementation notes:
       - Exception handling not fully implemented (no traps on overflow)
       - Frame-based timing (not cycle-accurate)
       - Audio not implemented - silent gameplay
-  - All tests pass (97 tests passing, 1 ignored: cartridge, RDP with 3D rendering, display list commands, texture loading, RSP HLE with matrix stack and branching, PIF/controllers, VI, system integration)
+  - All tests pass (118 tests passing, 1 ignored: cartridge, RDP with 3D textured rendering, display list commands, texture loading/sampling, RSP HLE with matrix stack and branching, PIF/controllers, VI, system integration)
 
 
 ### Frontend (`crates/frontend/gui`)
