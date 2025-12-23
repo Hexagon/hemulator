@@ -90,6 +90,37 @@ The emulator supports configurable boot priority:
 
 Set boot priority in .hemu project files or via the API.
 
+## .hemu Project Files
+
+For PC systems with multiple disk images, you can create a `.hemu` project file to configure all mount points and boot priority. Example:
+
+```json
+{
+  "version": 1,
+  "system": "pc",
+  "mounts": {
+    "BIOS": "custom_bios.bin",
+    "FloppyA": "dos622_boot.img",
+    "HardDrive": "freedos.img"
+  },
+  "boot_priority": "FloppyFirst"
+}
+```
+
+**Boot Priority Options:**
+- `FloppyFirst` - Boot from floppy A first, then hard drive C (default)
+- `HardDriveFirst` - Boot from hard drive C first, then floppy A
+- `FloppyOnly` - Only boot from floppy A
+- `HardDriveOnly` - Only boot from hard drive C
+
+**Loading a Project:**
+1. Press F3 in the emulator
+2. Select your `.hemu` file
+3. All disks will be mounted and boot priority will be set
+4. System will reset and boot from the configured disk
+
+See `example.hemu` for a template.
+
 ## Mount Points
 
 The PC emulator supports the following mount points:

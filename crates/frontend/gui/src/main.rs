@@ -1500,6 +1500,25 @@ fn main() {
                                     }
                                 }
 
+                                // Set boot priority if specified in project (PC systems only)
+                                if let Some(priority_str) = project.get_boot_priority() {
+                                    // Parse boot priority string
+                                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                                        let priority = match priority_str.as_str() {
+                                            "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
+                                            "HardDriveFirst" => emu_pc::BootPriority::HardDriveFirst,
+                                            "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
+                                            "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
+                                            _ => {
+                                                eprintln!("Unknown boot priority: {}, using default", priority_str);
+                                                emu_pc::BootPriority::FloppyFirst
+                                            }
+                                        };
+                                        pc_sys.set_boot_priority(priority);
+                                        println!("Set boot priority: {:?}", priority);
+                                    }
+                                }
+
                                 if any_mounted {
                                     rom_loaded = true;
                                     status_message = "Project loaded".to_string();

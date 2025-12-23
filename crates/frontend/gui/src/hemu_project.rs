@@ -15,6 +15,9 @@ pub struct HemuProject {
     /// Key: mount point ID (e.g., "BIOS", "FloppyA", "Cartridge")
     /// Value: file path (relative or absolute)
     pub mounts: HashMap<String, String>,
+    /// Boot priority for PC systems (optional, defaults to FloppyFirst)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boot_priority: Option<String>,
 }
 
 impl HemuProject {
@@ -24,6 +27,7 @@ impl HemuProject {
             version: 1,
             system,
             mounts: HashMap::new(),
+            boot_priority: None,
         }
     }
 
@@ -49,6 +53,16 @@ impl HemuProject {
     /// Get a mount point path
     pub fn get_mount(&self, mount_id: &str) -> Option<&String> {
         self.mounts.get(mount_id)
+    }
+
+    /// Set boot priority (for PC systems)
+    pub fn set_boot_priority(&mut self, priority: String) {
+        self.boot_priority = Some(priority);
+    }
+
+    /// Get boot priority
+    pub fn get_boot_priority(&self) -> Option<&String> {
+        self.boot_priority.as_ref()
     }
 
     /// Check if system has multiple mount points (requires .hemu file)
@@ -85,6 +99,7 @@ mod tests {
         let mut project = HemuProject::new("pc".to_string());
         project.set_mount("BIOS".to_string(), "bios.rom".to_string());
         project.set_mount("FloppyA".to_string(), "disk.img".to_string());
+        project.set_boot_priority("HardDriveFirst".to_string());
 
         // Save
         project.save(&test_file).expect("Failed to save");
@@ -97,9 +112,19 @@ mod tests {
             loaded.get_mount("FloppyA"),
             Some(&"disk.img".to_string())
         );
+        assert_eq!(loaded.get_boot_priority(), Some(&"HardDriveFirst".to_string()));
 
         // Cleanup
         fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_boot_priority() {
+        let mut project = HemuProject::new("pc".to_string());
+        assert_eq!(project.get_boot_priority(), None);
+
+        project.set_boot_priority("FloppyFirst".to_string());
+        assert_eq!(project.get_boot_priority(), Some(&"FloppyFirst".to_string()));
     }
 
     #[test]
