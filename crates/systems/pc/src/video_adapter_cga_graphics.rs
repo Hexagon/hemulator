@@ -425,8 +425,8 @@ mod tests {
         let mut vram = vec![0u8; 0x4000]; // 16KB for graphics mode
 
         // Fill with a simple pattern (alternating colors)
-        for i in 0..100 {
-            vram[i] = 0b11100100; // Mix of colors
+        for byte in vram.iter_mut().take(100) {
+            *byte = 0b11100100; // Mix of colors
         }
 
         let mut pixels = vec![0u32; 320 * 200];
@@ -446,8 +446,8 @@ mod tests {
         let mut vram = vec![0u8; 0x4000]; // 16KB for graphics mode
 
         // Fill with alternating bits
-        for i in 0..100 {
-            vram[i] = 0b10101010;
+        for byte in vram.iter_mut().take(100) {
+            *byte = 0b10101010;
         }
 
         let mut pixels = vec![0u32; 640 * 200];
