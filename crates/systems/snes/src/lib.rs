@@ -227,9 +227,7 @@ mod tests {
         assert!(sys.mount("Cartridge", test_rom).is_ok());
         assert!(sys.is_mounted("Cartridge"));
 
-        // Just run one frame - the emulator will show a test pattern
-        // (Full SNES emulation would require extensive PPU work beyond the scope
-        // of making it "complete and working" for basic demonstration)
+        // Run one frame - the emulator will show a checkerboard pattern
         let frame = sys.step_frame().unwrap();
 
         // Verify frame dimensions
@@ -237,7 +235,62 @@ mod tests {
         assert_eq!(frame.height, 224);
         assert_eq!(frame.pixels.len(), 256 * 224);
 
-        // Frame should exist and have correct dimensions
-        // This proves the SNES system infrastructure is working
+        // Verify we have a checkerboard pattern
+        // The test ROM creates alternating tiles (blue and red) in a checkerboard
+        // Tile 0 (blue): color 3 = 0xFF0000F8 (blue with 5-bit to 8-bit conversion)
+        // Tile 1 (red): color 2 = 0xFFF80000 (red)
+
+        // Helper to get pixel at tile position
+        let get_tile_color = |tx: usize, ty: usize| -> u32 {
+            // Get pixel from center of tile to avoid edge effects
+            let x = tx * 8 + 4;
+            let y = ty * 8 + 4;
+            frame.pixels[y * 256 + x]
+        };
+
+        // Verify horizontal checkerboard: adjacent tiles horizontally should differ
+        for ty in 0..4 {
+            for tx in 0..7 {
+                let color1 = get_tile_color(tx, ty);
+                let color2 = get_tile_color(tx + 1, ty);
+                assert_ne!(
+                    color1, color2,
+                    "Horizontal checkerboard failed at tile ({}, {}): both tiles are 0x{:08X}",
+                    tx, ty, color1
+                );
+            }
+        }
+
+        // Verify vertical checkerboard: adjacent tiles vertically should differ
+        for ty in 0..3 {
+            for tx in 0..8 {
+                let color1 = get_tile_color(tx, ty);
+                let color2 = get_tile_color(tx, ty + 1);
+                assert_ne!(
+                    color1, color2,
+                    "Vertical checkerboard failed at tile ({}, {}): both tiles are 0x{:08X}",
+                    tx, ty, color1
+                );
+            }
+        }
+
+        // Verify we actually have two distinct colors (not all black or all one color)
+        use std::collections::HashSet;
+        let mut unique_colors = HashSet::new();
+        for ty in 0..4 {
+            for tx in 0..8 {
+                unique_colors.insert(get_tile_color(tx, ty));
+            }
+        }
+        assert_eq!(
+            unique_colors.len(),
+            2,
+            "Expected exactly 2 unique colors in checkerboard, got {}: {:?}",
+            unique_colors.len(),
+            unique_colors
+                .iter()
+                .map(|c| format!("0x{:08X}", c))
+                .collect::<Vec<_>>()
+        );
     }
 }
