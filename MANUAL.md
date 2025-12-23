@@ -745,7 +745,8 @@ For N64 games, the standard controller mappings apply with these button equivale
   - See `AGENTS.md` for full instruction set details
 - **Memory bus** (640KB RAM, 128KB VRAM, 256KB ROM)
 - **Custom BIOS** built from assembly source
-  - 64KB BIOS ROM with INT 13h disk services
+  - 64KB BIOS ROM with INT 13h disk services (fully implemented)
+  - INT 13h functions: Reset (00h), Read Sectors (02h), Write Sectors (03h), Get Drive Parameters (08h)
   - Source: `test_roms/pc/bios.asm`
   - Build script: `test_roms/pc/build.sh` (requires NASM)
   - Replaceable via BIOS mount point
@@ -754,11 +755,12 @@ For N64 games, the standard controller mappings apply with these button equivale
   2. **Floppy A** - Floppy disk drive A: (`.img`, `.ima`)
   3. **Floppy B** - Floppy disk drive B: (`.img`, `.ima`)
   4. **Hard Drive C** - Hard disk drive C: (`.img`, `.vhd`)
-- **Disk controller** with INT 13h support
+- **Disk controller** with INT 13h support (fully implemented)
   - Floppy geometry: 1.44MB format (80 cylinders, 18 sectors, 2 heads)
   - Hard drive geometry: 10MB format (306 cylinders, 17 sectors, 4 heads)
   - LBA (Logical Block Address) calculation
-  - Read/write operations to disk images
+  - Read/write operations to disk images (fully functional)
+  - Boot sector loading with boot priority (floppy first, hard drive first, etc.)
 - **CGA video** (640x400 text mode)
 - **Keyboard input** with full passthrough
 - Save states (F5/F6)
@@ -788,9 +790,11 @@ There are two ways to mount disk images and BIOS:
 - See "PC/DOS Keyboard Input" section for details
 
 **Known Limitations**:
-- **BIOS**: Minimal implementation - INT 13h disk services are stubs
-  - Disk operations return success but don't actually read/write disk data yet
-  - Future: Full INT 13h implementation with actual disk I/O
+- **BIOS Interrupts**: 
+  - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
+  - INT 13h (Disk): Fully implemented and functional (read, write, get params, reset)
+  - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
+  - INT 21h (DOS): Character I/O works; file and system functions are stubs
 - **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
     - Text mode: 80x25 characters (640x400 pixels)
@@ -814,17 +818,15 @@ There are two ways to mount disk images and BIOS:
     - Software rendering (CPU-based)
     - Hardware rendering stub (OpenGL, for future use)
   - Future: Additional palettes, more VGA modes
-- **Input**: Keyboard passthrough works, but:
+- **Input**: Keyboard passthrough works with INT 16h integration
+  - Keyboard controller implemented with scancode buffer
+  - INT 16h keyboard services now read from keyboard controller
+  - AH=00h (read keystroke) and AH=01h (check keystroke) functional
   - No mouse support
   - No serial/parallel port emulation
-- **Disk I/O**: Infrastructure in place but not yet connected to BIOS
-  - Disk controller implemented with read/write support
-  - BIOS INT 13h handlers exist but return stubs
-  - Next step: Wire disk controller to BIOS interrupts
 - **No audio**: PC speaker not implemented
 - **No timer**: PIT (Programmable Interval Timer) not implemented
 - **Timing**: Frame-based execution - not cycle-accurate
-- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. CGA, EGA, and VGA graphics adapters fully implemented with software and hardware (OpenGL stub) backends. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading, add additional VGA modes and palettes.
 
 ## Troubleshooting
 

@@ -372,9 +372,21 @@ impl PcCpu {
     /// INT 16h, AH=00h: Read keystroke (blocking)
     fn int16h_read_keystroke(&mut self) -> u32 {
         // Returns: AH = scan code, AL = ASCII character
-        // For now, return 0 (no key available)
-        // A real implementation would block until a key is available
-        self.cpu.ax = 0x0000;
+        // Note: In a real BIOS, this would block until a key is available
+        // For emulation, we just read from buffer (non-blocking behavior)
+
+        if self.cpu.memory.keyboard.has_data() {
+            let scancode = self.cpu.memory.keyboard.read_scancode();
+
+            // Convert scancode to ASCII (simplified mapping)
+            let ascii = scancode_to_ascii(scancode);
+
+            // AH = scan code, AL = ASCII character
+            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+        } else {
+            // No key available - return 0
+            self.cpu.ax = 0x0000;
+        }
         51
     }
 
@@ -383,9 +395,21 @@ impl PcCpu {
         // Returns: ZF = 1 if no key available, ZF = 0 if key available
         // If key available: AH = scan code, AL = ASCII character
 
-        // For now, always indicate no key available
-        self.set_zero_flag(true); // ZF = 1 (no key)
-        self.cpu.ax = 0x0000;
+        if self.cpu.memory.keyboard.has_data() {
+            // Peek at the next scancode without consuming it
+            let scancode = self.cpu.memory.keyboard.peek_scancode();
+            let ascii = scancode_to_ascii(scancode);
+
+            // Set ZF = 0 (key available)
+            self.set_zero_flag(false);
+
+            // AH = scan code, AL = ASCII character
+            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+        } else {
+            // No key available
+            self.set_zero_flag(true); // ZF = 1 (no key)
+            self.cpu.ax = 0x0000;
+        }
         51
     }
 
@@ -876,6 +900,61 @@ impl PcCpu {
     }
 }
 
+/// Convert PC scancode to ASCII character (simplified mapping)
+fn scancode_to_ascii(scancode: u8) -> u8 {
+    use crate::keyboard::*;
+
+    // Skip break codes (high bit set)
+    if scancode & 0x80 != 0 {
+        return 0;
+    }
+
+    match scancode {
+        SCANCODE_A => b'a',
+        SCANCODE_B => b'b',
+        SCANCODE_C => b'c',
+        SCANCODE_D => b'd',
+        SCANCODE_E => b'e',
+        SCANCODE_F => b'f',
+        SCANCODE_G => b'g',
+        SCANCODE_H => b'h',
+        SCANCODE_I => b'i',
+        SCANCODE_J => b'j',
+        SCANCODE_K => b'k',
+        SCANCODE_L => b'l',
+        SCANCODE_M => b'm',
+        SCANCODE_N => b'n',
+        SCANCODE_O => b'o',
+        SCANCODE_P => b'p',
+        SCANCODE_Q => b'q',
+        SCANCODE_R => b'r',
+        SCANCODE_S => b's',
+        SCANCODE_T => b't',
+        SCANCODE_U => b'u',
+        SCANCODE_V => b'v',
+        SCANCODE_W => b'w',
+        SCANCODE_X => b'x',
+        SCANCODE_Y => b'y',
+        SCANCODE_Z => b'z',
+        SCANCODE_0 => b'0',
+        SCANCODE_1 => b'1',
+        SCANCODE_2 => b'2',
+        SCANCODE_3 => b'3',
+        SCANCODE_4 => b'4',
+        SCANCODE_5 => b'5',
+        SCANCODE_6 => b'6',
+        SCANCODE_7 => b'7',
+        SCANCODE_8 => b'8',
+        SCANCODE_9 => b'9',
+        SCANCODE_SPACE => b' ',
+        SCANCODE_ENTER => b'\r',
+        SCANCODE_BACKSPACE => 0x08,
+        SCANCODE_TAB => b'\t',
+        SCANCODE_ESC => 0x1B,
+        _ => 0, // No ASCII equivalent
+    }
+}
+
 /// CPU register state for save/load
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CpuRegisters {
@@ -1299,5 +1378,157 @@ mod tests {
         assert_eq!(cpu.cpu.memory.read(buffer_addr), 0); // Sector 0, byte 0
         assert_eq!(cpu.cpu.memory.read(buffer_addr + 512), 100); // Sector 1, byte 0
         assert_eq!(cpu.cpu.memory.read(buffer_addr + 1024), 200); // Sector 2, byte 0
+    }
+
+    #[test]
+    fn test_int16h_read_keystroke() {
+        use crate::keyboard::SCANCODE_A;
+
+        let mut bus = PcBus::new();
+
+        // Add a key to the keyboard buffer
+        bus.keyboard.key_press(SCANCODE_A);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 16h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x16); // 16h
+
+        // Setup registers for AH=00h (read keystroke)
+        cpu.cpu.ax = 0x0000; // AH=00h
+
+        // Execute INT 16h
+        cpu.step();
+
+        // Should return scancode in AH, ASCII in AL
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_A as u16); // AH = scancode
+        assert_eq!(cpu.cpu.ax & 0xFF, b'a' as u16); // AL = ASCII 'a'
+    }
+
+    #[test]
+    fn test_int16h_check_keystroke_available() {
+        use crate::keyboard::SCANCODE_B;
+
+        let mut bus = PcBus::new();
+
+        // Add a key to the keyboard buffer
+        bus.keyboard.key_press(SCANCODE_B);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 16h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x16); // 16h
+
+        // Setup registers for AH=01h (check keystroke)
+        cpu.cpu.ax = 0x0100; // AH=01h
+
+        // Execute INT 16h
+        cpu.step();
+
+        // Should return scancode in AH, ASCII in AL, and ZF=0
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_B as u16); // AH = scancode
+        assert_eq!(cpu.cpu.ax & 0xFF, b'b' as u16); // AL = ASCII 'b'
+        assert_eq!(cpu.cpu.flags & 0x0040, 0); // ZF = 0 (key available)
+
+        // Key should still be in buffer (peek doesn't consume)
+        assert!(cpu.cpu.memory.keyboard.has_data());
+    }
+
+    #[test]
+    fn test_int16h_check_keystroke_not_available() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 16h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x16); // 16h
+
+        // Setup registers for AH=01h (check keystroke)
+        cpu.cpu.ax = 0x0100; // AH=01h
+
+        // Execute INT 16h
+        cpu.step();
+
+        // Should return 0 and ZF=1 (no key)
+        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.flags & 0x0040, 0x0040); // ZF = 1 (no key available)
+    }
+
+    #[test]
+    fn test_int16h_multiple_keystrokes() {
+        use crate::keyboard::{SCANCODE_E, SCANCODE_H, SCANCODE_L, SCANCODE_O};
+
+        let mut bus = PcBus::new();
+
+        // Add multiple keys to simulate typing "HELLO"
+        bus.keyboard.key_press(SCANCODE_H);
+        bus.keyboard.key_press(SCANCODE_E);
+        bus.keyboard.key_press(SCANCODE_L);
+        bus.keyboard.key_press(SCANCODE_L);
+        bus.keyboard.key_press(SCANCODE_O);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Read each keystroke
+        let expected = vec![
+            (SCANCODE_H, b'h'),
+            (SCANCODE_E, b'e'),
+            (SCANCODE_L, b'l'),
+            (SCANCODE_L, b'l'),
+            (SCANCODE_O, b'o'),
+        ];
+
+        for (expected_scan, expected_ascii) in expected {
+            // Move CPU to RAM
+            cpu.cpu.cs = 0x0000;
+            cpu.cpu.ip = 0x1000;
+
+            // Setup: Write INT 16h instruction
+            let cs = cpu.cpu.cs;
+            let ip = cpu.cpu.ip;
+            let addr = ((cs as u32) << 4) + (ip as u32);
+
+            cpu.cpu.memory.write(addr, 0xCD); // INT
+            cpu.cpu.memory.write(addr + 1, 0x16); // 16h
+
+            // Setup registers for AH=00h (read keystroke)
+            cpu.cpu.ax = 0x0000;
+
+            // Execute INT 16h
+            cpu.step();
+
+            // Verify scancode and ASCII
+            assert_eq!((cpu.cpu.ax >> 8) & 0xFF, expected_scan as u16);
+            assert_eq!(cpu.cpu.ax & 0xFF, expected_ascii as u16);
+        }
+
+        // Buffer should now be empty
+        assert!(!cpu.cpu.memory.keyboard.has_data());
     }
 }

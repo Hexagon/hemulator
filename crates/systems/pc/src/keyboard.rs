@@ -32,6 +32,11 @@ impl Keyboard {
         self.scancode_buffer.pop_front().unwrap_or(0)
     }
 
+    /// Peek at the next scancode without consuming it
+    pub fn peek_scancode(&self) -> u8 {
+        self.scancode_buffer.front().copied().unwrap_or(0)
+    }
+
     /// Add a key press event (generates make code)
     pub fn key_press(&mut self, key: u8) {
         if self.scancode_buffer.len() < self.max_buffer_size {
@@ -203,5 +208,28 @@ mod tests {
 
         kb.clear();
         assert!(!kb.has_data());
+    }
+
+    #[test]
+    fn test_peek_scancode() {
+        let mut kb = Keyboard::new();
+
+        kb.key_press(SCANCODE_A);
+        kb.key_press(SCANCODE_B);
+
+        // Peek should return first item without removing it
+        assert_eq!(kb.peek_scancode(), SCANCODE_A);
+        assert!(kb.has_data());
+
+        // Peek again should return same value
+        assert_eq!(kb.peek_scancode(), SCANCODE_A);
+
+        // Read should consume the item
+        assert_eq!(kb.read_scancode(), SCANCODE_A);
+        assert_eq!(kb.peek_scancode(), SCANCODE_B);
+        assert_eq!(kb.read_scancode(), SCANCODE_B);
+
+        // Peek on empty buffer should return 0
+        assert_eq!(kb.peek_scancode(), 0);
     }
 }
