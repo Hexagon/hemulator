@@ -125,6 +125,8 @@ pub struct GbBus {
     joypad: u8,
     /// Joypad button state
     button_state: u8,
+    /// CGB mode flag (true if Game Boy Color features are enabled)
+    cgb_mode: bool,
 }
 
 impl GbBus {
@@ -141,6 +143,7 @@ impl GbBus {
             timer: Timer::new(),
             joypad: 0xFF,
             button_state: 0xFF,
+            cgb_mode: false,
         }
     }
 
@@ -165,17 +168,30 @@ impl GbBus {
         self.if_reg != 0
     }
 
+    /// Check if CGB mode is enabled
+    #[allow(dead_code)] // Will be used when CGB features are fully implemented
+    pub fn is_cgb_mode(&self) -> bool {
+        self.cgb_mode
+    }
+
     pub fn load_cart(&mut self, data: &[u8]) {
         // Parse cart header
         if data.len() < 0x150 {
             // Too small to be a valid cart, but load it anyway
             self.mapper = Some(Mapper::from_cart(data.to_vec(), vec![], 0x00));
             self.boot_rom_enabled = false;
+            self.cgb_mode = false;
             return;
         }
 
         let cart_type = data[0x147];
         let ram_size_code = data[0x149];
+
+        // Check CGB flag at 0x143
+        // 0x80 = Works on both DMG and CGB
+        // 0xC0 = CGB only
+        let cgb_flag = data[0x143];
+        self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
 
         let ram_size = match ram_size_code {
             0x00 => 0,

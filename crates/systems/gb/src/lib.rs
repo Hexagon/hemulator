@@ -495,6 +495,34 @@ mod tests {
     }
 
     #[test]
+    fn test_gb_cgb_mode_detection() {
+        let mut sys = GbSystem::new();
+
+        // Create a ROM with CGB flag set (0x80 = works on both DMG and CGB)
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Check that CGB mode is detected
+        assert!(sys.cpu.memory.is_cgb_mode());
+
+        // Create a ROM without CGB flag
+        let mut rom2 = vec![0; 0x150];
+        rom2[0x143] = 0x00; // No CGB
+        rom2[0x147] = 0x00;
+        rom2[0x149] = 0x00;
+
+        sys.unmount("Cartridge").unwrap();
+        sys.mount("Cartridge", &rom2).unwrap();
+
+        // Check that CGB mode is not detected
+        assert!(!sys.cpu.memory.is_cgb_mode());
+    }
+
+    #[test]
     fn test_gb_smoke_test_rom() {
         // Load the test ROM
         let test_rom = include_bytes!("../../../../test_roms/gb/test.gb");
