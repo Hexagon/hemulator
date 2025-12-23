@@ -1,13 +1,13 @@
-//! CRT filter effects for post-processing emulator output
+//! display filter effects for post-processing emulator output
 //!
-//! This module provides various CRT (Cathode Ray Tube) display effects that can be applied
+//! This module provides various display (CRT, LCD, etc.) effects that can be applied
 //! to the raw emulator frame buffer to simulate the appearance of old CRT monitors and TVs.
 
 use serde::{Deserialize, Serialize};
 
 /// Available CRT/LCD display filter types based on real-world products
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum CrtFilter {
+pub enum DisplayFilter {
     /// No filter - raw pixels
     #[default]
     None,
@@ -28,28 +28,28 @@ pub enum CrtFilter {
     RcaVictor,
 }
 
-impl CrtFilter {
+impl DisplayFilter {
     /// Get the name of the filter for display
     pub fn name(&self) -> &str {
         match self {
-            CrtFilter::None => "None",
-            CrtFilter::SonyTrinitron => "Sony Trinitron",
-            CrtFilter::Ibm5151 => "IBM 5151",
-            CrtFilter::Commodore1702 => "Commodore 1702",
-            CrtFilter::SharpLcd => "Sharp LCD",
-            CrtFilter::RcaVictor => "RCA Victor",
+            DisplayFilter::None => "None",
+            DisplayFilter::SonyTrinitron => "Sony Trinitron",
+            DisplayFilter::Ibm5151 => "IBM 5151",
+            DisplayFilter::Commodore1702 => "Commodore 1702",
+            DisplayFilter::SharpLcd => "Sharp LCD",
+            DisplayFilter::RcaVictor => "RCA Victor",
         }
     }
 
     /// Cycle to the next filter in the sequence
     pub fn next(&self) -> Self {
         match self {
-            CrtFilter::None => CrtFilter::SonyTrinitron,
-            CrtFilter::SonyTrinitron => CrtFilter::Ibm5151,
-            CrtFilter::Ibm5151 => CrtFilter::Commodore1702,
-            CrtFilter::Commodore1702 => CrtFilter::SharpLcd,
-            CrtFilter::SharpLcd => CrtFilter::RcaVictor,
-            CrtFilter::RcaVictor => CrtFilter::None,
+            DisplayFilter::None => DisplayFilter::SonyTrinitron,
+            DisplayFilter::SonyTrinitron => DisplayFilter::Ibm5151,
+            DisplayFilter::Ibm5151 => DisplayFilter::Commodore1702,
+            DisplayFilter::Commodore1702 => DisplayFilter::SharpLcd,
+            DisplayFilter::SharpLcd => DisplayFilter::RcaVictor,
+            DisplayFilter::RcaVictor => DisplayFilter::None,
         }
     }
 
@@ -61,22 +61,22 @@ impl CrtFilter {
     /// * `height` - Height of the frame
     pub fn apply(&self, buffer: &mut [u32], width: usize, height: usize) {
         match self {
-            CrtFilter::None => {
+            DisplayFilter::None => {
                 // No processing needed
             }
-            CrtFilter::SonyTrinitron => {
+            DisplayFilter::SonyTrinitron => {
                 apply_sony_trinitron(buffer, width, height);
             }
-            CrtFilter::Ibm5151 => {
+            DisplayFilter::Ibm5151 => {
                 apply_ibm5151(buffer, width, height);
             }
-            CrtFilter::Commodore1702 => {
+            DisplayFilter::Commodore1702 => {
                 apply_commodore1702(buffer, width, height);
             }
-            CrtFilter::SharpLcd => {
+            DisplayFilter::SharpLcd => {
                 apply_sharp_lcd(buffer, width, height);
             }
-            CrtFilter::RcaVictor => {
+            DisplayFilter::RcaVictor => {
                 apply_rca_victor(buffer, width, height);
             }
         }
@@ -578,33 +578,33 @@ mod tests {
 
     #[test]
     fn test_filter_cycling() {
-        let filter = CrtFilter::None;
-        assert_eq!(filter.next(), CrtFilter::SonyTrinitron);
+        let filter = DisplayFilter::None;
+        assert_eq!(filter.next(), DisplayFilter::SonyTrinitron);
 
-        let filter = CrtFilter::SonyTrinitron;
-        assert_eq!(filter.next(), CrtFilter::Ibm5151);
+        let filter = DisplayFilter::SonyTrinitron;
+        assert_eq!(filter.next(), DisplayFilter::Ibm5151);
 
-        let filter = CrtFilter::Ibm5151;
-        assert_eq!(filter.next(), CrtFilter::Commodore1702);
+        let filter = DisplayFilter::Ibm5151;
+        assert_eq!(filter.next(), DisplayFilter::Commodore1702);
 
-        let filter = CrtFilter::Commodore1702;
-        assert_eq!(filter.next(), CrtFilter::SharpLcd);
+        let filter = DisplayFilter::Commodore1702;
+        assert_eq!(filter.next(), DisplayFilter::SharpLcd);
 
-        let filter = CrtFilter::SharpLcd;
-        assert_eq!(filter.next(), CrtFilter::RcaVictor);
+        let filter = DisplayFilter::SharpLcd;
+        assert_eq!(filter.next(), DisplayFilter::RcaVictor);
 
-        let filter = CrtFilter::RcaVictor;
-        assert_eq!(filter.next(), CrtFilter::None);
+        let filter = DisplayFilter::RcaVictor;
+        assert_eq!(filter.next(), DisplayFilter::None);
     }
 
     #[test]
     fn test_filter_names() {
-        assert_eq!(CrtFilter::None.name(), "None");
-        assert_eq!(CrtFilter::SonyTrinitron.name(), "Sony Trinitron");
-        assert_eq!(CrtFilter::Ibm5151.name(), "IBM 5151");
-        assert_eq!(CrtFilter::Commodore1702.name(), "Commodore 1702");
-        assert_eq!(CrtFilter::SharpLcd.name(), "Sharp LCD");
-        assert_eq!(CrtFilter::RcaVictor.name(), "RCA Victor");
+        assert_eq!(DisplayFilter::None.name(), "None");
+        assert_eq!(DisplayFilter::SonyTrinitron.name(), "Sony Trinitron");
+        assert_eq!(DisplayFilter::Ibm5151.name(), "IBM 5151");
+        assert_eq!(DisplayFilter::Commodore1702.name(), "Commodore 1702");
+        assert_eq!(DisplayFilter::SharpLcd.name(), "Sharp LCD");
+        assert_eq!(DisplayFilter::RcaVictor.name(), "RCA Victor");
     }
 
     #[test]
@@ -687,25 +687,25 @@ mod tests {
         // Test that all filters can be applied without panicking
         let width = 16;
         let height = 16;
-        
+
         let filters = [
-            CrtFilter::None,
-            CrtFilter::SonyTrinitron,
-            CrtFilter::Ibm5151,
-            CrtFilter::Commodore1702,
-            CrtFilter::SharpLcd,
-            CrtFilter::RcaVictor,
+            DisplayFilter::None,
+            DisplayFilter::SonyTrinitron,
+            DisplayFilter::Ibm5151,
+            DisplayFilter::Commodore1702,
+            DisplayFilter::SharpLcd,
+            DisplayFilter::RcaVictor,
         ];
-        
+
         for filter in filters.iter() {
             let mut buffer = vec![0xFFFFFFFF; width * height];
             filter.apply(&mut buffer, width, height);
-            
+
             // Verify buffer is still valid
             assert_eq!(buffer.len(), width * height);
-            
+
             // For None filter, buffer should be unchanged
-            if *filter == CrtFilter::None {
+            if *filter == DisplayFilter::None {
                 assert!(buffer.iter().all(|&c| c == 0xFFFFFFFF));
             } else {
                 // Other filters should modify at least some pixels
@@ -717,6 +717,6 @@ mod tests {
 
     #[test]
     fn test_default_filter() {
-        assert_eq!(CrtFilter::default(), CrtFilter::None);
+        assert_eq!(DisplayFilter::default(), DisplayFilter::None);
     }
 }

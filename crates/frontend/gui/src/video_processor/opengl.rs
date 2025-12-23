@@ -5,7 +5,7 @@
 
 use super::VideoProcessor;
 use super::VideoResult;
-use crate::crt_filter::CrtFilter;
+use crate::display_filter::DisplayFilter;
 
 use glow::HasContext;
 
@@ -18,7 +18,7 @@ pub struct OpenGLProcessor {
     texture: glow::Texture,
     width: usize,
     height: usize,
-    current_filter: CrtFilter,
+    current_filter: DisplayFilter,
 }
 
 impl OpenGLProcessor {
@@ -130,13 +130,13 @@ impl OpenGLProcessor {
                 texture,
                 width: 0,
                 height: 0,
-                current_filter: CrtFilter::None,
+                current_filter: DisplayFilter::None,
             })
         }
     }
 
     /// Switch shader program based on filter
-    unsafe fn update_shader_for_filter(&mut self, filter: CrtFilter) -> VideoResult<()> {
+    unsafe fn update_shader_for_filter(&mut self, filter: DisplayFilter) -> VideoResult<()> {
         if self.current_filter == filter {
             return Ok(()); // No need to recompile
         }
@@ -152,12 +152,12 @@ impl OpenGLProcessor {
         )?;
 
         let fragment_source = match filter {
-            CrtFilter::None => include_str!("../shaders/fragment_none.glsl"),
-            CrtFilter::SonyTrinitron => include_str!("../shaders/fragment_sony_trinitron.glsl"),
-            CrtFilter::Ibm5151 => include_str!("../shaders/fragment_ibm5151.glsl"),
-            CrtFilter::Commodore1702 => include_str!("../shaders/fragment_commodore1702.glsl"),
-            CrtFilter::SharpLcd => include_str!("../shaders/fragment_sharp_lcd.glsl"),
-            CrtFilter::RcaVictor => include_str!("../shaders/fragment_rca_victor.glsl"),
+            DisplayFilter::None => include_str!("../shaders/fragment_none.glsl"),
+            DisplayFilter::SonyTrinitron => include_str!("../shaders/fragment_sony_trinitron.glsl"),
+            DisplayFilter::Ibm5151 => include_str!("../shaders/fragment_ibm5151.glsl"),
+            DisplayFilter::Commodore1702 => include_str!("../shaders/fragment_commodore1702.glsl"),
+            DisplayFilter::SharpLcd => include_str!("../shaders/fragment_sharp_lcd.glsl"),
+            DisplayFilter::RcaVictor => include_str!("../shaders/fragment_rca_victor.glsl"),
         };
 
         let fragment_shader = compile_shader(&self.gl, glow::FRAGMENT_SHADER, fragment_source)?;
@@ -192,7 +192,7 @@ impl VideoProcessor for OpenGLProcessor {
         buffer: &[u32],
         width: usize,
         height: usize,
-        filter: CrtFilter,
+        filter: DisplayFilter,
     ) -> VideoResult<Vec<u32>> {
         unsafe {
             // Update shader if filter changed

@@ -1,7 +1,7 @@
 //! SDL2 window backend supporting both software and OpenGL rendering
 
 use super::{Key, WindowBackend};
-use crate::crt_filter::CrtFilter;
+use crate::display_filter::DisplayFilter;
 use crate::video_processor::{OpenGLProcessor, SoftwareProcessor, VideoProcessor};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -32,7 +32,7 @@ pub struct Sdl2Backend {
     pressed_keys: HashSet<Key>,
     key_pressed_once: HashSet<Key>,
     is_open: bool,
-    current_filter: CrtFilter,
+    current_filter: DisplayFilter,
 }
 
 impl Sdl2Backend {
@@ -98,7 +98,7 @@ impl Sdl2Backend {
             pressed_keys: HashSet::new(),
             key_pressed_once: HashSet::new(),
             is_open: true,
-            current_filter: CrtFilter::None,
+            current_filter: DisplayFilter::None,
         })
     }
 
@@ -172,7 +172,7 @@ impl Sdl2Backend {
         }
     }
 
-    pub fn set_filter(&mut self, filter: CrtFilter) {
+    pub fn set_filter(&mut self, filter: DisplayFilter) {
         self.current_filter = filter;
     }
 }

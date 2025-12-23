@@ -1,4 +1,4 @@
-use crate::crt_filter::CrtFilter;
+use crate::display_filter::DisplayFilter;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -155,7 +155,7 @@ pub struct Settings {
     #[serde(default)]
     pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
     #[serde(default)]
-    pub crt_filter: CrtFilter,
+    pub display_filter: DisplayFilter,
     #[serde(default = "default_emulation_speed")]
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
     #[serde(default = "default_video_backend")]
@@ -181,7 +181,7 @@ impl Default for Settings {
             window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
             mount_points: HashMap::new(),
-            crt_filter: CrtFilter::default(),
+            display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
             video_backend: "software".to_string(),
             extra: HashMap::new(),
