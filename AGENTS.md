@@ -774,7 +774,7 @@ Detailed implementation notes:
   - All tests pass (121 tests total)
 
 
-- **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)
+- **SNES (`emu_snes`)**: Functional implementation (Modes 0 & 1, sprites, scrolling)
   - Uses `cpu_65c816` from core with SNES-specific bus implementation
   - `SnesCpu` wraps `Cpu65c816<SnesBus>` to provide SNES-specific interface
   - SNES bus includes: 128KB WRAM, cartridge ROM/RAM, hardware registers
@@ -802,9 +802,7 @@ Detailed implementation notes:
     - Cartridge mount/unmount
     - System reset
   - **Known Limitations**:
-    - **PPU**: Mode 0 only (other modes 1-7 not implemented)
-      - No sprites (OAM)
-      - No scrolling (BG offset registers not implemented)
+    - **PPU**: Modes 2-7 not implemented
       - No windows or masks
       - No HDMA effects, mosaic, or color math
       - Only 32x32 tilemap size supported (64x32, 32x64, 64x64 not implemented)
@@ -822,13 +820,28 @@ Detailed implementation notes:
       - BG mode register ($2105 - BGMODE)
       - BG tilemap address registers ($2107-$210A - BG1SC-BG4SC)
       - BG CHR address registers ($210B-$210C - BG12NBA, BG34NBA)
-      - Main screen designation ($212C - TM) for layer enable/disable
+      - BG scroll registers ($210D-$2114 - horizontal/vertical offsets for all 4 layers)
+      - Main screen designation ($212C - TM) for layer/sprite enable/disable
       - Proper tile rendering with 8x8 tiles, 2-bit color (4 colors per tile)
       - Tilemap attribute support: horizontal/vertical flip, palette selection (8 palettes × 4 colors)
       - Layer priority rendering (BG4 → BG3 → BG2 → BG1)
       - Transparent pixel handling (color 0 is transparent)
-    - **NOT implemented**: Modes 1-7, sprites, scrolling, windows, effects
-  - All tests pass (17 tests: 5 cartridge, 7 PPU, 5 system)
+      - Full scrolling support on all layers
+    - **Mode 1 Support** (2 BG layers 4bpp, 1 BG layer 2bpp):
+      - Most common mode in commercial games (~60% of titles)
+      - BG1/BG2: 4bpp (16 colors per tile, 8 palettes × 16 colors)
+      - BG3: 2bpp (4 colors per tile, 8 palettes × 4 colors)
+      - Full scrolling support on all layers
+      - Layer priority rendering (BG3 → BG2 → BG1)
+    - **Sprite Support (OAM)**:
+      - 128 sprites with reverse priority rendering (127 → 0)
+      - 4bpp sprites (16 colors, 8 palettes at CGRAM 128-255)
+      - OAM registers: $2101 (OBSEL), $2102-$2103 (OAMADDL/H), $2104 (OAMDATA)
+      - Multiple size modes: 8x8/16x16, 8x8/32x32, 16x16/32x32, etc.
+      - Horizontal and vertical flipping
+      - Configurable VRAM base address
+    - **NOT implemented**: Modes 2-7, windows, HDMA, mosaic, color math
+  - All tests pass (28 tests: 5 cartridge, 18 PPU including sprites/scrolling/modes, 5 system)
 
 - **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation
