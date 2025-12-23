@@ -30,8 +30,8 @@ use emu_core::{
 };
 use serde_json::Value;
 use thiserror::Error;
-use video_adapter::VideoAdapter;
-use video_adapter_software::SoftwareCgaAdapter;
+pub use video_adapter::VideoAdapter;
+pub use video_adapter_software::SoftwareCgaAdapter;
 
 pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
@@ -150,6 +150,42 @@ impl PcSystem {
         self.cpu.bus().boot_priority()
     }
 
+    /// Set the video adapter
+    ///
+    /// # Examples
+    /// ```
+    /// use emu_pc::{PcSystem, SoftwareCgaAdapter, SoftwareEgaAdapter, SoftwareVgaAdapter};
+    ///
+    /// let mut sys = PcSystem::new();
+    /// // Switch to EGA adapter
+    /// sys.set_video_adapter(Box::new(SoftwareEgaAdapter::new()));
+    /// // Switch to VGA adapter
+    /// sys.set_video_adapter(Box::new(SoftwareVgaAdapter::new()));
+    /// ```
+    pub fn set_video_adapter(&mut self, adapter: Box<dyn VideoAdapter>) {
+        self.video = adapter;
+    }
+
+    /// Get the current video adapter name
+    ///
+    /// # Examples
+    /// ```
+    /// use emu_pc::PcSystem;
+    ///
+    /// let sys = PcSystem::new();
+    /// assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+    /// ```
+    pub fn video_adapter_name(&self) -> &str {
+        self.video.name()
+    }
+
+    /// Get the current framebuffer dimensions
+    ///
+    /// Returns (width, height) in pixels
+    pub fn framebuffer_dimensions(&self) -> (usize, usize) {
+        (self.video.fb_width(), self.video.fb_height())
+    }
+
     /// Trigger boot sector loading (called before first execution or on reset)
     fn ensure_boot_sector_loaded(&mut self) {
         self.cpu.bus_mut().load_boot_sector();
@@ -242,14 +278,20 @@ impl System for PcSystem {
     fn save_state(&self) -> Value {
         let regs = self.cpu.get_registers();
         serde_json::json!({
-            "version": 1,
+            "version": 2,
             "system": "pc",
             "registers": regs,
             "cycles": self.cycles,
+            "cpu_model": format!("{:?}", self.cpu.model()),
+            "boot_priority": self.boot_priority(),
+            "video_adapter": self.video.name(),
         })
     }
 
     fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
+        // Handle both v1 and v2 save states
+        let version = state.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
+
         if let Some(regs) = state.get("registers") {
             let regs: CpuRegisters = serde_json::from_value(regs.clone())?;
             self.cpu.set_registers(&regs);
@@ -257,6 +299,27 @@ impl System for PcSystem {
 
         if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
             self.cycles = cycles;
+        }
+
+        // Restore CPU model if available (v2+)
+        if version >= 2 {
+            if let Some(model_str) = state.get("cpu_model").and_then(|v| v.as_str()) {
+                let model = match model_str {
+                    "Intel8086" => CpuModel::Intel8086,
+                    "Intel8088" => CpuModel::Intel8088,
+                    "Intel80186" => CpuModel::Intel80186,
+                    "Intel80188" => CpuModel::Intel80188,
+                    "Intel80286" => CpuModel::Intel80286,
+                    _ => CpuModel::Intel8086, // Default fallback
+                };
+                self.set_cpu_model(model);
+            }
+
+            // Restore boot priority if available
+            if let Some(priority) = state.get("boot_priority") {
+                let priority: BootPriority = serde_json::from_value(priority.clone())?;
+                self.set_boot_priority(priority);
+            }
         }
 
         Ok(())
@@ -295,21 +358,59 @@ impl System for PcSystem {
         ]
     }
 
+    /// Mount a disk image with validation
+    ///
+    /// # Arguments
+    /// * `mount_point_id` - The mount point identifier ("BIOS", "FloppyA", "FloppyB", "HardDrive")
+    /// * `data` - The disk image data
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use emu_pc::{PcSystem, create_blank_floppy, FloppyFormat};
+    /// use emu_core::System;
+    ///
+    /// let mut sys = PcSystem::new();
+    /// let floppy = create_blank_floppy(FloppyFormat::Floppy1_44M);
+    /// sys.mount("FloppyA", &floppy).expect("Failed to mount floppy");
+    /// ```
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
+        // Validate data size for disk images
         match mount_point_id {
             "BIOS" => {
+                if data.is_empty() {
+                    return Err(PcError::InvalidExecutable);
+                }
                 self.cpu.bus_mut().load_bios(data);
                 Ok(())
             }
             "FloppyA" => {
+                // Validate floppy size (common formats: 360K, 720K, 1.2M, 1.44M)
+                let valid_sizes = [368640, 737280, 1228800, 1474560];
+                if !valid_sizes.contains(&data.len()) {
+                    eprintln!(
+                        "Warning: Floppy A image size {} is not a standard format",
+                        data.len()
+                    );
+                }
                 self.cpu.bus_mut().mount_floppy_a(data.to_vec());
                 Ok(())
             }
             "FloppyB" => {
+                let valid_sizes = [368640, 737280, 1228800, 1474560];
+                if !valid_sizes.contains(&data.len()) {
+                    eprintln!(
+                        "Warning: Floppy B image size {} is not a standard format",
+                        data.len()
+                    );
+                }
                 self.cpu.bus_mut().mount_floppy_b(data.to_vec());
                 Ok(())
             }
             "HardDrive" => {
+                // Validate hard drive size (minimum 1MB)
+                if data.len() < 1024 * 1024 {
+                    return Err(PcError::InvalidExecutable);
+                }
                 self.cpu.bus_mut().mount_hard_drive(data.to_vec());
                 Ok(())
             }
@@ -394,7 +495,7 @@ mod tests {
 
         let state = sys.save_state();
         assert_eq!(state["system"], "pc");
-        assert_eq!(state["version"], 1);
+        assert_eq!(state["version"], 2);
 
         let mut sys2 = PcSystem::new();
         assert!(sys2.load_state(&state).is_ok());
@@ -933,5 +1034,134 @@ mod tests {
         } else {
             panic!("VRAM too small");
         }
+    }
+
+    #[test]
+    fn test_video_adapter_switching() {
+        let mut sys = PcSystem::new();
+
+        // Default is CGA
+        assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 400));
+
+        // Switch to EGA
+        sys.set_video_adapter(Box::new(
+            crate::video_adapter_ega_software::SoftwareEgaAdapter::new(),
+        ));
+        assert_eq!(sys.video_adapter_name(), "Software EGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 350));
+
+        // Switch to VGA
+        sys.set_video_adapter(Box::new(
+            crate::video_adapter_vga_software::SoftwareVgaAdapter::new(),
+        ));
+        assert_eq!(sys.video_adapter_name(), "Software VGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (720, 400));
+
+        // Switch back to CGA
+        sys.set_video_adapter(Box::new(SoftwareCgaAdapter::new()));
+        assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 400));
+    }
+
+    #[test]
+    fn test_save_state_v2_includes_cpu_model() {
+        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
+
+        let state = sys.save_state();
+        assert_eq!(state["version"], 2);
+        assert_eq!(state["cpu_model"], "Intel80186");
+    }
+
+    #[test]
+    fn test_save_state_v2_includes_boot_priority() {
+        let mut sys = PcSystem::new();
+        sys.set_boot_priority(crate::BootPriority::HardDriveFirst);
+
+        let state = sys.save_state();
+        assert_eq!(state["version"], 2);
+        assert_eq!(state["boot_priority"], "HardDriveFirst");
+    }
+
+    #[test]
+    fn test_load_state_v2_restores_cpu_model() {
+        let sys = PcSystem::with_cpu_model(CpuModel::Intel80286);
+        let state = sys.save_state();
+
+        let mut sys2 = PcSystem::with_cpu_model(CpuModel::Intel8086);
+        assert_eq!(sys2.cpu_model(), CpuModel::Intel8086);
+
+        sys2.load_state(&state).unwrap();
+        assert_eq!(sys2.cpu_model(), CpuModel::Intel80286);
+    }
+
+    #[test]
+    fn test_load_state_v2_restores_boot_priority() {
+        let mut sys = PcSystem::new();
+        sys.set_boot_priority(crate::BootPriority::FloppyOnly);
+        let state = sys.save_state();
+
+        let mut sys2 = PcSystem::new();
+        sys2.set_boot_priority(crate::BootPriority::HardDriveFirst);
+
+        sys2.load_state(&state).unwrap();
+        assert_eq!(sys2.boot_priority(), crate::BootPriority::FloppyOnly);
+    }
+
+    #[test]
+    fn test_load_state_v1_backward_compatibility() {
+        // Create a v1 state manually
+        let state = serde_json::json!({
+            "version": 1,
+            "system": "pc",
+            "registers": {
+                "ax": 0x1234,
+                "bx": 0x5678,
+                "cx": 0,
+                "dx": 0,
+                "si": 0,
+                "di": 0,
+                "bp": 0,
+                "sp": 0xFFFE,
+                "cs": 0xFFFF,
+                "ds": 0,
+                "es": 0,
+                "ss": 0,
+                "ip": 0,
+                "flags": 0,
+            },
+            "cycles": 12345,
+        });
+
+        let mut sys = PcSystem::new();
+        assert!(sys.load_state(&state).is_ok());
+        assert_eq!(sys.cycles, 12345);
+    }
+
+    #[test]
+    fn test_mount_validation_invalid_bios() {
+        let mut sys = PcSystem::new();
+        // Empty BIOS should fail
+        let result = sys.mount("BIOS", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mount_validation_invalid_hard_drive() {
+        let mut sys = PcSystem::new();
+        // Hard drive smaller than 1MB should fail
+        let small_hd = vec![0; 512 * 1024]; // 512KB
+        let result = sys.mount("HardDrive", &small_hd);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mount_validation_valid_floppy() {
+        let mut sys = PcSystem::new();
+        // 1.44MB floppy should succeed
+        let floppy = vec![0; 1474560];
+        let result = sys.mount("FloppyA", &floppy);
+        assert!(result.is_ok());
+        assert!(sys.is_mounted("FloppyA"));
     }
 }
