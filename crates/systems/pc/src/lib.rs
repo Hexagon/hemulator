@@ -12,6 +12,7 @@ mod disk;
 mod keyboard;
 mod video;
 mod video_adapter;
+mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
 mod video_adapter_software;
 
 use bios::generate_minimal_bios;
