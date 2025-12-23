@@ -98,6 +98,51 @@ fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {
     0xFF000000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
+/// Apply CRT edge vignette effect - fades edges to near black with slight rounding
+/// This simulates the rounded corners and edge darkening of CRT displays
+#[inline]
+fn apply_crt_vignette(buffer: &mut [u32], width: usize, height: usize) {
+    let center_x = width as f32 / 2.0;
+    let center_y = height as f32 / 2.0;
+    let max_dist = (center_x * center_x + center_y * center_y).sqrt();
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if idx < buffer.len() {
+                let color = buffer[idx];
+                let (r, g, b) = unpack_rgb(color);
+
+                // Calculate distance from center
+                let dx = x as f32 - center_x;
+                let dy = y as f32 - center_y;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                // Normalize distance (0.0 at center, 1.0 at corners)
+                let normalized_dist = dist / max_dist;
+
+                // Apply smooth vignette with quadratic falloff for rounded edges
+                // At 90% of distance, start aggressive darkening to near black at edges
+                let vignette = if normalized_dist > 0.9 {
+                    // Aggressive fade at very edges - goes to near black
+                    let edge_factor = (normalized_dist - 0.9) / 0.1; // 0.0 to 1.0 in outer 10%
+                    1.0 - edge_factor * 0.95 // Fade to 5% brightness at edges
+                } else {
+                    // Gentle vignette in main area
+                    1.0 - (normalized_dist * normalized_dist * 0.2) // 20% darkening at 90% radius
+                };
+
+                // Apply vignette to all channels
+                let r = (r as f32 * vignette) as u8;
+                let g = (g as f32 * vignette) as u8;
+                let b = (b as f32 * vignette) as u8;
+
+                buffer[idx] = pack_rgb(r, g, b);
+            }
+        }
+    }
+}
+
 /// Blend two colors with a given ratio (0.0 = all color1, 1.0 = all color2)
 #[allow(dead_code)] // Still used in tests
 #[inline]
@@ -238,6 +283,9 @@ fn apply_sony_trinitron(buffer: &mut [u32], width: usize, height: usize) {
             b.saturating_add(bb),
         );
     }
+
+    // Apply CRT edge vignette for authentic rounded screen effect
+    apply_crt_vignette(buffer, width, height);
 }
 
 /// IBM 5151 - Green monochrome PC monitor with phosphor glow and persistence
@@ -317,6 +365,9 @@ fn apply_ibm5151(buffer: &mut [u32], width: usize, height: usize) {
             }
         }
     }
+
+    // Apply CRT edge vignette for authentic rounded screen effect
+    apply_crt_vignette(buffer, width, height);
 }
 
 /// Commodore 1702 - Color CRT monitor with shadow mask and moderate scanlines
@@ -408,6 +459,9 @@ fn apply_commodore1702(buffer: &mut [u32], width: usize, height: usize) {
             }
         }
     }
+
+    // Apply CRT edge vignette for authentic rounded screen effect
+    apply_crt_vignette(buffer, width, height);
 }
 
 /// Sharp LCD - Early passive matrix LCD with blur, low contrast, and pixel grid
@@ -503,11 +557,7 @@ fn apply_sharp_lcd(buffer: &mut [u32], width: usize, height: usize) {
 /// RCA Victor - Vintage B/W CRT TV with heavy scanlines and vignette
 /// Simulates 1950s-60s black and white television
 fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
-    let center_x = width as f32 / 2.0;
-    let center_y = height as f32 / 2.0;
-    let max_dist = (center_x * center_x + center_y * center_y).sqrt();
-
-    // Convert to B/W and apply vignette
+    // Convert to B/W
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
@@ -518,16 +568,7 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
                 let b = (color & 0xFF) as u8;
 
                 // Convert to luminance
-                let mut lum = ((r as u16 * 77 + g as u16 * 150 + b as u16 * 29) >> 8) as u8;
-
-                // Calculate distance from center for vignette
-                let dx = x as f32 - center_x;
-                let dy = y as f32 - center_y;
-                let dist = (dx * dx + dy * dy).sqrt();
-                let vignette = 1.0 - ((dist / max_dist) * 0.25); // 25% darkening at edges
-
-                // Apply vignette
-                lum = (lum as f32 * vignette) as u8;
+                let lum = ((r as u16 * 77 + g as u16 * 150 + b as u16 * 29) >> 8) as u8;
 
                 buffer[idx] = pack_rgb(lum, lum, lum);
             }
@@ -570,6 +611,9 @@ fn apply_rca_victor(buffer: &mut [u32], width: usize, height: usize) {
             }
         }
     }
+
+    // Apply CRT edge vignette for authentic rounded screen effect
+    apply_crt_vignette(buffer, width, height);
 }
 
 #[cfg(test)]
