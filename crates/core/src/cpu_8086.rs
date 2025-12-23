@@ -794,6 +794,356 @@ impl<M: Memory8086> Cpu8086<M> {
         let opcode = self.fetch_u8();
 
         match opcode {
+            // REP/REPE/REPZ prefix (0xF3)
+            0xF3 => {
+                let next_opcode = self.fetch_u8();
+                let mut total_cycles: u32 = 9; // Base prefix overhead
+
+                match next_opcode {
+                    // MOVSB
+                    0xA4 => {
+                        while self.cx != 0 {
+                            let val = self.read(self.ds, self.si);
+                            self.write(self.es, self.di, val);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 17;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // MOVSW
+                    0xA5 => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.ds, self.si);
+                            self.write_u16(self.es, self.di, val);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 17;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // STOSB
+                    0xAA => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            self.write(self.es, self.di, al);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 10;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // STOSW
+                    0xAB => {
+                        while self.cx != 0 {
+                            self.write_u16(self.es, self.di, self.ax);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 10;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // LODSB
+                    0xAC => {
+                        while self.cx != 0 {
+                            let val = self.read(self.ds, self.si);
+                            self.ax = (self.ax & 0xFF00) | (val as u16);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 13;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // LODSW
+                    0xAD => {
+                        while self.cx != 0 {
+                            self.ax = self.read_u16(self.ds, self.si);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 13;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSB
+                    0xA6 => {
+                        while self.cx != 0 {
+                            let src = self.read(self.ds, self.si);
+                            let dst = self.read(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u16) < (dst as u16);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSW
+                    0xA7 => {
+                        while self.cx != 0 {
+                            let src = self.read_u16(self.ds, self.si);
+                            let dst = self.read_u16(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u32) < (dst as u32);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASB
+                    0xAE => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            let val = self.read(self.es, self.di);
+                            let result = al.wrapping_sub(val);
+                            let borrow = (al as u16) < (val as u16);
+                            let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASW
+                    0xAF => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.es, self.di);
+                            let result = self.ax.wrapping_sub(val);
+                            let borrow = (self.ax as u32) < (val as u32);
+                            let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented REP string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
+            // REPNZ/REPNE prefix (0xF2)
+            0xF2 => {
+                let next_opcode = self.fetch_u8();
+                let mut total_cycles: u32 = 9; // Base prefix overhead
+
+                match next_opcode {
+                    // CMPSB
+                    0xA6 => {
+                        while self.cx != 0 {
+                            let src = self.read(self.ds, self.si);
+                            let dst = self.read(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u16) < (dst as u16);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSW
+                    0xA7 => {
+                        while self.cx != 0 {
+                            let src = self.read_u16(self.ds, self.si);
+                            let dst = self.read_u16(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u32) < (dst as u32);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASB
+                    0xAE => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            let val = self.read(self.es, self.di);
+                            let result = al.wrapping_sub(val);
+                            let borrow = (al as u16) < (val as u16);
+                            let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASW
+                    0xAF => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.es, self.di);
+                            let result = self.ax.wrapping_sub(val);
+                            let borrow = (self.ax as u32) < (val as u32);
+                            let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented REPNZ string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
             // NOP
             0x90 => {
                 self.cycles += 3;
@@ -1934,6 +2284,199 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 4;
                     4
                 }
+            }
+
+            // MOVSB - Move String Byte (0xA4)
+            0xA4 => {
+                // Move byte from DS:SI to ES:DI
+                let val = self.read(self.ds, self.si);
+                self.write(self.es, self.di, val);
+
+                // Update SI and DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 18;
+                18
+            }
+
+            // MOVSW - Move String Word (0xA5)
+            0xA5 => {
+                // Move word from DS:SI to ES:DI
+                let val = self.read_u16(self.ds, self.si);
+                self.write_u16(self.es, self.di, val);
+
+                // Update SI and DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 18;
+                18
+            }
+
+            // CMPSB - Compare String Byte (0xA6)
+            0xA6 => {
+                // Compare byte at DS:SI with byte at ES:DI
+                let src = self.read(self.ds, self.si);
+                let dst = self.read(self.es, self.di);
+                let result = src.wrapping_sub(dst);
+                let borrow = (src as u16) < (dst as u16);
+                let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update SI and DI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 22;
+                22
+            }
+
+            // CMPSW - Compare String Word (0xA7)
+            0xA7 => {
+                // Compare word at DS:SI with word at ES:DI
+                let src = self.read_u16(self.ds, self.si);
+                let dst = self.read_u16(self.es, self.di);
+                let result = src.wrapping_sub(dst);
+                let borrow = (src as u32) < (dst as u32);
+                let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update SI and DI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 22;
+                22
+            }
+
+            // STOSB - Store String Byte (0xAA)
+            0xAA => {
+                // Store AL to ES:DI
+                let al = (self.ax & 0xFF) as u8;
+                self.write(self.es, self.di, al);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 11;
+                11
+            }
+
+            // STOSW - Store String Word (0xAB)
+            0xAB => {
+                // Store AX to ES:DI
+                self.write_u16(self.es, self.di, self.ax);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 11;
+                11
+            }
+
+            // LODSB - Load String Byte (0xAC)
+            0xAC => {
+                // Load byte from DS:SI into AL
+                let val = self.read(self.ds, self.si);
+                self.ax = (self.ax & 0xFF00) | (val as u16);
+
+                // Update SI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                }
+                self.cycles += 12;
+                12
+            }
+
+            // LODSW - Load String Word (0xAD)
+            0xAD => {
+                // Load word from DS:SI into AX
+                self.ax = self.read_u16(self.ds, self.si);
+
+                // Update SI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                }
+                self.cycles += 12;
+                12
+            }
+
+            // SCASB - Scan String Byte (0xAE)
+            0xAE => {
+                // Compare AL with byte at ES:DI
+                let al = (self.ax & 0xFF) as u8;
+                let val = self.read(self.es, self.di);
+                let result = al.wrapping_sub(val);
+                let borrow = (al as u16) < (val as u16);
+                let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 15;
+                15
+            }
+
+            // SCASW - Scan String Word (0xAF)
+            0xAF => {
+                // Compare AX with word at ES:DI
+                let val = self.read_u16(self.es, self.di);
+                let result = self.ax.wrapping_sub(val);
+                let borrow = (self.ax as u32) < (val as u32);
+                let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 15;
+                15
             }
 
             // CALL near relative (0xE8)
@@ -3881,5 +4424,447 @@ mod tests {
 
         cpu.step();
         assert_eq!(cpu.ss, 0xABCD); // SS should contain value from memory
+    }
+
+    // ===== String Operation Tests =====
+
+    #[test]
+    fn test_movsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x42);
+
+        // MOVSB (0xA4)
+        cpu.memory.load_program(0xFFFF0, &[0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify data copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x42);
+
+        // Verify SI and DI incremented (DF=0)
+        assert_eq!(cpu.si, 0x0101);
+        assert_eq!(cpu.di, 0x0201);
+    }
+
+    #[test]
+    fn test_movsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write source word
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x34);
+        cpu.memory.write(src_addr + 1, 0x12);
+
+        // MOVSW (0xA5)
+        cpu.memory.load_program(0xFFFF0, &[0xA5]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify word copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x34);
+        assert_eq!(cpu.memory.read(dst_addr + 1), 0x12);
+
+        // Verify SI and DI incremented by 2
+        assert_eq!(cpu.si, 0x0102);
+        assert_eq!(cpu.di, 0x0202);
+    }
+
+    #[test]
+    fn test_movsb_with_df() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+        cpu.set_flag(FLAG_DF, true); // Set direction flag
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0xAB);
+
+        // MOVSB
+        cpu.memory.load_program(0xFFFF0, &[0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify SI and DI decremented (DF=1)
+        assert_eq!(cpu.si, 0x00FF);
+        assert_eq!(cpu.di, 0x01FF);
+    }
+
+    #[test]
+    fn test_stosb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+
+        // STOSB (0xAA)
+        cpu.memory.load_program(0xFFFF0, &[0xAA]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify AL stored to ES:DI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xFF);
+        assert_eq!(cpu.di, 0x0101);
+    }
+
+    #[test]
+    fn test_stosw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0xABCD;
+
+        // STOSW (0xAB)
+        cpu.memory.load_program(0xFFFF0, &[0xAB]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify AX stored to ES:DI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xCD);
+        assert_eq!(cpu.memory.read(addr + 1), 0xAB);
+        assert_eq!(cpu.di, 0x0102);
+    }
+
+    #[test]
+    fn test_lodsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+
+        // Write test data
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x55);
+
+        // LODSB (0xAC)
+        cpu.memory.load_program(0xFFFF0, &[0xAC]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify data loaded into AL
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+        assert_eq!(cpu.si, 0x0101);
+    }
+
+    #[test]
+    fn test_lodsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+
+        // Write test word
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x78);
+        cpu.memory.write(addr + 1, 0x56);
+
+        // LODSW (0xAD)
+        cpu.memory.load_program(0xFFFF0, &[0xAD]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify word loaded into AX
+        assert_eq!(cpu.ax, 0x5678);
+        assert_eq!(cpu.si, 0x0102);
+    }
+
+    #[test]
+    fn test_scasb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x0042; // AL = 0x42
+
+        // Write test data
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0x42);
+
+        // SCASB (0xAE)
+        cpu.memory.load_program(0xFFFF0, &[0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF set (AL == [ES:DI])
+        assert!(cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.di, 0x0101);
+    }
+
+    #[test]
+    fn test_scasw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x1234;
+
+        // Write different word
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0x56);
+        cpu.memory.write(addr + 1, 0x78);
+
+        // SCASW (0xAF)
+        cpu.memory.load_program(0xFFFF0, &[0xAF]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF clear (AX != [ES:DI])
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.di, 0x0102);
+    }
+
+    #[test]
+    fn test_cmpsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write matching bytes
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        cpu.memory.write(src_addr, 0x55);
+        cpu.memory.write(dst_addr, 0x55);
+
+        // CMPSB (0xA6)
+        cpu.memory.load_program(0xFFFF0, &[0xA6]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF set (bytes equal)
+        assert!(cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.si, 0x0101);
+        assert_eq!(cpu.di, 0x0201);
+    }
+
+    #[test]
+    fn test_cmpsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write different words
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        cpu.memory.write(src_addr, 0x34);
+        cpu.memory.write(src_addr + 1, 0x12);
+        cpu.memory.write(dst_addr, 0x78);
+        cpu.memory.write(dst_addr + 1, 0x56);
+
+        // CMPSW (0xA7)
+        cpu.memory.load_program(0xFFFF0, &[0xA7]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF clear (words not equal)
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.si, 0x0102);
+        assert_eq!(cpu.di, 0x0202);
+    }
+
+    #[test]
+    fn test_rep_stosb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00AA; // AL = 0xAA
+        cpu.cx = 5; // Repeat 5 times
+
+        // REP STOSB (0xF3 0xAA)
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAA]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify 5 bytes written
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            assert_eq!(cpu.memory.read(addr + i), 0xAA);
+        }
+        assert_eq!(cpu.di, 0x0105);
+        assert_eq!(cpu.cx, 0); // CX should be 0
+    }
+
+    #[test]
+    fn test_rep_movsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+        cpu.cx = 3;
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x11);
+        cpu.memory.write(src_addr + 1, 0x22);
+        cpu.memory.write(src_addr + 2, 0x33);
+
+        // REP MOVSB (0xF3 0xA4)
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify all bytes copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x11);
+        assert_eq!(cpu.memory.read(dst_addr + 1), 0x22);
+        assert_eq!(cpu.memory.read(dst_addr + 2), 0x33);
+        assert_eq!(cpu.cx, 0);
+    }
+
+    #[test]
+    fn test_repe_scasb_match() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 5;
+
+        // Fill memory with 0xFF
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            cpu.memory.write(addr + i, 0xFF);
+        }
+
+        // REPE SCASB (0xF3 0xAE) - scan while equal
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should scan all 5 bytes and stop when CX=0
+        assert_eq!(cpu.cx, 0);
+        assert_eq!(cpu.di, 0x0105);
+        assert!(cpu.get_flag(FLAG_ZF)); // Last comparison was equal
+    }
+
+    #[test]
+    fn test_repe_scasb_mismatch() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 5;
+
+        // Fill first 2 with 0xFF, then different value
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0xFF);
+        cpu.memory.write(addr + 1, 0xFF);
+        cpu.memory.write(addr + 2, 0xAA); // Different
+
+        // REPE SCASB - should stop at mismatch
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should stop after 3 comparisons (2 matches + 1 mismatch)
+        assert_eq!(cpu.cx, 2); // 5 - 3 = 2 remaining
+        assert_eq!(cpu.di, 0x0103);
+        assert!(!cpu.get_flag(FLAG_ZF)); // Last comparison was not equal
+    }
+
+    #[test]
+    fn test_repne_scasb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x0000; // AL = 0x00 (looking for null)
+        cpu.cx = 10;
+
+        // Fill with non-zero, then zero at position 5
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            cpu.memory.write(addr + i, 0xFF);
+        }
+        cpu.memory.write(addr + 5, 0x00); // Match at position 5
+
+        // REPNE SCASB (0xF2 0xAE) - scan while not equal
+        cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should stop when it finds 0x00 at position 5
+        assert_eq!(cpu.cx, 4); // 10 - 6 = 4 remaining
+        assert_eq!(cpu.di, 0x0106);
+        assert!(cpu.get_flag(FLAG_ZF)); // Found match
     }
 }
