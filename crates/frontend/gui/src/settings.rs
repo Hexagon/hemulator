@@ -150,8 +150,8 @@ pub struct Settings {
 
     pub window_width: usize,
     pub window_height: usize,
-    #[serde(default)]
-    pub last_rom_path: Option<String>, // Kept for backward compatibility
+    #[serde(default, skip_serializing)]
+    pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
     pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
     #[serde(default)]
@@ -301,10 +301,8 @@ mod tests {
         let loaded_contents = fs::read_to_string(&test_config).unwrap();
         let loaded: Settings = serde_json::from_str(&loaded_contents).unwrap();
 
-        assert_eq!(
-            loaded.last_rom_path,
-            Some("/test/path/game.nes".to_string())
-        );
+        // last_rom_path is skip_serializing, so it won't be saved
+        assert_eq!(loaded.last_rom_path, None);
         assert_eq!(loaded.window_width, 1024);
         assert_eq!(loaded.window_height, 960);
 
