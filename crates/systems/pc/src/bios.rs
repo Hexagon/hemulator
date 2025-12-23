@@ -75,20 +75,21 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     bios
 }
 
-/// Write "Hemu" ASCII art logo directly to video RAM
+/// Write "hemu" ASCII art logo directly to video RAM
 /// This is called from the PC system to display the logo at boot
 pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
-    // ASCII art for "Hemu"
+    // ASCII art for "hemu" using dense block-style characters
     let logo_lines = [
-        "  _   _   ___   __  __   _   _ ",
-        " | | | | | __| |  \\/  | | | | |",
-        " | |_| | | _|  | |\\/| | | |_| |",
-        "  \\___/  |___| |_|  |_|  \\___/ ",
+        "#   # #### #   # #  #",
+        "##### #    ## ## #  #",
+        "#   # ###  # # # #  #",
+        "#   # #    #   # #  #",
+        "#   # #### #   #  ##",
     ];
 
     let attribute = 0x0E; // Yellow on black
     let start_row = 10;
-    let start_col = 24; // Center the 32-char wide logo on an 80-char screen
+    let start_col = 29; // Center the 21-char wide logo on an 80-char screen
 
     // Video RAM offset for text mode (0xB8000 - 0xA0000 = 0x18000)
     let text_offset = 0x18000;

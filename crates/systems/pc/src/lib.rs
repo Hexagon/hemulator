@@ -870,24 +870,24 @@ mod tests {
 
         // Check that the logo was written to video memory
         // Video memory is at 0xB8000, which is offset 0x18000 in VRAM
-        // Logo should be at row 10, column 24
+        // Logo should be at row 10, column 29 (compressed format)
         let vram = sys.cpu.bus().vram();
         let text_offset = 0x18000;
         let logo_row = 10;
-        let logo_col = 24;
+        let logo_col = 29;
         let logo_offset = text_offset + (logo_row * 80 + logo_col) * 2;
 
-        // Check first line of logo: "  _   _   ___   __  __   _   _ "
+        // Check first line of logo
         if vram.len() > logo_offset + 64 {
             // Just check for some characteristic characters from the first line
             let first_line_chars: Vec<char> =
-                (0..32).map(|i| vram[logo_offset + i * 2] as char).collect();
+                (0..21).map(|i| vram[logo_offset + i * 2] as char).collect();
             let first_line: String = first_line_chars.iter().collect();
 
-            println!("Hemu logo first line: '{}'", first_line);
+            println!("hemu logo first line: '{}'", first_line);
 
-            // Verify we have underscores (part of the ASCII art)
-            assert!(first_line.contains('_'), "Logo should contain underscores");
+            // Verify we have hash characters (part of the ASCII art)
+            assert!(first_line.contains('#'), "Logo should contain # characters");
 
             // Verify the attribute is yellow (0x0E)
             assert_eq!(
@@ -896,19 +896,19 @@ mod tests {
                 "Logo should be in yellow color"
             );
 
-            // Check second line for characteristic letters
+            // Check second line
             let second_row_offset = logo_offset + 160; // Next row (80 chars * 2 bytes)
-            let second_line_chars: Vec<char> = (0..32)
+            let second_line_chars: Vec<char> = (0..21)
                 .map(|i| vram[second_row_offset + i * 2] as char)
                 .collect();
             let second_line: String = second_line_chars.iter().collect();
 
-            println!("Hemu logo second line: '{}'", second_line);
+            println!("hemu logo second line: '{}'", second_line);
 
-            // Should have pipe characters and letters
+            // Should have hash characters
             assert!(
-                second_line.contains('|'),
-                "Logo should contain vertical bars"
+                second_line.contains('#'),
+                "Logo should contain # characters"
             );
 
             // Print full screen for visual verification
@@ -929,7 +929,7 @@ mod tests {
                 println!("{:2}: {}", row, line);
             }
 
-            println!("\n✓ Hemu ASCII art logo detected in video memory!");
+            println!("\n✓ hemu ASCII art logo detected in video memory!");
         } else {
             panic!("VRAM too small");
         }
