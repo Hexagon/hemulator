@@ -158,11 +158,11 @@ mod tests {
         processor.init(256, 240).unwrap();
 
         let buffer = vec![0xFFFFFFFF; 256 * 240];
-        let result = processor.process_frame(&buffer, 256, 240, CrtFilter::Scanlines);
+        let result = processor.process_frame(&buffer, 256, 240, CrtFilter::SonyTrinitron);
         assert!(result.is_ok());
 
         let processed = result.unwrap();
-        // Scanlines should darken every other row
+        // Filter should modify pixels
         assert_eq!(processed.len(), 256 * 240);
     }
 }

@@ -153,9 +153,11 @@ impl OpenGLProcessor {
 
         let fragment_source = match filter {
             CrtFilter::None => include_str!("../shaders/fragment_none.glsl"),
-            CrtFilter::Scanlines => include_str!("../shaders/fragment_scanlines.glsl"),
-            CrtFilter::Phosphor => include_str!("../shaders/fragment_phosphor.glsl"),
-            CrtFilter::CrtMonitor => include_str!("../shaders/fragment_crt.glsl"),
+            CrtFilter::SonyTrinitron => include_str!("../shaders/fragment_sony_trinitron.glsl"),
+            CrtFilter::Ibm5151 => include_str!("../shaders/fragment_ibm5151.glsl"),
+            CrtFilter::Commodore1702 => include_str!("../shaders/fragment_commodore1702.glsl"),
+            CrtFilter::SharpLcd => include_str!("../shaders/fragment_sharp_lcd.glsl"),
+            CrtFilter::RcaVictor => include_str!("../shaders/fragment_rca_victor.glsl"),
         };
 
         let fragment_shader = compile_shader(&self.gl, glow::FRAGMENT_SHADER, fragment_source)?;
