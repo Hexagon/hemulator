@@ -134,6 +134,7 @@ mod cartridge;
 mod cpu;
 mod riot;
 mod tia;
+pub mod tia_renderer;
 
 use bus::Atari2600Bus;
 use cartridge::{Cartridge, CartridgeError};
@@ -141,6 +142,7 @@ use cpu::Atari2600Cpu;
 use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
+use tia_renderer::{SoftwareTiaRenderer, TiaRenderer};
 
 #[derive(Debug, Error)]
 pub enum Atari2600Error {
@@ -156,6 +158,7 @@ pub enum Atari2600Error {
 pub struct Atari2600System {
     cpu: Atari2600Cpu,
     cycles: u64,
+    renderer: Box<dyn TiaRenderer>,
 }
 
 impl Default for Atari2600System {
@@ -170,7 +173,11 @@ impl Atari2600System {
         let bus = Atari2600Bus::new();
         let cpu = Atari2600Cpu::new(bus);
 
-        Self { cpu, cycles: 0 }
+        Self {
+            cpu,
+            cycles: 0,
+            renderer: Box::new(SoftwareTiaRenderer::new()),
+        }
     }
 
     /// Get debug information
@@ -217,7 +224,6 @@ impl System for Atari2600System {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Atari 2600 NTSC: 262 scanlines per frame
         // Instead of running for a fixed cycle count, run until we've completed 262 scanlines
-        let mut frame = Frame::new(160, 192);
 
         // Clear per-frame debug stats
         if let Some(bus) = self.cpu.bus_mut() {
@@ -310,7 +316,7 @@ impl System for Atari2600System {
             );
         }
 
-        // Render the frame
+        // Render the frame using the renderer
         if let Some(bus) = self.cpu.bus() {
             // Dynamically determine visible window based on VBLANK timing
             let visible_start = bus.tia.visible_window_start_scanline();
@@ -322,18 +328,15 @@ impl System for Atari2600System {
                 eprintln!("[ATARI RENDER] visible_start={}", visible_start);
             }
 
-            // Render 192 visible scanlines
-            for visible_line in 0..192 {
-                let tia_scanline = (visible_start + visible_line as u16) % 262;
-                bus.tia
-                    .render_scanline(&mut frame.pixels, visible_line, tia_scanline);
-            }
+            // Use renderer to render the frame
+            self.renderer.render_frame(&bus.tia, visible_start);
         }
 
         if std::env::var("EMU_LOG_ATARI_FRAME_PIXELS")
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(false)
         {
+            let frame = self.renderer.get_frame();
             let non_black = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
             let mut scanlines_with_pf = 0u32;
@@ -384,7 +387,8 @@ impl System for Atari2600System {
             }
         }
 
-        Ok(frame)
+        // Return the rendered frame
+        Ok(self.renderer.get_frame().clone())
     }
 
     fn save_state(&self) -> Value {

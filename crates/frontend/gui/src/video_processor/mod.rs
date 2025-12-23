@@ -1,7 +1,35 @@
 //! Modular video processing abstraction
 //!
-//! This module provides an abstraction layer for video processing and rendering,
+//! This module provides an abstraction layer for video processing and post-processing,
 //! allowing different backends (software, OpenGL, etc.) to be used interchangeably.
+//!
+//! # Design Philosophy
+//!
+//! The VideoProcessor trait follows a similar pattern to `emu_core::renderer::Renderer`,
+//! but focuses on post-processing rather than core rendering:
+//!
+//! - **Software Processor**: CPU-based post-processing, maximum compatibility
+//! - **OpenGL Processor**: GPU-accelerated post-processing for performance
+//!
+//! # Architecture
+//!
+//! ```text
+//! System Renderer -> Frame -> VideoProcessor -> Post-Processed Frame -> Display
+//!                                   ↓
+//!                    (follows similar pattern to Renderer)
+//! ```
+//!
+//! The VideoProcessor applies effects (CRT filters, scaling, etc.) to frames
+//! after they've been rendered by the system's renderer.
+//!
+//! # Core Methods (Common Pattern)
+//!
+//! Similar to `emu_core::renderer::Renderer`, processors provide:
+//! - `init()`: Initialize with dimensions
+//! - `process_frame()`: Apply effects to a frame
+//! - `resize()`: Handle resolution changes
+//! - `name()`: Get processor name for debugging/UI
+//! - `is_hardware_accelerated()`: Check if GPU-accelerated
 
 use crate::crt_filter::CrtFilter;
 

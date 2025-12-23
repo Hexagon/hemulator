@@ -74,6 +74,7 @@ mod cartridge;
 mod cpu;
 mod mappers;
 mod ppu;
+pub mod ppu_renderer;
 
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;
@@ -81,6 +82,7 @@ use bus::NesBus;
 use cpu::NesCpu;
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
+use ppu_renderer::{NesPpuRenderer, SoftwareNesPpuRenderer};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -191,6 +193,7 @@ pub struct NesSystem {
     cartridge_loaded: bool,
     frame_index: u64,
     last_stats: RuntimeStats,
+    renderer: Box<dyn NesPpuRenderer>,
 }
 
 impl NesSystem {
@@ -284,6 +287,7 @@ impl Default for NesSystem {
             cartridge_loaded: false,
             frame_index: 0,
             last_stats: RuntimeStats::default(),
+            renderer: Box::new(SoftwareNesPpuRenderer::new()),
         }
     }
 }
@@ -386,7 +390,6 @@ impl System for NesSystem {
         };
 
         // Prepare an output frame and render scanlines incrementally during visible time.
-        let mut frame = Frame::new(256, 240);
         let mut rendered_scanlines: u32 = 0;
 
         // Visible portion (VBlank low)
@@ -428,7 +431,8 @@ impl System for NesSystem {
                         // effect during that scanline. MMC3 IRQ-triggered bank changes typically
                         // affect the *next* scanline.
                         if rendered_scanlines < 240 {
-                            b.ppu.render_scanline(rendered_scanlines, &mut frame);
+                            self.renderer
+                                .render_scanline(&mut b.ppu, rendered_scanlines);
                             rendered_scanlines += 1;
                         }
 
@@ -468,7 +472,8 @@ impl System for NesSystem {
         if rendered_scanlines < 240 {
             if let Some(b) = self.cpu.bus_mut() {
                 while rendered_scanlines < 240 {
-                    b.ppu.render_scanline(rendered_scanlines, &mut frame);
+                    self.renderer
+                        .render_scanline(&mut b.ppu, rendered_scanlines);
                     rendered_scanlines += 1;
                 }
             }
@@ -626,7 +631,8 @@ impl System for NesSystem {
             );
         }
 
-        Ok(frame)
+        // Return the rendered frame from the renderer
+        Ok(self.renderer.get_frame().clone())
     }
 
     fn save_state(&self) -> serde_json::Value {

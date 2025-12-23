@@ -10,6 +10,7 @@ pub mod cpu_mips_r4300i;
 pub mod cpu_z80;
 pub mod graphics;
 pub mod ppu;
+pub mod renderer;
 pub mod types {
     use serde::{Deserialize, Serialize};
 
