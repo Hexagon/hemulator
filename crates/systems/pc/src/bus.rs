@@ -7,6 +7,7 @@
 //! - 0xC0000-0xFFFFF: ROM area (256KB)
 //! - 0xF0000-0xFFFFF: BIOS ROM (64KB)
 
+use crate::bios::BootPriority;
 use crate::disk::DiskController;
 use crate::keyboard::Keyboard;
 use emu_core::cpu_8086::Memory8086;
@@ -31,6 +32,10 @@ pub struct PcBus {
     hard_drive: Option<Vec<u8>>,
     /// Disk controller
     disk_controller: DiskController,
+    /// Boot priority order
+    boot_priority: BootPriority,
+    /// Flag to track if boot sector has been loaded
+    boot_sector_loaded: bool,
 }
 
 impl PcBus {
@@ -46,6 +51,8 @@ impl PcBus {
             floppy_b: None,
             hard_drive: None,
             disk_controller: DiskController::new(),
+            boot_priority: BootPriority::default(),
+            boot_sector_loaded: false,
         }
     }
 
@@ -56,6 +63,78 @@ impl PcBus {
         self.vram.fill(0);
         self.keyboard.clear();
         self.disk_controller.reset();
+        self.boot_sector_loaded = false;
+    }
+
+    /// Set boot priority
+    pub fn set_boot_priority(&mut self, priority: BootPriority) {
+        self.boot_priority = priority;
+    }
+
+    /// Get boot priority
+    pub fn boot_priority(&self) -> BootPriority {
+        self.boot_priority
+    }
+
+    /// Load boot sector from the appropriate disk based on boot priority
+    ///
+    /// This method attempts to load the boot sector (sector 0, 512 bytes) from
+    /// the configured boot disk to memory address 0x7C00. It verifies the boot
+    /// signature (0xAA55) at the end of the sector.
+    ///
+    /// Returns: true if boot sector was loaded successfully, false otherwise
+    pub fn load_boot_sector(&mut self) -> bool {
+        // Prevent loading boot sector multiple times
+        if self.boot_sector_loaded {
+            return true;
+        }
+
+        // Determine which disk(s) to try based on boot priority
+        let boot_devices: Vec<(u8, Option<&[u8]>)> = match self.boot_priority {
+            BootPriority::FloppyFirst => vec![
+                (0x00, self.floppy_a.as_deref()),
+                (0x80, self.hard_drive.as_deref()),
+            ],
+            BootPriority::HardDriveFirst => vec![
+                (0x80, self.hard_drive.as_deref()),
+                (0x00, self.floppy_a.as_deref()),
+            ],
+            BootPriority::FloppyOnly => vec![
+                (0x00, self.floppy_a.as_deref()),
+            ],
+            BootPriority::HardDriveOnly => vec![
+                (0x80, self.hard_drive.as_deref()),
+            ],
+        };
+
+        // Try each device in order
+        for (drive, disk_image) in boot_devices {
+            if let Some(image) = disk_image {
+                // Check if disk image is large enough for boot sector
+                if image.len() < 512 {
+                    continue;
+                }
+
+                // Read boot sector (first 512 bytes)
+                let boot_sector = &image[0..512];
+
+                // Check for boot signature 0xAA55 at offset 510-511
+                if boot_sector[510] != 0x55 || boot_sector[511] != 0xAA {
+                    println!("Boot sector on drive 0x{:02X} has invalid signature", drive);
+                    continue;
+                }
+
+                // Load boot sector to 0x0000:0x7C00 (physical address 0x7C00)
+                self.ram[0x7C00..0x7C00 + 512].copy_from_slice(boot_sector);
+
+                self.boot_sector_loaded = true;
+                println!("Loaded boot sector from drive 0x{:02X}", drive);
+                return true;
+            }
+        }
+
+        println!("No bootable disk found");
+        false
     }
 
     /// Load an executable at a specific address
@@ -81,6 +160,16 @@ impl PcBus {
     /// Get a reference to the video RAM (for rendering)
     pub fn vram(&self) -> &[u8] {
         &self.vram
+    }
+
+    /// Read a byte from RAM at the given offset (for testing)
+    #[cfg(test)]
+    pub fn read_ram(&self, offset: usize) -> u8 {
+        if offset < self.ram.len() {
+            self.ram[offset]
+        } else {
+            0xFF
+        }
     }
 
     /// Mount floppy A disk image

@@ -1,61 +1,87 @@
-//! Basic BIOS stub for PC emulation
+//! BIOS implementation for PC emulation
 //!
-//! This provides a minimal BIOS that allows booting DOS executables.
-//! A real PC BIOS is much more complex, but for basic emulation we can
-//! provide a simple stub that sets up the system and jumps to the loaded program.
+//! This provides boot functionality for the PC system.
+//! The BIOS sets up the system and attempts to boot from disk.
+
+pub use boot_priority::BootPriority;
+
+mod boot_priority {
+    /// Boot priority options
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum BootPriority {
+        /// Boot from floppy first, then hard drive
+        FloppyFirst,
+        /// Boot from hard drive first, then floppy
+        HardDriveFirst,
+        /// Boot from floppy only
+        FloppyOnly,
+        /// Boot from hard drive only
+        HardDriveOnly,
+    }
+
+    impl Default for BootPriority {
+        fn default() -> Self {
+            BootPriority::FloppyFirst
+        }
+    }
+}
 
 /// Generate a minimal BIOS ROM
 ///
 /// This BIOS:
-/// 1. Initializes segment registers
-/// 2. Sets up the stack
-/// 3. Jumps to the loaded program at 0x0000:0x0100 (COM file convention)
+/// 1. Initializes segment registers and stack
+/// 2. Attempts to boot from disk (handled by emulator)
+/// 3. If boot fails, halts
 ///
-/// Size: 64KB (standard BIOS size), but most is just padding
+/// Size: 64KB (standard BIOS size)
 pub fn generate_minimal_bios() -> Vec<u8> {
     let mut bios = vec![0x00; 0x10000]; // 64KB of zeros
 
-    // BIOS entry point at 0xFFFF:0x0000 (physical 0xFFFF0)
-    // This is where the CPU starts executing on reset
-    // We only have 16 bytes at the very end, so use a minimal stub
-    let entry_point_offset = 0xFFF0;
-
-    // Minimal boot code that fits in 16 bytes:
-    // Jump to a larger boot routine at the start of the BIOS
-    let boot_stub: Vec<u8> = vec![
-        0xEA, 0x00, 0xF0, // JMP FAR 0xF000:0x0000 - jump to main boot code
-        0x00, 0xF0, // (continuation of far jump: segment = 0xF000)
-    ];
-
-    // Main boot code at 0xF0000 (start of BIOS)
+    // Main boot code at 0xF000:0x0000 (start of BIOS ROM)
+    // The emulator will intercept execution at specific points to handle boot logic
     let main_boot: Vec<u8> = vec![
-        0xFA, // CLI - disable interrupts
-        0xB8, 0x00, 0x00, // MOV AX, 0x0000
-        0x8E, 0xD8, // MOV DS, AX - set data segment to 0
-        0x8E, 0xC0, // MOV ES, AX - set extra segment to 0
-        0x8E, 0xD0, // MOV SS, AX - set stack segment to 0
-        0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE - set stack pointer
-        0xFB, // STI - enable interrupts
-        0xEA, 0x00, 0x01, // JMP FAR 0x0000:0x0100 - jump to COM program
-        0x00, 0x00, // (continuation of far jump: segment = 0x0000)
-    ];
+        // CLI - disable interrupts during setup
+        0xFA,
+        
+        // Initialize segment registers
+        0xB8, 0x00, 0x00,       // MOV AX, 0x0000
+        0x8E, 0xD8,             // MOV DS, AX
+        0x8E, 0xC0,             // MOV ES, AX
+        0x8E, 0xD0,             // MOV SS, AX
+        0xBC, 0xFE, 0xFF,       // MOV SP, 0xFFFE
 
-    // Copy boot stub to entry point (must fit in 16 bytes)
-    let stub_len = boot_stub.len();
-    bios[entry_point_offset..entry_point_offset + stub_len].copy_from_slice(&boot_stub);
+        // STI - enable interrupts
+        0xFB,
+
+        // Boot from disk - the emulator intercepts this and loads boot sector
+        // For now, just jump to boot sector location (0x0000:0x7C00)
+        // The emulator will load the boot sector before executing this
+        0xEA, 0x00, 0x7C,       // JMP FAR 0x0000:0x7C00
+        0x00, 0x00,             // (continuation: segment = 0x0000)
+
+        // If we return here, boot failed - halt
+        0xF4,                   // HLT
+    ];
 
     // Copy main boot code to start of BIOS
-    let main_len = main_boot.len();
-    bios[0..main_len].copy_from_slice(&main_boot);
+    bios[0..main_boot.len()].copy_from_slice(&main_boot);
 
-    // Add BIOS signature at end (some programs check for this)
-    // Standard PC BIOS date: "01/01/88"
+    // BIOS entry point at 0xFFFF:0x0000 (physical 0xFFFF0)
+    // This is where the CPU starts executing on reset
+    let entry_point_offset = 0xFFF0;
+    let boot_stub: Vec<u8> = vec![
+        0xEA, 0x00, 0xF0,       // JMP FAR 0xF000:0x0000
+        0x00, 0xF0,             // (continuation: segment = 0xF000)
+    ];
+    bios[entry_point_offset..entry_point_offset + boot_stub.len()].copy_from_slice(&boot_stub);
+
+    // Add BIOS signature at end
     let date_offset = 0xFFF5;
     let date_str = b"01/01/88";
     bios[date_offset..date_offset + date_str.len()].copy_from_slice(date_str);
 
-    // System model byte (0xFF = PC, 0xFE = XT, 0xFC = AT)
-    bios[0xFFFE] = 0xFE; // PC XT
+    // System model byte (0xFE = PC XT)
+    bios[0xFFFE] = 0xFE;
 
     bios
 }
