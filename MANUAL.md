@@ -788,7 +788,7 @@ There are two ways to mount disk images and BIOS:
 - **BIOS**: Minimal implementation - INT 13h disk services are stubs
   - Disk operations return success but don't actually read/write disk data yet
   - Future: Full INT 13h implementation with actual disk I/O
-- **Display**: CGA and EGA adapters implemented with multiple modes
+- **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
     - Text mode: 80x25 characters (640x400 pixels)
     - Graphics modes: 320x200 4-color, 640x200 2-color
@@ -802,7 +802,15 @@ There are two ways to mount disk images and BIOS:
     - Planar memory organization (4 bit planes)
     - Software rendering (CPU-based)
     - Hardware rendering stub (OpenGL, for future use)
-  - Future: VGA support, additional CGA palettes
+  - **VGA Support** (Video Graphics Array):
+    - Text mode: 80x25 characters (720x400 pixels, 9x16 font)
+    - Graphics modes: 320x200 256-color (Mode 13h), 640x480 16-color
+    - 256-color palette (18-bit RGB: 6 bits per channel)
+    - Mode 13h uses linear addressing (1 byte per pixel)
+    - 640x480x16 uses planar memory (4 bit planes)
+    - Software rendering (CPU-based)
+    - Hardware rendering stub (OpenGL, for future use)
+  - Future: Additional palettes, more VGA modes
 - **Input**: Keyboard passthrough works, but:
   - No mouse support
   - No serial/parallel port emulation
@@ -813,7 +821,7 @@ There are two ways to mount disk images and BIOS:
 - **No audio**: PC speaker not implemented
 - **No timer**: PIT (Programmable Interval Timer) not implemented
 - **Timing**: Frame-based execution - not cycle-accurate
-- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. CGA and EGA graphics adapters fully implemented with software and hardware (OpenGL stub) backends. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading, complete VGA support.
+- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. CGA, EGA, and VGA graphics adapters fully implemented with software and hardware (OpenGL stub) backends. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading, add additional VGA modes and palettes.
 
 ## Troubleshooting
 
