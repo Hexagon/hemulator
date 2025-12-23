@@ -128,34 +128,37 @@ RESET:
     ldx #$1000
     stx $2116               ; VRAM address
     
-    ; Tile 0: White square (all pixels use color 1)
-    ; Each tile is 8x8 pixels, 2 bits per pixel in planar format
-    ; For Mode 0, we have bitplanes 0 and 1
+    ; Tile 0: Blue square (all pixels use color 3 = binary 11)
+    ; Bitplane 0: all 1s (bytes 0-7), Bitplane 1: all 1s (bytes 8-15)
+    ; Write as 16-bit words to VRAM
     lda #$FF
-    ldx #$0010              ; 16 bytes per tile (8 rows * 2 bitplanes)
-:   sta $2118               ; Write to VRAM data port
+    ldx #$0008              ; 16 bytes = 8 words
+:   sta $2118               ; Low byte
+    sta $2119               ; High byte (same as low for tile 0)
     dex
     bne :-
     
-    ; Tile 1: Red square (pattern 10 in binary = color 2)
-    stz $2118               ; Bitplane 0: all 0s (8 bytes)
-    stz $2118
-    stz $2118
-    stz $2118
-    stz $2118
-    stz $2118
-    stz $2118
-    stz $2118
+    ; Tile 1: Red square (color 2 = binary 10)
+    ; Bitplane 0: all 0s (bytes 0-7), Bitplane 1: all 1s (bytes 8-15)
+    ; Write as 16-bit words
+    stz $2118               ; Bitplane 0, row 0 (low byte)
+    stz $2119               ; Bitplane 0, row 1 (high byte)
+    stz $2118               ; Bitplane 0, row 2
+    stz $2119               ; Bitplane 0, row 3
+    stz $2118               ; Bitplane 0, row 4
+    stz $2119               ; Bitplane 0, row 5
+    stz $2118               ; Bitplane 0, row 6
+    stz $2119               ; Bitplane 0, row 7
     
-    lda #$FF                ; Bitplane 1: all 1s (8 bytes)
-    sta $2118
-    sta $2118
-    sta $2118
-    sta $2118
-    sta $2118
-    sta $2118
-    sta $2118
-    sta $2118
+    lda #$FF
+    sta $2118               ; Bitplane 1, row 0 (low byte)
+    sta $2119               ; Bitplane 1, row 1 (high byte)
+    sta $2118               ; Bitplane 1, row 2
+    sta $2119               ; Bitplane 1, row 3
+    sta $2118               ; Bitplane 1, row 4
+    sta $2119               ; Bitplane 1, row 5
+    sta $2118               ; Bitplane 1, row 6
+    sta $2119               ; Bitplane 1, row 7
     
     ; Upload tilemap to VRAM
     ; Set VRAM address to $0000 (tilemap for BG1)
@@ -163,20 +166,38 @@ RESET:
     stx $2116
     
     ; Fill 32x32 tilemap with checkerboard pattern (tiles 0 and 1)
-    ldy #$0400              ; 1024 tiles (32x32)
-    ldx #$0000              ; Start with tile 0
-tilemap_loop:
+    ; We need a 2D checkerboard: (x + y) & 1
+    ; Use Y for row counter, X for column counter
+    ldy #$0000              ; Y = row (0-31)
+row_loop:
+    ldx #$0000              ; X = column (0-31)
+col_loop:
+    ; Calculate checkerboard tile: (x + y) & 1
+    ; Save X and Y to temp variables in RAM (use WRAM at $7E0000)
     txa
+    sta $7E0000             ; Save X to WRAM
+    tya
+    sta $7E0001             ; Save Y to WRAM
+    
+    ; Calculate (X + Y) & 1
+    clc
+    adc $7E0000             ; A = Y + X
+    and #$01                ; A = (Y + X) & 1
+    
     sta $2118               ; Write tile number to VRAM
     stz $2119               ; Write high byte (attributes) = 0
     
-    ; Toggle between 0 and 1
-    txa
-    eor #$01
+    ; Restore X from WRAM
+    lda $7E0000
     tax
     
-    dey
-    bne tilemap_loop
+    inx                     ; Next column
+    cpx #$0020              ; 32 columns?
+    bne col_loop
+    
+    iny                     ; Next row
+    cpy #$0020              ; 32 rows?
+    bne row_loop
     
     ; Turn on screen (brightness = 15)
     lda #$0F
