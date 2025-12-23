@@ -158,6 +158,11 @@ impl PcBus {
         &self.vram
     }
 
+    /// Get a mutable reference to the video RAM (for BIOS initialization)
+    pub fn vram_mut(&mut self) -> &mut [u8] {
+        &mut self.vram
+    }
+
     /// Read a byte from RAM at the given offset (for testing)
     #[cfg(test)]
     pub fn read_ram(&self, offset: usize) -> u8 {

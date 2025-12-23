@@ -79,6 +79,9 @@ impl PcSystem {
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
 
+        // Write Hemu logo to video RAM
+        bios::write_hemu_logo_to_vram(bus.vram_mut());
+
         let cpu = PcCpu::with_model(bus, model);
 
         Self {
@@ -196,6 +199,10 @@ impl System for PcSystem {
         self.cpu.bus_mut().reset();
         self.cycles = 0;
         self.frame_cycles = 0;
+
+        // Write Hemu logo to video RAM
+        let vram = self.cpu.bus_mut().vram_mut();
+        bios::write_hemu_logo_to_vram(vram);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -848,6 +855,69 @@ mod tests {
         ] {
             let sys = PcSystem::with_cpu_model(*model);
             assert_eq!(sys.cpu_model(), *model);
+        }
+    }
+
+    #[test]
+    fn test_hemu_logo_display() {
+        // Test that the BIOS displays the "Hemu" ASCII art logo
+        let mut sys = PcSystem::new();
+
+        // Run for a few frames to let the BIOS execute and display the logo
+        for _ in 0..5 {
+            let _ = sys.step_frame();
+        }
+
+        // Check that the logo was written to video memory
+        // Video memory is at 0xB8000, which is offset 0x18000 in VRAM
+        // Logo should be at row 10, column 24
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+        let logo_row = 10;
+        let logo_col = 24;
+        let logo_offset = text_offset + (logo_row * 80 + logo_col) * 2;
+
+        // Check first line of logo: "  _   _   ___   __  __   _   _ "
+        if vram.len() > logo_offset + 64 {
+            // Just check for some characteristic characters from the first line
+            let first_line_chars: Vec<char> = (0..32)
+                .map(|i| vram[logo_offset + i * 2] as char)
+                .collect();
+            let first_line: String = first_line_chars.iter().collect();
+
+            println!("Hemu logo first line: '{}'", first_line);
+
+            // Verify we have underscores (part of the ASCII art)
+            assert!(
+                first_line.contains('_'),
+                "Logo should contain underscores"
+            );
+
+            // Verify the attribute is yellow (0x0E)
+            assert_eq!(
+                vram[logo_offset + 1],
+                0x0E,
+                "Logo should be in yellow color"
+            );
+
+            // Check second line for characteristic letters
+            let second_row_offset = logo_offset + 160; // Next row (80 chars * 2 bytes)
+            let second_line_chars: Vec<char> = (0..32)
+                .map(|i| vram[second_row_offset + i * 2] as char)
+                .collect();
+            let second_line: String = second_line_chars.iter().collect();
+
+            println!("Hemu logo second line: '{}'", second_line);
+
+            // Should have pipe characters and letters
+            assert!(
+                second_line.contains('|'),
+                "Logo should contain vertical bars"
+            );
+
+            println!("✓ Hemu ASCII art logo detected in video memory!");
+        } else {
+            panic!("VRAM too small");
         }
     }
 }
