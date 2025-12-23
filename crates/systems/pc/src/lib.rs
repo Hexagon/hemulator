@@ -880,18 +880,14 @@ mod tests {
         // Check first line of logo: "  _   _   ___   __  __   _   _ "
         if vram.len() > logo_offset + 64 {
             // Just check for some characteristic characters from the first line
-            let first_line_chars: Vec<char> = (0..32)
-                .map(|i| vram[logo_offset + i * 2] as char)
-                .collect();
+            let first_line_chars: Vec<char> =
+                (0..32).map(|i| vram[logo_offset + i * 2] as char).collect();
             let first_line: String = first_line_chars.iter().collect();
 
             println!("Hemu logo first line: '{}'", first_line);
 
             // Verify we have underscores (part of the ASCII art)
-            assert!(
-                first_line.contains('_'),
-                "Logo should contain underscores"
-            );
+            assert!(first_line.contains('_'), "Logo should contain underscores");
 
             // Verify the attribute is yellow (0x0E)
             assert_eq!(
@@ -923,7 +919,11 @@ mod tests {
                     let offset = text_offset + (row * 80 + col) * 2;
                     if offset < vram.len() {
                         let ch = vram[offset] as char;
-                        line.push(if ch.is_ascii_graphic() || ch == ' ' { ch } else { '.' });
+                        line.push(if ch.is_ascii_graphic() || ch == ' ' {
+                            ch
+                        } else {
+                            '.'
+                        });
                     }
                 }
                 println!("{:2}: {}", row, line);

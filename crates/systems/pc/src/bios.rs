@@ -57,13 +57,12 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xFA, // CLI
         0xB8, 0x00, 0x00, // MOV AX, 0
         0x8E, 0xD8, // MOV DS, AX
-        0x8E, 0xC0, // MOV ES, AX  
+        0x8E, 0xC0, // MOV ES, AX
         0x8E, 0xD0, // MOV SS, AX
         0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
         0xEB, 0x00, // JMP short +0 (skip to next instruction - placeholder)
     ];
-    bios[entry_point_offset..entry_point_offset + entry_code.len()]
-        .copy_from_slice(&entry_code);
+    bios[entry_point_offset..entry_point_offset + entry_code.len()].copy_from_slice(&entry_code);
 
     // Add BIOS signature
     let date_offset = 0xFFF5;
