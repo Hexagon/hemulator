@@ -50,6 +50,13 @@ pub enum MicrocodeType {
     Audio,
 }
 
+/// Geometry mode flags
+const G_ZBUFFER: u32 = 0x00000001; // Enable Z-buffer
+const G_TEXTURE_ENABLE: u32 = 0x00000002; // Enable texture mapping (custom flag for demo)
+const G_SHADE: u32 = 0x00000004; // Enable shading (Gouraud)
+const G_CULL_FRONT: u32 = 0x00000200; // Cull front-facing triangles
+const G_CULL_BACK: u32 = 0x00000400; // Cull back-facing triangles
+
 /// Vertex structure for graphics microcode
 #[derive(Debug, Clone, Copy)]
 pub struct Vertex {
