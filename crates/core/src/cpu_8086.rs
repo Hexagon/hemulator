@@ -2,6 +2,50 @@
 //!
 //! This module provides a reusable, generic 8086 CPU implementation that can be used
 //! by any system (IBM PC, PC XT, etc.) by implementing the `Memory8086` trait.
+//!
+//! Supports multiple CPU models: 8086, 80186, 80286, and their variants.
+
+/// CPU model/variant selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum CpuModel {
+    /// Intel 8086 (1978) - Original 16-bit x86 processor
+    #[default]
+    Intel8086,
+    /// Intel 8088 (1979) - 8-bit external bus variant of 8086
+    Intel8088,
+    /// Intel 80186 (1982) - Enhanced 8086 with additional instructions
+    Intel80186,
+    /// Intel 80188 (1982) - 8-bit external bus variant of 80186
+    Intel80188,
+    /// Intel 80286 (1982) - Protected mode support, 24-bit addressing
+    Intel80286,
+}
+
+impl CpuModel {
+    /// Returns true if this CPU model supports 80186+ instructions
+    pub fn supports_80186_instructions(&self) -> bool {
+        matches!(
+            self,
+            CpuModel::Intel80186 | CpuModel::Intel80188 | CpuModel::Intel80286
+        )
+    }
+
+    /// Returns true if this CPU model supports 80286+ instructions
+    pub fn supports_80286_instructions(&self) -> bool {
+        matches!(self, CpuModel::Intel80286)
+    }
+
+    /// Returns the name of the CPU model as a string
+    pub fn name(&self) -> &'static str {
+        match self {
+            CpuModel::Intel8086 => "Intel 8086",
+            CpuModel::Intel8088 => "Intel 8088",
+            CpuModel::Intel80186 => "Intel 80186",
+            CpuModel::Intel80188 => "Intel 80188",
+            CpuModel::Intel80286 => "Intel 80286",
+        }
+    }
+}
 
 /// Memory interface trait for the 8086 CPU
 ///
@@ -64,6 +108,9 @@ pub struct Cpu8086<M: Memory8086> {
 
     /// Halt flag
     halted: bool,
+
+    /// CPU model (8086, 80186, 80286, etc.)
+    model: CpuModel,
 }
 
 // Flag bit positions in FLAGS register
@@ -82,6 +129,11 @@ const FLAG_OF: u16 = 0x0800; // Overflow Flag
 impl<M: Memory8086> Cpu8086<M> {
     /// Create a new 8086 CPU with the given memory interface
     pub fn new(memory: M) -> Self {
+        Self::with_model(memory, CpuModel::Intel8086)
+    }
+
+    /// Create a new CPU with a specific model
+    pub fn with_model(memory: M, model: CpuModel) -> Self {
         Self {
             ax: 0,
             bx: 0,
@@ -100,10 +152,21 @@ impl<M: Memory8086> Cpu8086<M> {
             cycles: 0,
             memory,
             halted: false,
+            model,
         }
     }
 
-    /// Reset the CPU to initial state (preserves memory)
+    /// Get the CPU model
+    pub fn model(&self) -> CpuModel {
+        self.model
+    }
+
+    /// Set the CPU model
+    pub fn set_model(&mut self, model: CpuModel) {
+        self.model = model;
+    }
+
+    /// Reset the CPU to initial state (preserves memory and model)
     pub fn reset(&mut self) {
         self.ax = 0;
         self.bx = 0;
@@ -121,6 +184,7 @@ impl<M: Memory8086> Cpu8086<M> {
         self.flags = 0x0002;
         self.cycles = 0;
         self.halted = false;
+        // Note: model is preserved across reset
     }
 
     /// Calculate physical address from segment:offset
@@ -379,6 +443,8 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     pub fn write_byte(&mut self, segment: u16, offset: u16, val: u8) {
         self.write(segment, offset, val);
+    }
+
     /// Decode ModR/M byte and return (mod, reg, r/m)
     #[inline]
     fn decode_modrm(modrm: u8) -> (u8, u8, u8) {
@@ -2837,5 +2903,65 @@ mod tests {
         let physical_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
         assert_eq!(cpu.memory.read(physical_addr), 0xBB); // Low byte
         assert_eq!(cpu.memory.read(physical_addr + 1), 0xAA); // High byte
+    }
+
+    #[test]
+    fn test_cpu_model_default() {
+        let mem = ArrayMemory::new();
+        let cpu = Cpu8086::new(mem);
+        assert_eq!(cpu.model(), CpuModel::Intel8086);
+    }
+
+    #[test]
+    fn test_cpu_model_with_model() {
+        let mem = ArrayMemory::new();
+        let cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+        assert_eq!(cpu.model(), CpuModel::Intel80186);
+    }
+
+    #[test]
+    fn test_cpu_model_set() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        assert_eq!(cpu.model(), CpuModel::Intel8086);
+
+        cpu.set_model(CpuModel::Intel80286);
+        assert_eq!(cpu.model(), CpuModel::Intel80286);
+    }
+
+    #[test]
+    fn test_cpu_model_preserved_on_reset() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ax = 0x1234;
+        assert_eq!(cpu.model(), CpuModel::Intel80186);
+
+        cpu.reset();
+
+        assert_eq!(cpu.ax, 0); // Registers reset
+        assert_eq!(cpu.model(), CpuModel::Intel80186); // Model preserved
+    }
+
+    #[test]
+    fn test_cpu_model_feature_flags() {
+        assert!(!CpuModel::Intel8086.supports_80186_instructions());
+        assert!(!CpuModel::Intel8088.supports_80186_instructions());
+        assert!(CpuModel::Intel80186.supports_80186_instructions());
+        assert!(CpuModel::Intel80188.supports_80186_instructions());
+        assert!(CpuModel::Intel80286.supports_80186_instructions());
+
+        assert!(!CpuModel::Intel8086.supports_80286_instructions());
+        assert!(!CpuModel::Intel80186.supports_80286_instructions());
+        assert!(CpuModel::Intel80286.supports_80286_instructions());
+    }
+
+    #[test]
+    fn test_cpu_model_names() {
+        assert_eq!(CpuModel::Intel8086.name(), "Intel 8086");
+        assert_eq!(CpuModel::Intel8088.name(), "Intel 8088");
+        assert_eq!(CpuModel::Intel80186.name(), "Intel 80186");
+        assert_eq!(CpuModel::Intel80188.name(), "Intel 80188");
+        assert_eq!(CpuModel::Intel80286.name(), "Intel 80286");
     }
 }

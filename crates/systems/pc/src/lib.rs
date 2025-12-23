@@ -15,13 +15,18 @@ mod video;
 use bios::generate_minimal_bios;
 use bus::PcBus;
 use cpu::{CpuRegisters, PcCpu};
-use emu_core::{cpu_8086::Memory8086, types::Frame, MountPointInfo, System};
+use emu_core::{
+    cpu_8086::{CpuModel, Memory8086},
+    types::Frame,
+    MountPointInfo, System,
+};
 use serde_json::Value;
 use thiserror::Error;
 use video::CgaVideo;
 
 pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
+pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external use
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
 
 #[derive(Debug, Error)]
@@ -49,15 +54,20 @@ impl Default for PcSystem {
 }
 
 impl PcSystem {
-    /// Create a new PC system
+    /// Create a new PC system with default CPU (8086)
     pub fn new() -> Self {
+        Self::with_cpu_model(CpuModel::Intel8086)
+    }
+
+    /// Create a new PC system with a specific CPU model
+    pub fn with_cpu_model(model: CpuModel) -> Self {
         let mut bus = PcBus::new();
 
         // Load minimal BIOS
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
 
-        let cpu = PcCpu::new(bus);
+        let cpu = PcCpu::with_model(bus, model);
 
         Self {
             cpu,
@@ -65,6 +75,16 @@ impl PcSystem {
             frame_cycles: 0,
             video: CgaVideo::new(),
         }
+    }
+
+    /// Get the CPU model
+    pub fn cpu_model(&self) -> CpuModel {
+        self.cpu.model()
+    }
+
+    /// Set the CPU model (requires reset to take full effect)
+    pub fn set_cpu_model(&mut self, model: CpuModel) {
+        self.cpu.set_model(model);
     }
 
     /// Load a DOS executable into memory
@@ -766,5 +786,56 @@ mod tests {
         // We've successfully tested INT 13h reset and read operations
 
         println!("INT 13h integration test completed - program executed successfully");
+    }
+
+    #[test]
+    fn test_cpu_model_default() {
+        let sys = PcSystem::new();
+        assert_eq!(sys.cpu_model(), CpuModel::Intel8086);
+    }
+
+    #[test]
+    fn test_cpu_model_selection() {
+        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
+        assert_eq!(sys.cpu_model(), CpuModel::Intel80186);
+    }
+
+    #[test]
+    fn test_cpu_model_set() {
+        let mut sys = PcSystem::new();
+        assert_eq!(sys.cpu_model(), CpuModel::Intel8086);
+
+        sys.set_cpu_model(CpuModel::Intel80286);
+        assert_eq!(sys.cpu_model(), CpuModel::Intel80286);
+    }
+
+    #[test]
+    fn test_cpu_model_preserved_in_save_state() {
+        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
+
+        // Save state
+        let state = sys.save_state();
+
+        // Create new system with different CPU model
+        let mut sys2 = PcSystem::with_cpu_model(CpuModel::Intel8086);
+        assert_eq!(sys2.cpu_model(), CpuModel::Intel8086);
+
+        // Load state - should restore CPU model
+        assert!(sys2.load_state(&state).is_ok());
+        assert_eq!(sys2.cpu_model(), CpuModel::Intel80186);
+    }
+
+    #[test]
+    fn test_all_cpu_models() {
+        for model in &[
+            CpuModel::Intel8086,
+            CpuModel::Intel8088,
+            CpuModel::Intel80186,
+            CpuModel::Intel80188,
+            CpuModel::Intel80286,
+        ] {
+            let sys = PcSystem::with_cpu_model(*model);
+            assert_eq!(sys.cpu_model(), *model);
+        }
     }
 }
