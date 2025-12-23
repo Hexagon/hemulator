@@ -670,7 +670,10 @@ Detailed implementation notes:
     - **INT 10h Video Services** (partially implemented):
       - Teletype output, cursor position control, character read/write
       - Video mode functions are stubs
-    - **INT 16h Keyboard Services** (stubs - not connected to keyboard controller)
+    - **INT 16h Keyboard Services** (functional):
+      - AH=00h: Read keystroke - reads from keyboard buffer
+      - AH=01h: Check keystroke - peeks at buffer without consuming
+      - AH=02h: Get shift flags - stub (returns 0)
     - **INT 21h DOS API** (partially implemented):
       - Character I/O uses INT 10h for output
       - Most file and system functions are stubs
@@ -694,7 +697,10 @@ Detailed implementation notes:
     - Scancode buffer with key press/release tracking
     - Full scancode set (A-Z, 0-9, function keys, modifiers, etc.)
     - GUI integration for keyboard passthrough
-    - **Not yet connected**: INT 16h keyboard BIOS services don't read from keyboard controller
+    - **Connected to INT 16h**: Keyboard BIOS services now read from keyboard controller
+      - AH=00h: Read keystroke (returns scancode + ASCII)
+      - AH=01h: Check keystroke (peek without consuming)
+      - AH=02h: Get shift flags (stub)
   - **Timing**:
     - 4.77 MHz CPU clock (IBM PC standard)
     - ~79,500 cycles per frame at 60 Hz
@@ -800,7 +806,7 @@ Detailed implementation notes:
     - VGA modes:
       - Text mode: 720x400 (80x25 characters, 9x16 font)
       - Graphics modes: 320x200 256-color (Mode 13h), 640x480 16-color
-  - All tests pass (122 tests total: CPU with INT 13h/10h/16h/21h, video adapters, bus, disk controller, keyboard, boot sector loading, system integration)
+  - All tests pass (127 tests total: CPU with INT 13h/10h/16h/21h, video adapters, bus, disk controller, keyboard with INT 16h integration, boot sector loading, system integration)
 
 
 - **SNES (`emu_snes`)**: Functional implementation (Modes 0 & 1, sprites, scrolling)

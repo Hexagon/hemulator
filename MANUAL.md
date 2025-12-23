@@ -790,11 +790,11 @@ There are two ways to mount disk images and BIOS:
 - See "PC/DOS Keyboard Input" section for details
 
 **Known Limitations**:
-- **BIOS Interrupts**: INT 10h (Video), INT 16h (Keyboard), INT 21h (DOS) are partially implemented
-  - INT 10h: Teletype output, cursor control (basic), video mode functions (stubs)
-  - INT 16h: Keyboard services return no input (not connected to keyboard controller)
-  - INT 21h: Character I/O uses INT 10h, other DOS functions are stubs
-  - INT 13h: Disk services fully implemented and functional
+- **BIOS Interrupts**: 
+  - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
+  - INT 13h (Disk): Fully implemented and functional (read, write, get params, reset)
+  - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
+  - INT 21h (DOS): Character I/O works; file and system functions are stubs
 - **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
     - Text mode: 80x25 characters (640x400 pixels)
@@ -818,9 +818,10 @@ There are two ways to mount disk images and BIOS:
     - Software rendering (CPU-based)
     - Hardware rendering stub (OpenGL, for future use)
   - Future: Additional palettes, more VGA modes
-- **Input**: Keyboard passthrough works, but:
+- **Input**: Keyboard passthrough works with INT 16h integration
   - Keyboard controller implemented with scancode buffer
-  - INT 16h keyboard services not yet connected to controller
+  - INT 16h keyboard services now read from keyboard controller
+  - AH=00h (read keystroke) and AH=01h (check keystroke) functional
   - No mouse support
   - No serial/parallel port emulation
 - **No audio**: PC speaker not implemented

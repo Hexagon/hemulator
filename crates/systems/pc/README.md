@@ -17,6 +17,7 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **Disk Controller** - Full INT 13h disk I/O (read, write, get params, reset)
 - ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
 - ✅ **Keyboard** - Full passthrough with host modifier
+- ✅ **INT 16h Integration** - Keyboard BIOS services connected to controller
 - ✅ **Mount System** - Multi-slot disk image mounting
 - ✅ **Save States** - State serialization
 
@@ -47,7 +48,7 @@ Each adapter has software (CPU) and hardware (OpenGL stub) implementations.
 - ⏳ **Timer**: PIT (Programmable Interval Timer) not implemented
 - ⏳ **Serial/Parallel**: No COM/LPT port support
 - ⏳ **INT 10h**: Video BIOS services (set mode, cursor control, etc.) are stubs
-- ⏳ **INT 16h**: Keyboard BIOS services are stubs (return no input)
+- ⏳ **INT 16h**: Keyboard services AH=02h (shift flags) is a stub
 - ⏳ **INT 21h**: DOS API functions are mostly stubs
 
 ## Architecture
@@ -120,11 +121,12 @@ cargo run --release -p emu_gui -- --slot2 boot.img
 
 The PC crate includes comprehensive tests:
 
-- **121 total tests**:
-  - CPU tests (8086 instruction set)
+- **127 total tests**:
+  - CPU tests (8086 instruction set, INT 13h, INT 16h keyboard integration)
   - Video adapter tests (CGA, EGA, VGA modes)
   - Bus tests (memory access)
   - Disk controller tests
+  - Keyboard tests (including peek functionality)
   - System integration tests
 
 - **Test BIOS**: `test_roms/pc/bios.bin` built from assembly
@@ -163,7 +165,9 @@ Without modifier, function keys go to DOS program.
 See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
-- INT 10h (Video BIOS), INT 16h (Keyboard), INT 21h (DOS API) are partially implemented (stubs)
+- INT 10h (Video BIOS) is partially implemented (teletype, cursor control work; mode switching is stub)
+- INT 16h (Keyboard) read/check functions work; shift flags is stub
+- INT 21h (DOS API) is partially implemented (character I/O works; file operations are stubs)
 - Frame-based timing (not cycle-accurate)
 - No PC speaker audio
 - No PIT timer
