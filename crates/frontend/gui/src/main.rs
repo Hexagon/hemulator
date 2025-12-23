@@ -1671,12 +1671,9 @@ fn main() {
             }
         }
 
-        // F5-F9 - Save state slot selector OR Save PC virtual machine
+        // F5 - Save state slot selector
         if rom_loaded && window.is_key_pressed(Key::F5, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) {
-                // For PC system, F5-F9 save the virtual machine state
-                save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            } else if sys.supports_save_states() {
+            if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "SAVE";
                 show_help = false;
@@ -1685,12 +1682,9 @@ fn main() {
             }
         }
 
-        // F6 - Show load state slot selector OR Save PC virtual machine
+        // F6 - Show load state slot selector
         if rom_loaded && window.is_key_pressed(Key::F6, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) {
-                // For PC system, F5-F9 save the virtual machine state
-                save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            } else if sys.supports_save_states() {
+            if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "LOAD";
                 show_help = false;
@@ -1699,67 +1693,25 @@ fn main() {
             }
         }
 
-        // F7 - Show system selector OR Save PC virtual machine
+        // F7 - Show system selector
         if window.is_key_pressed(Key::F7, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) && rom_loaded {
-                // For PC system, F5-F9 save the virtual machine state
-                save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            } else {
-                show_system_selector = true;
-                show_help = false;
-                show_slot_selector = false;
-                show_mount_selector = false;
-                show_speed_selector = false;
-                show_debug = false;
-            }
+            show_system_selector = true;
+            show_help = false;
+            show_slot_selector = false;
+            show_mount_selector = false;
+            show_speed_selector = false;
+            show_debug = false;
         }
 
-        // F8 - Save PC virtual machine OR legacy project save
+        // F8 - Save PC virtual machine
         if window.is_key_pressed(Key::F8, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) && rom_loaded {
-                // For PC system, F5-F9 save the virtual machine state
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                // For PC system, F8 saves the virtual machine state
                 save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            } else if matches!(&sys, EmulatorSystem::PC(_)) {
-                // Legacy behavior: Save project file when no ROM loaded
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Hemulator Project", &["hemu"])
-                    .set_file_name("project.hemu")
-                    .save_file()
-                {
-                    let mut project = HemuProject::new("pc".to_string());
-
-                    // Get current mount points from settings
-                    for (mount_id, mount_path) in &settings.mount_points {
-                        project.set_mount(mount_id.clone(), mount_path.clone());
-                    }
-
-                    match project.save(&path) {
-                        Ok(_) => {
-                            println!("Project saved to: {}", path.display());
-                            status_message = format!(
-                                "Project saved: {}",
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to save project: {}", e);
-                            status_message = format!("Failed to save project: {}", e);
-                        }
-                    }
-                }
             } else {
                 println!("Project files are only supported for multi-mount systems (PC)");
                 status_message = "Project files only for PC system".to_string();
             }
-        }
-
-        // F9 - Save PC virtual machine
-        if rom_loaded
-            && window.is_key_pressed(Key::F9, false)
-            && matches!(&sys, EmulatorSystem::PC(_))
-        {
-            // For PC system, F5-F9 save the virtual machine state
-            save_pc_virtual_machine(&sys, &settings, &mut status_message);
         }
 
         // Handle controller input / emulation step when ROM is loaded.

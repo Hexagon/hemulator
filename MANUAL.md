@@ -130,11 +130,10 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 | F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) |
 | F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
 | F4 | Screenshot | Save screenshot to `screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png` |
-| F5 | Save State / Save VM | Save state (consoles) OR Save VM file (PC) |
-| F6 | Load State / Save VM | Load state (consoles) OR Save VM file (PC) |
-| F7 | System Selector / Save VM | Switch system (no ROM loaded) OR Save VM file (PC) |
-| F8 | Save VM | Save VM file (PC only) |
-| F9 | Save VM | Save VM file (PC only) |
+| F5 | Save State | Save state (consoles only, opens slot selector 1-5) |
+| F6 | Load State | Load state (consoles only, opens slot selector 1-5) |
+| F7 | System Selector | Switch between emulated systems (when no ROM loaded) |
+| F8 | Save VM | Save virtual machine file (PC only, .hemu project) |
 | F10 | Debug Info | Show/hide debug information overlay |
 | F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
@@ -412,7 +411,7 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - **Atari 2600**: Fully supported - save and load states with F5-F6
 - **Game Boy**: Fully supported - save and load states with F5-F6
 - **PC/DOS**: Not supported - PC systems use **Virtual Machine files** (.hemu) instead
-  - **F5-F9** save the current VM configuration to a `.hemu` project file
+  - **F8** saves the current VM configuration to a `.hemu` project file
   - VM files include all mounted disk images, BIOS, and boot priority settings
   - Disk state is preserved in the disk image files themselves (as in a real PC)
   - Load VM files via F3 to restore all mount points
@@ -757,7 +756,7 @@ For N64 games, the standard controller mappings apply with these button equivale
   - 64KB BIOS ROM with traditional PC BIOS POST (Power-On Self-Test) screen
   - Displays on boot: BIOS version, CPU type, memory test, disk drives, boot priority
   - Updates dynamically when disks are mounted/unmounted
-  - Shows helpful instructions: F3 to mount disks, F12 to reset, F5-F9 to save VM
+  - Shows helpful instructions: F3 to mount disks, F12 to reset, F8 to save VM
   - INT 13h disk services (fully implemented): Reset (00h), Read Sectors (02h), Write Sectors (03h), Get Drive Parameters (08h)
   - Source: `test_roms/pc/bios.asm`
   - Build script: `test_roms/pc/build.sh` (requires NASM)
@@ -775,10 +774,10 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Boot sector loading with boot priority (floppy first, hard drive first, etc.)
 - **CGA video** (640x400 text mode)
 - **Keyboard input** with full passthrough
-- **Virtual Machine State Saving**: PC systems use F5-F9 to save VM configuration
+- **Virtual Machine State Saving**: PC systems use F8 to save VM configuration
   - Instead of save states, PC mode saves the current VM configuration to a `.hemu` project file
   - Includes all mounted disk images, BIOS, and boot priority settings
-  - Press any of F5-F9 to open a save dialog and choose where to save the VM file
+  - Press F8 to open a save dialog and choose where to save the VM file
   - Load the VM file later via F3 to restore all mount points
   - Disk state is preserved in the disk image files themselves (as in a real PC)
 

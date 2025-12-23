@@ -168,7 +168,7 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     let help_attr = 0x0B; // Bright cyan on black
     write_line(20, 2, "Press F3 to mount disks", help_attr);
     write_line(21, 2, "Press F12 to reset system", help_attr);
-    write_line(22, 2, "Press F5-F9 to save virtual machine", help_attr);
+    write_line(22, 2, "Press F8 to save virtual machine", help_attr);
 
     // Bottom line (white on blue)
     write_line(24, 0, &" ".repeat(80), header_attr);

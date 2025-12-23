@@ -1082,7 +1082,7 @@ mod tests {
             "Should show Floppy First as default"
         );
 
-        // Check instructions mention F3, F12, F5-F9
+        // Check instructions mention F3, F12, F8
         let help1 = read_text(20, 0, 80);
         assert!(help1.contains("F3"), "Should mention F3 key");
 
@@ -1090,7 +1090,7 @@ mod tests {
         assert!(help2.contains("F12"), "Should mention F12 key");
 
         let help3 = read_text(22, 0, 80);
-        assert!(help3.contains("F5-F9"), "Should mention F5-F9 keys");
+        assert!(help3.contains("F8"), "Should mention F8 key");
 
         // Check bottom message
         let bottom = read_text(24, 0, 80);
