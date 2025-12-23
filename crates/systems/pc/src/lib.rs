@@ -915,7 +915,21 @@ mod tests {
                 "Logo should contain vertical bars"
             );
 
-            println!("✓ Hemu ASCII art logo detected in video memory!");
+            // Print full screen for visual verification
+            println!("\n=== Complete Screen Text Dump ===");
+            for row in 0..25 {
+                let mut line = String::new();
+                for col in 0..80 {
+                    let offset = text_offset + (row * 80 + col) * 2;
+                    if offset < vram.len() {
+                        let ch = vram[offset] as char;
+                        line.push(if ch.is_ascii_graphic() || ch == ' ' { ch } else { '.' });
+                    }
+                }
+                println!("{:2}: {}", row, line);
+            }
+
+            println!("\n✓ Hemu ASCII art logo detected in video memory!");
         } else {
             panic!("VRAM too small");
         }
