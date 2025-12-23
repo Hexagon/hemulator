@@ -1,4 +1,4 @@
-pub mod crt_filter;
+pub mod display_filter;
 mod hemu_project;
 mod rom_detect;
 mod save_state;
@@ -1131,17 +1131,17 @@ fn main() {
             }
         }
 
-        // Cycle CRT filter (F11)
+        // Cycle display filter (F11)
         if window.is_key_pressed(Key::F11, false) {
-            settings.crt_filter = settings.crt_filter.next();
+            settings.display_filter = settings.display_filter.next();
             // Update the backend's filter setting
             if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                sdl2_backend.set_filter(settings.crt_filter);
+                sdl2_backend.set_filter(settings.display_filter);
             }
             if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save CRT filter setting: {}", e);
+                eprintln!("Warning: Failed to save display filter setting: {}", e);
             }
-            println!("CRT Filter: {}", settings.crt_filter.name());
+            println!("Display Filter: {}", settings.display_filter.name());
         }
 
         // Handle speed selector
@@ -1717,9 +1717,9 @@ fn main() {
                 Ok(f) => {
                     buffer = f.pixels; // Move instead of clone
 
-                    // Apply CRT filter if not showing overlays
+                    // Apply display filter if not showing overlays
                     if !show_help && !show_slot_selector {
-                        settings.crt_filter.apply(&mut buffer, width, height);
+                        settings.display_filter.apply(&mut buffer, width, height);
                     }
 
                     // Audio generation: generate samples based on actual frame rate

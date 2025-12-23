@@ -31,7 +31,7 @@
 //! - `name()`: Get processor name for debugging/UI
 //! - `is_hardware_accelerated()`: Check if GPU-accelerated
 
-use crate::crt_filter::CrtFilter;
+use crate::display_filter::DisplayFilter;
 
 mod opengl;
 pub use opengl::OpenGLProcessor;
@@ -61,7 +61,7 @@ pub trait VideoProcessor {
         buffer: &[u32],
         width: usize,
         height: usize,
-        filter: CrtFilter,
+        filter: DisplayFilter,
     ) -> VideoResult<Vec<u32>>;
 
     /// Resize the processor to new dimensions
@@ -104,7 +104,7 @@ impl VideoProcessor for SoftwareProcessor {
         buffer: &[u32],
         width: usize,
         height: usize,
-        filter: CrtFilter,
+        filter: DisplayFilter,
     ) -> VideoResult<Vec<u32>> {
         // Clone the buffer and apply filter in-place
         let mut output = buffer.to_vec();
@@ -145,7 +145,7 @@ mod tests {
         processor.init(256, 240).unwrap();
 
         let buffer = vec![0xFFFFFFFF; 256 * 240];
-        let result = processor.process_frame(&buffer, 256, 240, CrtFilter::None);
+        let result = processor.process_frame(&buffer, 256, 240, DisplayFilter::None);
         assert!(result.is_ok());
 
         let processed = result.unwrap();
@@ -158,11 +158,11 @@ mod tests {
         processor.init(256, 240).unwrap();
 
         let buffer = vec![0xFFFFFFFF; 256 * 240];
-        let result = processor.process_frame(&buffer, 256, 240, CrtFilter::Scanlines);
+        let result = processor.process_frame(&buffer, 256, 240, DisplayFilter::SonyTrinitron);
         assert!(result.is_ok());
 
         let processed = result.unwrap();
-        // Scanlines should darken every other row
+        // Filter should modify pixels
         assert_eq!(processed.len(), 256 * 240);
     }
 }
