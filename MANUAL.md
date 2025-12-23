@@ -2,6 +2,8 @@
 
 Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, SNES, N64, Atari 2600, Game Boy, and PC/DOS emulation.
 
+**For Developers**: See [README.md](README.md) for build instructions and [AGENTS.md](AGENTS.md) for architecture details.
+
 ## Getting Started
 
 ### First Run
@@ -424,10 +426,10 @@ This emulator supports 6 different retro gaming systems. Here's a quick overview
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
 | **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
-| **Game Boy** | ⚠️ Functional | Graphics, input, saves, timer, audio | - | Playing GB games with sound |
+| **Game Boy** | ✅ Fully Working | Everything | - | Playing GB games |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
-| **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS | Full disk I/O, graphics modes, boot | Development/testing |
+| **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
 ### NES (Nintendo Entertainment System)
 
@@ -496,7 +498,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: ✅ Fully Functional (All core features working)  
+**Status**: ✅ Fully Working  
 **Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
@@ -521,7 +523,6 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **MBC2**: Not implemented (~1% of games) - rare mapper with built-in 512×4 bits RAM
 - **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
-- **Interrupts**: Basic VBlank and Timer interrupts implemented, full interrupt handling not complete
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit

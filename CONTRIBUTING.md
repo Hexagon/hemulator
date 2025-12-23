@@ -1,6 +1,10 @@
 # Contributing to Hemulator
 
-Contributions are welcome! Please follow these guidelines:
+Contributions are welcome! Please follow these guidelines.
+
+**For Users**: See [MANUAL.md](MANUAL.md) for usage instructions.
+
+**For Architecture Details**: See [AGENTS.md](AGENTS.md) for implementation guidelines and system architecture.
 
 ## Pre-Commit Checks (REQUIRED)
 
@@ -26,7 +30,10 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 ## Additional Guidelines
 
-- **Documentation**: Update MANUAL.md for user-facing changes, README.md for developer info
+- **Documentation**: 
+  - Update [MANUAL.md](MANUAL.md) for user-facing changes (controls, features, system limitations)
+  - Update [README.md](README.md) for developer setup info and project overview
+  - Update [AGENTS.md](AGENTS.md) for architecture changes and implementation guidelines
 - **Code Quality**: Write clean, well-documented code with meaningful variable names
 - **Commit Messages**: Use clear, descriptive commit messages
 
@@ -40,6 +47,8 @@ Before committing any code, run these checks in order and ensure they all pass:
 ## Debug Environment Variables
 
 The emulator supports several environment variables for debugging. These can be enabled by setting them to `1`, `true`, or `TRUE`, and disabled by setting them to `0` or any other value (or by not setting them at all).
+
+**For comprehensive debug variable documentation**, see [AGENTS.md](AGENTS.md#debug-environment-variables).
 
 ### Core (6502 CPU)
 - **`EMU_LOG_UNKNOWN_OPS`**: Log unknown/unimplemented 6502 opcodes to stderr

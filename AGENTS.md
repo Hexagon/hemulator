@@ -1,6 +1,13 @@
-# agents.md
+# AGENTS.md
 
-Purpose: guidance for automated agents and maintainers about CI, formatting, and safety.
+**Purpose**: Guidance for automated agents and maintainers about CI, formatting, architecture, and implementation guidelines.
+
+**Related Documentation**:
+- **[README.md](README.md)**: Developer quick start, build instructions, project overview
+- **[MANUAL.md](MANUAL.md)**: End-user manual with controls, features, and system-specific information
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
+
+---
 
 - **Keep track of known limitations**: Document known limitations and missing features in MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
@@ -1183,6 +1190,62 @@ For systems without pluggable renderers (NES, Game Boy, SNES, Atari 2600):
 3. **Phase 3: Full Migration** (Long-term)
    - Gradually adopt pluggable renderers
    - Benefits: Hardware acceleration, consistency, easier testing
+
+### System Implementation Examples
+
+#### N64 - RdpRenderer Trait
+
+**Status**: ✅ Complete (following pattern)
+
+**Pattern Extensions**:
+- Core methods follow `Renderer` pattern
+- 3D extensions: Triangle rasterization (flat, shaded, textured, with/without Z-buffer)
+- RDP-specific: Z-buffer operations, scissor clipping, texture sampling
+
+**Implementations**:
+- ✅ `SoftwareRdpRenderer`: CPU-based 3D rasterization (always available)
+- ✅ `OpenGLRdpRenderer`: GPU-accelerated (feature-gated, complete but not integrated)
+
+**Integration Status**: OpenGL renderer is fully implemented but requires GL context from frontend for integration.
+
+#### PC - VideoAdapter Trait
+
+**Status**: ✅ Complete (following pattern)
+
+**Pattern Extensions**:
+- Core methods follow `Renderer` pattern
+- PC extensions: VRAM rendering, text/graphics modes, multiple resolutions
+- Adapter-specific: `render(vram, pixels)`, `fb_width()`, `fb_height()`, `init()`
+
+**Implementations**:
+- ✅ `SoftwareCgaAdapter`: CGA text mode (80x25, 8x16 font)
+- ✅ `CgaGraphicsAdapter`: CGA graphics modes (320x200 4-color, 640x200 2-color)
+- ✅ `SoftwareEgaAdapter`: EGA all modes (text + graphics)
+- ✅ `SoftwareVgaAdapter`: VGA all modes (text + Mode 13h + 640x480x16)
+- 🔲 `HardwareCgaAdapter`, `HardwareEgaAdapter`, `HardwareVgaAdapter`: OpenGL stubs
+
+#### Frontend - VideoProcessor Trait
+
+**Status**: ✅ Complete (similar pattern, post-processing focus)
+
+**Purpose**: Post-processing effects rather than core rendering
+
+**Implementations**:
+- ✅ `SoftwareProcessor`: CPU-based CRT filters
+- ✅ `OpenGLProcessor`: GPU-accelerated shaders
+
+**Architecture Flow**:
+```
+System Renderer -> Frame -> VideoProcessor -> Post-Processed Frame -> Display
+```
+
+### Benefits of Unified Pattern
+
+1. **Consistency**: All systems use the same core interface
+2. **Future-Proofing**: Easy to add new rendering backends (Vulkan, Metal, DirectX, WebGPU)
+3. **Testability**: Renderers can be tested independently
+4. **Performance**: Optional GPU acceleration without modifying core emulation
+5. **Separation of Concerns**: Clear boundaries between state management and rendering
 
 ## PC Video Adapter Implementation Guidelines
 
