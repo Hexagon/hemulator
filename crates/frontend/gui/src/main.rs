@@ -1037,11 +1037,11 @@ fn main() {
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open
             show_help = false; // Close help if open
-            
+
             // Dump debug info to console when opening debug overlay
             if show_debug {
                 println!("\n=== Debug Info Dump ===");
-                
+
                 // Try NES debug info first
                 if let Some(debug_info) = sys.get_debug_info_nes() {
                     let timing_str = match debug_info.timing_mode {
@@ -1049,10 +1049,25 @@ fn main() {
                         emu_core::apu::TimingMode::Pal => "PAL",
                     };
                     println!("System: NES");
-                    println!("Mapper: {} (#{:03})", debug_info.mapper_name, debug_info.mapper_number);
+                    println!(
+                        "Mapper: {} (#{:03})",
+                        debug_info.mapper_name, debug_info.mapper_number
+                    );
                     println!("Timing: {}", timing_str);
-                    println!("PRG Banks: {} ({}KB total)", debug_info.prg_banks, debug_info.prg_banks * 16);
-                    println!("CHR Banks: {} ({}KB total)", debug_info.chr_banks, if debug_info.chr_banks == 0 { "RAM".to_string() } else { format!("{}", debug_info.chr_banks * 8) });
+                    println!(
+                        "PRG Banks: {} ({}KB total)",
+                        debug_info.prg_banks,
+                        debug_info.prg_banks * 16
+                    );
+                    println!(
+                        "CHR Banks: {} ({}KB total)",
+                        debug_info.chr_banks,
+                        if debug_info.chr_banks == 0 {
+                            "RAM".to_string()
+                        } else {
+                            format!("{}", debug_info.chr_banks * 8)
+                        }
+                    );
                     let stats = sys.get_runtime_stats();
                     println!("Frame: {}", stats.frame_index);
                     println!("PC: 0x{:04X}", stats.pc);
@@ -1080,11 +1095,25 @@ fn main() {
                 else if let Some(debug_info) = sys.get_debug_info_snes() {
                     println!("System: SNES");
                     println!("ROM Size: {} KB", debug_info.rom_size / 1024);
-                    println!("Header: {}", if debug_info.has_smc_header { "SMC (512 bytes)" } else { "None" });
+                    println!(
+                        "Header: {}",
+                        if debug_info.has_smc_header {
+                            "SMC (512 bytes)"
+                        } else {
+                            "None"
+                        }
+                    );
                     println!("PC: 0x{:02X}:{:04X}", debug_info.pbr, debug_info.pc);
-                    println!("Mode: {}", if debug_info.emulation_mode { "Emulation (6502)" } else { "Native (65C816)" });
+                    println!(
+                        "Mode: {}",
+                        if debug_info.emulation_mode {
+                            "Emulation (6502)"
+                        } else {
+                            "Native (65C816)"
+                        }
+                    );
                 }
-                
+
                 println!("FPS: {:.1}", current_fps);
                 println!("Video Backend: {}", settings.video_backend);
                 println!("======================\n");

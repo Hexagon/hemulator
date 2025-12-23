@@ -295,8 +295,9 @@ mod tests {
         let frame = ppu.render_frame();
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 224);
-        // All pixels should be black
-        assert!(frame.pixels.iter().all(|&p| p == 0));
+        // All pixels should be black (0xFF000000 - black with full alpha)
+        // CGRAM is initialized to 0, which converts to black in RGB
+        assert!(frame.pixels.iter().all(|&p| p == 0xFF000000));
 
         // Enable screen
         ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
