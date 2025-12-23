@@ -153,6 +153,7 @@ pub fn draw_text_lines(
 }
 
 /// Create the default splash screen
+#[allow(dead_code)]
 pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
     let mut buffer = vec![0xFF1A1A2E; width * height]; // Dark blue background
 
