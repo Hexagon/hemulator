@@ -379,6 +379,126 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     pub fn write_byte(&mut self, segment: u16, offset: u16, val: u8) {
         self.write(segment, offset, val);
+    /// Decode ModR/M byte and return (mod, reg, r/m)
+    #[inline]
+    fn decode_modrm(modrm: u8) -> (u8, u8, u8) {
+        let modbits = (modrm >> 6) & 0x03; // Bits 7-6
+        let reg = (modrm >> 3) & 0x07; // Bits 5-3
+        let rm = modrm & 0x07; // Bits 2-0
+        (modbits, reg, rm)
+    }
+
+    /// Calculate effective address from ModR/M byte
+    /// Returns (segment, offset) and number of additional bytes consumed
+    fn calc_effective_address(&mut self, modbits: u8, rm: u8) -> (u16, u16, u8) {
+        match modbits {
+            // mod = 00: Memory mode with no displacement (except for special case rm=110)
+            0b00 => {
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si), 0), // [BX+SI]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di), 0), // [BX+DI]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si), 0), // [BP+SI]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di), 0), // [BP+DI]
+                    0b100 => (self.ds, self.si, 0),                       // [SI]
+                    0b101 => (self.ds, self.di, 0),                       // [DI]
+                    0b110 => {
+                        // Special case: direct address (16-bit displacement)
+                        let disp = self.fetch_u16();
+                        (self.ds, disp, 2)
+                    }
+                    0b111 => (self.ds, self.bx, 0), // [BX]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 01: Memory mode with 8-bit signed displacement
+            0b01 => {
+                let disp = self.fetch_u8() as i8 as i16 as u16;
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si).wrapping_add(disp), 1), // [BX+SI+disp8]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 1), // [BX+DI+disp8]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 1), // [BP+SI+disp8]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 1), // [BP+DI+disp8]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 1), // [SI+disp8]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 1), // [DI+disp8]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 1), // [BP+disp8]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 1), // [BX+disp8]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 10: Memory mode with 16-bit signed displacement
+            0b10 => {
+                let disp = self.fetch_u16();
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si).wrapping_add(disp), 2), // [BX+SI+disp16]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 2), // [BX+DI+disp16]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 2), // [BP+SI+disp16]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 2), // [BP+DI+disp16]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 2), // [SI+disp16]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 2), // [DI+disp16]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 2), // [BP+disp16]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 2), // [BX+disp16]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 11: Register mode (no memory access)
+            _ => (0, 0, 0), // Not used for register mode
+        }
+    }
+
+    /// Read 8-bit value from ModR/M operand (either register or memory)
+    fn read_rm8(&mut self, modbits: u8, rm: u8) -> u8 {
+        if modbits == 0b11 {
+            // Register mode
+            if rm < 4 {
+                self.get_reg8_low(rm)
+            } else {
+                self.get_reg8_high(rm - 4)
+            }
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.read(seg, offset)
+        }
+    }
+
+    /// Write 8-bit value to ModR/M operand (either register or memory)
+    fn write_rm8(&mut self, modbits: u8, rm: u8, val: u8) {
+        if modbits == 0b11 {
+            // Register mode
+            if rm < 4 {
+                self.set_reg8_low(rm, val);
+            } else {
+                self.set_reg8_high(rm - 4, val);
+            }
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.write(seg, offset, val);
+        }
+    }
+
+    /// Read 16-bit value from ModR/M operand (either register or memory)
+    fn read_rm16(&mut self, modbits: u8, rm: u8) -> u16 {
+        if modbits == 0b11 {
+            // Register mode
+            self.get_reg16(rm)
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.read_u16(seg, offset)
+        }
+    }
+
+    /// Write 16-bit value to ModR/M operand (either register or memory)
+    fn write_rm16(&mut self, modbits: u8, rm: u8, val: u16) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg16(rm, val);
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.write_u16(seg, offset, val);
+        }
     }
 
     /// Execute one instruction and return cycles used
@@ -423,6 +543,362 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_reg16(reg, val);
                 self.cycles += 4;
                 4
+            }
+
+            // MOV r/m8, r8 (0x88)
+            0x88 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                self.write_rm8(modbits, rm, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 9 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    9
+                }
+            }
+
+            // MOV r/m16, r16 (0x89)
+            0x89 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.get_reg16(reg);
+                self.write_rm16(modbits, rm, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 9 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    9
+                }
+            }
+
+            // MOV r8, r/m8 (0x8A)
+            0x8A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                if reg < 4 {
+                    self.set_reg8_low(reg, val);
+                } else {
+                    self.set_reg8_high(reg - 4, val);
+                }
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
+            }
+
+            // MOV r16, r/m16 (0x8B)
+            0x8B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                self.set_reg16(reg, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
+            }
+
+            // ADD r/m8, r8 (0x00)
+            0x00 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_add(reg_val);
+                let carry = (rm_val as u16 + reg_val as u16) > 0xFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // ADD r/m16, r16 (0x01)
+            0x01 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_add(reg_val);
+                let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // ADD r8, r/m8 (0x02)
+            0x02 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_add(rm_val);
+                let carry = (reg_val as u16 + rm_val as u16) > 0xFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // ADD r16, r/m16 (0x03)
+            0x03 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_add(rm_val);
+                let carry = (reg_val as u32 + rm_val as u32) > 0xFFFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // SUB r/m8, r8 (0x28)
+            0x28 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u16) < (reg_val as u16);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // SUB r/m16, r16 (0x29)
+            0x29 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u32) < (reg_val as u32);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // SUB r8, r/m8 (0x2A)
+            0x2A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u16) < (rm_val as u16);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // SUB r16, r/m16 (0x2B)
+            0x2B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u32) < (rm_val as u32);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // CMP r/m8, r8 (0x38)
+            0x38 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u16) < (reg_val as u16);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // CMP r/m16, r16 (0x39)
+            0x39 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u32) < (reg_val as u32);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // CMP r8, r/m8 (0x3A)
+            0x3A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u16) < (rm_val as u16);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // CMP r16, r/m16 (0x3B)
+            0x3B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u32) < (rm_val as u32);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // ADD AL, imm8
@@ -597,6 +1073,165 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // TEST r/m8, r8 (0x84)
+            0x84 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // TEST r/m16, r16 (0x85)
+            0x85 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // TEST AL, imm8 (0xA8)
+            0xA8 => {
+                let val = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                let result = al & val;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += 4;
+                4
+            }
+
+            // TEST AX, imm16 (0xA9)
+            0xA9 => {
+                let val = self.fetch_u16();
+                let result = self.ax & val;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += 4;
+                4
+            }
+
+            // Group 3 opcodes (0xF6) - 8-bit operations (NOT, NEG, MUL, DIV, etc.)
+            0xF6 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                match reg {
+                    // NOT r/m8
+                    0b010 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let result = !val;
+                        self.write_rm8(modbits, rm, result);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
+                    }
+                    // NEG r/m8
+                    0b011 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let result = 0u8.wrapping_sub(val);
+                        self.write_rm8(modbits, rm, result);
+                        self.update_flags_8(result);
+                        self.set_flag(FLAG_CF, val != 0);
+                        self.set_flag(FLAG_OF, val == 0x80);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
+            // Group 3 opcodes (0xF7) - 16-bit operations (NOT, NEG, MUL, DIV, etc.)
+            0xF7 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                match reg {
+                    // NOT r/m16
+                    0b010 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let result = !val;
+                        self.write_rm16(modbits, rm, result);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
+                    }
+                    // NEG r/m16
+                    0b011 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let result = 0u16.wrapping_sub(val);
+                        self.write_rm16(modbits, rm, result);
+                        self.update_flags_16(result);
+                        self.set_flag(FLAG_CF, val != 0);
+                        self.set_flag(FLAG_OF, val == 0x8000);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
             // INC reg16 (40-47)
             // Note: INC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
             0x40..=0x47 => {
@@ -704,6 +1339,65 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 4;
                     4
                 }
+            }
+
+            // CALL near relative (0xE8)
+            0xE8 => {
+                let offset = self.fetch_u16() as i16;
+                // Push return address (current IP after fetching the offset)
+                self.push(self.ip);
+                // Jump to target (IP + offset)
+                self.ip = self.ip.wrapping_add(offset as u16);
+                self.cycles += 19;
+                19
+            }
+
+            // RET near (0xC3)
+            0xC3 => {
+                self.ip = self.pop();
+                self.cycles += 8;
+                8
+            }
+
+            // RET near with immediate (0xC2) - pops return address and adds imm16 to SP
+            0xC2 => {
+                let pop_bytes = self.fetch_u16();
+                self.ip = self.pop();
+                self.sp = self.sp.wrapping_add(pop_bytes);
+                self.cycles += 12;
+                12
+            }
+
+            // CALL far absolute (0x9A)
+            0x9A => {
+                let new_ip = self.fetch_u16();
+                let new_cs = self.fetch_u16();
+                // Push current CS and IP
+                self.push(self.cs);
+                self.push(self.ip);
+                // Jump to far address
+                self.cs = new_cs;
+                self.ip = new_ip;
+                self.cycles += 28;
+                28
+            }
+
+            // RET far (0xCB)
+            0xCB => {
+                self.ip = self.pop();
+                self.cs = self.pop();
+                self.cycles += 18;
+                18
+            }
+
+            // RET far with immediate (0xCA) - pops return address and adds imm16 to SP
+            0xCA => {
+                let pop_bytes = self.fetch_u16();
+                self.ip = self.pop();
+                self.cs = self.pop();
+                self.sp = self.sp.wrapping_add(pop_bytes);
+                self.cycles += 17;
+                17
             }
 
             // CLC - Clear Carry Flag
@@ -1296,5 +1990,852 @@ mod tests {
 
         cpu.step();
         assert!(!cpu.get_flag(FLAG_PF));
+    }
+
+    #[test]
+    fn test_call_near() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL near with offset +0x0050 (0xE8, 0x50, 0x00)
+        cpu.memory.load_program(0x20010, &[0xE8, 0x50, 0x00]);
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // IP should be at offset location (0x0010 + 3 (instruction size) + 0x0050)
+        assert_eq!(cpu.ip, 0x0063);
+
+        // Stack should contain return address (0x0013 - after the CALL instruction)
+        assert_eq!(cpu.sp, old_sp - 2);
+        let return_addr = cpu.read_u16(cpu.ss, cpu.sp);
+        assert_eq!(return_addr, 0x0013);
+    }
+
+    #[test]
+    fn test_ret_near() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00FE;
+        cpu.cs = 0x2000;
+
+        // Push return address onto stack
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE),
+            0x34,
+        );
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF),
+            0x12,
+        );
+
+        // RET (0xC3)
+        cpu.memory.load_program(0x20000, &[0xC3]);
+        cpu.ip = 0x0000;
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // IP should be restored to return address
+        assert_eq!(cpu.ip, 0x1234);
+        // Stack pointer should be restored
+        assert_eq!(cpu.sp, old_sp + 2);
+    }
+
+    #[test]
+    fn test_ret_near_with_immediate() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00F8;
+        cpu.cs = 0x2000;
+
+        // Push return address onto stack
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F8),
+            0x78,
+        );
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F9),
+            0x56,
+        );
+
+        // RET 0x0004 (0xC2, 0x04, 0x00) - pops return address and adds 4 to SP
+        cpu.memory.load_program(0x20000, &[0xC2, 0x04, 0x00]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // IP should be restored to return address
+        assert_eq!(cpu.ip, 0x5678);
+        // Stack pointer should be restored plus the immediate value
+        assert_eq!(cpu.sp, 0x00F8 + 2 + 4); // Original SP + 2 (pop) + 4 (immediate)
+    }
+
+    #[test]
+    fn test_call_ret_roundtrip() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL near with offset +0x0020
+        cpu.memory.load_program(0x20010, &[0xE8, 0x20, 0x00]);
+        cpu.step();
+        assert_eq!(cpu.ip, 0x0033); // 0x0010 + 3 + 0x0020
+
+        // RET
+        cpu.memory.load_program(0x20033, &[0xC3]);
+        cpu.step();
+        assert_eq!(cpu.ip, 0x0013); // Return to address after CALL
+        assert_eq!(cpu.sp, 0x0100); // Stack pointer restored
+    }
+
+    #[test]
+    fn test_test_rm8_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST CL, AL (0x84 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x84, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 0x00AA; // CL = 0xAA
+
+        let old_ax = cpu.ax;
+        let old_cx = cpu.cx;
+        cpu.step();
+
+        // TEST doesn't modify operands
+        assert_eq!(cpu.ax, old_ax);
+        assert_eq!(cpu.cx, old_cx);
+
+        // Flags should be set based on AL & CL = 0xFF & 0xAA = 0xAA
+        assert!(!cpu.get_flag(FLAG_ZF)); // Result is not zero
+        assert!(cpu.get_flag(FLAG_SF)); // Result has sign bit set
+        assert!(!cpu.get_flag(FLAG_CF)); // CF cleared
+        assert!(!cpu.get_flag(FLAG_OF)); // OF cleared
+    }
+
+    #[test]
+    fn test_test_al_imm8_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST AL, 0x0F (0xA8, 0x0F)
+        cpu.memory.load_program(0xFFFF0, &[0xA8, 0x0F]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00F0; // AL = 0xF0
+
+        cpu.step();
+
+        // AL & 0x0F = 0xF0 & 0x0F = 0x00
+        assert!(cpu.get_flag(FLAG_ZF)); // Result is zero
+    }
+
+    #[test]
+    fn test_test_ax_imm16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST AX, 0x8000 (0xA9, 0x00, 0x80)
+        cpu.memory.load_program(0xFFFF0, &[0xA9, 0x00, 0x80]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x8080;
+
+        cpu.step();
+
+        // AX & 0x8000 = 0x8080 & 0x8000 = 0x8000
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(cpu.get_flag(FLAG_SF)); // Sign bit set
+    }
+
+    #[test]
+    fn test_not_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NOT AL (0xF6 with ModR/M 0b11_010_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_010_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00AA; // AL = 0xAA
+
+        cpu.step();
+
+        // AL should be ~0xAA = 0x55
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_not_r16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NOT AX (0xF7 with ModR/M 0b11_010_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_010_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0xAAAA;
+
+        cpu.step();
+
+        // AX should be ~0xAAAA = 0x5555
+        assert_eq!(cpu.ax, 0x5555);
+    }
+
+    #[test]
+    fn test_not_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0xF0);
+
+        // NOT byte ptr [BX] (0xF6 with ModR/M 0b00_010_111)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b00_010_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Memory should contain ~0xF0 = 0x0F
+        assert_eq!(cpu.memory.read(addr), 0x0F);
+    }
+
+    #[test]
+    fn test_neg_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+
+        cpu.step();
+
+        // AL should be -5 = 0xFB (two's complement)
+        assert_eq!(cpu.ax & 0xFF, 0xFB);
+        assert!(cpu.get_flag(FLAG_CF)); // CF set when operand is not zero
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(cpu.get_flag(FLAG_SF));
+    }
+
+    #[test]
+    fn test_neg_r16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AX (0xF7 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x1000;
+
+        cpu.step();
+
+        // AX should be -0x1000 = 0xF000 (two's complement)
+        assert_eq!(cpu.ax, 0xF000);
+        assert!(cpu.get_flag(FLAG_CF));
+        assert!(cpu.get_flag(FLAG_SF));
+    }
+
+    #[test]
+    fn test_neg_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL with AL=0 (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0000; // AL = 0
+
+        cpu.step();
+
+        // AL should remain 0
+        assert_eq!(cpu.ax & 0xFF, 0);
+        assert!(!cpu.get_flag(FLAG_CF)); // CF cleared when operand is zero
+        assert!(cpu.get_flag(FLAG_ZF));
+    }
+
+    #[test]
+    fn test_neg_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL with AL=0x80 (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0080; // AL = -128
+
+        cpu.step();
+
+        // AL should become 0x80 (overflow: -(-128) cannot be represented in 8-bit signed)
+        assert_eq!(cpu.ax & 0xFF, 0x80);
+        assert!(cpu.get_flag(FLAG_OF)); // OF set for overflow
+        assert!(cpu.get_flag(FLAG_CF)); // CF set when operand is not zero
+    }
+
+    #[test]
+    fn test_call_far() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL far to 0x3000:0x0050 (0x9A, 0x50, 0x00, 0x00, 0x30)
+        cpu.memory
+            .load_program(0x20010, &[0x9A, 0x50, 0x00, 0x00, 0x30]);
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // CS:IP should be at far address
+        assert_eq!(cpu.cs, 0x3000);
+        assert_eq!(cpu.ip, 0x0050);
+
+        // Stack should contain old CS and IP
+        assert_eq!(cpu.sp, old_sp - 4);
+        let return_ip = cpu.read_u16(cpu.ss, old_sp - 4); // IP is pushed last
+        let return_cs = cpu.read_u16(cpu.ss, old_sp - 2); // CS is pushed first
+        assert_eq!(return_ip, 0x0015); // After CALL instruction
+        assert_eq!(return_cs, 0x2000);
+    }
+
+    #[test]
+    fn test_ret_far() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00FC;
+        cpu.cs = 0x3000;
+
+        // Push return CS and IP onto stack (IP first, then CS)
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FC),
+            0x34,
+        ); // IP low
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FD),
+            0x12,
+        ); // IP high
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE),
+            0x00,
+        ); // CS low
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF),
+            0x20,
+        ); // CS high
+
+        // RET far (0xCB)
+        cpu.memory.load_program(0x30000, &[0xCB]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // CS:IP should be restored
+        assert_eq!(cpu.ip, 0x1234);
+        assert_eq!(cpu.cs, 0x2000);
+        assert_eq!(cpu.sp, 0x0100); // SP restored
+    }
+
+    #[test]
+    fn test_mov_r8_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV AL, CL (0x8A with ModR/M 0b11_000_001)
+        // AL = reg field (000), CL = r/m field (001)
+        cpu.memory.load_program(0xFFFF0, &[0x8A, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.cx = 0x0042; // CL = 0x42
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x42);
+    }
+
+    #[test]
+    fn test_mov_r8_rm8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write test value to memory at DS:BX
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x55);
+
+        // MOV AL, [BX] (0x8A with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x8A, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_mov_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV CL, AL (0x88 with ModR/M 0b11_000_001)
+        // AL = reg field (000), CL = r/m field (001)
+        cpu.memory.load_program(0xFFFF0, &[0x88, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0099; // AL = 0x99
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 0x99);
+    }
+
+    #[test]
+    fn test_mov_rm8_r8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.ax = 0x00AA; // AL = 0xAA
+
+        // MOV [BX], AL (0x88 with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x88, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify memory was written
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xAA);
+    }
+
+    #[test]
+    fn test_mov_r16_rm16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV AX, CX (0x8B with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x8B, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.cx = 0x1234;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x1234);
+    }
+
+    #[test]
+    fn test_mov_r16_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+
+        // Write test value to memory at DS:SI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0200);
+        cpu.memory.write(addr, 0x78); // Low byte
+        cpu.memory.write(addr + 1, 0x56); // High byte
+
+        // MOV AX, [SI] (0x8B with ModR/M 0b00_000_100)
+        cpu.memory.load_program(0xFFFF0, &[0x8B, 0b00_000_100]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x5678);
+    }
+
+    #[test]
+    fn test_mov_rm16_r16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV CX, AX (0x89 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x89, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0xABCD;
+
+        cpu.step();
+        assert_eq!(cpu.cx, 0xABCD);
+    }
+
+    #[test]
+    fn test_mov_rm16_r16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.di = 0x0300;
+        cpu.ax = 0x9876;
+
+        // MOV [DI], AX (0x89 with ModR/M 0b00_000_101)
+        cpu.memory.load_program(0xFFFF0, &[0x89, 0b00_000_101]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify memory was written (little-endian)
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0300);
+        assert_eq!(cpu.memory.read(addr), 0x76); // Low byte
+        assert_eq!(cpu.memory.read(addr + 1), 0x98); // High byte
+    }
+
+    #[test]
+    fn test_add_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ADD CL, AL (0x00 with ModR/M 0b11_000_001)
+        // AL = reg (000), CL = r/m (001)
+        cpu.memory.load_program(0xFFFF0, &[0x00, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+        cpu.cx = 0x0003; // CL = 3
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 8); // CL should be 3 + 5 = 8
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_add_rm16_r16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.ax = 0x0020; // AX = 32
+
+        // Write initial value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x10); // Low byte = 16
+        cpu.memory.write(addr + 1, 0x00); // High byte = 0
+
+        // ADD [BX], AX (0x01 with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x01, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Memory should now contain 16 + 32 = 48
+        let result = cpu.memory.read(addr) as u16 | ((cpu.memory.read(addr + 1) as u16) << 8);
+        assert_eq!(result, 48);
+    }
+
+    #[test]
+    fn test_add_r8_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ADD AL, CL (0x02 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x02, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0010; // AL = 16
+        cpu.cx = 0x0020; // CL = 32
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 48); // AL should be 16 + 32 = 48
+    }
+
+    #[test]
+    fn test_sub_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SUB CL, AL (0x28 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x28, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+        cpu.cx = 0x000A; // CL = 10
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 5); // CL should be 10 - 5 = 5
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_sub_r16_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+        cpu.ax = 0x0050; // AX = 80
+
+        // Write value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0200);
+        cpu.memory.write(addr, 0x1E); // Low byte = 30
+        cpu.memory.write(addr + 1, 0x00); // High byte = 0
+
+        // SUB AX, [SI] (0x2B with ModR/M 0b00_000_100)
+        cpu.memory.load_program(0xFFFF0, &[0x2B, 0b00_000_100]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 50); // AX should be 80 - 30 = 50
+    }
+
+    #[test]
+    fn test_cmp_rm8_r8_sets_zero_flag() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // CMP CL, AL (0x38 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x38, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0042; // AL = 0x42
+        cpu.cx = 0x0042; // CL = 0x42
+
+        let old_cx = cpu.cx;
+        cpu.step();
+        assert_eq!(cpu.cx, old_cx); // CMP doesn't modify operand
+        assert!(cpu.get_flag(FLAG_ZF)); // Should set zero flag when equal
+    }
+
+    #[test]
+    fn test_cmp_r16_rm16_sets_carry_flag() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // CMP AX, CX (0x3B with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x3B, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0010; // AX = 16
+        cpu.cx = 0x0020; // CX = 32
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x0010); // CMP doesn't modify operand
+        assert!(cpu.get_flag(FLAG_CF)); // Should set carry when AX < CX
+    }
+
+    #[test]
+    fn test_decode_modrm() {
+        // Test ModR/M byte decoding
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b11_010_001);
+        assert_eq!(modbits, 0b11); // Register mode
+        assert_eq!(reg, 0b010); // DX
+        assert_eq!(rm, 0b001); // CX
+
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b00_101_110);
+        assert_eq!(modbits, 0b00); // Memory mode, no displacement
+        assert_eq!(reg, 0b101); // BP
+        assert_eq!(rm, 0b110); // Direct address
+
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b01_000_100);
+        assert_eq!(modbits, 0b01); // Memory mode, 8-bit displacement
+        assert_eq!(reg, 0b000); // AX
+        assert_eq!(rm, 0b100); // [SI+disp8]
+    }
+
+    #[test]
+    fn test_effective_address_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.bx = 0x1000;
+        cpu.si = 0x0200;
+
+        // Register mode should not calculate addresses
+        // We're just testing that the function is callable
+        let modbits = 0b11;
+        let rm = 0b000;
+        let (seg, offset, bytes) = cpu.calc_effective_address(modbits, rm);
+        assert_eq!(bytes, 0);
+        // In register mode, seg/offset are not used
+        let _ = (seg, offset); // Suppress unused warning
+    }
+
+    #[test]
+    fn test_effective_address_no_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.si = 0x0020;
+
+        // mod=00, rm=000: [BX+SI]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b000);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0120); // BX + SI
+        assert_eq!(bytes, 0);
+
+        // mod=00, rm=111: [BX]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b111);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0100); // BX
+        assert_eq!(bytes, 0);
+    }
+
+    #[test]
+    fn test_effective_address_direct() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.memory.load_program(0xFFFF0, &[0x34, 0x12]); // 16-bit displacement: 0x1234
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=00, rm=110: Direct address (16-bit displacement)
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b110);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x1234);
+        assert_eq!(bytes, 2);
+    }
+
+    #[test]
+    fn test_effective_address_8bit_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+        cpu.memory.load_program(0xFFFF0, &[0x10]); // 8-bit displacement: +16
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=01, rm=100: [SI+disp8]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b01, 0b100);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0110); // SI + 0x10
+        assert_eq!(bytes, 1);
+    }
+
+    #[test]
+    fn test_effective_address_16bit_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0200;
+        cpu.di = 0x0050;
+        cpu.memory.load_program(0xFFFF0, &[0x00, 0x10]); // 16-bit displacement: 0x1000
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=10, rm=001: [BX+DI+disp16]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b10, 0b001);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x1250); // BX + DI + 0x1000
+        assert_eq!(bytes, 2);
+    }
+
+    #[test]
+    fn test_read_write_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Set AL to 0x42
+        cpu.ax = 0x0042;
+
+        // Read AL using ModR/M (mod=11, rm=000 for AL)
+        let val = cpu.read_rm8(0b11, 0b000);
+        assert_eq!(val, 0x42);
+
+        // Write to CL (mod=11, rm=001 for CL)
+        cpu.write_rm8(0b11, 0b001, 0x55);
+        assert_eq!(cpu.cx & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_read_write_rm8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write to memory using ModR/M (mod=00, rm=111 for [BX])
+        cpu.write_rm8(0b00, 0b111, 0xAA);
+
+        // Read it back
+        let val = cpu.read_rm8(0b00, 0b111);
+        assert_eq!(val, 0xAA);
+
+        // Verify it's at the right physical address
+        let physical_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(physical_addr), 0xAA);
+    }
+
+    #[test]
+    fn test_read_write_rm16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Set AX to 0x1234
+        cpu.ax = 0x1234;
+
+        // Read AX using ModR/M (mod=11, rm=000 for AX)
+        let val = cpu.read_rm16(0b11, 0b000);
+        assert_eq!(val, 0x1234);
+
+        // Write to CX (mod=11, rm=001 for CX)
+        cpu.write_rm16(0b11, 0b001, 0x5678);
+        assert_eq!(cpu.cx, 0x5678);
+    }
+
+    #[test]
+    fn test_read_write_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write to memory using ModR/M (mod=00, rm=111 for [BX])
+        cpu.write_rm16(0b00, 0b111, 0xAABB);
+
+        // Read it back
+        let val = cpu.read_rm16(0b00, 0b111);
+        assert_eq!(val, 0xAABB);
+
+        // Verify it's at the right physical address (little-endian)
+        let physical_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(physical_addr), 0xBB); // Low byte
+        assert_eq!(cpu.memory.read(physical_addr + 1), 0xAA); // High byte
     }
 }

@@ -187,22 +187,50 @@ Contains reusable CPU implementations and common traits:
   - Ready for use in Nintendo 64 emulation and other MIPS III systems
   - `ArrayMemory` helper for testing (8MB)
 
-- **`cpu_8086`**: Intel 8086 CPU implementation with core instruction set
+- **`cpu_8086`**: Intel 8086 CPU implementation with extended instruction set
   - Generic `Memory8086` trait for memory access
   - Segment-based memory addressing (CS, DS, ES, SS)
-  - Comprehensive test coverage (22 unit tests)
+  - Comprehensive test coverage (65 unit tests)
   - Can be used by any system: IBM PC, PC XT, etc.
   - Implementation includes:
     - All general-purpose registers (AX, BX, CX, DX, SI, DI, BP, SP)
     - Segment registers (CS, DS, ES, SS)
     - Instruction pointer (IP) and FLAGS register
-    - Core instructions: MOV (immediate), arithmetic (ADD, SUB, CMP, INC, DEC), logical (AND, OR, XOR)
-    - Control flow: JMP (short), conditional jumps (JZ, JNZ, JC, JNC)
-    - Stack operations (PUSH, POP)
-    - Flag manipulation (CLC, STC, CLI, STI, CLD, STD)
+    - **ModR/M addressing support**: Full decoder with all addressing modes
+      - Register mode (mod=11)
+      - Memory modes with 8/16-bit displacements (mod=00, 01, 10)
+      - All EA calculations: [BX+SI], [BX+DI], [BP+SI], [BP+DI], [SI], [DI], [BP], [BX], direct address
+    - **Data movement**:
+      - MOV immediate (B0-B7, B8-BF)
+      - MOV with ModR/M (0x88-0x8B) - register to/from register/memory
+    - **Arithmetic operations**:
+      - ADD immediate (0x04-0x05)
+      - ADD with ModR/M (0x00-0x03) - register to/from register/memory
+      - SUB immediate (0x2C-0x2D)
+      - SUB with ModR/M (0x28-0x2B) - register to/from register/memory
+      - CMP immediate (0x3C-0x3D)
+      - CMP with ModR/M (0x38-0x3B) - register to/from register/memory
+      - INC/DEC register (0x40-0x4F)
+    - **Logical operations**:
+      - AND immediate (0x24-0x25)
+      - OR immediate (0x0C-0x0D)
+      - XOR immediate (0x34-0x35)
+      - TEST with ModR/M (0x84-0x85) and immediate (0xA8-0xA9)
+      - NOT (0xF6/0xF7 with reg=2)
+      - NEG (0xF6/0xF7 with reg=3)
+    - **Control flow**:
+      - JMP short (0xEB)
+      - Conditional jumps: JZ/JE, JNZ/JNE, JC/JB, JNC/JAE (0x72-0x75)
+      - CALL near relative (0xE8)
+      - CALL far absolute (0x9A)
+      - RET near (0xC3) and with immediate (0xC2)
+      - RET far (0xCB) and with immediate (0xCA)
+      - INT n (0xCD) and IRET (0xCF)
+    - **Stack operations**: PUSH/POP register (0x50-0x5F)
+    - **Flag manipulation**: CLC, STC, CLI, STI, CLD, STD (0xF8-0xFD)
     - Accurate cycle counting
     - Parity, zero, sign, carry, and overflow flags
-  - Ready for extension with additional instructions (ModR/M, multiply/divide, shifts, string operations, etc.)
+  - **Not yet implemented**: Shift/rotate instructions, multiply/divide, string operations, segment register moves
   - `ArrayMemory` helper for testing and simple use cases
 
 - **`apu`**: Reusable audio processing unit components
