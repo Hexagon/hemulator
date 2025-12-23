@@ -1008,6 +1008,135 @@ mod tests {
     }
 
     #[test]
+    fn test_post_screen_content() {
+        // Test that the POST screen contains expected content
+        let sys = PcSystem::new();
+
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Helper to read text from VRAM
+        let read_text = |row: usize, col: usize, len: usize| -> String {
+            let offset = text_offset + (row * 80 + col) * 2;
+            (0..len)
+                .map(|i| {
+                    if offset + i * 2 < vram.len() {
+                        vram[offset + i * 2] as char
+                    } else {
+                        ' '
+                    }
+                })
+                .collect()
+        };
+
+        // Check header contains "Hemu BIOS"
+        let header = read_text(0, 0, 80);
+        assert!(
+            header.contains("Hemu BIOS"),
+            "Header should contain 'Hemu BIOS'"
+        );
+
+        // Check title contains "Hemu PC/XT"
+        let title = read_text(3, 0, 80);
+        assert!(
+            title.contains("Hemu PC/XT"),
+            "Title should contain 'Hemu PC/XT'"
+        );
+
+        // Check processor line
+        let processor = read_text(5, 0, 80);
+        assert!(processor.contains("Intel 8086"), "Should show Intel 8086");
+
+        // Check memory line
+        let memory = read_text(7, 0, 80);
+        assert!(memory.contains("640K"), "Should show 640K memory");
+
+        // Check disk status - initially all "Not present"
+        let floppy_a = read_text(10, 0, 80);
+        assert!(floppy_a.contains("Floppy A:"), "Should show Floppy A");
+        assert!(
+            floppy_a.contains("Not present"),
+            "Floppy A should be not present initially"
+        );
+
+        let floppy_b = read_text(11, 0, 80);
+        assert!(floppy_b.contains("Floppy B:"), "Should show Floppy B");
+        assert!(
+            floppy_b.contains("Not present"),
+            "Floppy B should be not present initially"
+        );
+
+        let hard_disk = read_text(12, 0, 80);
+        assert!(hard_disk.contains("Hard Disk C:"), "Should show Hard Disk C");
+        assert!(
+            hard_disk.contains("Not present"),
+            "Hard Disk C should be not present initially"
+        );
+
+        // Check boot priority
+        let boot = read_text(14, 0, 80);
+        assert!(
+            boot.contains("Floppy First"),
+            "Should show Floppy First as default"
+        );
+
+        // Check instructions mention F3, F12, F5-F9
+        let help1 = read_text(20, 0, 80);
+        assert!(help1.contains("F3"), "Should mention F3 key");
+
+        let help2 = read_text(21, 0, 80);
+        assert!(help2.contains("F12"), "Should mention F12 key");
+
+        let help3 = read_text(22, 0, 80);
+        assert!(help3.contains("F5-F9"), "Should mention F5-F9 keys");
+
+        // Check bottom message
+        let bottom = read_text(24, 0, 80);
+        assert!(
+            bottom.contains("No bootable disk"),
+            "Should show no bootable disk message"
+        );
+    }
+
+    #[test]
+    fn test_post_screen_updates_on_mount() {
+        // Test that POST screen updates when disks are mounted
+        let mut sys = PcSystem::new();
+
+        // Create a blank floppy and mount it
+        let floppy = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_44M);
+        sys.mount("FloppyA", &floppy).unwrap();
+        sys.update_post_screen();
+
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Check that Floppy A now shows as "Present"
+        let floppy_a_offset = text_offset + (10 * 80 + 4) * 2;
+        let floppy_a: String = (0..30)
+            .map(|i| vram[floppy_a_offset + i * 2] as char)
+            .collect();
+
+        assert!(
+            floppy_a.contains("Floppy A:"),
+            "Should still show Floppy A label"
+        );
+        assert!(
+            floppy_a.contains("Present"),
+            "Floppy A should show as Present after mounting"
+        );
+
+        // Bottom message should change
+        let bottom_offset = text_offset + (24 * 80 + 2) * 2;
+        let bottom: String = (0..50).map(|i| vram[bottom_offset + i * 2] as char).collect();
+
+        assert!(
+            bottom.contains("Bootable disk detected") || bottom.contains("Press F12 to boot"),
+            "Bottom message should indicate bootable disk detected"
+        );
+    }
+
+    #[test]
     fn test_video_adapter_switching() {
         let mut sys = PcSystem::new();
 

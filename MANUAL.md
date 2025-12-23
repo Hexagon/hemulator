@@ -130,8 +130,11 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 | F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) |
 | F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
 | F4 | Screenshot | Save screenshot to `screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png` |
-| F5 | Save State | Open slot selector (1-5) to save |
-| F6 | Load State | Open slot selector (1-5) to load |
+| F5 | Save State / Save VM | Save state (consoles) OR Save VM file (PC) |
+| F6 | Load State / Save VM | Load state (consoles) OR Save VM file (PC) |
+| F7 | System Selector / Save VM | Switch system (no ROM loaded) OR Save VM file (PC) |
+| F8 | Save VM | Save VM file (PC only) |
+| F9 | Save VM | Save VM file (PC only) |
 | F10 | Debug Info | Show/hide debug information overlay |
 | F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
@@ -397,7 +400,7 @@ A-Z, Space, Enter, LeftShift, RightShift, LeftCtrl, RightCtrl, Up, Down, Left, R
 Save states are stored in `saves/<rom_hash>/states.json`:
 - Each game gets its own directory based on ROM hash
 - 5 slots available per game
-- **F5** opens the save slot selector - press 1-5 to select a slot (only for systems that support save states)
+- **F5** opens the save slot selector - press 1-5 to select a slot (only for console systems)
 - **F6** opens the load slot selector - press 1-5 to select a slot (shows which slots have saves)
 - States are portable and can be backed up or transferred between systems
 - **Important**: Save states do NOT include ROM/cartridge data - they only save emulator state
@@ -405,13 +408,15 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - If you try to load a state with a different ROM mounted, you'll get an error
 
 **Save State Support by System**:
-- **NES**: Fully supported - save and load states with F5-F9 when a cartridge is loaded
-- **Atari 2600**: Fully supported - save and load states with F5-F9
-- **Game Boy**: Fully supported - save and load states with F5-F9
-- **PC/DOS**: Not supported - PC systems preserve state in disk images, not save states
-  - Disk writes are performed in-memory on mounted disk images
-  - Unlike ROM-based consoles, PC state is in the disk files themselves
-  - System configuration (CPU model, boot priority, video adapter) should be set via GUI or command-line
+- **NES**: Fully supported - save and load states with F5-F6 when a cartridge is loaded
+- **Atari 2600**: Fully supported - save and load states with F5-F6
+- **Game Boy**: Fully supported - save and load states with F5-F6
+- **PC/DOS**: Not supported - PC systems use **Virtual Machine files** (.hemu) instead
+  - **F5-F9** save the current VM configuration to a `.hemu` project file
+  - VM files include all mounted disk images, BIOS, and boot priority settings
+  - Disk state is preserved in the disk image files themselves (as in a real PC)
+  - Load VM files via F3 to restore all mount points
+  - This approach matches how real PCs work - state persists on disks, not in memory snapshots
 
 Example structure:
 ```
@@ -748,9 +753,12 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Flag manipulation (CLC, STC, CLI, STI, etc.)
   - See `AGENTS.md` for full instruction set details
 - **Memory bus** (640KB RAM, 128KB VRAM, 256KB ROM)
-- **Custom BIOS** built from assembly source
-  - 64KB BIOS ROM with INT 13h disk services (fully implemented)
-  - INT 13h functions: Reset (00h), Read Sectors (02h), Write Sectors (03h), Get Drive Parameters (08h)
+- **Custom BIOS** with POST screen
+  - 64KB BIOS ROM with traditional PC BIOS POST (Power-On Self-Test) screen
+  - Displays on boot: BIOS version, CPU type, memory test, disk drives, boot priority
+  - Updates dynamically when disks are mounted/unmounted
+  - Shows helpful instructions: F3 to mount disks, F12 to reset, F5-F9 to save VM
+  - INT 13h disk services (fully implemented): Reset (00h), Read Sectors (02h), Write Sectors (03h), Get Drive Parameters (08h)
   - Source: `test_roms/pc/bios.asm`
   - Build script: `test_roms/pc/build.sh` (requires NASM)
   - Replaceable via BIOS mount point
@@ -767,11 +775,12 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Boot sector loading with boot priority (floppy first, hard drive first, etc.)
 - **CGA video** (640x400 text mode)
 - **Keyboard input** with full passthrough
-- **Note on State Persistence**: PC systems don't use save states (F5/F6) like ROM-based consoles
-  - Disk writes happen in-memory on mounted disk images
-  - State is preserved in the disk images themselves
-  - To persist changes across sessions, disk images would need to be written back to files
-  - This is fundamentally different from NES/GB where ROMs are read-only
+- **Virtual Machine State Saving**: PC systems use F5-F9 to save VM configuration
+  - Instead of save states, PC mode saves the current VM configuration to a `.hemu` project file
+  - Includes all mounted disk images, BIOS, and boot priority settings
+  - Press any of F5-F9 to open a save dialog and choose where to save the VM file
+  - Load the VM file later via F3 to restore all mount points
+  - Disk state is preserved in the disk image files themselves (as in a real PC)
 
 **Mount Point Usage**:
 
