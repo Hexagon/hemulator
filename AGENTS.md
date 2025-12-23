@@ -663,15 +663,44 @@ Detailed implementation notes:
       - Pluggable backends: Easy to swap software/hardware implementations
       - Mode switching: Supports text and graphics modes
       - Follows VideoAdapter trait pattern consistently
+  - **VGA Adapter (Video Graphics Array)**:
+    - System-specific implementation in `crates/systems/pc/src/video_adapter_vga_*.rs`
+    - **Trait-based abstraction** following modular adapter pattern:
+      - `SoftwareVgaAdapter`: CPU-based VGA renderer (always available)
+      - `HardwareVgaAdapter`: GPU-accelerated VGA renderer (OpenGL stub, feature-gated)
+    - **Software VGA Adapter**:
+      - Text mode: 80x25 characters at 720x400 pixels (9x16 font)
+      - Graphics modes:
+        - Mode 13h: 320x200 256-color (linear addressing, most popular VGA mode)
+        - 640x480 16-color (planar memory, 4 bit planes)
+      - 256-color palette (18-bit RGB: 6 bits per channel)
+      - Default palette: First 16 colors match EGA/CGA, remaining grayscale
+      - 9th column handling for line-drawing characters in text mode
+    - **Hardware VGA Adapter**:
+      - OpenGL stub implementation with mode switching
+      - Feature-gated behind `opengl` flag (when implemented)
+      - Documented requirements for full GPU rendering
+      - Would provide shader-based rendering for:
+        - Mode 13h: Linear palette lookup
+        - 640x480x16: Planar-to-packed conversion
+        - Text mode: Font atlas rendering
+    - **Design Benefits**:
+      - Clean separation: System manages state, adapter handles rendering
+      - Pluggable backends: Easy to swap software/hardware implementations
+      - Mode switching: Supports text and graphics modes
+      - Follows VideoAdapter trait pattern consistently
   - **Display**:
-    - Multiple display modes via CGA and EGA graphics adapters
+    - Multiple display modes via CGA, EGA, and VGA graphics adapters
     - CGA modes:
       - Text mode: 640x400 (80x25 characters)
       - Graphics modes: 320x200 4-color, 640x200 2-color
     - EGA modes:
       - Text mode: 640x350 (80x25 characters)
       - Graphics modes: 640x350 16-color, 320x200 16-color
-  - All tests pass (107 tests total)
+    - VGA modes:
+      - Text mode: 720x400 (80x25 characters, 9x16 font)
+      - Graphics modes: 320x200 256-color (Mode 13h), 640x480 16-color
+  - All tests pass (121 tests total)
 
 
 - **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)

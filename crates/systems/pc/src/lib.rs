@@ -17,6 +17,8 @@ mod video_adapter_ega_hardware; // EGA hardware renderer (OpenGL stub)
 mod video_adapter_ega_software; // EGA software renderer
 mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
 mod video_adapter_software;
+mod video_adapter_vga_hardware; // VGA hardware renderer (OpenGL stub)
+mod video_adapter_vga_software; // VGA software renderer
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
@@ -37,6 +39,7 @@ pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external us
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
 pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA graphics adapter and modes
 pub use video_adapter_ega_software::{EgaMode, SoftwareEgaAdapter}; // Export EGA software adapter and modes
+pub use video_adapter_vga_software::{SoftwareVgaAdapter, VgaMode}; // Export VGA software adapter and modes
 
 #[derive(Debug, Error)]
 pub enum PcError {
