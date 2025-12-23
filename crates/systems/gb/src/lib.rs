@@ -149,15 +149,19 @@ mod apu;
 mod bus;
 mod mappers;
 pub(crate) mod ppu;
+pub mod ppu_renderer;
 mod timer;
 
 use bus::GbBus;
+use ppu_renderer::{PpuRenderer, SoftwarePpuRenderer};
 
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
     cart_loaded: bool,
     /// Accumulated cycles for audio generation
     audio_cycles_accumulated: u32,
+    /// Renderer for PPU output
+    renderer: Box<dyn PpuRenderer>,
 }
 
 impl Default for GbSystem {
@@ -176,6 +180,7 @@ impl GbSystem {
             cpu,
             cart_loaded: false,
             audio_cycles_accumulated: 0,
+            renderer: Box::new(SoftwarePpuRenderer::new()),
         }
     }
 
@@ -270,8 +275,9 @@ impl System for GbSystem {
             }
         }
 
-        // Render the frame from PPU
-        Ok(self.cpu.memory.ppu.render_frame())
+        // Render the frame using the renderer
+        self.renderer.render_frame(&self.cpu.memory.ppu);
+        Ok(self.renderer.get_frame().clone())
     }
 
     fn save_state(&self) -> serde_json::Value {
