@@ -788,9 +788,21 @@ There are two ways to mount disk images and BIOS:
 - **BIOS**: Minimal implementation - INT 13h disk services are stubs
   - Disk operations return success but don't actually read/write disk data yet
   - Future: Full INT 13h implementation with actual disk I/O
-- **Display**: Basic CGA text mode only
-  - 80x25 character display in text mode
-  - No graphics modes, no colors yet
+- **Display**: CGA and EGA adapters implemented with multiple modes
+  - **CGA Support** (Color Graphics Adapter):
+    - Text mode: 80x25 characters (640x400 pixels)
+    - Graphics modes: 320x200 4-color, 640x200 2-color
+    - 16-color fixed palette
+    - Software rendering (CPU-based)
+    - Hardware rendering stub (OpenGL, for future use)
+  - **EGA Support** (Enhanced Graphics Adapter):
+    - Text mode: 80x25 characters (640x350 pixels, 8x14 font)
+    - Graphics modes: 640x350 16-color, 320x200 16-color
+    - 64-color palette (6-bit RGB), 16 active colors
+    - Planar memory organization (4 bit planes)
+    - Software rendering (CPU-based)
+    - Hardware rendering stub (OpenGL, for future use)
+  - Future: VGA support, additional CGA palettes
 - **Input**: Keyboard passthrough works, but:
   - No mouse support
   - No serial/parallel port emulation
@@ -801,7 +813,7 @@ There are two ways to mount disk images and BIOS:
 - **No audio**: PC speaker not implemented
 - **No timer**: PIT (Programmable Interval Timer) not implemented
 - **Timing**: Frame-based execution - not cycle-accurate
-- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading.
+- **Status**: Modular architecture complete with mount points for BIOS and disks. Custom BIOS built from source. Disk controller ready for integration. CGA and EGA graphics adapters fully implemented with software and hardware (OpenGL stub) backends. Next steps: Connect disk controller to BIOS INT 13h, implement boot sector loading, complete VGA support.
 
 ## Troubleshooting
 
