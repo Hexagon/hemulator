@@ -591,9 +591,10 @@ The emulator supports the following cartridge banking schemes:
   - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
   - **Software renderer** (default): Fully functional, high accuracy
   - **OpenGL renderer** (stub): Architecture in place for future GPU acceleration
-  - **3D triangle rasterization** with flat and Gouraud shading
+  - **3D triangle rasterization** with flat, Gouraud shading, and texture mapping
   - **Z-buffer (depth buffer)** for hidden surface removal
   - **Scissor clipping** for efficient rendering
+  - **Texture mapping** with UV coordinate interpolation
   - Scanline-based triangle rasterization
 - VI (Video Interface) with display configuration registers
 - ROM loading with automatic byte-order detection and conversion
@@ -604,8 +605,10 @@ The emulator supports the following cartridge banking schemes:
 - **Triangle Rendering**:
   - Flat-shaded triangles (solid color)
   - Gouraud-shaded triangles (per-vertex color interpolation)
+  - **Textured triangles** (with UV coordinate interpolation)
   - Z-buffered triangles (depth testing for proper occlusion)
   - Combined shading + Z-buffer rendering
+  - Combined texture + Z-buffer rendering
 - **Z-Buffer**:
   - 16-bit depth buffer (0 = near, 0xFFFF = far)
   - Per-pixel depth testing
@@ -615,7 +618,14 @@ The emulator supports the following cartridge banking schemes:
   - Scanline-based edge walking
   - Barycentric coordinate interpolation
   - Per-pixel color and depth interpolation
+  - **Per-pixel texture coordinate interpolation**
   - Scissor rectangle clipping
+- **Texture Mapping**:
+  - 4KB TMEM (Texture Memory) for texture storage
+  - 8 tile descriptors for texture configuration
+  - RGBA16 (5-5-5-1) and RGBA32 (8-8-8-8) format support
+  - Texture wrapping and clamping modes
+  - LOAD_BLOCK and LOAD_TILE commands for texture loading
 
 **Controller Mapping**:
 For N64 games, the standard controller mappings apply with these button equivalents:
@@ -646,8 +656,12 @@ For N64 games, the standard controller mappings apply with these button equivale
     - SYNC commands (SYNC_FULL, SYNC_PIPE, SYNC_TILE, SYNC_LOAD)
     - SET_COLOR_IMAGE - accepted but uses internal framebuffer
   - **Triangle commands** (opcodes 0x08-0x0F):
-    - Command placeholders in place for future full implementation
-    - Direct triangle drawing functions available via API
+    - 0x08: Non-shaded triangle (fully implemented)
+    - 0x09: Non-shaded triangle with Z-buffer (fully implemented)
+    - 0x0A: Textured triangle (fully implemented)
+    - 0x0B: Textured triangle with Z-buffer (fully implemented)
+    - 0x0C: Shaded triangle (fully implemented)
+    - 0x0D: Shaded triangle with Z-buffer (fully implemented)
   - **Stub implementations** (accept but don't fully process):
     - TEXTURE_RECTANGLE - currently renders as solid rectangle (needs advanced sampling)
     - SET_OTHER_MODES - rendering modes configuration
@@ -656,16 +670,14 @@ For N64 games, the standard controller mappings apply with these button equivale
     - Tile descriptors (8 tiles) fully configured via SET_TILE
     - Texture image address tracking via SET_TEXTURE_IMAGE
     - Texture sampling for RGBA16 and RGBA32 formats
-    - Ready for textured triangle rendering
+    - **Textured triangle rendering fully integrated**
   - **Not implemented**: 
-    - Textured triangle rasterization (texture sampling works but not integrated with triangle rendering yet)
     - Advanced texture formats (CI, IA, I)
     - Anti-aliasing and blending
     - Perspective-correct texture mapping
-    - Display list triangle commands (API exists but not wired to command processor)
     - Most advanced rendering commands
-  - Can render 3D wireframe and flat-shaded graphics
-  - Full game graphics require textured triangle rendering, RSP display list parsing, and additional RDP features
+  - Can render 3D textured graphics with depth testing
+  - Full game graphics require perspective-correct mapping, additional RDP features, and more complete RSP emulation
 - **VI (Video Interface)**: Registers implemented but not fully integrated
   - All VI registers accessible (STATUS, ORIGIN, WIDTH, timing, scaling)
   - Not yet used for actual display output (uses RDP internal framebuffer)
@@ -697,7 +709,7 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Frontend keyboard/gamepad mapping not yet connected
 - **Memory**: Basic memory map only - no TLB, cache, or accurate timing
 - **Timing**: Frame-based implementation - not cycle-accurate
-- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. TMEM texture loading fully implemented. Next steps: textured triangle rendering, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics.
+- **Status**: Core infrastructure in place (CPU, RDP, RSP HLE with F3DEX support, PIF). RSP supports full matrix stack operations and conditional branching. **Textured triangle rendering fully implemented** with TMEM texture loading and sampling. Next steps: perspective-correct mapping, lighting, frontend controller integration. Test ROMs can run and render transformed 3D graphics with textures.
 
 ### PC/DOS (IBM PC/XT)
 

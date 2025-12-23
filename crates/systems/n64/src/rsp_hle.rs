@@ -51,10 +51,15 @@ pub enum MicrocodeType {
 }
 
 /// Geometry mode flags
+#[allow(dead_code)] // Reserved for future use when geometry modes are fully implemented
 const G_ZBUFFER: u32 = 0x00000001; // Enable Z-buffer
+#[allow(dead_code)]
 const G_TEXTURE_ENABLE: u32 = 0x00000002; // Enable texture mapping (custom flag for demo)
+#[allow(dead_code)]
 const G_SHADE: u32 = 0x00000004; // Enable shading (Gouraud)
+#[allow(dead_code)]
 const G_CULL_FRONT: u32 = 0x00000200; // Cull front-facing triangles
+#[allow(dead_code)]
 const G_CULL_BACK: u32 = 0x00000400; // Cull back-facing triangles
 
 /// Vertex structure for graphics microcode
