@@ -3,7 +3,7 @@
 //! This module wraps the core 8086 CPU with PC-specific initialization and state.
 
 use crate::bus::PcBus;
-use emu_core::cpu_8086::{Cpu8086, Memory8086};
+use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
 
 /// PC CPU wrapper
 pub struct PcCpu {
@@ -11,9 +11,15 @@ pub struct PcCpu {
 }
 
 impl PcCpu {
-    /// Create a new PC CPU with the given bus
+    /// Create a new PC CPU with the given bus (defaults to 8086)
+    #[allow(dead_code)] // Public API, used in tests
     pub fn new(bus: PcBus) -> Self {
-        let mut cpu = Cpu8086::new(bus);
+        Self::with_model(bus, CpuModel::Intel8086)
+    }
+
+    /// Create a new PC CPU with a specific CPU model
+    pub fn with_model(bus: PcBus, model: CpuModel) -> Self {
+        let mut cpu = Cpu8086::with_model(bus, model);
 
         // IBM PC/XT boots at CS:IP = 0xFFFF:0x0000 (physical address 0xFFFF0)
         // This is the BIOS entry point
@@ -29,6 +35,16 @@ impl PcCpu {
         cpu.es = 0x0000;
 
         Self { cpu }
+    }
+
+    /// Get the CPU model
+    pub fn model(&self) -> CpuModel {
+        self.cpu.model()
+    }
+
+    /// Set the CPU model
+    pub fn set_model(&mut self, model: CpuModel) {
+        self.cpu.set_model(model);
     }
 
     /// Reset the CPU to initial state
@@ -311,6 +327,7 @@ impl PcCpu {
             ss: self.cpu.ss,
             ip: self.cpu.ip,
             flags: self.cpu.flags,
+            model: self.cpu.model(),
         }
     }
 
@@ -330,6 +347,7 @@ impl PcCpu {
         self.cpu.ss = regs.ss;
         self.cpu.ip = regs.ip;
         self.cpu.flags = regs.flags;
+        self.cpu.set_model(regs.model);
     }
 
     /// Get total cycles executed
@@ -356,6 +374,8 @@ pub struct CpuRegisters {
     pub ss: u16,
     pub ip: u16,
     pub flags: u16,
+    #[serde(default)]
+    pub model: CpuModel,
 }
 
 #[cfg(test)]
