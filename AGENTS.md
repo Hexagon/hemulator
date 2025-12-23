@@ -652,20 +652,49 @@ Detailed implementation notes:
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation
   - `PcCpu` wraps `Cpu8086<PcBus>` to provide PC-specific interface
-  - PC bus includes: 640KB RAM, 128KB VRAM, 256KB ROM area
+  - PC bus includes: 640KB RAM, 128KB VRAM, 256KB ROM area, disk controller, keyboard
   - **Memory Map**:
     - 0x00000-0x9FFFF: Conventional memory (640KB)
     - 0xA0000-0xBFFFF: Video memory (128KB)
     - 0xC0000-0xFFFFF: ROM area (256KB, includes BIOS)
     - 0xF0000-0xFFFFF: BIOS ROM (64KB)
   - **BIOS**:
-    - Minimal BIOS stub for booting DOS executables
+    - Custom BIOS built from assembly source (`test_roms/pc/bios.asm`)
     - Entry point at 0xFFFF:0x0000 (physical 0xFFFF0)
     - Initializes segments and stack
-    - Jumps to loaded program at 0x0000:0x0100 (COM file convention)
+    - **INT 13h Disk Services** (fully implemented):
+      - AH=00h: Reset disk system
+      - AH=02h: Read sectors (with LBA calculation and geometry support)
+      - AH=03h: Write sectors (with mutable disk image support)
+      - AH=08h: Get drive parameters (returns geometry for floppy/hard drive)
+    - **INT 10h Video Services** (partially implemented):
+      - Teletype output, cursor position control, character read/write
+      - Video mode functions are stubs
+    - **INT 16h Keyboard Services** (stubs - not connected to keyboard controller)
+    - **INT 21h DOS API** (partially implemented):
+      - Character I/O uses INT 10h for output
+      - Most file and system functions are stubs
+  - **Disk Controller**:
+    - System-specific implementation in `crates/systems/pc/src/disk.rs`
+    - Full read/write support for floppy and hard drive images
+    - LBA (Logical Block Address) calculation from CHS (Cylinder/Head/Sector)
+    - Geometry-based disk access (supports 1.44MB floppy, 10MB hard drive by default)
+    - Status codes: 0x00 (success), 0x04 (sector not found), 0x80 (timeout/not ready)
+  - **Boot Sector Loading**:
+    - System-specific implementation in `crates/systems/pc/src/bus.rs`
+    - Loads 512-byte boot sector from disk to memory address 0x7C00
+    - Validates boot signature (0x55AA at offset 510-511)
+    - Boot priority: FloppyFirst, HardDriveFirst, FloppyOnly, HardDriveOnly
+    - Fallback support: tries next device if first boot device has invalid signature
   - **Executable Support**:
     - COM files: Loaded at 0x0100, limited to 64KB - 256 bytes
     - EXE files: MZ header detected but full parsing not yet implemented
+  - **Keyboard**:
+    - System-specific implementation in `crates/systems/pc/src/keyboard.rs`
+    - Scancode buffer with key press/release tracking
+    - Full scancode set (A-Z, 0-9, function keys, modifiers, etc.)
+    - GUI integration for keyboard passthrough
+    - **Not yet connected**: INT 16h keyboard BIOS services don't read from keyboard controller
   - **Timing**:
     - 4.77 MHz CPU clock (IBM PC standard)
     - ~79,500 cycles per frame at 60 Hz
@@ -771,7 +800,7 @@ Detailed implementation notes:
     - VGA modes:
       - Text mode: 720x400 (80x25 characters, 9x16 font)
       - Graphics modes: 320x200 256-color (Mode 13h), 640x480 16-color
-  - All tests pass (121 tests total)
+  - All tests pass (122 tests total: CPU with INT 13h/10h/16h/21h, video adapters, bus, disk controller, keyboard, boot sector loading, system integration)
 
 
 - **SNES (`emu_snes`)**: Functional implementation (Modes 0 & 1, sprites, scrolling)

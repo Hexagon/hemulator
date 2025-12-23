@@ -14,7 +14,8 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **Memory** - 640KB RAM, 128KB VRAM, 256KB ROM
 - ✅ **BIOS** - Minimal custom BIOS built from assembly
 - ✅ **Video Adapters** - CGA, EGA, VGA with multiple modes
-- ✅ **Disk Controller** - INT 13h infrastructure
+- ✅ **Disk Controller** - Full INT 13h disk I/O (read, write, get params, reset)
+- ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
 - ✅ **Keyboard** - Full passthrough with host modifier
 - ✅ **Mount System** - Multi-slot disk image mounting
 - ✅ **Save States** - State serialization
@@ -42,11 +43,12 @@ Each adapter has software (CPU) and hardware (OpenGL stub) implementations.
 
 ### What's Missing
 
-- ⏳ **BIOS**: INT 13h disk I/O not connected
-- ⏳ **Boot**: Boot sector loading infrastructure exists but not fully wired
 - ⏳ **Audio**: PC speaker not implemented
 - ⏳ **Timer**: PIT (Programmable Interval Timer) not implemented
 - ⏳ **Serial/Parallel**: No COM/LPT port support
+- ⏳ **INT 10h**: Video BIOS services (set mode, cursor control, etc.) are stubs
+- ⏳ **INT 16h**: Keyboard BIOS services are stubs (return no input)
+- ⏳ **INT 21h**: DOS API functions are mostly stubs
 
 ## Architecture
 
@@ -161,9 +163,11 @@ Without modifier, function keys go to DOS program.
 See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
-- BIOS INT 13h exists but not fully connected to disk controller
-- Boot sector loading infrastructure exists but not wired
+- INT 10h (Video BIOS), INT 16h (Keyboard), INT 21h (DOS API) are partially implemented (stubs)
 - Frame-based timing (not cycle-accurate)
+- No PC speaker audio
+- No PIT timer
+- No serial/parallel ports
 
 ## Performance
 
@@ -174,15 +178,15 @@ See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 ## Future Improvements
 
 **Short Term**:
-- Connect disk controller to BIOS INT 13h
-- Boot sector loading and execution
+- Expand INT 10h video services (more functions)
+- Expand INT 16h keyboard services (actual key reading)
+- Expand INT 21h DOS API (file I/O, etc.)
 - Additional video modes
 
 **Medium Term**:
-- INT 10h (Video Services)
-- INT 16h (Keyboard Services)
 - PC speaker audio
 - PIT timer
+- More complete DOS compatibility
 
 **Long Term**:
 - EMS/XMS memory
