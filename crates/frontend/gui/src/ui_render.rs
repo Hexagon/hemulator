@@ -271,12 +271,14 @@ pub fn create_help_overlay(
         "Function Keys:",
         "  F1  - Help",
         "  F2  - Speed",
-        "  F3  - Open ROM",
+        "  F3  - Open ROM/Project",
         "  F4  - Screenshot",
         "  F5  - Save state",
         "  F6  - Load state",
+        "  F7  - Switch system",
+        "  F8  - New project (PC)",
         "  F10 - Debug info",
-        "  F11 - CRT filter",
+        "  F11 - Host menu (CRT filter)",
         "  F12 - Reset",
         "  ESC - Exit",
         "",
@@ -725,6 +727,133 @@ pub fn create_speed_selector_overlay(width: usize, height: usize, current_speed:
     all_lines.push("Press 0-5 to select, ESC to cancel");
 
     let start_x = (width.saturating_sub(35 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &all_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create splash screen with status message
+pub fn create_splash_screen_with_status(
+    width: usize,
+    height: usize,
+    status_message: &str,
+) -> Vec<u32> {
+    let mut buffer = vec![0xFF1A1A2E; width * height]; // Dark blue background
+
+    // Hemulator logo/title - draw each line centered individually
+    let logo_y = height / 3;
+
+    // Center "HEMULATOR" (9 characters)
+    let hemulator_x = (width - 9 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "HEMULATOR",
+        hemulator_x,
+        logo_y,
+        0xFF16F2B3,
+    );
+
+    // Center "Multi-System Emulator" (21 characters)
+    let subtitle_x = (width - 21 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Multi-System Emulator",
+        subtitle_x,
+        logo_y + (FONT_HEIGHT + 4) * 2,
+        0xFF16F2B3,
+    );
+
+    // Instructions - center each line individually
+    let inst_y = height * 2 / 3;
+
+    // "Press F3 to open a ROM" (22 characters)
+    let inst1_x = (width - 22 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F3 to open a ROM",
+        inst1_x,
+        inst_y,
+        0xFFF0F0F0,
+    );
+
+    // "Press F7 to switch system" (25 characters)
+    let inst2_x = (width - 25 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F7 to switch system",
+        inst2_x,
+        inst_y + FONT_HEIGHT + 4,
+        0xFFF0F0F0,
+    );
+
+    // "Press F1 for help" (17 characters)
+    let inst3_x = (width - 17 * FONT_WIDTH) / 2;
+    draw_text(
+        &mut buffer,
+        width,
+        height,
+        "Press F1 for help",
+        inst3_x,
+        inst_y + (FONT_HEIGHT + 4) * 2,
+        0xFFF0F0F0,
+    );
+
+    // Status message at bottom - centered
+    if !status_message.is_empty() {
+        let status_y = height.saturating_sub(FONT_HEIGHT + 10);
+        let status_x = (width.saturating_sub(status_message.len() * FONT_WIDTH)) / 2;
+        draw_text(
+            &mut buffer,
+            width,
+            height,
+            status_message,
+            status_x,
+            status_y,
+            0xFF16F2B3,
+        );
+    }
+
+    buffer
+}
+
+/// Create system selector overlay
+pub fn create_system_selector_overlay(width: usize, height: usize) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let all_lines = vec![
+        "SYSTEM SELECTOR",
+        "",
+        "  1 - NES (Nintendo Entertainment System)",
+        "  2 - Game Boy",
+        "  3 - Atari 2600",
+        "  4 - PC (IBM PC/XT)",
+        "  5 - SNES (Super Nintendo)",
+        "  6 - N64 (Nintendo 64)",
+        "",
+        "Press 1-6 to select, ESC to cancel",
+    ];
+
+    let start_x = (width.saturating_sub(45 * FONT_WIDTH)) / 2;
     let start_y = height / 3;
 
     draw_text_lines(
