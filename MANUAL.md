@@ -424,7 +424,7 @@ This emulator supports 6 different retro gaming systems. Here's a quick overview
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
 | **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
-| **Game Boy** | ⚠️ Functional | Graphics, input, saves | Audio, timer | Playing most GB games (silent) |
+| **Game Boy** | ⚠️ Functional | Graphics, input, saves, timer | Audio | Playing most GB games (silent) |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS | Full disk I/O, graphics modes, boot | Development/testing |
@@ -496,7 +496,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: ⚠️ Functional (Core features work, audio/timer missing)  
+**Status**: ⚠️ Functional (Core features work, audio integration pending)  
 **Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
@@ -511,6 +511,8 @@ The emulator supports the following cartridge banking schemes:
   - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
 - Joypad input with matrix selection
+- Timer registers (DIV, TIMA, TMA, TAC) with interrupt support
+- VBlank and Timer interrupts
 - Save states (F5-F9)
 - Frame-based timing (~59.73 Hz)
 
@@ -518,8 +520,7 @@ The emulator supports the following cartridge banking schemes:
 - **MBC2**: Not implemented (~1% of games) - rare mapper with built-in 512×4 bits RAM
 - **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **Audio**: APU implementation exists but not integrated with frontend (silent gameplay)
-- **Timer**: Timer registers not implemented - games relying on timer interrupts won't work
-- **Interrupts**: Registers exist but interrupt handling not fully wired
+- **Interrupts**: Basic VBlank and Timer interrupts implemented, full interrupt handling not complete
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit

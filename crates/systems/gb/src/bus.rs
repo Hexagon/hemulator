@@ -81,6 +81,8 @@
 //! - ✅ High RAM (127 bytes)
 //! - ✅ Joypad register with matrix selection
 //! - ✅ PPU registers (LCDC, STAT, palettes, scroll, etc.)
+//! - ✅ APU registers (sound channels, master controls, wave RAM)
+//! - ✅ Timer registers (DIV, TIMA, TMA, TAC)
 //! - ✅ Interrupt registers (IF, IE)
 //! - ✅ Boot ROM disable register
 //! - ✅ Cartridge ROM loading (up to size)
@@ -89,15 +91,14 @@
 //!
 //! ## Not Implemented
 //! - ❌ MBC2 mapper (built-in 512×4 bits RAM)
-//! - ❌ Timer registers
 //! - ❌ Serial transfer
-//! - ❌ Sound registers
 //! - ❌ DMA register
 //! - ❌ CGB-specific registers
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
 use crate::ppu::Ppu;
+use crate::timer::Timer;
 use emu_core::cpu_lr35902::MemoryLr35902;
 
 /// Game Boy memory bus
@@ -118,6 +119,8 @@ pub struct GbBus {
     pub ppu: Ppu,
     /// APU (Audio Processing Unit)
     pub apu: GbApu,
+    /// Timer
+    pub timer: Timer,
     /// Joypad state register (0xFF00)
     joypad: u8,
     /// Joypad button state
@@ -135,6 +138,7 @@ impl GbBus {
             boot_rom_enabled: true,
             ppu: Ppu::new(),
             apu: GbApu::new(),
+            timer: Timer::new(),
             joypad: 0xFF,
             button_state: 0xFF,
         }
@@ -144,6 +148,21 @@ impl GbBus {
     /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
     pub fn set_buttons(&mut self, state: u8) {
         self.button_state = state;
+    }
+
+    /// Request an interrupt
+    /// Bit 0: VBlank
+    /// Bit 1: LCD STAT
+    /// Bit 2: Timer
+    /// Bit 3: Serial
+    /// Bit 4: Joypad
+    pub fn request_interrupt(&mut self, interrupt_bit: u8) {
+        self.if_reg |= interrupt_bit;
+    }
+
+    /// Check if any interrupts are pending
+    pub fn has_pending_interrupts(&self) -> bool {
+        self.if_reg != 0
     }
 
     pub fn load_cart(&mut self, data: &[u8]) {
@@ -229,6 +248,8 @@ impl MemoryLr35902 for GbBus {
                     }
                     result
                 }
+                // Timer registers
+                0xFF04..=0xFF07 => self.timer.read_register(addr),
                 0xFF0F => self.if_reg,
                 // APU registers
                 0xFF10..=0xFF26 => self.apu.read_register(addr),
@@ -282,6 +303,8 @@ impl MemoryLr35902 for GbBus {
             0xFF00..=0xFF7F => {
                 match addr {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
+                    // Timer registers
+                    0xFF04..=0xFF07 => self.timer.write_register(addr, val),
                     0xFF0F => self.if_reg = val,
                     // APU registers
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
