@@ -406,10 +406,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 1), // [BX+DI+disp8]
                     0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 1), // [BP+SI+disp8]
                     0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 1), // [BP+DI+disp8]
-                    0b100 => (self.ds, self.si.wrapping_add(disp), 1),                       // [SI+disp8]
-                    0b101 => (self.ds, self.di.wrapping_add(disp), 1),                       // [DI+disp8]
-                    0b110 => (self.ss, self.bp.wrapping_add(disp), 1),                       // [BP+disp8]
-                    0b111 => (self.ds, self.bx.wrapping_add(disp), 1),                       // [BX+disp8]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 1), // [SI+disp8]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 1), // [DI+disp8]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 1), // [BP+disp8]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 1), // [BX+disp8]
                     _ => unreachable!(),
                 }
             }
@@ -421,10 +421,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 2), // [BX+DI+disp16]
                     0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 2), // [BP+SI+disp16]
                     0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 2), // [BP+DI+disp16]
-                    0b100 => (self.ds, self.si.wrapping_add(disp), 2),                       // [SI+disp16]
-                    0b101 => (self.ds, self.di.wrapping_add(disp), 2),                       // [DI+disp16]
-                    0b110 => (self.ss, self.bp.wrapping_add(disp), 2),                       // [BP+disp16]
-                    0b111 => (self.ds, self.bx.wrapping_add(disp), 2),                       // [BX+disp16]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 2), // [SI+disp16]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 2), // [DI+disp16]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 2), // [BP+disp16]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 2), // [BX+disp16]
                     _ => unreachable!(),
                 }
             }
@@ -544,7 +544,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 };
                 self.write_rm8(modbits, rm, val);
                 self.cycles += if modbits == 0b11 { 2 } else { 9 };
-                if modbits == 0b11 { 2 } else { 9 }
+                if modbits == 0b11 {
+                    2
+                } else {
+                    9
+                }
             }
 
             // MOV r/m16, r16 (0x89)
@@ -554,7 +558,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.get_reg16(reg);
                 self.write_rm16(modbits, rm, val);
                 self.cycles += if modbits == 0b11 { 2 } else { 9 };
-                if modbits == 0b11 { 2 } else { 9 }
+                if modbits == 0b11 {
+                    2
+                } else {
+                    9
+                }
             }
 
             // MOV r8, r/m8 (0x8A)
@@ -568,7 +576,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.set_reg8_high(reg - 4, val);
                 }
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
-                if modbits == 0b11 { 2 } else { 8 }
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
             }
 
             // MOV r16, r/m16 (0x8B)
@@ -578,7 +590,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.read_rm16(modbits, rm);
                 self.set_reg16(reg, val);
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
-                if modbits == 0b11 { 2 } else { 8 }
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
             }
 
             // ADD r/m8, r8 (0x00)
@@ -600,7 +616,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 { 3 } else { 16 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
             }
 
             // ADD r/m16, r16 (0x01)
@@ -618,7 +638,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 { 3 } else { 16 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
             }
 
             // ADD r8, r/m8 (0x02)
@@ -644,7 +668,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // ADD r16, r/m16 (0x03)
@@ -662,7 +690,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // SUB r/m8, r8 (0x28)
@@ -684,7 +716,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 { 3 } else { 16 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
             }
 
             // SUB r/m16, r16 (0x29)
@@ -702,7 +738,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 { 3 } else { 16 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
             }
 
             // SUB r8, r/m8 (0x2A)
@@ -728,7 +768,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // SUB r16, r/m16 (0x2B)
@@ -746,7 +790,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // CMP r/m8, r8 (0x38)
@@ -767,7 +815,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // CMP r/m16, r16 (0x39)
@@ -784,7 +836,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // CMP r8, r/m8 (0x3A)
@@ -805,7 +861,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // CMP r16, r/m16 (0x3B)
@@ -822,7 +882,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // ADD AL, imm8
@@ -1013,7 +1077,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // TEST r/m16, r16 (0x85)
@@ -1028,7 +1096,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 { 3 } else { 9 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // TEST AL, imm8 (0xA8)
@@ -1068,7 +1140,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         let result = !val;
                         self.write_rm8(modbits, rm, result);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                        if modbits == 0b11 { 3 } else { 16 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
                     }
                     // NEG r/m8
                     0b011 => {
@@ -1079,7 +1155,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x80);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                        if modbits == 0b11 { 3 } else { 16 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
                     }
                     _ => {
                         eprintln!(
@@ -1106,7 +1186,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         let result = !val;
                         self.write_rm16(modbits, rm, result);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                        if modbits == 0b11 { 3 } else { 16 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
                     }
                     // NEG r/m16
                     0b011 => {
@@ -1117,7 +1201,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x8000);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                        if modbits == 0b11 { 3 } else { 16 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            16
+                        }
                     }
                     _ => {
                         eprintln!(
@@ -1927,8 +2015,14 @@ mod tests {
         cpu.cs = 0x2000;
 
         // Push return address onto stack
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE), 0x34);
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF), 0x12);
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE),
+            0x34,
+        );
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF),
+            0x12,
+        );
 
         // RET (0xC3)
         cpu.memory.load_program(0x20000, &[0xC3]);
@@ -1953,8 +2047,14 @@ mod tests {
         cpu.cs = 0x2000;
 
         // Push return address onto stack
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F8), 0x78);
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F9), 0x56);
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F8),
+            0x78,
+        );
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F9),
+            0x56,
+        );
 
         // RET 0x0004 (0xC2, 0x04, 0x00) - pops return address and adds 4 to SP
         cpu.memory.load_program(0x20000, &[0xC2, 0x04, 0x00]);
@@ -2197,7 +2297,8 @@ mod tests {
         cpu.ip = 0x0010;
 
         // CALL far to 0x3000:0x0050 (0x9A, 0x50, 0x00, 0x00, 0x30)
-        cpu.memory.load_program(0x20010, &[0x9A, 0x50, 0x00, 0x00, 0x30]);
+        cpu.memory
+            .load_program(0x20010, &[0x9A, 0x50, 0x00, 0x00, 0x30]);
 
         let old_sp = cpu.sp;
         cpu.step();
@@ -2224,10 +2325,22 @@ mod tests {
         cpu.cs = 0x3000;
 
         // Push return CS and IP onto stack (IP first, then CS)
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FC), 0x34); // IP low
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FD), 0x12); // IP high
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE), 0x00); // CS low
-        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF), 0x20); // CS high
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FC),
+            0x34,
+        ); // IP low
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FD),
+            0x12,
+        ); // IP high
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE),
+            0x00,
+        ); // CS low
+        cpu.memory.write(
+            Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF),
+            0x20,
+        ); // CS high
 
         // RET far (0xCB)
         cpu.memory.load_program(0x30000, &[0xCB]);
