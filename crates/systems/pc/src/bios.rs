@@ -7,9 +7,7 @@ pub use boot_priority::BootPriority;
 
 mod boot_priority {
     /// Boot priority options
-    #[derive(
-        Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
-    )]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
     pub enum BootPriority {
         /// Boot from floppy first, then hard drive
         #[default]

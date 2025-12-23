@@ -367,6 +367,20 @@ impl<M: Memory8086> Cpu8086<M> {
         self.set_flag(FLAG_PF, Self::calc_parity((result & 0xFF) as u8));
     }
 
+    /// Public method to read a byte from memory using segment:offset
+    /// This is used for BIOS interrupt handlers that need to access memory
+    #[inline]
+    pub fn read_byte(&self, segment: u16, offset: u16) -> u8 {
+        self.read(segment, offset)
+    }
+
+    /// Public method to write a byte to memory using segment:offset
+    /// This is used for BIOS interrupt handlers that need to access memory
+    #[inline]
+    pub fn write_byte(&mut self, segment: u16, offset: u16, val: u8) {
+        self.write(segment, offset, val);
+    }
+
     /// Execute one instruction and return cycles used
     pub fn step(&mut self) -> u32 {
         if self.halted {

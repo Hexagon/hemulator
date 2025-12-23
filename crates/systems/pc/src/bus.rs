@@ -242,6 +242,46 @@ impl PcBus {
     pub fn disk_controller_mut(&mut self) -> &mut DiskController {
         &mut self.disk_controller
     }
+
+    /// Perform a disk read operation
+    pub fn disk_read(&mut self, request: &crate::disk::DiskRequest, buffer: &mut [u8]) -> u8 {
+        let disk_image = if request.drive < 0x80 {
+            // Floppy drive
+            if request.drive == 0x00 {
+                self.floppy_a.as_deref()
+            } else if request.drive == 0x01 {
+                self.floppy_b.as_deref()
+            } else {
+                None
+            }
+        } else {
+            // Hard drive
+            self.hard_drive.as_deref()
+        };
+
+        self.disk_controller
+            .read_sectors(request, buffer, disk_image)
+    }
+
+    /// Perform a disk write operation
+    pub fn disk_write(&mut self, request: &crate::disk::DiskRequest, buffer: &[u8]) -> u8 {
+        let disk_mut = if request.drive < 0x80 {
+            // Floppy drive
+            if request.drive == 0x00 {
+                self.floppy_a.as_mut()
+            } else if request.drive == 0x01 {
+                self.floppy_b.as_mut()
+            } else {
+                None
+            }
+        } else {
+            // Hard drive
+            self.hard_drive.as_mut()
+        };
+
+        self.disk_controller
+            .write_sectors(request, buffer, disk_mut)
+    }
 }
 
 impl Default for PcBus {
