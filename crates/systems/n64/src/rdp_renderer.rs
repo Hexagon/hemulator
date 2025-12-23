@@ -6,18 +6,41 @@
 //!
 //! # Design Philosophy
 //!
-//! The separation follows the same pattern as the frontend's `VideoProcessor` trait:
+//! The RdpRenderer trait follows the common renderer pattern defined in
+//! `emu_core::renderer::Renderer`. All emulated systems with graphics capabilities
+//! follow the same architectural approach:
+//!
 //! - **Software Renderer**: CPU-based rasterization, maximum accuracy and compatibility
-//! - **OpenGL Renderer** (future): GPU-accelerated rasterization for performance
+//! - **OpenGL Renderer**: GPU-accelerated rasterization for performance
 //!
 //! # Architecture
 //!
 //! ```text
 //! RDP (state management) -> RdpRenderer trait -> {Software, OpenGL} implementations
+//!                               ↓
+//!                   (follows emu_core::renderer::Renderer pattern)
 //! ```
 //!
 //! The RDP struct maintains state (registers, TMEM, scissor, etc.) and delegates
 //! actual drawing operations to the renderer backend.
+//!
+//! # Core Methods (Common Pattern)
+//!
+//! Following the `emu_core::renderer::Renderer` pattern, all renderers provide:
+//! - `get_frame()`: Get the current framebuffer
+//! - `clear()`: Clear the framebuffer with a color
+//! - `reset()`: Reset renderer to initial state
+//! - `name()`: Get renderer name for debugging/UI
+//! - `is_hardware_accelerated()`: Check if GPU-accelerated
+//! - `resize()`: Resize the renderer
+//!
+//! # N64-Specific Methods
+//!
+//! In addition to the common pattern, RDP renderers provide:
+//! - Triangle rasterization (flat, shaded, textured, with/without Z-buffer)
+//! - Rectangle filling with scissor clipping
+//! - Z-buffer operations (clear, enable/disable)
+//! - Texture sampling and mapping
 
 use emu_core::types::Frame;
 

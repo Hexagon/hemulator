@@ -6,18 +6,39 @@
 //!
 //! # Design Philosophy
 //!
-//! The separation follows the same pattern as the N64's `RdpRenderer` trait:
+//! The VideoAdapter trait follows the common renderer pattern defined in
+//! `emu_core::renderer::Renderer`. All emulated systems with graphics capabilities
+//! follow the same architectural approach:
+//!
 //! - **Software Renderer**: CPU-based rendering, maximum compatibility
-//! - **Hardware Renderer** (future): GPU-accelerated rendering for performance
+//! - **Hardware Renderer**: GPU-accelerated rendering for performance
 //!
 //! # Architecture
 //!
 //! ```text
 //! PcSystem (state management) -> VideoAdapter trait -> {Software, Hardware} implementations
+//!                                     ↓
+//!                     (follows emu_core::renderer::Renderer pattern)
 //! ```
 //!
 //! The PcSystem maintains state (registers, memory, etc.) and delegates
 //! actual rendering operations to the video adapter backend.
+//!
+//! # Core Methods (Common Pattern)
+//!
+//! Following the `emu_core::renderer::Renderer` pattern, all adapters provide:
+//! - `get_frame()`: Get the current framebuffer
+//! - `reset()`: Reset adapter to initial state  
+//! - `name()`: Get adapter name for debugging/UI
+//! - `is_hardware_accelerated()`: Check if GPU-accelerated
+//! - `resize()`: Resize the adapter
+//!
+//! # PC-Specific Methods
+//!
+//! In addition to the common pattern, PC adapters provide:
+//! - `render()`: Render VRAM to framebuffer (text/graphics modes)
+//! - `fb_width()`, `fb_height()`: Get framebuffer dimensions
+//! - `init()`: Initialize with specific dimensions
 
 use emu_core::types::Frame;
 
