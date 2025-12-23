@@ -997,6 +997,141 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // TEST r/m8, r8 (0x84)
+            0x84 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // TEST r/m16, r16 (0x85)
+            0x85 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // TEST AL, imm8 (0xA8)
+            0xA8 => {
+                let val = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                let result = al & val;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += 4;
+                4
+            }
+
+            // TEST AX, imm16 (0xA9)
+            0xA9 => {
+                let val = self.fetch_u16();
+                let result = self.ax & val;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += 4;
+                4
+            }
+
+            // Group 3 opcodes (0xF6) - 8-bit operations (NOT, NEG, MUL, DIV, etc.)
+            0xF6 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                match reg {
+                    // NOT r/m8
+                    0b010 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let result = !val;
+                        self.write_rm8(modbits, rm, result);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 { 3 } else { 16 }
+                    }
+                    // NEG r/m8
+                    0b011 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let result = 0u8.wrapping_sub(val);
+                        self.write_rm8(modbits, rm, result);
+                        self.update_flags_8(result);
+                        self.set_flag(FLAG_CF, val != 0);
+                        self.set_flag(FLAG_OF, val == 0x80);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 { 3 } else { 16 }
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
+            // Group 3 opcodes (0xF7) - 16-bit operations (NOT, NEG, MUL, DIV, etc.)
+            0xF7 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                match reg {
+                    // NOT r/m16
+                    0b010 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let result = !val;
+                        self.write_rm16(modbits, rm, result);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 { 3 } else { 16 }
+                    }
+                    // NEG r/m16
+                    0b011 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let result = 0u16.wrapping_sub(val);
+                        self.write_rm16(modbits, rm, result);
+                        self.update_flags_16(result);
+                        self.set_flag(FLAG_CF, val != 0);
+                        self.set_flag(FLAG_OF, val == 0x8000);
+                        self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                        if modbits == 0b11 { 3 } else { 16 }
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
+                            reg,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
             // INC reg16 (40-47)
             // Note: INC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
             0x40..=0x47 => {
@@ -1853,6 +1988,202 @@ mod tests {
         cpu.step();
         assert_eq!(cpu.ip, 0x0013); // Return to address after CALL
         assert_eq!(cpu.sp, 0x0100); // Stack pointer restored
+    }
+
+    #[test]
+    fn test_test_rm8_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST CL, AL (0x84 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x84, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 0x00AA; // CL = 0xAA
+
+        let old_ax = cpu.ax;
+        let old_cx = cpu.cx;
+        cpu.step();
+
+        // TEST doesn't modify operands
+        assert_eq!(cpu.ax, old_ax);
+        assert_eq!(cpu.cx, old_cx);
+
+        // Flags should be set based on AL & CL = 0xFF & 0xAA = 0xAA
+        assert!(!cpu.get_flag(FLAG_ZF)); // Result is not zero
+        assert!(cpu.get_flag(FLAG_SF)); // Result has sign bit set
+        assert!(!cpu.get_flag(FLAG_CF)); // CF cleared
+        assert!(!cpu.get_flag(FLAG_OF)); // OF cleared
+    }
+
+    #[test]
+    fn test_test_al_imm8_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST AL, 0x0F (0xA8, 0x0F)
+        cpu.memory.load_program(0xFFFF0, &[0xA8, 0x0F]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00F0; // AL = 0xF0
+
+        cpu.step();
+
+        // AL & 0x0F = 0xF0 & 0x0F = 0x00
+        assert!(cpu.get_flag(FLAG_ZF)); // Result is zero
+    }
+
+    #[test]
+    fn test_test_ax_imm16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // TEST AX, 0x8000 (0xA9, 0x00, 0x80)
+        cpu.memory.load_program(0xFFFF0, &[0xA9, 0x00, 0x80]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x8080;
+
+        cpu.step();
+
+        // AX & 0x8000 = 0x8080 & 0x8000 = 0x8000
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(cpu.get_flag(FLAG_SF)); // Sign bit set
+    }
+
+    #[test]
+    fn test_not_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NOT AL (0xF6 with ModR/M 0b11_010_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_010_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00AA; // AL = 0xAA
+
+        cpu.step();
+
+        // AL should be ~0xAA = 0x55
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_not_r16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NOT AX (0xF7 with ModR/M 0b11_010_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_010_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0xAAAA;
+
+        cpu.step();
+
+        // AX should be ~0xAAAA = 0x5555
+        assert_eq!(cpu.ax, 0x5555);
+    }
+
+    #[test]
+    fn test_not_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0xF0);
+
+        // NOT byte ptr [BX] (0xF6 with ModR/M 0b00_010_111)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b00_010_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Memory should contain ~0xF0 = 0x0F
+        assert_eq!(cpu.memory.read(addr), 0x0F);
+    }
+
+    #[test]
+    fn test_neg_r8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+
+        cpu.step();
+
+        // AL should be -5 = 0xFB (two's complement)
+        assert_eq!(cpu.ax & 0xFF, 0xFB);
+        assert!(cpu.get_flag(FLAG_CF)); // CF set when operand is not zero
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(cpu.get_flag(FLAG_SF));
+    }
+
+    #[test]
+    fn test_neg_r16() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AX (0xF7 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x1000;
+
+        cpu.step();
+
+        // AX should be -0x1000 = 0xF000 (two's complement)
+        assert_eq!(cpu.ax, 0xF000);
+        assert!(cpu.get_flag(FLAG_CF));
+        assert!(cpu.get_flag(FLAG_SF));
+    }
+
+    #[test]
+    fn test_neg_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL with AL=0 (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0000; // AL = 0
+
+        cpu.step();
+
+        // AL should remain 0
+        assert_eq!(cpu.ax & 0xFF, 0);
+        assert!(!cpu.get_flag(FLAG_CF)); // CF cleared when operand is zero
+        assert!(cpu.get_flag(FLAG_ZF));
+    }
+
+    #[test]
+    fn test_neg_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // NEG AL with AL=0x80 (0xF6 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0080; // AL = -128
+
+        cpu.step();
+
+        // AL should become 0x80 (overflow: -(-128) cannot be represented in 8-bit signed)
+        assert_eq!(cpu.ax & 0xFF, 0x80);
+        assert!(cpu.get_flag(FLAG_OF)); // OF set for overflow
+        assert!(cpu.get_flag(FLAG_CF)); // CF set when operand is not zero
     }
 
     #[test]
