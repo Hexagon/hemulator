@@ -2,6 +2,8 @@
 
 This directory contains minimal test ROMs for smoke testing each emulated system.
 
+**For detailed test ROM requirements and guidelines**, see [AGENTS.md](../AGENTS.md#test-rom-requirements).
+
 ## Purpose
 
 These test ROMs are designed to:
@@ -25,7 +27,7 @@ When implementing new systems, follow this pattern:
 2. Write minimal assembly code that produces visible output
 3. Add build script and built ROM
 4. Add smoke test to system crate
-5. Update this README and AGENTS.md
+5. Update this README and [AGENTS.md](../AGENTS.md#test-rom-requirements)
 
 ## Building
 

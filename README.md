@@ -24,7 +24,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
 | **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
-| **Game Boy** | ⚠️ Functional | LR35902 (Complete) | PPU (Complete) | APU (Not integrated) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported; no audio/timer |
+| **Game Boy** | ✅ Fully Working | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported |
 | **SNES** | 🚧 Basic | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 | **PC (DOS)** | 🧪 Experimental | 8086 (Partial) | CGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ❌ | COM/EXE loading; text + graphics modes |
@@ -42,20 +42,33 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - ✅ **NES** - Best experience, ~90% game compatibility, full audio
 - ✅ **Atari 2600** - Complete implementation, all features working
 
-**Playable but limited:**
-- ⚠️ **Game Boy** - Graphics work great, but no sound or timer (most games playable)
+**Playable with full features:**
+- ✅ **Game Boy** - Complete implementation with graphics, sound, and timer support
 
 **Not ready for gaming:**
 - 🚧 **SNES** - Infrastructure only, very limited functionality
 - 🚧 **N64** - Development in progress, can render 3D graphics but few games work
-- 🧪 **PC** - CGA text mode works, but limited BIOS/DOS support
-- 🧪 **PC/DOS** - Experimental only, black screen
+- 🧪 **PC/DOS** - CGA/EGA/VGA graphics modes work, but limited BIOS/DOS support
 
 ## For Users
 
-Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See [MANUAL.md](MANUAL.md) for complete usage instructions.
+Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See **[MANUAL.md](MANUAL.md)** for complete usage instructions, controls, and system-specific information.
 
 ## For Developers
+
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for overall emulation system architecture and design patterns.
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow and contribution guidelines.
+
+See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
+
+**System-Specific Documentation**:
+- [NES](crates/systems/nes/README.md) - PPU, APU, mappers
+- [Game Boy](crates/systems/gb/README.md) - PPU, APU, MBCs
+- [Atari 2600](crates/systems/atari2600/README.md) - TIA, RIOT, cartridges
+- [SNES](crates/systems/snes/README.md) - PPU modes, memory map
+- [N64](crates/systems/n64/README.md) - RDP renderer, RSP
+- [PC](crates/systems/pc/README.md) - Video adapters, BIOS
 
 ### Quick Start
 
@@ -73,41 +86,23 @@ cargo run --release -p emu_gui
 ./target/release/hemu path/to/your/game.nes
 ```
 
-## PC Video Adapter Architecture
+## Architecture
 
-The PC emulation system uses a modular video adapter architecture, allowing different rendering backends:
+Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
-### Modular Design
+**Core Components** (`crates/core/`):
+- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
+- Audio: APU channels, envelopes, mixers
+- Graphics: ZBuffer, ColorOps, palette/tile utilities
+- Traits: System, Cpu, Renderer, AudioChip
 
-```
-PcSystem (state) → VideoAdapter trait → {Software, Hardware, Graphics} implementations
-```
+**System Implementations** (`crates/systems/`):
+- Each system combines core components with system-specific logic
+- See individual [system READMEs](#for-developers) for implementation details
 
-**Current Adapters:**
-- **SoftwareCgaAdapter**: CPU-based CGA text mode only (80x25 characters, 640x400 pixels)
-  - 16-color CGA palette
-  - IBM PC 8x16 font rendering
-  - Full attribute support (foreground/background colors)
+### Renderer Architecture
 
-- **CgaGraphicsAdapter**: CGA graphics modes with runtime mode switching
-  - **Text Mode**: 80x25 characters (640x400 pixels)
-  - **Graphics Mode 4**: 320x200, 4 colors (cyan, magenta, white)
-  - **Graphics Mode 6**: 640x200, 2 colors (black and white)
-  - Pixel-level drawing support for graphics applications
-  - Interlaced scanline addressing (authentic CGA behavior)
-
-**Future Adapters:**
-- **HardwareCgaAdapter**: GPU-accelerated rendering (OpenGL/Vulkan)
-- **EgaAdapter**: Enhanced Graphics Adapter (16 colors, multiple modes)
-- **VgaAdapter**: Video Graphics Array (256 colors, Mode 13h)
-
-This architecture follows the same pattern as the N64's RDP renderer, enabling:
-- Easy addition of new graphics modes
-- Hardware acceleration without changing core system
-- Runtime adapter switching
-- Clean separation of state management and rendering
-
-See `crates/systems/pc/src/video_adapter*.rs` for implementation details.
+The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](ARCHITECTURE.md#renderer-architecture) for implementation details.
 
 ## NES Mapper Support
 
@@ -301,7 +296,13 @@ See existing mapper implementations for examples.
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
+Contributions are welcome! Please see **[CONTRIBUTING.md](CONTRIBUTING.md)** for:
+- Pre-commit check requirements (formatting, linting, building, testing)
+- Development workflow and coding standards
+- Debug environment variables
+- Areas where contributions are needed
+
+For architecture details and implementation guidelines, see **[AGENTS.md](AGENTS.md)**.
 
 ## License
 
