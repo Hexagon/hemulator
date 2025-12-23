@@ -515,11 +515,11 @@ mod tests {
 
         // Create a bootable floppy image with boot signature
         let mut floppy = vec![0; 1474560]; // 1.44MB
-        
+
         // Add boot signature at offset 510-511
         floppy[510] = 0x55;
         floppy[511] = 0xAA;
-        
+
         // Add some boot code
         floppy[0] = 0xEA; // JMP FAR (boot code starts here)
 
@@ -534,10 +534,10 @@ mod tests {
 
         // Verify boot sector was loaded to 0x7C00
         let bus = sys.cpu.bus();
-        
+
         // Check that boot code was copied
         assert_eq!(bus.read_ram(0x7C00), 0xEA);
-        
+
         // Check boot signature
         assert_eq!(bus.read_ram(0x7C00 + 510), 0x55);
         assert_eq!(bus.read_ram(0x7C00 + 511), 0xAA);
@@ -549,11 +549,11 @@ mod tests {
 
         // Create a bootable hard drive image
         let mut hd = vec![0; 10653696]; // 10MB
-        
+
         // Add boot signature
         hd[510] = 0x55;
         hd[511] = 0xAA;
-        
+
         // Add boot code
         hd[0] = 0xB8; // MOV AX, ... (different from floppy)
 
@@ -568,10 +568,10 @@ mod tests {
 
         // Verify boot sector was loaded
         let bus = sys.cpu.bus();
-        
+
         // Check that boot code was copied
         assert_eq!(bus.read_ram(0x7C00), 0xB8);
-        
+
         // Check boot signature
         assert_eq!(bus.read_ram(0x7C00 + 510), 0x55);
         assert_eq!(bus.read_ram(0x7C00 + 511), 0xAA);
@@ -625,7 +625,7 @@ mod tests {
 
         // Boot sector should NOT be loaded (should remain zeros)
         let bus = sys.cpu.bus();
-        
+
         // Should be all zeros since boot failed
         assert_eq!(bus.read_ram(0x7C00), 0x00);
         assert_eq!(bus.read_ram(0x7C00 + 510), 0x00);
@@ -636,16 +636,23 @@ mod tests {
         // This test uses the test boot sector from test_roms/pc/boot.bin
         // The boot sector writes "BOOT OK" to video memory
         let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_roms/pc/boot.bin");
-        
+
         // Skip if boot.bin doesn't exist (not built yet)
         if !std::path::Path::new(boot_bin_path).exists() {
-            eprintln!("Skipping boot sector smoke test: {} not found", boot_bin_path);
+            eprintln!(
+                "Skipping boot sector smoke test: {} not found",
+                boot_bin_path
+            );
             eprintln!("Build with: cd test_roms/pc && ./build_boot.sh");
             return;
         }
 
         let boot_sector = std::fs::read(boot_bin_path).expect("Failed to read boot.bin");
-        assert_eq!(boot_sector.len(), 512, "Boot sector should be exactly 512 bytes");
+        assert_eq!(
+            boot_sector.len(),
+            512,
+            "Boot sector should be exactly 512 bytes"
+        );
 
         // Create a floppy image with the boot sector
         let mut floppy = vec![0; 1474560]; // 1.44MB

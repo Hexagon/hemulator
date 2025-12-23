@@ -7,9 +7,12 @@ pub use boot_priority::BootPriority;
 
 mod boot_priority {
     /// Boot priority options
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[derive(
+        Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize,
+    )]
     pub enum BootPriority {
         /// Boot from floppy first, then hard drive
+        #[default]
         FloppyFirst,
         /// Boot from hard drive first, then floppy
         HardDriveFirst,
@@ -17,12 +20,6 @@ mod boot_priority {
         FloppyOnly,
         /// Boot from hard drive only
         HardDriveOnly,
-    }
-
-    impl Default for BootPriority {
-        fn default() -> Self {
-            BootPriority::FloppyFirst
-        }
     }
 }
 
@@ -41,26 +38,21 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     // The emulator will intercept execution at specific points to handle boot logic
     let main_boot: Vec<u8> = vec![
         // CLI - disable interrupts during setup
-        0xFA,
-        
-        // Initialize segment registers
-        0xB8, 0x00, 0x00,       // MOV AX, 0x0000
-        0x8E, 0xD8,             // MOV DS, AX
-        0x8E, 0xC0,             // MOV ES, AX
-        0x8E, 0xD0,             // MOV SS, AX
-        0xBC, 0xFE, 0xFF,       // MOV SP, 0xFFFE
-
+        0xFA, // Initialize segment registers
+        0xB8, 0x00, 0x00, // MOV AX, 0x0000
+        0x8E, 0xD8, // MOV DS, AX
+        0x8E, 0xC0, // MOV ES, AX
+        0x8E, 0xD0, // MOV SS, AX
+        0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
         // STI - enable interrupts
         0xFB,
-
         // Boot from disk - the emulator intercepts this and loads boot sector
         // For now, just jump to boot sector location (0x0000:0x7C00)
         // The emulator will load the boot sector before executing this
-        0xEA, 0x00, 0x7C,       // JMP FAR 0x0000:0x7C00
-        0x00, 0x00,             // (continuation: segment = 0x0000)
-
+        0xEA, 0x00, 0x7C, // JMP FAR 0x0000:0x7C00
+        0x00, 0x00, // (continuation: segment = 0x0000)
         // If we return here, boot failed - halt
-        0xF4,                   // HLT
+        0xF4, // HLT
     ];
 
     // Copy main boot code to start of BIOS
@@ -70,8 +62,8 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     // This is where the CPU starts executing on reset
     let entry_point_offset = 0xFFF0;
     let boot_stub: Vec<u8> = vec![
-        0xEA, 0x00, 0xF0,       // JMP FAR 0xF000:0x0000
-        0x00, 0xF0,             // (continuation: segment = 0xF000)
+        0xEA, 0x00, 0xF0, // JMP FAR 0xF000:0x0000
+        0x00, 0xF0, // (continuation: segment = 0xF000)
     ];
     bios[entry_point_offset..entry_point_offset + boot_stub.len()].copy_from_slice(&boot_stub);
 

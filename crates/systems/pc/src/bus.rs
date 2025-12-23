@@ -99,12 +99,8 @@ impl PcBus {
                 (0x80, self.hard_drive.as_deref()),
                 (0x00, self.floppy_a.as_deref()),
             ],
-            BootPriority::FloppyOnly => vec![
-                (0x00, self.floppy_a.as_deref()),
-            ],
-            BootPriority::HardDriveOnly => vec![
-                (0x80, self.hard_drive.as_deref()),
-            ],
+            BootPriority::FloppyOnly => vec![(0x00, self.floppy_a.as_deref())],
+            BootPriority::HardDriveOnly => vec![(0x80, self.hard_drive.as_deref())],
         };
 
         // Try each device in order

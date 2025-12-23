@@ -1211,7 +1211,9 @@ fn main() {
                         println!("Switched to Game Boy system");
                     }
                     3 => {
-                        sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
+                        sys = EmulatorSystem::Atari2600(Box::new(
+                            emu_atari2600::Atari2600System::new(),
+                        ));
                         status_message = "Switched to Atari 2600".to_string();
                         println!("Switched to Atari 2600 system");
                     }
@@ -1235,7 +1237,11 @@ fn main() {
 
                 // Update buffer with splash screen
                 let (new_width, new_height) = sys.resolution();
-                buffer = ui_render::create_splash_screen_with_status(new_width, new_height, &status_message);
+                buffer = ui_render::create_splash_screen_with_status(
+                    new_width,
+                    new_height,
+                    &status_message,
+                );
             }
         }
 
@@ -1361,7 +1367,11 @@ fn main() {
                                             mp_info.name, e
                                         );
                                         status_message = format!("Failed to mount: {}", e);
-                                        buffer = ui_render::create_splash_screen_with_status(width, height, &status_message);
+                                        buffer = ui_render::create_splash_screen_with_status(
+                                            width,
+                                            height,
+                                            &status_message,
+                                        );
                                     }
                                 }
                             }
@@ -1478,8 +1488,12 @@ fn main() {
                     match HemuProject::load(&path) {
                         Ok(project) => {
                             if project.system != "pc" {
-                                eprintln!("Project is for {} system, but PC system is active", project.system);
-                                status_message = format!("Wrong system: project is for {}", project.system);
+                                eprintln!(
+                                    "Project is for {} system, but PC system is active",
+                                    project.system
+                                );
+                                status_message =
+                                    format!("Wrong system: project is for {}", project.system);
                             } else {
                                 // Load all mounts from project
                                 let mut any_mounted = false;
@@ -1489,13 +1503,17 @@ fn main() {
                                             if let Err(e) = sys.mount(mount_id, &data) {
                                                 eprintln!("Failed to mount {}: {}", mount_id, e);
                                             } else {
-                                                settings.set_mount_point(mount_id, mount_path.clone());
+                                                settings
+                                                    .set_mount_point(mount_id, mount_path.clone());
                                                 any_mounted = true;
                                                 println!("Mounted {}: {}", mount_id, mount_path);
                                             }
                                         }
                                         Err(e) => {
-                                            eprintln!("Failed to read file for {}: {}", mount_id, e);
+                                            eprintln!(
+                                                "Failed to read file for {}: {}",
+                                                mount_id, e
+                                            );
                                         }
                                     }
                                 }
@@ -1506,11 +1524,16 @@ fn main() {
                                     if let EmulatorSystem::PC(pc_sys) = &mut sys {
                                         let priority = match priority_str.as_str() {
                                             "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
-                                            "HardDriveFirst" => emu_pc::BootPriority::HardDriveFirst,
+                                            "HardDriveFirst" => {
+                                                emu_pc::BootPriority::HardDriveFirst
+                                            }
                                             "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
                                             "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
                                             _ => {
-                                                eprintln!("Unknown boot priority: {}, using default", priority_str);
+                                                eprintln!(
+                                                    "Unknown boot priority: {}, using default",
+                                                    priority_str
+                                                );
                                                 emu_pc::BootPriority::FloppyFirst
                                             }
                                         };
@@ -1544,32 +1567,34 @@ fn main() {
                 if let Some(path) = create_file_dialog(mp_info).pick_file() {
                     let path_str = path.to_string_lossy().to_string();
                     match std::fs::read(&path) {
-                        Ok(data) => {
-                            match sys.mount(&mp_info.id, &data) {
-                                Ok(_) => {
-                                    rom_loaded = true;
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    settings.set_mount_point(&mp_info.id, path_str.clone());
-                                    if let Err(e) = settings.save() {
-                                        eprintln!("Warning: Failed to save settings: {}", e);
-                                    }
-                                    game_saves = if let Some(ref hash) = rom_hash {
-                                        GameSaves::load(hash)
-                                    } else {
-                                        GameSaves::default()
-                                    };
-                                    status_message = format!("{} loaded", mp_info.name);
-                                    println!("Loaded media into {}: {}", mp_info.name, path_str);
+                        Ok(data) => match sys.mount(&mp_info.id, &data) {
+                            Ok(_) => {
+                                rom_loaded = true;
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                settings.set_mount_point(&mp_info.id, path_str.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
                                 }
-                                Err(e) => {
-                                    eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
-                                    rom_hash = None;
-                                    rom_loaded = false;
-                                    status_message = format!("Failed to mount: {}", e);
-                                    buffer = ui_render::create_splash_screen_with_status(width, height, &status_message);
-                                }
+                                game_saves = if let Some(ref hash) = rom_hash {
+                                    GameSaves::load(hash)
+                                } else {
+                                    GameSaves::default()
+                                };
+                                status_message = format!("{} loaded", mp_info.name);
+                                println!("Loaded media into {}: {}", mp_info.name, path_str);
                             }
-                        }
+                            Err(e) => {
+                                eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
+                                rom_hash = None;
+                                rom_loaded = false;
+                                status_message = format!("Failed to mount: {}", e);
+                                buffer = ui_render::create_splash_screen_with_status(
+                                    width,
+                                    height,
+                                    &status_message,
+                                );
+                            }
+                        },
                         Err(e) => {
                             eprintln!("Failed to read file: {}", e);
                             status_message = format!("Failed to read file: {}", e);
@@ -1634,16 +1659,19 @@ fn main() {
                     .save_file()
                 {
                     let mut project = HemuProject::new("pc".to_string());
-                    
+
                     // Get current mount points from settings
                     for (mount_id, mount_path) in &settings.mount_points {
                         project.set_mount(mount_id.clone(), mount_path.clone());
                     }
-                    
+
                     match project.save(&path) {
                         Ok(_) => {
                             println!("Project saved to: {}", path.display());
-                            status_message = format!("Project saved: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                            status_message = format!(
+                                "Project saved: {}",
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            );
                         }
                         Err(e) => {
                             eprintln!("Failed to save project: {}", e);

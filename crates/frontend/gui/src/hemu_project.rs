@@ -108,11 +108,11 @@ mod tests {
         let loaded = HemuProject::load(&test_file).expect("Failed to load");
         assert_eq!(loaded.system, "pc");
         assert_eq!(loaded.get_mount("BIOS"), Some(&"bios.rom".to_string()));
+        assert_eq!(loaded.get_mount("FloppyA"), Some(&"disk.img".to_string()));
         assert_eq!(
-            loaded.get_mount("FloppyA"),
-            Some(&"disk.img".to_string())
+            loaded.get_boot_priority(),
+            Some(&"HardDriveFirst".to_string())
         );
-        assert_eq!(loaded.get_boot_priority(), Some(&"HardDriveFirst".to_string()));
 
         // Cleanup
         fs::remove_file(test_file).ok();
@@ -124,7 +124,10 @@ mod tests {
         assert_eq!(project.get_boot_priority(), None);
 
         project.set_boot_priority("FloppyFirst".to_string());
-        assert_eq!(project.get_boot_priority(), Some(&"FloppyFirst".to_string()));
+        assert_eq!(
+            project.get_boot_priority(),
+            Some(&"FloppyFirst".to_string())
+        );
     }
 
     #[test]
