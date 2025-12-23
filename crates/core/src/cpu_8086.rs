@@ -1106,6 +1106,65 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
+            // CALL near relative (0xE8)
+            0xE8 => {
+                let offset = self.fetch_u16() as i16;
+                // Push return address (current IP after fetching the offset)
+                self.push(self.ip);
+                // Jump to target (IP + offset)
+                self.ip = self.ip.wrapping_add(offset as u16);
+                self.cycles += 19;
+                19
+            }
+
+            // RET near (0xC3)
+            0xC3 => {
+                self.ip = self.pop();
+                self.cycles += 8;
+                8
+            }
+
+            // RET near with immediate (0xC2) - pops return address and adds imm16 to SP
+            0xC2 => {
+                let pop_bytes = self.fetch_u16();
+                self.ip = self.pop();
+                self.sp = self.sp.wrapping_add(pop_bytes);
+                self.cycles += 12;
+                12
+            }
+
+            // CALL far absolute (0x9A)
+            0x9A => {
+                let new_ip = self.fetch_u16();
+                let new_cs = self.fetch_u16();
+                // Push current CS and IP
+                self.push(self.cs);
+                self.push(self.ip);
+                // Jump to far address
+                self.cs = new_cs;
+                self.ip = new_ip;
+                self.cycles += 28;
+                28
+            }
+
+            // RET far (0xCB)
+            0xCB => {
+                self.ip = self.pop();
+                self.cs = self.pop();
+                self.cycles += 18;
+                18
+            }
+
+            // RET far with immediate (0xCA) - pops return address and adds imm16 to SP
+            0xCA => {
+                let pop_bytes = self.fetch_u16();
+                self.ip = self.pop();
+                self.cs = self.pop();
+                self.sp = self.sp.wrapping_add(pop_bytes);
+                self.cycles += 17;
+                17
+            }
+
             // CLC - Clear Carry Flag
             0xF8 => {
                 self.set_flag(FLAG_CF, false);
@@ -1696,6 +1755,159 @@ mod tests {
 
         cpu.step();
         assert!(!cpu.get_flag(FLAG_PF));
+    }
+
+    #[test]
+    fn test_call_near() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL near with offset +0x0050 (0xE8, 0x50, 0x00)
+        cpu.memory.load_program(0x20010, &[0xE8, 0x50, 0x00]);
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // IP should be at offset location (0x0010 + 3 (instruction size) + 0x0050)
+        assert_eq!(cpu.ip, 0x0063);
+
+        // Stack should contain return address (0x0013 - after the CALL instruction)
+        assert_eq!(cpu.sp, old_sp - 2);
+        let return_addr = cpu.read_u16(cpu.ss, cpu.sp);
+        assert_eq!(return_addr, 0x0013);
+    }
+
+    #[test]
+    fn test_ret_near() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00FE;
+        cpu.cs = 0x2000;
+
+        // Push return address onto stack
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE), 0x34);
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF), 0x12);
+
+        // RET (0xC3)
+        cpu.memory.load_program(0x20000, &[0xC3]);
+        cpu.ip = 0x0000;
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // IP should be restored to return address
+        assert_eq!(cpu.ip, 0x1234);
+        // Stack pointer should be restored
+        assert_eq!(cpu.sp, old_sp + 2);
+    }
+
+    #[test]
+    fn test_ret_near_with_immediate() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00F8;
+        cpu.cs = 0x2000;
+
+        // Push return address onto stack
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F8), 0x78);
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00F9), 0x56);
+
+        // RET 0x0004 (0xC2, 0x04, 0x00) - pops return address and adds 4 to SP
+        cpu.memory.load_program(0x20000, &[0xC2, 0x04, 0x00]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // IP should be restored to return address
+        assert_eq!(cpu.ip, 0x5678);
+        // Stack pointer should be restored plus the immediate value
+        assert_eq!(cpu.sp, 0x00F8 + 2 + 4); // Original SP + 2 (pop) + 4 (immediate)
+    }
+
+    #[test]
+    fn test_call_ret_roundtrip() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL near with offset +0x0020
+        cpu.memory.load_program(0x20010, &[0xE8, 0x20, 0x00]);
+        cpu.step();
+        assert_eq!(cpu.ip, 0x0033); // 0x0010 + 3 + 0x0020
+
+        // RET
+        cpu.memory.load_program(0x20033, &[0xC3]);
+        cpu.step();
+        assert_eq!(cpu.ip, 0x0013); // Return to address after CALL
+        assert_eq!(cpu.sp, 0x0100); // Stack pointer restored
+    }
+
+    #[test]
+    fn test_call_far() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ip = 0x0010;
+
+        // CALL far to 0x3000:0x0050 (0x9A, 0x50, 0x00, 0x00, 0x30)
+        cpu.memory.load_program(0x20010, &[0x9A, 0x50, 0x00, 0x00, 0x30]);
+
+        let old_sp = cpu.sp;
+        cpu.step();
+
+        // CS:IP should be at far address
+        assert_eq!(cpu.cs, 0x3000);
+        assert_eq!(cpu.ip, 0x0050);
+
+        // Stack should contain old CS and IP
+        assert_eq!(cpu.sp, old_sp - 4);
+        let return_ip = cpu.read_u16(cpu.ss, old_sp - 4); // IP is pushed last
+        let return_cs = cpu.read_u16(cpu.ss, old_sp - 2); // CS is pushed first
+        assert_eq!(return_ip, 0x0015); // After CALL instruction
+        assert_eq!(return_cs, 0x2000);
+    }
+
+    #[test]
+    fn test_ret_far() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ss = 0x1000;
+        cpu.sp = 0x00FC;
+        cpu.cs = 0x3000;
+
+        // Push return CS and IP onto stack (IP first, then CS)
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FC), 0x34); // IP low
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FD), 0x12); // IP high
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FE), 0x00); // CS low
+        cpu.memory.write(Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x00FF), 0x20); // CS high
+
+        // RET far (0xCB)
+        cpu.memory.load_program(0x30000, &[0xCB]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // CS:IP should be restored
+        assert_eq!(cpu.ip, 0x1234);
+        assert_eq!(cpu.cs, 0x2000);
+        assert_eq!(cpu.sp, 0x0100); // SP restored
     }
 
     #[test]
