@@ -51,11 +51,13 @@ impl HemuProject {
     }
 
     /// Get a mount point path
+    #[allow(dead_code)]
     pub fn get_mount(&self, mount_id: &str) -> Option<&String> {
         self.mounts.get(mount_id)
     }
 
     /// Set boot priority (for PC systems)
+    #[allow(dead_code)]
     pub fn set_boot_priority(&mut self, priority: String) {
         self.boot_priority = Some(priority);
     }
@@ -66,6 +68,7 @@ impl HemuProject {
     }
 
     /// Check if system has multiple mount points (requires .hemu file)
+    #[allow(dead_code)]
     pub fn is_multi_mount_system(system: &str) -> bool {
         matches!(system, "pc")
     }

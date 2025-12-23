@@ -238,6 +238,7 @@ impl Settings {
     }
 
     /// Get a mount point path
+    #[allow(dead_code)]
     pub fn get_mount_point(&self, mount_point_id: &str) -> Option<&String> {
         self.mount_points.get(mount_point_id)
     }

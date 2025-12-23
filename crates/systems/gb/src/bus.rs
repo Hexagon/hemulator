@@ -81,6 +81,8 @@
 //! - ✅ High RAM (127 bytes)
 //! - ✅ Joypad register with matrix selection
 //! - ✅ PPU registers (LCDC, STAT, palettes, scroll, etc.)
+//! - ✅ APU registers (sound channels, master controls, wave RAM)
+//! - ✅ Timer registers (DIV, TIMA, TMA, TAC)
 //! - ✅ Interrupt registers (IF, IE)
 //! - ✅ Boot ROM disable register
 //! - ✅ Cartridge ROM loading (up to size)
@@ -89,15 +91,14 @@
 //!
 //! ## Not Implemented
 //! - ❌ MBC2 mapper (built-in 512×4 bits RAM)
-//! - ❌ Timer registers
 //! - ❌ Serial transfer
-//! - ❌ Sound registers
 //! - ❌ DMA register
 //! - ❌ CGB-specific registers
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
 use crate::ppu::Ppu;
+use crate::timer::Timer;
 use emu_core::cpu_lr35902::MemoryLr35902;
 
 /// Game Boy memory bus
@@ -118,10 +119,14 @@ pub struct GbBus {
     pub ppu: Ppu,
     /// APU (Audio Processing Unit)
     pub apu: GbApu,
+    /// Timer
+    pub timer: Timer,
     /// Joypad state register (0xFF00)
     joypad: u8,
     /// Joypad button state
     button_state: u8,
+    /// CGB mode flag (true if Game Boy Color features are enabled)
+    cgb_mode: bool,
 }
 
 impl GbBus {
@@ -135,8 +140,10 @@ impl GbBus {
             boot_rom_enabled: true,
             ppu: Ppu::new(),
             apu: GbApu::new(),
+            timer: Timer::new(),
             joypad: 0xFF,
             button_state: 0xFF,
+            cgb_mode: false,
         }
     }
 
@@ -146,17 +153,45 @@ impl GbBus {
         self.button_state = state;
     }
 
+    /// Request an interrupt
+    /// Bit 0: VBlank
+    /// Bit 1: LCD STAT
+    /// Bit 2: Timer
+    /// Bit 3: Serial
+    /// Bit 4: Joypad
+    pub fn request_interrupt(&mut self, interrupt_bit: u8) {
+        self.if_reg |= interrupt_bit;
+    }
+
+    /// Check if any interrupts are pending
+    pub fn has_pending_interrupts(&self) -> bool {
+        self.if_reg != 0
+    }
+
+    /// Check if CGB mode is enabled
+    #[allow(dead_code)] // Will be used when CGB features are fully implemented
+    pub fn is_cgb_mode(&self) -> bool {
+        self.cgb_mode
+    }
+
     pub fn load_cart(&mut self, data: &[u8]) {
         // Parse cart header
         if data.len() < 0x150 {
             // Too small to be a valid cart, but load it anyway
             self.mapper = Some(Mapper::from_cart(data.to_vec(), vec![], 0x00));
             self.boot_rom_enabled = false;
+            self.cgb_mode = false;
             return;
         }
 
         let cart_type = data[0x147];
         let ram_size_code = data[0x149];
+
+        // Check CGB flag at 0x143
+        // 0x80 = Works on both DMG and CGB
+        // 0xC0 = CGB only
+        let cgb_flag = data[0x143];
+        self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
 
         let ram_size = match ram_size_code {
             0x00 => 0,
@@ -229,6 +264,8 @@ impl MemoryLr35902 for GbBus {
                     }
                     result
                 }
+                // Timer registers
+                0xFF04..=0xFF07 => self.timer.read_register(addr),
                 0xFF0F => self.if_reg,
                 // APU registers
                 0xFF10..=0xFF26 => self.apu.read_register(addr),
@@ -282,6 +319,8 @@ impl MemoryLr35902 for GbBus {
             0xFF00..=0xFF7F => {
                 match addr {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
+                    // Timer registers
+                    0xFF04..=0xFF07 => self.timer.write_register(addr, val),
                     0xFF0F => self.if_reg = val,
                     // APU registers
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
