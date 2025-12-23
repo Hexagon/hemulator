@@ -734,6 +734,44 @@ impl<M: Memory8086> Cpu8086<M> {
                 2
             }
 
+            // INT n - Software Interrupt
+            0xCD => {
+                let int_num = self.fetch_u8();
+
+                // Push FLAGS, CS, IP onto stack (in that order)
+                self.push(self.flags);
+                self.push(self.cs);
+                self.push(self.ip);
+
+                // Clear IF and TF flags
+                self.set_flag(FLAG_IF, false);
+                self.set_flag(FLAG_TF, false);
+
+                // Read interrupt vector from IVT (Interrupt Vector Table) at 0x0000:int_num*4
+                // Each IVT entry is 4 bytes: offset (2 bytes) + segment (2 bytes)
+                let ivt_offset = (int_num as u16) * 4;
+                let new_ip = self.read_u16(0, ivt_offset);
+                let new_cs = self.read_u16(0, ivt_offset + 2);
+
+                // Jump to interrupt handler
+                self.ip = new_ip;
+                self.cs = new_cs;
+
+                self.cycles += 51; // Approximate timing for INT instruction
+                51
+            }
+
+            // IRET - Return from Interrupt
+            0xCF => {
+                // Pop IP, CS, FLAGS from stack (reverse order of INT)
+                self.ip = self.pop();
+                self.cs = self.pop();
+                self.flags = self.pop();
+
+                self.cycles += 32; // Approximate timing for IRET instruction
+                32
+            }
+
             _ => {
                 // Unknown/unimplemented opcode
                 eprintln!(
@@ -1124,6 +1162,86 @@ mod tests {
         let cycles = cpu.step();
         assert_eq!(cycles, 3);
         assert_eq!(cpu.ip, old_ip + 1);
+    }
+
+    #[test]
+    fn test_int_instruction() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Setup interrupt vector for INT 0x10 at IVT address 0x0000:0x0040 (0x10 * 4)
+        // IVT entry: offset=0x1000, segment=0xF000
+        cpu.memory.write(0x0040, 0x00); // IP low
+        cpu.memory.write(0x0041, 0x10); // IP high
+        cpu.memory.write(0x0042, 0x00); // CS low
+        cpu.memory.write(0x0043, 0xF0); // CS high
+
+        // Load INT 0x10 instruction at CS:IP
+        cpu.memory.load_program(0xFFFF0, &[0xCD, 0x10]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ss = 0x0000;
+        cpu.sp = 0xFFFE;
+        cpu.flags = 0x0202; // IF=1
+
+        let old_ip = cpu.ip;
+        let old_cs = cpu.cs;
+        let old_flags = cpu.flags;
+
+        cpu.step();
+
+        // Check that CS:IP jumped to interrupt handler
+        assert_eq!(cpu.cs, 0xF000);
+        assert_eq!(cpu.ip, 0x1000);
+
+        // Check that FLAGS, CS, IP were pushed to stack
+        assert_eq!(cpu.sp, 0xFFF8); // Stack pointer moved down by 6 bytes
+
+        // Read pushed values from stack (pushed in order: FLAGS, CS, IP)
+        // Last pushed (IP) is at SP, first pushed (FLAGS) is at SP+4
+        let pushed_ip = cpu.memory.read(0xFFF8) as u16 | ((cpu.memory.read(0xFFF9) as u16) << 8);
+        let pushed_cs = cpu.memory.read(0xFFFA) as u16 | ((cpu.memory.read(0xFFFB) as u16) << 8);
+        let pushed_flags = cpu.memory.read(0xFFFC) as u16 | ((cpu.memory.read(0xFFFD) as u16) << 8);
+
+        // IP should point to next instruction (after INT)
+        assert_eq!(pushed_ip, old_ip + 2);
+        assert_eq!(pushed_cs, old_cs);
+        assert_eq!(pushed_flags, old_flags);
+
+        // Check that IF flag was cleared
+        assert!(!cpu.get_flag(FLAG_IF));
+    }
+
+    #[test]
+    fn test_iret_instruction() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Setup stack with return values
+        cpu.ss = 0x0000;
+        cpu.sp = 0xFFF8;
+
+        // IRET pops in order: IP, CS, FLAGS
+        // So stack layout from SP upwards is: IP, CS, FLAGS
+        cpu.memory.write(0xFFF8, 0x78); // IP low
+        cpu.memory.write(0xFFF9, 0x56); // IP high
+        cpu.memory.write(0xFFFA, 0x34); // CS low
+        cpu.memory.write(0xFFFB, 0x12); // CS high
+        cpu.memory.write(0xFFFC, 0x02); // FLAGS low
+        cpu.memory.write(0xFFFD, 0x02); // FLAGS high
+
+        // Load IRET instruction
+        cpu.memory.load_program(0xF0000, &[0xCF]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xF000;
+
+        cpu.step();
+
+        // Check that IP, CS, FLAGS were popped
+        assert_eq!(cpu.ip, 0x5678);
+        assert_eq!(cpu.cs, 0x1234);
+        assert_eq!(cpu.flags, 0x0202);
+        assert_eq!(cpu.sp, 0xFFFE); // Stack pointer restored
     }
 
     #[test]
