@@ -461,6 +461,7 @@ impl Ppu {
 
     /// Get a single pixel color index from a tile in Mode 0 (2bpp)
     /// Returns CGRAM color index (0-255) or 0 for transparent
+    #[allow(clippy::too_many_arguments)]
     fn get_tile_pixel_mode0(
         &self,
         tile_index: u8,
