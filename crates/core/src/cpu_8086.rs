@@ -431,6 +431,224 @@ impl<M: Memory8086> Cpu8086<M> {
         self.set_flag(FLAG_PF, Self::calc_parity((result & 0xFF) as u8));
     }
 
+    /// Perform 8-bit shift/rotate operation
+    fn shift_rotate_8(&mut self, val: u8, op: u8, count: u8) -> u8 {
+        if count == 0 {
+            return val;
+        }
+
+        let count = count & 0x1F; // 8086: only lower 5 bits used
+        let mut result = val;
+
+        match op {
+            // ROL - Rotate left
+            0b000 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x80) != 0;
+                    result = (result << 1) | (if carry_out { 1 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                // OF is set if sign bit changed (only for count=1)
+                if count == 1 {
+                    let msb = (result & 0x80) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // ROR - Rotate right
+            0b001 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x01) != 0;
+                    result = (result >> 1) | (if carry_out { 0x80 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                // OF is set if two high bits differ (only for count=1)
+                if count == 1 {
+                    let bit7 = (result & 0x80) != 0;
+                    let bit6 = (result & 0x40) != 0;
+                    self.set_flag(FLAG_OF, bit7 != bit6);
+                }
+            }
+            // RCL - Rotate through carry left
+            0b010 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let carry_out = (result & 0x80) != 0;
+                    result = (result << 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                // OF is set if sign bit changed (only for count=1)
+                if count == 1 {
+                    let msb = (result & 0x80) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // RCR - Rotate through carry right
+            0b011 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 0x80 } else { 0 };
+                    let carry_out = (result & 0x01) != 0;
+                    result = (result >> 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                // OF is set if two high bits differ (only for count=1)
+                if count == 1 {
+                    let bit7 = (result & 0x80) != 0;
+                    let bit6 = (result & 0x40) != 0;
+                    self.set_flag(FLAG_OF, bit7 != bit6);
+                }
+            }
+            // SHL/SAL - Shift left
+            0b100 | 0b110 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x80) != 0;
+                    result <<= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_8(result);
+                // OF is set if sign bit changed (only for count=1)
+                if count == 1 {
+                    let msb = (result & 0x80) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // SHR - Shift right
+            0b101 => {
+                // OF is set to MSB of original value (only for count=1)
+                if count == 1 {
+                    self.set_flag(FLAG_OF, (val & 0x80) != 0);
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x01) != 0;
+                    result >>= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_8(result);
+            }
+            // SAR - Shift arithmetic right
+            0b111 => {
+                let sign_bit = val & 0x80;
+                if count == 1 {
+                    self.set_flag(FLAG_OF, false); // Always 0 for SAR
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x01) != 0;
+                    result = (result >> 1) | sign_bit;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_8(result);
+            }
+            _ => {}
+        }
+
+        result
+    }
+
+    /// Perform 16-bit shift/rotate operation
+    fn shift_rotate_16(&mut self, val: u16, op: u8, count: u8) -> u16 {
+        if count == 0 {
+            return val;
+        }
+
+        let count = count & 0x1F; // 8086: only lower 5 bits used
+        let mut result = val;
+
+        match op {
+            // ROL - Rotate left
+            0b000 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x8000) != 0;
+                    result = (result << 1) | (if carry_out { 1 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let msb = (result & 0x8000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // ROR - Rotate right
+            0b001 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x0001) != 0;
+                    result = (result >> 1) | (if carry_out { 0x8000 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let bit15 = (result & 0x8000) != 0;
+                    let bit14 = (result & 0x4000) != 0;
+                    self.set_flag(FLAG_OF, bit15 != bit14);
+                }
+            }
+            // RCL - Rotate through carry left
+            0b010 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let carry_out = (result & 0x8000) != 0;
+                    result = (result << 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let msb = (result & 0x8000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // RCR - Rotate through carry right
+            0b011 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 0x8000 } else { 0 };
+                    let carry_out = (result & 0x0001) != 0;
+                    result = (result >> 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let bit15 = (result & 0x8000) != 0;
+                    let bit14 = (result & 0x4000) != 0;
+                    self.set_flag(FLAG_OF, bit15 != bit14);
+                }
+            }
+            // SHL/SAL - Shift left
+            0b100 | 0b110 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x8000) != 0;
+                    result <<= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_16(result);
+                if count == 1 {
+                    let msb = (result & 0x8000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // SHR - Shift right
+            0b101 => {
+                if count == 1 {
+                    self.set_flag(FLAG_OF, (val & 0x8000) != 0);
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x0001) != 0;
+                    result >>= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_16(result);
+            }
+            // SAR - Shift arithmetic right
+            0b111 => {
+                let sign_bit = val & 0x8000;
+                if count == 1 {
+                    self.set_flag(FLAG_OF, false); // Always 0 for SAR
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x0001) != 0;
+                    result = (result >> 1) | sign_bit;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_16(result);
+            }
+            _ => {}
+        }
+
+        result
+    }
+
     /// Public method to read a byte from memory using segment:offset
     /// This is used for BIOS interrupt handlers that need to access memory
     #[inline]
@@ -576,6 +794,356 @@ impl<M: Memory8086> Cpu8086<M> {
         let opcode = self.fetch_u8();
 
         match opcode {
+            // REP/REPE/REPZ prefix (0xF3)
+            0xF3 => {
+                let next_opcode = self.fetch_u8();
+                let mut total_cycles: u32 = 9; // Base prefix overhead
+
+                match next_opcode {
+                    // MOVSB
+                    0xA4 => {
+                        while self.cx != 0 {
+                            let val = self.read(self.ds, self.si);
+                            self.write(self.es, self.di, val);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 17;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // MOVSW
+                    0xA5 => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.ds, self.si);
+                            self.write_u16(self.es, self.di, val);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 17;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // STOSB
+                    0xAA => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            self.write(self.es, self.di, al);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 10;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // STOSW
+                    0xAB => {
+                        while self.cx != 0 {
+                            self.write_u16(self.es, self.di, self.ax);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 10;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // LODSB
+                    0xAC => {
+                        while self.cx != 0 {
+                            let val = self.read(self.ds, self.si);
+                            self.ax = (self.ax & 0xFF00) | (val as u16);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 13;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // LODSW
+                    0xAD => {
+                        while self.cx != 0 {
+                            self.ax = self.read_u16(self.ds, self.si);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 13;
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSB
+                    0xA6 => {
+                        while self.cx != 0 {
+                            let src = self.read(self.ds, self.si);
+                            let dst = self.read(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u16) < (dst as u16);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSW
+                    0xA7 => {
+                        while self.cx != 0 {
+                            let src = self.read_u16(self.ds, self.si);
+                            let dst = self.read_u16(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u32) < (dst as u32);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASB
+                    0xAE => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            let val = self.read(self.es, self.di);
+                            let result = al.wrapping_sub(val);
+                            let borrow = (al as u16) < (val as u16);
+                            let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASW
+                    0xAF => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.es, self.di);
+                            let result = self.ax.wrapping_sub(val);
+                            let borrow = (self.ax as u32) < (val as u32);
+                            let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPE: Exit if ZF=0
+                            if !self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented REP string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
+            // REPNZ/REPNE prefix (0xF2)
+            0xF2 => {
+                let next_opcode = self.fetch_u8();
+                let mut total_cycles: u32 = 9; // Base prefix overhead
+
+                match next_opcode {
+                    // CMPSB
+                    0xA6 => {
+                        while self.cx != 0 {
+                            let src = self.read(self.ds, self.si);
+                            let dst = self.read(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u16) < (dst as u16);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(1);
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.si = self.si.wrapping_add(1);
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // CMPSW
+                    0xA7 => {
+                        while self.cx != 0 {
+                            let src = self.read_u16(self.ds, self.si);
+                            let dst = self.read_u16(self.es, self.di);
+                            let result = src.wrapping_sub(dst);
+                            let borrow = (src as u32) < (dst as u32);
+                            let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.si = self.si.wrapping_sub(2);
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.si = self.si.wrapping_add(2);
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 22;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASB
+                    0xAE => {
+                        let al = (self.ax & 0xFF) as u8;
+                        while self.cx != 0 {
+                            let val = self.read(self.es, self.di);
+                            let result = al.wrapping_sub(val);
+                            let borrow = (al as u16) < (val as u16);
+                            let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                            self.update_flags_8(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(1);
+                            } else {
+                                self.di = self.di.wrapping_add(1);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    // SCASW
+                    0xAF => {
+                        while self.cx != 0 {
+                            let val = self.read_u16(self.es, self.di);
+                            let result = self.ax.wrapping_sub(val);
+                            let borrow = (self.ax as u32) < (val as u32);
+                            let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                            self.update_flags_16(result);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            if self.get_flag(FLAG_DF) {
+                                self.di = self.di.wrapping_sub(2);
+                            } else {
+                                self.di = self.di.wrapping_add(2);
+                            }
+                            self.cx = self.cx.wrapping_sub(1);
+                            total_cycles += 15;
+                            // REPNE: Exit if ZF=1
+                            if self.get_flag(FLAG_ZF) {
+                                break;
+                            }
+                        }
+                        self.cycles += total_cycles as u64;
+                        total_cycles
+                    }
+                    _ => {
+                        eprintln!(
+                            "Unimplemented REPNZ string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 1;
+                        1
+                    }
+                }
+            }
+
             // NOP
             0x90 => {
                 self.cycles += 3;
@@ -667,6 +1235,34 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let val = self.read_rm16(modbits, rm);
                 self.set_reg16(reg, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
+            }
+
+            // MOV r/m16, Sreg (0x8C) - Move segment register to r/m16
+            0x8C => {
+                let modrm = self.fetch_u8();
+                let (modbits, seg, rm) = Self::decode_modrm(modrm);
+                let val = self.get_seg(seg & 0x03); // Only ES, CS, SS, DS (0-3)
+                self.write_rm16(modbits, rm, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 9 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    9
+                }
+            }
+
+            // MOV Sreg, r/m16 (0x8E) - Move r/m16 to segment register
+            0x8E => {
+                let modrm = self.fetch_u8();
+                let (modbits, seg, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                self.set_seg(seg & 0x03, val); // Only ES, CS, SS, DS (0-3)
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
                 if modbits == 0b11 {
                     2
@@ -1239,6 +1835,111 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
+                    // MUL r/m8 (unsigned multiply AL by r/m8, result in AX)
+                    0b100 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let al = (self.ax & 0xFF) as u8;
+                        let result = (al as u16) * (val as u16);
+                        self.ax = result;
+                        // CF and OF are set if AH is non-zero
+                        let high_byte_set = (result & 0xFF00) != 0;
+                        self.set_flag(FLAG_CF, high_byte_set);
+                        self.set_flag(FLAG_OF, high_byte_set);
+                        // SF, ZF, PF are undefined but we'll update them
+                        self.update_flags_16(result);
+                        self.cycles += if modbits == 0b11 { 70 } else { 76 };
+                        if modbits == 0b11 {
+                            70
+                        } else {
+                            76
+                        }
+                    }
+                    // IMUL r/m8 (signed multiply AL by r/m8, result in AX)
+                    0b101 => {
+                        let val = self.read_rm8(modbits, rm) as i8;
+                        let al = (self.ax & 0xFF) as i8;
+                        let result = (al as i16) * (val as i16);
+                        self.ax = result as u16;
+                        // CF and OF are set if sign extension of AL != AH
+                        let sign_extended = (al as i16) as u16;
+                        let high_byte_set = (result as u16) != sign_extended;
+                        self.set_flag(FLAG_CF, high_byte_set);
+                        self.set_flag(FLAG_OF, high_byte_set);
+                        self.update_flags_16(result as u16);
+                        self.cycles += if modbits == 0b11 { 80 } else { 86 };
+                        if modbits == 0b11 {
+                            80
+                        } else {
+                            86
+                        }
+                    }
+                    // DIV r/m8 (unsigned divide AX by r/m8, quotient in AL, remainder in AH)
+                    0b110 => {
+                        let divisor = self.read_rm8(modbits, rm);
+                        if divisor == 0 {
+                            // Division by zero - should trigger INT 0
+                            // For now, we'll just leave registers unchanged
+                            eprintln!(
+                                "Division by zero at CS:IP={:04X}:{:04X}",
+                                self.cs,
+                                self.ip.wrapping_sub(2)
+                            );
+                        } else {
+                            let dividend = self.ax;
+                            let quotient = dividend / (divisor as u16);
+                            let remainder = dividend % (divisor as u16);
+                            // Check for overflow (quotient > 255)
+                            if quotient > 0xFF {
+                                eprintln!(
+                                    "Division overflow at CS:IP={:04X}:{:04X}",
+                                    self.cs,
+                                    self.ip.wrapping_sub(2)
+                                );
+                            } else {
+                                self.ax = (remainder << 8) | quotient;
+                            }
+                        }
+                        self.cycles += if modbits == 0b11 { 80 } else { 86 };
+                        if modbits == 0b11 {
+                            80
+                        } else {
+                            86
+                        }
+                    }
+                    // IDIV r/m8 (signed divide AX by r/m8, quotient in AL, remainder in AH)
+                    0b111 => {
+                        let divisor = self.read_rm8(modbits, rm) as i8;
+                        if divisor == 0 {
+                            // Division by zero
+                            eprintln!(
+                                "Division by zero at CS:IP={:04X}:{:04X}",
+                                self.cs,
+                                self.ip.wrapping_sub(2)
+                            );
+                        } else {
+                            let dividend = self.ax as i16;
+                            let quotient = dividend / (divisor as i16);
+                            let remainder = dividend % (divisor as i16);
+                            // Check for overflow (quotient out of -128..127 range)
+                            if !(-128..=127).contains(&quotient) {
+                                eprintln!(
+                                    "Division overflow at CS:IP={:04X}:{:04X}",
+                                    self.cs,
+                                    self.ip.wrapping_sub(2)
+                                );
+                            } else {
+                                let quot_u8 = quotient as u8;
+                                let rem_u8 = remainder as u8;
+                                self.ax = ((rem_u8 as u16) << 8) | (quot_u8 as u16);
+                            }
+                        }
+                        self.cycles += if modbits == 0b11 { 101 } else { 107 };
+                        if modbits == 0b11 {
+                            101
+                        } else {
+                            107
+                        }
+                    }
                     _ => {
                         eprintln!(
                             "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
@@ -1285,6 +1986,114 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
+                    // MUL r/m16 (unsigned multiply AX by r/m16, result in DX:AX)
+                    0b100 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let result = (self.ax as u32) * (val as u32);
+                        self.ax = (result & 0xFFFF) as u16;
+                        self.dx = ((result >> 16) & 0xFFFF) as u16;
+                        // CF and OF are set if DX is non-zero
+                        let high_word_set = self.dx != 0;
+                        self.set_flag(FLAG_CF, high_word_set);
+                        self.set_flag(FLAG_OF, high_word_set);
+                        self.update_flags_16(self.ax);
+                        self.cycles += if modbits == 0b11 { 118 } else { 124 };
+                        if modbits == 0b11 {
+                            118
+                        } else {
+                            124
+                        }
+                    }
+                    // IMUL r/m16 (signed multiply AX by r/m16, result in DX:AX)
+                    0b101 => {
+                        let val = self.read_rm16(modbits, rm) as i16;
+                        let ax_signed = self.ax as i16;
+                        let result = (ax_signed as i32) * (val as i32);
+                        self.ax = (result & 0xFFFF) as u16;
+                        self.dx = ((result >> 16) & 0xFFFF) as u16;
+                        // CF and OF are set if sign extension of AX != DX
+                        let sign_extended = if (self.ax & 0x8000) != 0 {
+                            0xFFFF
+                        } else {
+                            0x0000
+                        };
+                        let overflow = self.dx != sign_extended;
+                        self.set_flag(FLAG_CF, overflow);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.update_flags_16(self.ax);
+                        self.cycles += if modbits == 0b11 { 128 } else { 134 };
+                        if modbits == 0b11 {
+                            128
+                        } else {
+                            134
+                        }
+                    }
+                    // DIV r/m16 (unsigned divide DX:AX by r/m16, quotient in AX, remainder in DX)
+                    0b110 => {
+                        let divisor = self.read_rm16(modbits, rm);
+                        if divisor == 0 {
+                            // Division by zero
+                            eprintln!(
+                                "Division by zero at CS:IP={:04X}:{:04X}",
+                                self.cs,
+                                self.ip.wrapping_sub(2)
+                            );
+                        } else {
+                            let dividend = ((self.dx as u32) << 16) | (self.ax as u32);
+                            let quotient = dividend / (divisor as u32);
+                            let remainder = dividend % (divisor as u32);
+                            // Check for overflow (quotient > 65535)
+                            if quotient > 0xFFFF {
+                                eprintln!(
+                                    "Division overflow at CS:IP={:04X}:{:04X}",
+                                    self.cs,
+                                    self.ip.wrapping_sub(2)
+                                );
+                            } else {
+                                self.ax = quotient as u16;
+                                self.dx = remainder as u16;
+                            }
+                        }
+                        self.cycles += if modbits == 0b11 { 144 } else { 150 };
+                        if modbits == 0b11 {
+                            144
+                        } else {
+                            150
+                        }
+                    }
+                    // IDIV r/m16 (signed divide DX:AX by r/m16, quotient in AX, remainder in DX)
+                    0b111 => {
+                        let divisor = self.read_rm16(modbits, rm) as i16;
+                        if divisor == 0 {
+                            // Division by zero
+                            eprintln!(
+                                "Division by zero at CS:IP={:04X}:{:04X}",
+                                self.cs,
+                                self.ip.wrapping_sub(2)
+                            );
+                        } else {
+                            let dividend = (((self.dx as u32) << 16) | (self.ax as u32)) as i32;
+                            let quotient = dividend / (divisor as i32);
+                            let remainder = dividend % (divisor as i32);
+                            // Check for overflow (quotient out of -32768..32767 range)
+                            if !(-32768..=32767).contains(&quotient) {
+                                eprintln!(
+                                    "Division overflow at CS:IP={:04X}:{:04X}",
+                                    self.cs,
+                                    self.ip.wrapping_sub(2)
+                                );
+                            } else {
+                                self.ax = quotient as u16;
+                                self.dx = remainder as u16;
+                            }
+                        }
+                        self.cycles += if modbits == 0b11 { 165 } else { 171 };
+                        if modbits == 0b11 {
+                            165
+                        } else {
+                            171
+                        }
+                    }
                     _ => {
                         eprintln!(
                             "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
@@ -1295,6 +2104,76 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.cycles += 1;
                         1
                     }
+                }
+            }
+
+            // Group 2 opcodes (0xD0) - Shift/rotate r/m8 by 1
+            0xD0 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                let result = self.shift_rotate_8(val, op, 1);
+                self.write_rm8(modbits, rm, result);
+                self.cycles += if modbits == 0b11 { 2 } else { 15 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    15
+                }
+            }
+
+            // Group 2 opcodes (0xD1) - Shift/rotate r/m16 by 1
+            0xD1 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                let result = self.shift_rotate_16(val, op, 1);
+                self.write_rm16(modbits, rm, result);
+                self.cycles += if modbits == 0b11 { 2 } else { 15 };
+                if modbits == 0b11 {
+                    2
+                } else {
+                    15
+                }
+            }
+
+            // Group 2 opcodes (0xD2) - Shift/rotate r/m8 by CL
+            0xD2 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                let count = (self.cx & 0xFF) as u8;
+                let result = self.shift_rotate_8(val, op, count);
+                self.write_rm8(modbits, rm, result);
+                self.cycles += if modbits == 0b11 {
+                    8 + (4 * count as u64)
+                } else {
+                    20 + (4 * count as u64)
+                };
+                if modbits == 0b11 {
+                    8 + (4 * count as u32)
+                } else {
+                    20 + (4 * count as u32)
+                }
+            }
+
+            // Group 2 opcodes (0xD3) - Shift/rotate r/m16 by CL
+            0xD3 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                let count = (self.cx & 0xFF) as u8;
+                let result = self.shift_rotate_16(val, op, count);
+                self.write_rm16(modbits, rm, result);
+                self.cycles += if modbits == 0b11 {
+                    8 + (4 * count as u64)
+                } else {
+                    20 + (4 * count as u64)
+                };
+                if modbits == 0b11 {
+                    8 + (4 * count as u32)
+                } else {
+                    20 + (4 * count as u32)
                 }
             }
 
@@ -1405,6 +2284,199 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 4;
                     4
                 }
+            }
+
+            // MOVSB - Move String Byte (0xA4)
+            0xA4 => {
+                // Move byte from DS:SI to ES:DI
+                let val = self.read(self.ds, self.si);
+                self.write(self.es, self.di, val);
+
+                // Update SI and DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 18;
+                18
+            }
+
+            // MOVSW - Move String Word (0xA5)
+            0xA5 => {
+                // Move word from DS:SI to ES:DI
+                let val = self.read_u16(self.ds, self.si);
+                self.write_u16(self.es, self.di, val);
+
+                // Update SI and DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 18;
+                18
+            }
+
+            // CMPSB - Compare String Byte (0xA6)
+            0xA6 => {
+                // Compare byte at DS:SI with byte at ES:DI
+                let src = self.read(self.ds, self.si);
+                let dst = self.read(self.es, self.di);
+                let result = src.wrapping_sub(dst);
+                let borrow = (src as u16) < (dst as u16);
+                let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update SI and DI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 22;
+                22
+            }
+
+            // CMPSW - Compare String Word (0xA7)
+            0xA7 => {
+                // Compare word at DS:SI with word at ES:DI
+                let src = self.read_u16(self.ds, self.si);
+                let dst = self.read_u16(self.es, self.di);
+                let result = src.wrapping_sub(dst);
+                let borrow = (src as u32) < (dst as u32);
+                let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update SI and DI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 22;
+                22
+            }
+
+            // STOSB - Store String Byte (0xAA)
+            0xAA => {
+                // Store AL to ES:DI
+                let al = (self.ax & 0xFF) as u8;
+                self.write(self.es, self.di, al);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 11;
+                11
+            }
+
+            // STOSW - Store String Word (0xAB)
+            0xAB => {
+                // Store AX to ES:DI
+                self.write_u16(self.es, self.di, self.ax);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 11;
+                11
+            }
+
+            // LODSB - Load String Byte (0xAC)
+            0xAC => {
+                // Load byte from DS:SI into AL
+                let val = self.read(self.ds, self.si);
+                self.ax = (self.ax & 0xFF00) | (val as u16);
+
+                // Update SI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                }
+                self.cycles += 12;
+                12
+            }
+
+            // LODSW - Load String Word (0xAD)
+            0xAD => {
+                // Load word from DS:SI into AX
+                self.ax = self.read_u16(self.ds, self.si);
+
+                // Update SI
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                }
+                self.cycles += 12;
+                12
+            }
+
+            // SCASB - Scan String Byte (0xAE)
+            0xAE => {
+                // Compare AL with byte at ES:DI
+                let al = (self.ax & 0xFF) as u8;
+                let val = self.read(self.es, self.di);
+                let result = al.wrapping_sub(val);
+                let borrow = (al as u16) < (val as u16);
+                let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 15;
+                15
+            }
+
+            // SCASW - Scan String Word (0xAF)
+            0xAF => {
+                // Compare AX with word at ES:DI
+                let val = self.read_u16(self.es, self.di);
+                let result = self.ax.wrapping_sub(val);
+                let borrow = (self.ax as u32) < (val as u32);
+                let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+
+                // Update DI
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 15;
+                15
             }
 
             // CALL near relative (0xE8)
@@ -2963,5 +4035,836 @@ mod tests {
         assert_eq!(CpuModel::Intel80186.name(), "Intel 80186");
         assert_eq!(CpuModel::Intel80188.name(), "Intel 80188");
         assert_eq!(CpuModel::Intel80286.name(), "Intel 80286");
+    }
+
+    // ===== Multiply/Divide Tests =====
+
+    #[test]
+    fn test_mul_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MUL CL (0xF6 with ModR/M 0b11_100_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_100_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+        cpu.cx = 0x0006; // CL = 6
+
+        cpu.step();
+        assert_eq!(cpu.ax, 30); // 5 * 6 = 30
+        assert!(!cpu.get_flag(FLAG_CF)); // High byte is zero
+        assert!(!cpu.get_flag(FLAG_OF));
+    }
+
+    #[test]
+    fn test_mul_8bit_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MUL CL
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_100_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0080; // AL = 128
+        cpu.cx = 0x0002; // CL = 2
+
+        cpu.step();
+        assert_eq!(cpu.ax, 256); // 128 * 2 = 256 (0x0100)
+        assert!(cpu.get_flag(FLAG_CF)); // High byte is non-zero
+        assert!(cpu.get_flag(FLAG_OF));
+    }
+
+    #[test]
+    fn test_mul_16bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MUL CX (0xF7 with ModR/M 0b11_100_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_100_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x1000; // AX = 4096
+        cpu.cx = 0x0010; // CX = 16
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x0000); // Low word of 65536
+        assert_eq!(cpu.dx, 0x0001); // High word of 65536
+        assert!(cpu.get_flag(FLAG_CF)); // DX is non-zero
+        assert!(cpu.get_flag(FLAG_OF));
+    }
+
+    #[test]
+    fn test_imul_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // IMUL CL (0xF6 with ModR/M 0b11_101_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_101_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FB; // AL = -5 (signed)
+        cpu.cx = 0x0006; // CL = 6
+
+        cpu.step();
+        // -5 * 6 = -30 = 0xFFE2 in 16-bit two's complement
+        assert_eq!(cpu.ax, 0xFFE2);
+    }
+
+    #[test]
+    fn test_div_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // DIV CL (0xF6 with ModR/M 0b11_110_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_110_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 100; // Dividend
+        cpu.cx = 7; // CL = divisor
+
+        cpu.step();
+        // 100 / 7 = 14 remainder 2
+        // AL = quotient, AH = remainder
+        assert_eq!(cpu.ax & 0xFF, 14); // AL = quotient
+        assert_eq!((cpu.ax >> 8) & 0xFF, 2); // AH = remainder
+    }
+
+    #[test]
+    fn test_div_16bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // DIV CX (0xF7 with ModR/M 0b11_110_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF7, 0b11_110_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.dx = 0x0001; // High word of dividend
+        cpu.ax = 0x0000; // Low word: 0x10000 = 65536
+        cpu.cx = 100; // Divisor
+
+        cpu.step();
+        // 65536 / 100 = 655 remainder 36
+        assert_eq!(cpu.ax, 655); // Quotient
+        assert_eq!(cpu.dx, 36); // Remainder
+    }
+
+    #[test]
+    fn test_idiv_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // IDIV CL (0xF6 with ModR/M 0b11_111_001)
+        cpu.memory.load_program(0xFFFF0, &[0xF6, 0b11_111_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = (-50i16) as u16; // -50 as signed dividend
+        cpu.cx = 0x0007; // CL = 7
+
+        cpu.step();
+        // -50 / 7 = -7 remainder -1
+        assert_eq!((cpu.ax & 0xFF) as i8, -7); // AL = quotient
+        assert_eq!(((cpu.ax >> 8) & 0xFF) as i8, -1); // AH = remainder
+    }
+
+    // ===== Shift/Rotate Tests =====
+
+    #[test]
+    fn test_shl_8bit_by_1() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SHL AL, 1 (0xD0 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_100_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0042; // AL = 0x42
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x84); // 0x42 << 1 = 0x84
+        assert!(!cpu.get_flag(FLAG_CF)); // No bit shifted out
+    }
+
+    #[test]
+    fn test_shl_8bit_with_carry() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SHL AL, 1
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_100_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0080; // AL = 0x80 (bit 7 set)
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x00); // 0x80 << 1 = 0x00 (wraps)
+        assert!(cpu.get_flag(FLAG_CF)); // Bit 7 was shifted into CF
+    }
+
+    #[test]
+    fn test_shr_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SHR AL, 1 (0xD0 with ModR/M 0b11_101_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_101_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0042; // AL = 0x42
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x21); // 0x42 >> 1 = 0x21
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_sar_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SAR AL, 1 (0xD0 with ModR/M 0b11_111_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_111_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0084; // AL = 0x84 (negative in signed)
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0xC2); // Sign bit preserved: 0x84 >> 1 = 0xC2
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_rol_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ROL AL, 1 (0xD0 with ModR/M 0b11_000_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_000_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0081; // AL = 0x81
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x03); // 0x81 rotated left = 0x03
+        assert!(cpu.get_flag(FLAG_CF)); // Bit 7 rotated into CF
+    }
+
+    #[test]
+    fn test_ror_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ROR AL, 1 (0xD0 with ModR/M 0b11_001_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_001_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0081; // AL = 0x81
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0xC0); // 0x81 rotated right = 0xC0
+        assert!(cpu.get_flag(FLAG_CF)); // Bit 0 rotated into CF
+    }
+
+    #[test]
+    fn test_rcl_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // RCL AL, 1 (0xD0 with ModR/M 0b11_010_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_010_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0081; // AL = 0x81
+        cpu.set_flag(FLAG_CF, true); // CF = 1
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x03); // 0x81 << 1 with CF=1 becomes 0x03
+        assert!(cpu.get_flag(FLAG_CF)); // Old bit 7 moved to CF
+    }
+
+    #[test]
+    fn test_rcr_8bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // RCR AL, 1 (0xD0 with ModR/M 0b11_011_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD0, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0081; // AL = 0x81
+        cpu.set_flag(FLAG_CF, true); // CF = 1
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0xC0); // 0x81 >> 1 with CF=1 becomes 0xC0
+        assert!(cpu.get_flag(FLAG_CF)); // Old bit 0 moved to CF
+    }
+
+    #[test]
+    fn test_shl_by_cl() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0b11_100_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0002; // AL = 2
+        cpu.cx = 0x0003; // CL = 3
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 16); // 2 << 3 = 16
+    }
+
+    #[test]
+    fn test_shl_16bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SHL AX, 1 (0xD1 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD1, 0b11_100_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x1234;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x2468); // 0x1234 << 1 = 0x2468
+    }
+
+    #[test]
+    fn test_ror_16bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ROR AX, 1 (0xD1 with ModR/M 0b11_001_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD1, 0b11_001_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x8001;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0xC000); // Bit 0 rotates to bit 15
+        assert!(cpu.get_flag(FLAG_CF));
+    }
+
+    // ===== Segment Register Tests =====
+
+    #[test]
+    fn test_mov_seg_to_reg() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV AX, DS (0x8C with ModR/M 0b11_011_000)
+        // seg=3 (DS), rm=0 (AX)
+        cpu.memory.load_program(0xFFFF0, &[0x8C, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ds = 0x1234;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x1234); // AX should now contain DS value
+    }
+
+    #[test]
+    fn test_mov_reg_to_seg() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV DS, AX (0x8E with ModR/M 0b11_011_000)
+        // seg=3 (DS), rm=0 (AX)
+        cpu.memory.load_program(0xFFFF0, &[0x8E, 0b11_011_000]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x5678;
+
+        cpu.step();
+        assert_eq!(cpu.ds, 0x5678); // DS should now contain AX value
+    }
+
+    #[test]
+    fn test_mov_seg_to_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.es = 0x2345; // ES value to store
+
+        // MOV [BX], ES (0x8C with ModR/M 0b00_000_111)
+        // seg=0 (ES), rm=7 ([BX])
+        cpu.memory.load_program(0xFFFF0, &[0x8C, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ES was written to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        let value = cpu.memory.read(addr) as u16 | ((cpu.memory.read(addr + 1) as u16) << 8);
+        assert_eq!(value, 0x2345);
+    }
+
+    #[test]
+    fn test_mov_memory_to_seg() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0200;
+
+        // Write test value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0200);
+        cpu.memory.write(addr, 0xCD); // Low byte
+        cpu.memory.write(addr + 1, 0xAB); // High byte
+
+        // MOV SS, [BX] (0x8E with ModR/M 0b00_010_111)
+        // seg=2 (SS), rm=7 ([BX])
+        cpu.memory.load_program(0xFFFF0, &[0x8E, 0b00_010_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ss, 0xABCD); // SS should contain value from memory
+    }
+
+    // ===== String Operation Tests =====
+
+    #[test]
+    fn test_movsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x42);
+
+        // MOVSB (0xA4)
+        cpu.memory.load_program(0xFFFF0, &[0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify data copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x42);
+
+        // Verify SI and DI incremented (DF=0)
+        assert_eq!(cpu.si, 0x0101);
+        assert_eq!(cpu.di, 0x0201);
+    }
+
+    #[test]
+    fn test_movsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write source word
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x34);
+        cpu.memory.write(src_addr + 1, 0x12);
+
+        // MOVSW (0xA5)
+        cpu.memory.load_program(0xFFFF0, &[0xA5]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify word copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x34);
+        assert_eq!(cpu.memory.read(dst_addr + 1), 0x12);
+
+        // Verify SI and DI incremented by 2
+        assert_eq!(cpu.si, 0x0102);
+        assert_eq!(cpu.di, 0x0202);
+    }
+
+    #[test]
+    fn test_movsb_with_df() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+        cpu.set_flag(FLAG_DF, true); // Set direction flag
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0xAB);
+
+        // MOVSB
+        cpu.memory.load_program(0xFFFF0, &[0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify SI and DI decremented (DF=1)
+        assert_eq!(cpu.si, 0x00FF);
+        assert_eq!(cpu.di, 0x01FF);
+    }
+
+    #[test]
+    fn test_stosb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+
+        // STOSB (0xAA)
+        cpu.memory.load_program(0xFFFF0, &[0xAA]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify AL stored to ES:DI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xFF);
+        assert_eq!(cpu.di, 0x0101);
+    }
+
+    #[test]
+    fn test_stosw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0xABCD;
+
+        // STOSW (0xAB)
+        cpu.memory.load_program(0xFFFF0, &[0xAB]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify AX stored to ES:DI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xCD);
+        assert_eq!(cpu.memory.read(addr + 1), 0xAB);
+        assert_eq!(cpu.di, 0x0102);
+    }
+
+    #[test]
+    fn test_lodsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+
+        // Write test data
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x55);
+
+        // LODSB (0xAC)
+        cpu.memory.load_program(0xFFFF0, &[0xAC]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify data loaded into AL
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+        assert_eq!(cpu.si, 0x0101);
+    }
+
+    #[test]
+    fn test_lodsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+
+        // Write test word
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x78);
+        cpu.memory.write(addr + 1, 0x56);
+
+        // LODSW (0xAD)
+        cpu.memory.load_program(0xFFFF0, &[0xAD]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify word loaded into AX
+        assert_eq!(cpu.ax, 0x5678);
+        assert_eq!(cpu.si, 0x0102);
+    }
+
+    #[test]
+    fn test_scasb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x0042; // AL = 0x42
+
+        // Write test data
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0x42);
+
+        // SCASB (0xAE)
+        cpu.memory.load_program(0xFFFF0, &[0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF set (AL == [ES:DI])
+        assert!(cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.di, 0x0101);
+    }
+
+    #[test]
+    fn test_scasw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x1234;
+
+        // Write different word
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0x56);
+        cpu.memory.write(addr + 1, 0x78);
+
+        // SCASW (0xAF)
+        cpu.memory.load_program(0xFFFF0, &[0xAF]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF clear (AX != [ES:DI])
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.di, 0x0102);
+    }
+
+    #[test]
+    fn test_cmpsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write matching bytes
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        cpu.memory.write(src_addr, 0x55);
+        cpu.memory.write(dst_addr, 0x55);
+
+        // CMPSB (0xA6)
+        cpu.memory.load_program(0xFFFF0, &[0xA6]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF set (bytes equal)
+        assert!(cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.si, 0x0101);
+        assert_eq!(cpu.di, 0x0201);
+    }
+
+    #[test]
+    fn test_cmpsw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+
+        // Write different words
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        cpu.memory.write(src_addr, 0x34);
+        cpu.memory.write(src_addr + 1, 0x12);
+        cpu.memory.write(dst_addr, 0x78);
+        cpu.memory.write(dst_addr + 1, 0x56);
+
+        // CMPSW (0xA7)
+        cpu.memory.load_program(0xFFFF0, &[0xA7]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify ZF clear (words not equal)
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert_eq!(cpu.si, 0x0102);
+        assert_eq!(cpu.di, 0x0202);
+    }
+
+    #[test]
+    fn test_rep_stosb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00AA; // AL = 0xAA
+        cpu.cx = 5; // Repeat 5 times
+
+        // REP STOSB (0xF3 0xAA)
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAA]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify 5 bytes written
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            assert_eq!(cpu.memory.read(addr + i), 0xAA);
+        }
+        assert_eq!(cpu.di, 0x0105);
+        assert_eq!(cpu.cx, 0); // CX should be 0
+    }
+
+    #[test]
+    fn test_rep_movsb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.es = 0x2000;
+        cpu.si = 0x0100;
+        cpu.di = 0x0200;
+        cpu.cx = 3;
+
+        // Write source data
+        let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(src_addr, 0x11);
+        cpu.memory.write(src_addr + 1, 0x22);
+        cpu.memory.write(src_addr + 2, 0x33);
+
+        // REP MOVSB (0xF3 0xA4)
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA4]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify all bytes copied
+        let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+        assert_eq!(cpu.memory.read(dst_addr), 0x11);
+        assert_eq!(cpu.memory.read(dst_addr + 1), 0x22);
+        assert_eq!(cpu.memory.read(dst_addr + 2), 0x33);
+        assert_eq!(cpu.cx, 0);
+    }
+
+    #[test]
+    fn test_repe_scasb_match() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 5;
+
+        // Fill memory with 0xFF
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            cpu.memory.write(addr + i, 0xFF);
+        }
+
+        // REPE SCASB (0xF3 0xAE) - scan while equal
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should scan all 5 bytes and stop when CX=0
+        assert_eq!(cpu.cx, 0);
+        assert_eq!(cpu.di, 0x0105);
+        assert!(cpu.get_flag(FLAG_ZF)); // Last comparison was equal
+    }
+
+    #[test]
+    fn test_repe_scasb_mismatch() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x00FF; // AL = 0xFF
+        cpu.cx = 5;
+
+        // Fill first 2 with 0xFF, then different value
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        cpu.memory.write(addr, 0xFF);
+        cpu.memory.write(addr + 1, 0xFF);
+        cpu.memory.write(addr + 2, 0xAA); // Different
+
+        // REPE SCASB - should stop at mismatch
+        cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should stop after 3 comparisons (2 matches + 1 mismatch)
+        assert_eq!(cpu.cx, 2); // 5 - 3 = 2 remaining
+        assert_eq!(cpu.di, 0x0103);
+        assert!(!cpu.get_flag(FLAG_ZF)); // Last comparison was not equal
+    }
+
+    #[test]
+    fn test_repne_scasb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.es = 0x2000;
+        cpu.di = 0x0100;
+        cpu.ax = 0x0000; // AL = 0x00 (looking for null)
+        cpu.cx = 10;
+
+        // Fill with non-zero, then zero at position 5
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
+        for i in 0..5 {
+            cpu.memory.write(addr + i, 0xFF);
+        }
+        cpu.memory.write(addr + 5, 0x00); // Match at position 5
+
+        // REPNE SCASB (0xF2 0xAE) - scan while not equal
+        cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAE]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Should stop when it finds 0x00 at position 5
+        assert_eq!(cpu.cx, 4); // 10 - 6 = 4 remaining
+        assert_eq!(cpu.di, 0x0106);
+        assert!(cpu.get_flag(FLAG_ZF)); // Found match
     }
 }
