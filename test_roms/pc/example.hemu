@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "system": "pc",
+  "mounts": {
+    "FloppyA": "dos622_boot.img",
+    "HardDrive": "freedos.img"
+  },
+  "boot_priority": "FloppyFirst"
+}

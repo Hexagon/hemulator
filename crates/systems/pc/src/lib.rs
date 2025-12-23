@@ -20,6 +20,7 @@ use serde_json::Value;
 use thiserror::Error;
 use video::CgaVideo;
 
+pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
 
@@ -104,6 +105,21 @@ impl PcSystem {
         self.cpu.bus_mut().keyboard.key_release(scancode);
     }
 
+    /// Set boot priority
+    pub fn set_boot_priority(&mut self, priority: bios::BootPriority) {
+        self.cpu.bus_mut().set_boot_priority(priority);
+    }
+
+    /// Get boot priority
+    pub fn boot_priority(&self) -> bios::BootPriority {
+        self.cpu.bus().boot_priority()
+    }
+
+    /// Trigger boot sector loading (called before first execution or on reset)
+    fn ensure_boot_sector_loaded(&mut self) {
+        self.cpu.bus_mut().load_boot_sector();
+    }
+
     /// Get debug information
     pub fn debug_info(&self) -> DebugInfo {
         let regs = self.cpu.get_registers();
@@ -154,6 +170,9 @@ impl System for PcSystem {
         // PC runs at ~4.77 MHz
         // At 60 Hz, that's ~79,500 cycles per frame
         const CYCLES_PER_FRAME: u32 = 79500;
+
+        // Ensure boot sector is loaded before first execution
+        self.ensure_boot_sector_loaded();
 
         // Create frame buffer for text mode 80x25 (640x400 pixels)
         let mut frame = Frame::new(640, 400);
@@ -488,5 +507,192 @@ mod tests {
 
         let hd_40m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive40M);
         assert_eq!(hd_40m.len(), 42618880);
+    }
+
+    #[test]
+    fn test_boot_sector_loading_from_floppy() {
+        let mut sys = PcSystem::new();
+
+        // Create a bootable floppy image with boot signature
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+
+        // Add boot signature at offset 510-511
+        floppy[510] = 0x55;
+        floppy[511] = 0xAA;
+
+        // Add some boot code
+        floppy[0] = 0xEA; // JMP FAR (boot code starts here)
+
+        // Mount the floppy
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+
+        // Set boot priority to floppy first
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Trigger boot sector load
+        sys.ensure_boot_sector_loaded();
+
+        // Verify boot sector was loaded to 0x7C00
+        let bus = sys.cpu.bus();
+
+        // Check that boot code was copied
+        assert_eq!(bus.read_ram(0x7C00), 0xEA);
+
+        // Check boot signature
+        assert_eq!(bus.read_ram(0x7C00 + 510), 0x55);
+        assert_eq!(bus.read_ram(0x7C00 + 511), 0xAA);
+    }
+
+    #[test]
+    fn test_boot_sector_loading_from_hard_drive() {
+        let mut sys = PcSystem::new();
+
+        // Create a bootable hard drive image
+        let mut hd = vec![0; 10653696]; // 10MB
+
+        // Add boot signature
+        hd[510] = 0x55;
+        hd[511] = 0xAA;
+
+        // Add boot code
+        hd[0] = 0xB8; // MOV AX, ... (different from floppy)
+
+        // Mount the hard drive
+        assert!(sys.mount("HardDrive", &hd).is_ok());
+
+        // Set boot priority to hard drive first
+        sys.set_boot_priority(crate::BootPriority::HardDriveFirst);
+
+        // Trigger boot sector load
+        sys.ensure_boot_sector_loaded();
+
+        // Verify boot sector was loaded
+        let bus = sys.cpu.bus();
+
+        // Check that boot code was copied
+        assert_eq!(bus.read_ram(0x7C00), 0xB8);
+
+        // Check boot signature
+        assert_eq!(bus.read_ram(0x7C00 + 510), 0x55);
+        assert_eq!(bus.read_ram(0x7C00 + 511), 0xAA);
+    }
+
+    #[test]
+    fn test_boot_priority_fallback() {
+        let mut sys = PcSystem::new();
+
+        // Create bootable hard drive but NOT bootable floppy
+        let mut hd = vec![0; 10653696];
+        hd[510] = 0x55;
+        hd[511] = 0xAA;
+        hd[0] = 0xB8;
+
+        let mut floppy = vec![0; 1474560];
+        // No boot signature on floppy!
+        floppy[510] = 0x00;
+        floppy[511] = 0x00;
+
+        // Mount both
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        assert!(sys.mount("HardDrive", &hd).is_ok());
+
+        // Set boot priority to floppy first (should fall back to hard drive)
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Trigger boot sector load
+        sys.ensure_boot_sector_loaded();
+
+        // Should have loaded from hard drive (fallback)
+        let bus = sys.cpu.bus();
+        assert_eq!(bus.read_ram(0x7C00), 0xB8); // Hard drive boot code
+    }
+
+    #[test]
+    fn test_invalid_boot_signature() {
+        let mut sys = PcSystem::new();
+
+        // Create a floppy WITHOUT valid boot signature
+        let mut floppy = vec![0; 1474560];
+        floppy[510] = 0xFF; // Invalid
+        floppy[511] = 0xFF; // Invalid
+
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+
+        sys.set_boot_priority(crate::BootPriority::FloppyOnly);
+
+        // Trigger boot sector load (should fail)
+        sys.ensure_boot_sector_loaded();
+
+        // Boot sector should NOT be loaded (should remain zeros)
+        let bus = sys.cpu.bus();
+
+        // Should be all zeros since boot failed
+        assert_eq!(bus.read_ram(0x7C00), 0x00);
+        assert_eq!(bus.read_ram(0x7C00 + 510), 0x00);
+    }
+
+    #[test]
+    fn test_boot_sector_smoke_test() {
+        // This test uses the test boot sector from test_roms/pc/boot.bin
+        // The boot sector writes "BOOT OK" to video memory
+        let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_roms/pc/boot.bin");
+
+        // Skip if boot.bin doesn't exist (not built yet)
+        if !std::path::Path::new(boot_bin_path).exists() {
+            eprintln!(
+                "Skipping boot sector smoke test: {} not found",
+                boot_bin_path
+            );
+            eprintln!("Build with: cd test_roms/pc && ./build_boot.sh");
+            return;
+        }
+
+        let boot_sector = std::fs::read(boot_bin_path).expect("Failed to read boot.bin");
+        assert_eq!(
+            boot_sector.len(),
+            512,
+            "Boot sector should be exactly 512 bytes"
+        );
+
+        // Create a floppy image with the boot sector
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        floppy[0..512].copy_from_slice(&boot_sector);
+
+        // Create system and mount floppy
+        let mut sys = PcSystem::new();
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Run for a few frames to let the boot code execute
+        for _ in 0..5 {
+            let _ = sys.step_frame();
+        }
+
+        // Check that "BOOT OK" was written to video memory
+        // Video memory is at 0xB8000, which is offset 0x18000 in VRAM
+        // Each character is 2 bytes: character + attribute
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Verify "BOOT OK" (each char followed by green attribute 0x02)
+        if vram.len() > text_offset + 14 {
+            assert_eq!(vram[text_offset], b'B');
+            assert_eq!(vram[text_offset + 1], 0x02);
+            assert_eq!(vram[text_offset + 2], b'O');
+            assert_eq!(vram[text_offset + 3], 0x02);
+            assert_eq!(vram[text_offset + 4], b'O');
+            assert_eq!(vram[text_offset + 5], 0x02);
+            assert_eq!(vram[text_offset + 6], b'T');
+            assert_eq!(vram[text_offset + 7], 0x02);
+            assert_eq!(vram[text_offset + 8], b' ');
+            assert_eq!(vram[text_offset + 9], 0x02);
+            assert_eq!(vram[text_offset + 10], b'O');
+            assert_eq!(vram[text_offset + 11], 0x02);
+            assert_eq!(vram[text_offset + 12], b'K');
+            assert_eq!(vram[text_offset + 13], 0x02);
+            println!("Boot sector smoke test passed: BOOT OK displayed");
+        } else {
+            panic!("VRAM too small");
+        }
     }
 }
