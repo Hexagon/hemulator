@@ -637,13 +637,41 @@ Detailed implementation notes:
       - Re-exports from `video.rs` for existing code
     - **Future Enhancements**:
       - Additional CGA palettes (green/red/brown)
-      - EGA/VGA adapter implementations
       - Hardware-accelerated rendering backends
+  - **EGA Adapter (Enhanced Graphics Adapter)**:
+    - System-specific implementation in `crates/systems/pc/src/video_adapter_ega_*.rs`
+    - **Trait-based abstraction** following modular adapter pattern:
+      - `SoftwareEgaAdapter`: CPU-based EGA renderer (always available)
+      - `HardwareEgaAdapter`: GPU-accelerated EGA renderer (OpenGL stub, feature-gated)
+    - **Software EGA Adapter**:
+      - Resolution: 640x350 pixels (80x25 characters, 8x14 font)
+      - Graphics modes:
+        - 640x350 16-color graphics (planar memory)
+        - 320x200 16-color graphics (planar memory, CGA compatible)
+      - 64-color palette (6-bit RGB: 2 bits per channel)
+      - 16 active colors selectable from 64-color palette
+      - Planar memory organization (4 bit planes)
+      - Default palette matches IBM EGA standard
+    - **Hardware EGA Adapter**:
+      - OpenGL stub implementation with mode switching
+      - Feature-gated behind `opengl` flag (when implemented)
+      - Documented requirements for full GPU rendering
+      - Would provide shader-based planar-to-packed conversion
+      - Would provide palette lookup and font atlas rendering
+    - **Design Benefits**:
+      - Clean separation: System manages state, adapter handles rendering
+      - Pluggable backends: Easy to swap software/hardware implementations
+      - Mode switching: Supports text and graphics modes
+      - Follows VideoAdapter trait pattern consistently
   - **Display**:
-    - Multiple display modes via CGA graphics adapter
-    - Text mode: 640x400 (80x25 characters)
-    - Graphics modes: 320x200 4-color, 640x200 2-color
-  - All tests pass (93 tests total)
+    - Multiple display modes via CGA and EGA graphics adapters
+    - CGA modes:
+      - Text mode: 640x400 (80x25 characters)
+      - Graphics modes: 320x200 4-color, 640x200 2-color
+    - EGA modes:
+      - Text mode: 640x350 (80x25 characters)
+      - Graphics modes: 640x350 16-color, 320x200 16-color
+  - All tests pass (107 tests total)
 
 
 - **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)
@@ -997,7 +1025,13 @@ When implementing a new video adapter for the PC system or enhancing existing ad
 
 3. **Understand the modular architecture**:
    - **VideoAdapter trait** (`video_adapter.rs`): Common interface for all adapters
-   - **SoftwareCgaAdapter** (`video_adapter_software.rs`): Reference implementation
+   - **Software adapters**: CPU-based rendering (CGA, EGA)
+     - `SoftwareCgaAdapter` (`video_adapter_software.rs`): CGA text mode
+     - `CgaGraphicsAdapter` (`video_adapter_cga_graphics.rs`): CGA graphics modes
+     - `SoftwareEgaAdapter` (`video_adapter_ega_software.rs`): EGA all modes
+   - **Hardware adapters**: GPU-accelerated rendering (OpenGL stubs)
+     - `HardwareCgaAdapter` (`video_adapter_hardware.rs`): CGA OpenGL stub
+     - `HardwareEgaAdapter` (`video_adapter_ega_hardware.rs`): EGA OpenGL stub
    - **PcSystem**: Uses `Box<dyn VideoAdapter>` for pluggable backends
 
 ### Implementation Steps
@@ -1018,17 +1052,23 @@ When implementing a new video adapter for the PC system or enhancing existing ad
        fn resize(&mut self, width: usize, height: usize);
    }
    ```
-3. **Handle VRAM format correctly**: CGA text mode uses 2 bytes per character (ASCII + attribute)
+3. **Handle VRAM format correctly**: 
+   - CGA text mode: 2 bytes per character (ASCII + attribute)
+   - CGA graphics: Interlaced scanlines, 2bpp or 1bpp
+   - EGA text mode: 2 bytes per character (ASCII + attribute)
+   - EGA graphics: Planar memory (4 bit planes)
 4. **Implement color mapping**: Convert hardware color values to ARGB8888 format
+   - CGA: 16-color fixed palette
+   - EGA: 16 colors from 64-color palette (6-bit RGB)
 5. **Add comprehensive tests**: Test each mode, color, and rendering feature
 6. **Update module exports**: Add to `lib.rs` module list
 
 ### Example Adapters to Implement
 
-- **EGA/VGA Text Mode**: 16 colors, multiple font sizes
-- **CGA Graphics Mode**: 320x200 4-color, 640x200 2-color
-- **VGA Graphics Mode**: 320x200 256-color (Mode 13h)
-- **Hardware-Accelerated CGA**: OpenGL/Vulkan backend for text mode
+- **VGA Text Mode**: 16 colors, multiple font sizes, 720x400
+- **VGA Graphics Mode**: 320x200 256-color (Mode 13h), palette support
+- **VGA High Res**: 640x480 16-color
+- **Hardware-Accelerated Adapters**: OpenGL/Vulkan backends for all modes
 
 ### Testing Strategy
 
@@ -1043,9 +1083,15 @@ When implementing a new video adapter for the PC system or enhancing existing ad
 
 - **Color format confusion**: Ensure consistent ARGB8888 output
 - **VRAM layout errors**: Verify byte ordering and memory layout
+  - CGA: Interlaced scanlines (even/odd at different offsets)
+  - EGA/VGA: Planar organization (separate bit planes)
 - **Font rendering**: Use correct glyph data for character sets
+  - CGA: 8x16 font
+  - EGA: 8x14 font
+  - VGA: 8x16 or 9x16 font
 - **Framebuffer size**: Match resolution to actual output dimensions
 - **Thread safety**: Ensure adapter is `Send` for trait object compatibility
+- **Palette handling**: EGA/VGA have programmable palettes, CGA is fixed
 
 ## Documentation Structure
 
