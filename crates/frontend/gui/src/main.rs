@@ -678,6 +678,7 @@ fn main() {
     let mut status_message = String::new();
 
     // Only load ROM if provided via CLI argument (no auto-loading from settings)
+    #[allow(unused_assignments)]
     if let Some(ref rom_path) = cli_args.rom_path {
         status_message = "Detecting ROM format...".to_string();
         match std::fs::read(rom_path) {
