@@ -1,4 +1,5 @@
 pub mod crt_filter;
+mod hemu_project;
 mod rom_detect;
 mod save_state;
 mod settings;
@@ -7,6 +8,7 @@ pub mod video_processor;
 pub mod window_backend;
 
 use emu_core::{types::Frame, System};
+use hemu_project::HemuProject;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -669,134 +671,139 @@ fn main() {
         eprintln!("Warning: Failed to save config.json: {}", e);
     }
 
-    // Determine ROM path: CLI argument takes precedence over settings
-    let rom_path = cli_args.rom_path.or_else(|| {
-        // Try new mount_points system first
-        settings
-            .get_mount_point("Cartridge")
-            .cloned()
-            .or_else(|| settings.last_rom_path.clone())
-    });
-
+    // Initialize system - start with NES by default, no ROM loaded
     let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
+    let mut status_message = String::new();
 
-    // Try to load ROM if path is available
-    // Note: We still use ROM type detection at startup to determine which system to instantiate.
-    // The mount point system works within a system for managing media slots.
-    if let Some(p) = &rom_path {
-        match std::fs::read(p) {
+    // Only load ROM if provided via CLI argument (no auto-loading from settings)
+    if let Some(ref rom_path) = cli_args.rom_path {
+        status_message = "Detecting ROM format...".to_string();
+        match std::fs::read(rom_path) {
             Ok(data) => match detect_rom_type(&data) {
                 Ok(SystemType::NES) => {
+                    status_message = "Detected NES ROM - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut nes_sys = emu_nes::NesSystem::default();
-                    // Use the mount point system to load the cartridge
                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load NES ROM: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::NES(Box::new(nes_sys));
-                        settings.set_mount_point("Cartridge", p.clone());
-                        settings.last_rom_path = Some(p.clone()); // Keep for backward compat
+                        settings.set_mount_point("Cartridge", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded NES ROM: {}", p);
+                        status_message = "NES ROM loaded".to_string();
+                        println!("Loaded NES ROM: {}", rom_path);
                     }
                 }
                 Ok(SystemType::Atari2600) => {
+                    status_message = "Detected Atari 2600 ROM - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut a2600_sys = emu_atari2600::Atari2600System::new();
                     if let Err(e) = a2600_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                        settings.set_mount_point("Cartridge", p.clone());
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Cartridge", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded Atari 2600 ROM: {}", p);
+                        status_message = "Atari 2600 ROM loaded".to_string();
+                        println!("Loaded Atari 2600 ROM: {}", rom_path);
                     }
                 }
                 Ok(SystemType::GameBoy) => {
+                    status_message = "Detected Game Boy ROM - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut gb_sys = emu_gb::GbSystem::new();
                     if let Err(e) = gb_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load Game Boy ROM: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                        settings.set_mount_point("Cartridge", p.clone());
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Cartridge", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded Game Boy ROM: {}", p);
+                        status_message = "Game Boy ROM loaded".to_string();
+                        println!("Loaded Game Boy ROM: {}", rom_path);
                     }
                 }
                 Ok(SystemType::PC) => {
+                    status_message = "Detected PC executable - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut pc_sys = emu_pc::PcSystem::new();
                     if let Err(e) = pc_sys.mount("Executable", &data) {
                         eprintln!("Failed to load PC executable: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::PC(Box::new(pc_sys));
-                        settings.set_mount_point("Executable", p.clone());
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Executable", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded PC executable: {}", p);
+                        status_message = "PC executable loaded".to_string();
+                        println!("Loaded PC executable: {}", rom_path);
                     }
                 }
                 Ok(SystemType::SNES) => {
+                    status_message = "Detected SNES ROM - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut snes_sys = emu_snes::SnesSystem::new();
                     if let Err(e) = snes_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load SNES ROM: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                        settings.set_mount_point("Cartridge", p.clone());
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Cartridge", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded SNES ROM: {}", p);
+                        status_message = "SNES ROM loaded".to_string();
+                        println!("Loaded SNES ROM: {}", rom_path);
                     }
                 }
                 Ok(SystemType::N64) => {
+                    status_message = "Detected N64 ROM - Initializing...".to_string();
                     rom_hash = Some(GameSaves::rom_hash(&data));
                     let mut n64_sys = emu_n64::N64System::new();
                     if let Err(e) = n64_sys.mount("Cartridge", &data) {
                         eprintln!("Failed to load N64 ROM: {}", e);
+                        status_message = format!("Error: {}", e);
                         rom_hash = None;
                     } else {
                         rom_loaded = true;
                         sys = EmulatorSystem::N64(Box::new(n64_sys));
-                        settings.set_mount_point("Cartridge", p.clone());
-                        settings.last_rom_path = Some(p.clone());
+                        settings.set_mount_point("Cartridge", rom_path.clone());
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        println!("Loaded N64 ROM: {}", p);
+                        status_message = "N64 ROM loaded".to_string();
+                        println!("Loaded N64 ROM: {}", rom_path);
                     }
                 }
                 Err(e) => {
                     eprintln!("Unsupported ROM: {}", e);
+                    status_message = format!("Unsupported ROM: {}", e);
                 }
             },
             Err(e) => {
                 eprintln!("Failed to read ROM file: {}", e);
+                status_message = format!("Failed to read ROM: {}", e);
             }
         }
     }
@@ -941,7 +948,7 @@ fn main() {
     let mut buffer = if rom_loaded {
         vec![0; width * height]
     } else {
-        ui_render::create_default_screen(width, height)
+        ui_render::create_splash_screen_with_status(width, height, &status_message)
     };
 
     // Help overlay state
@@ -959,6 +966,9 @@ fn main() {
 
     // Speed selector state
     let mut show_speed_selector = false;
+
+    // System selector state
+    let mut show_system_selector = false;
 
     // Timing trackers
     let mut last_frame = Instant::now();
@@ -1162,6 +1172,73 @@ fn main() {
             }
         }
 
+        // Handle system selector
+        if show_system_selector {
+            // Check for system selection (1-6) or cancel (ESC)
+            let mut selected_system: Option<u8> = None;
+
+            if window.is_key_pressed(Key::Key1, false) {
+                selected_system = Some(1); // NES
+            } else if window.is_key_pressed(Key::Key2, false) {
+                selected_system = Some(2); // Game Boy
+            } else if window.is_key_pressed(Key::Key3, false) {
+                selected_system = Some(3); // Atari 2600
+            } else if window.is_key_pressed(Key::Key4, false) {
+                selected_system = Some(4); // PC
+            } else if window.is_key_pressed(Key::Key5, false) {
+                selected_system = Some(5); // SNES
+            } else if window.is_key_pressed(Key::Key6, false) {
+                selected_system = Some(6); // N64
+            }
+
+            if let Some(sys_num) = selected_system {
+                show_system_selector = false;
+
+                // Clear current ROM state
+                rom_loaded = false;
+                rom_hash = None;
+
+                // Create new system instance
+                match sys_num {
+                    1 => {
+                        sys = EmulatorSystem::NES(Box::default());
+                        status_message = "Switched to NES".to_string();
+                        println!("Switched to NES system");
+                    }
+                    2 => {
+                        sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                        status_message = "Switched to Game Boy".to_string();
+                        println!("Switched to Game Boy system");
+                    }
+                    3 => {
+                        sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
+                        status_message = "Switched to Atari 2600".to_string();
+                        println!("Switched to Atari 2600 system");
+                    }
+                    4 => {
+                        sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                        status_message = "Switched to PC".to_string();
+                        println!("Switched to PC system");
+                    }
+                    5 => {
+                        sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                        status_message = "Switched to SNES".to_string();
+                        println!("Switched to SNES system");
+                    }
+                    6 => {
+                        sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
+                        status_message = "Switched to N64".to_string();
+                        println!("Switched to N64 system");
+                    }
+                    _ => {}
+                }
+
+                // Update buffer with splash screen
+                let (new_width, new_height) = sys.resolution();
+                buffer = ui_render::create_splash_screen_with_status(new_width, new_height, &status_message);
+            }
+        }
+
         // Handle slot selector
         if show_slot_selector {
             // Check for slot selection (1-5) or cancel (ESC)
@@ -1283,7 +1360,8 @@ fn main() {
                                             "Failed to mount media into {}: {}",
                                             mp_info.name, e
                                         );
-                                        buffer = ui_render::create_default_screen(width, height);
+                                        status_message = format!("Failed to mount: {}", e);
+                                        buffer = ui_render::create_splash_screen_with_status(width, height, &status_message);
                                     }
                                 }
                             }
@@ -1385,13 +1463,63 @@ fn main() {
             println!("System reset");
         }
 
-        // Check for open ROM dialog (F3)
+        // Check for open ROM/Project dialog (F3)
         if window.is_key_pressed(Key::F3, false) {
             let mount_points = sys.mount_points();
 
-            // If system has only one mount point, go directly to file dialog
-            // Otherwise, show mount point selector
-            if mount_points.len() == 1 {
+            // For PC system (multi-mount), load .hemu project file
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Hemulator Project", &["hemu"])
+                    .add_filter("All Files", &["*"])
+                    .pick_file()
+                {
+                    let path_str = path.to_string_lossy().to_string();
+                    match HemuProject::load(&path) {
+                        Ok(project) => {
+                            if project.system != "pc" {
+                                eprintln!("Project is for {} system, but PC system is active", project.system);
+                                status_message = format!("Wrong system: project is for {}", project.system);
+                            } else {
+                                // Load all mounts from project
+                                let mut any_mounted = false;
+                                for (mount_id, mount_path) in &project.mounts {
+                                    match std::fs::read(mount_path) {
+                                        Ok(data) => {
+                                            if let Err(e) = sys.mount(mount_id, &data) {
+                                                eprintln!("Failed to mount {}: {}", mount_id, e);
+                                            } else {
+                                                settings.set_mount_point(mount_id, mount_path.clone());
+                                                any_mounted = true;
+                                                println!("Mounted {}: {}", mount_id, mount_path);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to read file for {}: {}", mount_id, e);
+                                        }
+                                    }
+                                }
+
+                                if any_mounted {
+                                    rom_loaded = true;
+                                    status_message = "Project loaded".to_string();
+                                    println!("Loaded project from: {}", path_str);
+                                    if let Err(e) = settings.save() {
+                                        eprintln!("Warning: Failed to save settings: {}", e);
+                                    }
+                                } else {
+                                    status_message = "Failed to mount project files".to_string();
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load project: {}", e);
+                            status_message = format!("Failed to load project: {}", e);
+                        }
+                    }
+                }
+            } else if mount_points.len() == 1 {
+                // Single-mount systems: load ROM directly
                 let mp_info = &mount_points[0];
 
                 if let Some(path) = create_file_dialog(mp_info).pick_file() {
@@ -1403,7 +1531,6 @@ fn main() {
                                     rom_loaded = true;
                                     rom_hash = Some(GameSaves::rom_hash(&data));
                                     settings.set_mount_point(&mp_info.id, path_str.clone());
-                                    settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
                                     }
@@ -1412,23 +1539,26 @@ fn main() {
                                     } else {
                                         GameSaves::default()
                                     };
+                                    status_message = format!("{} loaded", mp_info.name);
                                     println!("Loaded media into {}: {}", mp_info.name, path_str);
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to mount media into {}: {}", mp_info.name, e);
                                     rom_hash = None;
                                     rom_loaded = false;
-                                    buffer = ui_render::create_default_screen(width, height);
+                                    status_message = format!("Failed to mount: {}", e);
+                                    buffer = ui_render::create_splash_screen_with_status(width, height, &status_message);
                                 }
                             }
                         }
                         Err(e) => {
                             eprintln!("Failed to read file: {}", e);
+                            status_message = format!("Failed to read file: {}", e);
                         }
                     }
                 }
             } else if mount_points.len() > 1 {
-                // Show mount point selector for systems with multiple mount points
+                // Show mount point selector for systems with multiple mount points (shouldn't happen now)
                 show_mount_selector = true;
                 show_help = false;
             }
@@ -1464,6 +1594,50 @@ fn main() {
             }
         }
 
+        // F7 - Show system selector
+        if window.is_key_pressed(Key::F7, false) {
+            show_system_selector = true;
+            show_help = false;
+            show_slot_selector = false;
+            show_mount_selector = false;
+            show_speed_selector = false;
+            show_debug = false;
+        }
+
+        // F8 - Create new project file (for PC system)
+        if window.is_key_pressed(Key::F8, false) {
+            // Only allow project creation for multi-mount systems (PC)
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                // Show file save dialog
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Hemulator Project", &["hemu"])
+                    .set_file_name("project.hemu")
+                    .save_file()
+                {
+                    let mut project = HemuProject::new("pc".to_string());
+                    
+                    // Get current mount points from settings
+                    for (mount_id, mount_path) in &settings.mount_points {
+                        project.set_mount(mount_id.clone(), mount_path.clone());
+                    }
+                    
+                    match project.save(&path) {
+                        Ok(_) => {
+                            println!("Project saved to: {}", path.display());
+                            status_message = format!("Project saved: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save project: {}", e);
+                            status_message = format!("Failed to save project: {}", e);
+                        }
+                    }
+                }
+            } else {
+                println!("Project files are only supported for multi-mount systems (PC)");
+                status_message = "Project files only for PC system".to_string();
+            }
+        }
+
         // Handle controller input / emulation step when ROM is loaded.
         // Debug overlay should NOT pause the game, but selectors should.
         // Speed selector and 0x speed also pause the game.
@@ -1472,6 +1646,7 @@ fn main() {
             && !show_slot_selector
             && !show_mount_selector
             && !show_speed_selector
+            && !show_system_selector
             && settings.emulation_speed > 0.0
         {
             // Handle keyboard input for PC system
@@ -1518,6 +1693,14 @@ fn main() {
             let speed_buffer =
                 ui_render::create_speed_selector_overlay(width, height, settings.emulation_speed);
             if let Err(e) = window.update_with_buffer(&speed_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            &[]
+        } else if show_system_selector {
+            // Render system selector overlay
+            let system_buffer = ui_render::create_system_selector_overlay(width, height);
+            if let Err(e) = window.update_with_buffer(&system_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
             }
