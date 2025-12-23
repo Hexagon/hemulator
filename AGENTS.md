@@ -326,6 +326,36 @@ Contains reusable CPU implementations and common traits:
   - **Future Formats**: SNES 4/8bpp, Genesis 4bpp linear (currently unimplemented)
   - Comprehensive unit tests (10+ tests)
 
+- **`renderer`**: Common renderer trait and architectural pattern
+  - **Purpose**: Defines a unified interface for all graphics rendering across systems
+  - **Design Philosophy**: All systems with graphics capabilities follow the same architectural pattern:
+    ```
+    System (state management) -> Renderer trait -> {Software, Hardware} implementations
+    ```
+  - **Core Trait Methods**:
+    - `get_frame()`: Get the current framebuffer (read-only)
+    - `clear(color)`: Clear framebuffer with a solid color
+    - `reset()`: Reset renderer to initial state
+    - `resize(width, height)`: Handle resolution changes
+    - `name()`: Get renderer name for debugging/UI
+    - `is_hardware_accelerated()`: Check if GPU-accelerated (default: false)
+  - **Implementation Pattern**:
+    - **Software Renderers**: CPU-based, maximum compatibility, always available
+    - **Hardware Renderers**: GPU-accelerated (OpenGL, Vulkan, Metal), optional
+  - **Current Usage**:
+    - **N64**: `RdpRenderer` trait follows this pattern with 3D-specific extensions
+    - **PC**: `VideoAdapter` trait follows this pattern with PC-specific extensions
+    - **Frontend**: `VideoProcessor` trait follows similar pattern for post-processing
+  - **Future Integration**:
+    - PPU-based systems (NES, Game Boy, SNES) should adopt this pattern
+    - Benefits: Pluggable renderers, hardware acceleration support, consistent architecture
+  - **Architecture Benefits**:
+    - **Consistency**: All systems use the same rendering interface approach
+    - **Future-proof**: Easy to add new rendering backends without changing system code
+    - **Testability**: Renderers can be tested independently of system logic
+    - **Performance**: Optional GPU acceleration without modifying core emulation
+  - Comprehensive unit tests (4 tests for base trait)
+
 - **`types`**: Common data structures (Frame, AudioSample)
 - **`Cpu` trait**: Generic CPU interface
 - **`System` trait**: High-level system interface
@@ -1035,6 +1065,125 @@ pub struct GbApu {
 - **State management**: Save/restore APU state for save states
 - **Test coverage**: Write tests before implementing to verify correctness
 
+## Renderer Implementation Guidelines
+
+When implementing graphics rendering for any system (new or existing):
+
+### Architectural Pattern
+
+All systems with graphics capabilities should follow the common `emu_core::renderer::Renderer` pattern:
+
+```text
+System (state management) -> Renderer trait -> {Software, Hardware} implementations
+```
+
+### Core Renderer Trait
+
+The base `Renderer` trait in `emu_core::renderer` defines the common interface:
+
+```rust
+pub trait Renderer: Send {
+    fn get_frame(&self) -> &Frame;
+    fn clear(&mut self, color: u32);
+    fn reset(&mut self);
+    fn resize(&mut self, width: u32, height: u32);
+    fn name(&self) -> &str;
+    fn is_hardware_accelerated(&self) -> bool { false }
+}
+```
+
+### System-Specific Extensions
+
+Systems extend this pattern with their specific needs:
+
+1. **Simple 2D Systems** (NES, Game Boy, Atari 2600):
+   - May use trait directly or create minimal extensions
+   - Focus on tile/sprite rendering, palettes, scrolling
+   - Example: `PpuRenderer` trait could extend pattern
+
+2. **Advanced 3D Systems** (N64):
+   - Extend with 3D-specific operations (triangles, Z-buffer, textures)
+   - Example: `RdpRenderer` follows pattern with `draw_triangle_*()` methods
+   - See `crates/systems/n64/src/rdp_renderer.rs`
+
+3. **Text/Graphics Mode Systems** (PC):
+   - Extend with mode-specific rendering (text, graphics, multiple resolutions)
+   - Example: `VideoAdapter` follows pattern with `render(vram, pixels)` method
+   - See `crates/systems/pc/src/video_adapter.rs`
+
+### Implementation Steps
+
+1. **Determine if you need a system-specific trait**:
+   - Simple systems: Use `Renderer` directly or reference the pattern
+   - Complex systems: Create trait that follows the `Renderer` pattern
+
+2. **Create renderer structure**:
+   ```rust
+   pub struct MySystemRenderer {
+       framebuffer: Frame,
+       // ... system-specific state
+   }
+   ```
+
+3. **Implement core methods** (following Renderer pattern):
+   ```rust
+   impl MyRenderer for MySystemRenderer {
+       fn get_frame(&self) -> &Frame { &self.framebuffer }
+       fn clear(&mut self, color: u32) { /* ... */ }
+       fn reset(&mut self) { /* ... */ }
+       fn resize(&mut self, width: u32, height: u32) { /* ... */ }
+       fn name(&self) -> &str { "My System Software Renderer" }
+   }
+   ```
+
+4. **Add system-specific methods**:
+   - Keep system state management separate from rendering
+   - Renderer only handles drawing operations
+   - System manages registers, memory, timing
+
+5. **Support multiple backends**:
+   - **Always** provide a software (CPU) renderer first
+   - Hardware (GPU) renderer is optional but recommended
+   - Use `Box<dyn YourRenderer>` for pluggable backends
+
+### Design Principles
+
+1. **Separation of Concerns**:
+   - **System/State**: Registers, memory, timing, game logic
+   - **Renderer**: Drawing operations, framebuffer management
+
+2. **Consistency**:
+   - Follow `Renderer` trait method names and signatures where applicable
+   - System-specific extensions are clearly documented
+   - Standard methods: `get_frame()`, `clear()`, `reset()`, `resize()`, `name()`
+
+3. **Testability**:
+   - Renderers can be tested independently
+   - Mock renderers for system tests
+   - Comprehensive unit tests for each renderer
+
+4. **Future-Proofing**:
+   - Easy to add new rendering backends
+   - No changes to system code when adding new renderer
+   - Settings-based renderer selection
+
+### Migration Path for Existing Systems
+
+For systems without pluggable renderers (NES, Game Boy, SNES, Atari 2600):
+
+1. **Phase 1: Document Alignment** (Current)
+   - Update documentation to reference the pattern
+   - No code changes to existing implementations
+
+2. **Phase 2: Optional Refactoring** (Future)
+   - Create renderer wrappers for existing implementations
+   - Maintain backward compatibility
+   - Only refactor when adding features
+
+3. **Phase 3: Full Migration** (Long-term)
+   - Gradually adopt pluggable renderers
+   - Benefits: Hardware acceleration, consistency, easier testing
+
 ## PC Video Adapter Implementation Guidelines
 
 When implementing a new video adapter for the PC system or enhancing existing adapters:
@@ -1050,11 +1199,13 @@ When implementing a new video adapter for the PC system or enhancing existing ad
 2. **Choose the implementation approach**:
    - **Software rendering**: CPU-based, maximum compatibility, easier debugging
    - **Hardware rendering**: GPU-accelerated, better performance for complex effects
-   - Follow the `VideoAdapter` trait pattern
+   - Follow the `VideoAdapter` trait pattern (which follows `emu_core::renderer::Renderer`)
 
 3. **Understand the modular architecture**:
-   - **VideoAdapter trait** (`video_adapter.rs`): Common interface for all adapters
-   - **Software adapters**: CPU-based rendering (CGA, EGA)
+   - **VideoAdapter trait** (`video_adapter.rs`): Follows common `Renderer` pattern
+   - **Core methods** (from Renderer pattern): `get_frame()`, `reset()`, `name()`, `is_hardware_accelerated()`, `resize()`
+   - **PC-specific methods**: `render()`, `fb_width()`, `fb_height()`, `init()`
+   - **Software adapters**: CPU-based rendering (CGA, EGA, VGA)
      - `SoftwareCgaAdapter` (`video_adapter_software.rs`): CGA text mode
      - `CgaGraphicsAdapter` (`video_adapter_cga_graphics.rs`): CGA graphics modes
      - `SoftwareEgaAdapter` (`video_adapter_ega_software.rs`): EGA all modes
