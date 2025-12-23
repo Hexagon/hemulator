@@ -367,6 +367,128 @@ impl<M: Memory8086> Cpu8086<M> {
         self.set_flag(FLAG_PF, Self::calc_parity((result & 0xFF) as u8));
     }
 
+    /// Decode ModR/M byte and return (mod, reg, r/m)
+    #[inline]
+    fn decode_modrm(modrm: u8) -> (u8, u8, u8) {
+        let modbits = (modrm >> 6) & 0x03; // Bits 7-6
+        let reg = (modrm >> 3) & 0x07; // Bits 5-3
+        let rm = modrm & 0x07; // Bits 2-0
+        (modbits, reg, rm)
+    }
+
+    /// Calculate effective address from ModR/M byte
+    /// Returns (segment, offset) and number of additional bytes consumed
+    fn calc_effective_address(&mut self, modbits: u8, rm: u8) -> (u16, u16, u8) {
+        match modbits {
+            // mod = 00: Memory mode with no displacement (except for special case rm=110)
+            0b00 => {
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si), 0), // [BX+SI]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di), 0), // [BX+DI]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si), 0), // [BP+SI]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di), 0), // [BP+DI]
+                    0b100 => (self.ds, self.si, 0),                       // [SI]
+                    0b101 => (self.ds, self.di, 0),                       // [DI]
+                    0b110 => {
+                        // Special case: direct address (16-bit displacement)
+                        let disp = self.fetch_u16();
+                        (self.ds, disp, 2)
+                    }
+                    0b111 => (self.ds, self.bx, 0), // [BX]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 01: Memory mode with 8-bit signed displacement
+            0b01 => {
+                let disp = self.fetch_u8() as i8 as i16 as u16;
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si).wrapping_add(disp), 1), // [BX+SI+disp8]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 1), // [BX+DI+disp8]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 1), // [BP+SI+disp8]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 1), // [BP+DI+disp8]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 1),                       // [SI+disp8]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 1),                       // [DI+disp8]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 1),                       // [BP+disp8]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 1),                       // [BX+disp8]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 10: Memory mode with 16-bit signed displacement
+            0b10 => {
+                let disp = self.fetch_u16();
+                match rm {
+                    0b000 => (self.ds, self.bx.wrapping_add(self.si).wrapping_add(disp), 2), // [BX+SI+disp16]
+                    0b001 => (self.ds, self.bx.wrapping_add(self.di).wrapping_add(disp), 2), // [BX+DI+disp16]
+                    0b010 => (self.ss, self.bp.wrapping_add(self.si).wrapping_add(disp), 2), // [BP+SI+disp16]
+                    0b011 => (self.ss, self.bp.wrapping_add(self.di).wrapping_add(disp), 2), // [BP+DI+disp16]
+                    0b100 => (self.ds, self.si.wrapping_add(disp), 2),                       // [SI+disp16]
+                    0b101 => (self.ds, self.di.wrapping_add(disp), 2),                       // [DI+disp16]
+                    0b110 => (self.ss, self.bp.wrapping_add(disp), 2),                       // [BP+disp16]
+                    0b111 => (self.ds, self.bx.wrapping_add(disp), 2),                       // [BX+disp16]
+                    _ => unreachable!(),
+                }
+            }
+            // mod = 11: Register mode (no memory access)
+            _ => (0, 0, 0), // Not used for register mode
+        }
+    }
+
+    /// Read 8-bit value from ModR/M operand (either register or memory)
+    fn read_rm8(&mut self, modbits: u8, rm: u8) -> u8 {
+        if modbits == 0b11 {
+            // Register mode
+            if rm < 4 {
+                self.get_reg8_low(rm)
+            } else {
+                self.get_reg8_high(rm - 4)
+            }
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.read(seg, offset)
+        }
+    }
+
+    /// Write 8-bit value to ModR/M operand (either register or memory)
+    fn write_rm8(&mut self, modbits: u8, rm: u8, val: u8) {
+        if modbits == 0b11 {
+            // Register mode
+            if rm < 4 {
+                self.set_reg8_low(rm, val);
+            } else {
+                self.set_reg8_high(rm - 4, val);
+            }
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.write(seg, offset, val);
+        }
+    }
+
+    /// Read 16-bit value from ModR/M operand (either register or memory)
+    fn read_rm16(&mut self, modbits: u8, rm: u8) -> u16 {
+        if modbits == 0b11 {
+            // Register mode
+            self.get_reg16(rm)
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.read_u16(seg, offset)
+        }
+    }
+
+    /// Write 16-bit value to ModR/M operand (either register or memory)
+    fn write_rm16(&mut self, modbits: u8, rm: u8, val: u16) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg16(rm, val);
+        } else {
+            // Memory mode
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            self.write_u16(seg, offset, val);
+        }
+    }
+
     /// Execute one instruction and return cycles used
     pub fn step(&mut self) -> u32 {
         if self.halted {
@@ -1282,5 +1404,193 @@ mod tests {
 
         cpu.step();
         assert!(!cpu.get_flag(FLAG_PF));
+    }
+
+    #[test]
+    fn test_decode_modrm() {
+        // Test ModR/M byte decoding
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b11_010_001);
+        assert_eq!(modbits, 0b11); // Register mode
+        assert_eq!(reg, 0b010); // DX
+        assert_eq!(rm, 0b001); // CX
+
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b00_101_110);
+        assert_eq!(modbits, 0b00); // Memory mode, no displacement
+        assert_eq!(reg, 0b101); // BP
+        assert_eq!(rm, 0b110); // Direct address
+
+        let (modbits, reg, rm) = Cpu8086::<ArrayMemory>::decode_modrm(0b01_000_100);
+        assert_eq!(modbits, 0b01); // Memory mode, 8-bit displacement
+        assert_eq!(reg, 0b000); // AX
+        assert_eq!(rm, 0b100); // [SI+disp8]
+    }
+
+    #[test]
+    fn test_effective_address_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.bx = 0x1000;
+        cpu.si = 0x0200;
+
+        // Register mode should not calculate addresses
+        // We're just testing that the function is callable
+        let modbits = 0b11;
+        let rm = 0b000;
+        let (seg, offset, bytes) = cpu.calc_effective_address(modbits, rm);
+        assert_eq!(bytes, 0);
+        // In register mode, seg/offset are not used
+        let _ = (seg, offset); // Suppress unused warning
+    }
+
+    #[test]
+    fn test_effective_address_no_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.si = 0x0020;
+
+        // mod=00, rm=000: [BX+SI]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b000);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0120); // BX + SI
+        assert_eq!(bytes, 0);
+
+        // mod=00, rm=111: [BX]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b111);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0100); // BX
+        assert_eq!(bytes, 0);
+    }
+
+    #[test]
+    fn test_effective_address_direct() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.memory.load_program(0xFFFF0, &[0x34, 0x12]); // 16-bit displacement: 0x1234
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=00, rm=110: Direct address (16-bit displacement)
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b00, 0b110);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x1234);
+        assert_eq!(bytes, 2);
+    }
+
+    #[test]
+    fn test_effective_address_8bit_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0100;
+        cpu.memory.load_program(0xFFFF0, &[0x10]); // 8-bit displacement: +16
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=01, rm=100: [SI+disp8]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b01, 0b100);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x0110); // SI + 0x10
+        assert_eq!(bytes, 1);
+    }
+
+    #[test]
+    fn test_effective_address_16bit_displacement() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0200;
+        cpu.di = 0x0050;
+        cpu.memory.load_program(0xFFFF0, &[0x00, 0x10]); // 16-bit displacement: 0x1000
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // mod=10, rm=001: [BX+DI+disp16]
+        let (seg, offset, bytes) = cpu.calc_effective_address(0b10, 0b001);
+        assert_eq!(seg, 0x1000);
+        assert_eq!(offset, 0x1250); // BX + DI + 0x1000
+        assert_eq!(bytes, 2);
+    }
+
+    #[test]
+    fn test_read_write_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Set AL to 0x42
+        cpu.ax = 0x0042;
+
+        // Read AL using ModR/M (mod=11, rm=000 for AL)
+        let val = cpu.read_rm8(0b11, 0b000);
+        assert_eq!(val, 0x42);
+
+        // Write to CL (mod=11, rm=001 for CL)
+        cpu.write_rm8(0b11, 0b001, 0x55);
+        assert_eq!(cpu.cx & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_read_write_rm8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write to memory using ModR/M (mod=00, rm=111 for [BX])
+        cpu.write_rm8(0b00, 0b111, 0xAA);
+
+        // Read it back
+        let val = cpu.read_rm8(0b00, 0b111);
+        assert_eq!(val, 0xAA);
+
+        // Verify it's at the right physical address
+        let physical_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(physical_addr), 0xAA);
+    }
+
+    #[test]
+    fn test_read_write_rm16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Set AX to 0x1234
+        cpu.ax = 0x1234;
+
+        // Read AX using ModR/M (mod=11, rm=000 for AX)
+        let val = cpu.read_rm16(0b11, 0b000);
+        assert_eq!(val, 0x1234);
+
+        // Write to CX (mod=11, rm=001 for CX)
+        cpu.write_rm16(0b11, 0b001, 0x5678);
+        assert_eq!(cpu.cx, 0x5678);
+    }
+
+    #[test]
+    fn test_read_write_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write to memory using ModR/M (mod=00, rm=111 for [BX])
+        cpu.write_rm16(0b00, 0b111, 0xAABB);
+
+        // Read it back
+        let val = cpu.read_rm16(0b00, 0b111);
+        assert_eq!(val, 0xAABB);
+
+        // Verify it's at the right physical address (little-endian)
+        let physical_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(physical_addr), 0xBB); // Low byte
+        assert_eq!(cpu.memory.read(physical_addr + 1), 0xAA); // High byte
     }
 }
