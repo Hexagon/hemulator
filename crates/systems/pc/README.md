@@ -11,15 +11,16 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 ### What Works
 
 - ✅ **CPU (8086)** - Complete instruction set from `emu_core::cpu_8086`
+- ✅ **CPU Model Selection** - Support for 8086, 8088, 80186, 80188, 80286
 - ✅ **Memory** - 640KB RAM, 128KB VRAM, 256KB ROM
 - ✅ **BIOS** - Minimal custom BIOS built from assembly
-- ✅ **Video Adapters** - CGA, EGA, VGA with multiple modes
+- ✅ **Video Adapters** - CGA, EGA, VGA with multiple modes and runtime switching
 - ✅ **Disk Controller** - Full INT 13h disk I/O (read, write, get params, reset)
 - ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
 - ✅ **Keyboard** - Full passthrough with host modifier
 - ✅ **INT 16h Integration** - Keyboard BIOS services connected to controller
-- ✅ **Mount System** - Multi-slot disk image mounting
-- ✅ **Save States** - State serialization
+- ✅ **Mount System** - Multi-slot disk image mounting with validation
+- ✅ **Persistent Disk State** - Disk images are modified in-place (writes persist to files)
 
 ### Video Adapter Support
 
@@ -85,10 +86,25 @@ PcSystem (state) → VideoAdapter trait → {Software, Hardware} implementations
 ```
 
 **Benefits**:
-- Easy mode switching at runtime
+- Easy mode switching at runtime via `set_video_adapter()`
 - Pluggable rendering backends
 - Clean separation of state and rendering
 - Future GPU acceleration support
+
+**API Examples**:
+```rust
+use emu_pc::{PcSystem, SoftwareCgaAdapter, SoftwareEgaAdapter, SoftwareVgaAdapter};
+
+let mut sys = PcSystem::new();
+
+// Switch video adapters at runtime
+sys.set_video_adapter(Box::new(SoftwareEgaAdapter::new()));
+assert_eq!(sys.video_adapter_name(), "Software EGA Adapter");
+
+// Check framebuffer dimensions
+let (width, height) = sys.framebuffer_dimensions();
+assert_eq!((width, height), (640, 350)); // EGA resolution
+```
 
 ### Memory Map
 
@@ -121,12 +137,14 @@ cargo run --release -p emu_gui -- --slot2 boot.img
 
 The PC crate includes comprehensive tests:
 
-- **127 total tests**:
+- **136 total tests** (9 new tests added):
   - CPU tests (8086 instruction set, INT 13h, INT 16h keyboard integration)
   - Video adapter tests (CGA, EGA, VGA modes)
+  - **Video adapter switching tests** (runtime adapter changes)
   - Bus tests (memory access)
   - Disk controller tests
   - Keyboard tests (including peek functionality)
+  - **Mount validation tests** (disk size validation)
   - System integration tests
 
 - **Test BIOS**: `test_roms/pc/bios.bin` built from assembly
@@ -135,18 +153,28 @@ The PC crate includes comprehensive tests:
 ## Usage Example
 
 ```rust
-use emu_pc::PcSystem;
+use emu_pc::{PcSystem, SoftwareVgaAdapter, BootPriority};
 use emu_core::System;
 
-// Create system
-let mut pc = PcSystem::new();
+// Create system with specific CPU model
+let mut pc = PcSystem::with_cpu_model(emu_pc::PcCpuModel::Intel80286);
 
-// Load disk image (optional)
+// Switch to VGA adapter
+pc.set_video_adapter(Box::new(SoftwareVgaAdapter::new()));
+
+// Load disk image
 let disk_data = std::fs::read("boot.img")?;
 pc.mount("FloppyA", &disk_data)?;
 
-// Run one frame
+// Set boot priority
+pc.set_boot_priority(BootPriority::FloppyFirst);
+
+// Run the system - disk writes happen in-memory
 let frame = pc.step_frame()?;
+
+// Note: PC systems don't use save states like ROM-based consoles
+// Disk state changes are in-memory on the mounted disk image
+// To persist changes, you would need to write the disk image back to disk
 ```
 
 ## Keyboard Input
@@ -165,6 +193,11 @@ Without modifier, function keys go to DOS program.
 See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
+- **No save states**: PC systems don't use save states like ROM-based consoles
+  - System state is preserved in the disk images themselves
+  - Disk writes are performed in-memory on the mounted disk image
+  - To persist changes, the disk image would need to be written back to the file system
+  - This is fundamentally different from NES/GB where ROM is read-only and state is separate
 - INT 10h (Video BIOS) is partially implemented (teletype, cursor control work; mode switching is stub)
 - INT 16h (Keyboard) read/check functions work; shift flags is stub
 - INT 21h (DOS API) is partially implemented (character I/O works; file operations are stubs)

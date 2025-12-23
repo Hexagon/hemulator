@@ -22,7 +22,7 @@ mod video_adapter_vga_software; // VGA software renderer
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
-use cpu::{CpuRegisters, PcCpu};
+use cpu::PcCpu;
 use emu_core::{
     cpu_8086::{CpuModel, Memory8086},
     types::Frame,
@@ -30,8 +30,8 @@ use emu_core::{
 };
 use serde_json::Value;
 use thiserror::Error;
-use video_adapter::VideoAdapter;
-use video_adapter_software::SoftwareCgaAdapter;
+pub use video_adapter::VideoAdapter;
+pub use video_adapter_software::SoftwareCgaAdapter;
 
 pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
@@ -150,6 +150,42 @@ impl PcSystem {
         self.cpu.bus().boot_priority()
     }
 
+    /// Set the video adapter
+    ///
+    /// # Examples
+    /// ```
+    /// use emu_pc::{PcSystem, SoftwareCgaAdapter, SoftwareEgaAdapter, SoftwareVgaAdapter};
+    ///
+    /// let mut sys = PcSystem::new();
+    /// // Switch to EGA adapter
+    /// sys.set_video_adapter(Box::new(SoftwareEgaAdapter::new()));
+    /// // Switch to VGA adapter
+    /// sys.set_video_adapter(Box::new(SoftwareVgaAdapter::new()));
+    /// ```
+    pub fn set_video_adapter(&mut self, adapter: Box<dyn VideoAdapter>) {
+        self.video = adapter;
+    }
+
+    /// Get the current video adapter name
+    ///
+    /// # Examples
+    /// ```
+    /// use emu_pc::PcSystem;
+    ///
+    /// let sys = PcSystem::new();
+    /// assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+    /// ```
+    pub fn video_adapter_name(&self) -> &str {
+        self.video.name()
+    }
+
+    /// Get the current framebuffer dimensions
+    ///
+    /// Returns (width, height) in pixels
+    pub fn framebuffer_dimensions(&self) -> (usize, usize) {
+        (self.video.fb_width(), self.video.fb_height())
+    }
+
     /// Trigger boot sector loading (called before first execution or on reset)
     fn ensure_boot_sector_loaded(&mut self) {
         self.cpu.bus_mut().load_boot_sector();
@@ -240,30 +276,28 @@ impl System for PcSystem {
     }
 
     fn save_state(&self) -> Value {
-        let regs = self.cpu.get_registers();
+        // PC systems don't use save states like consoles
+        // State is preserved in the disk images themselves
+        // This is kept for API compatibility but returns minimal data
         serde_json::json!({
             "version": 1,
             "system": "pc",
-            "registers": regs,
-            "cycles": self.cycles,
+            "note": "PC state is preserved in disk images, not save states"
         })
     }
 
-    fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
-        if let Some(regs) = state.get("registers") {
-            let regs: CpuRegisters = serde_json::from_value(regs.clone())?;
-            self.cpu.set_registers(&regs);
-        }
-
-        if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
-            self.cycles = cycles;
-        }
-
+    fn load_state(&mut self, _state: &Value) -> Result<(), serde_json::Error> {
+        // PC systems don't use save states
+        // This is a no-op for API compatibility
         Ok(())
     }
 
     fn supports_save_states(&self) -> bool {
-        true
+        // PC systems don't use save states like consoles
+        // State is preserved in disk images (which can be modified and saved)
+        // System configuration (CPU model, boot priority) should be set via
+        // the GUI or command-line arguments, not save states
+        false
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
@@ -295,21 +329,59 @@ impl System for PcSystem {
         ]
     }
 
+    /// Mount a disk image with validation
+    ///
+    /// # Arguments
+    /// * `mount_point_id` - The mount point identifier ("BIOS", "FloppyA", "FloppyB", "HardDrive")
+    /// * `data` - The disk image data
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use emu_pc::{PcSystem, create_blank_floppy, FloppyFormat};
+    /// use emu_core::System;
+    ///
+    /// let mut sys = PcSystem::new();
+    /// let floppy = create_blank_floppy(FloppyFormat::Floppy1_44M);
+    /// sys.mount("FloppyA", &floppy).expect("Failed to mount floppy");
+    /// ```
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
+        // Validate data size for disk images
         match mount_point_id {
             "BIOS" => {
+                if data.is_empty() {
+                    return Err(PcError::InvalidExecutable);
+                }
                 self.cpu.bus_mut().load_bios(data);
                 Ok(())
             }
             "FloppyA" => {
+                // Validate floppy size (common formats: 360K, 720K, 1.2M, 1.44M)
+                let valid_sizes = [368640, 737280, 1228800, 1474560];
+                if !valid_sizes.contains(&data.len()) {
+                    eprintln!(
+                        "Warning: Floppy A image size {} is not a standard format",
+                        data.len()
+                    );
+                }
                 self.cpu.bus_mut().mount_floppy_a(data.to_vec());
                 Ok(())
             }
             "FloppyB" => {
+                let valid_sizes = [368640, 737280, 1228800, 1474560];
+                if !valid_sizes.contains(&data.len()) {
+                    eprintln!(
+                        "Warning: Floppy B image size {} is not a standard format",
+                        data.len()
+                    );
+                }
                 self.cpu.bus_mut().mount_floppy_b(data.to_vec());
                 Ok(())
             }
             "HardDrive" => {
+                // Validate hard drive size (minimum 1MB)
+                if data.len() < 1024 * 1024 {
+                    return Err(PcError::InvalidExecutable);
+                }
                 self.cpu.bus_mut().mount_hard_drive(data.to_vec());
                 Ok(())
             }
@@ -392,12 +464,17 @@ mod tests {
     fn test_save_load_state() {
         let sys = PcSystem::new();
 
+        // PC systems don't use save states (returns minimal placeholder)
         let state = sys.save_state();
         assert_eq!(state["system"], "pc");
         assert_eq!(state["version"], 1);
+        assert_eq!(
+            state["note"],
+            "PC state is preserved in disk images, not save states"
+        );
 
         let mut sys2 = PcSystem::new();
-        assert!(sys2.load_state(&state).is_ok());
+        assert!(sys2.load_state(&state).is_ok()); // Should be a no-op
     }
 
     #[test]
@@ -463,7 +540,8 @@ mod tests {
     #[test]
     fn test_supports_save_states() {
         let sys = PcSystem::new();
-        assert!(sys.supports_save_states());
+        // PC systems don't support save states - state is in disk images
+        assert!(!sys.supports_save_states());
     }
 
     #[test]
@@ -829,22 +907,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cpu_model_preserved_in_save_state() {
-        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
-
-        // Save state
-        let state = sys.save_state();
-
-        // Create new system with different CPU model
-        let mut sys2 = PcSystem::with_cpu_model(CpuModel::Intel8086);
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel8086);
-
-        // Load state - should restore CPU model
-        assert!(sys2.load_state(&state).is_ok());
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel80186);
-    }
-
-    #[test]
     fn test_all_cpu_models() {
         for model in &[
             CpuModel::Intel8086,
@@ -933,5 +995,60 @@ mod tests {
         } else {
             panic!("VRAM too small");
         }
+    }
+
+    #[test]
+    fn test_video_adapter_switching() {
+        let mut sys = PcSystem::new();
+
+        // Default is CGA
+        assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 400));
+
+        // Switch to EGA
+        sys.set_video_adapter(Box::new(
+            crate::video_adapter_ega_software::SoftwareEgaAdapter::new(),
+        ));
+        assert_eq!(sys.video_adapter_name(), "Software EGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 350));
+
+        // Switch to VGA
+        sys.set_video_adapter(Box::new(
+            crate::video_adapter_vga_software::SoftwareVgaAdapter::new(),
+        ));
+        assert_eq!(sys.video_adapter_name(), "Software VGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (720, 400));
+
+        // Switch back to CGA
+        sys.set_video_adapter(Box::new(SoftwareCgaAdapter::new()));
+        assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
+        assert_eq!(sys.framebuffer_dimensions(), (640, 400));
+    }
+
+    #[test]
+    fn test_mount_validation_invalid_bios() {
+        let mut sys = PcSystem::new();
+        // Empty BIOS should fail
+        let result = sys.mount("BIOS", &[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mount_validation_invalid_hard_drive() {
+        let mut sys = PcSystem::new();
+        // Hard drive smaller than 1MB should fail
+        let small_hd = vec![0; 512 * 1024]; // 512KB
+        let result = sys.mount("HardDrive", &small_hd);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mount_validation_valid_floppy() {
+        let mut sys = PcSystem::new();
+        // 1.44MB floppy should succeed
+        let floppy = vec![0; 1474560];
+        let result = sys.mount("FloppyA", &floppy);
+        assert!(result.is_ok());
+        assert!(sys.is_mounted("FloppyA"));
     }
 }

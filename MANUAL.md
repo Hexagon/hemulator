@@ -408,6 +408,10 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - **NES**: Fully supported - save and load states with F5-F9 when a cartridge is loaded
 - **Atari 2600**: Fully supported - save and load states with F5-F9
 - **Game Boy**: Fully supported - save and load states with F5-F9
+- **PC/DOS**: Not supported - PC systems preserve state in disk images, not save states
+  - Disk writes are performed in-memory on mounted disk images
+  - Unlike ROM-based consoles, PC state is in the disk files themselves
+  - System configuration (CPU model, boot priority, video adapter) should be set via GUI or command-line
 
 Example structure:
 ```
@@ -763,7 +767,11 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Boot sector loading with boot priority (floppy first, hard drive first, etc.)
 - **CGA video** (640x400 text mode)
 - **Keyboard input** with full passthrough
-- Save states (F5/F6)
+- **Note on State Persistence**: PC systems don't use save states (F5/F6) like ROM-based consoles
+  - Disk writes happen in-memory on mounted disk images
+  - State is preserved in the disk images themselves
+  - To persist changes across sessions, disk images would need to be written back to files
+  - This is fundamentally different from NES/GB where ROMs are read-only
 
 **Mount Point Usage**:
 
