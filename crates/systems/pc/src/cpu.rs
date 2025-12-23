@@ -247,7 +247,7 @@ impl PcCpu {
             // CL = sectors per track (bits 0-5), high 2 bits of cylinders (bits 6-7)
             let max_cylinder = cylinders - 1; // 0-based
             let ch = (max_cylinder & 0xFF) as u8;
-            let cl_high = ((max_cylinder >> 2) & 0xC0) as u8;
+            let cl_high = (((max_cylinder >> 8) & 0x03) << 6) as u8;
             let cl = cl_high | sectors_per_track;
 
             self.cpu.cx = ((ch as u16) << 8) | (cl as u16);
