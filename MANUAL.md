@@ -533,27 +533,36 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: 🚧 Basic (Infrastructure only - not ready for gaming)  
-**Coverage**: Very limited - CPU works, minimal rendering only
+**Status**: 🚧 Basic (Mode 0 rendering functional - limited game support)  
+**Coverage**: Very limited - CPU works, Mode 0 PPU functional, simple games may display
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
 **Features**:
-- 65C816 CPU core with 16-bit extensions
+- 65C816 CPU core with 16-bit extensions (100% complete)
 - Basic memory bus (128KB WRAM + cartridge mapping)
 - LoROM cartridge mapping
 - SMC header detection and removal
-- Minimal PPU with VRAM/CGRAM support and basic tile rendering
+- **PPU with Mode 0 support**:
+  - 4 background layers with 2bpp tiles (4 colors per tile)
+  - 8 palettes per layer (32 colors total per layer)
+  - Horizontal and vertical tile flipping
+  - Layer enable/disable control
+  - Proper tile attribute handling
+  - 256x224 resolution
 - Save states (F5/F6)
-- Resolution: 256x224 pixels
 
 **Known Limitations**:
-- **Graphics**: Minimal PPU implementation - basic tile rendering only (no sprites, limited tile modes)
+- **Graphics**: Mode 0 only - no sprites, no other PPU modes (1-7)
+  - No scrolling (BG offset registers not implemented)
+  - No windows, masks, or special effects
+  - No HDMA, mosaic, or color math
+  - Only 32x32 tilemap size (other sizes not implemented)
 - **Audio**: APU not implemented - silent gameplay
 - **Input**: Controller support not implemented
 - **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
-- **Timing**: Stub implementation - not cycle-accurate
-- **Status**: This is a minimal working implementation to demonstrate infrastructure. Full SNES emulation requires significant additional PPU and APU work.
+- **Timing**: Frame-based - not cycle-accurate
+- **Status**: Can display simple Mode 0 graphics (like test ROMs), but most commercial games won't work due to missing features
 
 ### N64 (Nintendo 64)
 

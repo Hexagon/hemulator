@@ -555,10 +555,10 @@ Detailed implementation notes:
     - Currently renders black screen (video hardware not implemented)
   - All tests pass (22 tests total)
 
-- **SNES (`emu_snes`)**: Basic implementation (skeleton)
+- **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)
   - Uses `cpu_65c816` from core with SNES-specific bus implementation
   - `SnesCpu` wraps `Cpu65c816<SnesBus>` to provide SNES-specific interface
-  - SNES bus includes: 128KB WRAM, cartridge ROM/RAM, hardware registers (stub)
+  - SNES bus includes: 128KB WRAM, cartridge ROM/RAM, hardware registers
   - **CPU (65C816)**:
     - System-specific implementation uses core `cpu_65c816`
     - 16-bit processor with 8/16-bit mode switching
@@ -567,7 +567,7 @@ Detailed implementation notes:
     - Native mode for 16-bit operations
   - **Memory Bus** (`SnesBus`):
     - 128KB WRAM at banks $7E-$7F (full) and mirrors in $00-$3F, $80-$BF
-    - Hardware registers at $2000-$5FFF (stub - not functional)
+    - Hardware registers at $2000-$5FFF (PPU registers functional)
     - Cartridge ROM mapped at $8000-$FFFF in various banks
     - LoROM mapping: ROM at banks $00-$7D, $80-$FF
   - **Cartridge Support**:
@@ -583,24 +583,33 @@ Detailed implementation notes:
     - Cartridge mount/unmount
     - System reset
   - **Known Limitations**:
-    - **PPU**: Minimal implementation - basic tile rendering only
-      - No full PPU modes (Mode 0-7 with proper layer handling)
+    - **PPU**: Mode 0 only (other modes 1-7 not implemented)
       - No sprites (OAM)
-      - No scrolling, windows, or masks
+      - No scrolling (BG offset registers not implemented)
+      - No windows or masks
       - No HDMA effects, mosaic, or color math
+      - Only 32x32 tilemap size supported (64x32, 32x64, 64x64 not implemented)
     - **APU (SPC700)**: Not implemented - no audio
     - Controller support not implemented
     - Only LoROM mapping - no HiROM, ExHiROM
     - No enhancement chips (SuperFX, DSP, SA-1, etc.)
     - Frame-based timing (not cycle-accurate)
   - **PPU (Picture Processing Unit)**:
-    - Minimal implementation in `crates/systems/snes/ppu.rs`
+    - Implementation in `crates/systems/snes/ppu.rs`
     - VRAM access via registers $2116-$2119 (word-addressed, 64KB)
     - CGRAM (palette) access via $2121-$2122 (256 colors, 15-bit BGR format)
     - Screen enable/disable via $2100 (force blank + brightness control)
-    - Basic tile rendering from VRAM (8x8 tiles, 2-bit color)
-    - **NOT implemented**: Full PPU modes, sprites, layers, scrolling, windows, effects
-  - All tests pass (15 tests: cartridge, PPU, system)
+    - **Mode 0 Support** (4 BG layers, 2bpp each):
+      - BG mode register ($2105 - BGMODE)
+      - BG tilemap address registers ($2107-$210A - BG1SC-BG4SC)
+      - BG CHR address registers ($210B-$210C - BG12NBA, BG34NBA)
+      - Main screen designation ($212C - TM) for layer enable/disable
+      - Proper tile rendering with 8x8 tiles, 2-bit color (4 colors per tile)
+      - Tilemap attribute support: horizontal/vertical flip, palette selection (8 palettes × 4 colors)
+      - Layer priority rendering (BG4 → BG3 → BG2 → BG1)
+      - Transparent pixel handling (color 0 is transparent)
+    - **NOT implemented**: Modes 1-7, sprites, scrolling, windows, effects
+  - All tests pass (17 tests: 5 cartridge, 7 PPU, 5 system)
 
 - **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation
