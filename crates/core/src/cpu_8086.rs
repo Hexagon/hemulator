@@ -533,6 +533,54 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // MOV r/m8, r8 (0x88)
+            0x88 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                self.write_rm8(modbits, rm, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 9 };
+                if modbits == 0b11 { 2 } else { 9 }
+            }
+
+            // MOV r/m16, r16 (0x89)
+            0x89 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.get_reg16(reg);
+                self.write_rm16(modbits, rm, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 9 };
+                if modbits == 0b11 { 2 } else { 9 }
+            }
+
+            // MOV r8, r/m8 (0x8A)
+            0x8A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                if reg < 4 {
+                    self.set_reg8_low(reg, val);
+                } else {
+                    self.set_reg8_high(reg - 4, val);
+                }
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 { 2 } else { 8 }
+            }
+
+            // MOV r16, r/m16 (0x8B)
+            0x8B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                self.set_reg16(reg, val);
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 { 2 } else { 8 }
+            }
+
             // ADD AL, imm8
             0x04 => {
                 let val = self.fetch_u8();
@@ -1404,6 +1452,154 @@ mod tests {
 
         cpu.step();
         assert!(!cpu.get_flag(FLAG_PF));
+    }
+
+    #[test]
+    fn test_mov_r8_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV AL, CL (0x8A with ModR/M 0b11_000_001)
+        // AL = reg field (000), CL = r/m field (001)
+        cpu.memory.load_program(0xFFFF0, &[0x8A, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.cx = 0x0042; // CL = 0x42
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x42);
+    }
+
+    #[test]
+    fn test_mov_r8_rm8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write test value to memory at DS:BX
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x55);
+
+        // MOV AL, [BX] (0x8A with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x8A, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 0x55);
+    }
+
+    #[test]
+    fn test_mov_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV CL, AL (0x88 with ModR/M 0b11_000_001)
+        // AL = reg field (000), CL = r/m field (001)
+        cpu.memory.load_program(0xFFFF0, &[0x88, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0099; // AL = 0x99
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 0x99);
+    }
+
+    #[test]
+    fn test_mov_rm8_r8_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.ax = 0x00AA; // AL = 0xAA
+
+        // MOV [BX], AL (0x88 with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x88, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify memory was written
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        assert_eq!(cpu.memory.read(addr), 0xAA);
+    }
+
+    #[test]
+    fn test_mov_r16_rm16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV AX, CX (0x8B with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x8B, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.cx = 0x1234;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x1234);
+    }
+
+    #[test]
+    fn test_mov_r16_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+
+        // Write test value to memory at DS:SI
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0200);
+        cpu.memory.write(addr, 0x78); // Low byte
+        cpu.memory.write(addr + 1, 0x56); // High byte
+
+        // MOV AX, [SI] (0x8B with ModR/M 0b00_000_100)
+        cpu.memory.load_program(0xFFFF0, &[0x8B, 0b00_000_100]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x5678);
+    }
+
+    #[test]
+    fn test_mov_rm16_r16_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // MOV CX, AX (0x89 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x89, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0xABCD;
+
+        cpu.step();
+        assert_eq!(cpu.cx, 0xABCD);
+    }
+
+    #[test]
+    fn test_mov_rm16_r16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.di = 0x0300;
+        cpu.ax = 0x9876;
+
+        // MOV [DI], AX (0x89 with ModR/M 0b00_000_101)
+        cpu.memory.load_program(0xFFFF0, &[0x89, 0b00_000_101]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Verify memory was written (little-endian)
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0300);
+        assert_eq!(cpu.memory.read(addr), 0x76); // Low byte
+        assert_eq!(cpu.memory.read(addr + 1), 0x98); // High byte
     }
 
     #[test]
