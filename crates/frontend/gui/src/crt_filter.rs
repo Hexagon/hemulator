@@ -683,6 +683,39 @@ mod tests {
     }
 
     #[test]
+    fn test_all_filters_apply() {
+        // Test that all filters can be applied without panicking
+        let width = 16;
+        let height = 16;
+        
+        let filters = [
+            CrtFilter::None,
+            CrtFilter::SonyTrinitron,
+            CrtFilter::Ibm5151,
+            CrtFilter::Commodore1702,
+            CrtFilter::SharpLcd,
+            CrtFilter::RcaVictor,
+        ];
+        
+        for filter in filters.iter() {
+            let mut buffer = vec![0xFFFFFFFF; width * height];
+            filter.apply(&mut buffer, width, height);
+            
+            // Verify buffer is still valid
+            assert_eq!(buffer.len(), width * height);
+            
+            // For None filter, buffer should be unchanged
+            if *filter == CrtFilter::None {
+                assert!(buffer.iter().all(|&c| c == 0xFFFFFFFF));
+            } else {
+                // Other filters should modify at least some pixels
+                let modified = buffer.iter().any(|&c| c != 0xFFFFFFFF);
+                assert!(modified, "{} filter should modify pixels", filter.name());
+            }
+        }
+    }
+
+    #[test]
     fn test_default_filter() {
         assert_eq!(CrtFilter::default(), CrtFilter::None);
     }
