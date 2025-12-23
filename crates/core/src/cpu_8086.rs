@@ -581,6 +581,250 @@ impl<M: Memory8086> Cpu8086<M> {
                 if modbits == 0b11 { 2 } else { 8 }
             }
 
+            // ADD r/m8, r8 (0x00)
+            0x00 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_add(reg_val);
+                let carry = (rm_val as u16 + reg_val as u16) > 0xFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 { 3 } else { 16 }
+            }
+
+            // ADD r/m16, r16 (0x01)
+            0x01 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_add(reg_val);
+                let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 { 3 } else { 16 }
+            }
+
+            // ADD r8, r/m8 (0x02)
+            0x02 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_add(rm_val);
+                let carry = (reg_val as u16 + rm_val as u16) > 0xFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // ADD r16, r/m16 (0x03)
+            0x03 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_add(rm_val);
+                let carry = (reg_val as u32 + rm_val as u32) > 0xFFFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // SUB r/m8, r8 (0x28)
+            0x28 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u16) < (reg_val as u16);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 { 3 } else { 16 }
+            }
+
+            // SUB r/m16, r16 (0x29)
+            0x29 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u32) < (reg_val as u32);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 { 3 } else { 16 }
+            }
+
+            // SUB r8, r/m8 (0x2A)
+            0x2A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u16) < (rm_val as u16);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // SUB r16, r/m16 (0x2B)
+            0x2B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u32) < (rm_val as u32);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // CMP r/m8, r8 (0x38)
+            0x38 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u16) < (reg_val as u16);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // CMP r/m16, r16 (0x39)
+            0x39 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val.wrapping_sub(reg_val);
+                let borrow = (rm_val as u32) < (reg_val as u32);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // CMP r8, r/m8 (0x3A)
+            0x3A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u16) < (rm_val as u16);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
+            // CMP r16, r/m16 (0x3B)
+            0x3B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val.wrapping_sub(rm_val);
+                let borrow = (reg_val as u32) < (rm_val as u32);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 { 3 } else { 9 }
+            }
+
             // ADD AL, imm8
             0x04 => {
                 let val = self.fetch_u8();
@@ -1600,6 +1844,143 @@ mod tests {
         let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0300);
         assert_eq!(cpu.memory.read(addr), 0x76); // Low byte
         assert_eq!(cpu.memory.read(addr + 1), 0x98); // High byte
+    }
+
+    #[test]
+    fn test_add_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ADD CL, AL (0x00 with ModR/M 0b11_000_001)
+        // AL = reg (000), CL = r/m (001)
+        cpu.memory.load_program(0xFFFF0, &[0x00, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+        cpu.cx = 0x0003; // CL = 3
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 8); // CL should be 3 + 5 = 8
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_add_rm16_r16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+        cpu.ax = 0x0020; // AX = 32
+
+        // Write initial value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+        cpu.memory.write(addr, 0x10); // Low byte = 16
+        cpu.memory.write(addr + 1, 0x00); // High byte = 0
+
+        // ADD [BX], AX (0x01 with ModR/M 0b00_000_111)
+        cpu.memory.load_program(0xFFFF0, &[0x01, 0b00_000_111]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Memory should now contain 16 + 32 = 48
+        let result = cpu.memory.read(addr) as u16 | ((cpu.memory.read(addr + 1) as u16) << 8);
+        assert_eq!(result, 48);
+    }
+
+    #[test]
+    fn test_add_r8_rm8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // ADD AL, CL (0x02 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x02, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0010; // AL = 16
+        cpu.cx = 0x0020; // CL = 32
+
+        cpu.step();
+        assert_eq!(cpu.ax & 0xFF, 48); // AL should be 16 + 32 = 48
+    }
+
+    #[test]
+    fn test_sub_rm8_r8_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // SUB CL, AL (0x28 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x28, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0005; // AL = 5
+        cpu.cx = 0x000A; // CL = 10
+
+        cpu.step();
+        assert_eq!(cpu.cx & 0xFF, 5); // CL should be 10 - 5 = 5
+        assert!(!cpu.get_flag(FLAG_ZF));
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_sub_r16_rm16_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+        cpu.ax = 0x0050; // AX = 80
+
+        // Write value to memory
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0200);
+        cpu.memory.write(addr, 0x1E); // Low byte = 30
+        cpu.memory.write(addr + 1, 0x00); // High byte = 0
+
+        // SUB AX, [SI] (0x2B with ModR/M 0b00_000_100)
+        cpu.memory.load_program(0xFFFF0, &[0x2B, 0b00_000_100]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+        assert_eq!(cpu.ax, 50); // AX should be 80 - 30 = 50
+    }
+
+    #[test]
+    fn test_cmp_rm8_r8_sets_zero_flag() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // CMP CL, AL (0x38 with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x38, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0042; // AL = 0x42
+        cpu.cx = 0x0042; // CL = 0x42
+
+        let old_cx = cpu.cx;
+        cpu.step();
+        assert_eq!(cpu.cx, old_cx); // CMP doesn't modify operand
+        assert!(cpu.get_flag(FLAG_ZF)); // Should set zero flag when equal
+    }
+
+    #[test]
+    fn test_cmp_r16_rm16_sets_carry_flag() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // CMP AX, CX (0x3B with ModR/M 0b11_000_001)
+        cpu.memory.load_program(0xFFFF0, &[0x3B, 0b11_000_001]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x0010; // AX = 16
+        cpu.cx = 0x0020; // CX = 32
+
+        cpu.step();
+        assert_eq!(cpu.ax, 0x0010); // CMP doesn't modify operand
+        assert!(cpu.get_flag(FLAG_CF)); // Should set carry when AX < CX
     }
 
     #[test]
