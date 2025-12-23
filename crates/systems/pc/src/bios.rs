@@ -114,7 +114,7 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     // Video RAM offset for text mode (0xB8000 - 0xA0000 = 0x18000)
     let text_offset = 0x18000;
-    
+
     // Clear screen first (fill with spaces and default attribute)
     for i in (0..4000).step_by(2) {
         let offset = text_offset + i;
@@ -148,19 +148,19 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     // POST messages
     let post_attr = 0x0F; // Bright white on black
     let label_attr = 0x07; // Light gray on black
-    
+
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
     write_line(5, 15, "Intel 8086 @ 4.77 MHz", 0x0E); // Yellow
-    
+
     write_line(7, 2, "Memory Test:", label_attr);
     write_line(7, 15, "640K OK", 0x0A); // Bright green
-    
+
     write_line(9, 2, "Disk Drives:", label_attr);
     write_line(10, 4, "Floppy A: Not present", 0x08); // Dark gray
     write_line(11, 4, "Floppy B: Not present", 0x08);
     write_line(12, 4, "Hard Disk C: Not present", 0x08);
-    
+
     write_line(14, 2, "Boot Priority:", label_attr);
     write_line(14, 18, "Floppy First", 0x0E); // Yellow
 
@@ -169,10 +169,15 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     write_line(20, 2, "Press F3 to mount disks", help_attr);
     write_line(21, 2, "Press F12 to reset system", help_attr);
     write_line(22, 2, "Press F5-F9 to save virtual machine", help_attr);
-    
+
     // Bottom line (white on blue)
     write_line(24, 0, &" ".repeat(80), header_attr);
-    write_line(24, 2, "No bootable disk found. Insert disk and reset.", header_attr);
+    write_line(
+        24,
+        2,
+        "No bootable disk found. Insert disk and reset.",
+        header_attr,
+    );
 }
 
 /// Update the disk drive status on the POST screen
@@ -184,7 +189,7 @@ pub fn update_post_screen_mounts(
     boot_priority: BootPriority,
 ) {
     let text_offset = 0x18000;
-    
+
     let mut write_line = |row: usize, col: usize, text: &str, attr: u8| {
         let screen_offset = text_offset + (row * 80 + col) * 2;
         for (i, ch) in text.chars().enumerate() {
@@ -199,28 +204,28 @@ pub fn update_post_screen_mounts(
     // Update disk status
     let present_attr = 0x0A; // Bright green
     let absent_attr = 0x08; // Dark gray
-    
+
     // Floppy A
     if floppy_a {
         write_line(10, 4, "Floppy A: Present          ", present_attr);
     } else {
         write_line(10, 4, "Floppy A: Not present      ", absent_attr);
     }
-    
+
     // Floppy B
     if floppy_b {
         write_line(11, 4, "Floppy B: Present          ", present_attr);
     } else {
         write_line(11, 4, "Floppy B: Not present      ", absent_attr);
     }
-    
+
     // Hard Drive C
     if hard_drive {
         write_line(12, 4, "Hard Disk C: Present       ", present_attr);
     } else {
         write_line(12, 4, "Hard Disk C: Not present   ", absent_attr);
     }
-    
+
     // Update boot priority
     let boot_text = match boot_priority {
         BootPriority::FloppyFirst => "Floppy First   ",
@@ -229,13 +234,23 @@ pub fn update_post_screen_mounts(
         BootPriority::HardDriveOnly => "Hard Drive Only",
     };
     write_line(14, 18, boot_text, 0x0E);
-    
+
     // Update bottom message based on disk availability
     let header_attr = 0x1F;
     if floppy_a || floppy_b || hard_drive {
-        write_line(24, 2, "Bootable disk detected. Press F12 to boot.     ", header_attr);
+        write_line(
+            24,
+            2,
+            "Bootable disk detected. Press F12 to boot.     ",
+            header_attr,
+        );
     } else {
-        write_line(24, 2, "No bootable disk found. Insert disk and reset.", header_attr);
+        write_line(
+            24,
+            2,
+            "No bootable disk found. Insert disk and reset.",
+            header_attr,
+        );
     }
 }
 

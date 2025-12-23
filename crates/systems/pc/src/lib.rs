@@ -217,7 +217,7 @@ impl PcSystem {
         let floppy_b = self.cpu.bus().floppy_b().is_some();
         let hard_drive = self.cpu.bus().hard_drive().is_some();
         let boot_priority = self.cpu.bus().boot_priority();
-        
+
         // Now get mutable borrow to update VRAM
         let vram = self.cpu.bus_mut().vram_mut();
         bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
@@ -949,7 +949,7 @@ mod tests {
         let text_offset = 0x18000;
 
         // Check header at row 0, column 2 (should contain "Hemu BIOS")
-        let header_offset = text_offset + (0 * 80 + 2) * 2;
+        let header_offset = text_offset + 2 * 2; // row 0
         if vram.len() > header_offset + 40 {
             let header_chars: Vec<char> = (0..20)
                 .map(|i| vram[header_offset + i * 2] as char)
@@ -992,9 +992,8 @@ mod tests {
         // Check that disk drives are shown as "Not present" initially
         let disk_offset = text_offset + (10 * 80 + 4) * 2;
         if vram.len() > disk_offset + 60 {
-            let disk_chars: Vec<char> = (0..30)
-                .map(|i| vram[disk_offset + i * 2] as char)
-                .collect();
+            let disk_chars: Vec<char> =
+                (0..30).map(|i| vram[disk_offset + i * 2] as char).collect();
             let disk_line: String = disk_chars.iter().collect();
 
             println!("Disk status line: '{}'", disk_line);
@@ -1067,7 +1066,10 @@ mod tests {
         );
 
         let hard_disk = read_text(12, 0, 80);
-        assert!(hard_disk.contains("Hard Disk C:"), "Should show Hard Disk C");
+        assert!(
+            hard_disk.contains("Hard Disk C:"),
+            "Should show Hard Disk C"
+        );
         assert!(
             hard_disk.contains("Not present"),
             "Hard Disk C should be not present initially"
@@ -1128,7 +1130,9 @@ mod tests {
 
         // Bottom message should change
         let bottom_offset = text_offset + (24 * 80 + 2) * 2;
-        let bottom: String = (0..50).map(|i| vram[bottom_offset + i * 2] as char).collect();
+        let bottom: String = (0..50)
+            .map(|i| vram[bottom_offset + i * 2] as char)
+            .collect();
 
         assert!(
             bottom.contains("Bootable disk detected") || bottom.contains("Press F12 to boot"),

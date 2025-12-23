@@ -405,11 +405,7 @@ impl Source for StreamSource {
 }
 
 /// Save PC virtual machine state to a .hemu project file
-fn save_pc_virtual_machine(
-    sys: &EmulatorSystem,
-    settings: &Settings,
-    status_message: &mut String,
-) {
+fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_message: &mut String) {
     if let EmulatorSystem::PC(pc_sys) = sys {
         // Show file save dialog
         if let Some(path) = rfd::FileDialog::new()
@@ -1758,11 +1754,12 @@ fn main() {
         }
 
         // F9 - Save PC virtual machine
-        if rom_loaded && window.is_key_pressed(Key::F9, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) {
-                // For PC system, F5-F9 save the virtual machine state
-                save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            }
+        if rom_loaded
+            && window.is_key_pressed(Key::F9, false)
+            && matches!(&sys, EmulatorSystem::PC(_))
+        {
+            // For PC system, F5-F9 save the virtual machine state
+            save_pc_virtual_machine(&sys, &settings, &mut status_message);
         }
 
         // Handle controller input / emulation step when ROM is loaded.
