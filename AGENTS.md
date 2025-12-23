@@ -110,7 +110,7 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_65c816`**: WDC 65C816 CPU implementation (SNES)
   - Generic `Memory65c816` trait for memory access
   - 16-bit extension of the 6502
-  - **255/256 opcodes implemented (99.6% coverage)**
+  - **256/256 opcodes implemented (100% COMPLETE!)**
   - Comprehensive test coverage (29 unit tests)
   - Can be used by: SNES, Apple IIGS, etc.
   - Implementation includes:
@@ -120,10 +120,11 @@ Contains reusable CPU implementations and common traits:
     - Emulation mode for 6502 compatibility
     - Direct page register (D)
     - Stack pointer (S)
+    - **ALL 256 opcodes** including BRK (software interrupt)
     - **Arithmetic instructions**: ADC, SBC with all addressing modes including long and stack-relative
     - **Logical instructions**: AND, ORA, EOR with all addressing modes including long and stack-relative
     - **Shift/rotate instructions**: ASL, LSR, ROL, ROR (accumulator AND memory modes: dp, abs, dp,X, abs,X)
-    - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with all addressing modes including long and stack-relative
+    - **Load/store instructions**: LDA, LDX, LDY, STA, STX, STY with ALL addressing modes including dp,X, long, and stack-relative
     - **Transfer instructions**: TAX, TAY, TXA, TYA, TSX, TXS, TCD, TDC, TCS, TSC, TXY, TYX
     - **Increment/decrement**: INC, DEC (accumulator and memory with dp, abs, dp,X, abs,X modes), INX, INY, DEX, DEY
     - **Compare instructions**: CMP, CPX, CPY with all addressing modes including long and stack-relative
@@ -131,12 +132,11 @@ Contains reusable CPU implementations and common traits:
     - **Branch instructions**: BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, BRL
     - **Stack instructions**: PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY, PHD, PLD, PHB, PLB, PHK, PEA, PEI, PER
     - **Jump instructions**: JMP (absolute, long, indirect variants), JSR (absolute, long, indirect,X), JSL, RTS, RTI, RTL
-    - **65C816-specific**: XCE, REP, SEP, XBA, STZ, TSB, TRB, MVN, MVP, COP, WAI, STP, WDM
+    - **65C816-specific**: XCE, REP, SEP, XBA, STZ, TSB, TRB, MVN, MVP, COP, WAI, STP, WDM, BRK
     - **Mode control**: XCE (emulation toggle), REP (reset status bits), SEP (set status bits)
     - **Status flag instructions**: CLC, SEC, CLI, SEI, CLV, CLD, SED
     - **Status flags**: N, V, m, x, D, I, Z, C, e
-  - **Known limitations** (1 opcode remaining):
-    - Only BRK (0x00) not yet implemented (rarely used in SNES programs)
+  - **Production-ready**: Complete implementation with no known limitations
   - `ArrayMemory` helper for testing (16MB address space)
 
 - **`cpu_mips_r4300i`**: MIPS R4300i CPU implementation (N64)

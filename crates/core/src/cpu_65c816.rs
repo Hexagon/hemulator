@@ -2617,6 +2617,22 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.cycles += 5;
                 }
             }
+            0xB5 => {
+                // LDA dp,X
+                let dp = self.fetch_byte() as u32 + self.d as u32;
+                let addr = dp + self.x as u32;
+                if self.is_8bit_a() {
+                    let val = self.read(addr);
+                    self.c = (self.c & 0xFF00) | val as u16;
+                    self.set_zn_8(val);
+                    self.cycles += 4;
+                } else {
+                    let val = self.read_word(addr);
+                    self.c = val;
+                    self.set_zn_16(val);
+                    self.cycles += 5;
+                }
+            }
 
             // LDX - Load X Register
             0xA2 => {
