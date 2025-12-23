@@ -79,8 +79,319 @@ impl PcCpu {
             }
         }
 
-        // Otherwise, execute normally
+        // Execute normally
         self.cpu.step()
+    }
+
+    /// Handle INT 10h - Video BIOS services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int10h(&mut self) -> u32 {
+        // Skip the INT 10h instruction (2 bytes: 0xCD 0x10)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => self.int10h_set_video_mode(),
+            0x01 => self.int10h_set_cursor_shape(),
+            0x02 => self.int10h_set_cursor_position(),
+            0x03 => self.int10h_get_cursor_position(),
+            0x06 => self.int10h_scroll_up(),
+            0x07 => self.int10h_scroll_down(),
+            0x08 => self.int10h_read_char_attr(),
+            0x09 => self.int10h_write_char_attr(),
+            0x0E => self.int10h_teletype_output(),
+            0x0F => self.int10h_get_video_mode(),
+            0x13 => self.int10h_write_string(),
+            _ => {
+                // Unsupported function - just return
+                51 // Approximate INT instruction timing
+            }
+        }
+    }
+
+    /// INT 10h, AH=00h: Set video mode
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_set_video_mode(&mut self) -> u32 {
+        // AL contains the mode number
+        // For now, we just acknowledge the mode change
+        // Actual mode switching would be done via the video adapter
+        // Common modes: 0x00-0x03 (text), 0x04-0x06 (CGA graphics), 0x0D-0x13 (VGA)
+        51
+    }
+
+    /// INT 10h, AH=01h: Set cursor shape
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_set_cursor_shape(&mut self) -> u32 {
+        // CH = start scan line, CL = end scan line
+        // We don't render cursor, but acknowledge the call
+        51
+    }
+
+    /// INT 10h, AH=02h: Set cursor position
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_set_cursor_position(&mut self) -> u32 {
+        // BH = page number, DH = row, DL = column
+        // Store cursor position in BIOS data area at 0x40:0x50 + (page * 2)
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let row = ((self.cpu.dx >> 8) & 0xFF) as u8;
+        let col = (self.cpu.dx & 0xFF) as u8;
+
+        // BIOS data area cursor position storage
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        self.cpu.memory.write(cursor_addr, col);
+        self.cpu.memory.write(cursor_addr + 1, row);
+        51
+    }
+
+    /// INT 10h, AH=03h: Get cursor position
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_get_cursor_position(&mut self) -> u32 {
+        // BH = page number
+        // Returns: DH = row, DL = column, CH/CL = cursor shape
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Read cursor position from BIOS data area
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        let col = self.cpu.memory.read(cursor_addr);
+        let row = self.cpu.memory.read(cursor_addr + 1);
+
+        self.cpu.dx = ((row as u16) << 8) | (col as u16);
+        self.cpu.cx = 0x0607; // Default cursor shape
+        51
+    }
+
+    /// INT 10h, AH=06h: Scroll up window
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_scroll_up(&mut self) -> u32 {
+        // AL = lines to scroll (0 = clear), BH = attribute for blank lines
+        // CH,CL = row,col of upper left, DH,DL = row,col of lower right
+        // This would require accessing and modifying video memory
+        // For now, just acknowledge
+        51
+    }
+
+    /// INT 10h, AH=07h: Scroll down window
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_scroll_down(&mut self) -> u32 {
+        // AL = lines to scroll (0 = clear), BH = attribute for blank lines
+        // CH,CL = row,col of upper left, DH,DL = row,col of lower right
+        51
+    }
+
+    /// INT 10h, AH=08h: Read character and attribute at cursor
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_read_char_attr(&mut self) -> u32 {
+        // BH = page number
+        // Returns: AL = character, AH = attribute
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Get cursor position
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        let col = self.cpu.memory.read(cursor_addr) as u32;
+        let row = self.cpu.memory.read(cursor_addr + 1) as u32;
+
+        // Calculate offset in text mode video memory (0xB8000)
+        // Each character is 2 bytes: char + attribute
+        let offset = (row * 80 + col) * 2;
+        let video_addr = 0xB8000 + offset;
+
+        let ch = self.cpu.memory.read(video_addr);
+        let attr = self.cpu.memory.read(video_addr + 1);
+
+        self.cpu.ax = ((attr as u16) << 8) | (ch as u16);
+        51
+    }
+
+    /// INT 10h, AH=09h: Write character and attribute at cursor
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_write_char_attr(&mut self) -> u32 {
+        // AL = character, BL = attribute, BH = page, CX = count
+        let ch = (self.cpu.ax & 0xFF) as u8;
+        let attr = (self.cpu.bx & 0xFF) as u8;
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let count = self.cpu.cx;
+
+        // Get cursor position
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        let mut col = self.cpu.memory.read(cursor_addr) as u32;
+        let row = self.cpu.memory.read(cursor_addr + 1) as u32;
+
+        // Write character(s) to video memory
+        for _ in 0..count {
+            let offset = (row * 80 + col) * 2;
+            let video_addr = 0xB8000 + offset;
+
+            self.cpu.memory.write(video_addr, ch);
+            self.cpu.memory.write(video_addr + 1, attr);
+
+            col += 1;
+            if col >= 80 {
+                break; // Don't wrap to next line
+            }
+        }
+
+        51
+    }
+
+    /// INT 10h, AH=0Eh: Teletype output
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_teletype_output(&mut self) -> u32 {
+        // AL = character, BH = page number, BL = foreground color (graphics mode)
+        let ch = (self.cpu.ax & 0xFF) as u8;
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Get cursor position
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        let mut col = self.cpu.memory.read(cursor_addr) as u32;
+        let mut row = self.cpu.memory.read(cursor_addr + 1) as u32;
+
+        // Handle special characters
+        match ch {
+            0x08 => {
+                // Backspace
+                col = col.saturating_sub(1);
+            }
+            0x0A => {
+                // Line feed
+                row += 1;
+                if row >= 25 {
+                    row = 24; // Stay at bottom
+                }
+            }
+            0x0D => {
+                // Carriage return
+                col = 0;
+            }
+            _ => {
+                // Normal character - write to video memory
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+
+                self.cpu.memory.write(video_addr, ch);
+                // Use default attribute (white on black)
+                self.cpu.memory.write(video_addr + 1, 0x07);
+
+                col += 1;
+                if col >= 80 {
+                    col = 0;
+                    row += 1;
+                    if row >= 25 {
+                        row = 24;
+                    }
+                }
+            }
+        }
+
+        // Update cursor position
+        self.cpu.memory.write(cursor_addr, col as u8);
+        self.cpu.memory.write(cursor_addr + 1, row as u8);
+
+        51
+    }
+
+    /// INT 10h, AH=0Fh: Get video mode
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_get_video_mode(&mut self) -> u32 {
+        // Returns: AL = mode, AH = columns, BH = page
+        // Default to mode 3 (80x25 color text)
+        self.cpu.ax = 0x5003; // AH=80 columns, AL=mode 3
+        self.cpu.bx &= 0x00FF; // BH=0 (page 0)
+        51
+    }
+
+    /// INT 10h, AH=13h: Write string
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_write_string(&mut self) -> u32 {
+        // AL = write mode, BH = page, BL = attribute
+        // CX = string length, DH/DL = row/column
+        // ES:BP = pointer to string
+        let mode = (self.cpu.ax & 0xFF) as u8;
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let attr = (self.cpu.bx & 0xFF) as u8;
+        let length = self.cpu.cx;
+        let row = ((self.cpu.dx >> 8) & 0xFF) as u32;
+        let mut col = (self.cpu.dx & 0xFF) as u32;
+
+        // String address: ES:BP
+        let string_seg = self.cpu.es as u32;
+        let string_off = self.cpu.bp as u32;
+        let string_addr = (string_seg << 4) + string_off;
+
+        // Write string to video memory
+        for i in 0..length {
+            let ch = self.cpu.memory.read(string_addr + i as u32);
+
+            let offset = (row * 80 + col) * 2;
+            let video_addr = 0xB8000 + offset;
+
+            self.cpu.memory.write(video_addr, ch);
+            self.cpu.memory.write(video_addr + 1, attr);
+
+            col += 1;
+            if col >= 80 {
+                break;
+            }
+        }
+
+        // Update cursor position if mode bit 1 is set
+        if mode & 0x02 != 0 {
+            let cursor_addr = 0x450 + (page as u32 * 2);
+            self.cpu.memory.write(cursor_addr, col as u8);
+            self.cpu.memory.write(cursor_addr + 1, row as u8);
+        }
+
+        51
+    }
+
+    /// Handle INT 16h - Keyboard BIOS services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int16h(&mut self) -> u32 {
+        // Skip the INT 16h instruction (2 bytes: 0xCD 0x16)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => self.int16h_read_keystroke(),
+            0x01 => self.int16h_check_keystroke(),
+            0x02 => self.int16h_get_shift_flags(),
+            _ => {
+                // Unsupported function
+                51
+            }
+        }
+    }
+
+    /// INT 16h, AH=00h: Read keystroke (blocking)
+    fn int16h_read_keystroke(&mut self) -> u32 {
+        // Returns: AH = scan code, AL = ASCII character
+        // For now, return 0 (no key available)
+        // A real implementation would block until a key is available
+        self.cpu.ax = 0x0000;
+        51
+    }
+
+    /// INT 16h, AH=01h: Check for keystroke (non-blocking)
+    fn int16h_check_keystroke(&mut self) -> u32 {
+        // Returns: ZF = 1 if no key available, ZF = 0 if key available
+        // If key available: AH = scan code, AL = ASCII character
+
+        // For now, always indicate no key available
+        self.set_zero_flag(true); // ZF = 1 (no key)
+        self.cpu.ax = 0x0000;
+        51
+    }
+
+    /// INT 16h, AH=02h: Get shift flags
+    fn int16h_get_shift_flags(&mut self) -> u32 {
+        // Returns: AL = shift flags
+        // Bit 0 = right shift, Bit 1 = left shift, etc.
+        // For now, return 0 (no keys pressed)
+        self.cpu.ax &= 0xFF00;
+        51
     }
 
     /// Handle INT 13h BIOS disk services
@@ -297,6 +608,16 @@ impl PcCpu {
             self.cpu.flags |= FLAG_CF;
         } else {
             self.cpu.flags &= !FLAG_CF;
+        }
+    }
+
+    /// Set or clear the zero flag
+    fn set_zero_flag(&mut self, value: bool) {
+        const FLAG_ZF: u16 = 0x0040;
+        if value {
+            self.cpu.flags |= FLAG_ZF;
+        } else {
+            self.cpu.flags &= !FLAG_ZF;
         }
     }
 
