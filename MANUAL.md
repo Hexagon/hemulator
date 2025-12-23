@@ -536,8 +536,8 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: 🚧 Basic (Mode 0 rendering functional - limited game support)  
-**Coverage**: Very limited - CPU works, Mode 0 PPU functional, simple games may display
+**Status**: ✅ Functional (Modes 0 & 1, sprites, scrolling, input - ready for gameplay)  
+**Coverage**: Good - CPU complete, Modes 0 & 1 PPU functional, sprites, scrolling, controller support
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -546,26 +546,28 @@ The emulator supports the following cartridge banking schemes:
 - Basic memory bus (128KB WRAM + cartridge mapping)
 - LoROM cartridge mapping
 - SMC header detection and removal
-- **PPU with Mode 0 support**:
-  - 4 background layers with 2bpp tiles (4 colors per tile)
-  - 8 palettes per layer (32 colors total per layer)
+- **PPU with Mode 0 & Mode 1 support**:
+  - **Mode 0**: 4 background layers with 2bpp tiles (4 colors per tile)
+  - **Mode 1**: 2 background layers with 4bpp tiles (16 colors) + 1 layer with 2bpp
+  - **Scrolling**: Full horizontal and vertical scrolling on all BG layers
+  - **Sprites (OAM)**: 128 sprites with 4bpp (16 colors), multiple size modes
+  - 8 palettes per layer
   - Horizontal and vertical tile flipping
   - Layer enable/disable control
   - Proper tile attribute handling
   - 256x224 resolution
+- **Controller Support**: Full SNES controller with 12 buttons (A, B, X, Y, L, R, Start, Select, D-pad)
 - Save states (F5/F6)
 
 **Known Limitations**:
-- **Graphics**: Mode 0 only - no sprites, no other PPU modes (1-7)
-  - No scrolling (BG offset registers not implemented)
+- **Graphics**: Modes 2-7 not implemented
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - Only 32x32 tilemap size (other sizes not implemented)
 - **Audio**: APU not implemented - silent gameplay
-- **Input**: Controller support not implemented
 - **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
 - **Timing**: Frame-based - not cycle-accurate
-- **Status**: Can display simple Mode 0 graphics (like test ROMs), but most commercial games won't work due to missing features
+- **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio).
 
 ### N64 (Nintendo 64)
 

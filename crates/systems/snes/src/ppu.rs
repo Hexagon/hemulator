@@ -20,6 +20,7 @@ use emu_core::types::Frame;
 
 const VRAM_SIZE: usize = 0x10000; // 64KB VRAM
 const CGRAM_SIZE: usize = 512; // 256 colors * 2 bytes per color
+const OAM_SIZE: usize = 544; // 512 bytes main OAM + 32 bytes high table
 
 /// Parameters for rendering a single tile
 struct TileRenderParams {
@@ -38,6 +39,8 @@ pub struct Ppu {
     vram: Vec<u8>,
     /// CGRAM (Color Generator RAM - 512 bytes for 256 colors)
     cgram: Vec<u8>,
+    /// OAM (Object Attribute Memory - 512 bytes main + 32 bytes high table)
+    oam: Vec<u8>,
 
     /// VRAM address register ($2116/$2117)
     vram_addr: u16,
@@ -45,6 +48,10 @@ pub struct Ppu {
     cgram_addr: u8,
     /// CGRAM write latch (alternates between low and high byte)
     cgram_write_latch: bool,
+    /// OAM address register ($2102/$2103)
+    oam_addr: u16,
+    /// OAM write latch
+    oam_write_latch: bool,
 
     /// Screen display register ($2100) - bit 7 = force blank, bits 0-3 = brightness
     screen_display: u8,
@@ -79,9 +86,37 @@ pub struct Ppu {
     /// Bits 4-7: BG4 CHR base address (address = value << 13)
     bg34nba: u8,
 
+    /// OBJ (sprite) tilemap address and size ($2101)
+    /// Bits 0-2: Name base address (in 8KB units + $6000)
+    /// Bits 3-4: Name select (offset in 4KB units)
+    /// Bits 5-7: Object size
+    obsel: u8,
+
     /// Main screen designation ($212C)
     /// Bits 0-4: Enable BG1-4 and OBJ on main screen
     tm: u8,
+
+    /// BG1 horizontal scroll offset ($210D) - 10-bit value, written twice
+    bg1_hofs: u16,
+    /// BG1 vertical scroll offset ($210E) - 10-bit value, written twice
+    bg1_vofs: u16,
+    /// BG2 horizontal scroll offset ($210F)
+    bg2_hofs: u16,
+    /// BG2 vertical scroll offset ($2110)
+    bg2_vofs: u16,
+    /// BG3 horizontal scroll offset ($2111)
+    bg3_hofs: u16,
+    /// BG3 vertical scroll offset ($2112)
+    bg3_vofs: u16,
+    /// BG4 horizontal scroll offset ($2113)
+    bg4_hofs: u16,
+    /// BG4 vertical scroll offset ($2114)
+    bg4_vofs: u16,
+
+    /// Previous write value for scroll registers (used for 2-write protocol)
+    scroll_prev: u8,
+    /// Latch for scroll register writes
+    scroll_latch: bool,
 }
 
 impl Ppu {
@@ -89,9 +124,12 @@ impl Ppu {
         Self {
             vram: vec![0; VRAM_SIZE],
             cgram: vec![0; CGRAM_SIZE],
+            oam: vec![0; OAM_SIZE],
             vram_addr: 0,
             cgram_addr: 0,
             cgram_write_latch: false,
+            oam_addr: 0,
+            oam_write_latch: false,
             screen_display: 0x80, // Start with screen blanked
             bgmode: 0,
             bg1sc: 0,
@@ -100,7 +138,18 @@ impl Ppu {
             bg4sc: 0,
             bg12nba: 0,
             bg34nba: 0,
+            obsel: 0,
             tm: 0,
+            bg1_hofs: 0,
+            bg1_vofs: 0,
+            bg2_hofs: 0,
+            bg2_vofs: 0,
+            bg3_hofs: 0,
+            bg3_vofs: 0,
+            bg4_hofs: 0,
+            bg4_vofs: 0,
+            scroll_prev: 0,
+            scroll_latch: false,
         }
     }
 
@@ -110,6 +159,33 @@ impl Ppu {
             // $2100 - INIDISP - Screen Display Register
             0x2100 => {
                 self.screen_display = val;
+            }
+
+            // $2101 - OBSEL - Object Size and Base Address
+            0x2101 => {
+                self.obsel = val;
+            }
+
+            // $2102 - OAMADDL - OAM Address (low byte)
+            0x2102 => {
+                self.oam_addr = (self.oam_addr & 0xFF00) | val as u16;
+                self.oam_write_latch = false;
+            }
+
+            // $2103 - OAMADDH - OAM Address (high byte)
+            0x2103 => {
+                self.oam_addr = (self.oam_addr & 0x00FF) | ((val as u16 & 0x01) << 8);
+                self.oam_write_latch = false;
+            }
+
+            // $2104 - OAMDATA - OAM Data Write
+            0x2104 => {
+                let addr = self.oam_addr as usize;
+                if addr < OAM_SIZE {
+                    self.oam[addr] = val;
+                }
+                // Auto-increment address
+                self.oam_addr = (self.oam_addr + 1) % (OAM_SIZE as u16);
             }
 
             // $2105 - BGMODE - BG Mode and Character Size
@@ -145,6 +221,94 @@ impl Ppu {
             // $210C - BG34NBA - BG3/BG4 Character Data Address
             0x210C => {
                 self.bg34nba = val;
+            }
+
+            // $210D - BG1HOFS - BG1 Horizontal Scroll (2 writes)
+            0x210D => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg1_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $210E - BG1VOFS - BG1 Vertical Scroll (2 writes)
+            0x210E => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg1_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $210F - BG2HOFS - BG2 Horizontal Scroll (2 writes)
+            0x210F => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg2_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $2110 - BG2VOFS - BG2 Vertical Scroll (2 writes)
+            0x2110 => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg2_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $2111 - BG3HOFS - BG3 Horizontal Scroll (2 writes)
+            0x2111 => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg3_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $2112 - BG3VOFS - BG3 Vertical Scroll (2 writes)
+            0x2112 => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg3_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $2113 - BG4HOFS - BG4 Horizontal Scroll (2 writes)
+            0x2113 => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg4_hofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
+            }
+
+            // $2114 - BG4VOFS - BG4 Vertical Scroll (2 writes)
+            0x2114 => {
+                if !self.scroll_latch {
+                    self.scroll_prev = val;
+                    self.scroll_latch = true;
+                } else {
+                    self.bg4_vofs = ((val as u16 & 0x03) << 8) | (self.scroll_prev as u16);
+                    self.scroll_latch = false;
+                }
             }
 
             // $2116 - VMADDL - VRAM Address (low byte)
@@ -230,38 +394,84 @@ impl Ppu {
         // Get BG mode (bits 0-2 of BGMODE register)
         let bg_mode = self.bgmode & 0x07;
 
-        // For now, only implement Mode 0 (4 BG layers, 2bpp each)
-        if bg_mode == 0 {
-            // Render BG layers from back to front (BG4 -> BG3 -> BG2 -> BG1)
-            // Each layer is only rendered if enabled in TM register
-            if self.tm & 0x08 != 0 {
-                self.render_bg_layer(&mut frame, 3); // BG4
+        match bg_mode {
+            // Mode 0: 4 BG layers, 2bpp each (4 colors per layer)
+            0 => {
+                // Render BG layers from back to front (BG4 -> BG3 -> BG2 -> BG1)
+                // Each layer is only rendered if enabled in TM register
+                if self.tm & 0x08 != 0 {
+                    self.render_bg_layer_2bpp(&mut frame, 3); // BG4
+                }
+                if self.tm & 0x04 != 0 {
+                    self.render_bg_layer_2bpp(&mut frame, 2); // BG3
+                }
+                if self.tm & 0x02 != 0 {
+                    self.render_bg_layer_2bpp(&mut frame, 1); // BG2
+                }
+                if self.tm & 0x01 != 0 {
+                    self.render_bg_layer_2bpp(&mut frame, 0); // BG1
+                }
+
+                // Render sprites if enabled
+                if self.tm & 0x10 != 0 {
+                    self.render_sprites(&mut frame);
+                }
             }
-            if self.tm & 0x04 != 0 {
-                self.render_bg_layer(&mut frame, 2); // BG3
+            // Mode 1: 2 BG layers (4bpp) + 1 BG layer (2bpp)
+            1 => {
+                // BG3 is 2bpp, BG1 and BG2 are 4bpp
+                if self.tm & 0x04 != 0 {
+                    self.render_bg_layer_2bpp(&mut frame, 2); // BG3 (2bpp)
+                }
+                if self.tm & 0x02 != 0 {
+                    self.render_bg_layer_4bpp(&mut frame, 1); // BG2 (4bpp)
+                }
+                if self.tm & 0x01 != 0 {
+                    self.render_bg_layer_4bpp(&mut frame, 0); // BG1 (4bpp)
+                }
+
+                // Render sprites if enabled
+                if self.tm & 0x10 != 0 {
+                    self.render_sprites(&mut frame);
+                }
             }
-            if self.tm & 0x02 != 0 {
-                self.render_bg_layer(&mut frame, 1); // BG2
-            }
-            if self.tm & 0x01 != 0 {
-                self.render_bg_layer(&mut frame, 0); // BG1
+            _ => {
+                // Other modes not yet implemented - leave frame blank
             }
         }
 
         frame
     }
 
-    /// Render a single BG layer for Mode 0
-    fn render_bg_layer(&self, frame: &mut Frame, bg_index: usize) {
+    /// Render a single BG layer in 2bpp mode (4 colors)
+    fn render_bg_layer_2bpp(&self, frame: &mut Frame, bg_index: usize) {
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            2 => (self.bg3_hofs, self.bg3_vofs),
+            3 => (self.bg4_hofs, self.bg4_vofs),
+            _ => (0, 0),
+        };
+
         // Mode 0 always uses 32x32 tilemap (we'll ignore size bits for now)
-        // Each tilemap entry is 2 bytes
-        for tile_y in 0..28 {
-            // 28 tiles vertically (224 pixels / 8)
-            for tile_x in 0..32 {
-                // 32 tiles horizontally (256 pixels / 8)
+        // Render all visible tiles accounting for scrolling
+        // The visible area is 256x224 pixels
+        for screen_y in 0..224 {
+            for screen_x in 0..256 {
+                // Calculate world coordinates with scrolling
+                let world_x = (screen_x as u16 + hofs) & 0xFF; // Wrap at 256 pixels (32 tiles)
+                let world_y = (screen_y as u16 + vofs) & 0xFF; // Wrap at 256 pixels (32 tiles)
+
+                // Calculate tile coordinates
+                let tile_x = (world_x / 8) as usize;
+                let tile_y = (world_y / 8) as usize;
+                let pixel_x_in_tile = (world_x % 8) as usize;
+                let pixel_y_in_tile = (world_y % 8) as usize;
+
                 // Read tile entry from tilemap (2 bytes per entry)
                 let tilemap_offset = (tile_y * 32 + tile_x) * 2;
                 let tilemap_addr = tilemap_base + tilemap_offset;
@@ -271,28 +481,33 @@ impl Ppu {
                 }
 
                 // Read tile entry (format: cccccccc YXpppttt tttttttt)
-                // Low byte: tile number (bits 0-9, but we only use 0-7 for now)
-                // High byte: attributes (palette, priority, flip)
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
                 let tile_index = tile_low;
-                let palette = ((tile_high >> 2) & 0x07) as usize; // Bits 2-4
-                let _priority = (tile_high & 0x20) != 0; // Bit 5 (unused for now)
-                let flip_x = (tile_high & 0x40) != 0; // Bit 6
-                let flip_y = (tile_high & 0x80) != 0; // Bit 7
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
 
-                // Render the tile
-                let params = TileRenderParams {
-                    tile_x,
-                    tile_y,
+                // Get pixel color from tile
+                let color = self.get_tile_pixel_mode0(
                     tile_index,
                     chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
                     palette,
                     flip_x,
                     flip_y,
-                };
-                self.render_tile_mode0(frame, &params);
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Draw pixel
+                let frame_offset = screen_y * 256 + screen_x;
+                frame.pixels[frame_offset] = self.get_color(color);
             }
         }
     }
@@ -316,7 +531,55 @@ impl Ppu {
         (tilemap_base, chr_base)
     }
 
+    /// Get a single pixel color index from a tile in Mode 0 (2bpp)
+    /// Returns CGRAM color index (0-255) or 0 for transparent
+    #[allow(clippy::too_many_arguments)]
+    fn get_tile_pixel_mode0(
+        &self,
+        tile_index: u8,
+        chr_base: usize,
+        pixel_x: usize,
+        pixel_y: usize,
+        palette: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) -> u8 {
+        // In Mode 0, each tile is 16 bytes (8 rows * 2 bytes per row for 2bpp)
+        let tile_data_base = chr_base + (tile_index as usize * 16);
+
+        // Apply flip
+        let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
+        let actual_col = if flip_x { pixel_x } else { 7 - pixel_x };
+
+        // Read two bitplanes for this row
+        let bp0_addr = tile_data_base + actual_row;
+        let bp1_addr = tile_data_base + actual_row + 8;
+
+        let bp0 = if bp0_addr < VRAM_SIZE {
+            self.vram[bp0_addr]
+        } else {
+            0
+        };
+        let bp1 = if bp1_addr < VRAM_SIZE {
+            self.vram[bp1_addr]
+        } else {
+            0
+        };
+
+        // Extract color index from bitplanes
+        let bit = actual_col;
+        let bit0 = (bp0 >> bit) & 1;
+        let bit1 = (bp1 >> bit) & 1;
+        let color_index = (bit1 << 1) | bit0;
+
+        // Return CGRAM index (palette * 4 + color_index)
+        // Mode 0: each BG layer has 8 palettes of 4 colors each
+        (palette * 4 + color_index as usize) as u8
+    }
+
     /// Render a single 8x8 tile in Mode 0 (2bpp)
+    /// This is kept for backward compatibility but is no longer used by render_bg_layer
+    #[allow(dead_code)]
     fn render_tile_mode0(&self, frame: &mut Frame, params: &TileRenderParams) {
         // In Mode 0, each tile is 16 bytes (8 rows * 2 bytes per row for 2bpp)
         let tile_data_base = params.chr_base + (params.tile_index as usize * 16);
@@ -369,6 +632,317 @@ impl Ppu {
                 // Set pixel in frame
                 let frame_offset = pixel_y * 256 + pixel_x;
                 frame.pixels[frame_offset] = color;
+            }
+        }
+    }
+
+    /// Render a single BG layer in 4bpp mode (16 colors) - for Mode 1
+    fn render_bg_layer_4bpp(&self, frame: &mut Frame, bg_index: usize) {
+        // Get tilemap and CHR base addresses for this BG
+        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            2 => (self.bg3_hofs, self.bg3_vofs),
+            3 => (self.bg4_hofs, self.bg4_vofs),
+            _ => (0, 0),
+        };
+
+        // Render all visible tiles accounting for scrolling
+        for screen_y in 0..224 {
+            for screen_x in 0..256 {
+                // Calculate world coordinates with scrolling
+                let world_x = (screen_x as u16 + hofs) & 0xFF;
+                let world_y = (screen_y as u16 + vofs) & 0xFF;
+
+                // Calculate tile coordinates
+                let tile_x = (world_x / 8) as usize;
+                let tile_y = (world_y / 8) as usize;
+                let pixel_x_in_tile = (world_x % 8) as usize;
+                let pixel_y_in_tile = (world_y % 8) as usize;
+
+                // Read tile entry from tilemap (2 bytes per entry)
+                let tilemap_offset = (tile_y * 32 + tile_x) * 2;
+                let tilemap_addr = tilemap_base + tilemap_offset;
+
+                if tilemap_addr + 1 >= VRAM_SIZE {
+                    continue;
+                }
+
+                // Read tile entry
+                let tile_low = self.vram[tilemap_addr];
+                let tile_high = self.vram[tilemap_addr + 1];
+
+                let tile_index = tile_low;
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+
+                // Get pixel color from tile (4bpp)
+                let color = self.get_tile_pixel_4bpp(
+                    tile_index,
+                    chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
+                    palette,
+                    flip_x,
+                    flip_y,
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Draw pixel
+                let frame_offset = screen_y * 256 + screen_x;
+                frame.pixels[frame_offset] = self.get_color(color);
+            }
+        }
+    }
+
+    /// Get a single pixel color index from a tile in 4bpp mode (16 colors)
+    #[allow(clippy::too_many_arguments)]
+    fn get_tile_pixel_4bpp(
+        &self,
+        tile_index: u8,
+        chr_base: usize,
+        pixel_x: usize,
+        pixel_y: usize,
+        palette: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) -> u8 {
+        // In 4bpp mode, each tile is 32 bytes (8 rows * 4 bytes per row)
+        let tile_data_base = chr_base + (tile_index as usize * 32);
+
+        // Apply flip
+        let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
+        let actual_col = if flip_x { pixel_x } else { 7 - pixel_x };
+
+        // Read four bitplanes for this row
+        let bp0_addr = tile_data_base + actual_row;
+        let bp1_addr = tile_data_base + actual_row + 8;
+        let bp2_addr = tile_data_base + actual_row + 16;
+        let bp3_addr = tile_data_base + actual_row + 24;
+
+        let bp0 = if bp0_addr < VRAM_SIZE {
+            self.vram[bp0_addr]
+        } else {
+            0
+        };
+        let bp1 = if bp1_addr < VRAM_SIZE {
+            self.vram[bp1_addr]
+        } else {
+            0
+        };
+        let bp2 = if bp2_addr < VRAM_SIZE {
+            self.vram[bp2_addr]
+        } else {
+            0
+        };
+        let bp3 = if bp3_addr < VRAM_SIZE {
+            self.vram[bp3_addr]
+        } else {
+            0
+        };
+
+        // Extract color index from bitplanes
+        let bit = actual_col;
+        let bit0 = (bp0 >> bit) & 1;
+        let bit1 = (bp1 >> bit) & 1;
+        let bit2 = (bp2 >> bit) & 1;
+        let bit3 = (bp3 >> bit) & 1;
+        let color_index = (bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0;
+
+        // Return CGRAM index (palette * 16 + color_index)
+        // Mode 1: each BG layer has 8 palettes of 16 colors each
+        (palette * 16 + color_index as usize) as u8
+    }
+
+    /// Render sprites (OAM objects)
+    fn render_sprites(&self, frame: &mut Frame) {
+        // Get sprite size configuration from OBSEL register
+        let (small_size, large_size) = self.get_sprite_sizes();
+
+        // Get OBJ base address
+        let obj_base = self.get_obj_base_address();
+
+        // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
+        for sprite_index in (0..128).rev() {
+            // Each sprite has 4 bytes in main OAM table
+            let oam_offset = sprite_index * 4;
+            if oam_offset + 3 >= 512 {
+                continue;
+            }
+
+            // Read sprite attributes from OAM
+            let x = self.oam[oam_offset] as i16;
+            let y = self.oam[oam_offset + 1] as i16;
+            let tile = self.oam[oam_offset + 2];
+            let attr = self.oam[oam_offset + 3];
+
+            // Read high table entry for this sprite (2 bits per sprite in 32-byte table)
+            let high_table_index = sprite_index / 4;
+            let high_table_shift = (sprite_index % 4) * 2;
+            let high_bits = if 512 + high_table_index < OAM_SIZE {
+                (self.oam[512 + high_table_index] >> high_table_shift) & 0x03
+            } else {
+                0
+            };
+
+            // Bit 0 of high_bits: X MSB (9th bit of X coordinate)
+            // Bit 1 of high_bits: Size toggle (0=small, 1=large)
+            let x = x | (((high_bits & 0x01) as i16) << 8);
+            let is_large = (high_bits & 0x02) != 0;
+
+            // Get sprite size
+            let (width, height) = if is_large { large_size } else { small_size };
+
+            // Parse attributes
+            let palette = ((attr >> 1) & 0x07) as usize;
+            let _priority = (attr >> 4) & 0x03;
+            let flip_x = (attr & 0x40) != 0;
+            let flip_y = (attr & 0x80) != 0;
+
+            // Skip offscreen sprites (basic culling)
+            if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
+                continue;
+            }
+
+            // Render sprite pixels
+            self.render_sprite(
+                frame, x, y, tile, obj_base, palette, width, height, flip_x, flip_y,
+            );
+        }
+    }
+
+    /// Get sprite sizes based on OBSEL register
+    fn get_sprite_sizes(&self) -> ((usize, usize), (usize, usize)) {
+        // Bits 5-7 of OBSEL determine sprite sizes
+        let size_select = (self.obsel >> 5) & 0x07;
+        match size_select {
+            0 => ((8, 8), (16, 16)),
+            1 => ((8, 8), (32, 32)),
+            2 => ((8, 8), (64, 64)),
+            3 => ((16, 16), (32, 32)),
+            4 => ((16, 16), (64, 64)),
+            5 => ((32, 32), (64, 64)),
+            6 => ((16, 32), (32, 64)),
+            7 => ((16, 32), (32, 32)),
+            _ => ((8, 8), (16, 16)),
+        }
+    }
+
+    /// Get OBJ base address in VRAM
+    fn get_obj_base_address(&self) -> usize {
+        // Bits 0-2: Name base (in 8KB units, offset from $6000 in VRAM word address)
+        // Bits 3-4: Name select (4KB offset)
+        let name_base = (self.obsel & 0x07) as usize;
+        let name_select = ((self.obsel >> 3) & 0x03) as usize;
+
+        // Base address: (name_base * 8192) + $6000 (word address) = byte address
+        // In byte addressing: (name_base * 16384) + $C000
+        (name_base * 0x4000) + 0xC000 + (name_select * 0x1000)
+    }
+
+    /// Render a single sprite
+    #[allow(clippy::too_many_arguments)]
+    fn render_sprite(
+        &self,
+        frame: &mut Frame,
+        x: i16,
+        y: i16,
+        tile: u8,
+        obj_base: usize,
+        palette: usize,
+        width: usize,
+        height: usize,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        // Sprites use 4bpp (16 colors per tile)
+        // Each 8x8 tile is 32 bytes (8 rows * 4 bytes per row)
+        let tiles_wide = width / 8;
+        let tiles_high = height / 8;
+
+        for ty in 0..tiles_high {
+            for tx in 0..tiles_wide {
+                // Calculate tile number (tiles are arranged in rows)
+                let tile_num = tile as usize + (ty * 16) + tx;
+
+                // Calculate tile data address
+                let tile_addr = obj_base + (tile_num * 32);
+
+                // Render this 8x8 tile
+                for py in 0..8 {
+                    for px in 0..8 {
+                        let actual_px = if flip_x { 7 - px } else { px };
+                        let actual_py = if flip_y { 7 - py } else { py };
+
+                        // Screen position
+                        let screen_x = x + (tx * 8) as i16 + px as i16;
+                        let screen_y = y + (ty * 8) as i16 + py as i16;
+
+                        // Bounds check
+                        if !(0..256).contains(&screen_x) || !(0..224).contains(&screen_y) {
+                            continue;
+                        }
+
+                        // Read 4 bitplanes for this pixel
+                        let row_offset = actual_py;
+                        let bp0_addr = tile_addr + row_offset;
+                        let bp1_addr = tile_addr + row_offset + 8;
+                        let bp2_addr = tile_addr + row_offset + 16;
+                        let bp3_addr = tile_addr + row_offset + 24;
+
+                        let bp0 = if bp0_addr < VRAM_SIZE {
+                            self.vram[bp0_addr]
+                        } else {
+                            0
+                        };
+                        let bp1 = if bp1_addr < VRAM_SIZE {
+                            self.vram[bp1_addr]
+                        } else {
+                            0
+                        };
+                        let bp2 = if bp2_addr < VRAM_SIZE {
+                            self.vram[bp2_addr]
+                        } else {
+                            0
+                        };
+                        let bp3 = if bp3_addr < VRAM_SIZE {
+                            self.vram[bp3_addr]
+                        } else {
+                            0
+                        };
+
+                        // Extract color index (4 bits)
+                        let bit = 7 - actual_px;
+                        let bit0 = (bp0 >> bit) & 1;
+                        let bit1 = (bp1 >> bit) & 1;
+                        let bit2 = (bp2 >> bit) & 1;
+                        let bit3 = (bp3 >> bit) & 1;
+                        let color_index = (bit3 << 3) | (bit2 << 2) | (bit1 << 1) | bit0;
+
+                        // Skip transparent pixels
+                        if color_index == 0 {
+                            continue;
+                        }
+
+                        // Sprites use palettes 128-255 (palette 0-7 maps to CGRAM 128-255)
+                        let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
+                        let color = self.get_color(cgram_index);
+
+                        // Draw pixel
+                        let frame_offset = screen_y as usize * 256 + screen_x as usize;
+                        if frame_offset < frame.pixels.len() {
+                            frame.pixels[frame_offset] = color;
+                        }
+                    }
+                }
             }
         }
     }
@@ -566,5 +1140,297 @@ mod tests {
 
         // Actually, let's just check that rendering doesn't crash
         // A more complete test would set up proper palette and tile data
+    }
+
+    #[test]
+    fn test_scroll_registers() {
+        let mut ppu = Ppu::new();
+
+        // Test BG1 horizontal scroll (2-write protocol)
+        ppu.write_register(0x210D, 0x34); // Low byte
+        ppu.write_register(0x210D, 0x12); // High byte (only bits 0-1 used)
+        assert_eq!(ppu.bg1_hofs, 0x0234); // 10-bit value
+
+        // Test BG1 vertical scroll
+        ppu.write_register(0x210E, 0x78); // Low byte
+        ppu.write_register(0x210E, 0x01); // High byte
+        assert_eq!(ppu.bg1_vofs, 0x0178);
+
+        // Test BG2 scrolls
+        ppu.write_register(0x210F, 0xFF); // HOFS low
+        ppu.write_register(0x210F, 0x03); // HOFS high
+        assert_eq!(ppu.bg2_hofs, 0x03FF); // Max 10-bit value
+
+        ppu.write_register(0x2110, 0x00); // VOFS low
+        ppu.write_register(0x2110, 0x00); // VOFS high
+        assert_eq!(ppu.bg2_vofs, 0x0000);
+
+        // Test BG3 and BG4
+        ppu.write_register(0x2111, 0x10); // BG3 HOFS
+        ppu.write_register(0x2111, 0x00);
+        assert_eq!(ppu.bg3_hofs, 0x0010);
+
+        ppu.write_register(0x2112, 0x20); // BG3 VOFS
+        ppu.write_register(0x2112, 0x00);
+        assert_eq!(ppu.bg3_vofs, 0x0020);
+
+        ppu.write_register(0x2113, 0x30); // BG4 HOFS
+        ppu.write_register(0x2113, 0x00);
+        assert_eq!(ppu.bg4_hofs, 0x0030);
+
+        ppu.write_register(0x2114, 0x40); // BG4 VOFS
+        ppu.write_register(0x2114, 0x00);
+        assert_eq!(ppu.bg4_vofs, 0x0040);
+    }
+
+    #[test]
+    fn test_scrolling_rendering() {
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 0
+        ppu.write_register(0x2105, 0x00);
+
+        // Set BG1 tilemap at $0000, CHR at $2000
+        ppu.write_register(0x2107, 0x00);
+        ppu.write_register(0x210B, 0x01);
+
+        // Enable BG1
+        ppu.write_register(0x212C, 0x01);
+
+        // Set up palette (color 1 = red, color 2 = blue)
+        ppu.write_register(0x2121, 0x01);
+        ppu.write_register(0x2122, 0x1F); // Red low
+        ppu.write_register(0x2122, 0x00); // Red high
+
+        ppu.write_register(0x2122, 0x00); // Blue low
+        ppu.write_register(0x2122, 0x7C); // Blue high
+
+        // Create a simple test pattern in VRAM
+        // Two different tiles: tile 0 uses color 1 (red), tile 1 uses color 2 (blue)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10); // CHR at word $1000 (byte $2000)
+
+        // Tile 0: bitplane 0 = $FF, bitplane 1 = $00 (color 1 for all pixels)
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0xFF);
+            ppu.write_register(0x2119, 0x00);
+        }
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0x00);
+            ppu.write_register(0x2119, 0x00);
+        }
+
+        // Tile 1: bitplane 0 = $00, bitplane 1 = $FF (color 2 for all pixels)
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0x00);
+            ppu.write_register(0x2119, 0x00);
+        }
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0xFF);
+            ppu.write_register(0x2119, 0x00);
+        }
+
+        // Set up tilemap: tile 0 at (0,0), tile 1 at (1,0)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00); // Tile 0
+        ppu.write_register(0x2119, 0x00);
+        ppu.write_register(0x2118, 0x01); // Tile 1
+        ppu.write_register(0x2119, 0x00);
+
+        // Render with no scrolling
+        let frame1 = ppu.render_frame();
+        let pixel_0_0 = frame1.pixels[0]; // Top-left pixel of tile 0
+
+        // Apply horizontal scroll of 8 pixels (one tile)
+        ppu.write_register(0x210D, 0x08);
+        ppu.write_register(0x210D, 0x00);
+
+        let frame2 = ppu.render_frame();
+        let pixel_0_0_scrolled = frame2.pixels[0]; // Should now show tile 1
+
+        // The pixel should be different after scrolling
+        assert_ne!(pixel_0_0, pixel_0_0_scrolled);
+
+        // Verify both frames rendered successfully
+        assert_eq!(frame1.width, 256);
+        assert_eq!(frame1.height, 224);
+        assert_eq!(frame2.width, 256);
+        assert_eq!(frame2.height, 224);
+    }
+
+    #[test]
+    fn test_oam_registers() {
+        let mut ppu = Ppu::new();
+
+        // Test OBSEL register
+        ppu.write_register(0x2101, 0xE3);
+        assert_eq!(ppu.obsel, 0xE3);
+
+        // Test OAM address registers
+        ppu.write_register(0x2102, 0x40); // Low byte
+        ppu.write_register(0x2103, 0x01); // High byte (only bit 0 used)
+        assert_eq!(ppu.oam_addr, 0x0140);
+
+        // Test OAM data write
+        ppu.write_register(0x2104, 0xAA);
+        assert_eq!(ppu.oam[0x0140], 0xAA);
+        assert_eq!(ppu.oam_addr, 0x0141); // Auto-incremented
+
+        ppu.write_register(0x2104, 0xBB);
+        assert_eq!(ppu.oam[0x0141], 0xBB);
+        assert_eq!(ppu.oam_addr, 0x0142);
+    }
+
+    #[test]
+    fn test_sprite_sizes() {
+        let mut ppu = Ppu::new();
+
+        // Size 0: 8x8 and 16x16
+        ppu.obsel = 0x00;
+        let (small, large) = ppu.get_sprite_sizes();
+        assert_eq!(small, (8, 8));
+        assert_eq!(large, (16, 16));
+
+        // Size 3: 16x16 and 32x32
+        ppu.obsel = 0x60;
+        let (small, large) = ppu.get_sprite_sizes();
+        assert_eq!(small, (16, 16));
+        assert_eq!(large, (32, 32));
+
+        // Size 6: 16x32 and 32x64
+        ppu.obsel = 0xC0;
+        let (small, large) = ppu.get_sprite_sizes();
+        assert_eq!(small, (16, 32));
+        assert_eq!(large, (32, 64));
+    }
+
+    #[test]
+    fn test_obj_base_address() {
+        let mut ppu = Ppu::new();
+
+        // Name base = 0, name select = 0
+        ppu.obsel = 0x00;
+        let base = ppu.get_obj_base_address();
+        assert_eq!(base, 0xC000);
+
+        // Name base = 2, name select = 1
+        ppu.obsel = 0x0A;
+        let base = ppu.get_obj_base_address();
+        assert_eq!(base, 0xC000 + 2 * 0x4000 + 0x1000);
+    }
+
+    #[test]
+    fn test_sprite_basic() {
+        let mut ppu = Ppu::new();
+
+        // Directly set up minimal sprite data in OAM
+        ppu.oam[0] = 100; // X
+        ppu.oam[1] = 100; // Y
+        ppu.oam[2] = 0; // Tile
+        ppu.oam[3] = 0x00; // Attr (palette 0)
+        ppu.oam[512] = 0x00; // High table: small size, X MSB=0
+
+        // Directly set up sprite tile in VRAM at 0xC000
+        for i in 0..8 {
+            ppu.vram[0xC000 + i] = 0xFF; // Bitplane 0: all pixels on
+        }
+
+        // Set up sprite palette at CGRAM 128
+        ppu.cgram[128 * 2] = 0x00; // Color 0 transparent
+        ppu.cgram[128 * 2 + 1] = 0x00;
+        ppu.cgram[129 * 2] = 0x1F; // Color 1 red
+        ppu.cgram[129 * 2 + 1] = 0x00;
+
+        // Enable Mode 0 and sprites
+        ppu.bgmode = 0;
+        ppu.tm = 0x10;
+        ppu.obsel = 0;
+
+        // Render
+        let frame = ppu.render_frame();
+
+        // Check for sprite pixels
+        let mut found = false;
+        for y in 100..108 {
+            for x in 100..108 {
+                if frame.pixels[y * 256 + x] != 0 {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+
+        assert!(found, "Sprite pixels should be visible");
+    }
+
+    #[test]
+    fn test_mode1_rendering() {
+        let mut ppu = Ppu::new();
+
+        // Set up Mode 1
+        ppu.write_register(0x2105, 0x01); // Mode 1
+
+        // Set BG1 (4bpp) tilemap at $0000, CHR at $2000
+        ppu.write_register(0x2107, 0x00);
+        ppu.write_register(0x210B, 0x01);
+
+        // Enable BG1
+        ppu.write_register(0x212C, 0x01);
+
+        // Set up palette for 4bpp (16 colors)
+        // Color 0 is transparent, color 1 is red
+        ppu.write_register(0x2121, 0x00);
+        ppu.write_register(0x2122, 0x00); // Color 0 transparent
+        ppu.write_register(0x2122, 0x00);
+        ppu.write_register(0x2122, 0x1F); // Color 1 red
+        ppu.write_register(0x2122, 0x00);
+
+        // Upload a simple 4bpp tile to CHR at word $1000 (byte $2000)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10);
+
+        // Write 32 bytes for one 4bpp tile (bitplane 0 = $FF, others = $00)
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0xFF); // Bitplane 0
+            ppu.write_register(0x2119, 0x00);
+        }
+        for _ in 0..24 {
+            // Bitplanes 1, 2, 3
+            ppu.write_register(0x2118, 0x00);
+            ppu.write_register(0x2119, 0x00);
+        }
+
+        // Write tilemap entry for tile 0 at position (0,0)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00); // Tile 0
+        ppu.write_register(0x2119, 0x00);
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+
+        // The top-left tile should have some colored pixels
+        let mut has_pixels = false;
+        for y in 0..8 {
+            for x in 0..8 {
+                if frame.pixels[y * 256 + x] != 0 {
+                    has_pixels = true;
+                    break;
+                }
+            }
+            if has_pixels {
+                break;
+            }
+        }
+
+        assert!(has_pixels, "Mode 1 should render 4bpp tiles");
     }
 }
