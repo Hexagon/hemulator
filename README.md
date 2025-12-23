@@ -9,7 +9,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - 🎲 **Game Boy Emulation**: ⚠️ Functional - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
 - 🏰 **SNES Emulation**: 🚧 Basic infrastructure - CPU working, minimal PPU, no APU/input yet
 - 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
-- 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, black screen only
+- 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, CGA text mode rendering
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
@@ -27,7 +27,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 | **Game Boy** | ⚠️ Functional | LR35902 (Complete) | PPU (Complete) | APU (Not integrated) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported; no audio/timer |
 | **SNES** | 🚧 Basic | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
-| **PC (DOS)** | 🧪 Experimental | 8086 (Partial) | VGA (Stub) | ❌ Not implemented | ⚠️ Keyboard passthrough | ❌ | COM/EXE loading; black screen only |
+| **PC (DOS)** | 🧪 Experimental | 8086 (Partial) | CGA (Text mode) | ❌ Not implemented | ⚠️ Keyboard passthrough | ❌ | COM/EXE loading; text mode rendering |
 
 **Legend:**
 - ✅ Fully Working - Production ready with comprehensive features
@@ -48,6 +48,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 **Not ready for gaming:**
 - 🚧 **SNES** - Infrastructure only, very limited functionality
 - 🚧 **N64** - Development in progress, can render 3D graphics but few games work
+- 🧪 **PC** - CGA text mode works, but limited BIOS/DOS support
 - 🧪 **PC/DOS** - Experimental only, black screen
 
 ## For Users
@@ -71,6 +72,35 @@ cargo run --release -p emu_gui
 # Or using the built binary (located in target/release/hemu)
 ./target/release/hemu path/to/your/game.nes
 ```
+
+## PC Video Adapter Architecture
+
+The PC emulation system uses a modular video adapter architecture, allowing different rendering backends:
+
+### Modular Design
+
+```
+PcSystem (state) → VideoAdapter trait → {Software, Hardware} implementations
+```
+
+**Current Adapters:**
+- **SoftwareCgaAdapter**: CPU-based CGA text mode (80x25 characters, 640x400 pixels)
+  - 16-color CGA palette
+  - IBM PC 8x16 font rendering
+  - Full attribute support (foreground/background colors)
+
+**Future Adapters:**
+- **HardwareCgaAdapter**: GPU-accelerated text rendering (OpenGL/Vulkan)
+- **EgaAdapter**: Enhanced Graphics Adapter (16 colors, multiple modes)
+- **VgaAdapter**: Video Graphics Array (256 colors, Mode 13h)
+
+This architecture follows the same pattern as the N64's RDP renderer, enabling:
+- Easy addition of new graphics modes
+- Hardware acceleration without changing core system
+- Runtime adapter switching
+- Clean separation of state management and rendering
+
+See `crates/systems/pc/src/video_adapter*.rs` for implementation details.
 
 ## NES Mapper Support
 
@@ -116,7 +146,7 @@ See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibi
 | **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | ⚠️ Functional | No audio, ~95% compatible |
 | **SNES** | SMC/SFC (.smc, .sfc) | Header detection | 🚧 Basic | LoROM only, minimal PPU |
 | **N64** | Z64/N64/V64 (.z64, .n64, .v64) | Magic byte + conversion | 🚧 In development | Byte-order auto-detection |
-| **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | Black screen only |
+| **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | CGA text mode rendering |
 
 ## Video Processing System
 
