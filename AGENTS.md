@@ -1,11 +1,20 @@
 # AGENTS.md
 
-**Purpose**: Guidance for automated agents and maintainers about CI, formatting, architecture, and implementation guidelines.
+**Purpose**: Guidance for automated agents and maintainers about CI, formatting, and implementation guidelines.
 
 **Related Documentation**:
 - **[README.md](README.md)**: Developer quick start, build instructions, project overview
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
 - **[MANUAL.md](MANUAL.md)**: End-user manual with controls, features, and system-specific information
 - **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
+
+**System-Specific Implementation Details**:
+- **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
+- **[Game Boy](crates/systems/gb/README.md)**: Game Boy / Game Boy Color
+- **[Atari 2600](crates/systems/atari2600/README.md)**: Atari 2600
+- **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
+- **[N64](crates/systems/n64/README.md)**: Nintendo 64
+- **[PC](crates/systems/pc/README.md)**: IBM PC/XT
 
 ---
 
@@ -65,6 +74,31 @@
   - Long-running benchmark jobs exceeding expected time.
 
 ## Architecture
+
+For comprehensive architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+For system-specific implementation details, see each system's README:
+- **[NES](crates/systems/nes/README.md)** - PPU, APU, mappers
+- **[Game Boy](crates/systems/gb/README.md)** - PPU, APU, MBCs
+- **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
+- **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
+- **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
+- **[PC](crates/systems/pc/README.md)** - Video adapters, BIOS
+
+### Quick Reference
+
+**Core Components** (`crates/core/`):
+- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
+- Audio: APU channels, envelopes, mixers
+- Graphics: ZBuffer, ColorOps, palette/tile utilities
+- Traits: System, Cpu, Renderer, AudioChip
+
+**System Modules** (`crates/systems/`):
+- ✅ NES (~90% game coverage), Atari 2600 (complete), Game Boy (complete)
+- 🚧 SNES (basic), N64 (in development)
+- 🧪 PC (experimental)
+
+For detailed component documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Core Module (`crates/core/`)
 
@@ -1338,15 +1372,21 @@ When implementing a new video adapter for the PC system or enhancing existing ad
 
 ## Documentation Structure
 
-All documentation is maintained in the root-level markdown files. **Do NOT create files in a `docs/` directory**.
+All documentation is maintained in **five root-level markdown files**. **Do NOT create files in a `docs/` directory**.
 
 - **README.md**: Developer-focused documentation
   - Building instructions and quick start
-  - Project architecture overview
-  - NES mapper support details
-  - Supported ROM formats
-  - Development and testing guidelines
+  - Project overview and status
+  - Quick links to other documentation
   - Target audience: Contributors and developers setting up the project
+
+- **ARCHITECTURE.md**: Overall emulation system architecture
+  - High-level architecture and design patterns
+  - Core components (CPUs, audio, graphics)
+  - System architecture patterns
+  - Renderer architecture
+  - Links to system-specific READMEs
+  - Target audience: Developers understanding the codebase
 
 - **MANUAL.md**: End-user manual
   - Included in all release packages
@@ -1366,13 +1406,15 @@ All documentation is maintained in the root-level markdown files. **Do NOT creat
   - Target audience: External contributors
 
 - **AGENTS.md**: This file - guidance for automated agents and CI
-  - Project structure and architecture details
   - Implementation philosophy and best practices
   - Test ROM requirements and smoke testing
-  - Audio/PPU implementation guidelines
+  - Implementation guidelines (audio, renderer, video adapters)
   - Settings system and release packaging
   - Debug environment variables (comprehensive reference)
+  - Quick reference to architecture (detailed info in ARCHITECTURE.md)
   - Target audience: Automated agents, CI systems, and maintainers
+
+**System-Specific Implementation Details**: Each system has its own README in `crates/systems/<system>/README.md` with detailed technical information.
 
 ### Documentation Routing
 
@@ -1383,14 +1425,20 @@ When adding new documentation, use this routing guide:
 | **User-facing features** | MANUAL.md | Controls, settings, filters, save states, troubleshooting |
 | **System limitations (user impact)** | MANUAL.md | "Game X won't work because Y", "Feature Z not supported" |
 | **Developer setup** | README.md | Build commands, quick start, project overview |
-| **Architecture details** | AGENTS.md | System modules, CPU implementations, mapper internals |
+| **Overall architecture** | ARCHITECTURE.md | System patterns, core components, design philosophy |
+| **System implementation details** | System README | PPU details, mapper implementations, memory maps |
 | **Implementation guidelines** | AGENTS.md | How to add mappers, audio implementation patterns |
 | **Contribution workflow** | CONTRIBUTING.md | Pre-commit checks, coding standards, PR process |
 | **Debug tooling** | CONTRIBUTING.md | Basic debug variable usage for contributors |
 | **Debug tooling (comprehensive)** | AGENTS.md | All debug variables with full context for agents |
 | **CI/Agent instructions** | AGENTS.md | Test requirements, build artifacts, automation guidelines |
 
-**Never create a `docs/` directory**. All documentation belongs in the four root-level files listed above.
+**Documentation file structure**:
+- **Root level**: README.md, ARCHITECTURE.md, MANUAL.md, CONTRIBUTING.md, AGENTS.md
+- **System level**: `crates/systems/<system>/README.md` (implementation-specific details)
+- **Never create**: `docs/` directory
+
+All architecture and implementation documentation belongs in the root-level files or system READMEs.
 
 ## Release Packaging
 

@@ -56,9 +56,19 @@ Download the latest release from the [Releases](https://github.com/Hexagon/hemul
 
 ## For Developers
 
+See **[ARCHITECTURE.md](ARCHITECTURE.md)** for overall emulation system architecture and design patterns.
+
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow and contribution guidelines.
 
-See **[AGENTS.md](AGENTS.md)** for detailed architecture documentation and implementation guidelines.
+See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
+
+**System-Specific Documentation**:
+- [NES](crates/systems/nes/README.md) - PPU, APU, mappers
+- [Game Boy](crates/systems/gb/README.md) - PPU, APU, MBCs
+- [Atari 2600](crates/systems/atari2600/README.md) - TIA, RIOT, cartridges
+- [SNES](crates/systems/snes/README.md) - PPU modes, memory map
+- [N64](crates/systems/n64/README.md) - RDP renderer, RSP
+- [PC](crates/systems/pc/README.md) - Video adapters, BIOS
 
 ### Quick Start
 
@@ -76,9 +86,23 @@ cargo run --release -p emu_gui
 ./target/release/hemu path/to/your/game.nes
 ```
 
-## Renderer Architecture
+## Architecture
 
-The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [AGENTS.md](AGENTS.md#renderer-implementation-guidelines) for implementation details.
+Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+**Core Components** (`crates/core/`):
+- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
+- Audio: APU channels, envelopes, mixers
+- Graphics: ZBuffer, ColorOps, palette/tile utilities
+- Traits: System, Cpu, Renderer, AudioChip
+
+**System Implementations** (`crates/systems/`):
+- Each system combines core components with system-specific logic
+- See individual [system READMEs](#for-developers) for implementation details
+
+### Renderer Architecture
+
+The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](ARCHITECTURE.md#renderer-architecture) for implementation details.
 
 ## NES Mapper Support
 

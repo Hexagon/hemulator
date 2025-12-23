@@ -4,7 +4,9 @@ Contributions are welcome! Please follow these guidelines.
 
 **For Users**: See [MANUAL.md](MANUAL.md) for usage instructions.
 
-**For Architecture Details**: See [AGENTS.md](AGENTS.md) for implementation guidelines and system architecture.
+**For Architecture Details**: See [ARCHITECTURE.md](ARCHITECTURE.md) for overall emulation system architecture.
+
+**For Implementation Guidelines**: See [AGENTS.md](AGENTS.md) for detailed implementation patterns and CI requirements.
 
 ## Pre-Commit Checks (REQUIRED)
 
