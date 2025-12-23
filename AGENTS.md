@@ -603,10 +603,15 @@ Detailed implementation notes:
     - **Trait-based abstraction** following N64's RdpRenderer pattern:
       - `VideoAdapter` trait: Common interface for all rendering backends
       - `SoftwareCgaAdapter`: CPU-based CGA text mode (80x25) renderer
+      - `CgaGraphicsAdapter`: CGA graphics modes with runtime mode switching
+        - **Text Mode**: 80x25 characters (640x400 pixels)
+        - **Graphics Mode 4**: 320x200, 4 colors (2 bits per pixel)
+        - **Graphics Mode 6**: 640x200, 2 colors (1 bit per pixel)
       - Future support for hardware-accelerated adapters (OpenGL, Vulkan)
     - **Design Benefits**:
       - Clean separation: PcSystem manages state, adapter handles rendering
       - Pluggable backends: Easy to swap implementations at runtime
+      - Mode switching: Graphics adapter supports multiple CGA modes
       - Consistent with other systems' modular renderer architecture
     - **Software CGA Adapter**:
       - Resolution: 640x400 pixels (80x25 characters, 8x16 font)
@@ -614,17 +619,31 @@ Detailed implementation notes:
       - Text mode rendering with attribute bytes (foreground/background)
       - Character cell format: 2 bytes per cell (ASCII + attribute)
       - IBM PC 8x16 font (simplified, basic ASCII coverage)
+    - **CGA Graphics Adapter**:
+      - Mode switching support (text/graphics modes)
+      - **Graphics Mode 4** (320x200, 4-color):
+        - 2 bits per pixel
+        - Palette: Black, Cyan, Magenta, White
+        - Interlaced scanline addressing (even/odd at different offsets)
+        - Uses 16KB VRAM
+      - **Graphics Mode 6** (640x200, 2-color):
+        - 1 bit per pixel (black and white)
+        - Interlaced scanline addressing
+        - Uses 16KB VRAM
+      - Pixel-level drawing support for graphics modes
+      - Compatible with VideoAdapter trait for easy switching
     - **Backward Compatibility**:
       - Legacy `CgaVideo` type alias (deprecated)
       - Re-exports from `video.rs` for existing code
     - **Future Enhancements**:
-      - Graphics modes (320x200, 640x200, etc.)
+      - Additional CGA palettes (green/red/brown)
       - EGA/VGA adapter implementations
       - Hardware-accelerated rendering backends
   - **Display**:
-    - 640x400 frame buffer (text mode 80x25 equivalent)
-    - Currently renders CGA text mode via modular video adapter
-  - All tests pass (84 tests total)
+    - Multiple display modes via CGA graphics adapter
+    - Text mode: 640x400 (80x25 characters)
+    - Graphics modes: 320x200 4-color, 640x200 2-color
+  - All tests pass (93 tests total)
 
 
 - **SNES (`emu_snes`)**: Basic implementation (functional PPU Mode 0)

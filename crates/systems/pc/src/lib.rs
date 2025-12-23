@@ -12,6 +12,7 @@ mod disk;
 mod keyboard;
 mod video;
 mod video_adapter;
+mod video_adapter_cga_graphics; // CGA graphics modes with mode switching
 mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
 mod video_adapter_software;
 
@@ -32,6 +33,7 @@ pub use bios::BootPriority; // Export boot priority
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external use
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
+pub use video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode}; // Export CGA graphics adapter and modes
 
 #[derive(Debug, Error)]
 pub enum PcError {

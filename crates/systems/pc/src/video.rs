@@ -10,6 +10,8 @@
 
 // Re-export items from the new modular system for compatibility
 #[allow(unused_imports)] // Re-exported for public API
+pub use crate::video_adapter_cga_graphics::{CgaGraphicsAdapter, CgaMode};
+#[allow(unused_imports)] // Re-exported for public API
 pub use crate::video_adapter_software::{CgaColor, SoftwareCgaAdapter};
 
 /// Legacy type alias for backward compatibility
