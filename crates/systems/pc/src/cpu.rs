@@ -62,8 +62,8 @@ impl PcCpu {
 
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
-        // Check if the next instruction is INT 13h (BIOS disk services)
-        // Opcode 0xCD (INT) followed by 0x13
+        // Check if the next instruction is a BIOS/DOS interrupt we need to handle
+        // Opcode 0xCD (INT) followed by interrupt number
         let cs = self.cpu.cs;
         let ip = self.cpu.ip;
         let physical_addr = ((cs as u32) << 4) + (ip as u32);
@@ -73,9 +73,13 @@ impl PcCpu {
         if opcode == 0xCD {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);
-            if int_num == 0x13 {
-                // Handle INT 13h - BIOS disk services
-                return self.handle_int13h();
+            match int_num {
+                0x10 => return self.handle_int10h(), // Video BIOS
+                0x13 => return self.handle_int13h(), // Disk services
+                0x16 => return self.handle_int16h(), // Keyboard services
+                0x20 => return self.handle_int20h(), // DOS: Program terminate
+                0x21 => return self.handle_int21h(), // DOS API
+                _ => {}                              // Let CPU handle other interrupts normally
             }
         }
 
@@ -391,6 +395,200 @@ impl PcCpu {
         // Bit 0 = right shift, Bit 1 = left shift, etc.
         // For now, return 0 (no keys pressed)
         self.cpu.ax &= 0xFF00;
+        51
+    }
+
+    /// Handle INT 20h - DOS: Program terminate
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int20h(&mut self) -> u32 {
+        // Skip the INT 20h instruction (2 bytes: 0xCD 0x20)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Program terminate - for now, just halt
+        // In a real DOS environment, this would return to COMMAND.COM
+        // We could set a flag here to indicate program termination
+        51
+    }
+
+    /// Handle INT 21h - DOS API
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int21h(&mut self) -> u32 {
+        // Skip the INT 21h instruction (2 bytes: 0xCD 0x21)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => self.int21h_terminate(),            // Program terminate
+            0x01 => self.int21h_read_char_stdin(),      // Read character from stdin
+            0x02 => self.int21h_write_char_stdout(),    // Write character to stdout
+            0x06 => self.int21h_direct_console_io(),    // Direct console I/O
+            0x07 => self.int21h_direct_stdin(),         // Direct stdin input (no echo)
+            0x08 => self.int21h_stdin_no_echo(),        // Read stdin without echo
+            0x09 => self.int21h_write_string(),         // Write string to stdout
+            0x0A => self.int21h_buffered_input(),       // Buffered input
+            0x0B => self.int21h_check_stdin(),          // Check stdin status
+            0x25 => self.int21h_set_interrupt_vector(), // Set interrupt vector
+            0x35 => self.int21h_get_interrupt_vector(), // Get interrupt vector
+            0x4C => self.int21h_terminate_with_code(),  // Terminate with return code
+            _ => {
+                // Unsupported function - just return
+                51
+            }
+        }
+    }
+
+    /// INT 21h, AH=00h: Program terminate
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_terminate(&mut self) -> u32 {
+        // Same as INT 20h
+        51
+    }
+
+    /// INT 21h, AH=01h: Read character from stdin with echo
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_read_char_stdin(&mut self) -> u32 {
+        // Returns: AL = character read
+        // For now, return 0 (no input available)
+        self.cpu.ax &= 0xFF00;
+        51
+    }
+
+    /// INT 21h, AH=02h: Write character to stdout
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_write_char_stdout(&mut self) -> u32 {
+        // DL = character to write
+        let ch = (self.cpu.dx & 0xFF) as u8;
+
+        // Use INT 10h teletype output to display character
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u16);
+        self.int10h_teletype_output();
+        self.cpu.ax = saved_ax;
+
+        51
+    }
+
+    /// INT 21h, AH=06h: Direct console I/O
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_direct_console_io(&mut self) -> u32 {
+        // DL = 0xFF: read character, else: write character
+        let dl = (self.cpu.dx & 0xFF) as u8;
+
+        if dl == 0xFF {
+            // Read character - for now, return 0 and set ZF
+            self.cpu.ax &= 0xFF00;
+            self.set_zero_flag(true);
+        } else {
+            // Write character
+            let saved_ax = self.cpu.ax;
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (dl as u16);
+            self.int10h_teletype_output();
+            self.cpu.ax = saved_ax;
+        }
+
+        51
+    }
+
+    /// INT 21h, AH=07h: Direct stdin input without echo
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_direct_stdin(&mut self) -> u32 {
+        // Returns: AL = character read
+        self.cpu.ax &= 0xFF00;
+        51
+    }
+
+    /// INT 21h, AH=08h: Read stdin without echo
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_stdin_no_echo(&mut self) -> u32 {
+        // Returns: AL = character read
+        self.cpu.ax &= 0xFF00;
+        51
+    }
+
+    /// INT 21h, AH=09h: Write string to stdout
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_write_string(&mut self) -> u32 {
+        // DS:DX = pointer to string (terminated by '$')
+        let ds = self.cpu.ds as u32;
+        let dx = self.cpu.dx as u32;
+        let string_addr = (ds << 4) + dx;
+
+        // Read and display characters until '$'
+        let mut offset = 0;
+        loop {
+            let ch = self.cpu.memory.read(string_addr + offset);
+            if ch == b'$' {
+                break;
+            }
+
+            // Use INT 10h teletype output
+            let saved_ax = self.cpu.ax;
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u16);
+            self.int10h_teletype_output();
+            self.cpu.ax = saved_ax;
+
+            offset += 1;
+            if offset > 1000 {
+                // Safety limit to prevent infinite loops
+                break;
+            }
+        }
+
+        51
+    }
+
+    /// INT 21h, AH=0Ah: Buffered input
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_buffered_input(&mut self) -> u32 {
+        // DS:DX = pointer to input buffer
+        // Buffer format: [max_length, actual_length, ...characters...]
+        // For now, just return empty input
+        let ds = self.cpu.ds as u32;
+        let dx = self.cpu.dx as u32;
+        let buffer_addr = (ds << 4) + dx;
+
+        // Set actual length to 0
+        self.cpu.memory.write(buffer_addr + 1, 0);
+
+        51
+    }
+
+    /// INT 21h, AH=0Bh: Check stdin status
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_check_stdin(&mut self) -> u32 {
+        // Returns: AL = 0xFF if character available, 0x00 if not
+        // For now, always return 0x00 (no input)
+        self.cpu.ax &= 0xFF00;
+        51
+    }
+
+    /// INT 21h, AH=25h: Set interrupt vector
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_set_interrupt_vector(&mut self) -> u32 {
+        // AL = interrupt number, DS:DX = new vector
+        // For now, just acknowledge (interrupt vectors not fully emulated)
+        51
+    }
+
+    /// INT 21h, AH=35h: Get interrupt vector
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_get_interrupt_vector(&mut self) -> u32 {
+        // AL = interrupt number
+        // Returns: ES:BX = interrupt vector
+        // For now, return a dummy value
+        self.cpu.es = 0x0000;
+        self.cpu.bx = 0x0000;
+        51
+    }
+
+    /// INT 21h, AH=4Ch: Terminate with return code
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_terminate_with_code(&mut self) -> u32 {
+        // AL = return code
+        // For now, just halt like INT 20h
         51
     }
 
