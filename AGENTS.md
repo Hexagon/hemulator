@@ -807,10 +807,27 @@ Detailed implementation notes:
       - No HDMA effects, mosaic, or color math
       - Only 32x32 tilemap size supported (64x32, 32x64, 64x64 not implemented)
     - **APU (SPC700)**: Not implemented - no audio
-    - Controller support not implemented
     - Only LoROM mapping - no HiROM, ExHiROM
     - No enhancement chips (SuperFX, DSP, SA-1, etc.)
     - Frame-based timing (not cycle-accurate)
+  - **Controller Support**:
+    - Implementation in `crates/systems/snes/bus.rs`
+    - Full SNES controller support (12 buttons per controller, 2 controllers)
+    - **Registers**:
+      - $4016 - JOYWR - Controller strobe (latch/shift control)
+      - $4016 - JOYSER0 - Controller 1 serial data read
+      - $4017 - JOYSER1 - Controller 2 serial data read
+      - $4218-$421B - JOY1L/H, JOY2L/H - Auto-joypad read registers
+    - **Button Layout** (16-bit state):
+      - Bit 15: B, 14: Y, 13: Select, 12: Start
+      - Bit 11: Up, 10: Down, 9: Left, 8: Right
+      - Bit 7: A, 6: X, 5: L, 4: R
+    - **Features**:
+      - Serial read protocol with 16-bit shift register
+      - Controller strobe/latch mechanism
+      - Auto-joypad read for easy polling
+      - Dual controller support (Player 1 & 2)
+    - **API**: `set_controller(idx, state)` method with button constants
   - **PPU (Picture Processing Unit)**:
     - Implementation in `crates/systems/snes/ppu.rs`
     - VRAM access via registers $2116-$2119 (word-addressed, 64KB)
@@ -841,7 +858,7 @@ Detailed implementation notes:
       - Horizontal and vertical flipping
       - Configurable VRAM base address
     - **NOT implemented**: Modes 2-7, windows, HDMA, mosaic, color math
-  - All tests pass (28 tests: 5 cartridge, 18 PPU including sprites/scrolling/modes, 5 system)
+  - All tests pass (34 tests: 5 cartridge, 18 PPU including sprites/scrolling/modes, 6 controller, 5 system)
 
 - **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation

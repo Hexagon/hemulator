@@ -536,8 +536,8 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: 🚧 Functional (Modes 0 & 1, sprites working - moderate game support)  
-**Coverage**: Moderate - CPU complete, Modes 0 & 1 PPU functional, sprites working
+**Status**: ✅ Functional (Modes 0 & 1, sprites, scrolling, input - ready for gameplay)  
+**Coverage**: Good - CPU complete, Modes 0 & 1 PPU functional, sprites, scrolling, controller support
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -556,6 +556,7 @@ The emulator supports the following cartridge banking schemes:
   - Layer enable/disable control
   - Proper tile attribute handling
   - 256x224 resolution
+- **Controller Support**: Full SNES controller with 12 buttons (A, B, X, Y, L, R, Start, Select, D-pad)
 - Save states (F5/F6)
 
 **Known Limitations**:
@@ -564,10 +565,9 @@ The emulator supports the following cartridge banking schemes:
   - No HDMA, mosaic, or color math
   - Only 32x32 tilemap size (other sizes not implemented)
 - **Audio**: APU not implemented - silent gameplay
-- **Input**: Controller support not implemented
 - **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
 - **Timing**: Frame-based - not cycle-accurate
-- **Status**: Can run simple games using Mode 0 or Mode 1 with sprites. Most commercial titles that use these modes should display graphics correctly, but audio and input are missing.
+- **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio).
 
 ### N64 (Nintendo 64)
 
