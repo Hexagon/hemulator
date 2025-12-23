@@ -31,6 +31,8 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 The N64 RDP uses a **pluggable renderer architecture** that allows switching between different rendering backends.
 
+For detailed architecture documentation, see the **[Renderer Implementation Guidelines](../../../AGENTS.md#renderer-implementation-guidelines)** section in AGENTS.md.
+
 ### Software Renderer (Default)
 
 **Location**: `src/rdp_renderer_software.rs`
@@ -68,7 +70,7 @@ The N64 RDP uses a **pluggable renderer architecture** that allows switching bet
 - Hardware depth testing
 - Shader programs for flat/Gouraud shading
 
-See `N64_RENDERER_ARCHITECTURE.md` in the repository root for detailed architecture documentation.
+See `rdp.rs` for RDP command implementation details. For overall renderer architecture, see [AGENTS.md](../../../AGENTS.md#renderer-implementation-guidelines).
 
 ## Building
 
@@ -173,7 +175,7 @@ N64System
 
 ## Known Limitations
 
-See `MANUAL.md` and `N64_RENDERER_ARCHITECTURE.md` for comprehensive lists.
+See [MANUAL.md](../../../MANUAL.md#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Critical limitations**:
 1. No RSP - can't run real games (no geometry processing)
@@ -211,9 +213,9 @@ When adding features to the N64 emulator:
 
 ## References
 
-- **N64 Architecture**: See `N64_RENDERER_ARCHITECTURE.md`
+- **Project Documentation**: See [README.md](../../../README.md), [MANUAL.md](../../../MANUAL.md), and [AGENTS.md](../../../AGENTS.md)
 - **RDP Commands**: Documented in `rdp.rs`
-- **Test ROMs**: See `test_roms/n64/README.md` (if exists)
+- **Test ROMs**: See `../../../test_roms/README.md`
 
 ## License
 
