@@ -15,10 +15,12 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod ppu;
+pub mod ppu_renderer;
 
 use bus::SnesBus;
 use cpu::SnesCpu;
 use emu_core::{types::Frame, MountPointInfo, System};
+use ppu_renderer::{SnesPpuRenderer, SoftwareSnesPpuRenderer};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -45,6 +47,7 @@ pub struct SnesSystem {
     cpu: SnesCpu,
     frame_cycles: u32,
     current_cycles: u32,
+    renderer: Box<dyn SnesPpuRenderer>,
 }
 
 impl SnesSystem {
@@ -55,6 +58,7 @@ impl SnesSystem {
             cpu: SnesCpu::new(bus),
             frame_cycles: 89342, // ~3.58MHz / 60Hz (NTSC)
             current_cycles: 0,
+            renderer: Box::new(SoftwareSnesPpuRenderer::new()),
         }
     }
 
@@ -104,9 +108,9 @@ impl System for SnesSystem {
             self.current_cycles += cycles;
         }
 
-        // Render frame from PPU
-        let frame = self.cpu.bus().ppu().render_frame();
-        Ok(frame)
+        // Render frame using the renderer
+        self.renderer.render_frame(self.cpu.bus().ppu());
+        Ok(self.renderer.get_frame().clone())
     }
 
     fn save_state(&self) -> serde_json::Value {

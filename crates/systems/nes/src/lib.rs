@@ -431,7 +431,8 @@ impl System for NesSystem {
                         // effect during that scanline. MMC3 IRQ-triggered bank changes typically
                         // affect the *next* scanline.
                         if rendered_scanlines < 240 {
-                            self.renderer.render_scanline(&mut b.ppu, rendered_scanlines);
+                            self.renderer
+                                .render_scanline(&mut b.ppu, rendered_scanlines);
                             rendered_scanlines += 1;
                         }
 
@@ -471,7 +472,8 @@ impl System for NesSystem {
         if rendered_scanlines < 240 {
             if let Some(b) = self.cpu.bus_mut() {
                 while rendered_scanlines < 240 {
-                    self.renderer.render_scanline(&mut b.ppu, rendered_scanlines);
+                    self.renderer
+                        .render_scanline(&mut b.ppu, rendered_scanlines);
                     rendered_scanlines += 1;
                 }
             }
