@@ -20,7 +20,7 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **Keyboard** - Full passthrough with host modifier
 - ✅ **INT 16h Integration** - Keyboard BIOS services connected to controller
 - ✅ **Mount System** - Multi-slot disk image mounting with validation
-- ✅ **Save States** - Enhanced state serialization (v2) with CPU model and boot priority
+- ✅ **Persistent Disk State** - Disk images are modified in-place (writes persist to files)
 
 ### Video Adapter Support
 
@@ -144,9 +144,7 @@ The PC crate includes comprehensive tests:
   - Bus tests (memory access)
   - Disk controller tests
   - Keyboard tests (including peek functionality)
-  - **Save state v2 tests** (CPU model, boot priority persistence)
   - **Mount validation tests** (disk size validation)
-  - **Backward compatibility tests** (v1 save state loading)
   - System integration tests
 
 - **Test BIOS**: `test_roms/pc/bios.bin` built from assembly
@@ -164,21 +162,19 @@ let mut pc = PcSystem::with_cpu_model(emu_pc::PcCpuModel::Intel80286);
 // Switch to VGA adapter
 pc.set_video_adapter(Box::new(SoftwareVgaAdapter::new()));
 
-// Load disk image (optional)
+// Load disk image
 let disk_data = std::fs::read("boot.img")?;
 pc.mount("FloppyA", &disk_data)?;
 
 // Set boot priority
 pc.set_boot_priority(BootPriority::FloppyFirst);
 
-// Run one frame
+// Run the system - disk writes happen in-memory
 let frame = pc.step_frame()?;
 
-// Save state (v2 format with CPU model and boot priority)
-let state = pc.save_state();
-
-// Later, restore state
-pc.load_state(&state)?;
+// Note: PC systems don't use save states like ROM-based consoles
+// Disk state changes are in-memory on the mounted disk image
+// To persist changes, you would need to write the disk image back to disk
 ```
 
 ## Keyboard Input
@@ -197,6 +193,11 @@ Without modifier, function keys go to DOS program.
 See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
+- **No save states**: PC systems don't use save states like ROM-based consoles
+  - System state is preserved in the disk images themselves
+  - Disk writes are performed in-memory on the mounted disk image
+  - To persist changes, the disk image would need to be written back to the file system
+  - This is fundamentally different from NES/GB where ROM is read-only and state is separate
 - INT 10h (Video BIOS) is partially implemented (teletype, cursor control work; mode switching is stub)
 - INT 16h (Keyboard) read/check functions work; shift flags is stub
 - INT 21h (DOS API) is partially implemented (character I/O works; file operations are stubs)

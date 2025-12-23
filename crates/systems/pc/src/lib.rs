@@ -22,7 +22,7 @@ mod video_adapter_vga_software; // VGA software renderer
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
-use cpu::{CpuRegisters, PcCpu};
+use cpu::PcCpu;
 use emu_core::{
     cpu_8086::{CpuModel, Memory8086},
     types::Frame,
@@ -276,57 +276,28 @@ impl System for PcSystem {
     }
 
     fn save_state(&self) -> Value {
-        let regs = self.cpu.get_registers();
+        // PC systems don't use save states like consoles
+        // State is preserved in the disk images themselves
+        // This is kept for API compatibility but returns minimal data
         serde_json::json!({
-            "version": 2,
+            "version": 1,
             "system": "pc",
-            "registers": regs,
-            "cycles": self.cycles,
-            "cpu_model": format!("{:?}", self.cpu.model()),
-            "boot_priority": self.boot_priority(),
-            "video_adapter": self.video.name(),
+            "note": "PC state is preserved in disk images, not save states"
         })
     }
 
-    fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
-        // Handle both v1 and v2 save states
-        let version = state.get("version").and_then(|v| v.as_u64()).unwrap_or(1);
-
-        if let Some(regs) = state.get("registers") {
-            let regs: CpuRegisters = serde_json::from_value(regs.clone())?;
-            self.cpu.set_registers(&regs);
-        }
-
-        if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
-            self.cycles = cycles;
-        }
-
-        // Restore CPU model if available (v2+)
-        if version >= 2 {
-            if let Some(model_str) = state.get("cpu_model").and_then(|v| v.as_str()) {
-                let model = match model_str {
-                    "Intel8086" => CpuModel::Intel8086,
-                    "Intel8088" => CpuModel::Intel8088,
-                    "Intel80186" => CpuModel::Intel80186,
-                    "Intel80188" => CpuModel::Intel80188,
-                    "Intel80286" => CpuModel::Intel80286,
-                    _ => CpuModel::Intel8086, // Default fallback
-                };
-                self.set_cpu_model(model);
-            }
-
-            // Restore boot priority if available
-            if let Some(priority) = state.get("boot_priority") {
-                let priority: BootPriority = serde_json::from_value(priority.clone())?;
-                self.set_boot_priority(priority);
-            }
-        }
-
+    fn load_state(&mut self, _state: &Value) -> Result<(), serde_json::Error> {
+        // PC systems don't use save states
+        // This is a no-op for API compatibility
         Ok(())
     }
 
     fn supports_save_states(&self) -> bool {
-        true
+        // PC systems don't use save states like consoles
+        // State is preserved in disk images (which can be modified and saved)
+        // System configuration (CPU model, boot priority) should be set via
+        // the GUI or command-line arguments, not save states
+        false
     }
 
     fn mount_points(&self) -> Vec<MountPointInfo> {
@@ -493,12 +464,17 @@ mod tests {
     fn test_save_load_state() {
         let sys = PcSystem::new();
 
+        // PC systems don't use save states (returns minimal placeholder)
         let state = sys.save_state();
         assert_eq!(state["system"], "pc");
-        assert_eq!(state["version"], 2);
+        assert_eq!(state["version"], 1);
+        assert_eq!(
+            state["note"],
+            "PC state is preserved in disk images, not save states"
+        );
 
         let mut sys2 = PcSystem::new();
-        assert!(sys2.load_state(&state).is_ok());
+        assert!(sys2.load_state(&state).is_ok()); // Should be a no-op
     }
 
     #[test]
@@ -564,7 +540,8 @@ mod tests {
     #[test]
     fn test_supports_save_states() {
         let sys = PcSystem::new();
-        assert!(sys.supports_save_states());
+        // PC systems don't support save states - state is in disk images
+        assert!(!sys.supports_save_states());
     }
 
     #[test]
@@ -930,22 +907,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cpu_model_preserved_in_save_state() {
-        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
-
-        // Save state
-        let state = sys.save_state();
-
-        // Create new system with different CPU model
-        let mut sys2 = PcSystem::with_cpu_model(CpuModel::Intel8086);
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel8086);
-
-        // Load state - should restore CPU model
-        assert!(sys2.load_state(&state).is_ok());
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel80186);
-    }
-
-    #[test]
     fn test_all_cpu_models() {
         for model in &[
             CpuModel::Intel8086,
@@ -1062,80 +1023,6 @@ mod tests {
         sys.set_video_adapter(Box::new(SoftwareCgaAdapter::new()));
         assert_eq!(sys.video_adapter_name(), "Software CGA Adapter");
         assert_eq!(sys.framebuffer_dimensions(), (640, 400));
-    }
-
-    #[test]
-    fn test_save_state_v2_includes_cpu_model() {
-        let sys = PcSystem::with_cpu_model(CpuModel::Intel80186);
-
-        let state = sys.save_state();
-        assert_eq!(state["version"], 2);
-        assert_eq!(state["cpu_model"], "Intel80186");
-    }
-
-    #[test]
-    fn test_save_state_v2_includes_boot_priority() {
-        let mut sys = PcSystem::new();
-        sys.set_boot_priority(crate::BootPriority::HardDriveFirst);
-
-        let state = sys.save_state();
-        assert_eq!(state["version"], 2);
-        assert_eq!(state["boot_priority"], "HardDriveFirst");
-    }
-
-    #[test]
-    fn test_load_state_v2_restores_cpu_model() {
-        let sys = PcSystem::with_cpu_model(CpuModel::Intel80286);
-        let state = sys.save_state();
-
-        let mut sys2 = PcSystem::with_cpu_model(CpuModel::Intel8086);
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel8086);
-
-        sys2.load_state(&state).unwrap();
-        assert_eq!(sys2.cpu_model(), CpuModel::Intel80286);
-    }
-
-    #[test]
-    fn test_load_state_v2_restores_boot_priority() {
-        let mut sys = PcSystem::new();
-        sys.set_boot_priority(crate::BootPriority::FloppyOnly);
-        let state = sys.save_state();
-
-        let mut sys2 = PcSystem::new();
-        sys2.set_boot_priority(crate::BootPriority::HardDriveFirst);
-
-        sys2.load_state(&state).unwrap();
-        assert_eq!(sys2.boot_priority(), crate::BootPriority::FloppyOnly);
-    }
-
-    #[test]
-    fn test_load_state_v1_backward_compatibility() {
-        // Create a v1 state manually
-        let state = serde_json::json!({
-            "version": 1,
-            "system": "pc",
-            "registers": {
-                "ax": 0x1234,
-                "bx": 0x5678,
-                "cx": 0,
-                "dx": 0,
-                "si": 0,
-                "di": 0,
-                "bp": 0,
-                "sp": 0xFFFE,
-                "cs": 0xFFFF,
-                "ds": 0,
-                "es": 0,
-                "ss": 0,
-                "ip": 0,
-                "flags": 0,
-            },
-            "cycles": 12345,
-        });
-
-        let mut sys = PcSystem::new();
-        assert!(sys.load_state(&state).is_ok());
-        assert_eq!(sys.cycles, 12345);
     }
 
     #[test]

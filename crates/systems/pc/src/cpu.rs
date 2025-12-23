@@ -875,6 +875,9 @@ impl PcCpu {
     }
 
     /// Set CPU register state (for loading save states)
+    ///
+    /// Note: PC systems don't use save states, but this is kept for API compatibility
+    #[allow(dead_code)]
     pub fn set_registers(&mut self, regs: &CpuRegisters) {
         self.cpu.ax = regs.ax;
         self.cpu.bx = regs.bx;
