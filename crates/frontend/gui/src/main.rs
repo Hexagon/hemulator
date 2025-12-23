@@ -282,7 +282,7 @@ impl EmulatorSystem {
     fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         match self {
             EmulatorSystem::NES(sys) => sys.get_audio_samples(count),
-            EmulatorSystem::GameBoy(_) => vec![0; count], // TODO: Implement audio for Game Boy
+            EmulatorSystem::GameBoy(sys) => sys.get_audio_samples(count),
             EmulatorSystem::Atari2600(sys) => sys.get_audio_samples(count),
             EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES

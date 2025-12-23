@@ -93,13 +93,13 @@
 //! - ✅ APU: 4 sound channels (pulse 1/2, wave, noise)
 //! - ✅ APU: Frame sequencer and envelope/sweep control
 //! - ✅ APU: Audio sample generation at 44.1 kHz
+//! - ✅ APU: Integrated with frontend for audio output
 //! - ✅ Timer: Programmable timer with DIV, TIMA, TMA, TAC registers
 //! - ✅ Interrupts: VBlank and Timer interrupts (basic support)
 //!
 //! ## Not Yet Implemented
 //! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
 //! - ❌ Game Boy Color: CGB mode, color palettes
-//! - ❌ Audio: Frontend integration (APU implemented but not connected)
 //! - ❌ Serial: Link cable communication
 //! - ❌ Interrupts: Full interrupt handling (basic support implemented)
 //! - ❌ DMA: OAM DMA transfer
@@ -156,6 +156,8 @@ use bus::GbBus;
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
     cart_loaded: bool,
+    /// Accumulated cycles for audio generation
+    audio_cycles_accumulated: u32,
 }
 
 impl Default for GbSystem {
@@ -173,6 +175,7 @@ impl GbSystem {
         Self {
             cpu,
             cart_loaded: false,
+            audio_cycles_accumulated: 0,
         }
     }
 
@@ -180,6 +183,35 @@ impl GbSystem {
     /// Bits: 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
     pub fn set_controller(&mut self, state: u8) {
         self.cpu.memory.set_buttons(state);
+    }
+
+    /// Get audio samples from the APU
+    /// Generates samples based on accumulated CPU cycles
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        // Calculate cycles needed for requested sample count
+        // Sample rate: 44100 Hz, CPU clock: 4.194304 MHz
+        // Cycles per sample: 4194304 / 44100 ≈ 95.1
+        const CYCLES_PER_SAMPLE: u32 = 95;
+
+        let cycles_needed = count as u32 * CYCLES_PER_SAMPLE;
+
+        // Use accumulated cycles from actual emulation
+        let cycles_to_use = self.audio_cycles_accumulated.min(cycles_needed);
+
+        let samples = self.cpu.memory.apu.generate_samples(cycles_to_use);
+
+        // Subtract used cycles
+        self.audio_cycles_accumulated = self.audio_cycles_accumulated.saturating_sub(cycles_to_use);
+
+        // Pad with silence if we don't have enough samples
+        let mut result = samples;
+        while result.len() < count {
+            result.push(0);
+        }
+
+        // Truncate if we have too many
+        result.truncate(count);
+        result
     }
 }
 
@@ -212,6 +244,9 @@ impl System for GbSystem {
         while cycles < CYCLES_PER_FRAME {
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
+
+            // Accumulate cycles for audio generation
+            self.audio_cycles_accumulated += cpu_cycles;
 
             // Step timer and handle timer interrupt
             if self.cpu.memory.timer.step(cpu_cycles) {
@@ -434,6 +469,29 @@ mod tests {
         assert_eq!(sys.cpu.memory.ppu.lcdc, 0x91);
         assert_eq!(sys.cpu.memory.ppu.bgp, 0xFC);
         assert_eq!(sys.cpu.memory.ppu.ly, 0);
+    }
+
+    #[test]
+    fn test_gb_audio_samples() {
+        let mut sys = GbSystem::new();
+
+        // Load a minimal ROM to allow stepping
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Run a few frames to accumulate cycles
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+
+        // Request audio samples
+        let samples = sys.get_audio_samples(1000);
+
+        // Verify we got the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // Samples should be valid i16 values (no need to check range, type system ensures this)
+        // Audio system should not crash when generating samples
     }
 
     #[test]
