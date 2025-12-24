@@ -448,7 +448,7 @@ fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_mes
 }
 
 /// Save a screenshot to the screenshots directory
-/// Format: screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png
+/// Format: screenshots/\<system-name\>/YYYYMMDDHHMMSSRRR.png
 /// where RRR is a random number between 000 and 999
 fn save_screenshot(
     buffer: &[u32],
