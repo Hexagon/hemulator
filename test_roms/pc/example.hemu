@@ -5,5 +5,8 @@
     "FloppyA": "dos622_boot.img",
     "HardDrive": "freedos.img"
   },
-  "boot_priority": "FloppyFirst"
+  "boot_priority": "FloppyFirst",
+  "cpu_model": "Intel8086",
+  "memory_kb": 640,
+  "video_mode": "CGA"
 }
