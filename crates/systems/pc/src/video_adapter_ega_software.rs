@@ -13,6 +13,7 @@
 //! - 16 colors can be selected from the 64-color palette at a time
 //! - Planar memory organization (4 bit planes)
 
+use super::font;
 use super::video_adapter::VideoAdapter;
 use emu_core::types::Frame;
 
@@ -188,7 +189,7 @@ impl SoftwareEgaAdapter {
     ) {
         let fg_rgb = self.get_palette_color(fg_color);
         let bg_rgb = self.get_palette_color(bg_color);
-        let glyph = get_ega_font_glyph(char_code);
+        let glyph = font::get_font_8x14(char_code);
 
         for row in 0..self.char_height {
             let byte_idx = row.min(glyph.len() - 1);
@@ -340,62 +341,6 @@ impl VideoAdapter for SoftwareEgaAdapter {
     fn resize(&mut self, width: usize, height: usize) {
         self.init(width, height);
     }
-}
-
-/// Get EGA font glyph data (14-scanline font)
-fn get_ega_font_glyph(char_code: u8) -> &'static [u8] {
-    static FONT_DATA: [[u8; 14]; 256] = generate_ega_font();
-
-    let glyph = &FONT_DATA[char_code as usize];
-
-    if char_code != 0x20 && glyph.iter().all(|&b| b == 0) {
-        static BOX_GLYPH: [u8; 14] = [
-            0x00, 0x7E, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00,
-        ];
-        &BOX_GLYPH
-    } else {
-        glyph
-    }
-}
-
-/// Generate EGA font (8x14 characters)
-const fn generate_ega_font() -> [[u8; 14]; 256] {
-    let mut font = [[0u8; 14]; 256];
-
-    // Space (0x20)
-    font[0x20] = [0x00; 14];
-
-    // Exclamation mark (0x21)
-    font[0x21] = [
-        0x00, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00,
-    ];
-
-    // Letter 'A' (0x41)
-    font[0x41] = [
-        0x00, 0x00, 0x18, 0x3C, 0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x66, 0x00, 0x00,
-    ];
-
-    // Letter 'H' (0x48)
-    font[0x48] = [
-        0x00, 0x00, 0x66, 0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x66, 0x66, 0x00, 0x00,
-    ];
-
-    // Letter 'e' (0x65)
-    font[0x65] = [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x66, 0x66, 0x7E, 0x60, 0x60, 0x3E, 0x00, 0x00,
-    ];
-
-    // Letter 'l' (0x6C)
-    font[0x6C] = [
-        0x00, 0x00, 0x38, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00, 0x00,
-    ];
-
-    // Letter 'o' (0x6F)
-    font[0x6F] = [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00, 0x00,
-    ];
-
-    font
 }
 
 #[cfg(test)]
