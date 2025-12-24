@@ -25,9 +25,9 @@ mod boot_priority {
 ///
 /// This BIOS:
 /// 1. Initializes segment registers and stack  
-/// 2. Loops indefinitely (boot sector loaded by emulator)
+/// 2. Jumps to boot sector at 0x0000:0x7C00 (loaded by emulator)
 ///
-/// Note: The "Hemu" logo is displayed by writing directly to video RAM
+/// Note: The POST screen is displayed by writing directly to video RAM
 /// from the emulator, not from BIOS code.
 ///
 /// Size: 64KB (standard BIOS size)
@@ -43,34 +43,30 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0x8E, 0xD0, // MOV SS, AX
         0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
         0xFB, // STI - enable interrupts
-        0xEB, 0xFE, // JMP short -2 (infinite loop - emulator loads boot sector)
+        // Jump to boot sector at 0x0000:0x7C00
+        0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
     ];
     bios[0..init_code.len()].copy_from_slice(&init_code);
 
     // BIOS entry point at 0xFFF0 - CPU starts here (CS=0xFFFF, IP=0x0000)
-    // Jump backward to start of BIOS code at offset 0
-    // From 0xFFF0 to 0x0000 is -0xFFF0, but in 16-bit: 0x10 forward wraps to 0
-    let entry_point_offset = 0xFFF0;
-    let entry_code: Vec<u8> = vec![
-        // We can't use a far jump, and near jump is too far
-        // So let's just put the code here and skip the signature
-        0xFA, // CLI
-        0xB8, 0x00, 0x00, // MOV AX, 0
-        0x8E, 0xD8, // MOV DS, AX
-        0x8E, 0xC0, // MOV ES, AX
-        0x8E, 0xD0, // MOV SS, AX
-        0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
-        0xEB, 0x00, // JMP short +0 (skip to next instruction - placeholder)
-    ];
-    bios[entry_point_offset..entry_point_offset + entry_code.len()].copy_from_slice(&entry_code);
-
-    // Add BIOS signature
+    // Add BIOS signature first at 0xFFF5 (date)
     let date_offset = 0xFFF5;
     let date_str = b"12/23/24";
     bios[date_offset..date_offset + date_str.len()].copy_from_slice(date_str);
 
-    // System model byte (0xFE = PC XT)
+    // System model byte at 0xFFFE (PC XT)
     bios[0xFFFE] = 0xFE;
+
+    // Entry code at 0xFFF0 - must not overwrite date or model byte
+    // We have space from 0xFFF0 to 0xFFF4 (5 bytes) before the date
+    let entry_point_offset = 0xFFF0;
+    let entry_code: Vec<u8> = vec![
+        // Jump to main init code at offset 0
+        // We can't use JMP FAR to 0xFFFF:0x0000 (would wrap incorrectly)
+        // Instead, JMP FAR to 0x0000:0x0000 which contains our init code
+        0xEA, 0x00, 0x00, 0x00, 0x00, // JMP FAR 0x0000:0x0000 (5 bytes - fits!)
+    ];
+    bios[entry_point_offset..entry_point_offset + entry_code.len()].copy_from_slice(&entry_code);
 
     bios
 }
@@ -268,8 +264,8 @@ mod tests {
         // Check that entry point has code (not all zeros)
         assert_ne!(bios[0xFFF0], 0x00);
 
-        // Check CLI instruction at entry point
-        assert_eq!(bios[0xFFF0], 0xFA); // CLI
+        // Check JMP FAR instruction at entry point (0xEA = JMP FAR)
+        assert_eq!(bios[0xFFF0], 0xEA); // JMP FAR
 
         // Check system model byte
         assert_eq!(bios[0xFFFE], 0xFE); // PC XT

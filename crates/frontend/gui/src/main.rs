@@ -902,24 +902,15 @@ fn main() {
                     }
                 }
                 Ok(SystemType::PC) => {
-                    status_message = "Detected PC executable - Initializing...".to_string();
-                    rom_hash = Some(GameSaves::rom_hash(&data));
-                    let mut pc_sys = emu_pc::PcSystem::new();
-                    if let Err(e) = pc_sys.mount("Executable", &data) {
-                        eprintln!("Failed to load PC executable: {}", e);
-                        status_message = format!("Error: {}", e);
-                        rom_hash = None;
-                    } else {
-                        rom_loaded = true;
-                        sys = EmulatorSystem::PC(Box::new(pc_sys));
-                        settings.set_mount_point("Executable", p.clone());
-                        settings.last_rom_path = Some(p.clone());
-                        if let Err(e) = settings.save() {
-                            eprintln!("Warning: Failed to save settings: {}", e);
-                        }
-                        status_message = "PC executable loaded".to_string();
-                        println!("Loaded PC executable: {}", p);
-                    }
+                    // PC executables should be on disk images, not loaded directly
+                    // Create a new PC system and let user mount disk images via F3
+                    status_message = "PC system detected. Use F3 to mount disk images.".to_string();
+                    rom_hash = None; // PC systems don't use ROM hash
+                    let pc_sys = emu_pc::PcSystem::new();
+                    sys = EmulatorSystem::PC(Box::new(pc_sys));
+                    // Don't save mount points for PC since they use disk images
+                    eprintln!("PC executable detected. Please mount disk images using F3.");
+                    println!("Initialized PC system. Mount disk images to proceed.");
                 }
                 Ok(SystemType::SNES) => {
                     status_message = "Detected SNES ROM - Initializing...".to_string();
