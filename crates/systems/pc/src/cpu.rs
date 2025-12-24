@@ -154,6 +154,7 @@ impl PcCpu {
                 0x10 => return self.handle_int10h(), // Video BIOS
                 0x13 => return self.handle_int13h(), // Disk services
                 0x16 => return self.handle_int16h(), // Keyboard services
+                0x1A => return self.handle_int1ah(), // Time/Date services
                 0x20 => return self.handle_int20h(), // DOS: Program terminate
                 0x21 => return self.handle_int21h(), // DOS API
                 _ => {}                              // Let CPU handle other interrupts normally
@@ -918,6 +919,184 @@ impl PcCpu {
         } else {
             self.cpu.flags &= !FLAG_ZF;
         }
+    }
+
+    /// Handle INT 1Ah - Time and Date services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int1ah(&mut self) -> u32 {
+        // Skip the INT 1Ah instruction (2 bytes: 0xCD 0x1A)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => self.int1ah_read_system_clock(),
+            0x01 => self.int1ah_set_system_clock(),
+            0x02 => self.int1ah_read_real_time_clock(),
+            0x03 => self.int1ah_set_real_time_clock(),
+            0x04 => self.int1ah_read_date(),
+            0x05 => self.int1ah_set_date(),
+            _ => {
+                // Unsupported function - do nothing
+                51
+            }
+        }
+    }
+
+    /// INT 1Ah, AH=00h - Read system clock counter
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_read_system_clock(&mut self) -> u32 {
+        // Return tick count since midnight
+        // PC timer ticks at 18.2065 Hz (65536 PIT ticks)
+        // We'll use system time to calculate ticks since midnight
+        
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        
+        // Get seconds since midnight
+        let total_seconds = now.as_secs();
+        let seconds_since_midnight = total_seconds % 86400;
+        
+        // Convert to ticks (18.2065 ticks per second)
+        let ticks = (seconds_since_midnight as f64 * 18.2065) as u32;
+        
+        // CX:DX contains tick count
+        self.cpu.cx = ((ticks >> 16) & 0xFFFF) as u16;
+        self.cpu.dx = (ticks & 0xFFFF) as u16;
+        
+        // AL = midnight flag (0 = no midnight crossover since last read)
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00;
+        
+        51
+    }
+
+    /// INT 1Ah, AH=01h - Set system clock counter (stub - read-only)
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_set_system_clock(&mut self) -> u32 {
+        // Read-only implementation - ignore the set request
+        51
+    }
+
+    /// INT 1Ah, AH=02h - Read real-time clock time (AT, PS/2)
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_read_real_time_clock(&mut self) -> u32 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        
+        // Get local time broken down (using simple UTC for now)
+        let total_seconds = now.as_secs();
+        let seconds_in_day = total_seconds % 86400;
+        
+        let hours = (seconds_in_day / 3600) as u8;
+        let minutes = ((seconds_in_day % 3600) / 60) as u8;
+        let seconds = (seconds_in_day % 60) as u8;
+        
+        // CH = hours (BCD)
+        // CL = minutes (BCD)
+        // DH = seconds (BCD)
+        // DL = daylight savings flag (0)
+        
+        let hours_bcd = ((hours / 10) << 4) | (hours % 10);
+        let minutes_bcd = ((minutes / 10) << 4) | (minutes % 10);
+        let seconds_bcd = ((seconds / 10) << 4) | (seconds % 10);
+        
+        self.cpu.cx = ((hours_bcd as u16) << 8) | (minutes_bcd as u16);
+        self.cpu.dx = ((seconds_bcd as u16) << 8) | 0x00;
+        
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+        
+        51
+    }
+
+    /// INT 1Ah, AH=03h - Set real-time clock time (stub - read-only)
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_set_real_time_clock(&mut self) -> u32 {
+        // Read-only implementation - ignore the set request
+        51
+    }
+
+    /// INT 1Ah, AH=04h - Read real-time clock date (AT, PS/2)
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_read_date(&mut self) -> u32 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        
+        // Convert to days since epoch
+        let days_since_epoch = now.as_secs() / 86400;
+        
+        // Calculate year, month, day (simple algorithm for demonstration)
+        // This is a simplified calculation - a proper implementation would use chrono
+        let mut year = 1970;
+        let mut remaining_days = days_since_epoch as u32;
+        
+        loop {
+            let days_in_year = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                366
+            } else {
+                365
+            };
+            
+            if remaining_days >= days_in_year {
+                remaining_days -= days_in_year;
+                year += 1;
+            } else {
+                break;
+            }
+        }
+        
+        // Simple month calculation (assuming non-leap year for simplicity)
+        let days_per_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut month = 1;
+        let mut day = remaining_days + 1;
+        
+        for (m, &days) in days_per_month.iter().enumerate() {
+            if day > days {
+                day -= days;
+                month = m + 2;
+            } else {
+                month = m + 1;
+                break;
+            }
+        }
+        
+        // CH = century (BCD) - 19 or 20
+        // CL = year (BCD) - 00-99
+        // DH = month (BCD) - 01-12
+        // DL = day (BCD) - 01-31
+        
+        let century = year / 100;
+        let year_part = year % 100;
+        
+        let century_bcd = ((century / 10) << 4) | (century % 10);
+        let year_bcd = ((year_part / 10) << 4) | (year_part % 10);
+        let month_bcd = ((month / 10) << 4) | (month % 10);
+        let day_bcd = ((day / 10) << 4) | (day % 10);
+        
+        self.cpu.cx = ((century_bcd as u16) << 8) | (year_bcd as u16);
+        self.cpu.dx = ((month_bcd as u16) << 8) | (day_bcd as u16);
+        
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+        
+        51
+    }
+
+    /// INT 1Ah, AH=05h - Set real-time clock date (stub - read-only)
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_set_date(&mut self) -> u32 {
+        // Read-only implementation - ignore the set request
+        51
     }
 
     /// Get a reference to the bus
