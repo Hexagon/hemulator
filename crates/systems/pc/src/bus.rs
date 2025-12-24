@@ -48,9 +48,9 @@ impl PcBus {
     /// Valid sizes: 256KB, 512KB, 640KB (maximum conventional memory)
     pub fn with_memory_kb(kb: u32) -> Self {
         // Clamp memory size to valid range (256KB-640KB)
-        let kb = kb.max(256).min(640);
+        let kb = kb.clamp(256, 640);
         let ram_size = (kb as usize) * 1024;
-        
+
         Self {
             ram: vec![0; ram_size],
             vram: vec![0; 0x20000], // 128KB

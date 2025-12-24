@@ -78,7 +78,7 @@ impl PcSystem {
     }
 
     /// Create a new PC system with full configuration
-    /// 
+    ///
     /// # Arguments
     /// * `cpu_model` - CPU model (Intel8086, Intel8088, Intel80186, Intel80188, Intel80286, Intel80386)
     /// * `memory_kb` - Memory size in KB (256-640, will be clamped to valid range)
@@ -1213,5 +1213,103 @@ mod tests {
         let result = sys.mount("FloppyA", &floppy);
         assert!(result.is_ok());
         assert!(sys.is_mounted("FloppyA"));
+    }
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_size_clamping() {
+        // Test that memory size is clamped to valid range (256-640 KB)
+
+        // Test below minimum (should clamp to 256)
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            100, // Too low
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+        assert_eq!(
+            sys.memory_kb(),
+            256,
+            "Memory should be clamped to 256KB minimum"
+        );
+
+        // Test above maximum (should clamp to 640)
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            1024, // Too high
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+        assert_eq!(
+            sys.memory_kb(),
+            640,
+            "Memory should be clamped to 640KB maximum"
+        );
+
+        // Test valid values
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            512,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+        assert_eq!(sys.memory_kb(), 512, "Memory should be 512KB");
+    }
+
+    #[test]
+    fn test_with_config_cpu_models() {
+        // Test that different CPU models can be configured
+        let models = vec![
+            CpuModel::Intel8086,
+            CpuModel::Intel8088,
+            CpuModel::Intel80186,
+            CpuModel::Intel80188,
+            CpuModel::Intel80286,
+            CpuModel::Intel80386,
+        ];
+
+        for model in models {
+            let sys = PcSystem::with_config(model, 640, Box::new(SoftwareCgaAdapter::new()));
+            assert_eq!(sys.cpu_model(), model, "CPU model should match");
+        }
+    }
+
+    #[test]
+    fn test_with_config_video_adapters() {
+        // Test that different video adapters can be configured
+
+        // CGA adapter
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            640,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+        assert!(
+            sys.video_adapter_name().contains("CGA"),
+            "Should be CGA adapter"
+        );
+
+        // EGA adapter
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            640,
+            Box::new(SoftwareEgaAdapter::new()),
+        );
+        assert!(
+            sys.video_adapter_name().contains("EGA"),
+            "Should be EGA adapter"
+        );
+
+        // VGA adapter
+        let sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            640,
+            Box::new(SoftwareVgaAdapter::new()),
+        );
+        assert!(
+            sys.video_adapter_name().contains("VGA"),
+            "Should be VGA adapter"
+        );
     }
 }

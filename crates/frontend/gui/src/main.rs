@@ -1650,9 +1650,7 @@ fn main() {
                                 if let Some(priority_str) = project.get_boot_priority() {
                                     let priority = match priority_str.as_str() {
                                         "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
-                                        "HardDriveFirst" => {
-                                            emu_pc::BootPriority::HardDriveFirst
-                                        }
+                                        "HardDriveFirst" => emu_pc::BootPriority::HardDriveFirst,
                                         "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
                                         "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
                                         _ => {
@@ -1673,9 +1671,12 @@ fn main() {
                                     rom_loaded = true;
                                     status_message = "Project loaded".to_string();
                                     println!("Loaded project from: {}", path_str);
-                                    println!("CPU: {:?}, Memory: {}KB, Video: {:?}", 
-                                        cpu_model, memory_kb, 
-                                        project.get_video_mode().unwrap_or(&"CGA".to_string()));
+                                    println!(
+                                        "CPU: {:?}, Memory: {}KB, Video: {:?}",
+                                        cpu_model,
+                                        memory_kb,
+                                        project.get_video_mode().unwrap_or(&"CGA".to_string())
+                                    );
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
                                     }
