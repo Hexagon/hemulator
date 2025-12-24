@@ -19,6 +19,8 @@ pub enum CpuModel {
     Intel80188,
     /// Intel 80286 (1982) - Protected mode support, 24-bit addressing
     Intel80286,
+    /// Intel 80386 (1985) - 32-bit processor with 32-bit registers and addressing
+    Intel80386,
 }
 
 impl CpuModel {
@@ -26,13 +28,21 @@ impl CpuModel {
     pub fn supports_80186_instructions(&self) -> bool {
         matches!(
             self,
-            CpuModel::Intel80186 | CpuModel::Intel80188 | CpuModel::Intel80286
+            CpuModel::Intel80186
+                | CpuModel::Intel80188
+                | CpuModel::Intel80286
+                | CpuModel::Intel80386
         )
     }
 
     /// Returns true if this CPU model supports 80286+ instructions
     pub fn supports_80286_instructions(&self) -> bool {
-        matches!(self, CpuModel::Intel80286)
+        matches!(self, CpuModel::Intel80286 | CpuModel::Intel80386)
+    }
+
+    /// Returns true if this CPU model supports 80386+ instructions
+    pub fn supports_80386_instructions(&self) -> bool {
+        matches!(self, CpuModel::Intel80386)
     }
 
     /// Returns the name of the CPU model as a string
@@ -43,6 +53,7 @@ impl CpuModel {
             CpuModel::Intel80186 => "Intel 80186",
             CpuModel::Intel80188 => "Intel 80188",
             CpuModel::Intel80286 => "Intel 80286",
+            CpuModel::Intel80386 => "Intel 80386",
         }
     }
 }
@@ -257,6 +268,36 @@ impl<M: Memory8086> Cpu8086<M> {
         val
     }
 
+    /// Read a byte from I/O port (stub implementation - returns 0xFF)
+    #[inline]
+    fn io_read(&self, _port: u16) -> u8 {
+        // For basic emulation, I/O reads return 0xFF
+        // Systems can override this by wrapping the CPU
+        0xFF
+    }
+
+    /// Write a byte to I/O port (stub implementation - does nothing)
+    #[inline]
+    fn io_write(&mut self, _port: u16, _val: u8) {
+        // For basic emulation, I/O writes are no-ops
+        // Systems can override this by wrapping the CPU
+    }
+
+    /// Read a word from I/O port (stub implementation - returns 0xFFFF)
+    #[inline]
+    fn io_read_word(&self, _port: u16) -> u16 {
+        // For basic emulation, I/O reads return 0xFFFF
+        // Systems can override this by wrapping the CPU
+        0xFFFF
+    }
+
+    /// Write a word to I/O port (stub implementation - does nothing)
+    #[inline]
+    fn io_write_word(&mut self, _port: u16, _val: u16) {
+        // For basic emulation, I/O writes are no-ops
+        // Systems can override this by wrapping the CPU
+    }
+
     /// Get 8-bit high register
     #[inline]
     #[allow(dead_code)]
@@ -409,6 +450,32 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     fn get_flag(&self, flag: u16) -> bool {
         (self.flags & flag) != 0
+    }
+
+    /// Check condition code for conditional instructions
+    /// Condition codes: 0=O, 1=NO, 2=B/C, 3=NB/NC, 4=E/Z, 5=NE/NZ, 6=BE, 7=NBE,
+    ///                  8=S, 9=NS, A=P, B=NP, C=L, D=NL, E=LE, F=NLE
+    #[inline]
+    fn check_condition(&self, condition: u8) -> bool {
+        match condition {
+            0x0 => self.get_flag(FLAG_OF),  // O - Overflow
+            0x1 => !self.get_flag(FLAG_OF), // NO - Not Overflow
+            0x2 => self.get_flag(FLAG_CF),  // B/C - Below/Carry
+            0x3 => !self.get_flag(FLAG_CF), // NB/NC - Not Below/Not Carry
+            0x4 => self.get_flag(FLAG_ZF),  // E/Z - Equal/Zero
+            0x5 => !self.get_flag(FLAG_ZF), // NE/NZ - Not Equal/Not Zero
+            0x6 => self.get_flag(FLAG_CF) || self.get_flag(FLAG_ZF), // BE - Below or Equal
+            0x7 => !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF), // NBE - Not Below or Equal
+            0x8 => self.get_flag(FLAG_SF),  // S - Sign
+            0x9 => !self.get_flag(FLAG_SF), // NS - Not Sign
+            0xA => self.get_flag(FLAG_PF),  // P - Parity
+            0xB => !self.get_flag(FLAG_PF), // NP - Not Parity
+            0xC => self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF), // L - Less
+            0xD => self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF), // NL - Not Less
+            0xE => self.get_flag(FLAG_ZF) || (self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF)), // LE - Less or Equal
+            0xF => !self.get_flag(FLAG_ZF) && (self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF)), // NLE - Not Less or Equal
+            _ => false,
+        }
     }
 
     /// Calculate parity (true if even number of 1 bits in low byte)
@@ -2015,17 +2082,250 @@ impl<M: Memory8086> Cpu8086<M> {
             }
 
             // Two-byte opcode prefix (0x0F) - 80286+ instructions
-            // For basic 8086 emulation, treat as illegal/undefined
             0x0F => {
                 let next_opcode = self.fetch_u8();
-                eprintln!(
-                    "Two-byte opcode 0x0F 0x{:02X} not supported (80286+) at CS:IP={:04X}:{:04X}",
-                    next_opcode,
-                    self.cs,
-                    self.ip.wrapping_sub(2)
-                );
-                self.cycles += 2;
-                2
+                match next_opcode {
+                    // LMSW - Load Machine Status Word (0x0F 0x01 /6) - 80286+
+                    0x01 => {
+                        let modrm = self.fetch_u8();
+                        let (_modbits, reg, _rm) = Self::decode_modrm(modrm);
+                        if reg == 6 {
+                            // LMSW r/m16 - For now, just consume the operand
+                            // In a full implementation, this would load CR0 (MSW)
+                            self.cycles += 10;
+                            10
+                        } else {
+                            // Other Group 7 instructions (SGDT, SIDT, LGDT, LIDT, SMSW, etc.)
+                            self.cycles += 10;
+                            10
+                        }
+                    }
+                    // LAR - Load Access Rights (0x0F 0x02) - 80286+
+                    0x02 => {
+                        let _modrm = self.fetch_u8();
+                        // Stub: Just consume the opcode
+                        self.cycles += 15;
+                        15
+                    }
+                    // LSL - Load Segment Limit (0x0F 0x03) - 80286+
+                    0x03 => {
+                        let _modrm = self.fetch_u8();
+                        // Stub: Just consume the opcode
+                        self.cycles += 15;
+                        15
+                    }
+                    // CLTS - Clear Task Switched Flag (0x0F 0x06) - 80286+
+                    0x06 => {
+                        // Stub: Clear TS flag in CR0 (not implemented)
+                        self.cycles += 2;
+                        2
+                    }
+                    // MOVSX - Move with Sign Extension (0x0F 0xBE, 0xBF) - 80386+
+                    0xBE => {
+                        // MOVSX r16, r/m8
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let val = self.read_rm8(modbits, rm);
+                        let extended = (val as i8) as i16 as u16; // Sign extend
+                        self.set_reg16(reg, extended);
+                        self.cycles += if modbits == 0b11 { 3 } else { 6 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            6
+                        }
+                    }
+                    0xBF => {
+                        // MOVSX r32, r/m16 (80386 only - not fully supported yet)
+                        let _modrm = self.fetch_u8();
+                        self.cycles += 3;
+                        3
+                    }
+                    // MOVZX - Move with Zero Extension (0x0F 0xB6, 0xB7) - 80386+
+                    0xB6 => {
+                        // MOVZX r16, r/m8
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let val = self.read_rm8(modbits, rm);
+                        self.set_reg16(reg, val as u16); // Zero extend
+                        self.cycles += if modbits == 0b11 { 3 } else { 6 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            6
+                        }
+                    }
+                    0xB7 => {
+                        // MOVZX r32, r/m16 (80386 only - not fully supported yet)
+                        let _modrm = self.fetch_u8();
+                        self.cycles += 3;
+                        3
+                    }
+                    // BSF - Bit Scan Forward (0x0F 0xBC) - 80386+
+                    0xBC => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let val = self.read_rm16(modbits, rm);
+                        if val == 0 {
+                            // ZF = 1 if source is 0
+                            self.set_flag(FLAG_ZF, true);
+                        } else {
+                            // Find first set bit from LSB
+                            let bit_pos = val.trailing_zeros() as u16;
+                            self.set_reg16(reg, bit_pos);
+                            self.set_flag(FLAG_ZF, false);
+                        }
+                        self.cycles += if modbits == 0b11 { 10 } else { 11 };
+                        if modbits == 0b11 {
+                            10
+                        } else {
+                            11
+                        }
+                    }
+                    // BSR - Bit Scan Reverse (0x0F 0xBD) - 80386+
+                    0xBD => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let val = self.read_rm16(modbits, rm);
+                        if val == 0 {
+                            // ZF = 1 if source is 0
+                            self.set_flag(FLAG_ZF, true);
+                        } else {
+                            // Find first set bit from MSB
+                            let bit_pos = 15 - val.leading_zeros() as u16;
+                            self.set_reg16(reg, bit_pos);
+                            self.set_flag(FLAG_ZF, false);
+                        }
+                        self.cycles += if modbits == 0b11 { 10 } else { 11 };
+                        if modbits == 0b11 {
+                            10
+                        } else {
+                            11
+                        }
+                    }
+                    // BT - Bit Test (0x0F 0xA3) - 80386+
+                    0xA3 => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let bit_index = self.get_reg16(reg);
+                        let val = self.read_rm16(modbits, rm);
+                        let bit = (val >> (bit_index & 0x0F)) & 1;
+                        self.set_flag(FLAG_CF, bit != 0);
+                        self.cycles += if modbits == 0b11 { 3 } else { 12 };
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            12
+                        }
+                    }
+                    // BTS - Bit Test and Set (0x0F 0xAB) - 80386+
+                    0xAB => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let bit_index = self.get_reg16(reg);
+                        let val = self.read_rm16(modbits, rm);
+                        let bit = (val >> (bit_index & 0x0F)) & 1;
+                        self.set_flag(FLAG_CF, bit != 0);
+                        let new_val = val | (1 << (bit_index & 0x0F));
+                        self.write_rm16(modbits, rm, new_val);
+                        self.cycles += if modbits == 0b11 { 6 } else { 13 };
+                        if modbits == 0b11 {
+                            6
+                        } else {
+                            13
+                        }
+                    }
+                    // BTR - Bit Test and Reset (0x0F 0xB3) - 80386+
+                    0xB3 => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let bit_index = self.get_reg16(reg);
+                        let val = self.read_rm16(modbits, rm);
+                        let bit = (val >> (bit_index & 0x0F)) & 1;
+                        self.set_flag(FLAG_CF, bit != 0);
+                        let new_val = val & !(1 << (bit_index & 0x0F));
+                        self.write_rm16(modbits, rm, new_val);
+                        self.cycles += if modbits == 0b11 { 6 } else { 13 };
+                        if modbits == 0b11 {
+                            6
+                        } else {
+                            13
+                        }
+                    }
+                    // BTC - Bit Test and Complement (0x0F 0xBB) - 80386+
+                    0xBB => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let bit_index = self.get_reg16(reg);
+                        let val = self.read_rm16(modbits, rm);
+                        let bit = (val >> (bit_index & 0x0F)) & 1;
+                        self.set_flag(FLAG_CF, bit != 0);
+                        let new_val = val ^ (1 << (bit_index & 0x0F));
+                        self.write_rm16(modbits, rm, new_val);
+                        self.cycles += if modbits == 0b11 { 6 } else { 13 };
+                        if modbits == 0b11 {
+                            6
+                        } else {
+                            13
+                        }
+                    }
+                    // SHLD - Double Precision Shift Left (0x0F 0xA4, 0xA5) - 80386+
+                    0xA4 => {
+                        let modrm = self.fetch_u8();
+                        let (_modbits, _reg, _rm) = Self::decode_modrm(modrm);
+                        let _count = self.fetch_u8();
+                        // Stub: Not fully implemented
+                        self.cycles += 3;
+                        3
+                    }
+                    0xA5 => {
+                        let _modrm = self.fetch_u8();
+                        // SHLD with CL
+                        // Stub: Not fully implemented
+                        self.cycles += 3;
+                        3
+                    }
+                    // SHRD - Double Precision Shift Right (0x0F 0xAC, 0xAD) - 80386+
+                    0xAC => {
+                        let modrm = self.fetch_u8();
+                        let (_modbits, _reg, _rm) = Self::decode_modrm(modrm);
+                        let _count = self.fetch_u8();
+                        // Stub: Not fully implemented
+                        self.cycles += 3;
+                        3
+                    }
+                    0xAD => {
+                        let _modrm = self.fetch_u8();
+                        // SHRD with CL
+                        // Stub: Not fully implemented
+                        self.cycles += 3;
+                        3
+                    }
+                    // SETcc - Set Byte on Condition (0x0F 0x90-0x9F) - 80386+
+                    0x90..=0x9F => {
+                        let modrm = self.fetch_u8();
+                        let (modbits, _reg, rm) = Self::decode_modrm(modrm);
+                        let condition = next_opcode & 0x0F;
+                        let result = self.check_condition(condition);
+                        self.write_rm8(modbits, rm, if result { 1 } else { 0 });
+                        self.cycles += if modbits == 0b11 { 4 } else { 5 };
+                        if modbits == 0b11 {
+                            4
+                        } else {
+                            5
+                        }
+                    }
+                    _ => {
+                        eprintln!(
+                            "Two-byte opcode 0x0F 0x{:02X} not implemented at CS:IP={:04X}:{:04X}",
+                            next_opcode,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        self.cycles += 2;
+                        2
+                    }
+                }
             }
 
             // ADC r/m8, r8 (0x10) - Add with Carry
@@ -4179,6 +4479,204 @@ impl<M: Memory8086> Cpu8086<M> {
                 8
             }
 
+            // PUSHA - Push All General Registers (0x60) - 80186+
+            0x60 => {
+                let temp_sp = self.sp;
+                self.push(self.ax);
+                self.push(self.cx);
+                self.push(self.dx);
+                self.push(self.bx);
+                self.push(temp_sp); // Push original SP value
+                self.push(self.bp);
+                self.push(self.si);
+                self.push(self.di);
+                self.cycles += 36;
+                36
+            }
+
+            // POPA - Pop All General Registers (0x61) - 80186+
+            0x61 => {
+                self.di = self.pop();
+                self.si = self.pop();
+                self.bp = self.pop();
+                let _temp_sp = self.pop(); // Discard SP value
+                self.bx = self.pop();
+                self.dx = self.pop();
+                self.cx = self.pop();
+                self.ax = self.pop();
+                self.cycles += 51;
+                51
+            }
+
+            // BOUND - Check Array Index Against Bounds (0x62) - 80186+
+            0x62 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let index = self.get_reg16(reg) as i16;
+                let (_seg, ea, _bytes) = self.calc_effective_address(modbits, rm);
+                let lower_bound = self.read_u16(self.ds, ea) as i16;
+                let upper_bound = self.read_u16(self.ds, ea.wrapping_add(2)) as i16;
+
+                // If index is out of bounds, generate INT 5
+                if index < lower_bound || index > upper_bound {
+                    // Push flags, CS, IP
+                    self.push(self.flags);
+                    self.push(self.cs);
+                    self.push(self.ip);
+
+                    // Clear IF and TF
+                    self.set_flag(FLAG_IF, false);
+                    self.set_flag(FLAG_TF, false);
+
+                    // Jump to interrupt vector 5
+                    let ivt_offset = 5 * 4;
+                    let new_ip = self.read_u16(0, ivt_offset);
+                    let new_cs = self.read_u16(0, ivt_offset + 2);
+
+                    self.ip = new_ip;
+                    self.cs = new_cs;
+                    self.cycles += 33; // Approximate
+                    33
+                } else {
+                    self.cycles += 10; // No interrupt case
+                    10
+                }
+            }
+
+            // PUSH immediate word (0x68) - 80186+
+            0x68 => {
+                let val = self.fetch_u16();
+                self.push(val);
+                self.cycles += 3;
+                3
+            }
+
+            // IMUL r16, r/m16, imm16 (0x69) - 80186+
+            0x69 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let rm_val = self.read_rm16(modbits, rm) as i16;
+                let imm = self.fetch_u16() as i16;
+                let result = rm_val.wrapping_mul(imm);
+
+                self.set_reg16(reg, result as u16);
+
+                // Set CF and OF if result doesn't fit in signed 16-bit
+                // Check if the multiplication would overflow by comparing to extended multiply
+                let extended_result = (rm_val as i32) * (imm as i32);
+                let overflow = extended_result != (result as i32);
+                self.set_flag(FLAG_CF, overflow);
+                self.set_flag(FLAG_OF, overflow);
+
+                self.cycles += if modbits == 0b11 { 21 } else { 24 };
+                if modbits == 0b11 {
+                    21
+                } else {
+                    24
+                }
+            }
+
+            // PUSH immediate byte (0x6A) - 80186+
+            0x6A => {
+                let val = self.fetch_u8() as i8 as i16 as u16; // Sign extend
+                self.push(val);
+                self.cycles += 3;
+                3
+            }
+
+            // IMUL r16, r/m16, imm8 (0x6B) - 80186+
+            0x6B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let rm_val = self.read_rm16(modbits, rm) as i16;
+                let imm = self.fetch_u8() as i8 as i16; // Sign extend
+                let result = rm_val.wrapping_mul(imm);
+
+                self.set_reg16(reg, result as u16);
+
+                // Set CF and OF if result doesn't fit in signed 16-bit
+                // Check if the multiplication would overflow by comparing to extended multiply
+                let extended_result = (rm_val as i32) * (imm as i32);
+                let overflow = extended_result != (result as i32);
+                self.set_flag(FLAG_CF, overflow);
+                self.set_flag(FLAG_OF, overflow);
+
+                self.cycles += if modbits == 0b11 { 21 } else { 24 };
+                if modbits == 0b11 {
+                    21
+                } else {
+                    24
+                }
+            }
+
+            // INSB - Input String Byte (0x6C) - 80186+
+            0x6C => {
+                // Read from I/O port DX, write to ES:DI
+                let port = self.dx;
+                let val = self.io_read(port);
+                self.write(self.es, self.di, val);
+
+                // Update DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(1);
+                } else {
+                    self.di = self.di.wrapping_add(1);
+                }
+                self.cycles += 14;
+                14
+            }
+
+            // INSW - Input String Word (0x6D) - 80186+
+            0x6D => {
+                // Read from I/O port DX, write to ES:DI
+                let port = self.dx;
+                let val = self.io_read_word(port);
+                self.write_u16(self.es, self.di, val);
+
+                // Update DI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+                self.cycles += 14;
+                14
+            }
+
+            // OUTSB - Output String Byte (0x6E) - 80186+
+            0x6E => {
+                // Read from DS:SI, write to I/O port DX
+                let val = self.read(self.ds, self.si);
+                let port = self.dx;
+                self.io_write(port, val);
+
+                // Update SI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                }
+                self.cycles += 14;
+                14
+            }
+
+            // OUTSW - Output String Word (0x6F) - 80186+
+            0x6F => {
+                // Read from DS:SI, write to I/O port DX
+                let val = self.read_u16(self.ds, self.si);
+                let port = self.dx;
+                self.io_write_word(port, val);
+
+                // Update SI based on DF flag
+                if self.get_flag(FLAG_DF) {
+                    self.si = self.si.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                }
+                self.cycles += 14;
+                14
+            }
+
             // JMP short (EB)
             0xEB => {
                 let offset = self.fetch_u8() as i8;
@@ -4568,6 +5066,19 @@ impl ArrayMemory {
             self.data[start..end].copy_from_slice(program);
         }
     }
+
+    /// Read a 16-bit word from memory (little-endian)
+    pub fn read_u16(&self, addr: u32) -> u16 {
+        let low = self.read(addr);
+        let high = self.read(addr + 1);
+        (high as u16) << 8 | low as u16
+    }
+
+    /// Write a 16-bit word to memory (little-endian)
+    pub fn write_u16(&mut self, addr: u32, val: u16) {
+        self.write(addr, (val & 0xFF) as u8);
+        self.write(addr + 1, ((val >> 8) & 0xFF) as u8);
+    }
 }
 
 impl Default for ArrayMemory {
@@ -4595,6 +5106,11 @@ impl Memory8086 for ArrayMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Helper function for tests to calculate physical address
+    fn physical_address(segment: u16, offset: u16) -> u32 {
+        ((segment as u32) << 4) + (offset as u32)
+    }
 
     #[test]
     fn test_cpu_initialization() {
@@ -6781,5 +7297,551 @@ mod tests {
         assert_eq!(cpu.cx, 4); // 10 - 6 = 4 remaining
         assert_eq!(cpu.di, 0x0106);
         assert!(cpu.get_flag(FLAG_ZF)); // Found match
+    }
+
+    // ===== 80186 Instruction Tests =====
+
+    #[test]
+    fn test_pusha() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ax = 0x1111;
+        cpu.cx = 0x2222;
+        cpu.dx = 0x3333;
+        cpu.bx = 0x4444;
+        cpu.sp = 0x0100;
+        cpu.bp = 0x5555;
+        cpu.si = 0x6666;
+        cpu.di = 0x7777;
+        cpu.ss = 0x1000;
+
+        // PUSHA (0x60)
+        cpu.memory.load_program(0xFFFF0, &[0x60]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // SP should be decremented by 16 (8 words)
+        assert_eq!(cpu.sp, 0x00F0);
+
+        // Check values on stack
+        let base = physical_address(0x1000, 0x00F0);
+        assert_eq!(cpu.memory.read_u16(base), 0x7777); // DI
+        assert_eq!(cpu.memory.read_u16(base + 2), 0x6666); // SI
+        assert_eq!(cpu.memory.read_u16(base + 4), 0x5555); // BP
+        assert_eq!(cpu.memory.read_u16(base + 6), 0x0100); // Original SP
+        assert_eq!(cpu.memory.read_u16(base + 8), 0x4444); // BX
+        assert_eq!(cpu.memory.read_u16(base + 10), 0x3333); // DX
+        assert_eq!(cpu.memory.read_u16(base + 12), 0x2222); // CX
+        assert_eq!(cpu.memory.read_u16(base + 14), 0x1111); // AX
+    }
+
+    #[test]
+    fn test_popa() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.sp = 0x00F0;
+        cpu.ss = 0x1000;
+
+        // Set up stack with test values
+        let base = physical_address(0x1000, 0x00F0);
+        cpu.memory.write_u16(base, 0x7777); // DI
+        cpu.memory.write_u16(base + 2, 0x6666); // SI
+        cpu.memory.write_u16(base + 4, 0x5555); // BP
+        cpu.memory.write_u16(base + 6, 0x9999); // SP (discarded)
+        cpu.memory.write_u16(base + 8, 0x4444); // BX
+        cpu.memory.write_u16(base + 10, 0x3333); // DX
+        cpu.memory.write_u16(base + 12, 0x2222); // CX
+        cpu.memory.write_u16(base + 14, 0x1111); // AX
+
+        // POPA (0x61)
+        cpu.memory.load_program(0xFFFF0, &[0x61]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Check registers
+        assert_eq!(cpu.ax, 0x1111);
+        assert_eq!(cpu.cx, 0x2222);
+        assert_eq!(cpu.dx, 0x3333);
+        assert_eq!(cpu.bx, 0x4444);
+        assert_eq!(cpu.bp, 0x5555);
+        assert_eq!(cpu.si, 0x6666);
+        assert_eq!(cpu.di, 0x7777);
+        // SP should be incremented by 16
+        assert_eq!(cpu.sp, 0x0100);
+    }
+
+    #[test]
+    fn test_push_immediate_word() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.sp = 0x0100;
+        cpu.ss = 0x1000;
+
+        // PUSH imm16 (0x68) - Push 0x1234
+        cpu.memory.load_program(0xFFFF0, &[0x68, 0x34, 0x12]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // SP should be decremented by 2
+        assert_eq!(cpu.sp, 0x00FE);
+
+        // Check value on stack
+        let val = cpu.memory.read_u16(physical_address(0x1000, 0x00FE));
+        assert_eq!(val, 0x1234);
+    }
+
+    #[test]
+    fn test_push_immediate_byte() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.sp = 0x0100;
+        cpu.ss = 0x1000;
+
+        // PUSH imm8 (0x6A) - Push 0x7F (positive, sign extends to 0x007F)
+        cpu.memory.load_program(0xFFFF0, &[0x6A, 0x7F]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Check value on stack (should be sign-extended)
+        let val = cpu.memory.read_u16(physical_address(0x1000, 0x00FE));
+        assert_eq!(val, 0x007F);
+
+        // Test with negative value (0xFF should sign extend to 0xFFFF)
+        cpu.sp = 0x0100;
+        cpu.memory.load_program(0xFFFF0, &[0x6A, 0xFF]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        let val = cpu.memory.read_u16(physical_address(0x1000, 0x00FE));
+        assert_eq!(val, 0xFFFF);
+    }
+
+    #[test]
+    fn test_imul_immediate_word() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.bx = 10;
+
+        // IMUL AX, BX, 20 (0x69 ModRM imm16) - AX = BX * 20
+        cpu.memory.load_program(0xFFFF0, &[0x69, 0xC3, 0x14, 0x00]); // ModRM=0xC3 (AX, BX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // AX should be 10 * 20 = 200
+        assert_eq!(cpu.ax, 200);
+        // No overflow for this multiplication
+        assert!(!cpu.get_flag(FLAG_CF));
+        assert!(!cpu.get_flag(FLAG_OF));
+    }
+
+    #[test]
+    fn test_imul_immediate_byte() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.dx = 5;
+
+        // IMUL AX, DX, 7 (0x6B ModRM imm8) - AX = DX * 7
+        cpu.memory.load_program(0xFFFF0, &[0x6B, 0xC2, 0x07]); // ModRM=0xC2 (AX, DX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // AX should be 5 * 7 = 35
+        assert_eq!(cpu.ax, 35);
+        // No overflow
+        assert!(!cpu.get_flag(FLAG_CF));
+        assert!(!cpu.get_flag(FLAG_OF));
+    }
+
+    #[test]
+    fn test_bound_in_range() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ax = 50; // Index to test
+        cpu.ds = 0x1000;
+
+        // Set up bounds in memory at DS:0x0100
+        // Lower bound: 10, Upper bound: 100
+        let addr = physical_address(0x1000, 0x0100);
+        cpu.memory.write_u16(addr, 10); // Lower bound
+        cpu.memory.write_u16(addr + 2, 100); // Upper bound
+
+        // BOUND AX, [0x0100] (0x62 ModRM disp16)
+        cpu.memory.load_program(0xFFFF0, &[0x62, 0x06, 0x00, 0x01]); // ModRM=0x06 (direct addr)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        let old_ip = cpu.ip;
+        cpu.step();
+
+        // Should not trigger interrupt, IP should advance
+        assert_ne!(cpu.ip, old_ip);
+    }
+
+    #[test]
+    fn test_enter_leave() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.sp = 0x0100;
+        cpu.bp = 0x5555;
+        cpu.ss = 0x1000;
+
+        // ENTER 16, 0 (0xC8 size_low size_high nesting)
+        cpu.memory.load_program(0xFFFF0, &[0xC8, 0x10, 0x00, 0x00]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // BP should be saved and set to old SP - 2
+        let expected_bp = 0x00FE;
+        assert_eq!(cpu.bp, expected_bp);
+        // SP should be decremented by 2 (push BP) + 16 (local space)
+        assert_eq!(cpu.sp, 0x00EE);
+
+        // Now test LEAVE (0xC9)
+        cpu.memory.load_program(0xFFFF0, &[0xC9]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // SP should be restored to BP + 2 (after popping BP)
+        assert_eq!(cpu.sp, 0x0100);
+        // BP should be popped (restored to 0x5555)
+        assert_eq!(cpu.bp, 0x5555);
+    }
+
+    #[test]
+    fn test_ins_outs_byte() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.dx = 0x60; // Port
+        cpu.es = 0x1000;
+        cpu.di = 0x0100;
+
+        // INSB (0x6C) - Input from port DX to ES:DI
+        cpu.memory.load_program(0xFFFF0, &[0x6C]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // DI should be incremented
+        assert_eq!(cpu.di, 0x0101);
+        // Value should be written (0xFF from stub I/O)
+        let val = cpu.memory.read(physical_address(0x1000, 0x0100));
+        assert_eq!(val, 0xFF);
+
+        // Test OUTSB (0x6E)
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+        cpu.memory.write(physical_address(0x1000, 0x0200), 0x42);
+
+        cpu.memory.load_program(0xFFFF0, &[0x6E]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // SI should be incremented
+        assert_eq!(cpu.si, 0x0201);
+    }
+
+    #[test]
+    fn test_ins_outs_word() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.dx = 0x60; // Port
+        cpu.es = 0x1000;
+        cpu.di = 0x0100;
+
+        // INSW (0x6D) - Input word from port DX to ES:DI
+        cpu.memory.load_program(0xFFFF0, &[0x6D]);
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // DI should be incremented by 2
+        assert_eq!(cpu.di, 0x0102);
+        // Value should be written (0xFFFF from stub I/O)
+        let val = cpu.memory.read_u16(physical_address(0x1000, 0x0100));
+        assert_eq!(val, 0xFFFF);
+
+        // Test OUTSW (0x6F)
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+        cpu.memory
+            .write_u16(physical_address(0x1000, 0x0200), 0x1234);
+
+        cpu.memory.load_program(0xFFFF0, &[0x6F]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // SI should be incremented by 2
+        assert_eq!(cpu.si, 0x0202);
+    }
+
+    // ===== 80286/80386 Instruction Tests =====
+
+    #[test]
+    fn test_movsx() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.bx = 0x00FF; // Set BL to 0xFF (negative byte)
+
+        // MOVSX AX, BL (0x0F 0xBE ModRM)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC3]); // ModRM=0xC3 (AX, BX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // 0xFF sign-extended to 16-bit should be 0xFFFF
+        assert_eq!(cpu.ax, 0xFFFF);
+
+        // Test with positive value
+        cpu.bx = 0x007F; // Set BL to 0x7F (positive byte)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC3]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // 0x7F sign-extended to 16-bit should be 0x007F
+        assert_eq!(cpu.ax, 0x007F);
+    }
+
+    #[test]
+    fn test_movzx() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.bx = 0xFFFF; // Set BL to 0xFF
+
+        // MOVZX AX, BL (0x0F 0xB6 ModRM)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xB6, 0xC3]); // ModRM=0xC3 (AX, BX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // 0xFF zero-extended to 16-bit should be 0x00FF
+        assert_eq!(cpu.ax, 0x00FF);
+    }
+
+    #[test]
+    fn test_bsf() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.bx = 0x0018; // Binary: 0000 0000 0001 1000
+
+        // BSF AX, BX (0x0F 0xBC ModRM) - Find first set bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC3]); // ModRM=0xC3 (AX, BX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // First set bit from LSB is at position 3
+        assert_eq!(cpu.ax, 3);
+        assert!(!cpu.get_flag(FLAG_ZF));
+
+        // Test with zero
+        cpu.bx = 0;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC3]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // ZF should be set for zero
+        assert!(cpu.get_flag(FLAG_ZF));
+    }
+
+    #[test]
+    fn test_bsr() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.bx = 0x0018; // Binary: 0000 0000 0001 1000
+
+        // BSR AX, BX (0x0F 0xBD ModRM) - Find last set bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBD, 0xC3]); // ModRM=0xC3 (AX, BX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // First set bit from MSB is at position 4
+        assert_eq!(cpu.ax, 4);
+        assert!(!cpu.get_flag(FLAG_ZF));
+    }
+
+    #[test]
+    fn test_bt() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.ax = 3; // Bit index
+        cpu.bx = 0x0008; // Binary: 0000 0000 0000 1000 (bit 3 set)
+
+        // BT BX, AX (0x0F 0xA3 ModRM) - Test bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xA3, 0xC3]); // ModRM=0xC3 (BX, AX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Bit 3 is set, so CF should be set
+        assert!(cpu.get_flag(FLAG_CF));
+
+        // Test with bit not set
+        cpu.ax = 5; // Bit index
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xA3, 0xC3]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // Bit 5 is not set, so CF should be clear
+        assert!(!cpu.get_flag(FLAG_CF));
+    }
+
+    #[test]
+    fn test_bts() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.ax = 5; // Bit index
+        cpu.bx = 0x0008; // Binary: 0000 0000 0000 1000
+
+        // BTS BX, AX (0x0F 0xAB ModRM) - Test and set bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xAB, 0xC3]); // ModRM=0xC3 (BX, AX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Bit 5 was not set, so CF should be clear
+        assert!(!cpu.get_flag(FLAG_CF));
+        // Bit 5 should now be set: 0x0008 | 0x0020 = 0x0028
+        assert_eq!(cpu.bx, 0x0028);
+    }
+
+    #[test]
+    fn test_btr() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.ax = 3; // Bit index
+        cpu.bx = 0x0028; // Binary: 0000 0000 0010 1000
+
+        // BTR BX, AX (0x0F 0xB3 ModRM) - Test and reset bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xB3, 0xC3]); // ModRM=0xC3 (BX, AX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Bit 3 was set, so CF should be set
+        assert!(cpu.get_flag(FLAG_CF));
+        // Bit 3 should now be clear: 0x0028 & ~0x0008 = 0x0020
+        assert_eq!(cpu.bx, 0x0020);
+    }
+
+    #[test]
+    fn test_btc() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.ax = 3; // Bit index
+        cpu.bx = 0x0008; // Binary: 0000 0000 0000 1000
+
+        // BTC BX, AX (0x0F 0xBB ModRM) - Test and complement bit
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBB, 0xC3]); // ModRM=0xC3 (BX, AX)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // Bit 3 was set, so CF should be set
+        assert!(cpu.get_flag(FLAG_CF));
+        // Bit 3 should now be clear: 0x0008 ^ 0x0008 = 0x0000
+        assert_eq!(cpu.bx, 0x0000);
+
+        // Test complement again (from 0 to 1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBB, 0xC3]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // Bit 3 was clear, so CF should be clear
+        assert!(!cpu.get_flag(FLAG_CF));
+        // Bit 3 should now be set: 0x0000 ^ 0x0008 = 0x0008
+        assert_eq!(cpu.bx, 0x0008);
+    }
+
+    #[test]
+    fn test_setcc() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Set ZF flag
+        cpu.flags = FLAG_ZF;
+
+        // SETE BL (0x0F 0x94 ModRM) - Set if equal/zero
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x94, 0xC3]); // ModRM=0xC3 (BL)
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        cpu.step();
+
+        // ZF is set, so BL should be 1
+        assert_eq!(cpu.bx & 0xFF, 1);
+
+        // Clear ZF flag
+        cpu.flags = 0;
+
+        // SETE BL again
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x94, 0xC3]);
+        cpu.ip = 0x0000;
+
+        cpu.step();
+
+        // ZF is clear, so BL should be 0
+        assert_eq!(cpu.bx & 0xFF, 0);
+    }
+
+    #[test]
+    fn test_cpu_model_80386() {
+        let mem = ArrayMemory::new();
+        let cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        assert_eq!(cpu.model(), CpuModel::Intel80386);
+        assert_eq!(CpuModel::Intel80386.name(), "Intel 80386");
+        assert!(CpuModel::Intel80386.supports_80186_instructions());
+        assert!(CpuModel::Intel80386.supports_80286_instructions());
+        assert!(CpuModel::Intel80386.supports_80386_instructions());
     }
 }
