@@ -70,7 +70,7 @@ impl PcCpu {
 
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
-        
+
         // Handle I/O instructions by intercepting them before execution
         match opcode {
             // IN AL, imm8 (0xE4)
@@ -145,7 +145,7 @@ impl PcCpu {
             }
             _ => {}
         }
-        
+
         // Handle INT instructions
         if opcode == 0xCD {
             // This is an INT instruction, check the interrupt number
@@ -950,27 +950,27 @@ impl PcCpu {
         // Return tick count since midnight
         // PC timer ticks at 18.2065 Hz (65536 PIT ticks)
         // We'll use system time to calculate ticks since midnight
-        
+
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        
+
         // Get seconds since midnight
         let total_seconds = now.as_secs();
         let seconds_since_midnight = total_seconds % 86400;
-        
+
         // Convert to ticks (18.2065 ticks per second)
         let ticks = (seconds_since_midnight as f64 * 18.2065) as u32;
-        
+
         // CX:DX contains tick count
         self.cpu.cx = ((ticks >> 16) & 0xFFFF) as u16;
         self.cpu.dx = (ticks & 0xFFFF) as u16;
-        
+
         // AL = midnight flag (0 = no midnight crossover since last read)
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00;
-        
+        self.cpu.ax &= 0xFF00;
+
         51
     }
 
@@ -985,34 +985,34 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int1ah
     fn int1ah_read_real_time_clock(&mut self) -> u32 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        
+
         // Get local time broken down (using simple UTC for now)
         let total_seconds = now.as_secs();
         let seconds_in_day = total_seconds % 86400;
-        
+
         let hours = (seconds_in_day / 3600) as u8;
         let minutes = ((seconds_in_day % 3600) / 60) as u8;
         let seconds = (seconds_in_day % 60) as u8;
-        
+
         // CH = hours (BCD)
         // CL = minutes (BCD)
         // DH = seconds (BCD)
         // DL = daylight savings flag (0)
-        
+
         let hours_bcd = ((hours / 10) << 4) | (hours % 10);
         let minutes_bcd = ((minutes / 10) << 4) | (minutes % 10);
         let seconds_bcd = ((seconds / 10) << 4) | (seconds % 10);
-        
+
         self.cpu.cx = ((hours_bcd as u16) << 8) | (minutes_bcd as u16);
-        self.cpu.dx = ((seconds_bcd as u16) << 8) | 0x00;
-        
+        self.cpu.dx = (seconds_bcd as u16) << 8;
+
         // Clear carry flag (success)
         self.set_carry_flag(false);
-        
+
         51
     }
 
@@ -1027,26 +1027,26 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int1ah
     fn int1ah_read_date(&mut self) -> u32 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        
+
         // Convert to days since epoch
         let days_since_epoch = now.as_secs() / 86400;
-        
+
         // Calculate year, month, day (simple algorithm for demonstration)
         // This is a simplified calculation - a proper implementation would use chrono
         let mut year = 1970;
         let mut remaining_days = days_since_epoch as u32;
-        
+
         loop {
             let days_in_year = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
                 366
             } else {
                 365
             };
-            
+
             if remaining_days >= days_in_year {
                 remaining_days -= days_in_year;
                 year += 1;
@@ -1054,12 +1054,12 @@ impl PcCpu {
                 break;
             }
         }
-        
+
         // Simple month calculation (assuming non-leap year for simplicity)
         let days_per_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
         let mut month = 1;
         let mut day = remaining_days + 1;
-        
+
         for (m, &days) in days_per_month.iter().enumerate() {
             if day > days {
                 day -= days;
@@ -1069,26 +1069,26 @@ impl PcCpu {
                 break;
             }
         }
-        
+
         // CH = century (BCD) - 19 or 20
         // CL = year (BCD) - 00-99
         // DH = month (BCD) - 01-12
         // DL = day (BCD) - 01-31
-        
+
         let century = year / 100;
         let year_part = year % 100;
-        
+
         let century_bcd = ((century / 10) << 4) | (century % 10);
         let year_bcd = ((year_part / 10) << 4) | (year_part % 10);
         let month_bcd = ((month / 10) << 4) | (month % 10);
         let day_bcd = ((day / 10) << 4) | (day % 10);
-        
+
         self.cpu.cx = ((century_bcd as u16) << 8) | (year_bcd as u16);
         self.cpu.dx = ((month_bcd as u16) << 8) | (day_bcd as u16);
-        
+
         // Clear carry flag (success)
         self.set_carry_flag(false);
-        
+
         51
     }
 

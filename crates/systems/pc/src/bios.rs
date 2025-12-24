@@ -51,7 +51,7 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     // BIOS entry point at 0xFFF0 - CPU starts here (CS=0xFFFF, IP=0x0000)
     // Add BIOS signature first at 0xFFF5 (date)
     let date_offset = 0xFFF5;
-    let date_str = b"12/15/25";  // December 15, 2025
+    let date_str = b"12/15/25"; // December 15, 2025
     bios[date_offset..date_offset + date_str.len()].copy_from_slice(date_str);
 
     // System model byte at 0xFFFE (PC XT)
@@ -109,32 +109,32 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 /// This displays a traditional PC BIOS Power-On Self-Test screen
 pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     use std::time::{SystemTime, UNIX_EPOCH};
-    
+
     // Get current system time
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    
+
     let total_seconds = now.as_secs();
     let seconds_in_day = total_seconds % 86400;
-    
+
     // Calculate time
     let hours = (seconds_in_day / 3600) as u8;
     let minutes = ((seconds_in_day % 3600) / 60) as u8;
     let seconds = (seconds_in_day % 60) as u8;
-    
+
     // Calculate date
     let days_since_epoch = total_seconds / 86400;
     let mut year = 1970;
     let mut remaining_days = days_since_epoch as u32;
-    
+
     loop {
         let days_in_year = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
             366
         } else {
             365
         };
-        
+
         if remaining_days >= days_in_year {
             remaining_days -= days_in_year;
             year += 1;
@@ -142,12 +142,12 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
             break;
         }
     }
-    
+
     // Simple month calculation
     let days_per_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1;
     let mut day = remaining_days + 1;
-    
+
     for (m, &days) in days_per_month.iter().enumerate() {
         if day > days {
             day -= days;
@@ -157,11 +157,11 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
             break;
         }
     }
-    
+
     // Format date and time strings
     let date_str = format!("{:02}/{:02}/{:04}", month, day, year);
     let time_str = format!("{:02}:{:02}:{:02}", hours, minutes, seconds);
-    
+
     // Video RAM offset for text mode (0xB8000 - 0xA0000 = 0x18000)
     let text_offset = 0x18000;
 

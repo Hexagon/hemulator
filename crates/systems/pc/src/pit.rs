@@ -7,6 +7,8 @@
 //!
 //! The PIT operates at 1.193182 MHz (approximately 1/3 of CPU clock)
 
+#![allow(dead_code)] // Many methods used only in tests
+
 /// PIT base frequency in Hz (1.193182 MHz)
 pub const PIT_FREQUENCY: f64 = 1_193_182.0;
 
@@ -152,13 +154,9 @@ impl PitChannel {
 
     /// Read the current counter value
     fn read(&mut self) -> u8 {
-        let value = if let Some(latched) = self.latched_value {
-            latched
-        } else {
-            self.counter
-        };
+        let value = self.latched_value.unwrap_or(self.counter);
 
-        let result = match self.access_mode {
+        match self.access_mode {
             AccessMode::LatchCount => {
                 // Return latched value
                 if !self.high_byte_next {
@@ -189,9 +187,7 @@ impl PitChannel {
                     ((value >> 8) & 0xFF) as u8
                 }
             }
-        };
-
-        result
+        }
     }
 
     /// Latch the current counter value for reading
@@ -207,11 +203,15 @@ impl PitChannel {
         if !self.counting {
             return false;
         }
-        
-        // Get the effective reload value (0 means 65536)
-        let effective_reload = if self.reload == 0 { 65536u32 } else { self.reload as u32 };
 
-        let wrapped = match self.mode {
+        // Get the effective reload value (0 means 65536)
+        let effective_reload = if self.reload == 0 {
+            65536u32
+        } else {
+            self.reload as u32
+        };
+
+        match self.mode {
             PitMode::InterruptOnTerminalCount => {
                 // Mode 0: Count down, output goes high when reaching 0
                 if self.counter > 0 {
@@ -271,9 +271,7 @@ impl PitChannel {
                     false
                 }
             }
-        };
-
-        wrapped
+        }
     }
 
     /// Get the output state
@@ -326,7 +324,7 @@ impl Pit {
         self.write_control(0b00110110); // Channel 0, low/high byte, mode 3
         self.write_channel(0, 0x00); // Low byte
         self.write_channel(0, 0x00); // High byte
-        
+
         // The PIT treats 0 as 65536 internally, but we store it as 0
         // The frequency calculation handles this correctly
     }
@@ -334,7 +332,7 @@ impl Pit {
     /// Write to the mode/command register (port 0x43)
     pub fn write_control(&mut self, value: u8) {
         let channel_select = (value >> 6) & 0x03;
-        
+
         // Check for read-back command (only on 8254)
         if channel_select == 3 {
             // Read-back command - latch counters
@@ -355,7 +353,7 @@ impl Pit {
 
         let channel = &mut self.channels[channel_select as usize];
         let access_mode = AccessMode::from_bits(value);
-        
+
         if matches!(access_mode, AccessMode::LatchCount) {
             // Latch command
             channel.latch();
@@ -465,7 +463,7 @@ mod tests {
         let mut pit = Pit::new();
         pit.reset();
         assert!(!pit.timer_interrupt_pending());
-        
+
         // After reset, channel 0 should be configured
         let freq = pit.system_timer_frequency();
         assert!((freq - SYSTEM_TIMER_FREQUENCY).abs() < 0.1);
@@ -474,11 +472,11 @@ mod tests {
     #[test]
     fn test_channel_write_read_low_byte() {
         let mut pit = Pit::new();
-        
+
         // Configure channel 0 for low byte only, mode 2
         pit.write_control(0b00010100);
         pit.write_channel(0, 0x42);
-        
+
         // Read back
         let value = pit.read_channel(0);
         assert_eq!(value, 0x42);
@@ -487,11 +485,11 @@ mod tests {
     #[test]
     fn test_channel_write_read_high_byte() {
         let mut pit = Pit::new();
-        
+
         // Configure channel 0 for high byte only, mode 2
         pit.write_control(0b00100100);
         pit.write_channel(0, 0x42);
-        
+
         // Read back
         let value = pit.read_channel(0);
         assert_eq!(value, 0x42);
@@ -500,12 +498,12 @@ mod tests {
     #[test]
     fn test_channel_write_read_low_high() {
         let mut pit = Pit::new();
-        
+
         // Configure channel 0 for low/high byte, mode 2
         pit.write_control(0b00110100);
         pit.write_channel(0, 0x34); // Low byte
         pit.write_channel(0, 0x12); // High byte
-        
+
         // Read back
         let low = pit.read_channel(0);
         let high = pit.read_channel(0);
@@ -516,15 +514,15 @@ mod tests {
     #[test]
     fn test_channel_latch() {
         let mut pit = Pit::new();
-        
+
         // Configure and write value
         pit.write_control(0b00110100);
         pit.write_channel(0, 0x00);
         pit.write_channel(0, 0x10);
-        
+
         // Latch the value
         pit.write_control(0b00000000); // Latch channel 0
-        
+
         // Read latched value
         let low = pit.read_channel(0);
         let high = pit.read_channel(0);
@@ -535,25 +533,25 @@ mod tests {
     #[test]
     fn test_mode_3_square_wave() {
         let mut pit = Pit::new();
-        
+
         // Configure channel 2 for square wave, divisor 4
         pit.write_control(0b10110110); // Channel 2, low/high, mode 3
         pit.write_channel(2, 0x04); // Low byte
         pit.write_channel(2, 0x00); // High byte
-        
+
         // Channel should start counting
         assert!(pit.channels[2].counting);
-        
+
         // Get initial output
-        let initial_output = pit.speaker_output();
-        
+        let _initial_output = pit.speaker_output();
+
         // Clock enough times to see output change
         // With divisor 4, output should toggle after 2 ticks and again after 4
         for _ in 0..10 {
             pit.clock(4); // 1 PIT tick per clock
         }
-        
-        let new_output = pit.speaker_output();
+
+        let _new_output = pit.speaker_output();
         // After 10 ticks with divisor 4, output should have toggled multiple times
         // We can't predict the exact state, but we can verify the channel is working
         // by checking it's still counting
@@ -563,13 +561,13 @@ mod tests {
     #[test]
     fn test_speaker_frequency() {
         let mut pit = Pit::new();
-        
+
         // Configure channel 2 for 1000 Hz
         // Divisor = 1193182 / 1000 ≈ 1193
         pit.write_control(0b10110110);
         pit.write_channel(2, 0xA9); // Low byte of 1193
         pit.write_channel(2, 0x04); // High byte of 1193
-        
+
         let freq = pit.speaker_frequency();
         assert!((freq - 1000.0).abs() < 1.0);
     }
@@ -578,7 +576,7 @@ mod tests {
     fn test_timer_interrupt() {
         let mut pit = Pit::new();
         pit.reset();
-        
+
         // Clock enough to generate an interrupt
         // With divisor 65536, we need 65536 PIT ticks
         // = 65536 * 4 CPU cycles = 262144 cycles
@@ -589,7 +587,7 @@ mod tests {
                 break;
             }
         }
-        
+
         assert!(interrupted || pit.timer_interrupt_pending());
     }
 
@@ -598,7 +596,7 @@ mod tests {
         let mut pit = Pit::new();
         pit.timer_interrupt = true;
         assert!(pit.timer_interrupt_pending());
-        
+
         pit.clear_timer_interrupt();
         assert!(!pit.timer_interrupt_pending());
     }
@@ -606,20 +604,20 @@ mod tests {
     #[test]
     fn test_multiple_channels() {
         let mut pit = Pit::new();
-        
+
         // Configure all channels differently
         pit.write_control(0b00110100); // Ch 0, mode 2
         pit.write_channel(0, 0x00);
         pit.write_channel(0, 0x10);
-        
+
         pit.write_control(0b01110100); // Ch 1, mode 2
         pit.write_channel(1, 0x00);
         pit.write_channel(1, 0x20);
-        
+
         pit.write_control(0b10110100); // Ch 2, mode 2
         pit.write_channel(2, 0x00);
         pit.write_channel(2, 0x30);
-        
+
         // Read back all channels
         let ch0_low = pit.read_channel(0);
         let ch0_high = pit.read_channel(0);
@@ -627,7 +625,7 @@ mod tests {
         let ch1_high = pit.read_channel(1);
         let ch2_low = pit.read_channel(2);
         let ch2_high = pit.read_channel(2);
-        
+
         assert_eq!((ch0_high as u16) << 8 | ch0_low as u16, 0x1000);
         assert_eq!((ch1_high as u16) << 8 | ch1_low as u16, 0x2000);
         assert_eq!((ch2_high as u16) << 8 | ch2_low as u16, 0x3000);
