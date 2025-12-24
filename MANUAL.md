@@ -777,10 +777,84 @@ For N64 games, the standard controller mappings apply with these button equivale
 - **Keyboard input** with full passthrough
 - **Virtual Machine State Saving**: PC systems use F8 to save VM configuration
   - Instead of save states, PC mode saves the current VM configuration to a `.hemu` project file
-  - Includes all mounted disk images, BIOS, and boot priority settings
+  - Includes all mounted disk images, BIOS, boot priority settings, CPU model, memory size, and video mode
   - Press F8 to open a save dialog and choose where to save the VM file
-  - Load the VM file later via F3 to restore all mount points
+  - Load the VM file later via F3 to restore all mount points and configuration
   - Disk state is preserved in the disk image files themselves (as in a real PC)
+
+**Virtual PC Configuration (.hemu files)**:
+
+The `.hemu` project file format allows you to configure all aspects of the virtual PC. All fields except `version` and `system` are optional and will use defaults if not specified.
+
+Example configuration file:
+```json
+{
+  "version": 1,
+  "system": "pc",
+  "mounts": {
+    "FloppyA": "dos622_boot.img",
+    "HardDrive": "freedos.img"
+  },
+  "boot_priority": "FloppyFirst",
+  "cpu_model": "Intel8086",
+  "memory_kb": 640,
+  "video_mode": "CGA"
+}
+```
+
+**Configuration Options**:
+
+- **`cpu_model`** (optional, default: "Intel8086")
+  - Valid values: `"Intel8086"`, `"Intel8088"`, `"Intel80186"`, `"Intel80188"`, `"Intel80286"`, `"Intel80386"`
+  - Controls which CPU instruction set is available
+  - Intel8086/8088: Original IBM PC/XT instruction set
+  - Intel80186/80188: Adds PUSHA/POPA, BOUND, IMUL immediate, etc.
+  - Intel80286: Adds protected mode instruction stubs
+  - Intel80386: Adds 32-bit operations (MOVSX, MOVZX, BSF, BSR, etc.)
+
+- **`memory_kb`** (optional, default: 640)
+  - Valid range: 256-640 KB (will be clamped to this range)
+  - Common values: 256, 512, 640 (maximum conventional memory)
+  - Controls the amount of conventional memory available to software
+  - IBM PC/XT: 256KB typical, 640KB maximum
+  - Most DOS software requires at least 512KB
+
+- **`video_mode`** (optional, default: "CGA")
+  - Valid values: `"CGA"`, `"EGA"`, `"VGA"`
+  - **CGA** (Color Graphics Adapter):
+    - Text mode: 80x25 characters (640x400 pixels)
+    - Graphics modes: 320x200 4-color, 640x200 2-color
+    - 16-color fixed palette
+  - **EGA** (Enhanced Graphics Adapter):
+    - Text mode: 80x25 characters (640x350 pixels, 8x14 font)
+    - Graphics modes: 640x350 16-color, 320x200 16-color
+    - 64-color palette (6-bit RGB), 16 active colors
+  - **VGA** (Video Graphics Array):
+    - Text mode: 80x25 characters (720x400 pixels, 9x16 font)
+    - Graphics modes: 320x200 256-color (Mode 13h), 640x480 16-color
+    - 256-color palette (18-bit RGB)
+
+- **`boot_priority`** (optional, default: "FloppyFirst")
+  - Valid values: `"FloppyFirst"`, `"HardDriveFirst"`, `"FloppyOnly"`, `"HardDriveOnly"`
+  - Controls the boot device order
+  - FloppyFirst: Try floppy A first, then hard drive C (default)
+  - HardDriveFirst: Try hard drive C first, then floppy A
+  - FloppyOnly: Only boot from floppy A
+  - HardDriveOnly: Only boot from hard drive C
+
+**Creating .hemu Files**:
+
+1. **Manual Creation**: Create a text file with the JSON structure above
+2. **Save from GUI**: Press F8 while running a PC system to save current configuration
+3. **Edit Existing**: Open any .hemu file in a text editor and modify the settings
+
+**Loading .hemu Files**:
+
+1. Press F3 in the emulator
+2. Select your `.hemu` file
+3. All disks will be mounted and configuration will be applied
+4. System will reset and boot with the configured settings
+
 
 **Mount Point Usage**:
 

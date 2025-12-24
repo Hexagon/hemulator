@@ -17,6 +17,7 @@ screenshots/
 state.json
 roms/
 config.json
+*.hemu
 
 # Debugging files
 *trace.txt

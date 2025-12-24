@@ -646,6 +646,89 @@ pub fn create_snes_debug_overlay(
     buffer
 }
 
+/// Create a debug info overlay for PC
+#[allow(clippy::too_many_arguments)]
+pub fn create_pc_debug_overlay(
+    width: usize,
+    height: usize,
+    cs: u16,
+    ip: u16,
+    ax: u16,
+    bx: u16,
+    cx: u16,
+    dx: u16,
+    sp: u16,
+    bp: u16,
+    si: u16,
+    di: u16,
+    flags: u16,
+    cycles: u64,
+    fps: f64,
+    video_backend: &str,
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let cs_ip_line = format!("CS:IP: {:04X}:{:04X}", cs, ip);
+    let ax_bx_line = format!("AX: {:04X}  BX: {:04X}", ax, bx);
+    let cx_dx_line = format!("CX: {:04X}  DX: {:04X}", cx, dx);
+    let sp_bp_line = format!("SP: {:04X}  BP: {:04X}", sp, bp);
+    let si_di_line = format!("SI: {:04X}  DI: {:04X}", si, di);
+    let flags_line = format!("FLAGS: {:04X}", flags);
+    let cycles_line = format!("Cycles: {}", cycles);
+    let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
+
+    // Extract flag bits
+    let cf = if flags & 0x0001 != 0 { "C" } else { "-" };
+    let pf = if flags & 0x0004 != 0 { "P" } else { "-" };
+    let af = if flags & 0x0010 != 0 { "A" } else { "-" };
+    let zf = if flags & 0x0040 != 0 { "Z" } else { "-" };
+    let sf = if flags & 0x0080 != 0 { "S" } else { "-" };
+    let tf = if flags & 0x0100 != 0 { "T" } else { "-" };
+    let if_ = if flags & 0x0200 != 0 { "I" } else { "-" };
+    let df = if flags & 0x0400 != 0 { "D" } else { "-" };
+    let of = if flags & 0x0800 != 0 { "O" } else { "-" };
+    let flags_decoded = format!(
+        "Flags: {} {} {} {} {} {} {} {} {}",
+        cf, pf, af, zf, sf, tf, if_, df, of
+    );
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO - PC",
+        "",
+        &cs_ip_line,
+        &ax_bx_line,
+        &cx_dx_line,
+        &sp_bp_line,
+        &si_di_line,
+        &flags_line,
+        &flags_decoded,
+        "",
+        &cycles_line,
+        &fps_line,
+        &video_line,
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
 /// Create a mount point selection overlay
 pub fn create_mount_point_selector(
     width: usize,

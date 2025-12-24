@@ -228,6 +228,7 @@ impl VideoAdapter for SoftwareCgaAdapter {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;

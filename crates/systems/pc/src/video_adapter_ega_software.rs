@@ -343,6 +343,7 @@ impl VideoAdapter for SoftwareEgaAdapter {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
