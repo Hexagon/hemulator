@@ -1734,11 +1734,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Read next instruction and execute with ES override
                 // For simplicity, we'll just pass through to next instruction
                 // A full implementation would set a segment override flag
-                let next_opcode = self.fetch_u8();
+                let _next_opcode = self.fetch_u8();
                 self.ip = self.ip.wrapping_sub(1); // Back up IP
                 self.step() // Execute next instruction
-                // Note: This is a simplified implementation
-                // Real hardware would affect address calculation in the next instruction
+                            // Note: This is a simplified implementation
+                            // Real hardware would affect address calculation in the next instruction
             }
 
             // DAA - Decimal Adjust After Addition (0x27)
@@ -1770,7 +1770,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // CS segment override prefix (0x2E)
             0x2E => {
                 // Similar to ES override - simplified implementation
-                let next_opcode = self.fetch_u8();
+                let _next_opcode = self.fetch_u8();
                 self.ip = self.ip.wrapping_sub(1);
                 self.step()
             }
@@ -2453,7 +2453,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // SS segment override prefix (0x36)
             0x36 => {
                 // Simplified implementation - just execute next instruction
-                let next_opcode = self.fetch_u8();
+                let _next_opcode = self.fetch_u8();
                 self.ip = self.ip.wrapping_sub(1);
                 self.step()
             }
@@ -2469,7 +2469,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.set_flag(FLAG_AF, false);
                     self.set_flag(FLAG_CF, false);
                 }
-                self.ax = self.ax & 0xFF0F; // Clear upper nibble of AL
+                self.ax &= 0xFF0F; // Clear upper nibble of AL
                 self.cycles += 4;
                 4
             }
@@ -2477,7 +2477,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // DS segment override prefix (0x3E)
             0x3E => {
                 // Simplified implementation - just execute next instruction
-                let next_opcode = self.fetch_u8();
+                let _next_opcode = self.fetch_u8();
                 self.ip = self.ip.wrapping_sub(1);
                 self.step()
             }
@@ -2494,7 +2494,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.set_flag(FLAG_AF, false);
                     self.set_flag(FLAG_CF, false);
                 }
-                self.ax = self.ax & 0xFF0F; // Clear upper nibble of AL
+                self.ax &= 0xFF0F; // Clear upper nibble of AL
                 self.cycles += 4;
                 4
             }
@@ -2706,7 +2706,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm8(modbits, rm);
                 let imm = self.fetch_u8();
                 let result = match op {
-                    0 => { // ADD
+                    0 => {
+                        // ADD
                         let r = rm_val.wrapping_add(imm);
                         let carry = (rm_val as u16 + imm as u16) > 0xFF;
                         let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80) != 0;
@@ -2714,13 +2715,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    1 => { // OR
+                    1 => {
+                        // OR
                         let r = rm_val | imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    2 => { // ADC
+                    2 => {
+                        // ADC
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
                         let carry = (rm_val as u16 + imm as u16 + carry_in as u16) > 0xFF;
@@ -2729,7 +2732,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    3 => { // SBB
+                    3 => {
+                        // SBB
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
                         let borrow = (rm_val as u16) < (imm as u16 + carry_in as u16);
@@ -2738,13 +2742,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    4 => { // AND
+                    4 => {
+                        // AND
                         let r = rm_val & imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    5 => { // SUB
+                    5 => {
+                        // SUB
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u16) < (imm as u16);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80) != 0;
@@ -2752,13 +2758,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    6 => { // XOR
+                    6 => {
+                        // XOR
                         let r = rm_val ^ imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    7 => { // CMP
+                    7 => {
+                        // CMP
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u16) < (imm as u16);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80) != 0;
@@ -2775,7 +2783,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.update_flags_8(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 { 4 } else { 17 }
+                if modbits == 0b11 {
+                    4
+                } else {
+                    17
+                }
             }
 
             // 0x81 - r/m16, imm16
@@ -2785,7 +2797,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm16(modbits, rm);
                 let imm = self.fetch_u16();
                 let result = match op {
-                    0 => { // ADD
+                    0 => {
+                        // ADD
                         let r = rm_val.wrapping_add(imm);
                         let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
                         let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
@@ -2793,13 +2806,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    1 => { // OR
+                    1 => {
+                        // OR
                         let r = rm_val | imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    2 => { // ADC
+                    2 => {
+                        // ADC
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
                         let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
@@ -2808,7 +2823,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    3 => { // SBB
+                    3 => {
+                        // SBB
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
                         let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
@@ -2817,13 +2833,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    4 => { // AND
+                    4 => {
+                        // AND
                         let r = rm_val & imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    5 => { // SUB
+                    5 => {
+                        // SUB
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u32) < (imm as u32);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
@@ -2831,13 +2849,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    6 => { // XOR
+                    6 => {
+                        // XOR
                         let r = rm_val ^ imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    7 => { // CMP
+                    7 => {
+                        // CMP
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u32) < (imm as u32);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
@@ -2854,7 +2874,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 { 4 } else { 17 }
+                if modbits == 0b11 {
+                    4
+                } else {
+                    17
+                }
             }
 
             // 0x82 - Same as 0x80 (alias for 8086)
@@ -2870,7 +2894,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm16(modbits, rm);
                 let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
                 let result = match op {
-                    0 => { // ADD
+                    0 => {
+                        // ADD
                         let r = rm_val.wrapping_add(imm);
                         let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
                         let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
@@ -2878,13 +2903,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    1 => { // OR
+                    1 => {
+                        // OR
                         let r = rm_val | imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    2 => { // ADC
+                    2 => {
+                        // ADC
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
                         let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
@@ -2893,7 +2920,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    3 => { // SBB
+                    3 => {
+                        // SBB
                         let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                         let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
                         let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
@@ -2902,13 +2930,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    4 => { // AND
+                    4 => {
+                        // AND
                         let r = rm_val & imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    5 => { // SUB
+                    5 => {
+                        // SUB
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u32) < (imm as u32);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
@@ -2916,13 +2946,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                         r
                     }
-                    6 => { // XOR
+                    6 => {
+                        // XOR
                         let r = rm_val ^ imm;
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         r
                     }
-                    7 => { // CMP
+                    7 => {
+                        // CMP
                         let r = rm_val.wrapping_sub(imm);
                         let borrow = (rm_val as u32) < (imm as u32);
                         let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
@@ -2939,7 +2971,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 { 4 } else { 17 }
+                if modbits == 0b11 {
+                    4
+                } else {
+                    17
+                }
             }
 
             // TEST r/m8, r8 (0x84)
@@ -2994,16 +3030,20 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.get_reg8_high(reg - 4)
                 };
                 let rm_val = self.read_rm8(modbits, rm);
-                
+
                 if reg < 4 {
                     self.set_reg8_low(reg, rm_val);
                 } else {
                     self.set_reg8_high(reg - 4, rm_val);
                 }
                 self.write_rm8(modbits, rm, reg_val);
-                
+
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 { 4 } else { 17 }
+                if modbits == 0b11 {
+                    4
+                } else {
+                    17
+                }
             }
 
             // XCHG r16, r/m16 (0x87)
@@ -3012,12 +3052,16 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
                 let rm_val = self.read_rm16(modbits, rm);
-                
+
                 self.set_reg16(reg, rm_val);
                 self.write_rm16(modbits, rm, reg_val);
-                
+
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 { 4 } else { 17 }
+                if modbits == 0b11 {
+                    4
+                } else {
+                    17
+                }
             }
 
             // LEA - Load Effective Address (0x8D)
@@ -3054,7 +3098,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CWD - Convert Word to Doubleword (0x99)
             0x99 => {
-                let sign_extend = if self.ax & 0x8000 != 0 { 0xFFFF } else { 0x0000 };
+                let sign_extend = if self.ax & 0x8000 != 0 {
+                    0xFFFF
+                } else {
+                    0x0000
+                };
                 self.dx = sign_extend;
                 self.cycles += 5;
                 5
@@ -3499,11 +3547,16 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC6 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                if op == 0 { // Only op=0 is valid for MOV
+                if op == 0 {
+                    // Only op=0 is valid for MOV
                     let imm = self.fetch_u8();
                     self.write_rm8(modbits, rm, imm);
                     self.cycles += if modbits == 0b11 { 4 } else { 10 };
-                    if modbits == 0b11 { 4 } else { 10 }
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        10
+                    }
                 } else {
                     // Undefined
                     eprintln!("Undefined 0xC6 operation with op={}", op);
@@ -3516,11 +3569,16 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC7 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                if op == 0 { // Only op=0 is valid for MOV
+                if op == 0 {
+                    // Only op=0 is valid for MOV
                     let imm = self.fetch_u16();
                     self.write_rm16(modbits, rm, imm);
                     self.cycles += if modbits == 0b11 { 4 } else { 10 };
-                    if modbits == 0b11 { 4 } else { 10 }
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        10
+                    }
                 } else {
                     // Undefined
                     eprintln!("Undefined 0xC7 operation with op={}", op);
@@ -3572,7 +3630,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // ENTER (0xC8) - 80186+ instruction
             0xC8 => {
                 let size = self.fetch_u16();
-                let nesting = self.fetch_u8();
+                let _nesting = self.fetch_u8();
                 // Simplified implementation
                 self.push(self.bp);
                 let frame_temp = self.sp;
@@ -3596,19 +3654,19 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.push(self.flags);
                 self.push(self.cs);
                 self.push(self.ip);
-                
+
                 // Clear IF and TF
                 self.set_flag(FLAG_IF, false);
                 self.set_flag(FLAG_TF, false);
-                
+
                 // Jump to interrupt vector 3
                 let ivt_offset = 3 * 4;
                 let new_ip = self.read_u16(0, ivt_offset);
                 let new_cs = self.read_u16(0, ivt_offset + 2);
-                
+
                 self.ip = new_ip;
                 self.cs = new_cs;
-                
+
                 self.cycles += 52;
                 52
             }
@@ -3620,19 +3678,19 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.push(self.flags);
                     self.push(self.cs);
                     self.push(self.ip);
-                    
+
                     // Clear IF and TF
                     self.set_flag(FLAG_IF, false);
                     self.set_flag(FLAG_TF, false);
-                    
+
                     // Jump to interrupt vector 4
                     let ivt_offset = 4 * 4;
                     let new_ip = self.read_u16(0, ivt_offset);
                     let new_cs = self.read_u16(0, ivt_offset + 2);
-                    
+
                     self.ip = new_ip;
                     self.cs = new_cs;
-                    
+
                     self.cycles += 53;
                     53
                 } else {
@@ -3737,7 +3795,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let al = (self.ax & 0xFF) as u8;
                 let result = al.wrapping_add(ah.wrapping_mul(base));
                 self.ax = (self.ax & 0xFF00) | (result as u16);
-                self.ax = self.ax & 0x00FF; // Clear AH
+                self.ax &= 0x00FF; // Clear AH
                 self.update_flags_8(result);
                 self.cycles += 60;
                 60
@@ -3769,7 +3827,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, _, _) = Self::decode_modrm(modrm);
                 // Just consume the ModR/M byte and any displacement
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
-                if modbits == 0b11 { 2 } else { 8 }
+                if modbits == 0b11 {
+                    2
+                } else {
+                    8
+                }
             }
 
             // LOOP variants (0xE0-0xE3)
@@ -3830,7 +3892,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // IN AL, imm8 (0xE4)
             0xE4 => {
-                let port = self.fetch_u8();
+                let _port = self.fetch_u8();
                 // For basic emulation, return 0xFF
                 self.ax = (self.ax & 0xFF00) | 0xFF;
                 self.cycles += 10;
@@ -3839,7 +3901,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // IN AX, imm8 (0xE5)
             0xE5 => {
-                let port = self.fetch_u8();
+                let _port = self.fetch_u8();
                 // For basic emulation, return 0xFFFF
                 self.ax = 0xFFFF;
                 self.cycles += 10;
@@ -3848,8 +3910,8 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OUT imm8, AL (0xE6)
             0xE6 => {
-                let port = self.fetch_u8();
-                let al = (self.ax & 0xFF) as u8;
+                let _port = self.fetch_u8();
+                let _al = (self.ax & 0xFF) as u8;
                 // For basic emulation, do nothing
                 self.cycles += 10;
                 10
@@ -3857,7 +3919,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OUT imm8, AX (0xE7)
             0xE7 => {
-                let port = self.fetch_u8();
+                let _port = self.fetch_u8();
                 // For basic emulation, do nothing
                 self.cycles += 10;
                 10
@@ -3899,7 +3961,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OUT DX, AL (0xEE)
             0xEE => {
-                let al = (self.ax & 0xFF) as u8;
+                let _al = (self.ax & 0xFF) as u8;
                 // For basic emulation, do nothing
                 self.cycles += 8;
                 8
@@ -3915,7 +3977,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // LOCK prefix (0xF0)
             0xF0 => {
                 // LOCK prefix - for basic emulation, just execute next instruction
-                let next_opcode = self.fetch_u8();
+                let _next_opcode = self.fetch_u8();
                 self.ip = self.ip.wrapping_sub(1);
                 self.step()
             }
@@ -3923,13 +3985,6 @@ impl<M: Memory8086> Cpu8086<M> {
             // Undefined/INT1 (0xF1)
             0xF1 => {
                 // Treat as NOP
-                self.cycles += 2;
-                2
-            }
-
-            // HLT (0xF4)
-            0xF4 => {
-                self.halted = true;
                 self.cycles += 2;
                 2
             }
@@ -3946,16 +4001,18 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let val = self.read_rm8(modbits, rm);
-                
+
                 match op {
-                    0 => { // INC r/m8
+                    0 => {
+                        // INC r/m8
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7F;
                         self.write_rm8(modbits, rm, result);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_OF, overflow);
                     }
-                    1 => { // DEC r/m8
+                    1 => {
+                        // DEC r/m8
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x80;
                         self.write_rm8(modbits, rm, result);
@@ -3967,16 +4024,21 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                 }
                 self.cycles += if modbits == 0b11 { 3 } else { 15 };
-                if modbits == 0b11 { 3 } else { 15 }
+                if modbits == 0b11 {
+                    3
+                } else {
+                    15
+                }
             }
 
             // Group 5 opcodes (0xFF) - INC/DEC/CALL/JMP r/m16
             0xFF => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                
+
                 match op {
-                    0 => { // INC r/m16
+                    0 => {
+                        // INC r/m16
                         let val = self.read_rm16(modbits, rm);
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7FFF;
@@ -3984,9 +4046,14 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
-                        if modbits == 0b11 { 3 } else { 15 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            15
+                        }
                     }
-                    1 => { // DEC r/m16
+                    1 => {
+                        // DEC r/m16
                         let val = self.read_rm16(modbits, rm);
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x8000;
@@ -3994,16 +4061,26 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
-                        if modbits == 0b11 { 3 } else { 15 }
+                        if modbits == 0b11 {
+                            3
+                        } else {
+                            15
+                        }
                     }
-                    2 => { // CALL r/m16 (near)
+                    2 => {
+                        // CALL r/m16 (near)
                         let target = self.read_rm16(modbits, rm);
                         self.push(self.ip);
                         self.ip = target;
                         self.cycles += if modbits == 0b11 { 16 } else { 21 };
-                        if modbits == 0b11 { 16 } else { 21 }
+                        if modbits == 0b11 {
+                            16
+                        } else {
+                            21
+                        }
                     }
-                    3 => { // CALL m16:16 (far)
+                    3 => {
+                        // CALL m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
                         let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
@@ -4014,13 +4091,19 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.cycles += 37;
                         37
                     }
-                    4 => { // JMP r/m16 (near)
+                    4 => {
+                        // JMP r/m16 (near)
                         let target = self.read_rm16(modbits, rm);
                         self.ip = target;
                         self.cycles += if modbits == 0b11 { 11 } else { 18 };
-                        if modbits == 0b11 { 11 } else { 18 }
+                        if modbits == 0b11 {
+                            11
+                        } else {
+                            18
+                        }
                     }
-                    5 => { // JMP m16:16 (far)
+                    5 => {
+                        // JMP m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
                         let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
@@ -4029,11 +4112,16 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.cycles += 24;
                         24
                     }
-                    6 => { // PUSH r/m16
+                    6 => {
+                        // PUSH r/m16
                         let val = self.read_rm16(modbits, rm);
                         self.push(val);
                         self.cycles += if modbits == 0b11 { 11 } else { 16 };
-                        if modbits == 0b11 { 11 } else { 16 }
+                        if modbits == 0b11 {
+                            11
+                        } else {
+                            16
+                        }
                     }
                     _ => {
                         eprintln!("Undefined 0xFF operation with op={}", op);
@@ -4104,45 +4192,6 @@ impl<M: Memory8086> Cpu8086<M> {
             0x74 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
-                    self.cycles += 16;
-                    16
-                } else {
-                    self.cycles += 4;
-                    4
-                }
-            }
-
-            // JNZ/JNE (75) - Jump if Not Zero
-            0x75 => {
-                let offset = self.fetch_u8() as i8;
-                if !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
-                    self.cycles += 16;
-                    16
-                } else {
-                    self.cycles += 4;
-                    4
-                }
-            }
-
-            // JC/JB (72) - Jump if Carry
-            0x72 => {
-                let offset = self.fetch_u8() as i8;
-                if self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
-                    self.cycles += 16;
-                    16
-                } else {
-                    self.cycles += 4;
-                    4
-                }
-            }
-
-            // JNC/JAE (73) - Jump if Not Carry
-            0x73 => {
-                let offset = self.fetch_u8() as i8;
-                if !self.get_flag(FLAG_CF) {
                     self.ip = self.ip.wrapping_add(offset as i16 as u16);
                     self.cycles += 16;
                     16
