@@ -1621,6 +1621,20 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // PUSH ES (0x06)
+            0x06 => {
+                self.push(self.es);
+                self.cycles += 10;
+                10
+            }
+
+            // POP ES (0x07)
+            0x07 => {
+                self.es = self.pop();
+                self.cycles += 8;
+                8
+            }
+
             // OR r/m8, r8 (0x08)
             0x08 => {
                 let modrm = self.fetch_u8();
@@ -1711,6 +1725,80 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     9
                 }
+            }
+
+            // AND AL, imm8 (0x24) is already implemented
+
+            // ES segment override prefix (0x26)
+            0x26 => {
+                // Read next instruction and execute with ES override
+                // For simplicity, we'll just pass through to next instruction
+                // A full implementation would set a segment override flag
+                let next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1); // Back up IP
+                self.step() // Execute next instruction
+                // Note: This is a simplified implementation
+                // Real hardware would affect address calculation in the next instruction
+            }
+
+            // DAA - Decimal Adjust After Addition (0x27)
+            0x27 => {
+                let mut al = (self.ax & 0xFF) as u8;
+                let old_al = al;
+                let old_cf = self.get_flag(FLAG_CF);
+
+                if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
+                    al = al.wrapping_add(6);
+                    self.set_flag(FLAG_AF, true);
+                } else {
+                    self.set_flag(FLAG_AF, false);
+                }
+
+                if old_al > 0x99 || old_cf {
+                    al = al.wrapping_add(0x60);
+                    self.set_flag(FLAG_CF, true);
+                } else {
+                    self.set_flag(FLAG_CF, false);
+                }
+
+                self.ax = (self.ax & 0xFF00) | (al as u16);
+                self.update_flags_8(al);
+                self.cycles += 4;
+                4
+            }
+
+            // CS segment override prefix (0x2E)
+            0x2E => {
+                // Similar to ES override - simplified implementation
+                let next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1);
+                self.step()
+            }
+
+            // DAS - Decimal Adjust After Subtraction (0x2F)
+            0x2F => {
+                let mut al = (self.ax & 0xFF) as u8;
+                let old_al = al;
+                let old_cf = self.get_flag(FLAG_CF);
+
+                if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
+                    al = al.wrapping_sub(6);
+                    self.set_flag(FLAG_AF, true);
+                } else {
+                    self.set_flag(FLAG_AF, false);
+                }
+
+                if old_al > 0x99 || old_cf {
+                    al = al.wrapping_sub(0x60);
+                    self.set_flag(FLAG_CF, true);
+                } else {
+                    self.set_flag(FLAG_CF, false);
+                }
+
+                self.ax = (self.ax & 0xFF00) | (al as u16);
+                self.update_flags_8(al);
+                self.cycles += 4;
+                4
             }
 
             // XOR r/m8, r8 (0x30)
@@ -1919,6 +2007,178 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // PUSH CS (0x0E)
+            0x0E => {
+                self.push(self.cs);
+                self.cycles += 10;
+                10
+            }
+
+            // Two-byte opcode prefix (0x0F) - 80286+ instructions
+            // For basic 8086 emulation, treat as illegal/undefined
+            0x0F => {
+                let next_opcode = self.fetch_u8();
+                eprintln!(
+                    "Two-byte opcode 0x0F 0x{:02X} not supported (80286+) at CS:IP={:04X}:{:04X}",
+                    next_opcode,
+                    self.cs,
+                    self.ip.wrapping_sub(2)
+                );
+                self.cycles += 2;
+                2
+            }
+
+            // ADC r/m8, r8 (0x10) - Add with Carry
+            0x10 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
+                let carry = (rm_val as u16 + reg_val as u16 + carry_in as u16) > 0xFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // ADC r/m16, r16 (0x11) - Add with Carry
+            0x11 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
+                let carry = (rm_val as u32 + reg_val as u32 + carry_in as u32) > 0xFFFF;
+                let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // ADC r8, r/m8 (0x12) - Add with Carry
+            0x12 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
+                let carry = (reg_val as u16 + rm_val as u16 + carry_in as u16) > 0xFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // ADC r16, r/m16 (0x13) - Add with Carry
+            0x13 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
+                let carry = (reg_val as u32 + rm_val as u32 + carry_in as u32) > 0xFFFF;
+                let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // ADC AL, imm8 (0x14) - Add with Carry
+            0x14 => {
+                let val = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = al.wrapping_add(val).wrapping_add(carry_in);
+                let carry = (al as u16 + val as u16 + carry_in as u16) > 0xFF;
+                let overflow = ((al ^ result) & (val ^ result) & 0x80) != 0;
+
+                self.ax = (self.ax & 0xFF00) | (result as u16);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += 4;
+                4
+            }
+
+            // ADC AX, imm16 (0x15) - Add with Carry
+            0x15 => {
+                let val = self.fetch_u16();
+                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = self.ax.wrapping_add(val).wrapping_add(carry_in);
+                let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
+                let overflow = ((self.ax ^ result) & (val ^ result) & 0x8000) != 0;
+
+                self.ax = result;
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, carry);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += 4;
+                4
+            }
+
+            // PUSH SS (0x16)
+            0x16 => {
+                self.push(self.ss);
+                self.cycles += 10;
+                10
+            }
+
+            // POP SS (0x17)
+            0x17 => {
+                self.ss = self.pop();
+                self.cycles += 8;
+                8
+            }
+
             // SBB r/m8, r8 (0x18) - Subtract with Borrow
             0x18 => {
                 let modrm = self.fetch_u8();
@@ -2023,12 +2283,144 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
+            // SBB AL, imm8 (0x1C) - Subtract with Borrow
+            0x1C => {
+                let val = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = al.wrapping_sub(val).wrapping_sub(carry);
+                let borrow = (al as u16) < (val as u16 + carry as u16);
+                let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+
+                self.ax = (self.ax & 0xFF00) | (result as u16);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += 4;
+                4
+            }
+
+            // SBB AX, imm16 (0x1D) - Subtract with Borrow
+            0x1D => {
+                let val = self.fetch_u16();
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = self.ax.wrapping_sub(val).wrapping_sub(carry);
+                let borrow = (self.ax as u32) < (val as u32 + carry as u32);
+                let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+
+                self.ax = result;
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += 4;
+                4
+            }
+
+            // PUSH DS (0x1E)
+            0x1E => {
+                self.push(self.ds);
+                self.cycles += 10;
+                10
+            }
+
             // POP DS (0x1F)
             0x1F => {
                 let val = self.pop();
                 self.ds = val;
                 self.cycles += 8;
                 8
+            }
+
+            // AND r/m8, r8 (0x20)
+            0x20 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // AND r/m16, r16 (0x21)
+            0x21 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val & reg_val;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // AND r8, r/m8 (0x22)
+            0x22 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val & rm_val;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // AND r16, r/m16 (0x23)
+            0x23 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val & rm_val;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
             }
 
             // XOR AL, imm8
@@ -2056,6 +2448,498 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_OF, false);
                 self.cycles += 4;
                 4
+            }
+
+            // SS segment override prefix (0x36)
+            0x36 => {
+                // Simplified implementation - just execute next instruction
+                let next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1);
+                self.step()
+            }
+
+            // AAA - ASCII Adjust After Addition (0x37)
+            0x37 => {
+                let al = (self.ax & 0xFF) as u8;
+                if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
+                    self.ax = self.ax.wrapping_add(0x106); // Add 1 to AH, 6 to AL
+                    self.set_flag(FLAG_AF, true);
+                    self.set_flag(FLAG_CF, true);
+                } else {
+                    self.set_flag(FLAG_AF, false);
+                    self.set_flag(FLAG_CF, false);
+                }
+                self.ax = self.ax & 0xFF0F; // Clear upper nibble of AL
+                self.cycles += 4;
+                4
+            }
+
+            // DS segment override prefix (0x3E)
+            0x3E => {
+                // Simplified implementation - just execute next instruction
+                let next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1);
+                self.step()
+            }
+
+            // AAS - ASCII Adjust After Subtraction (0x3F)
+            0x3F => {
+                let al = (self.ax & 0xFF) as u8;
+                if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
+                    self.ax = self.ax.wrapping_sub(6); // Subtract 6 from AL
+                    self.ax = (self.ax & 0xFF) | ((self.ax.wrapping_sub(0x100)) & 0xFF00); // Subtract 1 from AH
+                    self.set_flag(FLAG_AF, true);
+                    self.set_flag(FLAG_CF, true);
+                } else {
+                    self.set_flag(FLAG_AF, false);
+                    self.set_flag(FLAG_CF, false);
+                }
+                self.ax = self.ax & 0xFF0F; // Clear upper nibble of AL
+                self.cycles += 4;
+                4
+            }
+
+            // Conditional jumps (0x70-0x7F)
+            // JO - Jump if Overflow (0x70)
+            0x70 => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_OF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNO - Jump if Not Overflow (0x71)
+            0x71 => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_OF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JB/JC/JNAE - Jump if Below/Carry (0x72)
+            0x72 => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_CF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNB/JNC/JAE - Jump if Not Below/No Carry (0x73)
+            0x73 => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_CF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JE/JZ - Jump if Equal/Zero (0x74) - already implemented
+
+            // JNE/JNZ - Jump if Not Equal/Not Zero (0x75)
+            0x75 => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_ZF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JBE/JNA - Jump if Below or Equal/Not Above (0x76)
+            0x76 => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_CF) || self.get_flag(FLAG_ZF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNBE/JA - Jump if Not Below or Equal/Above (0x77)
+            0x77 => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JS - Jump if Sign (0x78)
+            0x78 => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_SF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNS - Jump if Not Sign (0x79)
+            0x79 => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_SF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JP/JPE - Jump if Parity/Parity Even (0x7A)
+            0x7A => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_PF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNP/JPO - Jump if Not Parity/Parity Odd (0x7B)
+            0x7B => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_PF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JL/JNGE - Jump if Less/Not Greater or Equal (0x7C)
+            0x7C => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNL/JGE - Jump if Not Less/Greater or Equal (0x7D)
+            0x7D => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JLE/JNG - Jump if Less or Equal/Not Greater (0x7E)
+            0x7E => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_ZF) || (self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF)) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // JNLE/JG - Jump if Not Less or Equal/Greater (0x7F)
+            0x7F => {
+                let offset = self.fetch_u8() as i8;
+                if !self.get_flag(FLAG_ZF) && (self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF)) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
+
+            // Group 1 immediate operations (0x80-0x83)
+            // These require full ModR/M decoding with immediate values
+            // 0x80 - r/m8, imm8
+            0x80 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let rm_val = self.read_rm8(modbits, rm);
+                let imm = self.fetch_u8();
+                let result = match op {
+                    0 => { // ADD
+                        let r = rm_val.wrapping_add(imm);
+                        let carry = (rm_val as u16 + imm as u16) > 0xFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    1 => { // OR
+                        let r = rm_val | imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    2 => { // ADC
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
+                        let carry = (rm_val as u16 + imm as u16 + carry_in as u16) > 0xFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    3 => { // SBB
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
+                        let borrow = (rm_val as u16) < (imm as u16 + carry_in as u16);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    4 => { // AND
+                        let r = rm_val & imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    5 => { // SUB
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u16) < (imm as u16);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    6 => { // XOR
+                        let r = rm_val ^ imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    7 => { // CMP
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u16) < (imm as u16);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80) != 0;
+                        self.update_flags_8(r);
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                        return if modbits == 0b11 { 4 } else { 17 };
+                    }
+                    _ => unreachable!(),
+                };
+                if op != 7 {
+                    self.write_rm8(modbits, rm, result);
+                    self.update_flags_8(result);
+                }
+                self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                if modbits == 0b11 { 4 } else { 17 }
+            }
+
+            // 0x81 - r/m16, imm16
+            0x81 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let rm_val = self.read_rm16(modbits, rm);
+                let imm = self.fetch_u16();
+                let result = match op {
+                    0 => { // ADD
+                        let r = rm_val.wrapping_add(imm);
+                        let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    1 => { // OR
+                        let r = rm_val | imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    2 => { // ADC
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
+                        let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    3 => { // SBB
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
+                        let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    4 => { // AND
+                        let r = rm_val & imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    5 => { // SUB
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u32) < (imm as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    6 => { // XOR
+                        let r = rm_val ^ imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    7 => { // CMP
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u32) < (imm as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.update_flags_16(r);
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                        return if modbits == 0b11 { 4 } else { 17 };
+                    }
+                    _ => unreachable!(),
+                };
+                if op != 7 {
+                    self.write_rm16(modbits, rm, result);
+                    self.update_flags_16(result);
+                }
+                self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                if modbits == 0b11 { 4 } else { 17 }
+            }
+
+            // 0x82 - Same as 0x80 (alias for 8086)
+            0x82 => {
+                self.ip = self.ip.wrapping_sub(1); // Back up and execute as 0x80
+                self.step()
+            }
+
+            // 0x83 - r/m16, imm8 (sign-extended)
+            0x83 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let rm_val = self.read_rm16(modbits, rm);
+                let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
+                let result = match op {
+                    0 => { // ADD
+                        let r = rm_val.wrapping_add(imm);
+                        let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    1 => { // OR
+                        let r = rm_val | imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    2 => { // ADC
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
+                        let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
+                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, carry);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    3 => { // SBB
+                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                        let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
+                        let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    4 => { // AND
+                        let r = rm_val & imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    5 => { // SUB
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u32) < (imm as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        r
+                    }
+                    6 => { // XOR
+                        let r = rm_val ^ imm;
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        r
+                    }
+                    7 => { // CMP
+                        let r = rm_val.wrapping_sub(imm);
+                        let borrow = (rm_val as u32) < (imm as u32);
+                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                        self.update_flags_16(r);
+                        self.set_flag(FLAG_CF, borrow);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                        return if modbits == 0b11 { 4 } else { 17 };
+                    }
+                    _ => unreachable!(),
+                };
+                if op != 7 {
+                    self.write_rm16(modbits, rm, result);
+                    self.update_flags_16(result);
+                }
+                self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                if modbits == 0b11 { 4 } else { 17 }
             }
 
             // TEST r/m8, r8 (0x84)
@@ -2098,6 +2982,155 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     9
                 }
+            }
+
+            // XCHG r8, r/m8 (0x86)
+            0x86 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                
+                if reg < 4 {
+                    self.set_reg8_low(reg, rm_val);
+                } else {
+                    self.set_reg8_high(reg - 4, rm_val);
+                }
+                self.write_rm8(modbits, rm, reg_val);
+                
+                self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                if modbits == 0b11 { 4 } else { 17 }
+            }
+
+            // XCHG r16, r/m16 (0x87)
+            0x87 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                
+                self.set_reg16(reg, rm_val);
+                self.write_rm16(modbits, rm, reg_val);
+                
+                self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                if modbits == 0b11 { 4 } else { 17 }
+            }
+
+            // LEA - Load Effective Address (0x8D)
+            0x8D => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                // LEA only works with memory operands (not register mode)
+                if modbits != 0b11 {
+                    let (_, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                    self.set_reg16(reg, offset_ea);
+                }
+                self.cycles += 2;
+                2
+            }
+
+            // XCHG with AX (0x91-0x97)
+            0x91..=0x97 => {
+                let reg = opcode & 0x07;
+                let temp = self.ax;
+                self.ax = self.get_reg16(reg);
+                self.set_reg16(reg, temp);
+                self.cycles += 3;
+                3
+            }
+
+            // CBW - Convert Byte to Word (0x98)
+            0x98 => {
+                let al = (self.ax & 0xFF) as u8;
+                let sign_extend = if al & 0x80 != 0 { 0xFF00 } else { 0x0000 };
+                self.ax = (self.ax & 0x00FF) | sign_extend;
+                self.cycles += 2;
+                2
+            }
+
+            // CWD - Convert Word to Doubleword (0x99)
+            0x99 => {
+                let sign_extend = if self.ax & 0x8000 != 0 { 0xFFFF } else { 0x0000 };
+                self.dx = sign_extend;
+                self.cycles += 5;
+                5
+            }
+
+            // WAIT (0x9B)
+            0x9B => {
+                // WAIT instruction - normally waits for FPU
+                // For basic emulation, just consume cycles
+                self.cycles += 3;
+                3
+            }
+
+            // PUSHF - Push Flags (0x9C)
+            0x9C => {
+                self.push(self.flags);
+                self.cycles += 10;
+                10
+            }
+
+            // POPF - Pop Flags (0x9D)
+            0x9D => {
+                self.flags = self.pop();
+                self.cycles += 8;
+                8
+            }
+
+            // SAHF - Store AH into Flags (0x9E)
+            0x9E => {
+                let ah = ((self.ax >> 8) & 0xFF) as u8;
+                self.flags = (self.flags & 0xFF00) | (ah as u16);
+                self.cycles += 4;
+                4
+            }
+
+            // LAHF - Load AH from Flags (0x9F)
+            0x9F => {
+                let flags_low = (self.flags & 0xFF) as u8;
+                self.ax = (self.ax & 0x00FF) | ((flags_low as u16) << 8);
+                self.cycles += 4;
+                4
+            }
+
+            // MOV AL, moffs8 (0xA0) - Direct memory to AL
+            0xA0 => {
+                let addr = self.fetch_u16();
+                let val = self.read(self.ds, addr);
+                self.ax = (self.ax & 0xFF00) | (val as u16);
+                self.cycles += 10;
+                10
+            }
+
+            // MOV AX, moffs16 (0xA1) - Direct memory to AX
+            0xA1 => {
+                let addr = self.fetch_u16();
+                let val = self.read_u16(self.ds, addr);
+                self.ax = val;
+                self.cycles += 10;
+                10
+            }
+
+            // MOV moffs8, AL (0xA2) - AL to direct memory
+            0xA2 => {
+                let addr = self.fetch_u16();
+                let al = (self.ax & 0xFF) as u8;
+                self.write(self.ds, addr, al);
+                self.cycles += 10;
+                10
+            }
+
+            // MOV moffs16, AX (0xA3) - AX to direct memory
+            0xA3 => {
+                let addr = self.fetch_u16();
+                self.write_u16(self.ds, addr, self.ax);
+                self.cycles += 10;
+                10
             }
 
             // TEST AL, imm8 (0xA8)
@@ -2430,6 +3463,72 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
+            // LES - Load pointer to ES (0xC4)
+            0xC4 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                // LES only works with memory operands
+                if modbits != 0b11 {
+                    let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                    let offset = self.read_u16(seg, offset_ea);
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                    self.set_reg16(reg, offset);
+                    self.es = segment;
+                }
+                self.cycles += 16;
+                16
+            }
+
+            // LDS - Load pointer to DS (0xC5)
+            0xC5 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                // LDS only works with memory operands
+                if modbits != 0b11 {
+                    let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                    let offset = self.read_u16(seg, offset_ea);
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                    self.set_reg16(reg, offset);
+                    self.ds = segment;
+                }
+                self.cycles += 16;
+                16
+            }
+
+            // MOV r/m8, imm8 (0xC6) - Group 11
+            0xC6 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                if op == 0 { // Only op=0 is valid for MOV
+                    let imm = self.fetch_u8();
+                    self.write_rm8(modbits, rm, imm);
+                    self.cycles += if modbits == 0b11 { 4 } else { 10 };
+                    if modbits == 0b11 { 4 } else { 10 }
+                } else {
+                    // Undefined
+                    eprintln!("Undefined 0xC6 operation with op={}", op);
+                    self.cycles += 1;
+                    1
+                }
+            }
+
+            // MOV r/m16, imm16 (0xC7) - Group 11
+            0xC7 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                if op == 0 { // Only op=0 is valid for MOV
+                    let imm = self.fetch_u16();
+                    self.write_rm16(modbits, rm, imm);
+                    self.cycles += if modbits == 0b11 { 4 } else { 10 };
+                    if modbits == 0b11 { 4 } else { 10 }
+                } else {
+                    // Undefined
+                    eprintln!("Undefined 0xC7 operation with op={}", op);
+                    self.cycles += 1;
+                    1
+                }
+            }
+
             // Group 2 opcodes (0xC0) - Shift/rotate r/m8 by immediate byte (80186+)
             0xC0 => {
                 let modrm = self.fetch_u8();
@@ -2467,6 +3566,78 @@ impl<M: Memory8086> Cpu8086<M> {
                     5 + (4 * count as u32)
                 } else {
                     17 + (4 * count as u32)
+                }
+            }
+
+            // ENTER (0xC8) - 80186+ instruction
+            0xC8 => {
+                let size = self.fetch_u16();
+                let nesting = self.fetch_u8();
+                // Simplified implementation
+                self.push(self.bp);
+                let frame_temp = self.sp;
+                self.bp = frame_temp;
+                self.sp = self.sp.wrapping_sub(size);
+                self.cycles += 15;
+                15
+            }
+
+            // LEAVE (0xC9) - 80186+ instruction
+            0xC9 => {
+                self.sp = self.bp;
+                self.bp = self.pop();
+                self.cycles += 8;
+                8
+            }
+
+            // INT 3 (0xCC) - Breakpoint interrupt
+            0xCC => {
+                // Push flags, CS, IP
+                self.push(self.flags);
+                self.push(self.cs);
+                self.push(self.ip);
+                
+                // Clear IF and TF
+                self.set_flag(FLAG_IF, false);
+                self.set_flag(FLAG_TF, false);
+                
+                // Jump to interrupt vector 3
+                let ivt_offset = 3 * 4;
+                let new_ip = self.read_u16(0, ivt_offset);
+                let new_cs = self.read_u16(0, ivt_offset + 2);
+                
+                self.ip = new_ip;
+                self.cs = new_cs;
+                
+                self.cycles += 52;
+                52
+            }
+
+            // INTO - Interrupt on Overflow (0xCE)
+            0xCE => {
+                if self.get_flag(FLAG_OF) {
+                    // Push flags, CS, IP
+                    self.push(self.flags);
+                    self.push(self.cs);
+                    self.push(self.ip);
+                    
+                    // Clear IF and TF
+                    self.set_flag(FLAG_IF, false);
+                    self.set_flag(FLAG_TF, false);
+                    
+                    // Jump to interrupt vector 4
+                    let ivt_offset = 4 * 4;
+                    let new_ip = self.read_u16(0, ivt_offset);
+                    let new_cs = self.read_u16(0, ivt_offset + 2);
+                    
+                    self.ip = new_ip;
+                    self.cs = new_cs;
+                    
+                    self.cycles += 53;
+                    53
+                } else {
+                    self.cycles += 4;
+                    4
                 }
             }
 
@@ -2537,6 +3708,338 @@ impl<M: Memory8086> Cpu8086<M> {
                     8 + (4 * count as u32)
                 } else {
                     20 + (4 * count as u32)
+                }
+            }
+
+            // AAM - ASCII Adjust After Multiply (0xD4)
+            0xD4 => {
+                let base = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                if base == 0 {
+                    // Division by zero - trigger INT 0
+                    eprintln!("AAM with base 0 (division by zero)");
+                    self.cycles += 1;
+                    1
+                } else {
+                    let ah = al / base;
+                    let al_new = al % base;
+                    self.ax = ((ah as u16) << 8) | (al_new as u16);
+                    self.update_flags_8(al_new);
+                    self.cycles += 83;
+                    83
+                }
+            }
+
+            // AAD - ASCII Adjust Before Division (0xD5)
+            0xD5 => {
+                let base = self.fetch_u8();
+                let ah = ((self.ax >> 8) & 0xFF) as u8;
+                let al = (self.ax & 0xFF) as u8;
+                let result = al.wrapping_add(ah.wrapping_mul(base));
+                self.ax = (self.ax & 0xFF00) | (result as u16);
+                self.ax = self.ax & 0x00FF; // Clear AH
+                self.update_flags_8(result);
+                self.cycles += 60;
+                60
+            }
+
+            // SALC/SETALC (0xD6) - Undocumented opcode
+            0xD6 => {
+                // Set AL on Carry
+                let al = if self.get_flag(FLAG_CF) { 0xFF } else { 0x00 };
+                self.ax = (self.ax & 0xFF00) | (al as u16);
+                self.cycles += 3;
+                3
+            }
+
+            // XLAT/XLATB (0xD7)
+            0xD7 => {
+                let al = (self.ax & 0xFF) as u8;
+                let offset = self.bx.wrapping_add(al as u16);
+                let val = self.read(self.ds, offset);
+                self.ax = (self.ax & 0xFF00) | (val as u16);
+                self.cycles += 11;
+                11
+            }
+
+            // ESC opcodes (0xD8-0xDF) - FPU instructions
+            // For basic emulation, treat as NOPs
+            0xD8..=0xDF => {
+                let modrm = self.fetch_u8();
+                let (modbits, _, _) = Self::decode_modrm(modrm);
+                // Just consume the ModR/M byte and any displacement
+                self.cycles += if modbits == 0b11 { 2 } else { 8 };
+                if modbits == 0b11 { 2 } else { 8 }
+            }
+
+            // LOOP variants (0xE0-0xE3)
+            // LOOPNE/LOOPNZ (0xE0)
+            0xE0 => {
+                let offset = self.fetch_u8() as i8;
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && !self.get_flag(FLAG_ZF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 19;
+                    19
+                } else {
+                    self.cycles += 5;
+                    5
+                }
+            }
+
+            // LOOPE/LOOPZ (0xE1)
+            0xE1 => {
+                let offset = self.fetch_u8() as i8;
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && self.get_flag(FLAG_ZF) {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 18;
+                    18
+                } else {
+                    self.cycles += 6;
+                    6
+                }
+            }
+
+            // LOOP (0xE2)
+            0xE2 => {
+                let offset = self.fetch_u8() as i8;
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 17;
+                    17
+                } else {
+                    self.cycles += 5;
+                    5
+                }
+            }
+
+            // JCXZ - Jump if CX is Zero (0xE3)
+            0xE3 => {
+                let offset = self.fetch_u8() as i8;
+                if self.cx == 0 {
+                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.cycles += 18;
+                    18
+                } else {
+                    self.cycles += 6;
+                    6
+                }
+            }
+
+            // IN AL, imm8 (0xE4)
+            0xE4 => {
+                let port = self.fetch_u8();
+                // For basic emulation, return 0xFF
+                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.cycles += 10;
+                10
+            }
+
+            // IN AX, imm8 (0xE5)
+            0xE5 => {
+                let port = self.fetch_u8();
+                // For basic emulation, return 0xFFFF
+                self.ax = 0xFFFF;
+                self.cycles += 10;
+                10
+            }
+
+            // OUT imm8, AL (0xE6)
+            0xE6 => {
+                let port = self.fetch_u8();
+                let al = (self.ax & 0xFF) as u8;
+                // For basic emulation, do nothing
+                self.cycles += 10;
+                10
+            }
+
+            // OUT imm8, AX (0xE7)
+            0xE7 => {
+                let port = self.fetch_u8();
+                // For basic emulation, do nothing
+                self.cycles += 10;
+                10
+            }
+
+            // JMP near relative (0xE9)
+            0xE9 => {
+                let offset = self.fetch_u16() as i16;
+                self.ip = self.ip.wrapping_add(offset as u16);
+                self.cycles += 15;
+                15
+            }
+
+            // JMP far absolute (0xEA)
+            0xEA => {
+                let offset = self.fetch_u16();
+                let segment = self.fetch_u16();
+                self.ip = offset;
+                self.cs = segment;
+                self.cycles += 15;
+                15
+            }
+
+            // IN AL, DX (0xEC)
+            0xEC => {
+                // For basic emulation, return 0xFF
+                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.cycles += 8;
+                8
+            }
+
+            // IN AX, DX (0xED)
+            0xED => {
+                // For basic emulation, return 0xFFFF
+                self.ax = 0xFFFF;
+                self.cycles += 8;
+                8
+            }
+
+            // OUT DX, AL (0xEE)
+            0xEE => {
+                let al = (self.ax & 0xFF) as u8;
+                // For basic emulation, do nothing
+                self.cycles += 8;
+                8
+            }
+
+            // OUT DX, AX (0xEF)
+            0xEF => {
+                // For basic emulation, do nothing
+                self.cycles += 8;
+                8
+            }
+
+            // LOCK prefix (0xF0)
+            0xF0 => {
+                // LOCK prefix - for basic emulation, just execute next instruction
+                let next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1);
+                self.step()
+            }
+
+            // Undefined/INT1 (0xF1)
+            0xF1 => {
+                // Treat as NOP
+                self.cycles += 2;
+                2
+            }
+
+            // HLT (0xF4)
+            0xF4 => {
+                self.halted = true;
+                self.cycles += 2;
+                2
+            }
+
+            // CMC - Complement Carry Flag (0xF5)
+            0xF5 => {
+                self.set_flag(FLAG_CF, !self.get_flag(FLAG_CF));
+                self.cycles += 2;
+                2
+            }
+
+            // Group 4 opcodes (0xFE) - INC/DEC r/m8
+            0xFE => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                
+                match op {
+                    0 => { // INC r/m8
+                        let result = val.wrapping_add(1);
+                        let overflow = val == 0x7F;
+                        self.write_rm8(modbits, rm, result);
+                        self.update_flags_8(result);
+                        self.set_flag(FLAG_OF, overflow);
+                    }
+                    1 => { // DEC r/m8
+                        let result = val.wrapping_sub(1);
+                        let overflow = val == 0x80;
+                        self.write_rm8(modbits, rm, result);
+                        self.update_flags_8(result);
+                        self.set_flag(FLAG_OF, overflow);
+                    }
+                    _ => {
+                        eprintln!("Undefined 0xFE operation with op={}", op);
+                    }
+                }
+                self.cycles += if modbits == 0b11 { 3 } else { 15 };
+                if modbits == 0b11 { 3 } else { 15 }
+            }
+
+            // Group 5 opcodes (0xFF) - INC/DEC/CALL/JMP r/m16
+            0xFF => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                
+                match op {
+                    0 => { // INC r/m16
+                        let val = self.read_rm16(modbits, rm);
+                        let result = val.wrapping_add(1);
+                        let overflow = val == 0x7FFF;
+                        self.write_rm16(modbits, rm, result);
+                        self.update_flags_16(result);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.cycles += if modbits == 0b11 { 3 } else { 15 };
+                        if modbits == 0b11 { 3 } else { 15 }
+                    }
+                    1 => { // DEC r/m16
+                        let val = self.read_rm16(modbits, rm);
+                        let result = val.wrapping_sub(1);
+                        let overflow = val == 0x8000;
+                        self.write_rm16(modbits, rm, result);
+                        self.update_flags_16(result);
+                        self.set_flag(FLAG_OF, overflow);
+                        self.cycles += if modbits == 0b11 { 3 } else { 15 };
+                        if modbits == 0b11 { 3 } else { 15 }
+                    }
+                    2 => { // CALL r/m16 (near)
+                        let target = self.read_rm16(modbits, rm);
+                        self.push(self.ip);
+                        self.ip = target;
+                        self.cycles += if modbits == 0b11 { 16 } else { 21 };
+                        if modbits == 0b11 { 16 } else { 21 }
+                    }
+                    3 => { // CALL m16:16 (far)
+                        let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                        let offset = self.read_u16(seg, offset_ea);
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                        self.push(self.cs);
+                        self.push(self.ip);
+                        self.ip = offset;
+                        self.cs = segment;
+                        self.cycles += 37;
+                        37
+                    }
+                    4 => { // JMP r/m16 (near)
+                        let target = self.read_rm16(modbits, rm);
+                        self.ip = target;
+                        self.cycles += if modbits == 0b11 { 11 } else { 18 };
+                        if modbits == 0b11 { 11 } else { 18 }
+                    }
+                    5 => { // JMP m16:16 (far)
+                        let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                        let offset = self.read_u16(seg, offset_ea);
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                        self.ip = offset;
+                        self.cs = segment;
+                        self.cycles += 24;
+                        24
+                    }
+                    6 => { // PUSH r/m16
+                        let val = self.read_rm16(modbits, rm);
+                        self.push(val);
+                        self.cycles += if modbits == 0b11 { 11 } else { 16 };
+                        if modbits == 0b11 { 11 } else { 16 }
+                    }
+                    _ => {
+                        eprintln!("Undefined 0xFF operation with op={}", op);
+                        self.cycles += 1;
+                        1
+                    }
                 }
             }
 
