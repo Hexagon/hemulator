@@ -9,6 +9,7 @@ mod bios;
 mod bus;
 mod cpu;
 mod disk;
+mod font; // Shared IBM PC ROM font data
 mod keyboard;
 mod video;
 mod video_adapter;

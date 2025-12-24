@@ -88,7 +88,7 @@ For system-specific implementation details, see each system's README:
 ### Quick Reference
 
 **Core Components** (`crates/core/`):
-- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
+- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086/80186/80286/80386
 - Audio: APU channels, envelopes, mixers
 - Graphics: ZBuffer, ColorOps, palette/tile utilities
 - Traits: System, Cpu, Renderer, AudioChip
@@ -231,10 +231,10 @@ Contains reusable CPU implementations and common traits:
 - **`cpu_8086`**: Intel 8086 CPU implementation with comprehensive instruction set
   - Generic `Memory8086` trait for memory access
   - Segment-based memory addressing (CS, DS, ES, SS)
-  - Comprehensive test coverage (109 unit tests)
-  - CPU model selection support (8086, 8088, 80186, 80188, 80286)
-  - Can be used by any system: IBM PC, PC XT, etc.
-  - Implementation includes:
+  - Comprehensive test coverage (129 unit tests)
+  - CPU model selection support (8086, 8088, 80186, 80188, 80286, 80386)
+  - Can be used by any system: IBM PC, PC XT, AT, etc.
+  - **8086/8088 Base Implementation**:
     - All general-purpose registers (AX, BX, CX, DX, SI, DI, BP, SP)
     - Segment registers (CS, DS, ES, SS)
     - Instruction pointer (IP) and FLAGS register
@@ -290,8 +290,36 @@ Contains reusable CPU implementations and common traits:
       - INT n (0xCD) and IRET (0xCF)
     - **Stack operations**: PUSH/POP register (0x50-0x5F)
     - **Flag manipulation**: CLC, STC, CLI, STI, CLD, STD (0xF8-0xFD)
-    - Accurate cycle counting
-    - Parity, zero, sign, carry, and overflow flags
+  - **80186/80188 Extensions**:
+    - PUSHA/POPA (0x60, 0x61) - Push/Pop all general registers
+    - BOUND (0x62) - Check array index against bounds
+    - PUSH immediate (0x68 word, 0x6A byte sign-extended)
+    - IMUL immediate (0x69 word, 0x6B byte) - Multiply with immediate
+    - INSB/INSW (0x6C, 0x6D) - Input string from I/O port
+    - OUTSB/OUTSW (0x6E, 0x6F) - Output string to I/O port
+    - Shift/rotate by immediate (0xC0, 0xC1)
+    - ENTER/LEAVE (0xC8, 0xC9) - Stack frame management
+  - **80286 Protected Mode Instructions** (two-byte opcodes 0x0F prefix):
+    - LMSW (0x0F 0x01) - Load Machine Status Word (stub)
+    - LAR (0x0F 0x02) - Load Access Rights (stub)
+    - LSL (0x0F 0x03) - Load Segment Limit (stub)
+    - CLTS (0x0F 0x06) - Clear Task Switched flag (stub)
+  - **80386 Extensions**:
+    - MOVSX (0x0F 0xBE) - Move with sign extension
+    - MOVZX (0x0F 0xB6) - Move with zero extension
+    - BSF (0x0F 0xBC) - Bit scan forward
+    - BSR (0x0F 0xBD) - Bit scan reverse
+    - BT (0x0F 0xA3) - Bit test
+    - BTS (0x0F 0xAB) - Bit test and set
+    - BTR (0x0F 0xB3) - Bit test and reset
+    - BTC (0x0F 0xBB) - Bit test and complement
+    - SHLD/SHRD (0x0F 0xA4, 0xA5, 0xAC, 0xAD) - Double precision shifts (stubs)
+    - SETcc (0x0F 0x90-0x9F) - Set byte on condition
+  - **I/O Support**:
+    - I/O helper methods (io_read, io_write, io_read_word, io_write_word)
+    - Stub implementations return 0xFF/0xFFFF for reads, no-op for writes
+  - Accurate cycle counting
+  - Parity, zero, sign, carry, and overflow flags
   - `ArrayMemory` helper for testing and simple use cases
 
 - **`apu`**: Reusable audio processing unit components

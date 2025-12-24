@@ -745,11 +745,12 @@ For N64 games, the standard controller mappings apply with these button equivale
 - Hard drives: Disk images (.img, .vhd files)
 
 **Features**:
-- **8086 CPU core** with complete instruction set
-  - All MOV, arithmetic (ADD, SUB, CMP, INC, DEC), and logical operations (AND, OR, XOR)
-  - Control flow (JMP, conditional jumps, CALL, RET)
-  - Stack operations (PUSH, POP)
-  - Flag manipulation (CLC, STC, CLI, STI, etc.)
+- **8086/80186/80286/80386 CPU core** with comprehensive instruction set
+  - **8086/8088**: All base instructions (MOV, arithmetic, logical, control flow, stack, flags)
+  - **80186/80188**: PUSHA/POPA, BOUND, PUSH immediate, IMUL immediate, INS/OUTS, ENTER/LEAVE
+  - **80286**: Protected mode instruction stubs (LMSW, LAR, LSL, CLTS)
+  - **80386**: MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc
+  - CPU model selection support for running software with different instruction set requirements
   - See `AGENTS.md` for full instruction set details
 - **Memory bus** (640KB RAM, 128KB VRAM, 256KB ROM)
 - **Custom BIOS** with POST screen
