@@ -131,6 +131,8 @@ impl System for SnesSystem {
         while self.current_cycles < self.frame_cycles {
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
+            // Update cycle counter in bus for VBlank timing
+            self.cpu.bus_mut().tick_cycles(cycles);
         }
 
         // Render frame using the renderer
