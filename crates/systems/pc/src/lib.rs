@@ -79,8 +79,8 @@ impl PcSystem {
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
 
-        // Write Hemu logo to video RAM
-        bios::write_hemu_logo_to_vram(bus.vram_mut());
+        // Write BIOS POST screen to video RAM
+        bios::write_post_screen_to_vram(bus.vram_mut());
 
         let cpu = PcCpu::with_model(bus, model);
 
@@ -209,6 +209,19 @@ impl PcSystem {
             cycles: self.cycles,
         }
     }
+
+    /// Update POST screen with current mount status
+    pub fn update_post_screen(&mut self) {
+        // Get mount status first (immutable borrows)
+        let floppy_a = self.cpu.bus().floppy_a().is_some();
+        let floppy_b = self.cpu.bus().floppy_b().is_some();
+        let hard_drive = self.cpu.bus().hard_drive().is_some();
+        let boot_priority = self.cpu.bus().boot_priority();
+
+        // Now get mutable borrow to update VRAM
+        let vram = self.cpu.bus_mut().vram_mut();
+        bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -236,9 +249,9 @@ impl System for PcSystem {
         self.cycles = 0;
         self.frame_cycles = 0;
 
-        // Write Hemu logo to video RAM
+        // Write BIOS POST screen to video RAM
         let vram = self.cpu.bus_mut().vram_mut();
-        bios::write_hemu_logo_to_vram(vram);
+        bios::write_post_screen_to_vram(vram);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -921,80 +934,210 @@ mod tests {
     }
 
     #[test]
-    fn test_hemu_logo_display() {
-        // Test that the BIOS displays the "Hemu" ASCII art logo
+    fn test_post_screen_display() {
+        // Test that the BIOS displays the POST screen
         let mut sys = PcSystem::new();
 
-        // Run for a few frames to let the BIOS execute and display the logo
+        // Run for a few frames to let the BIOS execute and display the POST screen
         for _ in 0..5 {
             let _ = sys.step_frame();
         }
 
-        // Check that the logo was written to video memory
+        // Check that the POST screen was written to video memory
         // Video memory is at 0xB8000, which is offset 0x18000 in VRAM
-        // Logo should be at row 10, column 29 (compressed format)
         let vram = sys.cpu.bus().vram();
         let text_offset = 0x18000;
-        let logo_row = 10;
-        let logo_col = 29;
-        let logo_offset = text_offset + (logo_row * 80 + logo_col) * 2;
 
-        // Check first line of logo
-        if vram.len() > logo_offset + 64 {
-            // Just check for some characteristic characters from the first line
-            let first_line_chars: Vec<char> =
-                (0..21).map(|i| vram[logo_offset + i * 2] as char).collect();
-            let first_line: String = first_line_chars.iter().collect();
-
-            println!("hemu logo first line: '{}'", first_line);
-
-            // Verify we have hash characters (part of the ASCII art)
-            assert!(first_line.contains('#'), "Logo should contain # characters");
-
-            // Verify the attribute is yellow (0x0E)
-            assert_eq!(
-                vram[logo_offset + 1],
-                0x0E,
-                "Logo should be in yellow color"
-            );
-
-            // Check second line
-            let second_row_offset = logo_offset + 160; // Next row (80 chars * 2 bytes)
-            let second_line_chars: Vec<char> = (0..21)
-                .map(|i| vram[second_row_offset + i * 2] as char)
+        // Check header at row 0, column 2 (should contain "Hemu BIOS")
+        let header_offset = text_offset + 2 * 2; // row 0
+        if vram.len() > header_offset + 40 {
+            let header_chars: Vec<char> = (0..20)
+                .map(|i| vram[header_offset + i * 2] as char)
                 .collect();
-            let second_line: String = second_line_chars.iter().collect();
+            let header: String = header_chars.iter().collect();
 
-            println!("hemu logo second line: '{}'", second_line);
+            println!("POST screen header: '{}'", header);
 
-            // Should have hash characters
+            // Verify we have "Hemu BIOS" in the header
             assert!(
-                second_line.contains('#'),
-                "Logo should contain # characters"
+                header.contains("Hemu BIOS"),
+                "POST screen should contain 'Hemu BIOS'"
             );
 
-            // Print full screen for visual verification
-            println!("\n=== Complete Screen Text Dump ===");
-            for row in 0..25 {
-                let mut line = String::new();
-                for col in 0..80 {
-                    let offset = text_offset + (row * 80 + col) * 2;
-                    if offset < vram.len() {
-                        let ch = vram[offset] as char;
-                        line.push(if ch.is_ascii_graphic() || ch == ' ' {
-                            ch
-                        } else {
-                            '.'
-                        });
-                    }
-                }
-                println!("{:2}: {}", row, line);
-            }
-
-            println!("\n✓ hemu ASCII art logo detected in video memory!");
-        } else {
-            panic!("VRAM too small");
+            // Verify the attribute is white on blue (0x1F)
+            assert_eq!(
+                vram[header_offset + 1],
+                0x1F,
+                "Header should be in white on blue"
+            );
         }
+
+        // Check title at row 3 (should contain "Hemu PC/XT")
+        let title_offset = text_offset + (3 * 80 + 2) * 2;
+        if vram.len() > title_offset + 60 {
+            let title_chars: Vec<char> = (0..30)
+                .map(|i| vram[title_offset + i * 2] as char)
+                .collect();
+            let title: String = title_chars.iter().collect();
+
+            println!("POST screen title: '{}'", title);
+
+            // Verify we have "Hemu PC/XT" in the title
+            assert!(
+                title.contains("Hemu PC/XT"),
+                "POST screen should contain 'Hemu PC/XT'"
+            );
+        }
+
+        // Check that disk drives are shown as "Not present" initially
+        let disk_offset = text_offset + (10 * 80 + 4) * 2;
+        if vram.len() > disk_offset + 60 {
+            let disk_chars: Vec<char> =
+                (0..30).map(|i| vram[disk_offset + i * 2] as char).collect();
+            let disk_line: String = disk_chars.iter().collect();
+
+            println!("Disk status line: '{}'", disk_line);
+
+            // Verify disk status
+            assert!(
+                disk_line.contains("Floppy A:"),
+                "POST screen should show Floppy A status"
+            );
+        }
+    }
+
+    #[test]
+    fn test_post_screen_content() {
+        // Test that the POST screen contains expected content
+        let sys = PcSystem::new();
+
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Helper to read text from VRAM
+        let read_text = |row: usize, col: usize, len: usize| -> String {
+            let offset = text_offset + (row * 80 + col) * 2;
+            (0..len)
+                .map(|i| {
+                    if offset + i * 2 < vram.len() {
+                        vram[offset + i * 2] as char
+                    } else {
+                        ' '
+                    }
+                })
+                .collect()
+        };
+
+        // Check header contains "Hemu BIOS"
+        let header = read_text(0, 0, 80);
+        assert!(
+            header.contains("Hemu BIOS"),
+            "Header should contain 'Hemu BIOS'"
+        );
+
+        // Check title contains "Hemu PC/XT"
+        let title = read_text(3, 0, 80);
+        assert!(
+            title.contains("Hemu PC/XT"),
+            "Title should contain 'Hemu PC/XT'"
+        );
+
+        // Check processor line
+        let processor = read_text(5, 0, 80);
+        assert!(processor.contains("Intel 8086"), "Should show Intel 8086");
+
+        // Check memory line
+        let memory = read_text(7, 0, 80);
+        assert!(memory.contains("640K"), "Should show 640K memory");
+
+        // Check disk status - initially all "Not present"
+        let floppy_a = read_text(10, 0, 80);
+        assert!(floppy_a.contains("Floppy A:"), "Should show Floppy A");
+        assert!(
+            floppy_a.contains("Not present"),
+            "Floppy A should be not present initially"
+        );
+
+        let floppy_b = read_text(11, 0, 80);
+        assert!(floppy_b.contains("Floppy B:"), "Should show Floppy B");
+        assert!(
+            floppy_b.contains("Not present"),
+            "Floppy B should be not present initially"
+        );
+
+        let hard_disk = read_text(12, 0, 80);
+        assert!(
+            hard_disk.contains("Hard Disk C:"),
+            "Should show Hard Disk C"
+        );
+        assert!(
+            hard_disk.contains("Not present"),
+            "Hard Disk C should be not present initially"
+        );
+
+        // Check boot priority
+        let boot = read_text(14, 0, 80);
+        assert!(
+            boot.contains("Floppy First"),
+            "Should show Floppy First as default"
+        );
+
+        // Check instructions mention F3, F12, F8
+        let help1 = read_text(20, 0, 80);
+        assert!(help1.contains("F3"), "Should mention F3 key");
+
+        let help2 = read_text(21, 0, 80);
+        assert!(help2.contains("F12"), "Should mention F12 key");
+
+        let help3 = read_text(22, 0, 80);
+        assert!(help3.contains("F8"), "Should mention F8 key");
+
+        // Check bottom message
+        let bottom = read_text(24, 0, 80);
+        assert!(
+            bottom.contains("No bootable disk"),
+            "Should show no bootable disk message"
+        );
+    }
+
+    #[test]
+    fn test_post_screen_updates_on_mount() {
+        // Test that POST screen updates when disks are mounted
+        let mut sys = PcSystem::new();
+
+        // Create a blank floppy and mount it
+        let floppy = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_44M);
+        sys.mount("FloppyA", &floppy).unwrap();
+        sys.update_post_screen();
+
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000;
+
+        // Check that Floppy A now shows as "Present"
+        let floppy_a_offset = text_offset + (10 * 80 + 4) * 2;
+        let floppy_a: String = (0..30)
+            .map(|i| vram[floppy_a_offset + i * 2] as char)
+            .collect();
+
+        assert!(
+            floppy_a.contains("Floppy A:"),
+            "Should still show Floppy A label"
+        );
+        assert!(
+            floppy_a.contains("Present"),
+            "Floppy A should show as Present after mounting"
+        );
+
+        // Bottom message should change
+        let bottom_offset = text_offset + (24 * 80 + 2) * 2;
+        let bottom: String = (0..50)
+            .map(|i| vram[bottom_offset + i * 2] as char)
+            .collect();
+
+        assert!(
+            bottom.contains("Bootable disk detected") || bottom.contains("Press F12 to boot"),
+            "Bottom message should indicate bootable disk detected"
+        );
     }
 
     #[test]

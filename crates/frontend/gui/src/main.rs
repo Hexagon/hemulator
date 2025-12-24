@@ -311,6 +311,13 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => "n64",
         }
     }
+
+    /// Update POST screen for PC system
+    fn update_post_screen(&mut self) {
+        if let EmulatorSystem::PC(sys) = self {
+            sys.update_post_screen();
+        }
+    }
 }
 
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
@@ -394,6 +401,49 @@ impl Source for StreamSource {
 
     fn total_duration(&self) -> Option<std::time::Duration> {
         None
+    }
+}
+
+/// Save PC virtual machine state to a .hemu project file
+fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_message: &mut String) {
+    if let EmulatorSystem::PC(pc_sys) = sys {
+        // Show file save dialog
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Hemulator Project", &["hemu"])
+            .set_file_name("virtual_machine.hemu")
+            .save_file()
+        {
+            let mut project = HemuProject::new("pc".to_string());
+
+            // Get current mount points from settings
+            for (mount_id, mount_path) in &settings.mount_points {
+                project.set_mount(mount_id.clone(), mount_path.clone());
+            }
+
+            // Get boot priority from PC system
+            let priority = pc_sys.boot_priority();
+            let priority_str = match priority {
+                emu_pc::BootPriority::FloppyFirst => "FloppyFirst",
+                emu_pc::BootPriority::HardDriveFirst => "HardDriveFirst",
+                emu_pc::BootPriority::FloppyOnly => "FloppyOnly",
+                emu_pc::BootPriority::HardDriveOnly => "HardDriveOnly",
+            };
+            project.set_boot_priority(priority_str.to_string());
+
+            match project.save(&path) {
+                Ok(_) => {
+                    println!("Virtual machine saved to: {}", path.display());
+                    *status_message = format!(
+                        "VM saved: {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Failed to save virtual machine: {}", e);
+                    *status_message = format!("Failed to save VM: {}", e);
+                }
+            }
+        }
     }
 }
 
@@ -1361,6 +1411,8 @@ fn main() {
                                             "Loaded media into {}: {}",
                                             mp_info.name, path_str
                                         );
+                                        // Update POST screen for PC system
+                                        sys.update_post_screen();
                                     }
                                     Err(e) => {
                                         eprintln!(
@@ -1550,6 +1602,8 @@ fn main() {
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
                                     }
+                                    // Update POST screen for PC system
+                                    sys.update_post_screen();
                                 } else {
                                     status_message = "Failed to mount project files".to_string();
                                 }
@@ -1617,7 +1671,7 @@ fn main() {
             }
         }
 
-        // F5 - Show save state slot selector
+        // F5 - Save state slot selector
         if rom_loaded && window.is_key_pressed(Key::F5, false) {
             if sys.supports_save_states() {
                 show_slot_selector = true;
@@ -1649,37 +1703,11 @@ fn main() {
             show_debug = false;
         }
 
-        // F8 - Create new project file (for PC system)
+        // F8 - Save PC virtual machine
         if window.is_key_pressed(Key::F8, false) {
-            // Only allow project creation for multi-mount systems (PC)
             if matches!(&sys, EmulatorSystem::PC(_)) {
-                // Show file save dialog
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Hemulator Project", &["hemu"])
-                    .set_file_name("project.hemu")
-                    .save_file()
-                {
-                    let mut project = HemuProject::new("pc".to_string());
-
-                    // Get current mount points from settings
-                    for (mount_id, mount_path) in &settings.mount_points {
-                        project.set_mount(mount_id.clone(), mount_path.clone());
-                    }
-
-                    match project.save(&path) {
-                        Ok(_) => {
-                            println!("Project saved to: {}", path.display());
-                            status_message = format!(
-                                "Project saved: {}",
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to save project: {}", e);
-                            status_message = format!("Failed to save project: {}", e);
-                        }
-                    }
-                }
+                // For PC system, F8 saves the virtual machine state
+                save_pc_virtual_machine(&sys, &settings, &mut status_message);
             } else {
                 println!("Project files are only supported for multi-mount systems (PC)");
                 status_message = "Project files only for PC system".to_string();
