@@ -70,6 +70,83 @@ impl PcCpu {
 
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
+        
+        // Handle I/O instructions by intercepting them before execution
+        match opcode {
+            // IN AL, imm8 (0xE4)
+            0xE4 => {
+                let port = self.cpu.memory.read(physical_addr + 1) as u16;
+                let val = self.cpu.memory.io_read(port);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u16);
+                self.cpu.ip = self.cpu.ip.wrapping_add(2);
+                return 10;
+            }
+            // IN AX, imm8 (0xE5)
+            0xE5 => {
+                let port = self.cpu.memory.read(physical_addr + 1) as u16;
+                let val = self.cpu.memory.io_read(port);
+                let val_high = self.cpu.memory.io_read(port.wrapping_add(1));
+                self.cpu.ax = (val as u16) | ((val_high as u16) << 8);
+                self.cpu.ip = self.cpu.ip.wrapping_add(2);
+                return 10;
+            }
+            // OUT imm8, AL (0xE6)
+            0xE6 => {
+                let port = self.cpu.memory.read(physical_addr + 1) as u16;
+                let val = (self.cpu.ax & 0xFF) as u8;
+                self.cpu.memory.io_write(port, val);
+                self.cpu.ip = self.cpu.ip.wrapping_add(2);
+                return 10;
+            }
+            // OUT imm8, AX (0xE7)
+            0xE7 => {
+                let port = self.cpu.memory.read(physical_addr + 1) as u16;
+                let val_low = (self.cpu.ax & 0xFF) as u8;
+                let val_high = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                self.cpu.memory.io_write(port, val_low);
+                self.cpu.memory.io_write(port.wrapping_add(1), val_high);
+                self.cpu.ip = self.cpu.ip.wrapping_add(2);
+                return 10;
+            }
+            // IN AL, DX (0xEC)
+            0xEC => {
+                let port = self.cpu.dx;
+                let val = self.cpu.memory.io_read(port);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u16);
+                self.cpu.ip = self.cpu.ip.wrapping_add(1);
+                return 8;
+            }
+            // IN AX, DX (0xED)
+            0xED => {
+                let port = self.cpu.dx;
+                let val = self.cpu.memory.io_read(port);
+                let val_high = self.cpu.memory.io_read(port.wrapping_add(1));
+                self.cpu.ax = (val as u16) | ((val_high as u16) << 8);
+                self.cpu.ip = self.cpu.ip.wrapping_add(1);
+                return 8;
+            }
+            // OUT DX, AL (0xEE)
+            0xEE => {
+                let port = self.cpu.dx;
+                let val = (self.cpu.ax & 0xFF) as u8;
+                self.cpu.memory.io_write(port, val);
+                self.cpu.ip = self.cpu.ip.wrapping_add(1);
+                return 8;
+            }
+            // OUT DX, AX (0xEF)
+            0xEF => {
+                let port = self.cpu.dx;
+                let val_low = (self.cpu.ax & 0xFF) as u8;
+                let val_high = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                self.cpu.memory.io_write(port, val_low);
+                self.cpu.memory.io_write(port.wrapping_add(1), val_high);
+                self.cpu.ip = self.cpu.ip.wrapping_add(1);
+                return 8;
+            }
+            _ => {}
+        }
+        
+        // Handle INT instructions
         if opcode == 0xCD {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);

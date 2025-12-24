@@ -11,6 +11,7 @@ mod cpu;
 mod disk;
 mod font; // Shared IBM PC ROM font data
 mod keyboard;
+mod pit; // Programmable Interval Timer (8253/8254)
 mod video;
 mod video_adapter;
 mod video_adapter_cga_graphics; // CGA graphics modes with mode switching
@@ -293,6 +294,14 @@ impl System for PcSystem {
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
             self.frame_cycles += cycles as u64;
+
+            // Clock the PIT with the cycles executed
+            let timer_interrupt = self.cpu.bus_mut().pit.clock(cycles);
+            if timer_interrupt {
+                // Timer interrupt should trigger INT 08h
+                // For now, just clear the flag
+                self.cpu.bus_mut().pit.clear_timer_interrupt();
+            }
         }
 
         // Render video memory to frame buffer
