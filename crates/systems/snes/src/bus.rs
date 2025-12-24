@@ -16,6 +16,9 @@ pub struct SnesBus {
     ppu: Ppu,
     /// Frame counter for VBlank emulation
     frame_counter: u64,
+    /// Cycle counter within current frame for VBlank timing
+    /// NTSC SNES: ~89,342 cycles/frame, VBlank starts around cycle 75,000
+    frame_cycle: u32,
     /// Controller state (16 bits per controller)
     /// Button mapping: B Y Select Start Up Down Left Right A X L R 0 0 0 0
     pub controller_state: [u16; 2],
@@ -32,6 +35,7 @@ impl SnesBus {
             cartridge: None,
             ppu: Ppu::new(),
             frame_counter: 0,
+            frame_cycle: 0,
             controller_state: [0; 2],
             controller_shift: [Cell::new(0), Cell::new(0)],
             controller_strobe: false,
@@ -57,6 +61,22 @@ impl SnesBus {
 
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
+        self.frame_cycle = 0; // Reset cycle counter at frame start
+    }
+
+    /// Update cycle counter within frame (called after each CPU step)
+    pub fn tick_cycles(&mut self, cycles: u32) {
+        self.frame_cycle += cycles;
+    }
+
+    /// Check if currently in VBlank period
+    /// VBlank occurs during the last ~15% of the frame
+    /// NTSC: ~89,342 cycles/frame, VBlank starts around cycle 75,000
+    fn is_in_vblank(&self) -> bool {
+        // VBlank starts after visible scanlines complete
+        // Roughly 224/262 scanlines = ~85.5% of frame
+        // So VBlank starts at cycle ~76,400 out of 89,342
+        self.frame_cycle >= 76400
     }
 
     /// Set controller state (16 buttons) for controller `idx` (0 or 1).
@@ -142,11 +162,10 @@ impl Memory65c816 for SnesBus {
                     0x421F => 0,                                       // JOY4H (not implemented)
                     // $4212 - HVBJOY - H/V Blank and Joypad Status
                     0x4212 => {
-                        // Bit 7: VBlank flag (set during VBlank)
-                        // Bit 6: HBlank flag
+                        // Bit 7: VBlank flag (set during VBlank period)
+                        // Bit 6: HBlank flag (not implemented)
                         // Bit 0: Auto-joypad read in progress (0 = finished)
-                        // For simplicity, alternate VBlank every ~30 frames (simulate ~60Hz at ~2Hz toggle)
-                        if (self.frame_counter / 30).is_multiple_of(2) {
+                        if self.is_in_vblank() {
                             0x80 // VBlank
                         } else {
                             0x00 // Not in VBlank
