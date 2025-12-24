@@ -1271,6 +1271,33 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
+            // POP r/m16 (0x8F) - Group 1A
+            0x8F => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                // Only op=0 is valid for POP (other values are undefined)
+                if op == 0 {
+                    let val = self.pop();
+                    self.write_rm16(modbits, rm, val);
+                    self.cycles += if modbits == 0b11 { 8 } else { 17 };
+                    if modbits == 0b11 {
+                        8
+                    } else {
+                        17
+                    }
+                } else {
+                    // Undefined operation - treat as NOP
+                    eprintln!(
+                        "Undefined 0x8F operation with op={} at CS:IP={:04X}:{:04X}",
+                        op,
+                        self.cs,
+                        self.ip.wrapping_sub(2)
+                    );
+                    self.cycles += 1;
+                    1
+                }
+            }
+
             // ADD r/m8, r8 (0x00)
             0x00 => {
                 let modrm = self.fetch_u8();
@@ -1594,6 +1621,190 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
+            // OR r/m8, r8 (0x08)
+            0x08 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val | reg_val;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // OR r/m16, r16 (0x09)
+            0x09 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val | reg_val;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // OR r8, r/m8 (0x0A)
+            0x0A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val | rm_val;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // OR r16, r/m16 (0x0B)
+            0x0B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val | rm_val;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // XOR r/m8, r8 (0x30)
+            0x30 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = rm_val ^ reg_val;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // XOR r/m16, r16 (0x31)
+            0x31 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = rm_val ^ reg_val;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // XOR r8, r/m8 (0x32)
+            0x32 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let result = reg_val ^ rm_val;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // XOR r16, r/m16 (0x33)
+            0x33 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let result = reg_val ^ rm_val;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, false);
+                self.set_flag(FLAG_OF, false);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
             // SUB AL, imm8
             0x2C => {
                 let val = self.fetch_u8();
@@ -1706,6 +1917,118 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.set_flag(FLAG_OF, false);
                 self.cycles += 4;
                 4
+            }
+
+            // SBB r/m8, r8 (0x18) - Subtract with Borrow
+            0x18 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
+                let borrow = (rm_val as u16) < (reg_val as u16 + carry as u16);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+
+                self.write_rm8(modbits, rm, result);
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // SBB r/m16, r16 (0x19) - Subtract with Borrow
+            0x19 => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
+                let borrow = (rm_val as u32) < (reg_val as u32 + carry as u32);
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+
+                self.write_rm16(modbits, rm, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    16
+                }
+            }
+
+            // SBB r8, r/m8 (0x1A) - Subtract with Borrow
+            0x1A => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = if reg < 4 {
+                    self.get_reg8_low(reg)
+                } else {
+                    self.get_reg8_high(reg - 4)
+                };
+                let rm_val = self.read_rm8(modbits, rm);
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
+                let borrow = (reg_val as u16) < (rm_val as u16 + carry as u16);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+
+                if reg < 4 {
+                    self.set_reg8_low(reg, result);
+                } else {
+                    self.set_reg8_high(reg - 4, result);
+                }
+                self.update_flags_8(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // SBB r16, r/m16 (0x1B) - Subtract with Borrow
+            0x1B => {
+                let modrm = self.fetch_u8();
+                let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                let reg_val = self.get_reg16(reg);
+                let rm_val = self.read_rm16(modbits, rm);
+                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
+                let borrow = (reg_val as u32) < (rm_val as u32 + carry as u32);
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+
+                self.set_reg16(reg, result);
+                self.update_flags_16(result);
+                self.set_flag(FLAG_CF, borrow);
+                self.set_flag(FLAG_OF, overflow);
+                self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                if modbits == 0b11 {
+                    3
+                } else {
+                    9
+                }
+            }
+
+            // POP DS (0x1F)
+            0x1F => {
+                let val = self.pop();
+                self.ds = val;
+                self.cycles += 8;
+                8
             }
 
             // XOR AL, imm8
@@ -2104,6 +2427,46 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.cycles += 1;
                         1
                     }
+                }
+            }
+
+            // Group 2 opcodes (0xC0) - Shift/rotate r/m8 by immediate byte (80186+)
+            0xC0 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm8(modbits, rm);
+                let count = self.fetch_u8();
+                let result = self.shift_rotate_8(val, op, count);
+                self.write_rm8(modbits, rm, result);
+                self.cycles += if modbits == 0b11 {
+                    5 + (4 * count as u64)
+                } else {
+                    17 + (4 * count as u64)
+                };
+                if modbits == 0b11 {
+                    5 + (4 * count as u32)
+                } else {
+                    17 + (4 * count as u32)
+                }
+            }
+
+            // Group 2 opcodes (0xC1) - Shift/rotate r/m16 by immediate byte (80186+)
+            0xC1 => {
+                let modrm = self.fetch_u8();
+                let (modbits, op, rm) = Self::decode_modrm(modrm);
+                let val = self.read_rm16(modbits, rm);
+                let count = self.fetch_u8();
+                let result = self.shift_rotate_16(val, op, count);
+                self.write_rm16(modbits, rm, result);
+                self.cycles += if modbits == 0b11 {
+                    5 + (4 * count as u64)
+                } else {
+                    17 + (4 * count as u64)
+                };
+                if modbits == 0b11 {
+                    5 + (4 * count as u32)
+                } else {
+                    17 + (4 * count as u32)
                 }
             }
 
