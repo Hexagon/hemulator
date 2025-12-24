@@ -67,14 +67,28 @@ impl Default for PcSystem {
 }
 
 impl PcSystem {
-    /// Create a new PC system with default CPU (8086)
+    /// Create a new PC system with default CPU (8086), 640KB memory, and CGA video
     pub fn new() -> Self {
         Self::with_cpu_model(CpuModel::Intel8086)
     }
 
-    /// Create a new PC system with a specific CPU model
+    /// Create a new PC system with a specific CPU model, default memory and video
     pub fn with_cpu_model(model: CpuModel) -> Self {
-        let mut bus = PcBus::new();
+        Self::with_config(model, 640, Box::new(SoftwareCgaAdapter::new()))
+    }
+
+    /// Create a new PC system with full configuration
+    /// 
+    /// # Arguments
+    /// * `cpu_model` - CPU model (Intel8086, Intel8088, Intel80186, Intel80188, Intel80286, Intel80386)
+    /// * `memory_kb` - Memory size in KB (256-640, will be clamped to valid range)
+    /// * `video_adapter` - Video adapter (CGA, EGA, VGA)
+    pub fn with_config(
+        cpu_model: CpuModel,
+        memory_kb: u32,
+        video_adapter: Box<dyn VideoAdapter>,
+    ) -> Self {
+        let mut bus = PcBus::with_memory_kb(memory_kb);
 
         // Load minimal BIOS
         let bios = generate_minimal_bios();
@@ -83,19 +97,24 @@ impl PcSystem {
         // Write BIOS POST screen to video RAM
         bios::write_post_screen_to_vram(bus.vram_mut());
 
-        let cpu = PcCpu::with_model(bus, model);
+        let cpu = PcCpu::with_model(bus, cpu_model);
 
         Self {
             cpu,
             cycles: 0,
             frame_cycles: 0,
-            video: Box::new(SoftwareCgaAdapter::new()),
+            video: video_adapter,
         }
     }
 
     /// Get the CPU model
     pub fn cpu_model(&self) -> CpuModel {
         self.cpu.model()
+    }
+
+    /// Get the memory size in KB
+    pub fn memory_kb(&self) -> u32 {
+        self.cpu.bus().memory_kb()
     }
 
     /// Set the CPU model (requires reset to take full effect)
