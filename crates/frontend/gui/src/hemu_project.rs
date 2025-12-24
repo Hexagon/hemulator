@@ -18,6 +18,18 @@ pub struct HemuProject {
     /// Boot priority for PC systems (optional, defaults to FloppyFirst)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boot_priority: Option<String>,
+    /// CPU model for PC systems (optional, defaults to Intel8086)
+    /// Valid values: "Intel8086", "Intel8088", "Intel80186", "Intel80188", "Intel80286", "Intel80386"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_model: Option<String>,
+    /// Memory size in KB for PC systems (optional, defaults to 640)
+    /// Common values: 256, 512, 640 (maximum conventional memory)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_kb: Option<u32>,
+    /// Video mode for PC systems (optional, defaults to "CGA")
+    /// Valid values: "CGA", "EGA", "VGA"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_mode: Option<String>,
 }
 
 impl HemuProject {
@@ -28,6 +40,9 @@ impl HemuProject {
             system,
             mounts: HashMap::new(),
             boot_priority: None,
+            cpu_model: None,
+            memory_kb: None,
+            video_mode: None,
         }
     }
 
@@ -65,6 +80,39 @@ impl HemuProject {
     /// Get boot priority
     pub fn get_boot_priority(&self) -> Option<&String> {
         self.boot_priority.as_ref()
+    }
+
+    /// Set CPU model (for PC systems)
+    #[allow(dead_code)]
+    pub fn set_cpu_model(&mut self, model: String) {
+        self.cpu_model = Some(model);
+    }
+
+    /// Get CPU model
+    pub fn get_cpu_model(&self) -> Option<&String> {
+        self.cpu_model.as_ref()
+    }
+
+    /// Set memory size in KB (for PC systems)
+    #[allow(dead_code)]
+    pub fn set_memory_kb(&mut self, kb: u32) {
+        self.memory_kb = Some(kb);
+    }
+
+    /// Get memory size in KB
+    pub fn get_memory_kb(&self) -> Option<u32> {
+        self.memory_kb
+    }
+
+    /// Set video mode (for PC systems)
+    #[allow(dead_code)]
+    pub fn set_video_mode(&mut self, mode: String) {
+        self.video_mode = Some(mode);
+    }
+
+    /// Get video mode
+    pub fn get_video_mode(&self) -> Option<&String> {
+        self.video_mode.as_ref()
     }
 
     /// Check if system has multiple mount points (requires .hemu file)
@@ -139,5 +187,65 @@ mod tests {
         assert!(!HemuProject::is_multi_mount_system("nes"));
         assert!(!HemuProject::is_multi_mount_system("gb"));
         assert!(!HemuProject::is_multi_mount_system("atari2600"));
+    }
+
+    #[test]
+    fn test_cpu_model() {
+        let mut project = HemuProject::new("pc".to_string());
+        assert_eq!(project.get_cpu_model(), None);
+
+        project.set_cpu_model("Intel80286".to_string());
+        assert_eq!(project.get_cpu_model(), Some(&"Intel80286".to_string()));
+    }
+
+    #[test]
+    fn test_memory_kb() {
+        let mut project = HemuProject::new("pc".to_string());
+        assert_eq!(project.get_memory_kb(), None);
+
+        project.set_memory_kb(512);
+        assert_eq!(project.get_memory_kb(), Some(512));
+    }
+
+    #[test]
+    fn test_video_mode() {
+        let mut project = HemuProject::new("pc".to_string());
+        assert_eq!(project.get_video_mode(), None);
+
+        project.set_video_mode("VGA".to_string());
+        assert_eq!(project.get_video_mode(), Some(&"VGA".to_string()));
+    }
+
+    #[test]
+    fn test_save_load_with_all_pc_options() {
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_project_full.hemu");
+
+        let mut project = HemuProject::new("pc".to_string());
+        project.set_mount("BIOS".to_string(), "bios.rom".to_string());
+        project.set_mount("FloppyA".to_string(), "disk.img".to_string());
+        project.set_boot_priority("HardDriveFirst".to_string());
+        project.set_cpu_model("Intel80286".to_string());
+        project.set_memory_kb(512);
+        project.set_video_mode("EGA".to_string());
+
+        // Save
+        project.save(&test_file).expect("Failed to save");
+
+        // Load
+        let loaded = HemuProject::load(&test_file).expect("Failed to load");
+        assert_eq!(loaded.system, "pc");
+        assert_eq!(loaded.get_mount("BIOS"), Some(&"bios.rom".to_string()));
+        assert_eq!(loaded.get_mount("FloppyA"), Some(&"disk.img".to_string()));
+        assert_eq!(
+            loaded.get_boot_priority(),
+            Some(&"HardDriveFirst".to_string())
+        );
+        assert_eq!(loaded.get_cpu_model(), Some(&"Intel80286".to_string()));
+        assert_eq!(loaded.get_memory_kb(), Some(512));
+        assert_eq!(loaded.get_video_mode(), Some(&"EGA".to_string()));
+
+        // Cleanup
+        fs::remove_file(test_file).ok();
     }
 }

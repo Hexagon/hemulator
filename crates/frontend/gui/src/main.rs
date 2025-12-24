@@ -430,6 +430,33 @@ fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_mes
             };
             project.set_boot_priority(priority_str.to_string());
 
+            // Get CPU model from PC system
+            let cpu_model = pc_sys.cpu_model();
+            let cpu_str = match cpu_model {
+                emu_core::cpu_8086::CpuModel::Intel8086 => "Intel8086",
+                emu_core::cpu_8086::CpuModel::Intel8088 => "Intel8088",
+                emu_core::cpu_8086::CpuModel::Intel80186 => "Intel80186",
+                emu_core::cpu_8086::CpuModel::Intel80188 => "Intel80188",
+                emu_core::cpu_8086::CpuModel::Intel80286 => "Intel80286",
+                emu_core::cpu_8086::CpuModel::Intel80386 => "Intel80386",
+            };
+            project.set_cpu_model(cpu_str.to_string());
+
+            // Get memory size from PC system
+            let memory_kb = pc_sys.memory_kb();
+            project.set_memory_kb(memory_kb);
+
+            // Get video mode from PC system
+            let video_name = pc_sys.video_adapter_name();
+            let video_mode = if video_name.contains("VGA") {
+                "VGA"
+            } else if video_name.contains("EGA") {
+                "EGA"
+            } else {
+                "CGA"
+            };
+            project.set_video_mode(video_mode.to_string());
+
             match project.save(&path) {
                 Ok(_) => {
                     println!("Virtual machine saved to: {}", path.display());
@@ -1548,12 +1575,60 @@ fn main() {
                                 status_message =
                                     format!("Wrong system: project is for {}", project.system);
                             } else {
+                                // Parse configuration from project (PC systems only)
+                                let cpu_model = if let Some(cpu_str) = project.get_cpu_model() {
+                                    match cpu_str.as_str() {
+                                        "Intel8086" => emu_core::cpu_8086::CpuModel::Intel8086,
+                                        "Intel8088" => emu_core::cpu_8086::CpuModel::Intel8088,
+                                        "Intel80186" => emu_core::cpu_8086::CpuModel::Intel80186,
+                                        "Intel80188" => emu_core::cpu_8086::CpuModel::Intel80188,
+                                        "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
+                                        "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
+                                        _ => {
+                                            eprintln!(
+                                                "Unknown CPU model: {}, using default Intel8086",
+                                                cpu_str
+                                            );
+                                            emu_core::cpu_8086::CpuModel::Intel8086
+                                        }
+                                    }
+                                } else {
+                                    emu_core::cpu_8086::CpuModel::Intel8086
+                                };
+
+                                let memory_kb = project.get_memory_kb().unwrap_or(640);
+
+                                let video_adapter: Box<dyn emu_pc::VideoAdapter> =
+                                    if let Some(video_str) = project.get_video_mode() {
+                                        match video_str.as_str() {
+                                            "EGA" => Box::new(emu_pc::SoftwareEgaAdapter::new()),
+                                            "VGA" => Box::new(emu_pc::SoftwareVgaAdapter::new()),
+                                            "CGA" => Box::new(emu_pc::SoftwareCgaAdapter::new()),
+                                            _ => {
+                                                eprintln!(
+                                                    "Unknown video mode: {}, using default CGA",
+                                                    video_str
+                                                );
+                                                Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                            }
+                                        }
+                                    } else {
+                                        Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                    };
+
+                                // Recreate PC system with new configuration
+                                let mut pc_sys = emu_pc::PcSystem::with_config(
+                                    cpu_model,
+                                    memory_kb,
+                                    video_adapter,
+                                );
+
                                 // Load all mounts from project
                                 let mut any_mounted = false;
                                 for (mount_id, mount_path) in &project.mounts {
                                     match std::fs::read(mount_path) {
                                         Ok(data) => {
-                                            if let Err(e) = sys.mount(mount_id, &data) {
+                                            if let Err(e) = pc_sys.mount(mount_id, &data) {
                                                 eprintln!("Failed to mount {}: {}", mount_id, e);
                                             } else {
                                                 settings
@@ -1571,34 +1646,37 @@ fn main() {
                                     }
                                 }
 
-                                // Set boot priority if specified in project (PC systems only)
+                                // Set boot priority if specified in project
                                 if let Some(priority_str) = project.get_boot_priority() {
-                                    // Parse boot priority string
-                                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
-                                        let priority = match priority_str.as_str() {
-                                            "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
-                                            "HardDriveFirst" => {
-                                                emu_pc::BootPriority::HardDriveFirst
-                                            }
-                                            "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
-                                            "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
-                                            _ => {
-                                                eprintln!(
-                                                    "Unknown boot priority: {}, using default",
-                                                    priority_str
-                                                );
-                                                emu_pc::BootPriority::FloppyFirst
-                                            }
-                                        };
-                                        pc_sys.set_boot_priority(priority);
-                                        println!("Set boot priority: {:?}", priority);
-                                    }
+                                    let priority = match priority_str.as_str() {
+                                        "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
+                                        "HardDriveFirst" => emu_pc::BootPriority::HardDriveFirst,
+                                        "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
+                                        "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
+                                        _ => {
+                                            eprintln!(
+                                                "Unknown boot priority: {}, using default",
+                                                priority_str
+                                            );
+                                            emu_pc::BootPriority::FloppyFirst
+                                        }
+                                    };
+                                    pc_sys.set_boot_priority(priority);
+                                    println!("Set boot priority: {:?}", priority);
                                 }
 
                                 if any_mounted {
+                                    // Replace the system with the newly configured one
+                                    sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;
                                     status_message = "Project loaded".to_string();
                                     println!("Loaded project from: {}", path_str);
+                                    println!(
+                                        "CPU: {:?}, Memory: {}KB, Video: {:?}",
+                                        cpu_model,
+                                        memory_kb,
+                                        project.get_video_mode().unwrap_or(&"CGA".to_string())
+                                    );
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
                                     }
