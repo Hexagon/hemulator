@@ -1060,9 +1060,15 @@ impl PcCpu {
 
         match ah {
             0x00 => self.int13h_reset(),
+            0x01 => self.int13h_get_status(),
             0x02 => self.int13h_read_sectors(),
             0x03 => self.int13h_write_sectors(),
+            0x04 => self.int13h_verify_sectors(),
+            0x05 => self.int13h_format_track(),
             0x08 => self.int13h_get_drive_params(),
+            0x15 => self.int13h_get_disk_type(),
+            0x16 => self.int13h_get_disk_change_status(),
+            0x41 => self.int13h_check_extensions(),
             _ => {
                 // Unsupported function - set error in AH
                 self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
@@ -1255,6 +1261,179 @@ impl PcCpu {
         }
 
         51 // Approximate INT instruction timing
+    }
+
+    /// INT 13h, AH=01h: Get disk status
+    fn int13h_get_status(&mut self) -> u32 {
+        // DL = drive number
+        let _drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Return last status from disk controller
+        let status = self.cpu.memory.disk_controller().status();
+        
+        // AH = status
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+
+        // Clear carry flag if status is 0, set if error
+        self.set_carry_flag(status != 0x00);
+
+        51
+    }
+
+    /// INT 13h, AH=04h: Verify sectors
+    fn int13h_verify_sectors(&mut self) -> u32 {
+        // AL = number of sectors to verify
+        let count = (self.cpu.ax & 0xFF) as u8;
+
+        // Parse CHS parameters (same as read/write)
+        let ch = ((self.cpu.cx >> 8) & 0xFF) as u8;
+        let cl = (self.cpu.cx & 0xFF) as u8;
+        let _cylinder = ((cl as u16 & 0xC0) << 2) | (ch as u16);
+        let _sector = cl & 0x3F;
+        let _head = ((self.cpu.dx >> 8) & 0xFF) as u8;
+        let _drive = (self.cpu.dx & 0xFF) as u8;
+
+        // For now, always succeed (verification is implicit in read operations)
+        // In a real system, this would read sectors and verify ECC/checksums
+
+        // AH = 0 (success)
+        self.cpu.ax = (self.cpu.ax & 0x00FF);
+
+        // AL = number of sectors verified
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        51
+    }
+
+    /// INT 13h, AH=05h: Format track
+    fn int13h_format_track(&mut self) -> u32 {
+        // AL = number of sectors to format
+        let _count = (self.cpu.ax & 0xFF) as u8;
+
+        // Parse CHS parameters
+        let ch = ((self.cpu.cx >> 8) & 0xFF) as u8;
+        let cl = (self.cpu.cx & 0xFF) as u8;
+        let _cylinder = ((cl as u16 & 0xC0) << 2) | (ch as u16);
+        let _head = ((self.cpu.dx >> 8) & 0xFF) as u8;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // ES:BX = pointer to address field buffer
+        // Each entry is 4 bytes: C, H, S, N (cylinder, head, sector, sector size code)
+
+        // For now, just mark track as formatted (fill with zeros in a real implementation)
+        // This is a destructive operation that would write sector headers
+
+        if drive < 0x80 {
+            // Floppy: format succeeds
+            self.cpu.ax = (self.cpu.ax & 0x00FF); // AH = 0 (success)
+            self.set_carry_flag(false);
+        } else {
+            // Hard drive: format not typically supported via this function
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=15h: Get disk type
+    fn int13h_get_disk_type(&mut self) -> u32 {
+        use crate::disk::DiskController;
+
+        // DL = drive number
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if drive < 0x80 {
+            // Floppy drive
+            // Check if drive exists
+            let has_disk = self.cpu.memory.has_floppy(drive);
+            
+            if has_disk {
+                // AH = 01h (floppy with change-line support)
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+                self.set_carry_flag(false);
+            } else {
+                // AH = 00h (no such drive)
+                self.cpu.ax &= 0x00FF;
+                self.set_carry_flag(false);
+            }
+        } else {
+            // Hard drive
+            if let Some((cylinders, sectors_per_track, heads)) = 
+                DiskController::get_drive_params(drive) 
+            {
+                // AH = 03h (fixed disk)
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x03 << 8);
+
+                // CX:DX = number of sectors
+                let total_sectors = cylinders as u32 * sectors_per_track as u32 * heads as u32;
+                self.cpu.cx = ((total_sectors >> 16) & 0xFFFF) as u16;
+                self.cpu.dx = (total_sectors & 0xFFFF) as u16;
+
+                self.set_carry_flag(false);
+            } else {
+                // No such drive
+                self.cpu.ax &= 0x00FF;
+                self.set_carry_flag(false);
+            }
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=16h: Get disk change status (floppies only)
+    fn int13h_get_disk_change_status(&mut self) -> u32 {
+        // DL = drive number
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if drive < 0x80 {
+            // Floppy drive
+            // For now, always report "no change" (AH=00h)
+            // A real implementation would track if the disk was changed
+            self.cpu.ax &= 0x00FF; // AH = 0 (no change detected)
+            self.set_carry_flag(false);
+        } else {
+            // Function not valid for hard drives
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=41h: Check extensions present (Extended INT 13h)
+    fn int13h_check_extensions(&mut self) -> u32 {
+        // BX = 0x55AA (signature)
+        // DL = drive number
+
+        let bx = self.cpu.bx;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if bx == 0x55AA && drive >= 0x80 {
+            // Extended INT 13h supported for hard drives
+            // BX = 0xAA55 (signature)
+            self.cpu.bx = 0xAA55;
+            
+            // AH = major version (01h = 1.x)
+            // AL = internal use
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+
+            // CX = API subset support bitmap
+            // Bit 0 = extended disk access functions (AH=42h-44h,47h,48h)
+            // For now, report no extended functions supported
+            self.cpu.cx = 0x0000;
+
+            self.set_carry_flag(false);
+        } else {
+            // Extensions not supported or invalid parameters
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+            self.set_carry_flag(true);
+        }
+
+        51
     }
 
     /// Set or clear the carry flag

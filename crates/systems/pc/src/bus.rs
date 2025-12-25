@@ -313,6 +313,15 @@ impl PcBus {
         &mut self.disk_controller
     }
 
+    /// Check if a floppy drive has a disk mounted
+    pub fn has_floppy(&self, drive: u8) -> bool {
+        match drive {
+            0 => self.floppy_a.is_some(),
+            1 => self.floppy_b.is_some(),
+            _ => false,
+        }
+    }
+
     /// Perform a disk read operation
     pub fn disk_read(&mut self, request: &crate::disk::DiskRequest, buffer: &mut [u8]) -> u8 {
         let disk_image = if request.drive < 0x80 {
