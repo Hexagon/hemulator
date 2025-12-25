@@ -23,6 +23,12 @@ start:
     mov si, msg_boot_ok
     call print_string
 
+    ; Run memory test
+    call test_memory
+
+    ; Run CPU test
+    call test_cpu
+
     ; Print menu
     call print_menu
 
@@ -133,8 +139,66 @@ print_menu:
     call print_string
     jmp main_loop
 
+; Memory test - simple write and read test
+test_memory:
+    push ax
+    push di
+
+    ; Write and read test pattern at 0x1000
+    mov di, 0x1000
+    mov ax, 0xAA55
+    mov [di], ax
+    cmp [di], ax
+    jne .fail
+
+    ; Test passed
+    mov si, msg_mem_ok
+    call print_string
+    jmp .done
+
+.fail:
+    mov si, msg_mem_fail
+    call print_string
+
+.done:
+    pop di
+    pop ax
+    ret
+
+; CPU test - basic arithmetic and logic
+test_cpu:
+    push ax
+
+    ; Test addition
+    mov ax, 2
+    add ax, 2
+    cmp ax, 4
+    jne .fail
+
+    ; Test XOR
+    xor ax, ax
+    cmp ax, 0
+    jne .fail
+
+    ; Test passed
+    mov si, msg_cpu_ok
+    call print_string
+    jmp .done
+
+.fail:
+    mov si, msg_cpu_fail
+    call print_string
+
+.done:
+    pop ax
+    ret
+
 ; Strings
-msg_boot_ok:     db 'BOOT OK', 0x0D, 0x0A, 0x0D, 0x0A, 0
+msg_boot_ok:     db 'BOOT OK', 0x0D, 0x0A, 0
+msg_mem_ok:      db 'MEM OK', 0x0D, 0x0A, 0
+msg_mem_fail:    db 'MEM FAIL', 0x0D, 0x0A, 0
+msg_cpu_ok:      db 'CPU OK', 0x0D, 0x0A, 0x0D, 0x0A, 0
+msg_cpu_fail:    db 'CPU FAIL', 0x0D, 0x0A, 0x0D, 0x0A, 0
 msg_menu:        db '=== PC Test Menu ===', 0x0D, 0x0A
                  db '1. Test user input', 0x0D, 0x0A
                  db '2. Calculate 2+2', 0x0D, 0x0A

@@ -1062,8 +1062,10 @@ mod tests {
         // This test uses the interactive menu boot sector from test_roms/pc/menu.bin
         // The boot sector should:
         // 1. Print "BOOT OK" message
-        // 2. Display a menu using INT 10h
-        // 3. Wait for keyboard input using INT 16h
+        // 2. Run memory test and print "MEM OK"
+        // 3. Run CPU test and print "CPU OK"
+        // 4. Display a menu using INT 10h
+        // 5. Wait for keyboard input using INT 16h
 
         let menu_bin_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1126,32 +1128,11 @@ mod tests {
             let _ = sys.step_frame();
         }
 
-        // Check that "BOOT OK" was written to video memory
+        // Check that messages were written to video memory
         let vram = sys.cpu.bus().vram();
         let text_offset = 0x18000; // CGA text mode video memory offset
 
-        // Verify "BOOT OK" is displayed (each char followed by white-on-black attribute 0x07)
-        // The menu ROM uses INT 10h teletype output which uses attribute 0x07
-        if vram.len() > text_offset + 14 {
-            // Check for "BOOT OK" followed by CR LF
-            assert_eq!(vram[text_offset], b'B', "Expected 'B' in 'BOOT OK'");
-            assert_eq!(vram[text_offset + 2], b'O', "Expected 'O' in 'BOOT OK'");
-            assert_eq!(
-                vram[text_offset + 4],
-                b'O',
-                "Expected second 'O' in 'BOOT OK'"
-            );
-            assert_eq!(vram[text_offset + 6], b'T', "Expected 'T' in 'BOOT OK'");
-            assert_eq!(vram[text_offset + 8], b' ', "Expected space in 'BOOT OK'");
-            assert_eq!(vram[text_offset + 10], b'O', "Expected 'O' in 'BOOT OK'");
-            assert_eq!(vram[text_offset + 12], b'K', "Expected 'K' in 'BOOT OK'");
-        } else {
-            panic!("VRAM too small");
-        }
-
-        // Also verify that the menu is displayed (check for "PC Test Menu")
-        // The menu starts after "BOOT OK\r\n\r\n"
-        // We can check for "=== PC Test Menu ===" somewhere in VRAM
+        // Extract text from VRAM (skip attribute bytes)
         let vram_str: Vec<u8> = (0..2000)
             .filter_map(|i| {
                 if i % 2 == 0 && text_offset + i < vram.len() {
@@ -1163,6 +1144,26 @@ mod tests {
             .collect();
 
         let vram_text = String::from_utf8_lossy(&vram_str);
+
+        // Verify "BOOT OK" is displayed
+        assert!(
+            vram_text.contains("BOOT OK"),
+            "Expected 'BOOT OK' message in VRAM"
+        );
+
+        // Verify "MEM OK" is displayed
+        assert!(
+            vram_text.contains("MEM OK"),
+            "Expected 'MEM OK' message in VRAM"
+        );
+
+        // Verify "CPU OK" is displayed
+        assert!(
+            vram_text.contains("CPU OK"),
+            "Expected 'CPU OK' message in VRAM"
+        );
+
+        // Verify menu is displayed
         assert!(
             vram_text.contains("PC Test Menu"),
             "Menu title should be displayed"
