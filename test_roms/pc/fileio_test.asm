@@ -172,24 +172,29 @@ print_ax_hex:
     mov al, 'x'
     int 0x10
 
-    ; Print high byte
-    mov dx, ax
-    mov cl, 4
-    shr dx, cl
-    shr dx, cl
-    shr dx, cl
-    shr dx, cl
-    and dx, 0x0F
+    ; Print AX as 4 hex digits
+    mov bx, ax      ; Save AX
+    mov cl, 12      ; Start with highest nibble
+    mov ch, 4       ; Print 4 nibbles
+
+.print_nibble:
+    mov dx, bx
+    shr dx, cl      ; Shift to get nibble in position
+    and dx, 0x0F    ; Mask to get only the nibble
     add dl, '0'
     cmp dl, '9'
-    jle .print1
-    add dl, 7
-.print1:
+    jle .output
+    add dl, 7       ; Convert A-F
+.output:
     mov al, dl
     mov ah, 0x0E
     int 0x10
+    
+    sub cl, 4       ; Move to next nibble
+    dec ch
+    jnz .print_nibble
 
-    ; Print remaining nibbles (simplified)
+    ; Print newline
     mov si, msg_newline
     call print_string
 

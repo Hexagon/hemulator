@@ -985,7 +985,7 @@ impl PcCpu {
         // Returns: CF clear if success, AX = file handle
         //          CF set if error, AX = error code (03h = path not found, 04h = no handles, 05h = access denied)
         
-        // For now, return "file not found" error
+        // For now, return "path not found" error
         // In a real implementation, we would create the file on the mounted disk
         self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x03; // Path not found
         self.set_carry_flag(true);
