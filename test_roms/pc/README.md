@@ -2,6 +2,42 @@
 
 This directory contains test ROMs and BIOS for the IBM PC/XT emulator.
 
+## Interactive Menu Test (menu.bin)
+
+### File: `menu.bin` (512 bytes)
+
+An interactive bootable boot sector with a menu for manual testing of various features.
+
+**Building:**
+```bash
+./build_menu.sh
+```
+
+**Features:**
+1. Prints "BOOT OK" on startup
+2. Displays an interactive menu:
+   - Test user input (keyboard echo)
+   - Calculate 2+2 (arithmetic test)
+   - Test file I/O (read/write simulation)
+   - Quit option
+3. Uses INT 10h (video services) for display
+4. Uses INT 16h (keyboard services) for input
+
+**Requirements:**
+- NASM assembler (`sudo apt-get install nasm`)
+
+**Usage:**
+- Build and create bootable floppy: `./build_menu.sh`
+- Load `menu_floppy.img` in the emulator
+- Press F3 in the emulator and select the image file
+- Select menu options by pressing 1, 2, 3, or Q
+
+**Testing Features:**
+- **Option 1 (User Input)**: Type any text and see it echoed on screen. Press ESC to return to menu.
+- **Option 2 (Calculate 2+2)**: Demonstrates basic arithmetic (adds 2+2 and displays result: 4)
+- **Option 3 (File I/O)**: Simulates file read/write operations with status messages
+- **Option Q (Quit)**: Halts the system with a goodbye message
+
 ## Boot Sector Test (boot.bin)
 
 ### File: `boot.bin` (512 bytes)

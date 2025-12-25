@@ -1055,6 +1055,105 @@ mod tests {
     }
 
     #[test]
+    fn test_menu_rom_smoke_test() {
+        // This test uses the interactive menu boot sector from test_roms/pc/menu.bin
+        // The boot sector should:
+        // 1. Print "BOOT OK" message
+        // 2. Display a menu using INT 10h
+        // 3. Wait for keyboard input using INT 16h
+        
+        let menu_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../test_roms/pc/menu.bin");
+
+        // Skip if menu.bin doesn't exist (not built yet)
+        if !std::path::Path::new(menu_bin_path).exists() {
+            eprintln!(
+                "Skipping menu ROM smoke test: {} not found",
+                menu_bin_path
+            );
+            eprintln!("Build with: cd test_roms/pc && ./build_menu.sh");
+            return;
+        }
+
+        let boot_sector = std::fs::read(menu_bin_path).expect("Failed to read menu.bin");
+        assert_eq!(
+            boot_sector.len(),
+            512,
+            "Boot sector should be exactly 512 bytes"
+        );
+
+        // Verify boot signature
+        assert_eq!(boot_sector[510], 0x55, "Boot signature byte 1 should be 0x55");
+        assert_eq!(boot_sector[511], 0xAA, "Boot signature byte 2 should be 0xAA");
+
+        // Create a floppy image with the boot sector
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        floppy[0..512].copy_from_slice(&boot_sector);
+
+        // Create system and mount floppy
+        let mut sys = PcSystem::new();
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Skip boot delay and manually load boot sector
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+
+        // Clear VRAM to eliminate POST screen
+        {
+            let vram_mut = sys.cpu.bus_mut().vram_mut();
+            for i in 0..vram_mut.len() {
+                vram_mut[i] = 0;
+            }
+        }
+
+        // Load and execute boot sector
+        let _ = sys.step_frame();
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(0x7C00);
+        sys.cpu.unhalt();
+        
+        // Execute boot code - enough frames for the menu to display
+        for _ in 0..20 {
+            let _ = sys.step_frame();
+        }
+
+        // Check that "BOOT OK" was written to video memory
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000; // CGA text mode video memory offset
+
+        // Verify "BOOT OK" is displayed (each char followed by white-on-black attribute 0x07)
+        // The menu ROM uses INT 10h teletype output which uses attribute 0x07
+        if vram.len() > text_offset + 14 {
+            // Check for "BOOT OK" followed by CR LF
+            assert_eq!(vram[text_offset], b'B', "Expected 'B' in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 2], b'O', "Expected 'O' in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 4], b'O', "Expected second 'O' in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 6], b'T', "Expected 'T' in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 8], b' ', "Expected space in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 10], b'O', "Expected 'O' in 'BOOT OK'");
+            assert_eq!(vram[text_offset + 12], b'K', "Expected 'K' in 'BOOT OK'");
+        } else {
+            panic!("VRAM too small");
+        }
+        
+        // Also verify that the menu is displayed (check for "PC Test Menu")
+        // The menu starts after "BOOT OK\r\n\r\n"
+        // We can check for "=== PC Test Menu ===" somewhere in VRAM
+        let vram_str: Vec<u8> = (0..2000).filter_map(|i| {
+            if i % 2 == 0 && text_offset + i < vram.len() {
+                Some(vram[text_offset + i])
+            } else {
+                None
+            }
+        }).collect();
+        
+        let vram_text = String::from_utf8_lossy(&vram_str);
+        assert!(vram_text.contains("PC Test Menu"), "Menu title should be displayed");
+        assert!(vram_text.contains("Test user input"), "Menu option 1 should be displayed");
+        assert!(vram_text.contains("Calculate 2+2"), "Menu option 2 should be displayed");
+    }
+
+    #[test]
     fn test_int13h_integration() {
         // Integration test: Create a program that uses INT 13h to read a sector
         let mut sys = PcSystem::new();
