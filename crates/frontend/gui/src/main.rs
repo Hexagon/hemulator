@@ -1785,15 +1785,20 @@ fn main() {
                                 );
 
                                 // Load all mounts from project
+                                // Resolve paths relative to .hemu file location
+                                let project_dir = path.parent().unwrap_or(std::path::Path::new("."));
                                 let mut any_mounted = false;
                                 for (mount_id, mount_path) in &project.mounts {
-                                    match std::fs::read(mount_path) {
+                                    let full_path = project_dir.join(mount_path);
+                                    match std::fs::read(&full_path) {
                                         Ok(data) => {
                                             if let Err(e) = pc_sys.mount(mount_id, &data) {
                                                 eprintln!("Failed to mount {}: {}", mount_id, e);
                                             } else {
-                                                settings
-                                                    .set_mount_point(mount_id, mount_path.clone());
+                                                settings.set_mount_point(
+                                                    mount_id,
+                                                    full_path.to_string_lossy().to_string(),
+                                                );
                                                 any_mounted = true;
                                                 println!("Mounted {}: {}", mount_id, mount_path);
                                             }
