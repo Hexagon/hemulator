@@ -71,6 +71,23 @@ pub trait Memory8086 {
     fn write(&mut self, addr: u32, val: u8);
 }
 
+/// Segment override specification for next instruction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SegmentOverride {
+    /// Use ES segment
+    ES,
+    /// Use CS segment
+    CS,
+    /// Use SS segment
+    SS,
+    /// Use DS segment
+    DS,
+    /// Use FS segment (80386+)
+    FS,
+    /// Use GS segment (80386+)
+    GS,
+}
+
 /// Intel 8086 CPU state and execution engine
 ///
 /// This is a generic, reusable 8086 CPU implementation that works with any
@@ -126,6 +143,11 @@ pub struct Cpu8086<M: Memory8086> {
     /// Halt flag
     halted: bool,
 
+    /// Segment override for next instruction
+    /// Set by segment override prefixes (0x26 ES:, 0x2E CS:, 0x36 SS:, 0x3E DS:, 0x64 FS:, 0x65 GS:)
+    /// Consumed and cleared after the next memory-accessing instruction
+    segment_override: Option<SegmentOverride>,
+
     /// CPU model (8086, 80186, 80286, etc.)
     model: CpuModel,
 
@@ -175,6 +197,7 @@ impl<M: Memory8086> Cpu8086<M> {
             cycles: 0,
             memory,
             halted: false,
+            segment_override: None,
             model,
             protected_mode: ProtectedModeState::new(),
         }
@@ -223,6 +246,32 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Get mutable reference to protected mode state (80286+ only)
     pub fn protected_mode_mut(&mut self) -> &mut ProtectedModeState {
         &mut self.protected_mode
+    }
+
+    /// Check if the CPU is halted
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
+    /// Set the CPU halted state
+    /// When halted, the CPU will not execute instructions until an interrupt occurs or it is unhalted
+    pub fn set_halted(&mut self, halted: bool) {
+        self.halted = halted;
+    }
+
+    /// Get the segment value for a segment override, or default segment if no override
+    /// This consumes and clears the segment override
+    #[inline]
+    fn get_segment_with_override(&mut self, default: u16) -> u16 {
+        match self.segment_override.take() {
+            Some(SegmentOverride::ES) => self.es,
+            Some(SegmentOverride::CS) => self.cs,
+            Some(SegmentOverride::SS) => self.ss,
+            Some(SegmentOverride::DS) => self.ds,
+            Some(SegmentOverride::FS) => self.fs,
+            Some(SegmentOverride::GS) => self.gs,
+            None => default,
+        }
     }
 
     /// Calculate physical address from segment:offset
@@ -801,7 +850,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Calculate effective address from ModR/M byte
     /// Returns (segment, offset) and number of additional bytes consumed
     fn calc_effective_address(&mut self, modbits: u8, rm: u8) -> (u16, u16, u8) {
-        match modbits {
+        let (default_seg, offset, bytes_read) = match modbits {
             // mod = 00: Memory mode with no displacement (except for special case rm=110)
             0b00 => {
                 match rm {
@@ -852,7 +901,11 @@ impl<M: Memory8086> Cpu8086<M> {
             }
             // mod = 11: Register mode (no memory access)
             _ => (0, 0, 0), // Not used for register mode
-        }
+        };
+
+        // Apply segment override if present
+        let seg = self.get_segment_with_override(default_seg);
+        (seg, offset, bytes_read)
     }
 
     /// Read 8-bit value from ModR/M operand (either register or memory)
@@ -1132,14 +1185,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         total_cycles
                     }
                     _ => {
-                        eprintln!(
-                            "Unimplemented REP string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
-                            next_opcode,
-                            self.cs,
-                            self.ip.wrapping_sub(2)
-                        );
-                        self.cycles += 1;
-                        1
+                        // REP prefix with non-string instruction
+                        // According to x86 behavior, REP before non-string instructions is ignored
+                        // We need to "un-fetch" the opcode and execute it normally
+                        // Since we already fetched it, we decrement IP to put it back
+                        self.ip = self.ip.wrapping_sub(1);
+                        // Now execute the instruction normally by recursing
+                        let cycles = self.step();
+                        self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
+                        return cycles;
                     }
                 }
             }
@@ -1258,14 +1312,14 @@ impl<M: Memory8086> Cpu8086<M> {
                         total_cycles
                     }
                     _ => {
-                        eprintln!(
-                            "Unimplemented REPNZ string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
-                            next_opcode,
-                            self.cs,
-                            self.ip.wrapping_sub(2)
-                        );
-                        self.cycles += 1;
-                        1
+                        // REPNZ prefix with non-string instruction
+                        // According to x86 behavior, REPNZ before non-string instructions is ignored
+                        // We need to "un-fetch" the opcode and execute it normally
+                        self.ip = self.ip.wrapping_sub(1);
+                        // Now execute the instruction normally by recursing
+                        let cycles = self.step();
+                        self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
+                        return cycles;
                     }
                 }
             }
@@ -1857,14 +1911,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // ES segment override prefix (0x26)
             0x26 => {
-                // Read next instruction and execute with ES override
-                // For simplicity, we'll just pass through to next instruction
-                // A full implementation would set a segment override flag
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1); // Back up IP
-                self.step() // Execute next instruction
-                            // Note: This is a simplified implementation
-                            // Real hardware would affect address calculation in the next instruction
+                // ES segment override prefix
+                self.segment_override = Some(SegmentOverride::ES);
+                self.step() // Execute next instruction with ES override
             }
 
             // DAA - Decimal Adjust After Addition (0x27)
@@ -1895,10 +1944,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CS segment override prefix (0x2E)
             0x2E => {
-                // Similar to ES override - simplified implementation
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1);
-                self.step()
+                // CS segment override prefix
+                self.segment_override = Some(SegmentOverride::CS);
+                self.step() // Execute next instruction with CS override
             }
 
             // DAS - Decimal Adjust After Subtraction (0x2F)
@@ -2584,6 +2632,53 @@ impl<M: Memory8086> Cpu8086<M> {
                             5
                         }
                     }
+                    // MOV reg, CRx - Move from Control Register (0x0F 0x20) - 80386+
+                    0x20 => {
+                        if !self.model.supports_80386_instructions() {
+                            self.cycles += 6;
+                            return 6;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (_, reg, rm) = Self::decode_modrm(modrm);
+                        
+                        // Read from control register (only CR0 is commonly used)
+                        let cr_value = match reg {
+                            0 => self.protected_mode.get_cr0(), // CR0
+                            2 => 0, // CR2 (page fault linear address) - stub
+                            3 => 0, // CR3 (page directory base) - stub
+                            _ => 0, // Reserved
+                        };
+                        
+                        // Store to destination register
+                        self.set_reg16(rm, cr_value);
+                        self.cycles += 6;
+                        6
+                    }
+                    // MOV CRx, reg - Move to Control Register (0x0F 0x22) - 80386+
+                    0x22 => {
+                        if !self.model.supports_80386_instructions() {
+                            self.cycles += 10;
+                            return 10;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (_, reg, rm) = Self::decode_modrm(modrm);
+                        
+                        // Read from source register
+                        let value = self.get_reg16(rm);
+                        
+                        // Write to control register (only CR0 is commonly used)
+                        match reg {
+                            0 => self.protected_mode.set_cr0(value), // CR0
+                            2 => {}, // CR2 (page fault linear address) - stub
+                            3 => {}, // CR3 (page directory base) - stub
+                            _ => {}, // Reserved
+                        }
+                        
+                        self.cycles += 10;
+                        10
+                    }
                     _ => {
                         eprintln!(
                             "Two-byte opcode 0x0F 0x{:02X} not implemented at CS:IP={:04X}:{:04X}",
@@ -3021,10 +3116,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // SS segment override prefix (0x36)
             0x36 => {
-                // Simplified implementation - just execute next instruction
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1);
-                self.step()
+                // SS segment override prefix
+                self.segment_override = Some(SegmentOverride::SS);
+                self.step() // Execute next instruction with SS override
             }
 
             // AAA - ASCII Adjust After Addition (0x37)
@@ -3045,10 +3139,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // DS segment override prefix (0x3E)
             0x3E => {
-                // Simplified implementation - just execute next instruction
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1);
-                self.step()
+                // DS segment override prefix
+                self.segment_override = Some(SegmentOverride::DS);
+                self.step() // Execute next instruction with DS override
             }
 
             // AAS - ASCII Adjust After Subtraction (0x3F)
@@ -4119,12 +4212,21 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 if op == 0 {
                     // Only op=0 is valid for MOV
-                    let imm = self.fetch_u8();
-                    self.write_rm8(modbits, rm, imm);
-                    self.cycles += if modbits == 0b11 { 4 } else { 10 };
+                    // IMPORTANT: For memory operands with displacement, we must calculate
+                    // the effective address (which fetches displacement bytes) BEFORE
+                    // fetching the immediate value. So we handle register and memory cases separately.
                     if modbits == 0b11 {
+                        // Register mode - no displacement to fetch
+                        let imm = self.fetch_u8();
+                        self.write_rm8(modbits, rm, imm);
+                        self.cycles += 4;
                         4
                     } else {
+                        // Memory mode - get effective address first to consume displacement bytes
+                        let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                        let imm = self.fetch_u8();  // Now fetch immediate after displacement
+                        self.write(seg, offset, imm);
+                        self.cycles += 10;
                         10
                     }
                 } else {
@@ -4146,12 +4248,21 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 if op == 0 {
                     // Only op=0 is valid for MOV
-                    let imm = self.fetch_u16();
-                    self.write_rm16(modbits, rm, imm);
-                    self.cycles += if modbits == 0b11 { 4 } else { 10 };
+                    // IMPORTANT: For memory operands with displacement, we must calculate
+                    // the effective address (which fetches displacement bytes) BEFORE
+                    // fetching the immediate value.
                     if modbits == 0b11 {
+                        // Register mode - no displacement to fetch
+                        let imm = self.fetch_u16();
+                        self.write_rm16(modbits, rm, imm);
+                        self.cycles += 4;
                         4
                     } else {
+                        // Memory mode - get effective address first to consume displacement bytes
+                        let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                        let imm = self.fetch_u16();  // Now fetch immediate after displacement
+                        self.write_u16(seg, offset, imm);
+                        self.cycles += 10;
                         10
                     }
                 } else {
@@ -4354,10 +4465,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 let base = self.fetch_u8();
                 let al = (self.ax & 0xFF) as u8;
                 if base == 0 {
-                    // Division by zero - trigger INT 0
-                    eprintln!("AAM with base 0 (division by zero)");
-                    self.cycles += 1;
-                    1
+                    // Division by zero - trigger INT 0 (divide error exception)
+                    self.trigger_interrupt(0);
+                    self.cycles += 51; // Same as INT instruction
+                    51
                 } else {
                     let ah = al / base;
                     let al_new = al % base;
@@ -4856,26 +4967,16 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // FS segment override prefix (0x64) - 80386+
             0x64 => {
-                // Read next instruction and execute with FS override
-                // For simplicity, we'll just pass through to next instruction
-                // A full implementation would set a segment override flag
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1); // Back up IP
-                self.step() // Execute next instruction
-                            // Note: This is a simplified implementation
-                            // Real hardware would affect address calculation in the next instruction
+                // FS segment override prefix
+                self.segment_override = Some(SegmentOverride::FS);
+                self.step() // Execute next instruction with FS override
             }
 
             // GS segment override prefix (0x65) - 80386+
             0x65 => {
-                // Read next instruction and execute with GS override
-                // For simplicity, we'll just pass through to next instruction
-                // A full implementation would set a segment override flag
-                let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1); // Back up IP
-                self.step() // Execute next instruction
-                            // Note: This is a simplified implementation
-                            // Real hardware would affect address calculation in the next instruction
+                // GS segment override prefix
+                self.segment_override = Some(SegmentOverride::GS);
+                self.step() // Execute next instruction with GS override
             }
 
             // PUSH immediate word (0x68) - 80186+
