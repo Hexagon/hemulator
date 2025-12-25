@@ -718,23 +718,32 @@ impl PcCpu {
         // Note: In a real BIOS, this would block until a key is available
         // We emulate blocking by halting the CPU until keyboard input arrives
 
-        if self.cpu.memory.keyboard.has_data() {
-            let scancode = self.cpu.memory.keyboard.read_scancode();
+        loop {
+            if self.cpu.memory.keyboard.has_data() {
+                let scancode = self.cpu.memory.keyboard.read_scancode();
+                
+                // Skip break codes (key release) - only return make codes (key press)
+                if scancode & 0x80 != 0 {
+                    continue;
+                }
 
-            // Convert scancode to ASCII (simplified mapping)
-            let ascii = scancode_to_ascii(scancode);
+                // Convert scancode to ASCII (simplified mapping)
+                let ascii = scancode_to_ascii(scancode);
 
-            // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+                // AH = scan code, AL = ASCII character
+                self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
 
-            // Ensure CPU is not halted when we return a key
-            self.cpu.set_halted(false);
-        } else {
-            // No key available - halt CPU to wait for input
-            // This emulates the blocking behavior of INT 16h AH=00h
-            // The CPU will remain halted until keyboard input arrives and unhalts it
-            self.cpu.set_halted(true);
-            self.cpu.ax = 0x0000;
+                // Ensure CPU is not halted when we return a key
+                self.cpu.set_halted(false);
+                break;
+            } else {
+                // No key available - halt CPU to wait for input
+                // This emulates the blocking behavior of INT 16h AH=00h
+                // The CPU will remain halted until keyboard input arrives and unhalts it
+                self.cpu.set_halted(true);
+                self.cpu.ax = 0x0000;
+                break;
+            }
         }
         51
     }
@@ -744,21 +753,30 @@ impl PcCpu {
         // Returns: ZF = 1 if no key available, ZF = 0 if key available
         // If key available: AH = scan code, AL = ASCII character
 
+        // Look for a make code (skip break codes)
+        let mut found_make_code = false;
         if self.cpu.memory.keyboard.has_data() {
-            // Peek at the next scancode without consuming it
             let scancode = self.cpu.memory.keyboard.peek_scancode();
-            let ascii = scancode_to_ascii(scancode);
+            
+            // Only report make codes (key press), not break codes (key release)
+            if scancode & 0x80 == 0 {
+                found_make_code = true;
+                let ascii = scancode_to_ascii(scancode);
 
-            // Set ZF = 0 (key available)
-            self.set_zero_flag(false);
+                // Set ZF = 0 (key available)
+                self.set_zero_flag(false);
 
-            // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
-        } else {
-            // No key available
+                // AH = scan code, AL = ASCII character
+                self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+            }
+        }
+        
+        if !found_make_code {
+            // No make code available
             self.set_zero_flag(true); // ZF = 1 (no key)
             self.cpu.ax = 0x0000;
         }
+        
         51
     }
 
