@@ -362,6 +362,44 @@ impl PcBus {
             .write_sectors(request, buffer, disk_mut)
     }
 
+    /// Perform a disk read operation using LBA
+    pub fn disk_read_lba(&mut self, drive: u8, lba: u32, count: u8, buffer: &mut [u8]) -> u8 {
+        let disk_image = if drive < 0x80 {
+            // Floppy drive
+            if drive == 0x00 {
+                self.floppy_a.as_deref()
+            } else if drive == 0x01 {
+                self.floppy_b.as_deref()
+            } else {
+                None
+            }
+        } else {
+            // Hard drive
+            self.hard_drive.as_deref()
+        };
+
+        self.disk_controller.read_sectors_lba(lba, count, buffer, disk_image)
+    }
+
+    /// Perform a disk write operation using LBA
+    pub fn disk_write_lba(&mut self, drive: u8, lba: u32, count: u8, buffer: &[u8]) -> u8 {
+        let disk_mut = if drive < 0x80 {
+            // Floppy drive
+            if drive == 0x00 {
+                self.floppy_a.as_mut()
+            } else if drive == 0x01 {
+                self.floppy_b.as_mut()
+            } else {
+                None
+            }
+        } else {
+            // Hard drive
+            self.hard_drive.as_mut()
+        };
+
+        self.disk_controller.write_sectors_lba(lba, count, buffer, disk_mut)
+    }
+
     /// Read from an I/O port
     pub fn io_read(&self, port: u16) -> u8 {
         match port {

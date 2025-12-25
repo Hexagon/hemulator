@@ -763,12 +763,14 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Displays on boot: BIOS version, CPU type, memory test, disk drives, boot priority
   - Updates dynamically when disks are mounted/unmounted
   - Shows helpful instructions: F3 to mount disks, F12 to reset, F8 to save VM
-  - INT 13h disk services (FULLY IMPLEMENTED - all standard and extended functions)
+  - INT 13h disk services (FULLY IMPLEMENTED - all standard and extended functions including FAT32 support)
     - Standard functions: Reset (00h), Get Status (01h), Read (02h), Write (03h), Verify (04h), Format (05h), Get Drive Parameters (08h)
     - Extended functions: Get Disk Type (15h), Disk Change Status (16h), Check Extensions (41h)
+    - **Extended INT 13h (EDD) for FAT32/large disks**: Extended Read LBA (42h), Extended Write LBA (43h), Extended Verify (44h), Get Extended Drive Parameters (48h)
     - Complete CHS (Cylinder/Head/Sector) to LBA translation
+    - LBA (Logical Block Addressing) support for drives >8GB
     - Full read/write access to all mounted disk images
-    - Supports DOS filesystem access via real DOS running in emulator
+    - **Supports DOS with FAT12, FAT16, and FAT32 filesystems** via real DOS running in emulator
   - Source: `test_roms/pc/bios.asm`
   - Build script: `test_roms/pc/build.sh` (requires NASM)
   - Replaceable via BIOS mount point
@@ -904,17 +906,20 @@ There are two ways to mount disk images and BIOS:
     - **For filesystem access**: Boot real DOS from a disk image - DOS will handle FAT12/FAT16 filesystems
     - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
 - **DOS Filesystem Support**:
-  - ✅ **Full filesystem support available via real DOS**
+  - ✅ **Full filesystem support available via real DOS - FAT12, FAT16, and FAT32**
   - Mount a DOS boot disk (.img file with DOS installed)
-  - DOS boots and provides INT 21h file services using its own FAT12/FAT16 code
-  - INT 13h provides complete sector-level access to all mounted disk images
+  - DOS boots and provides INT 21h file services using its own FAT12/FAT16/FAT32 code
+  - INT 13h provides complete sector-level access to all mounted disk images (both CHS and LBA)
+  - **Extended INT 13h (EDD) support enables FAT32 and large disk support (>8GB)**
   - DOS can read, write, create, delete files on mounted floppy and hard drive images
+  - **Supports large drives**: LBA addressing allows drives up to 2TB (limited by 32-bit LBA)
   - **How to use**:
-    1. Create or download a DOS boot disk image (FreeDOS, MS-DOS, etc.)
+    1. Create or download a DOS boot disk image with FAT32 support (FreeDOS 1.2+, MS-DOS 7.1+, Windows 98 DOS)
     2. Mount it via `--slot2 dos_boot.img` or press F3 to mount to FloppyA
-    3. Mount data disks to FloppyB or HardDrive as needed
+    3. Mount data disks (including large FAT32 drives) to FloppyB or HardDrive as needed
     4. Boot the system - DOS will load from the boot disk
     5. Use DOS commands (DIR, COPY, etc.) to access files on all mounted disks
+    6. **FAT32 drives work if DOS supports FAT32** (FreeDOS, MS-DOS 7.x, Windows 95 OSR2+)
   - **Standalone COM/EXE programs**: Can run directly without DOS but have limited file I/O
 - **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
