@@ -1234,12 +1234,22 @@ fn main() {
     }
 
     // Main event loop
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+    // Host key (Right Alt) must be held to use emulator controls (F1-F12, ESC to exit)
+    // Without host key, all keys are passed to the emulated system
+    while window.is_open() {
         // Poll events at the start of each frame
         window.poll_events();
 
-        // Toggle help overlay (F1)
-        if window.is_key_pressed(Key::F1, false) {
+        // Check if host key (Right Alt) is held
+        let host_key_held = window.is_key_down(Key::RightAlt);
+
+        // Only exit on ESC if host key is held
+        if host_key_held && window.is_key_down(Key::Escape) {
+            break;
+        }
+
+        // Toggle help overlay (F1) - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F1, false) {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
@@ -1247,8 +1257,8 @@ fn main() {
             show_debug = false; // Close debug if open
         }
 
-        // Toggle speed selector (F2)
-        if window.is_key_pressed(Key::F2, false) {
+        // Toggle speed selector (F2) - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F2, false) {
             show_speed_selector = !show_speed_selector;
             show_help = false; // Close help if open
             show_slot_selector = false; // Close slot selector if open
@@ -1256,10 +1266,10 @@ fn main() {
             show_debug = false; // Close debug if open
         }
 
-        // Toggle debug overlay (F10)
+        // Toggle debug overlay (F10) - only when host key is held
         // For PC systems, allow debug even if no ROM is loaded (to show CPU state at POST)
         let can_debug = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
-        if window.is_key_pressed(Key::F10, false) && can_debug {
+        if host_key_held && window.is_key_pressed(Key::F10, false) && can_debug {
             show_debug = !show_debug;
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open
@@ -1347,8 +1357,8 @@ fn main() {
             }
         }
 
-        // Cycle CRT filter (F11)
-        if window.is_key_pressed(Key::F11, false) {
+        // Cycle CRT filter (F11) - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F11, false) {
             settings.display_filter = settings.display_filter.next();
             // Update the backend's filter setting
             if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
@@ -1709,16 +1719,16 @@ fn main() {
             }
         }
 
-        // Check for reset key (F12)
+        // Check for reset key (F12) - only when host key is held
         // For PC systems, allow reset even without ROM to trigger boot
         let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
-        if window.is_key_pressed(Key::F12, false) && can_reset {
+        if host_key_held && window.is_key_pressed(Key::F12, false) && can_reset {
             sys.reset();
             println!("System reset");
         }
 
-        // Check for open ROM dialog (F3)
-        if window.is_key_pressed(Key::F3, false) {
+        // Check for open ROM dialog (F3) - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F3, false) {
             let mount_points = sys.mount_points();
 
             // For PC system (multi-mount), load .hemu project file
@@ -1914,16 +1924,16 @@ fn main() {
             }
         }
 
-        // Check for screenshot key (F4)
-        if window.is_key_pressed(Key::F4, false) {
+        // Check for screenshot key (F4) - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F4, false) {
             match save_screenshot(&buffer, width, height, sys.system_name()) {
                 Ok(path) => println!("Screenshot saved to: {}", path),
                 Err(e) => eprintln!("Failed to save screenshot: {}", e),
             }
         }
 
-        // F5 - Save state slot selector
-        if rom_loaded && window.is_key_pressed(Key::F5, false) {
+        // F5 - Save state slot selector - only when host key is held
+        if host_key_held && rom_loaded && window.is_key_pressed(Key::F5, false) {
             if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "SAVE";
@@ -1933,8 +1943,8 @@ fn main() {
             }
         }
 
-        // F6 - Show load state slot selector
-        if rom_loaded && window.is_key_pressed(Key::F6, false) {
+        // F6 - Show load state slot selector - only when host key is held
+        if host_key_held && rom_loaded && window.is_key_pressed(Key::F6, false) {
             if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "LOAD";
@@ -1944,8 +1954,8 @@ fn main() {
             }
         }
 
-        // F7 - Show system selector
-        if window.is_key_pressed(Key::F7, false) {
+        // F7 - Show system selector - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F7, false) {
             show_system_selector = true;
             show_help = false;
             show_slot_selector = false;
@@ -1954,8 +1964,8 @@ fn main() {
             show_debug = false;
         }
 
-        // F8 - Save PC virtual machine
-        if window.is_key_pressed(Key::F8, false) {
+        // F8 - Save PC virtual machine - only when host key is held
+        if host_key_held && window.is_key_pressed(Key::F8, false) {
             if matches!(&sys, EmulatorSystem::PC(_)) {
                 // For PC system, F8 saves the virtual machine state
                 save_pc_virtual_machine(&sys, &settings, &mut status_message);
@@ -1980,29 +1990,79 @@ fn main() {
             // Handle keyboard input for PC system
             if matches!(&sys, EmulatorSystem::PC(_)) {
                 // PC system: Poll all keys and detect press/release edges
+                // Only pass keys to the client if host key is NOT held
                 let all_keys = [
-                    Key::A, Key::B, Key::C, Key::D, Key::E, Key::F, Key::G, Key::H,
-                    Key::I, Key::J, Key::K, Key::L, Key::M, Key::N, Key::O, Key::P,
-                    Key::Q, Key::R, Key::S, Key::T, Key::U, Key::V, Key::W, Key::X,
-                    Key::Y, Key::Z, Key::Key0, Key::Key1, Key::Key2, Key::Key3,
-                    Key::Key4, Key::Key5, Key::Key6, Key::Key7, Key::Key8, Key::Key9,
-                    Key::Space, Key::Enter, Key::Backspace, Key::Tab, Key::Escape,
-                    Key::LeftShift, Key::RightShift, Key::LeftCtrl, Key::RightCtrl,
-                    Key::LeftAlt, Key::RightAlt,
+                    Key::A,
+                    Key::B,
+                    Key::C,
+                    Key::D,
+                    Key::E,
+                    Key::F,
+                    Key::G,
+                    Key::H,
+                    Key::I,
+                    Key::J,
+                    Key::K,
+                    Key::L,
+                    Key::M,
+                    Key::N,
+                    Key::O,
+                    Key::P,
+                    Key::Q,
+                    Key::R,
+                    Key::S,
+                    Key::T,
+                    Key::U,
+                    Key::V,
+                    Key::W,
+                    Key::X,
+                    Key::Y,
+                    Key::Z,
+                    Key::Key0,
+                    Key::Key1,
+                    Key::Key2,
+                    Key::Key3,
+                    Key::Key4,
+                    Key::Key5,
+                    Key::Key6,
+                    Key::Key7,
+                    Key::Key8,
+                    Key::Key9,
+                    Key::Space,
+                    Key::Enter,
+                    Key::Backspace,
+                    Key::Tab,
+                    Key::Escape,
+                    Key::LeftShift,
+                    Key::RightShift,
+                    Key::LeftCtrl,
+                    Key::RightCtrl,
+                    Key::LeftAlt,
                 ];
 
                 for &key in &all_keys {
                     let is_down = window.is_key_down(key);
                     let was_down = prev_keys.contains(&key);
 
-                    if is_down && !was_down {
-                        // Key pressed
-                        sys.handle_keyboard(key, true);
-                        prev_keys.insert(key);
-                    } else if !is_down && was_down {
-                        // Key released
-                        sys.handle_keyboard(key, false);
-                        prev_keys.remove(&key);
+                    // Only pass key events to client if host key is NOT held
+                    // This allows ESC and function keys to work in the client
+                    if !host_key_held {
+                        if is_down && !was_down {
+                            // Key pressed
+                            sys.handle_keyboard(key, true);
+                            prev_keys.insert(key);
+                        } else if !is_down && was_down {
+                            // Key released
+                            sys.handle_keyboard(key, false);
+                            prev_keys.remove(&key);
+                        }
+                    } else {
+                        // Host key is held - update tracking but don't send to client
+                        if is_down {
+                            prev_keys.insert(key);
+                        } else {
+                            prev_keys.remove(&key);
+                        }
                     }
                 }
             } else {

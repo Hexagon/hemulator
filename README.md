@@ -72,6 +72,19 @@ See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements
 
 ### Quick Start
 
+**Linux Development Dependencies:**
+
+On Ubuntu/Debian, install these packages before building:
+```bash
+sudo apt-get install libasound2-dev cmake pkg-config
+```
+
+- `libasound2-dev` - Required for audio support (ALSA)
+- `cmake` - Required by some Rust dependencies
+- `pkg-config` - Required for library detection during build
+
+**Building and Running:**
+
 ```bash
 # Clone the repository
 git clone https://github.com/Hexagon/hemulator.git
@@ -217,6 +230,15 @@ hemulator/
 ```
 
 ## Development
+
+### Prerequisites
+
+**Linux:**
+```bash
+sudo apt-get install libasound2-dev cmake pkg-config
+```
+
+**Windows/macOS:** No additional dependencies required beyond Rust toolchain.
 
 ### Building
 
