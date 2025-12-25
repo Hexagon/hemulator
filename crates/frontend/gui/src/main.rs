@@ -212,6 +212,7 @@ impl EmulatorSystem {
                 Key::Enter => Some(emu_pc::SCANCODE_ENTER),
                 Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
                 Key::Tab => Some(emu_pc::SCANCODE_TAB),
+                Key::Escape => Some(emu_pc::SCANCODE_ESC),
                 Key::LeftShift | Key::RightShift => Some(emu_pc::SCANCODE_LEFT_SHIFT),
                 Key::LeftCtrl | Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
                 Key::LeftAlt | Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
@@ -783,8 +784,56 @@ fn main() {
                         eprintln!("Currently only PC system .hemu projects are supported");
                         eprintln!("Project is for: {}", project.system);
                     } else {
-                        // Create PC system
-                        let mut pc_sys = emu_pc::PcSystem::new();
+                        // Parse configuration from project
+                        let cpu_model = if let Some(cpu_str) = project.get_cpu_model() {
+                            match cpu_str.as_str() {
+                                "Intel8086" => emu_core::cpu_8086::CpuModel::Intel8086,
+                                "Intel8088" => emu_core::cpu_8086::CpuModel::Intel8088,
+                                "Intel80186" => emu_core::cpu_8086::CpuModel::Intel80186,
+                                "Intel80188" => emu_core::cpu_8086::CpuModel::Intel80188,
+                                "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
+                                "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
+                                _ => {
+                                    eprintln!(
+                                        "Unknown CPU model: {}, using default Intel8086",
+                                        cpu_str
+                                    );
+                                    emu_core::cpu_8086::CpuModel::Intel8086
+                                }
+                            }
+                        } else {
+                            emu_core::cpu_8086::CpuModel::Intel8086
+                        };
+                        println!("CPU model: {:?}", cpu_model);
+
+                        let memory_kb = project.get_memory_kb().unwrap_or(640);
+                        println!("Memory: {}KB", memory_kb);
+
+                        // Create video adapter based on project configuration
+                        let video_adapter: Box<dyn emu_pc::VideoAdapter> =
+                            if let Some(video_str) = project.get_video_mode() {
+                                match video_str.as_str() {
+                                    "EGA" => {
+                                        println!("Video mode: EGA");
+                                        Box::new(emu_pc::SoftwareEgaAdapter::new())
+                                    }
+                                    "VGA" => {
+                                        println!("Video mode: VGA");
+                                        Box::new(emu_pc::SoftwareVgaAdapter::new())
+                                    }
+                                    "CGA" | _ => {
+                                        println!("Video mode: CGA");
+                                        Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                    }
+                                }
+                            } else {
+                                println!("Video mode: CGA (default)");
+                                Box::new(emu_pc::SoftwareCgaAdapter::new())
+                            };
+
+                        // Create PC system with configuration
+                        let mut pc_sys =
+                            emu_pc::PcSystem::with_config(cpu_model, memory_kb, video_adapter);
 
                         // Load boot priority if specified
                         if let Some(priority_str) = project.boot_priority.as_ref() {
@@ -1181,6 +1230,7 @@ fn main() {
         out
     }
 
+    // Main event loop
     while window.is_open() && !window.is_key_down(Key::Escape) {
         // Poll events at the start of each frame
         window.poll_events();
@@ -1204,7 +1254,9 @@ fn main() {
         }
 
         // Toggle debug overlay (F10)
-        if window.is_key_pressed(Key::F10, false) && rom_loaded {
+        // For PC systems, allow debug even if no ROM is loaded (to show CPU state at POST)
+        let can_debug = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
+        if window.is_key_pressed(Key::F10, false) && can_debug {
             show_debug = !show_debug;
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open

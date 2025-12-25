@@ -3,6 +3,8 @@
 //! This provides boot functionality for the PC system.
 //! The BIOS sets up the system and attempts to boot from disk.
 
+use emu_core::cpu_8086::CpuModel;
+
 pub use boot_priority::BootPriority;
 
 mod boot_priority {
@@ -107,7 +109,12 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 
 /// Write BIOS POST screen to video RAM
 /// This displays a traditional PC BIOS Power-On Self-Test screen
-pub fn write_post_screen_to_vram(vram: &mut [u8]) {
+///
+/// # Arguments
+/// * `vram` - Video RAM buffer to write to
+/// * `cpu_model` - CPU model to display
+/// * `memory_kb` - Memory size in KB to display
+pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model: CpuModel, memory_kb: u32) {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get current system time
@@ -202,10 +209,21 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
 
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
-    write_line(5, 15, "Intel 8086 @ 4.77 MHz", 0x0E); // Yellow
+    
+    // Display CPU model name
+    let cpu_name = match cpu_model {
+        CpuModel::Intel8086 => "Intel 8086 @ 4.77 MHz",
+        CpuModel::Intel8088 => "Intel 8088 @ 4.77 MHz",
+        CpuModel::Intel80186 => "Intel 80186 @ 8 MHz",
+        CpuModel::Intel80188 => "Intel 80188 @ 8 MHz",
+        CpuModel::Intel80286 => "Intel 80286 @ 12 MHz",
+        CpuModel::Intel80386 => "Intel 80386 @ 20 MHz",
+    };
+    write_line(5, 15, cpu_name, 0x0E); // Yellow
 
     write_line(7, 2, "Memory Test:", label_attr);
-    write_line(7, 15, "640K OK", 0x0A); // Bright green
+    let memory_str = format!("{}K OK", memory_kb);
+    write_line(7, 15, &memory_str, 0x0A); // Bright green
 
     write_line(9, 2, "Disk Drives:", label_attr);
     write_line(10, 4, "Floppy A: Not present", 0x08); // Dark gray

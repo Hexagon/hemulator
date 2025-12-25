@@ -98,8 +98,8 @@ impl PcSystem {
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
 
-        // Write BIOS POST screen to video RAM
-        bios::write_post_screen_to_vram(bus.vram_mut());
+        // Write BIOS POST screen to video RAM with actual CPU model and memory
+        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model, memory_kb);
 
         let cpu = PcCpu::with_model(bus, cpu_model);
 
@@ -242,8 +242,17 @@ impl PcSystem {
         let hard_drive = self.cpu.bus().hard_drive().is_some();
         let boot_priority = self.cpu.bus().boot_priority();
 
+        // Get CPU model and memory
+        let cpu_model = self.cpu.model();
+        let memory_kb = self.cpu.bus().memory_kb();
+
         // Now get mutable borrow to update VRAM
         let vram = self.cpu.bus_mut().vram_mut();
+        
+        // Rewrite entire POST screen with current config
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb);
+        
+        // Update mount status
         bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
     }
 }
@@ -273,9 +282,11 @@ impl System for PcSystem {
         self.cycles = 0;
         self.frame_cycles = 0;
 
-        // Write BIOS POST screen to video RAM
+        // Write BIOS POST screen to video RAM with current config
+        let cpu_model = self.cpu.model();
+        let memory_kb = self.cpu.bus().memory_kb();
         let vram = self.cpu.bus_mut().vram_mut();
-        bios::write_post_screen_to_vram(vram);
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
