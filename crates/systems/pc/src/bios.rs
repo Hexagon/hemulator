@@ -339,7 +339,7 @@ pub fn write_post_screen_to_vram(
     // Instructions at bottom
     let help_attr = 0x0B; // Bright cyan on black
     write_line(20, 2, "Press F3 to mount disks", help_attr);
-    write_line(21, 2, "Press ESC to stay in BIOS", help_attr);
+    write_line(21, 2, "Press F12 to boot from disk", help_attr);
     write_line(22, 2, "Press F8 to save virtual machine", help_attr);
 
     // Bottom line (white on blue)
@@ -413,7 +413,7 @@ pub fn update_post_screen_mounts(
         write_line(
             24,
             2,
-            "Press ESC to stay in BIOS or wait to boot...  ",
+            "Bootable disk detected - Press F12 to boot     ",
             header_attr,
         );
     } else {

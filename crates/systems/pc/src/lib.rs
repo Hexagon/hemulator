@@ -648,6 +648,10 @@ mod tests {
     fn test_system_reset() {
         let mut sys = PcSystem::new();
 
+        // Skip boot delay to test actual CPU execution
+        sys.boot_delay_frames = 0;
+        sys.boot_started = true;
+
         // Execute some cycles
         let _ = sys.step_frame();
         assert!(sys.cycles > 0);
