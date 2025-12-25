@@ -13,6 +13,7 @@ use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -167,7 +168,6 @@ impl EmulatorSystem {
         }
     }
 
-    #[allow(dead_code)]
     fn handle_keyboard(&mut self, key: Key, pressed: bool) {
         if let EmulatorSystem::PC(sys) = self {
             // Map keys to PC scancodes
@@ -1175,6 +1175,9 @@ fn main() {
     // Mount point selector state
     let mut show_mount_selector = false;
 
+    // PC keyboard state tracking
+    let mut prev_keys: HashSet<Key> = HashSet::new();
+
     // Speed selector state
     let mut show_speed_selector = false;
 
@@ -1975,10 +1978,34 @@ fn main() {
 
         if should_step {
             // Handle keyboard input for PC system
-            // PC keyboard events are handled via the handle_keyboard method in EmulatorSystem
-            // which is called from the event loop based on key press/release events.
-            // For other systems, we poll controller state.
-            if !matches!(&sys, EmulatorSystem::PC(_)) {
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                // PC system: Poll all keys and detect press/release edges
+                let all_keys = [
+                    Key::A, Key::B, Key::C, Key::D, Key::E, Key::F, Key::G, Key::H,
+                    Key::I, Key::J, Key::K, Key::L, Key::M, Key::N, Key::O, Key::P,
+                    Key::Q, Key::R, Key::S, Key::T, Key::U, Key::V, Key::W, Key::X,
+                    Key::Y, Key::Z, Key::Key0, Key::Key1, Key::Key2, Key::Key3,
+                    Key::Key4, Key::Key5, Key::Key6, Key::Key7, Key::Key8, Key::Key9,
+                    Key::Space, Key::Enter, Key::Backspace, Key::Tab, Key::Escape,
+                    Key::LeftShift, Key::RightShift, Key::LeftCtrl, Key::RightCtrl,
+                    Key::LeftAlt, Key::RightAlt,
+                ];
+
+                for &key in &all_keys {
+                    let is_down = window.is_key_down(key);
+                    let was_down = prev_keys.contains(&key);
+
+                    if is_down && !was_down {
+                        // Key pressed
+                        sys.handle_keyboard(key, true);
+                        prev_keys.insert(key);
+                    } else if !is_down && was_down {
+                        // Key released
+                        sys.handle_keyboard(key, false);
+                        prev_keys.remove(&key);
+                    }
+                }
+            } else {
                 // Controller-based systems (NES, GB, Atari, etc.)
                 // Get controller state for each player
                 let ctrl0 = get_controller_state(window.as_ref(), &settings.input.player1);
