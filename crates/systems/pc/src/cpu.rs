@@ -157,6 +157,7 @@ impl PcCpu {
                 0x1A => return self.handle_int1ah(), // Time/Date services
                 0x20 => return self.handle_int20h(), // DOS: Program terminate
                 0x21 => return self.handle_int21h(), // DOS API
+                0x33 => return self.handle_int33h(), // Mouse services
                 _ => {}                              // Let CPU handle other interrupts normally
             }
         }
@@ -1096,6 +1097,136 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int1ah
     fn int1ah_set_date(&mut self) -> u32 {
         // Read-only implementation - ignore the set request
+        51
+    }
+
+    /// Handle INT 33h - Microsoft Mouse Driver services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int33h(&mut self) -> u32 {
+        // Skip the INT 33h instruction (2 bytes: 0xCD 0x33)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AX register
+        let ax = self.cpu.ax;
+
+        match ax {
+            0x0000 => self.int33h_reset(),
+            0x0001 => self.int33h_show_cursor(),
+            0x0002 => self.int33h_hide_cursor(),
+            0x0003 => self.int33h_get_position_and_buttons(),
+            0x0004 => self.int33h_set_position(),
+            0x0005 => self.int33h_get_button_press_info(),
+            0x0006 => self.int33h_get_button_release_info(),
+            0x0007 => self.int33h_set_horizontal_limits(),
+            0x0008 => self.int33h_set_vertical_limits(),
+            0x000F => self.int33h_set_mickey_ratio(),
+            0x0024 => self.int33h_get_driver_version(),
+            _ => {
+                // Unsupported function - do nothing
+                51
+            }
+        }
+    }
+
+    /// INT 33h, AX=0000h - Reset mouse driver
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_reset(&mut self) -> u32 {
+        let (ax, bx) = self.cpu.memory.mouse.reset();
+        self.cpu.ax = ax;
+        self.cpu.bx = bx;
+        51
+    }
+
+    /// INT 33h, AX=0001h - Show mouse cursor
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_show_cursor(&mut self) -> u32 {
+        self.cpu.memory.mouse.show_cursor();
+        51
+    }
+
+    /// INT 33h, AX=0002h - Hide mouse cursor
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_hide_cursor(&mut self) -> u32 {
+        self.cpu.memory.mouse.hide_cursor();
+        51
+    }
+
+    /// INT 33h, AX=0003h - Get mouse position and button status
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_get_position_and_buttons(&mut self) -> u32 {
+        let (buttons, x, y) = self.cpu.memory.mouse.get_position_and_buttons();
+        self.cpu.bx = buttons;
+        self.cpu.cx = x as u16;
+        self.cpu.dx = y as u16;
+        51
+    }
+
+    /// INT 33h, AX=0004h - Set mouse cursor position
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_set_position(&mut self) -> u32 {
+        let x = self.cpu.cx as i16;
+        let y = self.cpu.dx as i16;
+        self.cpu.memory.mouse.set_position(x, y);
+        51
+    }
+
+    /// INT 33h, AX=0005h - Get button press information
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_get_button_press_info(&mut self) -> u32 {
+        let button = self.cpu.bx;
+        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_press_info(button);
+        self.cpu.ax = buttons;
+        self.cpu.bx = count;
+        self.cpu.cx = x as u16;
+        self.cpu.dx = y as u16;
+        51
+    }
+
+    /// INT 33h, AX=0006h - Get button release information
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_get_button_release_info(&mut self) -> u32 {
+        let button = self.cpu.bx;
+        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_release_info(button);
+        self.cpu.ax = buttons;
+        self.cpu.bx = count;
+        self.cpu.cx = x as u16;
+        self.cpu.dx = y as u16;
+        51
+    }
+
+    /// INT 33h, AX=0007h - Set horizontal min/max position
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_set_horizontal_limits(&mut self) -> u32 {
+        let min = self.cpu.cx as i16;
+        let max = self.cpu.dx as i16;
+        self.cpu.memory.mouse.set_horizontal_limits(min, max);
+        51
+    }
+
+    /// INT 33h, AX=0008h - Set vertical min/max position
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_set_vertical_limits(&mut self) -> u32 {
+        let min = self.cpu.cx as i16;
+        let max = self.cpu.dx as i16;
+        self.cpu.memory.mouse.set_vertical_limits(min, max);
+        51
+    }
+
+    /// INT 33h, AX=000Fh - Set mickey to pixel ratio
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_set_mickey_ratio(&mut self) -> u32 {
+        let horiz = self.cpu.cx;
+        let vert = self.cpu.dx;
+        self.cpu.memory.mouse.set_mickey_ratio(horiz, vert);
+        51
+    }
+
+    /// INT 33h, AX=0024h - Get mouse driver version
+    #[allow(dead_code)] // Called from handle_int33h
+    fn int33h_get_driver_version(&mut self) -> u32 {
+        let (version, mtype, irq) = self.cpu.memory.mouse.get_driver_version();
+        self.cpu.bx = version;
+        self.cpu.cx = ((mtype as u16) << 8) | (irq as u16);
         51
     }
 

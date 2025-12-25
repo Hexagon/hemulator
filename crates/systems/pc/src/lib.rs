@@ -11,6 +11,7 @@ mod cpu;
 mod disk;
 mod font; // Shared IBM PC ROM font data
 mod keyboard;
+mod mouse; // Microsoft Mouse Driver (INT 33h)
 mod pit; // Programmable Interval Timer (8253/8254)
 mod video;
 mod video_adapter;

@@ -10,6 +10,7 @@
 use crate::bios::BootPriority;
 use crate::disk::DiskController;
 use crate::keyboard::Keyboard;
+use crate::mouse::Mouse;
 use crate::pit::Pit;
 use emu_core::cpu_8086::Memory8086;
 
@@ -41,6 +42,8 @@ pub struct PcBus {
     pub pit: Pit,
     /// PC speaker gate (bit 0 of port 0x61)
     speaker_gate: bool,
+    /// Microsoft Mouse Driver
+    pub mouse: Mouse,
 }
 
 impl PcBus {
@@ -73,6 +76,7 @@ impl PcBus {
             boot_sector_loaded: false,
             pit,
             speaker_gate: false,
+            mouse: Mouse::new(),
         }
     }
 
@@ -90,6 +94,7 @@ impl PcBus {
         self.disk_controller.reset();
         self.pit.reset();
         self.speaker_gate = false;
+        self.mouse = Mouse::new(); // Reset mouse state
         self.boot_sector_loaded = false;
     }
 
