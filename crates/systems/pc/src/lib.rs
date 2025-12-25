@@ -377,6 +377,9 @@ impl System for PcSystem {
                 drop(vram_mut);
                 self.update_post_screen();
 
+                // Clear keyboard buffer every frame during POST to prevent buffering
+                self.cpu.bus_mut().keyboard.clear();
+
                 // If delay expired, allow boot to proceed
                 if self.boot_delay_frames == 0 {
                     self.boot_started = true;
@@ -1438,12 +1441,12 @@ mod tests {
             "Should show Floppy First as default"
         );
 
-        // Check instructions mention F3, F12, F8
+        // Check instructions mention F3, ESC, F8
         let help1 = read_text(20, 0, 80);
         assert!(help1.contains("F3"), "Should mention F3 key");
 
         let help2 = read_text(21, 0, 80);
-        assert!(help2.contains("F12"), "Should mention F12 key");
+        assert!(help2.contains("ESC"), "Should mention ESC key");
 
         let help3 = read_text(22, 0, 80);
         assert!(help3.contains("F8"), "Should mention F8 key");
@@ -1491,7 +1494,7 @@ mod tests {
             .collect();
 
         assert!(
-            bottom.contains("Bootable disk detected") || bottom.contains("Press F12 to boot"),
+            bottom.contains("Bootable drive detected") || bottom.contains("countdown"),
             "Bottom message should indicate bootable disk detected"
         );
     }

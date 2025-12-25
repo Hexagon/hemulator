@@ -37,6 +37,15 @@ impl Keyboard {
         self.scancode_buffer.front().copied().unwrap_or(0)
     }
 
+    /// Find the first make code (key press) in the buffer, skipping break codes
+    /// Returns None if no make code is found
+    pub fn peek_make_code(&self) -> Option<u8> {
+        self.scancode_buffer
+            .iter()
+            .find(|&&code| code & 0x80 == 0) // Find first code with high bit clear (make code)
+            .copied()
+    }
+
     /// Add a key press event (generates make code)
     pub fn key_press(&mut self, key: u8) {
         if self.scancode_buffer.len() < self.max_buffer_size {
@@ -238,5 +247,44 @@ mod tests {
 
         // Peek on empty buffer should return 0
         assert_eq!(kb.peek_scancode(), 0);
+    }
+
+    #[test]
+    fn test_peek_make_code() {
+        let mut kb = Keyboard::new();
+
+        // Add a break code followed by a make code
+        kb.key_release(SCANCODE_A); // Break code
+        kb.key_press(SCANCODE_B); // Make code
+
+        // peek_make_code should skip the break code and find the make code
+        assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
+
+        // peek_scancode should still return the first item (break code)
+        assert_eq!(kb.peek_scancode(), SCANCODE_A | 0x80);
+
+        // Reading should get break code first
+        assert_eq!(kb.read_scancode(), SCANCODE_A | 0x80);
+
+        // Now peek_make_code should return the make code
+        assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
+
+        // Read the make code
+        assert_eq!(kb.read_scancode(), SCANCODE_B);
+
+        // No more data
+        assert_eq!(kb.peek_make_code(), None);
+    }
+
+    #[test]
+    fn test_peek_make_code_only_break_codes() {
+        let mut kb = Keyboard::new();
+
+        // Add only break codes
+        kb.key_release(SCANCODE_A);
+        kb.key_release(SCANCODE_B);
+
+        // Should return None since no make codes
+        assert_eq!(kb.peek_make_code(), None);
     }
 }

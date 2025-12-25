@@ -120,7 +120,12 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 **Without the host modifier**: Function keys are sent to the DOS program
 **With the host modifier**: Function keys control the emulator
 
-**Note**: ESC always exits the emulator, even in PC mode.
+**Note**: ESC requires the host modifier (Right Ctrl + ESC) to exit the emulator in PC mode.
+
+**Known Limitation**: Some host key + key combinations may be intercepted by your operating system before reaching the emulator. For example, on Windows, Left Ctrl + ESC opens the Start menu and cannot be captured. If you experience issues with your chosen host modifier key:
+- Try using `RightCtrl` instead of `LeftCtrl` (default setting)
+- Or choose a different modifier key in `config.json` (e.g., `RightAlt`)
+- Some OS-level keyboard shortcuts cannot be overridden by applications
 
 ### Function Keys
 
@@ -885,7 +890,13 @@ There are two ways to mount disk images and BIOS:
   - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
   - INT 13h (Disk): Fully implemented and functional (read, write, get params, reset)
   - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
-  - INT 21h (DOS): Character I/O works; file and system functions are stubs
+  - INT 21h (DOS): 
+    - Character I/O fully functional (AH=01h, 02h, 06h, 07h, 08h, 09h, 0Ah, 0Bh)
+    - File I/O stubs implemented (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
+    - **File operations return errors**: Open/create fail with "file not found" or "path not found" errors
+    - **Explanation**: File I/O requires a filesystem (FAT12/FAT16) which is not yet implemented
+    - **Workaround**: Use INT 13h directly for raw sector access to disks
+    - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
 - **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
     - Text mode: 80x25 characters (640x400 pixels)
