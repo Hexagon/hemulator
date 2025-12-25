@@ -121,6 +121,18 @@ impl ProtectedModeState {
         self.msw
     }
 
+    /// Get CR0 (Control Register 0) - alias for get_msw for 80386+
+    #[inline]
+    pub fn get_cr0(&self) -> u16 {
+        self.msw
+    }
+
+    /// Set CR0 (Control Register 0) - alias for set_msw for 80386+
+    #[inline]
+    pub fn set_cr0(&mut self, value: u16) {
+        self.set_msw(value);
+    }
+
     /// Load the Global Descriptor Table Register
     pub fn load_gdtr(&mut self, base: u32, limit: u16) {
         self.gdtr.base = base & 0x00FFFFFF; // 24-bit on 80286

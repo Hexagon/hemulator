@@ -1143,14 +1143,15 @@ impl<M: Memory8086> Cpu8086<M> {
                         total_cycles
                     }
                     _ => {
-                        eprintln!(
-                            "Unimplemented REP string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
-                            next_opcode,
-                            self.cs,
-                            self.ip.wrapping_sub(2)
-                        );
-                        self.cycles += 1;
-                        1
+                        // REP prefix with non-string instruction
+                        // According to x86 behavior, REP before non-string instructions is ignored
+                        // We need to "un-fetch" the opcode and execute it normally
+                        // Since we already fetched it, we decrement IP to put it back
+                        self.ip = self.ip.wrapping_sub(1);
+                        // Now execute the instruction normally by recursing
+                        let cycles = self.step();
+                        self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
+                        return cycles;
                     }
                 }
             }
@@ -1269,14 +1270,14 @@ impl<M: Memory8086> Cpu8086<M> {
                         total_cycles
                     }
                     _ => {
-                        eprintln!(
-                            "Unimplemented REPNZ string operation: 0x{:02X} at CS:IP={:04X}:{:04X}",
-                            next_opcode,
-                            self.cs,
-                            self.ip.wrapping_sub(2)
-                        );
-                        self.cycles += 1;
-                        1
+                        // REPNZ prefix with non-string instruction
+                        // According to x86 behavior, REPNZ before non-string instructions is ignored
+                        // We need to "un-fetch" the opcode and execute it normally
+                        self.ip = self.ip.wrapping_sub(1);
+                        // Now execute the instruction normally by recursing
+                        let cycles = self.step();
+                        self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
+                        return cycles;
                     }
                 }
             }
@@ -2594,6 +2595,53 @@ impl<M: Memory8086> Cpu8086<M> {
                         } else {
                             5
                         }
+                    }
+                    // MOV reg, CRx - Move from Control Register (0x0F 0x20) - 80386+
+                    0x20 => {
+                        if !self.model.supports_80386_instructions() {
+                            self.cycles += 6;
+                            return 6;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (_, reg, rm) = Self::decode_modrm(modrm);
+                        
+                        // Read from control register (only CR0 is commonly used)
+                        let cr_value = match reg {
+                            0 => self.protected_mode.get_cr0(), // CR0
+                            2 => 0, // CR2 (page fault linear address) - stub
+                            3 => 0, // CR3 (page directory base) - stub
+                            _ => 0, // Reserved
+                        };
+                        
+                        // Store to destination register
+                        self.set_reg16(rm, cr_value);
+                        self.cycles += 6;
+                        6
+                    }
+                    // MOV CRx, reg - Move to Control Register (0x0F 0x22) - 80386+
+                    0x22 => {
+                        if !self.model.supports_80386_instructions() {
+                            self.cycles += 10;
+                            return 10;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (_, reg, rm) = Self::decode_modrm(modrm);
+                        
+                        // Read from source register
+                        let value = self.get_reg16(rm);
+                        
+                        // Write to control register (only CR0 is commonly used)
+                        match reg {
+                            0 => self.protected_mode.set_cr0(value), // CR0
+                            2 => {}, // CR2 (page fault linear address) - stub
+                            3 => {}, // CR3 (page directory base) - stub
+                            _ => {}, // Reserved
+                        }
+                        
+                        self.cycles += 10;
+                        10
                     }
                     _ => {
                         eprintln!(
@@ -4365,10 +4413,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 let base = self.fetch_u8();
                 let al = (self.ax & 0xFF) as u8;
                 if base == 0 {
-                    // Division by zero - trigger INT 0
-                    eprintln!("AAM with base 0 (division by zero)");
-                    self.cycles += 1;
-                    1
+                    // Division by zero - trigger INT 0 (divide error exception)
+                    self.trigger_interrupt(0);
+                    self.cycles += 51; // Same as INT instruction
+                    51
                 } else {
                     let ah = al / base;
                     let al_new = al % base;
