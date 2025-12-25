@@ -142,6 +142,80 @@ impl DiskController {
         self.status
     }
 
+    /// Read sectors using LBA (Logical Block Addressing)
+    ///
+    /// Returns: Status code (0 = success)
+    pub fn read_sectors_lba(
+        &mut self,
+        lba: u32,
+        count: u8,
+        buffer: &mut [u8],
+        disk_image: Option<&[u8]>,
+    ) -> u8 {
+        // If no disk image mounted, return error
+        let disk_image = match disk_image {
+            Some(img) => img,
+            None => {
+                self.status = 0x80; // Timeout (disk not ready)
+                return self.status;
+            }
+        };
+
+        // Each sector is 512 bytes
+        let sector_size = 512;
+        let offset = (lba * sector_size) as usize;
+
+        // Check if read is within bounds
+        if offset + (count as usize * sector_size as usize) > disk_image.len() {
+            self.status = 0x04; // Sector not found
+            return self.status;
+        }
+
+        // Copy data from disk image to buffer
+        let bytes_to_copy = (count as usize * sector_size as usize).min(buffer.len());
+        buffer[..bytes_to_copy].copy_from_slice(&disk_image[offset..offset + bytes_to_copy]);
+
+        self.status = 0x00; // Success
+        self.status
+    }
+
+    /// Write sectors using LBA (Logical Block Addressing)
+    ///
+    /// Returns: Status code (0 = success)
+    pub fn write_sectors_lba(
+        &mut self,
+        lba: u32,
+        count: u8,
+        buffer: &[u8],
+        disk_image: Option<&mut Vec<u8>>,
+    ) -> u8 {
+        // If no disk image mounted, return error
+        let disk_image = match disk_image {
+            Some(img) => img,
+            None => {
+                self.status = 0x80; // Timeout (disk not ready)
+                return self.status;
+            }
+        };
+
+        // Each sector is 512 bytes
+        let sector_size = 512;
+        let offset = (lba * sector_size) as usize;
+
+        // Check if write is within bounds
+        if offset + (count as usize * sector_size as usize) > disk_image.len() {
+            self.status = 0x04; // Sector not found
+            return self.status;
+        }
+
+        // Copy data from buffer to disk image
+        let bytes_to_copy = (count as usize * sector_size as usize).min(buffer.len());
+        disk_image[offset..offset + bytes_to_copy].copy_from_slice(&buffer[..bytes_to_copy]);
+
+        self.status = 0x00; // Success
+        self.status
+    }
+
     /// Get drive parameters
     ///
     /// Returns: (cylinders, sectors_per_track, heads) or None if invalid drive

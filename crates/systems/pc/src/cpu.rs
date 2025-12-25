@@ -1060,9 +1060,19 @@ impl PcCpu {
 
         match ah {
             0x00 => self.int13h_reset(),
+            0x01 => self.int13h_get_status(),
             0x02 => self.int13h_read_sectors(),
             0x03 => self.int13h_write_sectors(),
+            0x04 => self.int13h_verify_sectors(),
+            0x05 => self.int13h_format_track(),
             0x08 => self.int13h_get_drive_params(),
+            0x15 => self.int13h_get_disk_type(),
+            0x16 => self.int13h_get_disk_change_status(),
+            0x41 => self.int13h_check_extensions(),
+            0x42 => self.int13h_extended_read(),
+            0x43 => self.int13h_extended_write(),
+            0x44 => self.int13h_extended_verify(),
+            0x48 => self.int13h_get_extended_params(),
             _ => {
                 // Unsupported function - set error in AH
                 self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
@@ -1255,6 +1265,432 @@ impl PcCpu {
         }
 
         51 // Approximate INT instruction timing
+    }
+
+    /// INT 13h, AH=01h: Get disk status
+    fn int13h_get_status(&mut self) -> u32 {
+        // DL = drive number
+        let _drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Return last status from disk controller
+        let status = self.cpu.memory.disk_controller().status();
+        
+        // AH = status
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+
+        // Clear carry flag if status is 0, set if error
+        self.set_carry_flag(status != 0x00);
+
+        51
+    }
+
+    /// INT 13h, AH=04h: Verify sectors
+    fn int13h_verify_sectors(&mut self) -> u32 {
+        // AL = number of sectors to verify
+        let count = (self.cpu.ax & 0xFF) as u8;
+
+        // Parse CHS parameters (same as read/write)
+        let ch = ((self.cpu.cx >> 8) & 0xFF) as u8;
+        let cl = (self.cpu.cx & 0xFF) as u8;
+        let _cylinder = ((cl as u16 & 0xC0) << 2) | (ch as u16);
+        let _sector = cl & 0x3F;
+        let _head = ((self.cpu.dx >> 8) & 0xFF) as u8;
+        let _drive = (self.cpu.dx & 0xFF) as u8;
+
+        // For now, always succeed (verification is implicit in read operations)
+        // In a real system, this would read sectors and verify ECC/checksums
+
+        // AH = 0 (success)
+        self.cpu.ax = (self.cpu.ax & 0x00FF);
+
+        // AL = number of sectors verified
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        51
+    }
+
+    /// INT 13h, AH=05h: Format track
+    fn int13h_format_track(&mut self) -> u32 {
+        // AL = number of sectors to format
+        let _count = (self.cpu.ax & 0xFF) as u8;
+
+        // Parse CHS parameters
+        let ch = ((self.cpu.cx >> 8) & 0xFF) as u8;
+        let cl = (self.cpu.cx & 0xFF) as u8;
+        let _cylinder = ((cl as u16 & 0xC0) << 2) | (ch as u16);
+        let _head = ((self.cpu.dx >> 8) & 0xFF) as u8;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // ES:BX = pointer to address field buffer
+        // Each entry is 4 bytes: C, H, S, N (cylinder, head, sector, sector size code)
+
+        // For now, just mark track as formatted (fill with zeros in a real implementation)
+        // This is a destructive operation that would write sector headers
+
+        if drive < 0x80 {
+            // Floppy: format succeeds
+            self.cpu.ax = (self.cpu.ax & 0x00FF); // AH = 0 (success)
+            self.set_carry_flag(false);
+        } else {
+            // Hard drive: format not typically supported via this function
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=15h: Get disk type
+    fn int13h_get_disk_type(&mut self) -> u32 {
+        use crate::disk::DiskController;
+
+        // DL = drive number
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if drive < 0x80 {
+            // Floppy drive
+            // Check if drive exists
+            let has_disk = self.cpu.memory.has_floppy(drive);
+            
+            if has_disk {
+                // AH = 01h (floppy with change-line support)
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+                self.set_carry_flag(false);
+            } else {
+                // AH = 00h (no such drive)
+                self.cpu.ax &= 0x00FF;
+                self.set_carry_flag(false);
+            }
+        } else {
+            // Hard drive
+            if let Some((cylinders, sectors_per_track, heads)) = 
+                DiskController::get_drive_params(drive) 
+            {
+                // AH = 03h (fixed disk)
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x03 << 8);
+
+                // CX:DX = number of sectors
+                let total_sectors = cylinders as u32 * sectors_per_track as u32 * heads as u32;
+                self.cpu.cx = ((total_sectors >> 16) & 0xFFFF) as u16;
+                self.cpu.dx = (total_sectors & 0xFFFF) as u16;
+
+                self.set_carry_flag(false);
+            } else {
+                // No such drive
+                self.cpu.ax &= 0x00FF;
+                self.set_carry_flag(false);
+            }
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=16h: Get disk change status (floppies only)
+    fn int13h_get_disk_change_status(&mut self) -> u32 {
+        // DL = drive number
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if drive < 0x80 {
+            // Floppy drive
+            // For now, always report "no change" (AH=00h)
+            // A real implementation would track if the disk was changed
+            self.cpu.ax &= 0x00FF; // AH = 0 (no change detected)
+            self.set_carry_flag(false);
+        } else {
+            // Function not valid for hard drives
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=41h: Check extensions present (Extended INT 13h)
+    fn int13h_check_extensions(&mut self) -> u32 {
+        // BX = 0x55AA (signature)
+        // DL = drive number
+
+        let bx = self.cpu.bx;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        if bx == 0x55AA && drive >= 0x80 {
+            // Extended INT 13h supported for hard drives
+            // BX = 0xAA55 (signature)
+            self.cpu.bx = 0xAA55;
+            
+            // AH = major version (01h = 1.x, 20h = 2.0, 21h = 2.1, 30h = 3.0)
+            // Let's report version 3.0 (full EDD 3.0 support)
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x30 << 8);
+
+            // CX = API subset support bitmap
+            // Bit 0 = extended disk access functions (AH=42h-44h, 47h, 48h)
+            // Bit 1 = removable drive controller functions (AH=45h, 46h, 48h, 49h, INT 15h AH=52h)
+            // Bit 2 = enhanced disk drive (EDD) support (AH=48h)
+            // We support bits 0 and 2
+            self.cpu.cx = 0x0001 | 0x0004; // Bit 0 (extended access) + Bit 2 (EDD)
+
+            self.set_carry_flag(false);
+        } else {
+            // Extensions not supported or invalid parameters
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=42h: Extended Read (LBA)
+    fn int13h_extended_read(&mut self) -> u32 {
+        // DS:SI = pointer to Disk Address Packet (DAP)
+        // DL = drive number
+        
+        let drive = (self.cpu.dx & 0xFF) as u8;
+        let ds = self.cpu.ds;
+        let si = self.cpu.si;
+        
+        // Read DAP structure from memory
+        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        
+        // DAP structure:
+        // Offset 0: Size of DAP (10h or 18h)
+        // Offset 1: Reserved (0)
+        // Offset 2-3: Number of blocks to transfer (word)
+        // Offset 4-7: Transfer buffer (segment:offset)
+        // Offset 8-15: Starting absolute block number (LBA, qword)
+        
+        let dap_size = self.cpu.memory.read(dap_addr);
+        if dap_size < 0x10 {
+            // Invalid DAP size
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+            self.set_carry_flag(true);
+            return 51;
+        }
+        
+        let num_sectors = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 2),
+            self.cpu.memory.read(dap_addr + 3),
+        ]);
+        
+        let buffer_offset = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 4),
+            self.cpu.memory.read(dap_addr + 5),
+        ]);
+        
+        let buffer_segment = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 6),
+            self.cpu.memory.read(dap_addr + 7),
+        ]);
+        
+        // Read LBA (64-bit, but we only support 32-bit LBA for now)
+        let lba = u32::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 8),
+            self.cpu.memory.read(dap_addr + 9),
+            self.cpu.memory.read(dap_addr + 10),
+            self.cpu.memory.read(dap_addr + 11),
+        ]);
+        
+        // Read sectors using LBA
+        let buffer_size = (num_sectors as usize) * 512;
+        let mut buffer = vec![0u8; buffer_size];
+        
+        // Perform LBA read
+        let status = self.cpu.memory.disk_read_lba(drive, lba, num_sectors as u8, &mut buffer);
+        
+        // Copy to memory at buffer_segment:buffer_offset
+        if status == 0x00 {
+            for (i, &byte) in buffer.iter().enumerate() {
+                let offset = buffer_offset.wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_segment, offset, byte);
+            }
+        }
+        
+        // Set AH = status
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        
+        // Set carry flag based on status
+        self.set_carry_flag(status != 0x00);
+        
+        51
+    }
+
+    /// INT 13h, AH=43h: Extended Write (LBA)
+    fn int13h_extended_write(&mut self) -> u32 {
+        // AL = write flags (bit 0: verify after write)
+        // DS:SI = pointer to Disk Address Packet (DAP)
+        // DL = drive number
+        
+        let drive = (self.cpu.dx & 0xFF) as u8;
+        let ds = self.cpu.ds;
+        let si = self.cpu.si;
+        let _verify = (self.cpu.ax & 0x01) != 0;
+        
+        // Read DAP structure
+        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        
+        let dap_size = self.cpu.memory.read(dap_addr);
+        if dap_size < 0x10 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+            self.set_carry_flag(true);
+            return 51;
+        }
+        
+        let num_sectors = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 2),
+            self.cpu.memory.read(dap_addr + 3),
+        ]);
+        
+        let buffer_offset = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 4),
+            self.cpu.memory.read(dap_addr + 5),
+        ]);
+        
+        let buffer_segment = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 6),
+            self.cpu.memory.read(dap_addr + 7),
+        ]);
+        
+        let lba = u32::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 8),
+            self.cpu.memory.read(dap_addr + 9),
+            self.cpu.memory.read(dap_addr + 10),
+            self.cpu.memory.read(dap_addr + 11),
+        ]);
+        
+        // Read data from memory
+        let buffer_size = (num_sectors as usize) * 512;
+        let mut buffer = vec![0u8; buffer_size];
+        for (i, byte) in buffer.iter_mut().enumerate() {
+            let offset = buffer_offset.wrapping_add(i as u16);
+            *byte = self.cpu.read_byte(buffer_segment, offset);
+        }
+        
+        // Perform LBA write
+        let status = self.cpu.memory.disk_write_lba(drive, lba, num_sectors as u8, &buffer);
+        
+        // Set AH = status
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.set_carry_flag(status != 0x00);
+        
+        51
+    }
+
+    /// INT 13h, AH=44h: Extended Verify (LBA)
+    fn int13h_extended_verify(&mut self) -> u32 {
+        // DS:SI = pointer to Disk Address Packet
+        // DL = drive number
+        
+        let ds = self.cpu.ds;
+        let si = self.cpu.si;
+        
+        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        
+        let dap_size = self.cpu.memory.read(dap_addr);
+        if dap_size < 0x10 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+            self.set_carry_flag(true);
+            return 51;
+        }
+        
+        let num_sectors = u16::from_le_bytes([
+            self.cpu.memory.read(dap_addr + 2),
+            self.cpu.memory.read(dap_addr + 3),
+        ]);
+        
+        // For verify, we just report success without actually reading
+        // In a real system, this would read and verify sectors
+        
+        // AH = 0 (success), AL = number of sectors verified (low byte)
+        self.cpu.ax = (num_sectors & 0xFF) as u16;
+        self.set_carry_flag(false);
+        
+        51
+    }
+
+    /// INT 13h, AH=48h: Get Extended Drive Parameters
+    fn int13h_get_extended_params(&mut self) -> u32 {
+        use crate::disk::DiskController;
+        
+        // DS:SI = pointer to result buffer
+        // DL = drive number
+        
+        let drive = (self.cpu.dx & 0xFF) as u8;
+        let ds = self.cpu.ds;
+        let si = self.cpu.si;
+        
+        // Get drive parameters
+        if let Some((cylinders, sectors_per_track, heads)) = DiskController::get_drive_params(drive) {
+            let buffer_addr = ((ds as u32) << 4) + (si as u32);
+            
+            // Read buffer size from first word
+            let buffer_size = u16::from_le_bytes([
+                self.cpu.memory.read(buffer_addr),
+                self.cpu.memory.read(buffer_addr + 1),
+            ]);
+            
+            if buffer_size < 0x1A {
+                // Buffer too small
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+                self.set_carry_flag(true);
+                return 51;
+            }
+            
+            // Fill in EDD 1.x structure (26 bytes minimum)
+            // Offset 0-1: Buffer size (word)
+            self.cpu.memory.write(buffer_addr, 0x1A); // Size = 26 bytes
+            self.cpu.memory.write(buffer_addr + 1, 0x00);
+            
+            // Offset 2-3: Information flags (word)
+            // Bit 0: DMA boundary errors handled transparently
+            // Bit 1: geometry is valid (CHS)
+            // Bit 2: removable media
+            self.cpu.memory.write(buffer_addr + 2, 0x02); // Geometry valid
+            self.cpu.memory.write(buffer_addr + 3, 0x00);
+            
+            // Offset 4-7: Number of physical cylinders (dword)
+            let cyl_bytes = (cylinders as u32).to_le_bytes();
+            self.cpu.memory.write(buffer_addr + 4, cyl_bytes[0]);
+            self.cpu.memory.write(buffer_addr + 5, cyl_bytes[1]);
+            self.cpu.memory.write(buffer_addr + 6, cyl_bytes[2]);
+            self.cpu.memory.write(buffer_addr + 7, cyl_bytes[3]);
+            
+            // Offset 8-11: Number of physical heads (dword)
+            let head_bytes = (heads as u32).to_le_bytes();
+            self.cpu.memory.write(buffer_addr + 8, head_bytes[0]);
+            self.cpu.memory.write(buffer_addr + 9, head_bytes[1]);
+            self.cpu.memory.write(buffer_addr + 10, head_bytes[2]);
+            self.cpu.memory.write(buffer_addr + 11, head_bytes[3]);
+            
+            // Offset 12-15: Number of physical sectors per track (dword)
+            let spt_bytes = (sectors_per_track as u32).to_le_bytes();
+            self.cpu.memory.write(buffer_addr + 12, spt_bytes[0]);
+            self.cpu.memory.write(buffer_addr + 13, spt_bytes[1]);
+            self.cpu.memory.write(buffer_addr + 14, spt_bytes[2]);
+            self.cpu.memory.write(buffer_addr + 15, spt_bytes[3]);
+            
+            // Offset 16-23: Total number of sectors (qword)
+            let total_sectors = cylinders as u64 * heads as u64 * sectors_per_track as u64;
+            let total_bytes = total_sectors.to_le_bytes();
+            for i in 0..8 {
+                self.cpu.memory.write(buffer_addr + 16 + i, total_bytes[i as usize]);
+            }
+            
+            // Offset 24-25: Bytes per sector (word)
+            self.cpu.memory.write(buffer_addr + 24, 0x00); // 512 bytes
+            self.cpu.memory.write(buffer_addr + 25, 0x02);
+            
+            // AH = 0 (success)
+            self.cpu.ax &= 0x00FF;
+            self.set_carry_flag(false);
+        } else {
+            // Invalid drive
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+            self.set_carry_flag(true);
+        }
+        
+        51
     }
 
     /// Set or clear the carry flag
