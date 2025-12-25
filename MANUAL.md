@@ -763,7 +763,12 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Displays on boot: BIOS version, CPU type, memory test, disk drives, boot priority
   - Updates dynamically when disks are mounted/unmounted
   - Shows helpful instructions: F3 to mount disks, F12 to reset, F8 to save VM
-  - INT 13h disk services (fully implemented): Reset (00h), Read Sectors (02h), Write Sectors (03h), Get Drive Parameters (08h)
+  - INT 13h disk services (FULLY IMPLEMENTED - all standard and extended functions)
+    - Standard functions: Reset (00h), Get Status (01h), Read (02h), Write (03h), Verify (04h), Format (05h), Get Drive Parameters (08h)
+    - Extended functions: Get Disk Type (15h), Disk Change Status (16h), Check Extensions (41h)
+    - Complete CHS (Cylinder/Head/Sector) to LBA translation
+    - Full read/write access to all mounted disk images
+    - Supports DOS filesystem access via real DOS running in emulator
   - Source: `test_roms/pc/bios.asm`
   - Build script: `test_roms/pc/build.sh` (requires NASM)
   - Replaceable via BIOS mount point
@@ -888,15 +893,29 @@ There are two ways to mount disk images and BIOS:
 **Known Limitations**:
 - **BIOS Interrupts**: 
   - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
-  - INT 13h (Disk): Fully implemented and functional (read, write, get params, reset)
+  - INT 13h (Disk): **FULLY IMPLEMENTED** ✅ - All standard and extended functions work
+    - AH=00h (Reset), AH=01h (Get Status), AH=02h (Read), AH=03h (Write)
+    - AH=04h (Verify), AH=05h (Format), AH=08h (Get Params)
+    - AH=15h (Get Disk Type), AH=16h (Change Status), AH=41h (Check Extensions)
   - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
-  - INT 21h (DOS): 
+  - INT 21h (DOS): **Use Real DOS for File Operations** 
     - Character I/O fully functional (AH=01h, 02h, 06h, 07h, 08h, 09h, 0Ah, 0Bh)
-    - File I/O stubs implemented (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
-    - **File operations return errors**: Open/create fail with "file not found" or "path not found" errors
-    - **Explanation**: File I/O requires a filesystem (FAT12/FAT16) which is not yet implemented
-    - **Workaround**: Use INT 13h directly for raw sector access to disks
+    - File I/O stubs present but return errors (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
+    - **For filesystem access**: Boot real DOS from a disk image - DOS will handle FAT12/FAT16 filesystems
     - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
+- **DOS Filesystem Support**:
+  - ✅ **Full filesystem support available via real DOS**
+  - Mount a DOS boot disk (.img file with DOS installed)
+  - DOS boots and provides INT 21h file services using its own FAT12/FAT16 code
+  - INT 13h provides complete sector-level access to all mounted disk images
+  - DOS can read, write, create, delete files on mounted floppy and hard drive images
+  - **How to use**:
+    1. Create or download a DOS boot disk image (FreeDOS, MS-DOS, etc.)
+    2. Mount it via `--slot2 dos_boot.img` or press F3 to mount to FloppyA
+    3. Mount data disks to FloppyB or HardDrive as needed
+    4. Boot the system - DOS will load from the boot disk
+    5. Use DOS commands (DIR, COPY, etc.) to access files on all mounted disks
+  - **Standalone COM/EXE programs**: Can run directly without DOS but have limited file I/O
 - **Display**: CGA, EGA, and VGA adapters implemented with multiple modes
   - **CGA Support** (Color Graphics Adapter):
     - Text mode: 80x25 characters (640x400 pixels)
