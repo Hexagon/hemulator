@@ -225,6 +225,17 @@ impl<M: Memory8086> Cpu8086<M> {
         &mut self.protected_mode
     }
 
+    /// Check if the CPU is halted
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
+    /// Set the CPU halted state
+    /// When halted, the CPU will not execute instructions until an interrupt occurs or it is unhalted
+    pub fn set_halted(&mut self, halted: bool) {
+        self.halted = halted;
+    }
+
     /// Calculate physical address from segment:offset
     #[inline]
     fn physical_address(segment: u16, offset: u16) -> u32 {

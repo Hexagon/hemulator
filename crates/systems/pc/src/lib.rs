@@ -179,6 +179,8 @@ impl PcSystem {
     /// Handle keyboard input (called by GUI)
     pub fn key_press(&mut self, scancode: u8) {
         self.cpu.bus_mut().keyboard.key_press(scancode);
+        // Unhalt the CPU if it was waiting for keyboard input (INT 16h AH=00h)
+        self.cpu.unhalt();
     }
 
     /// Handle keyboard release (called by GUI)

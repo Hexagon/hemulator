@@ -716,7 +716,7 @@ impl PcCpu {
     fn int16h_read_keystroke(&mut self) -> u32 {
         // Returns: AH = scan code, AL = ASCII character
         // Note: In a real BIOS, this would block until a key is available
-        // For emulation, we just read from buffer (non-blocking behavior)
+        // We emulate blocking by halting the CPU until keyboard input arrives
 
         if self.cpu.memory.keyboard.has_data() {
             let scancode = self.cpu.memory.keyboard.read_scancode();
@@ -726,8 +726,14 @@ impl PcCpu {
 
             // AH = scan code, AL = ASCII character
             self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+            
+            // Ensure CPU is not halted when we return a key
+            self.cpu.set_halted(false);
         } else {
-            // No key available - return 0
+            // No key available - halt CPU to wait for input
+            // This emulates the blocking behavior of INT 16h AH=00h
+            // The CPU will remain halted until keyboard input arrives and unhalts it
+            self.cpu.set_halted(true);
             self.cpu.ax = 0x0000;
         }
         51
@@ -1838,6 +1844,12 @@ impl PcCpu {
     /// Get a mutable reference to the bus
     pub fn bus_mut(&mut self) -> &mut PcBus {
         &mut self.cpu.memory
+    }
+
+    /// Unhalt the CPU (used when keyboard input arrives)
+    /// This wakes up the CPU from a halted state caused by INT 16h AH=00h waiting for input
+    pub fn unhalt(&mut self) {
+        self.cpu.set_halted(false);
     }
 
     /// Get CPU register state for debugging/save states
