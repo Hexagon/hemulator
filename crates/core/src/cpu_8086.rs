@@ -295,6 +295,38 @@ impl<M: Memory8086> Cpu8086<M> {
         val
     }
 
+    /// Trigger a software interrupt (INT)
+    /// This is used for both explicit INT instructions and CPU-generated exceptions (e.g., divide error)
+    #[inline]
+    fn trigger_interrupt(&mut self, int_num: u8) {
+        // Push FLAGS, CS, IP onto stack (in that order)
+        self.push(self.flags);
+        self.push(self.cs);
+        self.push(self.ip);
+
+        // Clear IF and TF flags
+        self.set_flag(FLAG_IF, false);
+        self.set_flag(FLAG_TF, false);
+
+        // Read interrupt vector from IVT (Interrupt Vector Table) at 0x0000:int_num*4
+        // Each IVT entry is 4 bytes: offset (2 bytes) + segment (2 bytes)
+        let ivt_offset = (int_num as u16) * 4;
+        let new_ip = self.read_u16(0, ivt_offset);
+        let new_cs = self.read_u16(0, ivt_offset + 2);
+
+        // Debug: Log INT 0 (divide error) calls (disabled - too verbose)
+        // if int_num == 0 {
+        //     eprintln!(
+        //         "INT 0 triggered: IVT[0] = {:04X}:{:04X}, returning to CS:IP={:04X}:{:04X}",
+        //         new_cs, new_ip, self.cs, self.ip
+        //     );
+        // }
+
+        // Jump to interrupt handler
+        self.ip = new_ip;
+        self.cs = new_cs;
+    }
+
     /// Read a byte from I/O port (stub implementation - returns 0xFF)
     #[inline]
     fn io_read(&self, _port: u16) -> u8 {
@@ -3833,24 +3865,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b110 => {
                         let divisor = self.read_rm8(modbits, rm);
                         if divisor == 0 {
-                            // Division by zero - should trigger INT 0
-                            // For now, we'll just leave registers unchanged
-                            eprintln!(
-                                "Division by zero at CS:IP={:04X}:{:04X}",
-                                self.cs,
-                                self.ip.wrapping_sub(2)
-                            );
+                            // Division by zero - trigger INT 0
+                            self.trigger_interrupt(0);
                         } else {
                             let dividend = self.ax;
                             let quotient = dividend / (divisor as u16);
                             let remainder = dividend % (divisor as u16);
                             // Check for overflow (quotient > 255)
                             if quotient > 0xFF {
-                                eprintln!(
-                                    "Division overflow at CS:IP={:04X}:{:04X}",
-                                    self.cs,
-                                    self.ip.wrapping_sub(2)
-                                );
+                                // Division overflow - trigger INT 0
+                                self.trigger_interrupt(0);
                             } else {
                                 self.ax = (remainder << 8) | quotient;
                             }
@@ -3866,23 +3890,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b111 => {
                         let divisor = self.read_rm8(modbits, rm) as i8;
                         if divisor == 0 {
-                            // Division by zero
-                            eprintln!(
-                                "Division by zero at CS:IP={:04X}:{:04X}",
-                                self.cs,
-                                self.ip.wrapping_sub(2)
-                            );
+                            // Division by zero - trigger INT 0
+                            self.trigger_interrupt(0);
                         } else {
                             let dividend = self.ax as i16;
                             let quotient = dividend / (divisor as i16);
                             let remainder = dividend % (divisor as i16);
                             // Check for overflow (quotient out of -128..127 range)
                             if !(-128..=127).contains(&quotient) {
-                                eprintln!(
-                                    "Division overflow at CS:IP={:04X}:{:04X}",
-                                    self.cs,
-                                    self.ip.wrapping_sub(2)
-                                );
+                                // Division overflow - trigger INT 0
+                                self.trigger_interrupt(0);
                             } else {
                                 let quot_u8 = quotient as u8;
                                 let rem_u8 = remainder as u8;
@@ -4003,23 +4020,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b110 => {
                         let divisor = self.read_rm16(modbits, rm);
                         if divisor == 0 {
-                            // Division by zero
-                            eprintln!(
-                                "Division by zero at CS:IP={:04X}:{:04X}",
-                                self.cs,
-                                self.ip.wrapping_sub(2)
-                            );
+                            // Division by zero - trigger INT 0
+                            self.trigger_interrupt(0);
                         } else {
                             let dividend = ((self.dx as u32) << 16) | (self.ax as u32);
                             let quotient = dividend / (divisor as u32);
                             let remainder = dividend % (divisor as u32);
                             // Check for overflow (quotient > 65535)
                             if quotient > 0xFFFF {
-                                eprintln!(
-                                    "Division overflow at CS:IP={:04X}:{:04X}",
-                                    self.cs,
-                                    self.ip.wrapping_sub(2)
-                                );
+                                // Division overflow - trigger INT 0
+                                self.trigger_interrupt(0);
                             } else {
                                 self.ax = quotient as u16;
                                 self.dx = remainder as u16;
@@ -4036,23 +4046,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b111 => {
                         let divisor = self.read_rm16(modbits, rm) as i16;
                         if divisor == 0 {
-                            // Division by zero
-                            eprintln!(
-                                "Division by zero at CS:IP={:04X}:{:04X}",
-                                self.cs,
-                                self.ip.wrapping_sub(2)
-                            );
+                            // Division by zero - trigger INT 0
+                            self.trigger_interrupt(0);
                         } else {
                             let dividend = (((self.dx as u32) << 16) | (self.ax as u32)) as i32;
                             let quotient = dividend / (divisor as i32);
                             let remainder = dividend % (divisor as i32);
                             // Check for overflow (quotient out of -32768..32767 range)
                             if !(-32768..=32767).contains(&quotient) {
-                                eprintln!(
-                                    "Division overflow at CS:IP={:04X}:{:04X}",
-                                    self.cs,
-                                    self.ip.wrapping_sub(2)
-                                );
+                                // Division overflow - trigger INT 0
+                                self.trigger_interrupt(0);
                             } else {
                                 self.ax = quotient as u16;
                                 self.dx = remainder as u16;
@@ -4126,7 +4129,12 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                 } else {
                     // Undefined
-                    eprintln!("Undefined 0xC6 operation with op={}", op);
+                    eprintln!(
+                        "Undefined 0xC6 operation with op={} at CS:IP={:04X}:{:04X}",
+                        op,
+                        self.cs,
+                        self.ip.wrapping_sub(2)
+                    );
                     self.cycles += 1;
                     1
                 }
@@ -4148,7 +4156,12 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                 } else {
                     // Undefined
-                    eprintln!("Undefined 0xC7 operation with op={}", op);
+                    eprintln!(
+                        "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X}",
+                        op,
+                        self.cs,
+                        self.ip.wrapping_sub(2)
+                    );
                     self.cycles += 1;
                     1
                 }
@@ -4587,7 +4600,14 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_OF, overflow);
                     }
                     _ => {
-                        eprintln!("Undefined 0xFE operation with op={}", op);
+                        eprintln!(
+                            "Undefined 0xFE operation with op={} at CS:IP={:04X}:{:04X}",
+                            op,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        // For undefined operations, we'll just NOP and continue
+                        // This prevents the system from crashing completely
                     }
                 }
                 self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -4691,7 +4711,14 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     _ => {
-                        eprintln!("Undefined 0xFF operation with op={}", op);
+                        eprintln!(
+                            "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X}",
+                            op,
+                            self.cs,
+                            self.ip.wrapping_sub(2)
+                        );
+                        // For undefined operations, we'll just NOP and continue
+                        // This prevents the system from crashing completely
                         self.cycles += 1;
                         1
                     }
@@ -5304,26 +5331,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // INT n - Software Interrupt
             0xCD => {
                 let int_num = self.fetch_u8();
-
-                // Push FLAGS, CS, IP onto stack (in that order)
-                self.push(self.flags);
-                self.push(self.cs);
-                self.push(self.ip);
-
-                // Clear IF and TF flags
-                self.set_flag(FLAG_IF, false);
-                self.set_flag(FLAG_TF, false);
-
-                // Read interrupt vector from IVT (Interrupt Vector Table) at 0x0000:int_num*4
-                // Each IVT entry is 4 bytes: offset (2 bytes) + segment (2 bytes)
-                let ivt_offset = (int_num as u16) * 4;
-                let new_ip = self.read_u16(0, ivt_offset);
-                let new_cs = self.read_u16(0, ivt_offset + 2);
-
-                // Jump to interrupt handler
-                self.ip = new_ip;
-                self.cs = new_cs;
-
+                self.trigger_interrupt(int_num);
                 self.cycles += 51; // Approximate timing for INT instruction
                 51
             }

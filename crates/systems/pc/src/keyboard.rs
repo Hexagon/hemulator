@@ -58,7 +58,9 @@ impl Keyboard {
 
     /// Check if ESC key is in the buffer (for boot abort)
     pub fn has_esc(&self) -> bool {
-        self.scancode_buffer.iter().any(|&code| code == SCANCODE_ESC)
+        self.scancode_buffer
+            .iter()
+            .any(|&code| code == SCANCODE_ESC)
     }
 }
 

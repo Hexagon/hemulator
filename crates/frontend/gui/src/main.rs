@@ -1786,7 +1786,8 @@ fn main() {
 
                                 // Load all mounts from project
                                 // Resolve paths relative to .hemu file location
-                                let project_dir = path.parent().unwrap_or(std::path::Path::new("."));
+                                let project_dir =
+                                    path.parent().unwrap_or(std::path::Path::new("."));
                                 let mut any_mounted = false;
                                 for (mount_id, mount_path) in &project.mounts {
                                     let full_path = project_dir.join(mount_path);

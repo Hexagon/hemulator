@@ -35,18 +35,28 @@ mod boot_priority {
 pub fn generate_minimal_bios() -> Vec<u8> {
     let mut bios = vec![0x00; 0x10000]; // 64KB of zeros
 
+    // INT 0h handler at offset 0x50 - Divide Error Exception
+    // This is called when division by zero or overflow occurs
+    let int00h_offset = 0x50;
+    let int00h_handler: Vec<u8> = vec![
+        // For now, just return (ignore the error)
+        // In a real system, this would display an error message
+        0xCF, // IRET
+    ];
+    bios[int00h_offset..int00h_offset + int00h_handler.len()].copy_from_slice(&int00h_handler);
+
     // INT 10h handler at offset 0x100 - Video Services
     let int10h_offset = 0x100;
     let int10h_handler: Vec<u8> = vec![
         // For now, just return successfully (clear CF and return)
-        0x50,       // PUSH AX
+        0x50, // PUSH AX
         0x80, 0xFC, 0x0E, // CMP AH, 0x0E (teletype output)
         0x75, 0x01, // JNZ skip
         // If teletype, we could write to video memory here
         // For now just skip
-        0x58,       // POP AX (skip label)
-        0xF8,       // CLC (clear carry flag - success)
-        0xCF,       // IRET
+        0x58, // POP AX (skip label)
+        0xF8, // CLC (clear carry flag - success)
+        0xCF, // IRET
     ];
     bios[int10h_offset..int10h_offset + int10h_handler.len()].copy_from_slice(&int10h_handler);
 
@@ -55,8 +65,8 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     let int13h_handler: Vec<u8> = vec![
         // Return success for all disk operations
         0x30, 0xE4, // XOR AH, AH (AH = 0 = success)
-        0xF8,       // CLC (clear carry flag)
-        0xCF,       // IRET
+        0xF8, // CLC (clear carry flag)
+        0xCF, // IRET
     ];
     bios[int13h_offset..int13h_offset + int13h_handler.len()].copy_from_slice(&int13h_handler);
 
@@ -65,17 +75,17 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     let int16h_handler: Vec<u8> = vec![
         // Return 0 in AX (no key available)
         0x30, 0xC0, // XOR AX, AX
-        0xF8,       // CLC
-        0xCF,       // IRET
+        0xF8, // CLC
+        0xCF, // IRET
     ];
     bios[int16h_offset..int16h_offset + int16h_handler.len()].copy_from_slice(&int16h_handler);
 
-    // INT 21h handler at offset 0x400 - DOS Services  
+    // INT 21h handler at offset 0x400 - DOS Services
     let int21h_offset = 0x400;
     let int21h_handler: Vec<u8> = vec![
         // Stub - just return
-        0xF8,       // CLC
-        0xCF,       // IRET
+        0xF8, // CLC
+        0xCF, // IRET
     ];
     bios[int21h_offset..int21h_offset + int21h_handler.len()].copy_from_slice(&int21h_handler);
 
@@ -88,49 +98,47 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0x8E, 0xC0, // MOV ES, AX
         0x8E, 0xD0, // MOV SS, AX
         0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
-        
         // Set up interrupt vectors
+        // INT 0x00 (Divide Error) at 0x0000
+        0xB8, 0x50, 0x00, // MOV AX, 0x0050 (offset of INT 0h handler)
+        0xA3, 0x00, 0x00, // MOV [0x0000], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
+        0xA3, 0x02, 0x00, // MOV [0x0002], AX
         // INT 0x10 (Video Services) at 0x0040
         0xB8, 0x00, 0x01, // MOV AX, 0x0100 (offset of INT 10h handler)
         0xA3, 0x40, 0x00, // MOV [0x0040], AX
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
         0xA3, 0x42, 0x00, // MOV [0x0042], AX
-        
         // INT 0x13 (Disk Services) at 0x004C
         0xB8, 0x00, 0x02, // MOV AX, 0x0200
         0xA3, 0x4C, 0x00, // MOV [0x004C], AX
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x4E, 0x00, // MOV [0x004E], AX
-        
         // INT 0x16 (Keyboard Services) at 0x0058
         0xB8, 0x00, 0x03, // MOV AX, 0x0300
         0xA3, 0x58, 0x00, // MOV [0x0058], AX
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x5A, 0x00, // MOV [0x005A], AX
-        
         // INT 0x21 (DOS Services) at 0x0084
         0xB8, 0x00, 0x04, // MOV AX, 0x0400
         0xA3, 0x84, 0x00, // MOV [0x0084], AX
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x86, 0x00, // MOV [0x0086], AX
-        
         0xFB, // STI - enable interrupts
-        
         // Check if boot sector is loaded by checking signature at 0x7C00 + 510
         // We'll check if byte at 0x7DFE is 0x55 and 0x7DFF is 0xAA
         0xBE, 0xFE, 0x7D, // MOV SI, 0x7DFE (offset of boot signature)
-        0x8A, 0x04,       // MOV AL, [SI]
-        0x3C, 0x55,       // CMP AL, 0x55
-        0x75, 0x08,       // JNZ skip_boot (if not equal, skip boot - jump 8 bytes)
+        0x8A, 0x04, // MOV AL, [SI]
+        0x3C, 0x55, // CMP AL, 0x55
+        0x75, 0x08, // JNZ skip_boot (if not equal, skip boot - jump 8 bytes)
         0x8A, 0x44, 0x01, // MOV AL, [SI+1]
-        0x3C, 0xAA,       // CMP AL, 0xAA
-        0x75, 0x02,       // JNZ skip_boot (if not equal, skip boot - jump 2 bytes)
+        0x3C, 0xAA, // CMP AL, 0xAA
+        0x75, 0x02, // JNZ skip_boot (if not equal, skip boot - jump 2 bytes)
         // Boot signature valid - jump to boot sector
         0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
-        
         // skip_boot: No valid boot sector - infinite loop (HLT)
         // 0xF4,       // HLT
-        0xEB, 0xFE,    // JMP -2 (infinite loop - simpler than HLT)
+        0xEB, 0xFE, // JMP -2 (infinite loop - simpler than HLT)
     ];
     bios[0..init_code.len()].copy_from_slice(&init_code);
 
@@ -298,7 +306,7 @@ pub fn write_post_screen_to_vram(
 
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
-    
+
     // Display CPU model name with actual emulated speed
     let cpu_name_base = match cpu_model {
         CpuModel::Intel8086 => "Intel 8086",

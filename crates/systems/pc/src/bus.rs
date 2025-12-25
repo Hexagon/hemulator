@@ -77,7 +77,7 @@ impl PcBus {
         let mut dpmi = DpmiDriver::new();
         dpmi.install();
 
-        Self {
+        let mut bus = Self {
             ram: vec![0; ram_size],
             vram: vec![0; 0x20000], // 128KB
             rom: vec![0; 0x40000],  // 256KB
@@ -94,7 +94,22 @@ impl PcBus {
             mouse: Mouse::new(),
             xms,
             dpmi,
-        }
+        };
+
+        // Initialize Interrupt Vector Table (IVT) in low RAM
+        // The IVT is at 0x0000:0x0000 and contains 256 interrupt vectors
+        // Each vector is 4 bytes: offset (2 bytes) + segment (2 bytes)
+        // For now, point all vectors to a simple IRET handler in BIOS
+        // This prevents crashes when interrupts are triggered
+
+        // Set INT 0 (divide error) to F000:0050 (BIOS IRET handler)
+        // Note: x86 is little-endian, so low byte first
+        bus.ram[0x0000] = 0x50; // offset low byte
+        bus.ram[0x0001] = 0x00; // offset high byte
+        bus.ram[0x0002] = 0x00; // segment low byte
+        bus.ram[0x0003] = 0xF0; // segment high byte (F000)
+
+        bus
     }
 
     /// Get the size of conventional memory in KB
