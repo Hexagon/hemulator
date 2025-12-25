@@ -129,7 +129,13 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 /// * `vram` - Video RAM buffer to write to
 /// * `cpu_model` - CPU model to display
 /// * `memory_kb` - Memory size in KB to display
-pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model: CpuModel, memory_kb: u32) {
+/// * `cpu_speed_mhz` - CPU speed in MHz to display
+pub fn write_post_screen_to_vram(
+    vram: &mut [u8],
+    cpu_model: CpuModel,
+    memory_kb: u32,
+    cpu_speed_mhz: f64,
+) {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get current system time
@@ -226,7 +232,6 @@ pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model: CpuModel, memory_kb
     write_line(5, 2, "Processor:", label_attr);
     
     // Display CPU model name with actual emulated speed
-    // All CPU models currently emulated at 4.77 MHz (IBM PC/XT speed)
     let cpu_name_base = match cpu_model {
         CpuModel::Intel8086 => "Intel 8086",
         CpuModel::Intel8088 => "Intel 8088",
@@ -235,8 +240,12 @@ pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model: CpuModel, memory_kb
         CpuModel::Intel80286 => "Intel 80286",
         CpuModel::Intel80386 => "Intel 80386",
     };
-    // Show actual emulated speed (4.77 MHz for all models currently)
-    let cpu_display = format!("{} @ 4.77 MHz", cpu_name_base);
+    // Display the actual emulated CPU speed
+    let cpu_display = if cpu_speed_mhz.fract() == 0.0 {
+        format!("{} @ {} MHz", cpu_name_base, cpu_speed_mhz as u32)
+    } else {
+        format!("{} @ {:.2} MHz", cpu_name_base, cpu_speed_mhz)
+    };
     write_line(5, 15, &cpu_display, 0x0E); // Yellow
 
     write_line(7, 2, "Memory Test:", label_attr);
