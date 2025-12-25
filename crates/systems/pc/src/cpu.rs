@@ -811,6 +811,11 @@ impl PcCpu {
             0x0B => self.int21h_check_stdin(),          // Check stdin status
             0x25 => self.int21h_set_interrupt_vector(), // Set interrupt vector
             0x35 => self.int21h_get_interrupt_vector(), // Get interrupt vector
+            0x3C => self.int21h_create_file(),          // Create or truncate file
+            0x3D => self.int21h_open_file(),            // Open existing file
+            0x3E => self.int21h_close_file(),           // Close file handle
+            0x3F => self.int21h_read_file(),            // Read from file or device
+            0x40 => self.int21h_write_file(),           // Write to file or device
             0x4C => self.int21h_terminate_with_code(),  // Terminate with return code
             _ => {
                 // Unsupported function - just return
@@ -969,6 +974,79 @@ impl PcCpu {
     fn int21h_terminate_with_code(&mut self) -> u32 {
         // AL = return code
         // For now, just halt like INT 20h
+        51
+    }
+
+    /// INT 21h, AH=3Ch: Create or truncate file
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_create_file(&mut self) -> u32 {
+        // DS:DX = pointer to ASCIIZ filename
+        // CX = file attributes
+        // Returns: CF clear if success, AX = file handle
+        //          CF set if error, AX = error code (03h = path not found, 04h = no handles, 05h = access denied)
+        
+        // For now, return "file not found" error
+        // In a real implementation, we would create the file on the mounted disk
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x03; // Path not found
+        self.set_carry_flag(true);
+        51
+    }
+
+    /// INT 21h, AH=3Dh: Open existing file
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_open_file(&mut self) -> u32 {
+        // DS:DX = pointer to ASCIIZ filename
+        // AL = access mode (0 = read, 1 = write, 2 = read/write)
+        // Returns: CF clear if success, AX = file handle
+        //          CF set if error, AX = error code (02h = file not found, 03h = path not found, 04h = no handles, 05h = access denied, 0Ch = invalid access)
+        
+        // For now, return "file not found" error
+        // In a real implementation, we would look up the file on the mounted disk
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x02; // File not found
+        self.set_carry_flag(true);
+        51
+    }
+
+    /// INT 21h, AH=3Eh: Close file handle
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_close_file(&mut self) -> u32 {
+        // BX = file handle
+        // Returns: CF clear if success
+        //          CF set if error, AX = error code (06h = invalid handle)
+        
+        // For now, always succeed (no-op)
+        self.set_carry_flag(false);
+        51
+    }
+
+    /// INT 21h, AH=3Fh: Read from file or device
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_read_file(&mut self) -> u32 {
+        // BX = file handle
+        // CX = number of bytes to read
+        // DS:DX = pointer to buffer
+        // Returns: CF clear if success, AX = number of bytes read
+        //          CF set if error, AX = error code (05h = access denied, 06h = invalid handle)
+        
+        // For now, return 0 bytes read (EOF)
+        self.cpu.ax = 0x0000; // 0 bytes read
+        self.set_carry_flag(false);
+        51
+    }
+
+    /// INT 21h, AH=40h: Write to file or device
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_write_file(&mut self) -> u32 {
+        // BX = file handle
+        // CX = number of bytes to write
+        // DS:DX = pointer to buffer
+        // Returns: CF clear if success, AX = number of bytes written
+        //          CF set if error, AX = error code (05h = access denied, 06h = invalid handle)
+        
+        // For now, report all bytes written but don't actually write anywhere
+        let cx = self.cpu.cx;
+        self.cpu.ax = cx; // Report all bytes written
+        self.set_carry_flag(false);
         51
     }
 
@@ -1187,6 +1265,12 @@ impl PcCpu {
         } else {
             self.cpu.flags &= !FLAG_CF;
         }
+    }
+
+    /// Get the carry flag value
+    fn get_carry_flag(&self) -> bool {
+        const FLAG_CF: u16 = 0x0001;
+        (self.cpu.flags & FLAG_CF) != 0
     }
 
     /// Set or clear the zero flag
@@ -2834,5 +2918,159 @@ mod tests {
         // Verify function supported (AL=1Ah) and VGA returned
         assert_eq!(cpu.cpu.ax & 0xFF, 0x1A);
         assert_eq!(cpu.cpu.bx, 0x0008); // VGA with color display
+    }
+
+    #[test]
+    fn test_int21h_open_file() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // Write filename at DS:DX
+        let filename_addr = 0x2000u32;
+        let filename = b"IO.SYS\0";
+        for (i, &byte) in filename.iter().enumerate() {
+            cpu.cpu.memory.write(filename_addr + i as u32, byte);
+        }
+
+        // AH=3Dh (open file), AL=00h (read only)
+        cpu.cpu.ax = 0x3D00;
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x2000;
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify carry flag is set (file not found)
+        assert!(cpu.get_carry_flag());
+        // Verify error code is 02h (file not found)
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x02);
+    }
+
+    #[test]
+    fn test_int21h_create_file() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // Write filename at DS:DX
+        let filename_addr = 0x2000u32;
+        let filename = b"TEST.TXT\0";
+        for (i, &byte) in filename.iter().enumerate() {
+            cpu.cpu.memory.write(filename_addr + i as u32, byte);
+        }
+
+        // AH=3Ch (create file), CX=0 (normal attributes)
+        cpu.cpu.ax = 0x3C00;
+        cpu.cpu.cx = 0x0000;
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x2000;
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify carry flag is set (not implemented, returns error)
+        assert!(cpu.get_carry_flag());
+    }
+
+    #[test]
+    fn test_int21h_read_file() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=3Fh (read file), BX=file handle, CX=bytes to read
+        cpu.cpu.ax = 0x3F00;
+        cpu.cpu.bx = 0x0005; // file handle
+        cpu.cpu.cx = 0x0040; // 64 bytes
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x3000; // buffer address
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify no error (CF clear)
+        assert!(!cpu.get_carry_flag());
+        // Verify 0 bytes read (EOF, since no file is actually open)
+        assert_eq!(cpu.cpu.ax, 0x0000);
+    }
+
+    #[test]
+    fn test_int21h_write_file() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=40h (write file), BX=file handle, CX=bytes to write
+        cpu.cpu.ax = 0x4000;
+        cpu.cpu.bx = 0x0005; // file handle
+        cpu.cpu.cx = 0x0020; // 32 bytes
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x3000; // buffer address
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify no error (CF clear)
+        assert!(!cpu.get_carry_flag());
+        // Verify all bytes reported as written
+        assert_eq!(cpu.cpu.ax, 0x0020);
+    }
+
+    #[test]
+    fn test_int21h_close_file() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=3Eh (close file), BX=file handle
+        cpu.cpu.ax = 0x3E00;
+        cpu.cpu.bx = 0x0005; // file handle
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify no error (CF clear)
+        assert!(!cpu.get_carry_flag());
     }
 }
