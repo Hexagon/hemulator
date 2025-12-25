@@ -100,8 +100,9 @@ impl PcSystem {
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
 
-        // Write BIOS POST screen to video RAM
-        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model.name());
+        // Write BIOS POST screen to video RAM with actual CPU model and memory
+        let cpu_speed_mhz = Self::cpu_speed_for_model(cpu_model);
+        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model, memory_kb, cpu_speed_mhz);
 
         let cpu = PcCpu::with_model(bus, cpu_model);
 
@@ -118,6 +119,23 @@ impl PcSystem {
     /// Get the CPU model
     pub fn cpu_model(&self) -> CpuModel {
         self.cpu.model()
+    }
+
+    /// Get the CPU clock speed in MHz based on CPU model
+    /// Returns the historical clock speed for each processor
+    pub fn cpu_speed_mhz(&self) -> f64 {
+        Self::cpu_speed_for_model(self.cpu.model())
+    }
+
+    /// Get the CPU clock speed in MHz for a given CPU model (static method)
+    /// Returns the historical clock speed for each processor
+    pub fn cpu_speed_for_model(model: CpuModel) -> f64 {
+        match model {
+            CpuModel::Intel8086 | CpuModel::Intel8088 => 4.77,
+            CpuModel::Intel80186 | CpuModel::Intel80188 => 8.0,
+            CpuModel::Intel80286 => 12.0,
+            CpuModel::Intel80386 => 20.0,
+        }
     }
 
     /// Get the memory size in KB
@@ -246,8 +264,18 @@ impl PcSystem {
         let hard_drive = self.cpu.bus().hard_drive().is_some();
         let boot_priority = self.cpu.bus().boot_priority();
 
+        // Get CPU model and memory
+        let cpu_model = self.cpu.model();
+        let memory_kb = self.cpu.bus().memory_kb();
+        let cpu_speed_mhz = self.cpu_speed_mhz();
+
         // Now get mutable borrow to update VRAM
         let vram = self.cpu.bus_mut().vram_mut();
+        
+        // Rewrite entire POST screen with current config
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
+        
+        // Update mount status
         bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
     }
 }
@@ -279,16 +307,19 @@ impl System for PcSystem {
         self.boot_started = false;
         self.boot_delay_frames = 300; // 5 seconds at 60 Hz
 
-        // Write BIOS POST screen to video RAM
-        let cpu_model_name = self.cpu_model().name();
+        // Write BIOS POST screen to video RAM with current config
+        let cpu_model = self.cpu.model();
+        let memory_kb = self.cpu.bus().memory_kb();
+        let cpu_speed_mhz = self.cpu_speed_mhz();
         let vram = self.cpu.bus_mut().vram_mut();
-        bios::write_post_screen_to_vram(vram, cpu_model_name);
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // PC runs at ~4.77 MHz
-        // At 60 Hz, that's ~79,500 cycles per frame
-        const CYCLES_PER_FRAME: u32 = 79500;
+        // Calculate cycles per frame based on CPU speed
+        // At 60 Hz: cycles_per_frame = (cpu_speed_mhz * 1_000_000) / 60
+        let cpu_speed_mhz = self.cpu_speed_mhz();
+        let cycles_per_frame = ((cpu_speed_mhz * 1_000_000.0) / 60.0) as u32;
 
         // Boot delay: Wait at POST screen for 5 seconds before loading boot sector
         if !self.boot_started && self.boot_delay_frames > 0 {
@@ -419,7 +450,7 @@ impl System for PcSystem {
         let mut cycles_this_frame = 0u32;
 
         // Execute until we've completed a frame
-        while cycles_this_frame < CYCLES_PER_FRAME {
+        while cycles_this_frame < cycles_per_frame {
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;

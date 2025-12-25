@@ -3,6 +3,8 @@
 //! This provides boot functionality for the PC system.
 //! The BIOS sets up the system and attempts to boot from disk.
 
+use emu_core::cpu_8086::CpuModel;
+
 pub use boot_priority::BootPriority;
 
 mod boot_priority {
@@ -78,6 +80,7 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     bios[int21h_offset..int21h_offset + int21h_handler.len()].copy_from_slice(&int21h_handler);
 
     // Main boot code at offset 0 (will be reached via entry point jump)
+    // This code checks if boot sector is loaded and either boots or halts
     let init_code: Vec<u8> = vec![
         0xFA, // CLI - disable interrupts
         0xB8, 0x00, 0x00, // MOV AX, 0x0000
@@ -112,8 +115,22 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xA3, 0x86, 0x00, // MOV [0x0086], AX
         
         0xFB, // STI - enable interrupts
-        // Jump to boot sector at 0x0000:0x7C00
+        
+        // Check if boot sector is loaded by checking signature at 0x7C00 + 510
+        // We'll check if byte at 0x7DFE is 0x55 and 0x7DFF is 0xAA
+        0xBE, 0xFE, 0x7D, // MOV SI, 0x7DFE (offset of boot signature)
+        0x8A, 0x04,       // MOV AL, [SI]
+        0x3C, 0x55,       // CMP AL, 0x55
+        0x75, 0x08,       // JNZ skip_boot (if not equal, skip boot - jump 8 bytes)
+        0x8A, 0x44, 0x01, // MOV AL, [SI+1]
+        0x3C, 0xAA,       // CMP AL, 0xAA
+        0x75, 0x02,       // JNZ skip_boot (if not equal, skip boot - jump 2 bytes)
+        // Boot signature valid - jump to boot sector
         0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
+        
+        // skip_boot: No valid boot sector - infinite loop (HLT)
+        // 0xF4,       // HLT
+        0xEB, 0xFE,    // JMP -2 (infinite loop - simpler than HLT)
     ];
     bios[0..init_code.len()].copy_from_slice(&init_code);
 
@@ -175,7 +192,18 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 
 /// Write BIOS POST screen to video RAM
 /// This displays a traditional PC BIOS Power-On Self-Test screen
-pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model_name: &str) {
+///
+/// # Arguments
+/// * `vram` - Video RAM buffer to write to
+/// * `cpu_model` - CPU model to display
+/// * `memory_kb` - Memory size in KB to display
+/// * `cpu_speed_mhz` - CPU speed in MHz to display
+pub fn write_post_screen_to_vram(
+    vram: &mut [u8],
+    cpu_model: CpuModel,
+    memory_kb: u32,
+    cpu_speed_mhz: f64,
+) {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get current system time
@@ -270,11 +298,27 @@ pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model_name: &str) {
 
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
-    let cpu_display = format!("{} @ 4.77 MHz", cpu_model_name);
+    
+    // Display CPU model name with actual emulated speed
+    let cpu_name_base = match cpu_model {
+        CpuModel::Intel8086 => "Intel 8086",
+        CpuModel::Intel8088 => "Intel 8088",
+        CpuModel::Intel80186 => "Intel 80186",
+        CpuModel::Intel80188 => "Intel 80188",
+        CpuModel::Intel80286 => "Intel 80286",
+        CpuModel::Intel80386 => "Intel 80386",
+    };
+    // Display the actual emulated CPU speed
+    let cpu_display = if cpu_speed_mhz.fract() == 0.0 {
+        format!("{} @ {} MHz", cpu_name_base, cpu_speed_mhz as u32)
+    } else {
+        format!("{} @ {:.2} MHz", cpu_name_base, cpu_speed_mhz)
+    };
     write_line(5, 15, &cpu_display, 0x0E); // Yellow
 
     write_line(7, 2, "Memory Test:", label_attr);
-    write_line(7, 15, "640K OK", 0x0A); // Bright green
+    let memory_str = format!("{}K OK", memory_kb);
+    write_line(7, 15, &memory_str, 0x0A); // Bright green
 
     write_line(9, 2, "Disk Drives:", label_attr);
     write_line(10, 4, "Floppy A: Not present", 0x08); // Dark gray
