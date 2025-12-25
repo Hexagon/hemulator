@@ -1241,20 +1241,24 @@ fn main() {
         window.poll_events();
 
         // Check if host key (from settings) is held
-        let host_modifier_key = window_backend::string_to_key(&settings.input.host_modifier)
-            .unwrap_or(Key::RightCtrl); // fallback to RightCtrl if invalid
+        let host_modifier_key =
+            window_backend::string_to_key(&settings.input.host_modifier).unwrap_or(Key::RightCtrl); // fallback to RightCtrl if invalid
         let host_key_held = window.is_key_down(host_modifier_key);
 
         // Only require host key for PC system
         let is_pc = matches!(&sys, EmulatorSystem::PC(_));
 
         // Only exit on ESC if host key is held (PC system), else allow ESC always
-        if (is_pc && host_key_held && window.is_key_down(Key::Escape)) || (!is_pc && window.is_key_down(Key::Escape)) {
+        if (is_pc && host_key_held && window.is_key_down(Key::Escape))
+            || (!is_pc && window.is_key_down(Key::Escape))
+        {
             break;
         }
 
         // Toggle help overlay (F1)
-        if ((is_pc && host_key_held && window.is_key_pressed(Key::F1, false)) || (!is_pc && window.is_key_pressed(Key::F1, false))) {
+        if ((is_pc && host_key_held && window.is_key_pressed(Key::F1, false))
+            || (!is_pc && window.is_key_pressed(Key::F1, false)))
+        {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
@@ -1263,7 +1267,9 @@ fn main() {
         }
 
         // Toggle speed selector (F2)
-        if ((is_pc && host_key_held && window.is_key_pressed(Key::F2, false)) || (!is_pc && window.is_key_pressed(Key::F2, false))) {
+        if ((is_pc && host_key_held && window.is_key_pressed(Key::F2, false))
+            || (!is_pc && window.is_key_pressed(Key::F2, false)))
+        {
             show_speed_selector = !show_speed_selector;
             show_help = false; // Close help if open
             show_slot_selector = false; // Close slot selector if open
@@ -1273,7 +1279,10 @@ fn main() {
 
         // Toggle debug overlay (F10)
         let can_debug = rom_loaded || is_pc;
-        if ((is_pc && host_key_held && window.is_key_pressed(Key::F10, false)) || (!is_pc && window.is_key_pressed(Key::F10, false))) && can_debug {
+        if ((is_pc && host_key_held && window.is_key_pressed(Key::F10, false))
+            || (!is_pc && window.is_key_pressed(Key::F10, false)))
+            && can_debug
+        {
             show_debug = !show_debug;
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open

@@ -255,7 +255,7 @@ mod tests {
 
         // Add a break code followed by a make code
         kb.key_release(SCANCODE_A); // Break code
-        kb.key_press(SCANCODE_B);   // Make code
+        kb.key_press(SCANCODE_B); // Make code
 
         // peek_make_code should skip the break code and find the make code
         assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
@@ -265,13 +265,13 @@ mod tests {
 
         // Reading should get break code first
         assert_eq!(kb.read_scancode(), SCANCODE_A | 0x80);
-        
+
         // Now peek_make_code should return the make code
         assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
-        
+
         // Read the make code
         assert_eq!(kb.read_scancode(), SCANCODE_B);
-        
+
         // No more data
         assert_eq!(kb.peek_make_code(), None);
     }

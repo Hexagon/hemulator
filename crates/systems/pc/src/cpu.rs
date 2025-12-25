@@ -721,7 +721,7 @@ impl PcCpu {
         // Drain all break codes from the buffer to find a make code
         while self.cpu.memory.keyboard.has_data() {
             let scancode = self.cpu.memory.keyboard.read_scancode();
-            
+
             // Skip break codes (key release) - only return make codes (key press)
             if scancode & 0x80 != 0 {
                 continue; // Skip this break code and check next
@@ -765,7 +765,7 @@ impl PcCpu {
             self.set_zero_flag(true); // ZF = 1 (no key)
             self.cpu.ax = 0x0000;
         }
-        
+
         51
     }
 
