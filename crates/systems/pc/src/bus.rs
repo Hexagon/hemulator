@@ -12,6 +12,7 @@ use crate::disk::DiskController;
 use crate::keyboard::Keyboard;
 use crate::mouse::Mouse;
 use crate::pit::Pit;
+use crate::xms::XmsDriver;
 use emu_core::cpu_8086::Memory8086;
 
 /// PC memory bus
@@ -44,6 +45,8 @@ pub struct PcBus {
     speaker_gate: bool,
     /// Microsoft Mouse Driver
     pub mouse: Mouse,
+    /// XMS (Extended Memory Specification) driver
+    pub xms: XmsDriver,
 }
 
 impl PcBus {
@@ -62,6 +65,11 @@ impl PcBus {
         let mut pit = Pit::new();
         pit.reset(); // Initialize with default system timer
 
+        // Initialize XMS with 15MB of extended memory (16MB total - 1MB conventional)
+        let mut xms = XmsDriver::new(15 * 1024);
+        xms.install();
+        xms.init_umbs(); // Initialize Upper Memory Blocks
+
         Self {
             ram: vec![0; ram_size],
             vram: vec![0; 0x20000], // 128KB
@@ -77,6 +85,7 @@ impl PcBus {
             pit,
             speaker_gate: false,
             mouse: Mouse::new(),
+            xms,
         }
     }
 
@@ -95,6 +104,7 @@ impl PcBus {
         self.pit.reset();
         self.speaker_gate = false;
         self.mouse = Mouse::new(); // Reset mouse state
+                                   // XMS driver state is preserved across resets (like hardware)
         self.boot_sector_loaded = false;
     }
 

@@ -22,6 +22,7 @@ mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
 mod video_adapter_software;
 mod video_adapter_vga_hardware; // VGA hardware renderer (OpenGL stub)
 mod video_adapter_vga_software; // VGA software renderer
+mod xms; // XMS (Extended Memory Specification) driver
 
 use bios::generate_minimal_bios;
 use bus::PcBus;

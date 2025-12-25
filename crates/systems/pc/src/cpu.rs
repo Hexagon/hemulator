@@ -153,10 +153,12 @@ impl PcCpu {
             match int_num {
                 0x10 => return self.handle_int10h(), // Video BIOS
                 0x13 => return self.handle_int13h(), // Disk services
+                0x15 => return self.handle_int15h(), // Extended services
                 0x16 => return self.handle_int16h(), // Keyboard services
                 0x1A => return self.handle_int1ah(), // Time/Date services
                 0x20 => return self.handle_int20h(), // DOS: Program terminate
                 0x21 => return self.handle_int21h(), // DOS API
+                0x2F => return self.handle_int2fh(), // Multiplex interrupt
                 0x33 => return self.handle_int33h(), // Mouse services
                 _ => {}                              // Let CPU handle other interrupts normally
             }
@@ -1228,6 +1230,125 @@ impl PcCpu {
         self.cpu.bx = version;
         self.cpu.cx = ((mtype as u16) << 8) | (irq as u16);
         51
+    }
+
+    /// Handle INT 15h - Extended BIOS services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int15h(&mut self) -> u32 {
+        // Skip the INT 15h instruction (2 bytes: 0xCD 0x15)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x88 => self.int15h_get_extended_memory_size(),
+            0xE8 => {
+                // Get Extended Memory Size (32-bit)
+                let al = (self.cpu.ax & 0xFF) as u8;
+                match al {
+                    0x01 => self.int15h_get_extended_memory_size_e801(),
+                    0x20 => self.int15h_query_system_address_map(),
+                    _ => {
+                        // Unsupported function
+                        self.set_carry_flag(true);
+                        51
+                    }
+                }
+            }
+            _ => {
+                // Unsupported function - set carry flag to indicate error
+                self.set_carry_flag(true);
+                51
+            }
+        }
+    }
+
+    /// INT 15h, AH=88h - Get Extended Memory Size
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_get_extended_memory_size(&mut self) -> u32 {
+        // Return extended memory size in KB (above 1MB)
+        let extended_kb = self.cpu.memory.xms.total_extended_memory_kb();
+        self.cpu.ax = extended_kb.min(0xFFFF) as u16;
+        self.set_carry_flag(false);
+        51
+    }
+
+    /// INT 15h, AX=E801h - Get Extended Memory Size (alternate)
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_get_extended_memory_size_e801(&mut self) -> u32 {
+        let extended_kb = self.cpu.memory.xms.total_extended_memory_kb();
+
+        // AX/CX = extended memory between 1MB and 16MB in KB
+        let mem_1_16mb = extended_kb.min(15 * 1024);
+        // BX/DX = extended memory above 16MB in 64KB blocks
+        let mem_above_16mb = if extended_kb > 15 * 1024 {
+            (extended_kb - 15 * 1024) / 64
+        } else {
+            0
+        };
+
+        self.cpu.ax = mem_1_16mb as u16;
+        self.cpu.bx = mem_above_16mb as u16;
+        self.cpu.cx = mem_1_16mb as u16;
+        self.cpu.dx = mem_above_16mb as u16;
+        self.set_carry_flag(false);
+        51
+    }
+
+    /// INT 15h, AX=E820h - Query System Address Map (stub)
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_query_system_address_map(&mut self) -> u32 {
+        // This would return memory map entries
+        // For now, just indicate no more entries
+        self.cpu.bx = 0; // No continuation
+        self.set_carry_flag(true); // No more entries
+        51
+    }
+
+    /// Handle INT 2Fh - Multiplex interrupt
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int2fh(&mut self) -> u32 {
+        // Skip the INT 2Fh instruction (2 bytes: 0xCD 0x2F)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x43 => self.int2fh_xms_installation_check(),
+            _ => {
+                // Unsupported function - just return
+                51
+            }
+        }
+    }
+
+    /// INT 2Fh, AH=43h - XMS Installation Check
+    #[allow(dead_code)] // Called from handle_int2fh
+    fn int2fh_xms_installation_check(&mut self) -> u32 {
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x00 => {
+                // XMS installation check
+                if self.cpu.memory.xms.is_installed() {
+                    self.cpu.ax = 0x80 << 8; // AL = 0x80 = installed
+                } else {
+                    self.cpu.ax = 0x00; // Not installed
+                }
+                51
+            }
+            0x10 => {
+                // Get XMS driver address
+                // In a real implementation, this would return ES:BX pointing to the XMS driver
+                // For now, we'll use a fake segment:offset
+                self.cpu.es = 0xC000; // Fake XMS driver segment
+                self.cpu.bx = 0x0000; // Offset
+                51
+            }
+            _ => 51,
+        }
     }
 
     /// Get a reference to the bus
