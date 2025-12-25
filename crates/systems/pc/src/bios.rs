@@ -352,6 +352,42 @@ pub fn write_post_screen_to_vram(
     );
 }
 
+/// Update the boot countdown on the POST screen
+///
+/// # Arguments
+/// * `vram` - Video RAM buffer to write to
+/// * `seconds_remaining` - Number of seconds remaining before boot
+pub fn update_post_screen_countdown(vram: &mut [u8], seconds_remaining: u32) {
+    let text_offset = 0x18000;
+
+    let mut write_line = |row: usize, col: usize, text: &str, attr: u8| {
+        let screen_offset = text_offset + (row * 80 + col) * 2;
+        for (i, ch) in text.chars().enumerate() {
+            let offset = screen_offset + i * 2;
+            if offset + 1 < vram.len() {
+                vram[offset] = ch as u8;
+                vram[offset + 1] = attr;
+            }
+        }
+    };
+
+    // Update countdown message
+    let countdown_attr = 0x0E; // Yellow on black
+    if seconds_remaining > 0 {
+        let message = format!(
+            "Booting in {} second{}... Press ESC to stay in BIOS",
+            seconds_remaining,
+            if seconds_remaining == 1 { "" } else { "s" }
+        );
+        // Center the message on row 18
+        let col = (80 - message.len()) / 2;
+        write_line(18, col, &message, countdown_attr);
+    } else {
+        // Clear the countdown line when boot starts
+        write_line(18, 0, &" ".repeat(80), 0x07);
+    }
+}
+
 /// Update the disk drive status on the POST screen
 pub fn update_post_screen_mounts(
     vram: &mut [u8],

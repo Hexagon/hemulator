@@ -369,6 +369,10 @@ impl System for PcSystem {
                 // Refresh POST screen every frame during boot delay to show live clock
                 bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
 
+                // Update countdown (60 frames per second)
+                let seconds_remaining = (self.boot_delay_frames + 59) / 60; // Round up
+                bios::update_post_screen_countdown(vram_mut, seconds_remaining);
+
                 // Update mount status
                 drop(vram_mut);
                 self.update_post_screen();
