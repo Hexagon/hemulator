@@ -5,6 +5,7 @@ pub mod cpu_6502;
 pub mod cpu_65c816;
 pub mod cpu_8080;
 pub mod cpu_8086;
+pub mod cpu_8086_protected;
 pub mod cpu_lr35902;
 pub mod cpu_mips_r4300i;
 pub mod cpu_z80;
