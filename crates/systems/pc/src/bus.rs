@@ -9,7 +9,11 @@
 
 use crate::bios::BootPriority;
 use crate::disk::DiskController;
+use crate::dpmi::DpmiDriver;
 use crate::keyboard::Keyboard;
+use crate::mouse::Mouse;
+use crate::pit::Pit;
+use crate::xms::XmsDriver;
 use emu_core::cpu_8086::Memory8086;
 
 /// PC memory bus
@@ -36,6 +40,16 @@ pub struct PcBus {
     boot_priority: BootPriority,
     /// Flag to track if boot sector has been loaded
     boot_sector_loaded: bool,
+    /// Programmable Interval Timer (8253/8254)
+    pub pit: Pit,
+    /// PC speaker gate (bit 0 of port 0x61)
+    speaker_gate: bool,
+    /// Microsoft Mouse Driver
+    pub mouse: Mouse,
+    /// XMS (Extended Memory Specification) driver
+    pub xms: XmsDriver,
+    /// DPMI (DOS Protected Mode Interface) driver
+    pub dpmi: DpmiDriver,
 }
 
 impl PcBus {
@@ -51,6 +65,18 @@ impl PcBus {
         let kb = kb.clamp(256, 640);
         let ram_size = (kb as usize) * 1024;
 
+        let mut pit = Pit::new();
+        pit.reset(); // Initialize with default system timer
+
+        // Initialize XMS with 15MB of extended memory (16MB total - 1MB conventional)
+        let mut xms = XmsDriver::new(15 * 1024);
+        xms.install();
+        xms.init_umbs(); // Initialize Upper Memory Blocks
+
+        // Initialize DPMI driver
+        let mut dpmi = DpmiDriver::new();
+        dpmi.install();
+
         Self {
             ram: vec![0; ram_size],
             vram: vec![0; 0x20000], // 128KB
@@ -63,6 +89,11 @@ impl PcBus {
             disk_controller: DiskController::new(),
             boot_priority: BootPriority::default(),
             boot_sector_loaded: false,
+            pit,
+            speaker_gate: false,
+            mouse: Mouse::new(),
+            xms,
+            dpmi,
         }
     }
 
@@ -78,6 +109,10 @@ impl PcBus {
         self.vram.fill(0);
         self.keyboard.clear();
         self.disk_controller.reset();
+        self.pit.reset();
+        self.speaker_gate = false;
+        self.mouse = Mouse::new(); // Reset mouse state
+                                   // XMS driver state is preserved across resets (like hardware)
         self.boot_sector_loaded = false;
     }
 
@@ -301,6 +336,69 @@ impl PcBus {
 
         self.disk_controller
             .write_sectors(request, buffer, disk_mut)
+    }
+
+    /// Read from an I/O port
+    pub fn io_read(&self, port: u16) -> u8 {
+        match port {
+            // PIT Channel 0 (system timer)
+            0x40 => {
+                // Reading would need mutable access to update read state
+                // This is a limitation of the trait design
+                0x00
+            }
+            // PIT Channel 1 (DRAM refresh - legacy)
+            0x41 => 0x00,
+            // PIT Channel 2 (PC speaker)
+            0x42 => 0x00,
+            // PIT Mode/Command register
+            0x43 => {
+                // Write-only register
+                0xFF
+            }
+            // Port B (speaker control, etc.)
+            0x61 => {
+                let mut value = 0x00;
+                if self.speaker_gate {
+                    value |= 0x01; // Speaker gate enabled
+                }
+                // Bit 5: PIT channel 2 output
+                if self.pit.speaker_output() {
+                    value |= 0x20;
+                }
+                value
+            }
+            _ => 0xFF, // Default for unimplemented ports
+        }
+    }
+
+    /// Write to an I/O port
+    pub fn io_write(&mut self, port: u16, val: u8) {
+        match port {
+            // PIT Channel 0 (system timer)
+            0x40 => {
+                self.pit.write_channel(0, val);
+            }
+            // PIT Channel 1 (DRAM refresh)
+            0x41 => {
+                self.pit.write_channel(1, val);
+            }
+            // PIT Channel 2 (PC speaker)
+            0x42 => {
+                self.pit.write_channel(2, val);
+            }
+            // PIT Mode/Command register
+            0x43 => {
+                self.pit.write_control(val);
+            }
+            // Port B (speaker control, keyboard acknowledge, etc.)
+            0x61 => {
+                self.speaker_gate = (val & 0x01) != 0;
+                // Bit 1: speaker data (directly drives speaker)
+                // We'll use this in combination with PIT channel 2
+            }
+            _ => {} // Ignore writes to unimplemented ports
+        }
     }
 }
 

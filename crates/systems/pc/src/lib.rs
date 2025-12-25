@@ -9,8 +9,11 @@ mod bios;
 mod bus;
 mod cpu;
 mod disk;
+mod dpmi; // DPMI (DOS Protected Mode Interface) driver
 mod font; // Shared IBM PC ROM font data
 mod keyboard;
+mod mouse; // Microsoft Mouse Driver (INT 33h)
+mod pit; // Programmable Interval Timer (8253/8254)
 mod video;
 mod video_adapter;
 mod video_adapter_cga_graphics; // CGA graphics modes with mode switching
@@ -20,6 +23,7 @@ mod video_adapter_hardware; // Example stub for hardware-accelerated rendering
 mod video_adapter_software;
 mod video_adapter_vga_hardware; // VGA hardware renderer (OpenGL stub)
 mod video_adapter_vga_software; // VGA software renderer
+mod xms; // XMS (Extended Memory Specification) driver
 
 use bios::generate_minimal_bios;
 use bus::PcBus;
@@ -293,6 +297,14 @@ impl System for PcSystem {
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;
             self.frame_cycles += cycles as u64;
+
+            // Clock the PIT with the cycles executed
+            let timer_interrupt = self.cpu.bus_mut().pit.clock(cycles);
+            if timer_interrupt {
+                // Timer interrupt should trigger INT 08h
+                // For now, just clear the flag
+                self.cpu.bus_mut().pit.clear_timer_interrupt();
+            }
         }
 
         // Render video memory to frame buffer

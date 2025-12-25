@@ -5,6 +5,8 @@
 //!
 //! Supports multiple CPU models: 8086, 80186, 80286, and their variants.
 
+use crate::cpu_8086_protected::ProtectedModeState;
+
 /// CPU model/variant selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CpuModel {
@@ -122,6 +124,10 @@ pub struct Cpu8086<M: Memory8086> {
 
     /// CPU model (8086, 80186, 80286, etc.)
     model: CpuModel,
+
+    /// Protected mode state (80286+ only)
+    /// This is only used when model is Intel80286 or later
+    protected_mode: ProtectedModeState,
 }
 
 // Flag bit positions in FLAGS register
@@ -164,6 +170,7 @@ impl<M: Memory8086> Cpu8086<M> {
             memory,
             halted: false,
             model,
+            protected_mode: ProtectedModeState::new(),
         }
     }
 
@@ -196,6 +203,18 @@ impl<M: Memory8086> Cpu8086<M> {
         self.cycles = 0;
         self.halted = false;
         // Note: model is preserved across reset
+        // Reset protected mode state
+        self.protected_mode.reset();
+    }
+
+    /// Get reference to protected mode state (80286+ only)
+    pub fn protected_mode(&self) -> &ProtectedModeState {
+        &self.protected_mode
+    }
+
+    /// Get mutable reference to protected mode state (80286+ only)
+    pub fn protected_mode_mut(&mut self) -> &mut ProtectedModeState {
+        &mut self.protected_mode
     }
 
     /// Calculate physical address from segment:offset
@@ -2085,40 +2104,250 @@ impl<M: Memory8086> Cpu8086<M> {
             0x0F => {
                 let next_opcode = self.fetch_u8();
                 match next_opcode {
-                    // LMSW - Load Machine Status Word (0x0F 0x01 /6) - 80286+
+                    // Group 7 instructions (0x0F 0x01) - 80286+
                     0x01 => {
+                        if !self.model.supports_80286_instructions() {
+                            // Invalid opcode on 8086/80186
+                            self.cycles += 10;
+                            return 10;
+                        }
+
                         let modrm = self.fetch_u8();
-                        let (_modbits, reg, _rm) = Self::decode_modrm(modrm);
-                        if reg == 6 {
-                            // LMSW r/m16 - For now, just consume the operand
-                            // In a full implementation, this would load CR0 (MSW)
-                            self.cycles += 10;
-                            10
-                        } else {
-                            // Other Group 7 instructions (SGDT, SIDT, LGDT, LIDT, SMSW, etc.)
-                            self.cycles += 10;
-                            10
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        match reg {
+                            0 => {
+                                // SGDT - Store Global Descriptor Table Register
+                                // Stores GDTR to memory (6 bytes: 2-byte limit, 4-byte base)
+                                let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                                let limit = self.protected_mode.gdtr.limit;
+                                let base = self.protected_mode.gdtr.base;
+
+                                self.write(segment, offset, (limit & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(3),
+                                    ((base >> 8) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(4),
+                                    ((base >> 16) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(5),
+                                    ((base >> 24) & 0xFF) as u8,
+                                );
+                                self.cycles += 11;
+                                11
+                            }
+                            1 => {
+                                // SIDT - Store Interrupt Descriptor Table Register
+                                let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                                let limit = self.protected_mode.idtr.limit;
+                                let base = self.protected_mode.idtr.base;
+
+                                self.write(segment, offset, (limit & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(3),
+                                    ((base >> 8) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(4),
+                                    ((base >> 16) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(5),
+                                    ((base >> 24) & 0xFF) as u8,
+                                );
+                                self.cycles += 11;
+                                11
+                            }
+                            2 => {
+                                // LGDT - Load Global Descriptor Table Register
+                                let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                                let limit_low = self.read(segment, offset) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
+                                let limit = limit_low | (limit_high << 8);
+
+                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
+                                let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
+
+                                self.protected_mode.load_gdtr(base, limit);
+                                self.cycles += 11;
+                                11
+                            }
+                            3 => {
+                                // LIDT - Load Interrupt Descriptor Table Register
+                                let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                                let limit_low = self.read(segment, offset) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
+                                let limit = limit_low | (limit_high << 8);
+
+                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
+                                let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
+
+                                self.protected_mode.load_idtr(base, limit);
+                                self.cycles += 11;
+                                11
+                            }
+                            4 => {
+                                // SMSW - Store Machine Status Word
+                                let msw = self.protected_mode.get_msw();
+                                self.write_rm16(modbits, rm, msw);
+                                self.cycles += 3;
+                                3
+                            }
+                            6 => {
+                                // LMSW - Load Machine Status Word
+                                let val = self.read_rm16(modbits, rm);
+                                self.protected_mode.set_msw(val);
+                                self.cycles += 10;
+                                10
+                            }
+                            7 => {
+                                // INVLPG - Invalidate TLB Entry (80486+)
+                                // Stub: No TLB implementation
+                                self.cycles += 25;
+                                25
+                            }
+                            _ => {
+                                // Reserved
+                                self.cycles += 10;
+                                10
+                            }
                         }
                     }
                     // LAR - Load Access Rights (0x0F 0x02) - 80286+
                     0x02 => {
-                        let _modrm = self.fetch_u8();
-                        // Stub: Just consume the opcode
+                        if !self.model.supports_80286_instructions() {
+                            self.cycles += 15;
+                            return 15;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let _selector = self.read_rm16(modbits, rm);
+
+                        // Stub implementation: Set ZF=0 (invalid selector)
+                        // In a full implementation, this would:
+                        // 1. Check if selector is valid
+                        // 2. Load access rights from descriptor
+                        // 3. Set ZF=1 if valid, store access rights in destination
+                        self.set_flag(FLAG_ZF, false);
+                        self.set_reg16(reg, 0);
+
                         self.cycles += 15;
                         15
                     }
                     // LSL - Load Segment Limit (0x0F 0x03) - 80286+
                     0x03 => {
-                        let _modrm = self.fetch_u8();
-                        // Stub: Just consume the opcode
+                        if !self.model.supports_80286_instructions() {
+                            self.cycles += 15;
+                            return 15;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        let _selector = self.read_rm16(modbits, rm);
+
+                        // Stub implementation: Set ZF=0 (invalid selector)
+                        self.set_flag(FLAG_ZF, false);
+                        self.set_reg16(reg, 0);
+
                         self.cycles += 15;
                         15
                     }
                     // CLTS - Clear Task Switched Flag (0x0F 0x06) - 80286+
                     0x06 => {
-                        // Stub: Clear TS flag in CR0 (not implemented)
+                        if !self.model.supports_80286_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+
+                        // Clear TS bit (bit 3) in MSW/CR0
+                        let msw = self.protected_mode.get_msw();
+                        self.protected_mode.set_msw(msw & !0x0008);
                         self.cycles += 2;
                         2
+                    }
+                    // Group 6 instructions (0x0F 0x00) - 80286+ descriptor table operations
+                    0x00 => {
+                        if !self.model.supports_80286_instructions() {
+                            self.cycles += 10;
+                            return 10;
+                        }
+
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        match reg {
+                            0 => {
+                                // SLDT - Store Local Descriptor Table Register
+                                let ldtr = self.protected_mode.ldtr;
+                                self.write_rm16(modbits, rm, ldtr);
+                                self.cycles += 3;
+                                3
+                            }
+                            1 => {
+                                // STR - Store Task Register
+                                let tr = self.protected_mode.tr;
+                                self.write_rm16(modbits, rm, tr);
+                                self.cycles += 3;
+                                3
+                            }
+                            2 => {
+                                // LLDT - Load Local Descriptor Table Register
+                                let selector = self.read_rm16(modbits, rm);
+                                self.protected_mode.load_ldtr(selector);
+                                self.cycles += 17;
+                                17
+                            }
+                            3 => {
+                                // LTR - Load Task Register
+                                let selector = self.read_rm16(modbits, rm);
+                                self.protected_mode.load_tr(selector);
+                                self.cycles += 17;
+                                17
+                            }
+                            4 => {
+                                // VERR - Verify Segment for Reading
+                                let _selector = self.read_rm16(modbits, rm);
+                                // Stub: Set ZF=0 (segment not readable)
+                                // In full implementation: check descriptor access rights
+                                self.set_flag(FLAG_ZF, false);
+                                self.cycles += 10;
+                                10
+                            }
+                            5 => {
+                                // VERW - Verify Segment for Writing
+                                let _selector = self.read_rm16(modbits, rm);
+                                // Stub: Set ZF=0 (segment not writable)
+                                // In full implementation: check descriptor access rights
+                                self.set_flag(FLAG_ZF, false);
+                                self.cycles += 10;
+                                10
+                            }
+                            _ => {
+                                // Reserved
+                                self.cycles += 10;
+                                10
+                            }
+                        }
                     }
                     // MOVSX - Move with Sign Extension (0x0F 0xBE, 0xBF) - 80386+
                     0xBE => {
