@@ -225,16 +225,19 @@ pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model: CpuModel, memory_kb
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
     
-    // Display CPU model name
-    let cpu_name = match cpu_model {
-        CpuModel::Intel8086 => "Intel 8086 @ 4.77 MHz",
-        CpuModel::Intel8088 => "Intel 8088 @ 4.77 MHz",
-        CpuModel::Intel80186 => "Intel 80186 @ 8 MHz",
-        CpuModel::Intel80188 => "Intel 80188 @ 8 MHz",
-        CpuModel::Intel80286 => "Intel 80286 @ 12 MHz",
-        CpuModel::Intel80386 => "Intel 80386 @ 20 MHz",
+    // Display CPU model name with actual emulated speed
+    // All CPU models currently emulated at 4.77 MHz (IBM PC/XT speed)
+    let cpu_name_base = match cpu_model {
+        CpuModel::Intel8086 => "Intel 8086",
+        CpuModel::Intel8088 => "Intel 8088",
+        CpuModel::Intel80186 => "Intel 80186",
+        CpuModel::Intel80188 => "Intel 80188",
+        CpuModel::Intel80286 => "Intel 80286",
+        CpuModel::Intel80386 => "Intel 80386",
     };
-    write_line(5, 15, cpu_name, 0x0E); // Yellow
+    // Show actual emulated speed (4.77 MHz for all models currently)
+    let cpu_display = format!("{} @ 4.77 MHz", cpu_name_base);
+    write_line(5, 15, &cpu_display, 0x0E); // Yellow
 
     write_line(7, 2, "Memory Test:", label_attr);
     let memory_str = format!("{}K OK", memory_kb);
