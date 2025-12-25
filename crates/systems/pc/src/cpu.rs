@@ -182,13 +182,21 @@ impl PcCpu {
             0x01 => self.int10h_set_cursor_shape(),
             0x02 => self.int10h_set_cursor_position(),
             0x03 => self.int10h_get_cursor_position(),
+            0x05 => self.int10h_select_active_page(),
             0x06 => self.int10h_scroll_up(),
             0x07 => self.int10h_scroll_down(),
             0x08 => self.int10h_read_char_attr(),
             0x09 => self.int10h_write_char_attr(),
+            0x0A => self.int10h_write_char_only(),
+            0x0C => self.int10h_write_pixel(),
+            0x0D => self.int10h_read_pixel(),
             0x0E => self.int10h_teletype_output(),
             0x0F => self.int10h_get_video_mode(),
+            0x10 => self.int10h_palette_functions(),
+            0x11 => self.int10h_character_generator(),
+            0x12 => self.int10h_video_subsystem_config(),
             0x13 => self.int10h_write_string(),
+            0x1A => self.int10h_display_combination(),
             _ => {
                 // Unsupported function - just return
                 51 // Approximate INT instruction timing
@@ -252,8 +260,46 @@ impl PcCpu {
     fn int10h_scroll_up(&mut self) -> u32 {
         // AL = lines to scroll (0 = clear), BH = attribute for blank lines
         // CH,CL = row,col of upper left, DH,DL = row,col of lower right
-        // This would require accessing and modifying video memory
-        // For now, just acknowledge
+        let lines = (self.cpu.ax & 0xFF) as u8;
+        let attr = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let top = ((self.cpu.cx >> 8) & 0xFF) as u32;
+        let left = (self.cpu.cx & 0xFF) as u32;
+        let bottom = ((self.cpu.dx >> 8) & 0xFF) as u32;
+        let right = (self.cpu.dx & 0xFF) as u32;
+
+        if lines == 0 {
+            // Clear window
+            for row in top..=bottom {
+                for col in left..=right {
+                    let offset = (row * 80 + col) * 2;
+                    let video_addr = 0xB8000 + offset;
+                    self.cpu.memory.write(video_addr, b' ');
+                    self.cpu.memory.write(video_addr + 1, attr);
+                }
+            }
+        } else {
+            // Scroll up by N lines
+            for row in top..=bottom {
+                for col in left..=right {
+                    let offset = (row * 80 + col) * 2;
+                    let video_addr = 0xB8000 + offset;
+
+                    if row + (lines as u32) <= bottom {
+                        // Copy from below
+                        let src_offset = ((row + (lines as u32)) * 80 + col) * 2;
+                        let src_addr = 0xB8000 + src_offset;
+                        let ch = self.cpu.memory.read(src_addr);
+                        let at = self.cpu.memory.read(src_addr + 1);
+                        self.cpu.memory.write(video_addr, ch);
+                        self.cpu.memory.write(video_addr + 1, at);
+                    } else {
+                        // Fill with blanks
+                        self.cpu.memory.write(video_addr, b' ');
+                        self.cpu.memory.write(video_addr + 1, attr);
+                    }
+                }
+            }
+        }
         51
     }
 
@@ -262,6 +308,46 @@ impl PcCpu {
     fn int10h_scroll_down(&mut self) -> u32 {
         // AL = lines to scroll (0 = clear), BH = attribute for blank lines
         // CH,CL = row,col of upper left, DH,DL = row,col of lower right
+        let lines = (self.cpu.ax & 0xFF) as u8;
+        let attr = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let top = ((self.cpu.cx >> 8) & 0xFF) as u32;
+        let left = (self.cpu.cx & 0xFF) as u32;
+        let bottom = ((self.cpu.dx >> 8) & 0xFF) as u32;
+        let right = (self.cpu.dx & 0xFF) as u32;
+
+        if lines == 0 {
+            // Clear window
+            for row in top..=bottom {
+                for col in left..=right {
+                    let offset = (row * 80 + col) * 2;
+                    let video_addr = 0xB8000 + offset;
+                    self.cpu.memory.write(video_addr, b' ');
+                    self.cpu.memory.write(video_addr + 1, attr);
+                }
+            }
+        } else {
+            // Scroll down by N lines (iterate in reverse to avoid overwriting)
+            for row in (top..=bottom).rev() {
+                for col in left..=right {
+                    let offset = (row * 80 + col) * 2;
+                    let video_addr = 0xB8000 + offset;
+
+                    if row >= top + (lines as u32) {
+                        // Copy from above
+                        let src_offset = ((row - (lines as u32)) * 80 + col) * 2;
+                        let src_addr = 0xB8000 + src_offset;
+                        let ch = self.cpu.memory.read(src_addr);
+                        let at = self.cpu.memory.read(src_addr + 1);
+                        self.cpu.memory.write(video_addr, ch);
+                        self.cpu.memory.write(video_addr + 1, at);
+                    } else {
+                        // Fill with blanks
+                        self.cpu.memory.write(video_addr, b' ');
+                        self.cpu.memory.write(video_addr + 1, attr);
+                    }
+                }
+            }
+        }
         51
     }
 
@@ -428,6 +514,171 @@ impl PcCpu {
         }
 
         51
+    }
+
+    /// INT 10h, AH=05h: Select active video page
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_select_active_page(&mut self) -> u32 {
+        // AL = new page number (0..7 for text mode)
+        // Store active page in BIOS data area at 0x40:0x62
+        let page = (self.cpu.ax & 0xFF) as u8;
+        self.cpu.memory.write(0x462, page & 0x07); // Limit to 8 pages
+        51
+    }
+
+    /// INT 10h, AH=0Ah: Write character only at cursor
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_write_char_only(&mut self) -> u32 {
+        // AL = character, BH = page, CX = count
+        // Note: Does NOT write attribute, does NOT advance cursor
+        let ch = (self.cpu.ax & 0xFF) as u8;
+        let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let count = self.cpu.cx;
+
+        // Get cursor position
+        let cursor_addr = 0x450 + (page as u32 * 2);
+        let mut col = self.cpu.memory.read(cursor_addr) as u32;
+        let row = self.cpu.memory.read(cursor_addr + 1) as u32;
+
+        // Write character(s) to video memory (character bytes only)
+        for _ in 0..count {
+            let offset = (row * 80 + col) * 2;
+            let video_addr = 0xB8000 + offset;
+
+            // Write character only, preserve existing attribute
+            self.cpu.memory.write(video_addr, ch);
+
+            col += 1;
+            if col >= 80 {
+                break; // Don't wrap to next line
+            }
+        }
+
+        51
+    }
+
+    /// INT 10h, AH=0Ch: Write pixel (graphics mode)
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_write_pixel(&mut self) -> u32 {
+        // AL = pixel color, CX = column, DX = row
+        // BH = page number (graphics mode)
+        let color = (self.cpu.ax & 0xFF) as u8;
+        let x = self.cpu.cx as u32;
+        let y = self.cpu.dx as u32;
+        let _page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Mode 13h (320x200 256-color): Linear addressing
+        // Each pixel is 1 byte at 0xA0000 + (y * 320 + x)
+        // For other modes, this would require mode-specific calculations
+        if x < 320 && y < 200 {
+            let offset = y * 320 + x;
+            let video_addr = 0xA0000 + offset;
+            self.cpu.memory.write(video_addr, color);
+        }
+
+        51
+    }
+
+    /// INT 10h, AH=0Dh: Read pixel (graphics mode)
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_read_pixel(&mut self) -> u32 {
+        // CX = column, DX = row, BH = page number
+        // Returns: AL = pixel color
+        let x = self.cpu.cx as u32;
+        let y = self.cpu.dx as u32;
+        let _page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Mode 13h (320x200 256-color): Linear addressing
+        let color = if x < 320 && y < 200 {
+            let offset = y * 320 + x;
+            let video_addr = 0xA0000 + offset;
+            self.cpu.memory.read(video_addr)
+        } else {
+            0
+        };
+
+        // Return color in AL
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (color as u16);
+        51
+    }
+
+    /// INT 10h, AH=10h: Palette/DAC functions
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_palette_functions(&mut self) -> u32 {
+        // AL = subfunction
+        // 00h = Set individual palette register
+        // 01h = Set overscan register
+        // 02h = Set all palette registers
+        // 03h = Toggle intensity/blinking
+        // 10h-13h = DAC color registers
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x03 => {
+                // Toggle intensity/blinking
+                // BL = 0: enable intensive colors
+                // BL = 1: enable blinking
+                // For now, just acknowledge
+                51
+            }
+            _ => {
+                // Other palette functions - stub
+                51
+            }
+        }
+    }
+
+    /// INT 10h, AH=11h: Character generator functions
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_character_generator(&mut self) -> u32 {
+        // AL = subfunction
+        // 00h-04h = Load font
+        // 10h-14h = Load font and program
+        // 20h-24h = Load font and set block
+        // 30h = Get font information
+        // For now, just acknowledge
+        51
+    }
+
+    /// INT 10h, AH=12h: Video subsystem configuration
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_video_subsystem_config(&mut self) -> u32 {
+        // BL = subfunction
+        // 10h = Get EGA info
+        // 20h = Select alternate print screen
+        // 30h = Select scan lines for text modes
+        // 31h = Enable/disable default palette loading
+        // 32h = Enable/disable video addressing
+        // 33h = Enable/disable gray-scale summing
+        // 34h = Enable/disable cursor emulation
+        // 36h = Enable/disable video refresh
+        // For now, just acknowledge
+        51
+    }
+
+    /// INT 10h, AH=1Ah: Display combination code
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_display_combination(&mut self) -> u32 {
+        // AL = subfunction
+        // 00h = Get display combination code
+        // 01h = Set display combination code
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x00 => {
+                // Get display combination code
+                // Return: AL = 1Ah (function supported)
+                //         BL = active display code
+                //         BH = alternate display code
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x1A;
+                self.cpu.bx = 0x0008; // VGA with color display
+                51
+            }
+            _ => {
+                // Set display combination - stub
+                51
+            }
+        }
     }
 
     /// Handle INT 16h - Keyboard BIOS services
@@ -2041,5 +2292,300 @@ mod tests {
 
         // Buffer should now be empty
         assert!(!cpu.cpu.memory.keyboard.has_data());
+    }
+
+    #[test]
+    fn test_int10h_select_active_page() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=05h, AL=3 (select page 3)
+        cpu.cpu.ax = 0x0503;
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify page was stored in BIOS data area
+        assert_eq!(cpu.cpu.memory.read(0x462), 3);
+    }
+
+    #[test]
+    fn test_int10h_write_char_only() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // Set cursor to known position (row 5, col 10)
+        cpu.cpu.memory.write(0x450, 10); // Column
+        cpu.cpu.memory.write(0x451, 5); // Row
+
+        // Preset some data at position with attributes
+        let video_offset = (5 * 80 + 10) * 2;
+        let video_addr = 0xB8000 + video_offset;
+        cpu.cpu.memory.write(video_addr, b'A'); // Preset char
+        cpu.cpu.memory.write(video_addr + 1, 0x1F); // Preset attribute
+        cpu.cpu.memory.write(video_addr + 2, b'B');
+        cpu.cpu.memory.write(video_addr + 3, 0x2E);
+        cpu.cpu.memory.write(video_addr + 4, b'C');
+        cpu.cpu.memory.write(video_addr + 5, 0x3D);
+
+        // AH=0Ah, AL='X', BH=0 (page), CX=3 (count)
+        cpu.cpu.ax = 0x0A58; // 'X'
+        cpu.cpu.bx = 0x0000;
+        cpu.cpu.cx = 3;
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify characters were written without changing attributes
+        assert_eq!(cpu.cpu.memory.read(video_addr), b'X');
+        assert_eq!(cpu.cpu.memory.read(video_addr + 1), 0x1F); // Attribute unchanged
+        assert_eq!(cpu.cpu.memory.read(video_addr + 2), b'X');
+        assert_eq!(cpu.cpu.memory.read(video_addr + 3), 0x2E); // Attribute unchanged
+        assert_eq!(cpu.cpu.memory.read(video_addr + 4), b'X');
+        assert_eq!(cpu.cpu.memory.read(video_addr + 5), 0x3D); // Attribute unchanged
+    }
+
+    #[test]
+    fn test_int10h_write_pixel() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=0Ch, AL=14 (color yellow in mode 13h), CX=100 (x), DX=50 (y)
+        cpu.cpu.ax = 0x0C0E; // Color 14
+        cpu.cpu.cx = 100; // X
+        cpu.cpu.dx = 50; // Y
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify pixel was written (Mode 13h: 0xA0000 + y*320 + x)
+        let offset = 50 * 320 + 100;
+        let pixel_addr = 0xA0000 + offset;
+        assert_eq!(cpu.cpu.memory.read(pixel_addr), 14);
+    }
+
+    #[test]
+    fn test_int10h_read_pixel() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write test pixel first
+        let offset = 75 * 320 + 150;
+        let pixel_addr = 0xA0000 + offset;
+        cpu.cpu.memory.write(pixel_addr, 42); // Write color 42
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=0Dh, CX=150 (x), DX=75 (y)
+        cpu.cpu.ax = 0x0D00;
+        cpu.cpu.cx = 150; // X
+        cpu.cpu.dx = 75; // Y
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify color was returned in AL
+        assert_eq!(cpu.cpu.ax & 0xFF, 42);
+    }
+
+    #[test]
+    fn test_int10h_scroll_up_clear() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Fill window with test data
+        for row in 5..=10 {
+            for col in 10..=20 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+                cpu.cpu.memory.write(video_addr, b'X');
+                cpu.cpu.memory.write(video_addr + 1, 0x07);
+            }
+        }
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=06h, AL=0 (clear), BH=0x1F (attribute), CH,CL=5,10 (top), DH,DL=10,20 (bottom)
+        cpu.cpu.ax = 0x0600; // Clear
+        cpu.cpu.bx = 0x1F00; // Attribute
+        cpu.cpu.cx = 0x050A; // Row 5, Col 10
+        cpu.cpu.dx = 0x0A14; // Row 10, Col 20
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify window was cleared with new attribute
+        for row in 5..=10 {
+            for col in 10..=20 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+                assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
+                assert_eq!(cpu.cpu.memory.read(video_addr + 1), 0x1F);
+            }
+        }
+    }
+
+    #[test]
+    fn test_int10h_scroll_up_lines() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Fill window with identifiable data (row number as character)
+        for row in 0..=5 {
+            for col in 0..=10 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+                cpu.cpu.memory.write(video_addr, b'0' + (row as u8));
+                cpu.cpu.memory.write(video_addr + 1, 0x07);
+            }
+        }
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=06h, AL=2 (scroll 2 lines), BH=0x07, CH,CL=0,0, DH,DL=5,10
+        cpu.cpu.ax = 0x0602; // Scroll 2 lines
+        cpu.cpu.bx = 0x0700;
+        cpu.cpu.cx = 0x0000; // Top-left: 0,0
+        cpu.cpu.dx = 0x050A; // Bottom-right: 5,10
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify lines were scrolled up by 2
+        // Row 0 should now contain what was in row 2 ('2')
+        let video_addr = 0xB8000;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b'2');
+
+        // Row 1 should now contain what was in row 3 ('3')
+        let video_addr = 0xB8000 + (1 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b'3');
+
+        // Rows 4-5 should be filled with spaces
+        let video_addr = 0xB8000 + (4 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
+        let video_addr = 0xB8000 + (5 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
+    }
+
+    #[test]
+    fn test_int10h_scroll_down_lines() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Fill window with identifiable data (row number as character)
+        for row in 0..=5 {
+            for col in 0..=10 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+                cpu.cpu.memory.write(video_addr, b'0' + (row as u8));
+                cpu.cpu.memory.write(video_addr + 1, 0x07);
+            }
+        }
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=07h, AL=2 (scroll 2 lines), BH=0x07, CH,CL=0,0, DH,DL=5,10
+        cpu.cpu.ax = 0x0702; // Scroll down 2 lines
+        cpu.cpu.bx = 0x0700;
+        cpu.cpu.cx = 0x0000; // Top-left: 0,0
+        cpu.cpu.dx = 0x050A; // Bottom-right: 5,10
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify lines were scrolled down by 2
+        // Rows 0-1 should be filled with spaces
+        let video_addr = 0xB8000;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
+        let video_addr = 0xB8000 + (1 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
+
+        // Row 2 should now contain what was in row 0 ('0')
+        let video_addr = 0xB8000 + (2 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b'0');
+
+        // Row 3 should now contain what was in row 1 ('1')
+        let video_addr = 0xB8000 + (3 * 80) * 2;
+        assert_eq!(cpu.cpu.memory.read(video_addr), b'1');
+    }
+
+    #[test]
+    fn test_int10h_display_combination() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 10h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x10); // 10h
+
+        // AH=1Ah, AL=00h (get display combination)
+        cpu.cpu.ax = 0x1A00;
+
+        // Execute INT 10h
+        cpu.step();
+
+        // Verify function supported (AL=1Ah) and VGA returned
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x1A);
+        assert_eq!(cpu.cpu.bx, 0x0008); // VGA with color display
     }
 }

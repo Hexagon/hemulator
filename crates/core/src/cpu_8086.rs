@@ -2114,7 +2114,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                        
+
                         match reg {
                             0 => {
                                 // SGDT - Store Global Descriptor Table Register
@@ -2122,13 +2122,25 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit = self.protected_mode.gdtr.limit;
                                 let base = self.protected_mode.gdtr.base;
-                                
+
                                 self.write(segment, offset, (limit & 0xFF) as u8);
                                 self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
                                 self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(3), ((base >> 8) & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(4), ((base >> 16) & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(5), ((base >> 24) & 0xFF) as u8);
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(3),
+                                    ((base >> 8) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(4),
+                                    ((base >> 16) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(5),
+                                    ((base >> 24) & 0xFF) as u8,
+                                );
                                 self.cycles += 11;
                                 11
                             }
@@ -2137,13 +2149,25 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit = self.protected_mode.idtr.limit;
                                 let base = self.protected_mode.idtr.base;
-                                
+
                                 self.write(segment, offset, (limit & 0xFF) as u8);
                                 self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
                                 self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(3), ((base >> 8) & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(4), ((base >> 16) & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(5), ((base >> 24) & 0xFF) as u8);
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(3),
+                                    ((base >> 8) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(4),
+                                    ((base >> 16) & 0xFF) as u8,
+                                );
+                                self.write(
+                                    segment,
+                                    offset.wrapping_add(5),
+                                    ((base >> 24) & 0xFF) as u8,
+                                );
                                 self.cycles += 11;
                                 11
                             }
@@ -2153,13 +2177,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let limit_low = self.read(segment, offset) as u16;
                                 let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
                                 let limit = limit_low | (limit_high << 8);
-                                
+
                                 let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
                                 let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
                                 let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
                                 let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
-                                
+
                                 self.protected_mode.load_gdtr(base, limit);
                                 self.cycles += 11;
                                 11
@@ -2170,13 +2194,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let limit_low = self.read(segment, offset) as u16;
                                 let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
                                 let limit = limit_low | (limit_high << 8);
-                                
+
                                 let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
                                 let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
                                 let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
                                 let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
-                                
+
                                 self.protected_mode.load_idtr(base, limit);
                                 self.cycles += 11;
                                 11
@@ -2214,11 +2238,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 15;
                             return 15;
                         }
-                        
+
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let _selector = self.read_rm16(modbits, rm);
-                        
+
                         // Stub implementation: Set ZF=0 (invalid selector)
                         // In a full implementation, this would:
                         // 1. Check if selector is valid
@@ -2226,7 +2250,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // 3. Set ZF=1 if valid, store access rights in destination
                         self.set_flag(FLAG_ZF, false);
                         self.set_reg16(reg, 0);
-                        
+
                         self.cycles += 15;
                         15
                     }
@@ -2236,15 +2260,15 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 15;
                             return 15;
                         }
-                        
+
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let _selector = self.read_rm16(modbits, rm);
-                        
+
                         // Stub implementation: Set ZF=0 (invalid selector)
                         self.set_flag(FLAG_ZF, false);
                         self.set_reg16(reg, 0);
-                        
+
                         self.cycles += 15;
                         15
                     }
@@ -2254,7 +2278,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 2;
                             return 2;
                         }
-                        
+
                         // Clear TS bit (bit 3) in MSW/CR0
                         let msw = self.protected_mode.get_msw();
                         self.protected_mode.set_msw(msw & !0x0008);
@@ -2270,7 +2294,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                        
+
                         match reg {
                             0 => {
                                 // SLDT - Store Local Descriptor Table Register

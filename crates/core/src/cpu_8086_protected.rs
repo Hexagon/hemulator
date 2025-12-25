@@ -293,10 +293,10 @@ mod tests {
         let bytes = [
             0xFF, 0xFF, // Limit low (0xFFFF)
             0x00, 0x00, // Base low (0x0000)
-            0x10,       // Base mid (0x10)
-            0x9A,       // Access (code, present, readable, DPL=0)
-            0xCF,       // Limit high (0xF) + flags (0xC = granularity + 32-bit)
-            0x00,       // Base high (0x00)
+            0x10, // Base mid (0x10)
+            0x9A, // Access (code, present, readable, DPL=0)
+            0xCF, // Limit high (0xF) + flags (0xC = granularity + 32-bit)
+            0x00, // Base high (0x00)
         ];
 
         let desc = SegmentDescriptor::from_bytes(&bytes);
@@ -313,10 +313,10 @@ mod tests {
         let bytes = [
             0x00, 0x10, // Limit
             0x00, 0x00, // Base low
-            0x00,       // Base mid
-            0x92,       // Access (data, present, writable, DPL=0)
-            0x00,       // Flags
-            0x00,       // Base high
+            0x00, // Base mid
+            0x92, // Access (data, present, writable, DPL=0)
+            0x00, // Flags
+            0x00, // Base high
         ];
 
         let desc = SegmentDescriptor::from_bytes(&bytes);
@@ -327,8 +327,7 @@ mod tests {
     #[test]
     fn test_segment_descriptor_not_present() {
         let bytes = [
-            0xFF, 0xFF, 0x00, 0x00, 0x00,
-            0x12, // Access without present bit
+            0xFF, 0xFF, 0x00, 0x00, 0x00, 0x12, // Access without present bit
             0x00, 0x00,
         ];
 
@@ -339,8 +338,7 @@ mod tests {
     #[test]
     fn test_segment_descriptor_dpl() {
         let bytes = [
-            0x00, 0x00, 0x00, 0x00, 0x00,
-            0xFA, // Access with DPL=3 (bits 5-6 = 11)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0xFA, // Access with DPL=3 (bits 5-6 = 11)
             0x00, 0x00,
         ];
 
