@@ -120,7 +120,12 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 **Without the host modifier**: Function keys are sent to the DOS program
 **With the host modifier**: Function keys control the emulator
 
-**Note**: ESC always exits the emulator, even in PC mode.
+**Note**: ESC requires the host modifier (Right Ctrl + ESC) to exit the emulator in PC mode.
+
+**Known Limitation**: Some host key + key combinations may be intercepted by your operating system before reaching the emulator. For example, on Windows, Left Ctrl + ESC opens the Start menu and cannot be captured. If you experience issues with your chosen host modifier key:
+- Try using `RightCtrl` instead of `LeftCtrl` (default setting)
+- Or choose a different modifier key in `config.json` (e.g., `RightAlt`)
+- Some OS-level keyboard shortcuts cannot be overridden by applications
 
 ### Function Keys
 
