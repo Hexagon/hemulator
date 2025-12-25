@@ -62,6 +62,8 @@ pub struct PcSystem {
     cycles: u64,
     frame_cycles: u64,
     video: Box<dyn VideoAdapter>,
+    boot_started: bool, // Track if boot sector has started executing
+    boot_delay_frames: u32, // Frames to wait at POST screen (5 seconds = 300 frames at 60Hz)
 }
 
 impl Default for PcSystem {
@@ -99,7 +101,7 @@ impl PcSystem {
         bus.load_bios(&bios);
 
         // Write BIOS POST screen to video RAM
-        bios::write_post_screen_to_vram(bus.vram_mut());
+        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model.name());
 
         let cpu = PcCpu::with_model(bus, cpu_model);
 
@@ -108,6 +110,8 @@ impl PcSystem {
             cycles: 0,
             frame_cycles: 0,
             video: video_adapter,
+            boot_started: false,
+            boot_delay_frames: 300, // 5 seconds at 60 Hz
         }
     }
 
@@ -272,10 +276,13 @@ impl System for PcSystem {
         self.cpu.bus_mut().reset();
         self.cycles = 0;
         self.frame_cycles = 0;
+        self.boot_started = false;
+        self.boot_delay_frames = 300; // 5 seconds at 60 Hz
 
         // Write BIOS POST screen to video RAM
+        let cpu_model_name = self.cpu_model().name();
         let vram = self.cpu.bus_mut().vram_mut();
-        bios::write_post_screen_to_vram(vram);
+        bios::write_post_screen_to_vram(vram, cpu_model_name);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -283,8 +290,128 @@ impl System for PcSystem {
         // At 60 Hz, that's ~79,500 cycles per frame
         const CYCLES_PER_FRAME: u32 = 79500;
 
-        // Ensure boot sector is loaded before first execution
-        self.ensure_boot_sector_loaded();
+        // Boot delay: Wait at POST screen for 5 seconds before loading boot sector
+        if !self.boot_started && self.boot_delay_frames > 0 {
+            // Check for ESC key to abort boot
+            if self.cpu.bus().keyboard.has_esc() {
+                // ESC pressed - skip boot delay and halt
+                self.boot_delay_frames = 0;
+                // Don't set boot_started to true - this keeps system at POST screen
+                
+                let cpu_model_name = self.cpu_model().name();
+                let vram_mut = self.cpu.bus_mut().vram_mut();
+                
+                // Refresh POST screen
+                bios::write_post_screen_to_vram(vram_mut, cpu_model_name);
+                
+                // Write abort message
+                let text_buffer_offset = 0x18000;
+                let abort_msg = b"Boot aborted by user (ESC key pressed)";
+                let row = 20; // Row 20 (near bottom)
+                let col = 20; // Column 20 (centered-ish)
+                for (i, &ch) in abort_msg.iter().enumerate() {
+                    let offset = text_buffer_offset + (row * 80 + col + i) * 2;
+                    if offset + 1 < vram_mut.len() {
+                        vram_mut[offset] = ch;
+                        vram_mut[offset + 1] = 0x0C; // Bright red on black
+                    }
+                }
+                
+                // Update mount status after writing to VRAM
+                drop(vram_mut);
+                self.update_post_screen();
+                
+                // Clear keyboard buffer
+                self.cpu.bus_mut().keyboard.clear();
+            } else {
+                self.boot_delay_frames -= 1;
+                
+                let cpu_model_name = self.cpu_model().name();
+                let vram_mut = self.cpu.bus_mut().vram_mut();
+                
+                // Refresh POST screen every frame during boot delay to show live clock
+                bios::write_post_screen_to_vram(vram_mut, cpu_model_name);
+                
+                // Update mount status
+                drop(vram_mut);
+                self.update_post_screen();
+                
+                // If delay expired, allow boot to proceed
+                if self.boot_delay_frames == 0 {
+                    self.boot_started = true;
+                    
+                    // Clear the POST screen before loading boot sector
+                    let vram_mut = self.cpu.bus_mut().vram_mut();
+                    let text_buffer_offset = 0x18000;
+                    // Clear entire text buffer (80x25 x 2 bytes = 4000 bytes)
+                    for i in 0..4000 {
+                        if text_buffer_offset + i < vram_mut.len() {
+                            if i % 2 == 0 {
+                                vram_mut[text_buffer_offset + i] = 0x20; // Space character
+                            } else {
+                                vram_mut[text_buffer_offset + i] = 0x07; // White on black
+                            }
+                        }
+                    }
+                    drop(vram_mut);
+                    
+                    // Initialize cursor position at (0,0) in BIOS data area
+                    use emu_core::cpu_8086::Memory8086;
+                    self.cpu.bus_mut().write(0x450, 0); // Column 0
+                    self.cpu.bus_mut().write(0x451, 0); // Row 0
+                    
+                    // Set up BIOS interrupt vectors (normally done by BIOS init code)
+                    // INT 0x10 (Video Services) at 0x0040
+                    self.cpu.bus_mut().write(0x40, 0x00); // Offset low byte
+                    self.cpu.bus_mut().write(0x41, 0x01); // Offset high byte (0x0100)
+                    self.cpu.bus_mut().write(0x42, 0x00); // Segment low byte
+                    self.cpu.bus_mut().write(0x43, 0xF0); // Segment high byte (0xF000)
+                    
+                    // INT 0x13 (Disk Services) at 0x004C
+                    self.cpu.bus_mut().write(0x4C, 0x00); // Offset low
+                    self.cpu.bus_mut().write(0x4D, 0x02); // Offset high (0x0200)
+                    self.cpu.bus_mut().write(0x4E, 0x00); // Segment low
+                    self.cpu.bus_mut().write(0x4F, 0xF0); // Segment high (0xF000)
+                    
+                    // INT 0x16 (Keyboard Services) at 0x0058
+                    self.cpu.bus_mut().write(0x58, 0x00); // Offset low
+                    self.cpu.bus_mut().write(0x59, 0x03); // Offset high (0x0300)
+                    self.cpu.bus_mut().write(0x5A, 0x00); // Segment low
+                    self.cpu.bus_mut().write(0x5B, 0xF0); // Segment high (0xF000)
+                    
+                    // INT 0x21 (DOS Services) at 0x0084
+                    self.cpu.bus_mut().write(0x84, 0x00); // Offset low
+                    self.cpu.bus_mut().write(0x85, 0x04); // Offset high (0x0400)
+                    self.cpu.bus_mut().write(0x86, 0x00); // Segment low
+                    self.cpu.bus_mut().write(0x87, 0xF0); // Segment high (0xF000)
+                    
+                    // Load boot sector
+                    self.ensure_boot_sector_loaded();
+                    
+                    // Jump directly to boot sector at 0x0000:0x7C00
+                    // Skip BIOS init since we're delaying boot
+                    self.cpu.set_cs(0x0000);
+                    self.cpu.set_ip(0x7C00);
+                }
+            }
+            
+            // Create frame buffer and render POST screen
+            let mut frame = Frame::new(self.video.fb_width() as u32, self.video.fb_height() as u32);
+            let vram = self.cpu.bus().vram();
+            let text_buffer_offset = 0x18000;
+            if vram.len() > text_buffer_offset {
+                self.video
+                    .render(&vram[text_buffer_offset..], &mut frame.pixels);
+            }
+            
+            return Ok(frame);
+        }
+
+        // Normal execution after boot delay
+        if !self.boot_started {
+            self.boot_started = true;
+            self.ensure_boot_sector_loaded();
+        }
 
         // Create frame buffer for text mode 80x25 (640x400 pixels)
         let mut frame = Frame::new(self.video.fb_width() as u32, self.video.fb_height() as u32);
@@ -312,6 +439,7 @@ impl System for PcSystem {
         let vram = self.cpu.bus().vram();
         // The text mode buffer is at offset 0x18000 in VRAM (0xB8000 - 0xA0000)
         let text_buffer_offset = 0x18000;
+        
         if vram.len() > text_buffer_offset {
             self.video
                 .render(&vram[text_buffer_offset..], &mut frame.pixels);

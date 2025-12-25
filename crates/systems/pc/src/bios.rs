@@ -21,18 +21,61 @@ mod boot_priority {
     }
 }
 
-/// Generate a minimal BIOS ROM
+/// Generate a minimal BIOS ROM with interrupt handlers
 ///
 /// This BIOS:
 /// 1. Initializes segment registers and stack  
-/// 2. Jumps to boot sector at 0x0000:0x7C00 (loaded by emulator)
-///
-/// Note: The POST screen is displayed by writing directly to video RAM
-/// from the emulator, not from BIOS code.
+/// 2. Sets up interrupt vectors in low memory
+/// 3. Provides basic INT 10h (video), INT 13h (disk), INT 16h (keyboard), INT 21h (DOS) handlers
+/// 4. Jumps to boot sector at 0x0000:0x7C00 (loaded by emulator)
 ///
 /// Size: 64KB (standard BIOS size)
 pub fn generate_minimal_bios() -> Vec<u8> {
     let mut bios = vec![0x00; 0x10000]; // 64KB of zeros
+
+    // INT 10h handler at offset 0x100 - Video Services
+    let int10h_offset = 0x100;
+    let int10h_handler: Vec<u8> = vec![
+        // For now, just return successfully (clear CF and return)
+        0x50,       // PUSH AX
+        0x80, 0xFC, 0x0E, // CMP AH, 0x0E (teletype output)
+        0x75, 0x01, // JNZ skip
+        // If teletype, we could write to video memory here
+        // For now just skip
+        0x58,       // POP AX (skip label)
+        0xF8,       // CLC (clear carry flag - success)
+        0xCF,       // IRET
+    ];
+    bios[int10h_offset..int10h_offset + int10h_handler.len()].copy_from_slice(&int10h_handler);
+
+    // INT 13h handler at offset 0x200 - Disk Services
+    let int13h_offset = 0x200;
+    let int13h_handler: Vec<u8> = vec![
+        // Return success for all disk operations
+        0x30, 0xE4, // XOR AH, AH (AH = 0 = success)
+        0xF8,       // CLC (clear carry flag)
+        0xCF,       // IRET
+    ];
+    bios[int13h_offset..int13h_offset + int13h_handler.len()].copy_from_slice(&int13h_handler);
+
+    // INT 16h handler at offset 0x300 - Keyboard Services
+    let int16h_offset = 0x300;
+    let int16h_handler: Vec<u8> = vec![
+        // Return 0 in AX (no key available)
+        0x30, 0xC0, // XOR AX, AX
+        0xF8,       // CLC
+        0xCF,       // IRET
+    ];
+    bios[int16h_offset..int16h_offset + int16h_handler.len()].copy_from_slice(&int16h_handler);
+
+    // INT 21h handler at offset 0x400 - DOS Services  
+    let int21h_offset = 0x400;
+    let int21h_handler: Vec<u8> = vec![
+        // Stub - just return
+        0xF8,       // CLC
+        0xCF,       // IRET
+    ];
+    bios[int21h_offset..int21h_offset + int21h_handler.len()].copy_from_slice(&int21h_handler);
 
     // Main boot code at offset 0 (will be reached via entry point jump)
     let init_code: Vec<u8> = vec![
@@ -42,6 +85,32 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0x8E, 0xC0, // MOV ES, AX
         0x8E, 0xD0, // MOV SS, AX
         0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
+        
+        // Set up interrupt vectors
+        // INT 0x10 (Video Services) at 0x0040
+        0xB8, 0x00, 0x01, // MOV AX, 0x0100 (offset of INT 10h handler)
+        0xA3, 0x40, 0x00, // MOV [0x0040], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
+        0xA3, 0x42, 0x00, // MOV [0x0042], AX
+        
+        // INT 0x13 (Disk Services) at 0x004C
+        0xB8, 0x00, 0x02, // MOV AX, 0x0200
+        0xA3, 0x4C, 0x00, // MOV [0x004C], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000
+        0xA3, 0x4E, 0x00, // MOV [0x004E], AX
+        
+        // INT 0x16 (Keyboard Services) at 0x0058
+        0xB8, 0x00, 0x03, // MOV AX, 0x0300
+        0xA3, 0x58, 0x00, // MOV [0x0058], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000
+        0xA3, 0x5A, 0x00, // MOV [0x005A], AX
+        
+        // INT 0x21 (DOS Services) at 0x0084
+        0xB8, 0x00, 0x04, // MOV AX, 0x0400
+        0xA3, 0x84, 0x00, // MOV [0x0084], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000
+        0xA3, 0x86, 0x00, // MOV [0x0086], AX
+        
         0xFB, // STI - enable interrupts
         // Jump to boot sector at 0x0000:0x7C00
         0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
@@ -61,10 +130,9 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     // We have space from 0xFFF0 to 0xFFF4 (5 bytes) before the date
     let entry_point_offset = 0xFFF0;
     let entry_code: Vec<u8> = vec![
-        // Jump to main init code at offset 0
-        // We can't use JMP FAR to 0xFFFF:0x0000 (would wrap incorrectly)
-        // Instead, JMP FAR to 0x0000:0x0000 which contains our init code
-        0xEA, 0x00, 0x00, 0x00, 0x00, // JMP FAR 0x0000:0x0000 (5 bytes - fits!)
+        // Jump to main init code at offset 0 (physical 0xF0000)
+        // CS=0xF000, IP=0x0000 -> segment 0xF000 * 16 + 0x0000 = 0xF0000
+        0xEA, 0x00, 0x00, 0x00, 0xF0, // JMP FAR 0xF000:0x0000 (5 bytes - fits!)
     ];
     bios[entry_point_offset..entry_point_offset + entry_code.len()].copy_from_slice(&entry_code);
 
@@ -107,7 +175,7 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 
 /// Write BIOS POST screen to video RAM
 /// This displays a traditional PC BIOS Power-On Self-Test screen
-pub fn write_post_screen_to_vram(vram: &mut [u8]) {
+pub fn write_post_screen_to_vram(vram: &mut [u8], cpu_model_name: &str) {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // Get current system time
@@ -202,7 +270,8 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
 
     write_line(3, 2, "Hemu PC/XT Compatible BIOS", post_attr);
     write_line(5, 2, "Processor:", label_attr);
-    write_line(5, 15, "Intel 8086 @ 4.77 MHz", 0x0E); // Yellow
+    let cpu_display = format!("{} @ 4.77 MHz", cpu_model_name);
+    write_line(5, 15, &cpu_display, 0x0E); // Yellow
 
     write_line(7, 2, "Memory Test:", label_attr);
     write_line(7, 15, "640K OK", 0x0A); // Bright green
@@ -218,7 +287,7 @@ pub fn write_post_screen_to_vram(vram: &mut [u8]) {
     // Instructions at bottom
     let help_attr = 0x0B; // Bright cyan on black
     write_line(20, 2, "Press F3 to mount disks", help_attr);
-    write_line(21, 2, "Press F12 to reset system", help_attr);
+    write_line(21, 2, "Press ESC to stay in BIOS", help_attr);
     write_line(22, 2, "Press F8 to save virtual machine", help_attr);
 
     // Bottom line (white on blue)
@@ -292,7 +361,7 @@ pub fn update_post_screen_mounts(
         write_line(
             24,
             2,
-            "Bootable disk detected. Press F12 to boot.     ",
+            "Press ESC to stay in BIOS or wait to boot...  ",
             header_attr,
         );
     } else {

@@ -47,6 +47,16 @@ impl PcCpu {
         self.cpu.set_model(model);
     }
 
+    /// Set CS register
+    pub fn set_cs(&mut self, value: u16) {
+        self.cpu.cs = value;
+    }
+
+    /// Set IP register
+    pub fn set_ip(&mut self, value: u16) {
+        self.cpu.ip = value;
+    }
+
     /// Reset the CPU to initial state
     pub fn reset(&mut self) {
         self.cpu.reset();
