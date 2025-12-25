@@ -106,6 +106,10 @@ pub struct Cpu8086<M: Memory8086> {
     pub es: u16,
     /// SS register (stack segment)
     pub ss: u16,
+    /// FS register (extra segment, 80386+ only)
+    pub fs: u16,
+    /// GS register (extra segment, 80386+ only)
+    pub gs: u16,
 
     // Control registers
     /// IP register (instruction pointer)
@@ -164,6 +168,8 @@ impl<M: Memory8086> Cpu8086<M> {
             ds: 0,
             es: 0,
             ss: 0,
+            fs: 0,
+            gs: 0,
             ip: 0,
             flags: 0x0002, // Reserved bit 1 is always set
             cycles: 0,
@@ -198,6 +204,8 @@ impl<M: Memory8086> Cpu8086<M> {
         self.ds = 0;
         self.es = 0;
         self.ss = 0;
+        self.fs = 0;
+        self.gs = 0;
         self.ip = 0;
         self.flags = 0x0002;
         self.cycles = 0;
@@ -3741,6 +3749,21 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
 
                 match reg {
+                    // TEST r/m8, imm8
+                    0b000 => {
+                        let val = self.read_rm8(modbits, rm);
+                        let imm = self.fetch_u8();
+                        let result = val & imm;
+                        self.update_flags_8(result);
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        self.cycles += if modbits == 0b11 { 5 } else { 11 };
+                        if modbits == 0b11 {
+                            5
+                        } else {
+                            11
+                        }
+                    }
                     // NOT r/m8
                     0b010 => {
                         let val = self.read_rm8(modbits, rm);
@@ -3892,6 +3915,21 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
 
                 match reg {
+                    // TEST r/m16, imm16 (reg=0 or reg=1)
+                    0b000 | 0b001 => {
+                        let val = self.read_rm16(modbits, rm);
+                        let imm = self.fetch_u16();
+                        let result = val & imm;
+                        self.update_flags_16(result);
+                        self.set_flag(FLAG_CF, false);
+                        self.set_flag(FLAG_OF, false);
+                        self.cycles += if modbits == 0b11 { 5 } else { 11 };
+                        if modbits == 0b11 {
+                            5
+                        } else {
+                            11
+                        }
+                    }
                     // NOT r/m16
                     0b010 => {
                         let val = self.read_rm16(modbits, rm);
@@ -4770,6 +4808,47 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10; // No interrupt case
                     10
                 }
+            }
+
+            // ARPL r/m16, r16 (0x63) - 80286+ protected mode instruction
+            // Adjust RPL field of selector: if RPL of r/m16 < RPL of r16, set r/m16's RPL to r16's RPL and set ZF
+            // For real mode emulation, we stub this as a NOP that clears ZF
+            0x63 => {
+                let modrm = self.fetch_u8();
+                let (modbits, _reg, _rm) = Self::decode_modrm(modrm);
+                // In real mode, ARPL is effectively a NOP (or may behave as MOVSXD on x86-64)
+                // We'll just clear ZF to indicate no adjustment was needed
+                self.set_flag(FLAG_ZF, false);
+                self.cycles += if modbits == 0b11 { 7 } else { 17 };
+                if modbits == 0b11 {
+                    7
+                } else {
+                    17
+                }
+            }
+
+            // FS segment override prefix (0x64) - 80386+
+            0x64 => {
+                // Read next instruction and execute with FS override
+                // For simplicity, we'll just pass through to next instruction
+                // A full implementation would set a segment override flag
+                let _next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1); // Back up IP
+                self.step() // Execute next instruction
+                            // Note: This is a simplified implementation
+                            // Real hardware would affect address calculation in the next instruction
+            }
+
+            // GS segment override prefix (0x65) - 80386+
+            0x65 => {
+                // Read next instruction and execute with GS override
+                // For simplicity, we'll just pass through to next instruction
+                // A full implementation would set a segment override flag
+                let _next_opcode = self.fetch_u8();
+                self.ip = self.ip.wrapping_sub(1); // Back up IP
+                self.step() // Execute next instruction
+                            // Note: This is a simplified implementation
+                            // Real hardware would affect address calculation in the next instruction
             }
 
             // PUSH immediate word (0x68) - 80186+
