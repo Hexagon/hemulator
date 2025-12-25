@@ -966,8 +966,11 @@ mod tests {
     fn test_boot_sector_smoke_test() {
         // This test uses the test boot sector from test_roms/pc/boot.bin
         // The boot sector writes "BOOT OK" to video memory using ES: segment override
-        
-        let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../test_roms/pc/boot.bin");
+
+        let boot_bin_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/pc/boot.bin"
+        );
 
         // Skip if boot.bin doesn't exist (not built yet)
         if !std::path::Path::new(boot_bin_path).exists() {
@@ -1012,7 +1015,7 @@ mod tests {
         sys.cpu.set_cs(0x0000);
         sys.cpu.set_ip(0x7C00);
         sys.cpu.unhalt();
-        
+
         // Execute boot code
         for _ in 0..10 {
             let _ = sys.step_frame();
@@ -1052,6 +1055,127 @@ mod tests {
         } else {
             panic!("VRAM too small");
         }
+    }
+
+    #[test]
+    fn test_menu_rom_smoke_test() {
+        // This test uses the interactive menu boot sector from test_roms/pc/menu.bin
+        // The boot sector should:
+        // 1. Print "BOOT OK" message
+        // 2. Run memory test and print "MEM OK"
+        // 3. Run CPU test and print "CPU OK"
+        // 4. Display a menu using INT 10h
+        // 5. Wait for keyboard input using INT 16h
+
+        let menu_bin_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/pc/menu.bin"
+        );
+
+        // Skip if menu.bin doesn't exist (not built yet)
+        if !std::path::Path::new(menu_bin_path).exists() {
+            eprintln!("Skipping menu ROM smoke test: {} not found", menu_bin_path);
+            eprintln!("Build with: cd test_roms/pc && ./build_menu.sh");
+            return;
+        }
+
+        let boot_sector = std::fs::read(menu_bin_path).expect("Failed to read menu.bin");
+        assert_eq!(
+            boot_sector.len(),
+            512,
+            "Boot sector should be exactly 512 bytes"
+        );
+
+        // Verify boot signature
+        assert_eq!(
+            boot_sector[510], 0x55,
+            "Boot signature byte 1 should be 0x55"
+        );
+        assert_eq!(
+            boot_sector[511], 0xAA,
+            "Boot signature byte 2 should be 0xAA"
+        );
+
+        // Create a floppy image with the boot sector
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        floppy[0..512].copy_from_slice(&boot_sector);
+
+        // Create system and mount floppy
+        let mut sys = PcSystem::new();
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Skip boot delay and manually load boot sector
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+
+        // Clear VRAM to eliminate POST screen
+        {
+            let vram_mut = sys.cpu.bus_mut().vram_mut();
+            for i in 0..vram_mut.len() {
+                vram_mut[i] = 0;
+            }
+        }
+
+        // Load and execute boot sector
+        let _ = sys.step_frame();
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(0x7C00);
+        sys.cpu.unhalt();
+
+        // Execute boot code - enough frames for the menu to display
+        for _ in 0..20 {
+            let _ = sys.step_frame();
+        }
+
+        // Check that messages were written to video memory
+        let vram = sys.cpu.bus().vram();
+        let text_offset = 0x18000; // CGA text mode video memory offset
+
+        // Extract text from VRAM (skip attribute bytes)
+        let vram_str: Vec<u8> = (0..2000)
+            .filter_map(|i| {
+                if i % 2 == 0 && text_offset + i < vram.len() {
+                    Some(vram[text_offset + i])
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let vram_text = String::from_utf8_lossy(&vram_str);
+
+        // Verify "BOOT OK" is displayed
+        assert!(
+            vram_text.contains("BOOT OK"),
+            "Expected 'BOOT OK' message in VRAM"
+        );
+
+        // Verify "MEM OK" is displayed
+        assert!(
+            vram_text.contains("MEM OK"),
+            "Expected 'MEM OK' message in VRAM"
+        );
+
+        // Verify "CPU OK" is displayed
+        assert!(
+            vram_text.contains("CPU OK"),
+            "Expected 'CPU OK' message in VRAM"
+        );
+
+        // Verify menu is displayed
+        assert!(
+            vram_text.contains("PC Test Menu"),
+            "Menu title should be displayed"
+        );
+        assert!(
+            vram_text.contains("Test user input"),
+            "Menu option 1 should be displayed"
+        );
+        assert!(
+            vram_text.contains("Calculate 2+2"),
+            "Menu option 2 should be displayed"
+        );
     }
 
     #[test]

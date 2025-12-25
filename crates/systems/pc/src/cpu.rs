@@ -726,7 +726,7 @@ impl PcCpu {
 
             // AH = scan code, AL = ASCII character
             self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
-            
+
             // Ensure CPU is not halted when we return a key
             self.cpu.set_halted(false);
         } else {
