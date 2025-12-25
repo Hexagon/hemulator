@@ -1707,7 +1707,9 @@ fn main() {
         }
 
         // Check for reset key (F12)
-        if window.is_key_pressed(Key::F12, false) && rom_loaded {
+        // For PC systems, allow reset even without ROM to trigger boot
+        let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
+        if window.is_key_pressed(Key::F12, false) && can_reset {
             sys.reset();
             println!("System reset");
         }

@@ -37,6 +37,7 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     let mut bios = vec![0x00; 0x10000]; // 64KB of zeros
 
     // Main boot code at offset 0 (will be reached via entry point jump)
+    // This code checks if boot sector is loaded and either boots or halts
     let init_code: Vec<u8> = vec![
         0xFA, // CLI - disable interrupts
         0xB8, 0x00, 0x00, // MOV AX, 0x0000
@@ -45,8 +46,22 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0x8E, 0xD0, // MOV SS, AX
         0xBC, 0xFE, 0xFF, // MOV SP, 0xFFFE
         0xFB, // STI - enable interrupts
-        // Jump to boot sector at 0x0000:0x7C00
+        
+        // Check if boot sector is loaded by checking signature at 0x7C00 + 510
+        // We'll check if byte at 0x7DFE is 0x55 and 0x7DFF is 0xAA
+        0xBE, 0xFE, 0x7D, // MOV SI, 0x7DFE (offset of boot signature)
+        0x8A, 0x04,       // MOV AL, [SI]
+        0x3C, 0x55,       // CMP AL, 0x55
+        0x75, 0x08,       // JNZ skip_boot (if not equal, skip boot - jump 8 bytes)
+        0x8A, 0x44, 0x01, // MOV AL, [SI+1]
+        0x3C, 0xAA,       // CMP AL, 0xAA
+        0x75, 0x02,       // JNZ skip_boot (if not equal, skip boot - jump 2 bytes)
+        // Boot signature valid - jump to boot sector
         0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
+        
+        // skip_boot: No valid boot sector - infinite loop (HLT)
+        // 0xF4,       // HLT
+        0xEB, 0xFE,    // JMP -2 (infinite loop - simpler than HLT)
     ];
     bios[0..init_code.len()].copy_from_slice(&init_code);
 
