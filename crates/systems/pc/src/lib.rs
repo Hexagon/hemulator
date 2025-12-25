@@ -966,8 +966,11 @@ mod tests {
     fn test_boot_sector_smoke_test() {
         // This test uses the test boot sector from test_roms/pc/boot.bin
         // The boot sector writes "BOOT OK" to video memory using ES: segment override
-        
-        let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../test_roms/pc/boot.bin");
+
+        let boot_bin_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/pc/boot.bin"
+        );
 
         // Skip if boot.bin doesn't exist (not built yet)
         if !std::path::Path::new(boot_bin_path).exists() {
@@ -1012,7 +1015,7 @@ mod tests {
         sys.cpu.set_cs(0x0000);
         sys.cpu.set_ip(0x7C00);
         sys.cpu.unhalt();
-        
+
         // Execute boot code
         for _ in 0..10 {
             let _ = sys.step_frame();
@@ -1061,15 +1064,15 @@ mod tests {
         // 1. Print "BOOT OK" message
         // 2. Display a menu using INT 10h
         // 3. Wait for keyboard input using INT 16h
-        
-        let menu_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../test_roms/pc/menu.bin");
+
+        let menu_bin_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/pc/menu.bin"
+        );
 
         // Skip if menu.bin doesn't exist (not built yet)
         if !std::path::Path::new(menu_bin_path).exists() {
-            eprintln!(
-                "Skipping menu ROM smoke test: {} not found",
-                menu_bin_path
-            );
+            eprintln!("Skipping menu ROM smoke test: {} not found", menu_bin_path);
             eprintln!("Build with: cd test_roms/pc && ./build_menu.sh");
             return;
         }
@@ -1082,8 +1085,14 @@ mod tests {
         );
 
         // Verify boot signature
-        assert_eq!(boot_sector[510], 0x55, "Boot signature byte 1 should be 0x55");
-        assert_eq!(boot_sector[511], 0xAA, "Boot signature byte 2 should be 0xAA");
+        assert_eq!(
+            boot_sector[510], 0x55,
+            "Boot signature byte 1 should be 0x55"
+        );
+        assert_eq!(
+            boot_sector[511], 0xAA,
+            "Boot signature byte 2 should be 0xAA"
+        );
 
         // Create a floppy image with the boot sector
         let mut floppy = vec![0; 1474560]; // 1.44MB
@@ -1111,7 +1120,7 @@ mod tests {
         sys.cpu.set_cs(0x0000);
         sys.cpu.set_ip(0x7C00);
         sys.cpu.unhalt();
-        
+
         // Execute boot code - enough frames for the menu to display
         for _ in 0..20 {
             let _ = sys.step_frame();
@@ -1127,7 +1136,11 @@ mod tests {
             // Check for "BOOT OK" followed by CR LF
             assert_eq!(vram[text_offset], b'B', "Expected 'B' in 'BOOT OK'");
             assert_eq!(vram[text_offset + 2], b'O', "Expected 'O' in 'BOOT OK'");
-            assert_eq!(vram[text_offset + 4], b'O', "Expected second 'O' in 'BOOT OK'");
+            assert_eq!(
+                vram[text_offset + 4],
+                b'O',
+                "Expected second 'O' in 'BOOT OK'"
+            );
             assert_eq!(vram[text_offset + 6], b'T', "Expected 'T' in 'BOOT OK'");
             assert_eq!(vram[text_offset + 8], b' ', "Expected space in 'BOOT OK'");
             assert_eq!(vram[text_offset + 10], b'O', "Expected 'O' in 'BOOT OK'");
@@ -1135,22 +1148,33 @@ mod tests {
         } else {
             panic!("VRAM too small");
         }
-        
+
         // Also verify that the menu is displayed (check for "PC Test Menu")
         // The menu starts after "BOOT OK\r\n\r\n"
         // We can check for "=== PC Test Menu ===" somewhere in VRAM
-        let vram_str: Vec<u8> = (0..2000).filter_map(|i| {
-            if i % 2 == 0 && text_offset + i < vram.len() {
-                Some(vram[text_offset + i])
-            } else {
-                None
-            }
-        }).collect();
-        
+        let vram_str: Vec<u8> = (0..2000)
+            .filter_map(|i| {
+                if i % 2 == 0 && text_offset + i < vram.len() {
+                    Some(vram[text_offset + i])
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         let vram_text = String::from_utf8_lossy(&vram_str);
-        assert!(vram_text.contains("PC Test Menu"), "Menu title should be displayed");
-        assert!(vram_text.contains("Test user input"), "Menu option 1 should be displayed");
-        assert!(vram_text.contains("Calculate 2+2"), "Menu option 2 should be displayed");
+        assert!(
+            vram_text.contains("PC Test Menu"),
+            "Menu title should be displayed"
+        );
+        assert!(
+            vram_text.contains("Test user input"),
+            "Menu option 1 should be displayed"
+        );
+        assert!(
+            vram_text.contains("Calculate 2+2"),
+            "Menu option 2 should be displayed"
+        );
     }
 
     #[test]

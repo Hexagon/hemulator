@@ -2641,7 +2641,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         let modrm = self.fetch_u8();
                         let (_, reg, rm) = Self::decode_modrm(modrm);
-                        
+
                         // Read from control register (only CR0 is commonly used)
                         let cr_value = match reg {
                             0 => self.protected_mode.get_cr0(), // CR0
@@ -2649,7 +2649,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             3 => 0, // CR3 (page directory base) - stub
                             _ => 0, // Reserved
                         };
-                        
+
                         // Store to destination register
                         self.set_reg16(rm, cr_value);
                         self.cycles += 6;
@@ -2664,18 +2664,18 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         let modrm = self.fetch_u8();
                         let (_, reg, rm) = Self::decode_modrm(modrm);
-                        
+
                         // Read from source register
                         let value = self.get_reg16(rm);
-                        
+
                         // Write to control register (only CR0 is commonly used)
                         match reg {
                             0 => self.protected_mode.set_cr0(value), // CR0
-                            2 => {}, // CR2 (page fault linear address) - stub
-                            3 => {}, // CR3 (page directory base) - stub
-                            _ => {}, // Reserved
+                            2 => {} // CR2 (page fault linear address) - stub
+                            3 => {} // CR3 (page directory base) - stub
+                            _ => {} // Reserved
                         }
-                        
+
                         self.cycles += 10;
                         10
                     }
@@ -4224,7 +4224,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     } else {
                         // Memory mode - get effective address first to consume displacement bytes
                         let (seg, offset, _) = self.calc_effective_address(modbits, rm);
-                        let imm = self.fetch_u8();  // Now fetch immediate after displacement
+                        let imm = self.fetch_u8(); // Now fetch immediate after displacement
                         self.write(seg, offset, imm);
                         self.cycles += 10;
                         10
@@ -4260,7 +4260,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     } else {
                         // Memory mode - get effective address first to consume displacement bytes
                         let (seg, offset, _) = self.calc_effective_address(modbits, rm);
-                        let imm = self.fetch_u16();  // Now fetch immediate after displacement
+                        let imm = self.fetch_u16(); // Now fetch immediate after displacement
                         self.write_u16(seg, offset, imm);
                         self.cycles += 10;
                         10
