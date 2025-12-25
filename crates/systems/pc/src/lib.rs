@@ -963,23 +963,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Requires segment override prefix support (ES:, CS:, etc.)
     fn test_boot_sector_smoke_test() {
         // This test uses the test boot sector from test_roms/pc/boot.bin
         // The boot sector writes "BOOT OK" to video memory using ES: segment override
-        // 
-        // KNOWN ISSUE: Segment override prefixes (0x26 ES:, 0x2E CS:, 0x36 SS:, 0x3E DS:)
-        // are not properly implemented in the CPU emulator. The current implementation
-        // just skips the prefix without affecting the next instruction's address calculation.
-        // This causes the boot sector to write to the wrong memory location.
-        //
-        // To fix: Implement proper segment override support by:
-        // 1. Adding segment_override state to Cpu8086
-        // 2. Setting it when 0x26/0x2E/0x36/0x3E prefixes are encountered
-        // 3. Using it in memory access instructions (MOV, PUSH, POP, etc.)
-        // 4. Clearing it after each instruction
-        //
-        // Impact: Affects any DOS program that uses segment overrides, which is very common.
         
         let boot_bin_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../test_roms/pc/boot.bin");
 
@@ -1013,6 +999,14 @@ mod tests {
         sys.boot_delay_frames = 0;
         sys.boot_started = false;
 
+        // Clear VRAM to eliminate POST screen
+        {
+            let vram_mut = sys.cpu.bus_mut().vram_mut();
+            for i in 0..vram_mut.len() {
+                vram_mut[i] = 0;
+            }
+        }
+
         // Load and execute boot sector
         let _ = sys.step_frame();
         sys.cpu.set_cs(0x0000);
@@ -1024,12 +1018,22 @@ mod tests {
             let _ = sys.step_frame();
         }
 
+        // Check where execution ended
+        let regs = sys.cpu.get_registers();
+        println!("After execution: CS={:04X} IP={:04X}", regs.cs, regs.ip);
+
         // Check that "BOOT OK" was written to video memory
         let vram = sys.cpu.bus().vram();
         let text_offset = 0x18000;
 
+        // Debug: print first 20 bytes
+        print!("First 20 bytes at 0x18000: ");
+        for i in 0..20 {
+            print!("{:02X} ", vram[text_offset + i]);
+        }
+        println!();
+
         // Verify "BOOT OK" (each char followed by green attribute 0x02)
-        // NOTE: This will fail until segment override support is implemented
         if vram.len() > text_offset + 14 {
             assert_eq!(vram[text_offset], b'B');
             assert_eq!(vram[text_offset + 1], 0x02);
