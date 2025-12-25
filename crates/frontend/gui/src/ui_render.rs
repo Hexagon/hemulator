@@ -269,7 +269,9 @@ pub fn create_help_overlay(
 
     help_lines.extend_from_slice(&[
         "",
-        "Function Keys:",
+        "HOST KEY: Hold Right Alt for emulator controls",
+        "",
+        "Function Keys (with Right Alt):",
         "  F1  - Help",
         "  F2  - Speed",
         "  F3  - Open ROM/Project",
@@ -279,9 +281,12 @@ pub fn create_help_overlay(
         "  F7  - Switch system",
         "  F8  - New project (PC)",
         "  F10 - Debug info",
-        "  F11 - Host menu (CRT filter)",
+        "  F11 - CRT filter",
         "  F12 - Reset",
-        "  ESC - Exit",
+        "  ESC - Exit emulator",
+        "",
+        "Without Right Alt: All keys pass to client",
+        "(ESC works in DOS, BIOS, etc.)",
         "",
         "Press F1 to close",
     ]);
