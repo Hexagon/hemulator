@@ -9,6 +9,7 @@
 
 use crate::bios::BootPriority;
 use crate::disk::DiskController;
+use crate::dpmi::DpmiDriver;
 use crate::keyboard::Keyboard;
 use crate::mouse::Mouse;
 use crate::pit::Pit;
@@ -47,6 +48,8 @@ pub struct PcBus {
     pub mouse: Mouse,
     /// XMS (Extended Memory Specification) driver
     pub xms: XmsDriver,
+    /// DPMI (DOS Protected Mode Interface) driver
+    pub dpmi: DpmiDriver,
 }
 
 impl PcBus {
@@ -70,6 +73,10 @@ impl PcBus {
         xms.install();
         xms.init_umbs(); // Initialize Upper Memory Blocks
 
+        // Initialize DPMI driver
+        let mut dpmi = DpmiDriver::new();
+        dpmi.install();
+
         Self {
             ram: vec![0; ram_size],
             vram: vec![0; 0x20000], // 128KB
@@ -86,6 +93,7 @@ impl PcBus {
             speaker_gate: false,
             mouse: Mouse::new(),
             xms,
+            dpmi,
         }
     }
 

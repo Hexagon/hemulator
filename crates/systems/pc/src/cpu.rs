@@ -159,6 +159,7 @@ impl PcCpu {
                 0x20 => return self.handle_int20h(), // DOS: Program terminate
                 0x21 => return self.handle_int21h(), // DOS API
                 0x2F => return self.handle_int2fh(), // Multiplex interrupt
+                0x31 => return self.handle_int31h(), // DPMI services
                 0x33 => return self.handle_int33h(), // Mouse services
                 _ => {}                              // Let CPU handle other interrupts normally
             }
@@ -1568,6 +1569,7 @@ impl PcCpu {
 
         match ah {
             0x43 => self.int2fh_xms_installation_check(),
+            0x16 => self.int2fh_dpmi_installation_check(),
             _ => {
                 // Unsupported function - just return
                 51
@@ -1600,6 +1602,222 @@ impl PcCpu {
             }
             _ => 51,
         }
+    }
+
+    /// INT 2Fh, AH=16h - DPMI Installation Check
+    #[allow(dead_code)] // Called from handle_int2fh
+    fn int2fh_dpmi_installation_check(&mut self) -> u32 {
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x00 => {
+                // DPMI installation check
+                if self.cpu.memory.dpmi.is_installed() {
+                    // DPMI is installed
+                    self.cpu.ax = 0x0000; // AX = 0 (supported)
+                    self.cpu.bx = 0x0001; // BX = flags (bit 0 = 32-bit support)
+                    self.cpu.cx = self.cpu.memory.dpmi.processor_type() as u16; // Processor type
+                    self.cpu.dx = self.cpu.memory.dpmi.version(); // DPMI version (BCD)
+
+                    // Entry point in ES:DI
+                    self.cpu.es = self.cpu.memory.dpmi.entry_segment();
+                    self.cpu.di = self.cpu.memory.dpmi.entry_offset();
+                } else {
+                    self.cpu.ax = 0x8001; // Not supported
+                }
+                51
+            }
+            _ => 51,
+        }
+    }
+
+    /// Handle INT 31h - DPMI services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int31h(&mut self) -> u32 {
+        // Skip the INT 31h instruction (2 bytes: 0xCD 0x31)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AX register
+        let ax = self.cpu.ax;
+
+        match ax {
+            0x0000 => self.int31h_allocate_descriptors(),
+            0x0001 => self.int31h_free_descriptor(),
+            0x0006 => self.int31h_get_segment_base(),
+            0x0007 => self.int31h_set_segment_base(),
+            0x0008 => self.int31h_get_segment_limit(),
+            0x0009 => self.int31h_set_segment_limit(),
+            0x0500 => self.int31h_get_free_memory_info(),
+            0x0501 => self.int31h_allocate_memory(),
+            0x0502 => self.int31h_free_memory(),
+            _ => {
+                // Unsupported function - set carry flag to indicate error
+                self.set_carry_flag(true);
+                self.cpu.ax = 0x8001; // Function not supported
+                51
+            }
+        }
+    }
+
+    /// INT 31h, AX=0000h - Allocate LDT Descriptors
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_allocate_descriptors(&mut self) -> u32 {
+        let count = self.cpu.cx;
+
+        match self.cpu.memory.dpmi.allocate_descriptor(count) {
+            Ok(selector) => {
+                self.cpu.ax = selector; // Base selector
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0001h - Free LDT Descriptor
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_free_descriptor(&mut self) -> u32 {
+        let selector = self.cpu.bx;
+
+        match self.cpu.memory.dpmi.free_descriptor(selector) {
+            Ok(()) => {
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0006h - Get Segment Base Address
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_get_segment_base(&mut self) -> u32 {
+        let selector = self.cpu.bx;
+
+        match self.cpu.memory.dpmi.get_segment_base(selector) {
+            Ok(base) => {
+                self.cpu.cx = ((base >> 16) & 0xFFFF) as u16; // High word
+                self.cpu.dx = (base & 0xFFFF) as u16; // Low word
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0007h - Set Segment Base Address
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_set_segment_base(&mut self) -> u32 {
+        let selector = self.cpu.bx;
+        let base = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
+
+        match self.cpu.memory.dpmi.set_segment_base(selector, base) {
+            Ok(()) => {
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0008h - Get Segment Limit
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_get_segment_limit(&mut self) -> u32 {
+        let selector = self.cpu.bx;
+
+        match self.cpu.memory.dpmi.get_segment_limit(selector) {
+            Ok(limit) => {
+                self.cpu.cx = ((limit >> 16) & 0xFFFF) as u16; // High word
+                self.cpu.dx = (limit & 0xFFFF) as u16; // Low word
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0009h - Set Segment Limit
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_set_segment_limit(&mut self) -> u32 {
+        let selector = self.cpu.bx;
+        let limit = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
+
+        match self.cpu.memory.dpmi.set_segment_limit(selector, limit) {
+            Ok(()) => {
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0500h - Get Free Memory Information
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_get_free_memory_info(&mut self) -> u32 {
+        let (largest, max_unlocked, _lockable) = self.cpu.memory.dpmi.get_free_memory_info();
+
+        // ES:DI points to buffer that receives memory info structure
+        // For simplicity, we'll just set registers
+        self.cpu.bx = (largest & 0xFFFF) as u16;
+        self.cpu.cx = ((largest >> 16) & 0xFFFF) as u16;
+        self.cpu.dx = (max_unlocked & 0xFFFF) as u16;
+        self.set_carry_flag(false);
+        51
+    }
+
+    /// INT 31h, AX=0501h - Allocate Memory Block
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_allocate_memory(&mut self) -> u32 {
+        let size = ((self.cpu.bx as u32) << 16) | (self.cpu.cx as u32);
+
+        match self.cpu.memory.dpmi.allocate_memory(size) {
+            Ok((linear_addr, handle)) => {
+                self.cpu.bx = ((linear_addr >> 16) & 0xFFFF) as u16; // Linear address high
+                self.cpu.cx = (linear_addr & 0xFFFF) as u16; // Linear address low
+                self.cpu.si = ((handle >> 16) & 0xFFFF) as u16; // Handle high
+                self.cpu.di = (handle & 0xFFFF) as u16; // Handle low
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
+    }
+
+    /// INT 31h, AX=0502h - Free Memory Block
+    #[allow(dead_code)] // Called from handle_int31h
+    fn int31h_free_memory(&mut self) -> u32 {
+        let handle = ((self.cpu.si as u32) << 16) | (self.cpu.di as u32);
+
+        match self.cpu.memory.dpmi.free_memory(handle) {
+            Ok(()) => {
+                self.set_carry_flag(false);
+            }
+            Err(err_code) => {
+                self.cpu.ax = err_code;
+                self.set_carry_flag(true);
+            }
+        }
+        51
     }
 
     /// Get a reference to the bus
@@ -2505,7 +2723,7 @@ mod tests {
         assert_eq!(cpu.cpu.memory.read(video_addr), b'2');
 
         // Row 1 should now contain what was in row 3 ('3')
-        let video_addr = 0xB8000 + (1 * 80) * 2;
+        let video_addr = 0xB8000 + 80 * 2;
         assert_eq!(cpu.cpu.memory.read(video_addr), b'3');
 
         // Rows 4-5 should be filled with spaces
@@ -2552,7 +2770,7 @@ mod tests {
         // Rows 0-1 should be filled with spaces
         let video_addr = 0xB8000;
         assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
-        let video_addr = 0xB8000 + (1 * 80) * 2;
+        let video_addr = 0xB8000 + 80 * 2;
         assert_eq!(cpu.cpu.memory.read(video_addr), b' ');
 
         // Row 2 should now contain what was in row 0 ('0')

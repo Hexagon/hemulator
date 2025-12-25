@@ -9,6 +9,7 @@ mod bios;
 mod bus;
 mod cpu;
 mod disk;
+mod dpmi; // DPMI (DOS Protected Mode Interface) driver
 mod font; // Shared IBM PC ROM font data
 mod keyboard;
 mod mouse; // Microsoft Mouse Driver (INT 33h)
