@@ -8648,74 +8648,77 @@ mod tests {
         // (divide by zero or overflow), the saved IP points to the DIV instruction
         // itself, not the next instruction. This allows the fault handler to either
         // fix the problem and retry, or abort the program.
-        
+
         let mut mem = ArrayMemory::new();
-        
+
         // Set up INT 0 vector to point to a handler that does IRET
         // IVT entry for INT 0 at 0x0000 (offset) and 0x0002 (segment)
         mem.write(0x00000, 0x00); // Offset low
         mem.write(0x00001, 0x10); // Offset high (handler at 0x1000)
         mem.write(0x00002, 0x00); // Segment low
         mem.write(0x00003, 0x00); // Segment high (CS = 0x0000)
-        
+
         // Write INT 0 handler at 0x0000:0x1000 - just IRET (0xCF)
         mem.write(0x01000, 0xCF); // IRET
-        
+
         // Write test code at 0x0000:0x7C00
         let code_addr = 0x07C00;
-        
+
         // MOV AX, 0x0001
         mem.write(code_addr, 0xB8);
         mem.write(code_addr + 1, 0x01);
         mem.write(code_addr + 2, 0x00);
-        
+
         // MOV CL, 0x00  (divisor = 0)
         mem.write(code_addr + 3, 0xB1);
         mem.write(code_addr + 4, 0x00);
-        
+
         // DIV CL  (divide AX by CL, should fault)
         mem.write(code_addr + 5, 0xF6);
         mem.write(code_addr + 6, 0xF1); // ModR/M: mod=11, reg=110 (DIV), rm=001 (CL)
-        
+
         // NOP (should NOT reach here if fault loops)
         mem.write(code_addr + 7, 0x90);
-        
+
         // HLT
         mem.write(code_addr + 8, 0xF4);
-        
+
         // Create CPU
         let mut cpu = Cpu8086::new(mem);
         cpu.cs = 0x0000;
         cpu.ip = 0x7C00;
-        
+
         // Step through code
         cpu.step(); // MOV AX, 1
         assert_eq!(cpu.ax, 0x0001);
         assert_eq!(cpu.ip, 0x7C03);
-        
+
         cpu.step(); // MOV CL, 0
         assert_eq!((cpu.cx & 0xFF) as u8, 0x00);
         assert_eq!(cpu.ip, 0x7C05);
-        
+
         // This should trigger INT 0 fault
         cpu.step(); // DIV CL - this triggers the fault and jumps to INT 0 handler
-        
+
         // CPU should now be at the INT 0 handler (0x0000:0x1000)
         assert_eq!(cpu.ip, 0x1000, "IP should be at INT 0 handler");
         assert_eq!(cpu.cs, 0x0000);
-        
+
         // Execute the IRET in the handler
         cpu.step(); // IRET
-        
+
         // After INT 0 handler (IRET), IP should return to the DIV instruction
         // NOT to the next instruction (NOP)
-        assert_eq!(cpu.ip, 0x7C05, "IP should point back to DIV instruction after fault");
+        assert_eq!(
+            cpu.ip, 0x7C05,
+            "IP should point back to DIV instruction after fault"
+        );
         assert_eq!(cpu.cs, 0x0000);
-        
+
         // If we step again, it should fault again (infinite loop unless we fix the divisor)
         // But let's fix the divisor first
         cpu.cx = 0x0002; // Set CL = 2
-        
+
         // Now DIV should succeed
         cpu.step(); // DIV CL
         assert_eq!(cpu.ax & 0xFF, 0x00); // AL = quotient = 1/2 = 0
