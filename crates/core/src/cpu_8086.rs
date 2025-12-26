@@ -1141,9 +1141,22 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // CMPSB
                     0xA6 => {
+                        // Debug: Log the comparison if enabled
+                        let debug_cmpsb = std::env::var("EMU_DEBUG_CMPSB").is_ok();
+                        if debug_cmpsb {
+                            eprintln!("[REPE CMPSB] Starting: CX={:04X} DS:SI={:04X}:{:04X} ES:DI={:04X}:{:04X}", 
+                                self.cx, self.ds, self.si, self.es, self.di);
+                        }
+                        
                         while self.cx != 0 {
                             let src = self.read(self.ds, self.si);
                             let dst = self.read(self.es, self.di);
+                            
+                            if debug_cmpsb {
+                                eprintln!("[REPE CMPSB] Comparing: DS:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})", 
+                                    self.ds, self.si, src, self.es, self.di, dst, self.cx);
+                            }
+                            
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u16) < (dst as u16);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
@@ -1161,9 +1174,17 @@ impl<M: Memory8086> Cpu8086<M> {
                             total_cycles += 22;
                             // REPE: Exit if ZF=0
                             if !self.get_flag(FLAG_ZF) {
+                                if debug_cmpsb {
+                                    eprintln!("[REPE CMPSB] Mismatch! Exiting early. ZF=0");
+                                }
                                 break;
                             }
                         }
+                        
+                        if debug_cmpsb {
+                            eprintln!("[REPE CMPSB] Finished: CX={:04X} ZF={}", self.cx, if self.get_flag(FLAG_ZF) { 1 } else { 0 });
+                        }
+                        
                         self.cycles += total_cycles as u64;
                         total_cycles
                     }
