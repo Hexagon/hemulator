@@ -1736,3 +1736,60 @@ mod memory_tests {
         println!("\n✅ Boot test passed - boot sector loads and produces output");
     }
 }
+
+#[cfg(test)]
+mod boot_output_tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn show_boot_screen_output() {
+        let img_path = "test_roms/pc/x86BOOT.img";
+        if !Path::new(img_path).exists() {
+            println!("x86BOOT.img not found, skipping");
+            return;
+        }
+        
+        let disk_data = fs::read(img_path).unwrap();
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+        
+        // Run a few frames
+        for _ in 0..10 {
+            sys.step_frame();
+        }
+        
+        // Capture screen content
+        let vram = sys.cpu.bus().vram();
+        let text_base = 0x18000; // CGA text mode offset
+        
+        println!("\n=== FreeDOS Boot Screen ===");
+        println!("Captured after 10 frames of execution:\n");
+        
+        for row in 0..25 {
+            let mut line = String::new();
+            for col in 0..80 {
+                let offset = text_base + (row * 80 + col) * 2;
+                if offset < vram.len() {
+                    let ch = vram[offset];
+                    if ch >= 32 && ch < 127 {
+                        line.push(ch as char);
+                    } else if ch == 0 {
+                        line.push(' ');
+                    } else {
+                        line.push('.');
+                    }
+                }
+            }
+            let trimmed = line.trim_end();
+            if !trimmed.is_empty() {
+                println!("{}", trimmed);
+            }
+        }
+        println!("\n=== End Screen Capture ===\n");
+    }
+}
