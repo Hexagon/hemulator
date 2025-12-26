@@ -484,8 +484,14 @@ impl System for PcSystem {
 
         let mut cycles_this_frame = 0u32;
 
-        // Execute until we've completed a frame
+        // Execute until we've completed a frame (or CPU is halted waiting for input)
         while cycles_this_frame < cycles_per_frame {
+            // If CPU is halted (e.g., INT 16h AH=00h waiting for keyboard input),
+            // break out of the loop to allow GUI to process keyboard events
+            if self.cpu.is_halted() {
+                break;
+            }
+
             let cycles = self.cpu.step();
             cycles_this_frame += cycles;
             self.cycles += cycles as u64;

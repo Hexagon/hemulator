@@ -78,6 +78,12 @@ impl DiskController {
         let sector_size: u32 = 512;
         let offset = (lba * sector_size) as usize;
 
+        // Log LBA calculation for debugging
+        if let Ok(_) = std::env::var("EMU_LOG_BUS") {
+            eprintln!("Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
+                request.cylinder, request.head, request.sector, lba, offset, sectors_per_track, heads);
+        }
+
         // Check if read is within bounds
         if offset + (request.count as usize * sector_size as usize) > disk_image.len() {
             self.status = 0x04; // Sector not found
@@ -87,6 +93,18 @@ impl DiskController {
         // Copy data from disk image to buffer
         let bytes_to_copy = (request.count as usize * sector_size as usize).min(buffer.len());
         buffer[..bytes_to_copy].copy_from_slice(&disk_image[offset..offset + bytes_to_copy]);
+
+        // Log first few bytes of data read
+        if let Ok(_) = std::env::var("EMU_LOG_BUS") {
+            eprint!("First 128 bytes read:");
+            for i in 0..128.min(bytes_to_copy) {
+                if i % 16 == 0 {
+                    eprint!("\n  {:04X}:", i);
+                }
+                eprint!(" {:02X}", buffer[i]);
+            }
+            eprintln!();
+        }
 
         self.status = 0x00; // Success
         self.status

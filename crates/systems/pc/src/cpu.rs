@@ -74,6 +74,11 @@ impl PcCpu {
         self.cpu.es = 0x0000;
     }
 
+    /// Check if the CPU is halted (e.g., waiting for keyboard input in INT 16h)
+    pub fn is_halted(&self) -> bool {
+        self.cpu.is_halted()
+    }
+
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
         // Check if the next instruction is a BIOS/DOS interrupt we need to handle
@@ -1492,6 +1497,18 @@ impl PcCpu {
                     "INT 13h AH=02h: Finished writing all {} bytes",
                     buffer.len()
                 );
+                
+                // Verify the write by reading back the first 32 bytes
+                eprint!("INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:", buffer_seg, buffer_offset);
+                for i in 0..32.min(buffer.len()) {
+                    if i % 16 == 0 {
+                        eprint!("\n  {:04X}:", i);
+                    }
+                    let offset = buffer_offset.wrapping_add(i as u16);
+                    let byte = self.cpu.read_byte(buffer_seg, offset);
+                    eprint!(" {:02X}", byte);
+                }
+                eprintln!();
             }
         }
 
@@ -1504,38 +1521,10 @@ impl PcCpu {
         // AL = number of sectors read (on success)
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
-
-            // Update ES:BX to point past the data that was just read
-            // This is critical for bootloaders that read multiple sectors in a loop
-            let bytes_read = (count as u32) * 512;
-
-            // Save original ES:BX for logging
-            let original_es = self.cpu.es;
-            let original_bx = self.cpu.bx;
-
-            // Add bytes to BX, handling overflow into ES
-            // Real BIOS behavior: BX advances by bytes read, with carry into ES
-            let new_bx = (buffer_offset as u32) + bytes_read;
-
-            // If we overflow past 64KB (0x10000), we need to adjust ES
-            if new_bx >= 0x10000 {
-                // How many complete 64KB segments did we cross?
-                let segments_crossed = (new_bx >> 16) as u16;
-                // Add to ES (each segment is 0x1000 paragraphs)
-                self.cpu.es = self.cpu.es.wrapping_add(segments_crossed * 0x1000);
-                // BX is the remainder
-                self.cpu.bx = (new_bx & 0xFFFF) as u16;
-            } else {
-                self.cpu.bx = new_bx as u16;
-            }
-
-            // Log ES:BX advancement for debugging boot issues
-            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                eprintln!(
-                    "INT 13h AH=02h: ES:BX advanced from {:04X}:{:04X} to {:04X}:{:04X} (+{} bytes)",
-                    original_es, original_bx, self.cpu.es, self.cpu.bx, bytes_read
-                );
-            }
+            
+            // Note: INT 13h AH=02h does NOT modify ES:BX
+            // The buffer pointer remains unchanged after the read
+            // (unlike some other BIOS calls that advance pointers)
         }
 
         51 // Approximate INT instruction timing
