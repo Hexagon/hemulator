@@ -964,6 +964,67 @@ impl<M: Memory8086> Cpu8086<M> {
         }
     }
 
+    /// Helper for Read-Modify-Write operations on 16-bit values
+    /// Returns (value_read, seg, offset) to avoid double-fetching EA
+    fn read_rmw16(&mut self, modbits: u8, rm: u8) -> (u16, u16, u16) {
+        if modbits == 0b11 {
+            // Register mode - return dummy seg/offset
+            (self.get_reg16(rm), 0, 0)
+        } else {
+            // Memory mode - calculate EA once and return it
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            let val = self.read_u16(seg, offset);
+            (val, seg, offset)
+        }
+    }
+
+    /// Helper for writing result of Read-Modify-Write operations on 16-bit values
+    /// Uses cached seg/offset to avoid recalculating EA
+    fn write_rmw16(&mut self, modbits: u8, rm: u8, val: u16, seg: u16, offset: u16) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg16(rm, val);
+        } else {
+            // Memory mode - use cached seg/offset
+            self.write_u16(seg, offset, val);
+        }
+    }
+
+    /// Helper for Read-Modify-Write operations on 8-bit values
+    /// Returns (value_read, seg, offset) to avoid double-fetching EA
+    fn read_rmw8(&mut self, modbits: u8, rm: u8) -> (u8, u16, u16) {
+        if modbits == 0b11 {
+            // Register mode - return dummy seg/offset
+            let val = if rm < 4 {
+                self.get_reg8_low(rm)
+            } else {
+                self.get_reg8_high(rm - 4)
+            };
+            (val, 0, 0)
+        } else {
+            // Memory mode - calculate EA once and return it
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            let val = self.read(seg, offset);
+            (val, seg, offset)
+        }
+    }
+
+    /// Helper for writing result of Read-Modify-Write operations on 8-bit values
+    /// Uses cached seg/offset to avoid recalculating EA
+    fn write_rmw8(&mut self, modbits: u8, rm: u8, val: u8, seg: u16, offset: u16) {
+        if modbits == 0b11 {
+            // Register mode
+            if rm < 4 {
+                self.set_reg8_low(rm, val);
+            } else {
+                self.set_reg8_high(rm - 4, val);
+            }
+        } else {
+            // Memory mode - use cached seg/offset
+            self.write(seg, offset, val);
+        }
+    }
+
     /// Execute one instruction and return cycles used
     pub fn step(&mut self) -> u32 {
         if self.halted {
@@ -1487,12 +1548,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                
+                // Use RMW helpers to avoid double-fetching EA
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val.wrapping_add(reg_val);
                 let carry = (rm_val as u16 + reg_val as u16) > 0xFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -1509,12 +1572,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                
+                // Use RMW helpers to avoid double-fetching EA
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val.wrapping_add(reg_val);
                 let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
-
-                self.write_rm16(modbits, rm, result);
+                
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -1587,12 +1652,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                
+                // Use RMW helpers to avoid double-fetching EA
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u16) < (reg_val as u16);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -1609,12 +1676,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                
+                // Use RMW helpers to avoid double-fetching EA
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u32) < (reg_val as u32);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -1824,10 +1893,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val | reg_val;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -1844,10 +1913,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val | reg_val;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -1984,10 +2053,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val ^ reg_val;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -2004,10 +2073,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val ^ reg_val;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -2701,13 +2770,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
                 let carry = (rm_val as u16 + reg_val as u16 + carry_in as u16) > 0xFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -2724,13 +2793,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
                 let carry = (rm_val as u32 + reg_val as u32 + carry_in as u32) > 0xFFFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -2852,13 +2921,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
                 let borrow = (rm_val as u16) < (reg_val as u16 + carry as u16);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -2875,13 +2944,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
                 let borrow = (rm_val as u32) < (reg_val as u32 + carry as u32);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -3004,10 +3073,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val & reg_val;
 
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -3024,10 +3093,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val & reg_val;
 
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -3365,7 +3434,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x80 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw8(modbits, rm);
                 let imm = self.fetch_u8();
                 let result = match op {
                     0 => {
@@ -3441,7 +3510,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm8(modbits, rm, result);
+                    self.write_rmw8(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_8(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
@@ -3456,7 +3525,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x81 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                 let imm = self.fetch_u16();
                 let result = match op {
                     0 => {
@@ -3532,7 +3601,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm16(modbits, rm, result);
+                    self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
@@ -3553,7 +3622,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x83 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                 let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
                 let result = match op {
                     0 => {
@@ -3629,7 +3698,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm16(modbits, rm, result);
+                    self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
@@ -3691,14 +3760,15 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
 
                 if reg < 4 {
                     self.set_reg8_low(reg, rm_val);
                 } else {
                     self.set_reg8_high(reg - 4, rm_val);
                 }
-                self.write_rm8(modbits, rm, reg_val);
+                self.write_rmw8(modbits, rm, reg_val, seg, offset);
 
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
                 if modbits == 0b11 {
@@ -3713,10 +3783,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
 
                 self.set_reg16(reg, rm_val);
-                self.write_rm16(modbits, rm, reg_val);
+                self.write_rmw16(modbits, rm, reg_val, seg, offset);
 
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
                 if modbits == 0b11 {
@@ -3889,11 +3960,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             11
                         }
                     }
-                    // NOT r/m8
+                    // NOT r/m8 - use RMW helpers to avoid double-fetching displacement
                     0b010 => {
-                        let val = self.read_rm8(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = !val;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
                         if modbits == 0b11 {
                             3
@@ -3901,11 +3972,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
-                    // NEG r/m8
+                    // NEG r/m8 - use RMW helpers to avoid double-fetching displacement
                     0b011 => {
-                        let val = self.read_rm8(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = 0u8.wrapping_sub(val);
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x80);
@@ -4040,11 +4111,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             11
                         }
                     }
-                    // NOT r/m16
+                    // NOT r/m16 - use RMW helpers to avoid double-fetching displacement
                     0b010 => {
-                        let val = self.read_rm16(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = !val;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
                         if modbits == 0b11 {
                             3
@@ -4052,11 +4123,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
-                    // NEG r/m16
+                    // NEG r/m16 - use RMW helpers to avoid double-fetching displacement
                     0b011 => {
-                        let val = self.read_rm16(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = 0u16.wrapping_sub(val);
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x8000);
@@ -4282,10 +4353,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC0 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
                 let count = self.fetch_u8();
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, count);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     5 + (4 * count as u64)
                 } else {
@@ -4302,10 +4374,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC1 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
                 let count = self.fetch_u8();
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, count);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     5 + (4 * count as u64)
                 } else {
@@ -4320,6 +4393,21 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // ENTER (0xC8) - 80186+ instruction
             0xC8 => {
+                // Debug: check what bytes we're about to read
+                if std::env::var("EMU_TRACE_PC").is_ok() {
+                    let ip_before = self.ip;
+                    let byte1 = self.read(self.cs, ip_before);
+                    let byte2 = self.read(self.cs, ip_before.wrapping_add(1));
+                    let byte3 = self.read(self.cs, ip_before.wrapping_add(2));
+                    let phys_start = ((self.cs as u32) << 4) + (ip_before as u32);
+                    eprintln!("[ENTER DEBUG] CS:IP={:04X}:{:04X}, physical=0x{:05X}", 
+                              self.cs, ip_before, phys_start);
+                    eprintln!("[ENTER DEBUG] Next 3 bytes in memory: {:02X} {:02X} {:02X}", 
+                              byte1, byte2, byte3);
+                    eprintln!("[ENTER DEBUG] Will read as: size=0x{:02X}{:02X}, nesting=0x{:02X}",
+                              byte2, byte1, byte3);
+                }
+                
                 let size = self.fetch_u16();
                 let _nesting = self.fetch_u8();
                 
@@ -4405,9 +4493,10 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD0 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, 1);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 { 2 } else { 15 };
                 if modbits == 0b11 {
                     2
@@ -4420,9 +4509,10 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD1 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, 1);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 { 2 } else { 15 };
                 if modbits == 0b11 {
                     2
@@ -4435,10 +4525,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD2 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
                 let count = (self.cx & 0xFF) as u8;
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, count);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     8 + (4 * count as u64)
                 } else {
@@ -4455,10 +4546,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD3 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
                 let count = (self.cx & 0xFF) as u8;
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, count);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     8 + (4 * count as u64)
                 } else {
@@ -4702,22 +4794,23 @@ impl<M: Memory8086> Cpu8086<M> {
             0xFE => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
-
+                
                 match op {
                     0 => {
-                        // INC r/m8
+                        // INC r/m8 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7F;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_OF, overflow);
                     }
                     1 => {
-                        // DEC r/m8
+                        // DEC r/m8 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x80;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_OF, overflow);
                     }
@@ -4747,11 +4840,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
                 match op {
                     0 => {
-                        // INC r/m16
-                        let val = self.read_rm16(modbits, rm);
+                        // INC r/m16 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7FFF;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -4762,11 +4855,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     1 => {
-                        // DEC r/m16
-                        let val = self.read_rm16(modbits, rm);
+                        // DEC r/m16 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x8000;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -8279,5 +8372,225 @@ mod tests {
         assert!(CpuModel::Intel80386.supports_80186_instructions());
         assert!(CpuModel::Intel80386.supports_80286_instructions());
         assert!(CpuModel::Intel80386.supports_80386_instructions());
+    }
+
+    /// Regression test for RMW (Read-Modify-Write) displacement bug
+    /// 
+    /// This test ensures that instructions which read from and write to memory
+    /// (like ADD [BP+disp], AX) don't fetch the displacement bytes twice.
+    /// 
+    /// The bug was: read_rm16() would fetch displacement, then write_rm16() would
+    /// fetch it again, causing IP to advance by extra bytes and execute misaligned code.
+    /// 
+    /// Fix: Use read_rmw16/write_rmw16 helpers that cache the effective address.
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_add() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        // Set up: BP=0x7C00, SP=0x7B00, value at [BP-0x10]=0x1234
+        cpu.bp = 0x7C00;
+        cpu.sp = 0x7B00;
+        cpu.ss = 0x0000;
+        cpu.ds = 0x0000;
+        cpu.ax = 0x0100;  // Value to add
+        
+        // Write test value at BP-0x10 = 0x7BF0
+        cpu.memory.write(0x7BF0, 0x34);
+        cpu.memory.write(0x7BF1, 0x12);
+        
+        // Instruction: ADD [BP-0x10], AX at 0x0000:0x0100
+        // Encoding: 01 86 F0 FF
+        // - 0x01: ADD r/m16, r16
+        // - 0x86: ModR/M byte (mod=10, reg=000 (AX), rm=110 (BP+disp16))
+        // - 0xF0 0xFF: Displacement -0x10 (two's complement of 16)
+        cpu.cs = 0x0000;
+        cpu.ip = 0x0100;
+        cpu.memory.write(0x0100, 0x01);  // ADD r/m16, r16
+        cpu.memory.write(0x0101, 0x86);  // ModR/M: mod=10, reg=000, rm=110
+        cpu.memory.write(0x0102, 0xF0);  // disp16 low byte
+        cpu.memory.write(0x0103, 0xFF);  // disp16 high byte
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // IP should advance by exactly 4 bytes (opcode + modrm + disp16)
+        assert_eq!(cpu.ip, 0x0104, "IP should advance by 4 bytes, not more");
+        
+        // Memory at BP-0x10 should be 0x1234 + 0x0100 = 0x1334
+        let result_lo = cpu.memory.read(0x7BF0);
+        let result_hi = cpu.memory.read(0x7BF1);
+        let result = (result_hi as u16) << 8 | result_lo as u16;
+        assert_eq!(result, 0x1334, "ADD result should be correct");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_or() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x1000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x00FF;
+        
+        cpu.memory.write(0x0FF0, 0xF0);  // Value at BP-0x10
+        cpu.memory.write(0x0FF1, 0x0F);
+        
+        // OR [BP-0x10], AX
+        cpu.ip = 0x0200;
+        cpu.memory.write(0x0200, 0x09);  // OR r/m16, r16
+        cpu.memory.write(0x0201, 0x86);  // ModR/M
+        cpu.memory.write(0x0202, 0xF0);  // disp16 low
+        cpu.memory.write(0x0203, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0204, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x0FF1) as u16) << 8 | cpu.memory.read(0x0FF0) as u16;
+        assert_eq!(result, 0x0FFF, "OR result should be correct");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_and() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x2000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0xFF00;
+        
+        cpu.memory.write(0x1FE0, 0xFF);  // Value at BP-0x20
+        cpu.memory.write(0x1FE1, 0x0F);
+        
+        // AND [BP-0x20], AX
+        cpu.ip = 0x0300;
+        cpu.memory.write(0x0300, 0x21);  // AND r/m16, r16
+        cpu.memory.write(0x0301, 0x86);  // ModR/M
+        cpu.memory.write(0x0302, 0xE0);  // disp16 low
+        cpu.memory.write(0x0303, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0304, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x1FE1) as u16) << 8 | cpu.memory.read(0x1FE0) as u16;
+        assert_eq!(result, 0x0F00, "AND result should be correct");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_sub() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x3000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x0001;
+        
+        cpu.memory.write(0x2FF0, 0x00);  // Value at BP-0x10 = 0x1000
+        cpu.memory.write(0x2FF1, 0x10);
+        
+        // SUB [BP-0x10], AX
+        cpu.ip = 0x0400;
+        cpu.memory.write(0x0400, 0x29);  // SUB r/m16, r16
+        cpu.memory.write(0x0401, 0x86);  // ModR/M
+        cpu.memory.write(0x0402, 0xF0);  // disp16 low
+        cpu.memory.write(0x0403, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0404, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x2FF1) as u16) << 8 | cpu.memory.read(0x2FF0) as u16;
+        assert_eq!(result, 0x0FFF, "SUB result should be correct");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_xor() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x4000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x5555;
+        
+        cpu.memory.write(0x3FE0, 0xAA);  // Value at BP-0x20 = 0xAAAA
+        cpu.memory.write(0x3FE1, 0xAA);
+        
+        // XOR [BP-0x20], AX
+        cpu.ip = 0x0500;
+        cpu.memory.write(0x0500, 0x31);  // XOR r/m16, r16
+        cpu.memory.write(0x0501, 0x86);  // ModR/M
+        cpu.memory.write(0x0502, 0xE0);  // disp16 low
+        cpu.memory.write(0x0503, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0504, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x3FE1) as u16) << 8 | cpu.memory.read(0x3FE0) as u16;
+        assert_eq!(result, 0xFFFF, "XOR result should be correct");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_adc() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x5000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x0001;
+        cpu.set_flag(FLAG_CF, true);  // Set carry flag
+        
+        cpu.memory.write(0x4FF0, 0xFF);  // Value at BP-0x10 = 0x00FF
+        cpu.memory.write(0x4FF1, 0x00);
+        
+        // ADC [BP-0x10], AX
+        cpu.ip = 0x0600;
+        cpu.memory.write(0x0600, 0x11);  // ADC r/m16, r16
+        cpu.memory.write(0x0601, 0x86);  // ModR/M
+        cpu.memory.write(0x0602, 0xF0);  // disp16 low
+        cpu.memory.write(0x0603, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0604, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x4FF1) as u16) << 8 | cpu.memory.read(0x4FF0) as u16;
+        assert_eq!(result, 0x0101, "ADC result should include carry");
+    }
+
+    #[test]
+    fn test_rmw_displacement_not_fetched_twice_sbb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+        
+        cpu.bp = 0x6000;
+        cpu.ds = 0x0000;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x0001;
+        cpu.set_flag(FLAG_CF, true);  // Set borrow flag
+        
+        cpu.memory.write(0x5FF0, 0x00);  // Value at BP-0x10 = 0x0100
+        cpu.memory.write(0x5FF1, 0x01);
+        
+        // SBB [BP-0x10], AX
+        cpu.ip = 0x0700;
+        cpu.memory.write(0x0700, 0x19);  // SBB r/m16, r16
+        cpu.memory.write(0x0701, 0x86);  // ModR/M
+        cpu.memory.write(0x0702, 0xF0);  // disp16 low
+        cpu.memory.write(0x0703, 0xFF);  // disp16 high
+        
+        cpu.step();
+        
+        assert_eq!(cpu.ip, 0x0704, "IP should advance by exactly 4 bytes");
+        
+        let result = (cpu.memory.read(0x5FF1) as u16) << 8 | cpu.memory.read(0x5FF0) as u16;
+        assert_eq!(result, 0x00FE, "SBB result should include borrow");
     }
 }

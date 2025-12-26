@@ -1651,4 +1651,145 @@ mod memory_tests {
             "Should be VGA adapter"
         );
     }
+
+    #[test]
+    fn test_boot_x86boot_image() {
+        use std::fs;
+        use std::path::Path;
+        
+        // Load x86BOOT.img (FreeDOS boot disk)
+        // Try multiple possible paths since test runs from different directories
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+        
+        let img_path = possible_paths.iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img in any expected location");
+        
+        let disk_data = fs::read(img_path).expect("Failed to read x86BOOT.img");
+        println!("\n=== Boot Test with x86BOOT.img ===");
+        println!("Disk size: {} bytes", disk_data.len());
+        
+        // Check boot signature
+        if disk_data.len() >= 512 {
+            let sig = u16::from_le_bytes([disk_data[510], disk_data[511]]);
+            println!("Boot signature: 0x{:04X} {}", sig, if sig == 0xAA55 { "✅" } else { "❌" });
+            assert_eq!(sig, 0xAA55, "Invalid boot signature");
+        }
+        
+        // Create PC system
+        let mut sys = PcSystem::new();
+        
+        // Mount the disk as floppy A
+        sys.mount("FloppyA", &disk_data).expect("Failed to mount floppy");
+        assert!(sys.is_mounted("FloppyA"));
+        
+        // Skip boot delay
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false; // Will trigger boot sector load
+        
+        // CRITICAL: Load boot sector before we start execution!
+        sys.ensure_boot_sector_loaded();
+        
+        println!("\n=== Running Boot Sequence ===");
+        println!("Testing that boot sector loads and executes (produces console output)");
+        println!("Note: Full boot may not complete due to complexity of FreeDOS boot code\n");
+        
+        // Execute a few frames and check for console output
+        let max_frames = 5;
+        let mut console_output_detected = false;
+        
+        for frame in 0..max_frames {
+            // Use step_frame which is designed for production use
+            let _result = sys.step_frame();
+            
+            // Check video memory for output
+            let vram = sys.cpu.bus().vram();
+            let text_offset = 0x18000; // CGA text mode
+            
+            // Check if any non-zero characters were written
+            for i in (text_offset..text_offset + 2000).step_by(2) {
+                if i < vram.len() && vram[i] != 0 && vram[i] != 0x20 && vram[i] < 0x7F {
+                    console_output_detected = true;
+                    println!("✅ Console output detected in frame {}!", frame);
+                    break;
+                }
+            }
+            
+            if console_output_detected {
+                break;
+            }
+        }
+        
+        let final_info = sys.debug_info();
+        println!("\n=== Test Results ===");
+        println!("Final CS:IP = {:04X}:{:04X}", final_info.cs, final_info.ip);
+        println!("Console output detected: {}", if console_output_detected { "YES ✅" } else { "NO ❌" });
+        
+        // The test passes if we detected console output
+        assert!(console_output_detected, 
+                "Boot sector should produce console output");
+        
+        println!("\n✅ Boot test passed - boot sector loads and produces output");
+    }
+}
+
+#[cfg(test)]
+mod boot_output_tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn show_boot_screen_output() {
+        let img_path = "test_roms/pc/x86BOOT.img";
+        if !Path::new(img_path).exists() {
+            println!("x86BOOT.img not found, skipping");
+            return;
+        }
+        
+        let disk_data = fs::read(img_path).unwrap();
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+        
+        // Run a few frames
+        for _ in 0..10 {
+            sys.step_frame();
+        }
+        
+        // Capture screen content
+        let vram = sys.cpu.bus().vram();
+        let text_base = 0x18000; // CGA text mode offset
+        
+        println!("\n=== FreeDOS Boot Screen ===");
+        println!("Captured after 10 frames of execution:\n");
+        
+        for row in 0..25 {
+            let mut line = String::new();
+            for col in 0..80 {
+                let offset = text_base + (row * 80 + col) * 2;
+                if offset < vram.len() {
+                    let ch = vram[offset];
+                    if ch >= 32 && ch < 127 {
+                        line.push(ch as char);
+                    } else if ch == 0 {
+                        line.push(' ');
+                    } else {
+                        line.push('.');
+                    }
+                }
+            }
+            let trimmed = line.trim_end();
+            if !trimmed.is_empty() {
+                println!("{}", trimmed);
+            }
+        }
+        println!("\n=== End Screen Capture ===\n");
+    }
 }
