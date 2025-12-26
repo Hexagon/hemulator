@@ -60,6 +60,16 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     ];
     bios[int10h_offset..int10h_offset + int10h_handler.len()].copy_from_slice(&int10h_handler);
 
+    // INT 12h handler at offset 0x180 - Get Memory Size
+    let int12h_offset = 0x180;
+    let int12h_handler: Vec<u8> = vec![
+        // Return 640KB in AX (standard PC conventional memory)
+        0xB8, 0x80, 0x02, // MOV AX, 0x0280 (640 in decimal)
+        0xF8, // CLC (clear carry flag - success)
+        0xCF, // IRET
+    ];
+    bios[int12h_offset..int12h_offset + int12h_handler.len()].copy_from_slice(&int12h_handler);
+
     // INT 13h handler at offset 0x200 - Disk Services
     let int13h_offset = 0x200;
     let int13h_handler: Vec<u8> = vec![
@@ -109,6 +119,11 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xA3, 0x40, 0x00, // MOV [0x0040], AX
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
         0xA3, 0x42, 0x00, // MOV [0x0042], AX
+        // INT 0x12 (Get Memory Size) at 0x0048
+        0xB8, 0x80, 0x01, // MOV AX, 0x0180 (offset of INT 12h handler)
+        0xA3, 0x48, 0x00, // MOV [0x0048], AX
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
+        0xA3, 0x4A, 0x00, // MOV [0x004A], AX
         // INT 0x13 (Disk Services) at 0x004C
         0xB8, 0x00, 0x02, // MOV AX, 0x0200
         0xA3, 0x4C, 0x00, // MOV [0x004C], AX

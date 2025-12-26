@@ -174,20 +174,23 @@ impl PcCpu {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
-            // Log ALL interrupts
-            if int_num != 0x10 {
-                // Don't log INT 10h to reduce noise
-                let cs = self.cpu.cs;
-                let ip = self.cpu.ip;
-                let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
-                eprintln!(
-                    "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                    int_num, ah, cs, ip
-                );
+            // Log interrupts for debugging
+            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() {
+                if int_num != 0x10 {
+                    // Don't log INT 10h to reduce noise
+                    let cs = self.cpu.cs;
+                    let ip = self.cpu.ip;
+                    let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
+                }
             }
 
             match int_num {
                 0x10 => return self.handle_int10h(), // Video BIOS
+                0x12 => return self.handle_int12h(), // Get memory size
                 0x13 => return self.handle_int13h(), // Disk services
                 0x15 => return self.handle_int15h(), // Extended services
                 0x16 => return self.handle_int16h(), // Keyboard services
@@ -444,6 +447,31 @@ impl PcCpu {
         51
     }
 
+    /// Helper function to scroll the entire screen up by N lines
+    fn scroll_screen_up(&mut self, lines: u32, attr: u8) {
+        // Scroll entire screen (0,0) to (24,79)
+        for row in 0..25 {
+            for col in 0..80 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+
+                if row + lines < 25 {
+                    // Copy from below
+                    let src_offset = ((row + lines) * 80 + col) * 2;
+                    let src_addr = 0xB8000 + src_offset;
+                    let ch = self.cpu.memory.read(src_addr);
+                    let at = self.cpu.memory.read(src_addr + 1);
+                    self.cpu.memory.write(video_addr, ch);
+                    self.cpu.memory.write(video_addr + 1, at);
+                } else {
+                    // Fill bottom lines with blanks
+                    self.cpu.memory.write(video_addr, b' ');
+                    self.cpu.memory.write(video_addr + 1, attr);
+                }
+            }
+        }
+    }
+
     /// INT 10h, AH=0Eh: Teletype output
     #[allow(dead_code)] // Called from handle_int10h
     fn int10h_teletype_output(&mut self) -> u32 {
@@ -473,7 +501,9 @@ impl PcCpu {
                 // Line feed
                 row += 1;
                 if row >= 25 {
-                    row = 24; // Stay at bottom
+                    // Scroll screen up by 1 line
+                    self.scroll_screen_up(1, 0x07);
+                    row = 24; // Stay at bottom after scroll
                 }
             }
             0x0D => {
@@ -494,7 +524,9 @@ impl PcCpu {
                     col = 0;
                     row += 1;
                     if row >= 25 {
-                        row = 24;
+                        // Scroll screen up by 1 line
+                        self.scroll_screen_up(1, 0x07);
+                        row = 24; // Stay at bottom after scroll
                     }
                 }
             }
@@ -1086,6 +1118,25 @@ impl PcCpu {
         51
     }
 
+    /// Handle INT 12h - Get Memory Size
+    /// Returns the amount of conventional memory in KB in AX
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int12h(&mut self) -> u32 {
+        // Skip the INT 12h instruction (2 bytes: 0xCD 0x12)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get memory size from bus
+        let memory_kb = self.cpu.memory.memory_kb() as u16;
+
+        // Return memory size in AX
+        self.cpu.ax = memory_kb;
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        51
+    }
+
     /// Handle INT 13h BIOS disk services
     fn handle_int13h(&mut self) -> u32 {
         // Get function code from AH register (before advancing IP)
@@ -1095,18 +1146,20 @@ impl PcCpu {
         // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
-        // Count INT 13h calls
-        static mut INT13H_CALL_COUNT: u32 = 0;
-        unsafe {
-            INT13H_CALL_COUNT += 1;
-            if INT13H_CALL_COUNT % 10 == 1 {
-                eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
-            }
-            if INT13H_CALL_COUNT > 1000 {
-                eprintln!("!!! INT 13h called over 1000 times! Stopping...");
-                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
-                self.set_carry_flag(true);
-                return 51;
+        // Count INT 13h calls for debugging
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            static mut INT13H_CALL_COUNT: u32 = 0;
+            unsafe {
+                INT13H_CALL_COUNT += 1;
+                if INT13H_CALL_COUNT % 10 == 1 {
+                    eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
+                }
+                if INT13H_CALL_COUNT > 1000 {
+                    eprintln!("!!! INT 13h called over 1000 times! Stopping...");
+                    self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+                    self.set_carry_flag(true);
+                    return 51;
+                }
             }
         }
 
@@ -1200,10 +1253,12 @@ impl PcCpu {
             return 51;
         }
 
-        eprintln!(
-            "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
-            count, cylinder, head, sector, drive, buffer_seg, buffer_offset
-        );
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            eprintln!(
+                "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
+                count, cylinder, head, sector, drive, buffer_seg, buffer_offset
+            );
+        }
 
         // Create disk request
         let request = DiskRequest {
@@ -1221,27 +1276,33 @@ impl PcCpu {
         // Perform read using bus helper method
         let status = self.cpu.memory.disk_read(&request, &mut buffer);
 
-        eprintln!(
-            "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
-            status, cylinder, head, sector, count, drive
-        );
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            eprintln!(
+                "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
+                status, cylinder, head, sector, count, drive
+            );
+        }
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
-            eprintln!(
-                "INT 13h AH=02h: Starting to write {} bytes to memory...",
-                buffer.len()
-            );
+            if std::env::var("EMU_TRACE_INT13").is_ok() {
+                eprintln!(
+                    "INT 13h AH=02h: Starting to write {} bytes to memory...",
+                    buffer.len()
+                );
+            }
             for (i, &byte) in buffer.iter().enumerate() {
-                if i % 128 == 0 {
+                if std::env::var("EMU_TRACE_INT13").is_ok() && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
                 let offset = buffer_offset.wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
-            eprintln!(
-                "INT 13h AH=02h: Finished writing all {} bytes",
-                buffer.len()
-            );
+            if std::env::var("EMU_TRACE_INT13").is_ok() {
+                eprintln!(
+                    "INT 13h AH=02h: Finished writing all {} bytes",
+                    buffer.len()
+                );
+            }
         }
 
         // Set AH = status
