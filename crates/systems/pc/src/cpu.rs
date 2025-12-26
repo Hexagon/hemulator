@@ -1336,15 +1336,10 @@ impl PcCpu {
             unsafe {
                 INT13H_CALL_COUNT += 1;
                 let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
-                if count % 10 == 1 {
+                if count % 100 == 1 {
                     eprintln!("INT 13h call #{}", count);
                 }
-                if count > 1000 {
-                    eprintln!("!!! INT 13h called over 1000 times! Stopping...");
-                    self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
-                    self.set_carry_flag(true);
-                    return 51;
-                }
+                // No limit - DOS legitimately makes thousands of disk I/O calls during boot
             }
         }
 
