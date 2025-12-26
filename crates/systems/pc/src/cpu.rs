@@ -175,8 +175,8 @@ impl PcCpu {
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
             // Log interrupts for debugging
-            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() {
-                if int_num != 0x10 {
+            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok()
+                && int_num != 0x10 {
                     // Don't log INT 10h to reduce noise
                     let cs = self.cpu.cs;
                     let ip = self.cpu.ip;
@@ -186,20 +186,30 @@ impl PcCpu {
                         int_num, ah, cs, ip
                     );
                 }
-            }
 
             match int_num {
+                0x05 => return self.handle_int05h(), // Print Screen / BOUND
+                0x08 => return self.handle_int08h(), // Timer tick
+                0x09 => return self.handle_int09h(), // Keyboard hardware interrupt
                 0x10 => return self.handle_int10h(), // Video BIOS
+                0x11 => return self.handle_int11h(), // Equipment list
                 0x12 => return self.handle_int12h(), // Get memory size
                 0x13 => return self.handle_int13h(), // Disk services
+                0x14 => return self.handle_int14h(), // Serial port services
                 0x15 => return self.handle_int15h(), // Extended services
                 0x16 => return self.handle_int16h(), // Keyboard services
+                0x17 => return self.handle_int17h(), // Printer services
+                0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
+                0x19 => return self.handle_int19h(), // Bootstrap loader
                 0x1A => return self.handle_int1ah(), // Time/Date services
+                0x1B => return self.handle_int1bh(), // Ctrl-Break handler
+                0x1C => return self.handle_int1ch(), // Timer tick handler
                 0x20 => return self.handle_int20h(), // DOS: Program terminate
                 0x21 => return self.handle_int21h(), // DOS API
                 0x2F => return self.handle_int2fh(), // Multiplex interrupt
                 0x31 => return self.handle_int31h(), // DPMI services
                 0x33 => return self.handle_int33h(), // Mouse services
+                0x4A => return self.handle_int4ah(), // RTC Alarm
                 _ => {}                              // Let CPU handle other interrupts normally
             }
         }
@@ -480,7 +490,7 @@ impl PcCpu {
         let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
 
         // Log printable characters
-        if ch >= 0x20 && ch < 0x7F {
+        if (0x20..0x7F).contains(&ch) {
             eprint!("{}", ch as char);
         } else if ch == 0x0D {
             eprintln!(); // Carriage return + line feed for stderr
@@ -1118,6 +1128,128 @@ impl PcCpu {
         51
     }
 
+    /// Handle INT 05h - Print Screen / BOUND Exception
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int05h(&mut self) -> u32 {
+        // Skip the INT 05h instruction (2 bytes: 0xCD 0x05)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // INT 05h is used for:
+        // 1. Print Screen (Shift+PrtSc) - not implemented in emulator
+        // 2. BOUND instruction exception - array bounds check failure
+        // For now, just return (ignore the exception)
+        51
+    }
+
+    /// Handle INT 08h - Timer Tick (System Timer)
+    /// Called by hardware timer 18.2065 times per second
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int08h(&mut self) -> u32 {
+        // Skip the INT 08h instruction (2 bytes: 0xCD 0x08)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Real hardware timer interrupt handler
+        // This interrupt fires 18.2065 times per second (every 54.9254 ms)
+        // BIOS uses this to maintain time-of-day counter at 0040:006Ch
+
+        // Increment the timer tick counter in BIOS data area
+        // Timer ticks stored at 0x0040:0x006C (4 bytes, little-endian)
+        let tick_addr = 0x046C;
+        let mut ticks = self.cpu.memory.read(tick_addr) as u32;
+        ticks |= (self.cpu.memory.read(tick_addr + 1) as u32) << 8;
+        ticks |= (self.cpu.memory.read(tick_addr + 2) as u32) << 16;
+        ticks |= (self.cpu.memory.read(tick_addr + 3) as u32) << 24;
+
+        ticks = ticks.wrapping_add(1);
+
+        // Check for midnight rollover (1573040 ticks = 24 hours at 18.2065 ticks/sec)
+        if ticks >= 0x001800B0 {
+            // 1573040 decimal = 0x1800B0
+            ticks = 0;
+            // Set midnight flag at 0x0040:0x0070
+            self.cpu.memory.write(0x0470, 1);
+        }
+
+        // Write back the updated tick count
+        self.cpu.memory.write(tick_addr, (ticks & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(tick_addr + 1, ((ticks >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(tick_addr + 2, ((ticks >> 16) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(tick_addr + 3, ((ticks >> 24) & 0xFF) as u8);
+
+        // Call INT 1Ch (user timer tick handler)
+        // In a real system, this would be a chain call
+        // For now, we'll just acknowledge it
+        // Programs can hook INT 1Ch to execute code on every tick
+
+        51
+    }
+
+    /// Handle INT 09h - Keyboard Hardware Interrupt
+    /// Called by keyboard hardware when a key is pressed or released
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int09h(&mut self) -> u32 {
+        // Skip the INT 09h instruction (2 bytes: 0xCD 0x09)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Hardware keyboard interrupt
+        // This is typically triggered by keyboard controller when a key is pressed
+        // The BIOS interrupt handler would:
+        // 1. Read scancode from keyboard port (60h)
+        // 2. Convert to ASCII if printable
+        // 3. Store in keyboard buffer at 0040:001Eh
+        // 4. Update buffer pointers
+        // 5. Send EOI to interrupt controller
+
+        // For emulator, keyboard input is handled by INT 16h services
+        // We just acknowledge the interrupt
+        51
+    }
+
+    /// Handle INT 11h - Equipment List
+    /// Returns equipment flags in AX
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int11h(&mut self) -> u32 {
+        // Skip the INT 11h instruction (2 bytes: 0xCD 0x11)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Equipment list word format:
+        // Bit 0: Floppy drive(s) installed
+        // Bit 1: Math coprocessor installed
+        // Bits 2-3: System RAM (00=16K, 01=32K, 10=48K, 11=64K+) - obsolete
+        // Bits 4-5: Initial video mode (00=EGA/VGA, 01=CGA 40x25, 10=CGA 80x25, 11=MDA 80x25)
+        // Bits 6-7: Number of floppy drives (00=1, 01=2, etc.) if bit 0 set
+        // Bit 8: DMA installed (0=yes on PC/XT)
+        // Bits 9-11: Number of serial ports
+        // Bit 12: Game adapter installed
+        // Bit 13: Serial printer installed (PCjr)
+        // Bits 14-15: Number of parallel printers
+
+        // Default configuration:
+        // - Floppy drives installed (bit 0 = 1)
+        // - No math coprocessor (bit 1 = 0)
+        // - 64K+ RAM (bits 2-3 = 11)
+        // - CGA 80x25 color (bits 4-5 = 10)
+        // - 1 floppy drive (bits 6-7 = 00)
+        // - No DMA (bit 8 = 0) - actually yes on real hardware but we say no
+        // - 1 serial port (bits 9-11 = 001)
+        // - No game adapter (bit 12 = 0)
+        // - No serial printer (bit 13 = 0)
+        // - 1 parallel printer (bits 14-15 = 01)
+
+        let equipment_flags: u16 = 0b0100_0010_0010_1101;
+        // = 0x422D = Floppy, 64K RAM, CGA 80x25, 1 floppy, 1 serial, 1 parallel
+
+        self.cpu.ax = equipment_flags;
+
+        51
+    }
+
     /// Handle INT 12h - Get Memory Size
     /// Returns the amount of conventional memory in KB in AX
     #[allow(dead_code)] // Called dynamically based on interrupt number
@@ -1469,7 +1601,7 @@ impl PcCpu {
         // In a real system, this would read sectors and verify ECC/checksums
 
         // AH = 0 (success)
-        self.cpu.ax = (self.cpu.ax & 0x00FF);
+        self.cpu.ax &= 0x00FF;
 
         // AL = number of sectors verified
         self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
@@ -1500,7 +1632,7 @@ impl PcCpu {
 
         if drive < 0x80 {
             // Floppy: format succeeds
-            self.cpu.ax = (self.cpu.ax & 0x00FF); // AH = 0 (success)
+            self.cpu.ax &= 0x00FF; // AH = 0 (success)
             self.set_carry_flag(false);
         } else {
             // Hard drive: format not typically supported via this function
@@ -1777,7 +1909,7 @@ impl PcCpu {
         // In a real system, this would read and verify sectors
 
         // AH = 0 (success), AL = number of sectors verified (low byte)
-        self.cpu.ax = (num_sectors & 0xFF) as u16;
+        self.cpu.ax = num_sectors & 0xFF;
         self.set_carry_flag(false);
 
         51
@@ -2275,6 +2407,172 @@ impl PcCpu {
         // For now, just indicate no more entries
         self.cpu.bx = 0; // No continuation
         self.set_carry_flag(true); // No more entries
+        51
+    }
+
+    /// Handle INT 14h - Serial Port Services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int14h(&mut self) -> u32 {
+        // Skip the INT 14h instruction (2 bytes: 0xCD 0x14)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => {
+                // Initialize serial port
+                // AL = port parameters (baud rate, parity, stop bits, word length)
+                // DX = port number (0-3)
+                // Returns: AH = line status, AL = modem status
+                self.cpu.ax = 0x0000; // Success
+                51
+            }
+            0x01 => {
+                // Transmit character
+                // AL = character to send, DX = port number
+                // Returns: AH = status (bit 7 = timeout if set)
+                self.cpu.ax &= 0x00FF; // AH = 0 (success)
+                51
+            }
+            0x02 => {
+                // Receive character
+                // DX = port number
+                // Returns: AH = status, AL = received character
+                self.cpu.ax = 0x0000; // No data available
+                51
+            }
+            0x03 => {
+                // Get port status
+                // DX = port number
+                // Returns: AH = line status, AL = modem status
+                self.cpu.ax = 0x0000;
+                51
+            }
+            _ => {
+                // Unsupported function
+                51
+            }
+        }
+    }
+
+    /// Handle INT 17h - Printer Services
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int17h(&mut self) -> u32 {
+        // Skip the INT 17h instruction (2 bytes: 0xCD 0x17)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        match ah {
+            0x00 => {
+                // Print character
+                // AL = character to print, DX = printer number (0-2)
+                // Returns: AH = printer status
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x9000; // AH = 0x90 (ready, no errors)
+                51
+            }
+            0x01 => {
+                // Initialize printer
+                // DX = printer number
+                // Returns: AH = printer status
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x9000; // AH = 0x90 (ready)
+                51
+            }
+            0x02 => {
+                // Get printer status
+                // DX = printer number
+                // Returns: AH = printer status
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x9000; // AH = 0x90 (ready)
+                51
+            }
+            _ => {
+                // Unsupported function
+                51
+            }
+        }
+    }
+
+    /// Handle INT 18h - Cassette BASIC / Boot Failure
+    /// On modern systems, this indicates boot failure
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int18h(&mut self) -> u32 {
+        // Skip the INT 18h instruction (2 bytes: 0xCD 0x18)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // On IBM PC/XT/AT, this would start ROM BASIC
+        // On clones and modern systems, this indicates no bootable disk
+        // We'll just halt the system
+        // The BIOS or bootloader calls this when boot fails
+
+        // In a real implementation, this might:
+        // 1. Display "No ROM BASIC" message
+        // 2. Attempt network boot
+        // 3. Halt the system
+
+        // For emulator, just return (let the system continue)
+        51
+    }
+
+    /// Handle INT 19h - Bootstrap Loader / System Reboot
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int19h(&mut self) -> u32 {
+        // Skip the INT 19h instruction (2 bytes: 0xCD 0x19)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // INT 19h is the bootstrap loader interrupt
+        // Called by:
+        // 1. BIOS after POST to load the OS
+        // 2. Programs to reboot the computer (warm boot)
+
+        // In a real system, this would:
+        // 1. Reset hardware (except memory)
+        // 2. Load boot sector from boot device to 0000:7C00
+        // 3. Jump to boot sector (JMP 0000:7C00)
+
+        // For emulator, we should trigger a system reboot
+        // For now, just acknowledge (actual reboot would need system-level support)
+        51
+    }
+
+    /// Handle INT 1Bh - Ctrl-Break Handler
+    /// Called by INT 09h (keyboard interrupt) when Ctrl-Break is pressed
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int1bh(&mut self) -> u32 {
+        // Skip the INT 1Bh instruction (2 bytes: 0xCD 0x1B)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Ctrl-Break handler
+        // Default BIOS handler does nothing and returns
+        // Programs can hook this interrupt to handle Ctrl-Break
+        51
+    }
+
+    /// Handle INT 1Ch - Timer Tick Handler
+    /// Called by INT 08h (timer interrupt) on every tick (18.2 Hz)
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int1ch(&mut self) -> u32 {
+        // Skip the INT 1Ch instruction (2 bytes: 0xCD 0x1C)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // User timer tick handler
+        // Called 18.2065 times per second by INT 08h
+        // Default BIOS handler is just IRET
+        // Programs can hook this to execute code on every timer tick
+        51
+    }
+
+    /// Handle INT 4Ah - Real-Time Clock Alarm
+    /// Called when RTC alarm fires
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int4ah(&mut self) -> u32 {
+        // Skip the INT 4Ah instruction (2 bytes: 0xCD 0x4A)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // RTC Alarm handler
+        // Called by RTC hardware when alarm time is reached
+        // Default handler does nothing
         51
     }
 
