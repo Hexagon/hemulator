@@ -28,8 +28,10 @@ mod boot_priority {
 /// This BIOS:
 /// 1. Initializes segment registers and stack  
 /// 2. Sets up interrupt vectors in low memory
-/// 3. Provides basic INT 10h (video), INT 13h (disk), INT 16h (keyboard), INT 21h (DOS) handlers
+/// 3. Provides basic INT 10h (video), INT 13h (disk), INT 16h (keyboard) handlers
 /// 4. Jumps to boot sector at 0x0000:0x7C00 (loaded by emulator)
+///
+/// NOTE: INT 21h (DOS API) is NOT provided by BIOS - DOS installs it during boot
 ///
 /// Size: 64KB (standard BIOS size)
 pub fn generate_minimal_bios() -> Vec<u8> {
@@ -97,14 +99,9 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     ];
     bios[int16h_offset..int16h_offset + int16h_handler.len()].copy_from_slice(&int16h_handler);
 
-    // INT 21h handler at offset 0x400 - DOS Services
-    let int21h_offset = 0x400;
-    let int21h_handler: Vec<u8> = vec![
-        // Stub - just return
-        0xF8, // CLC
-        0xCF, // IRET
-    ];
-    bios[int21h_offset..int21h_offset + int21h_handler.len()].copy_from_slice(&int21h_handler);
+    // NOTE: INT 21h (DOS Services) is NOT provided by BIOS
+    // DOS installs its own INT 21h handler when it loads (IO.SYS/MSDOS.SYS)
+    // The BIOS must not provide an INT 21h handler or it will interfere with DOS initialization
 
     // Main boot code at offset 0 (will be reached via entry point jump)
     // This code checks if boot sector is loaded and either boots or halts
@@ -186,11 +183,7 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xA3, 0x70, 0x00, // MOV [0x0070], AX (INT 1Ch vector = 0x0070)
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x72, 0x00, // MOV [0x0072], AX
-        // INT 0x21 (DOS Services) at 0x0084
-        0xB8, 0x00, 0x04, // MOV AX, 0x0400
-        0xA3, 0x84, 0x00, // MOV [0x0084], AX
-        0xB8, 0x00, 0xF0, // MOV AX, 0xF000
-        0xA3, 0x86, 0x00, // MOV [0x0086], AX
+        // NOTE: INT 0x21 vector is NOT set up by BIOS - DOS will install it
         0xFB, // STI - enable interrupts
         // Check if boot sector is loaded by checking signature at 0x7C00 + 510
         // We'll check if byte at 0x7DFE is 0x55 and 0x7DFF is 0xAA

@@ -213,8 +213,10 @@ impl PcCpu {
                 0x1A => return self.handle_int1ah(), // Time/Date services
                 0x1B => return self.handle_int1bh(), // Ctrl-Break handler
                 0x1C => return self.handle_int1ch(), // Timer tick handler
-                0x20 => return self.handle_int20h(), // DOS: Program terminate
-                0x21 => return self.handle_int21h(), // DOS API
+                // NOTE: INT 20h and INT 21h are DOS functions, not BIOS
+                // DOS installs its own handlers - we don't intercept them
+                // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
+                // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this)
                 0x2F => return self.handle_int2fh(), // Multiplex interrupt
                 0x31 => return self.handle_int31h(), // DPMI services
                 0x33 => return self.handle_int33h(), // Mouse services
@@ -1336,10 +1338,15 @@ impl PcCpu {
             unsafe {
                 INT13H_CALL_COUNT += 1;
                 let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
-                if count % 100 == 1 {
+                if count % 10 == 1 {
                     eprintln!("INT 13h call #{}", count);
                 }
-                // No limit - DOS legitimately makes thousands of disk I/O calls during boot
+                if count > 1000 {
+                    eprintln!("!!! INT 13h called over 1000 times! Stopping...");
+                    self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+                    self.set_carry_flag(true);
+                    return 51;
+                }
             }
         }
 
@@ -2474,6 +2481,7 @@ impl PcCpu {
 
         match ah {
             0x41 => self.int15h_wait_on_external_event(),
+            0x87 => self.int15h_extended_memory_block_move(),
             0x88 => self.int15h_get_extended_memory_size(),
             0xC0 => self.int15h_get_system_configuration(),
             0xE8 => {
@@ -2505,6 +2513,69 @@ impl PcCpu {
                 51
             }
         }
+    }
+
+    /// INT 15h, AH=87h - Move Extended Memory Block
+    /// Copies data between conventional and extended memory
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_extended_memory_block_move(&mut self) -> u32 {
+        // CX = number of words to move (WORDs, not bytes!)
+        // ES:SI = pointer to Global Descriptor Table (GDT)
+        //
+        // GDT format (48 bytes):
+        // 00h-0Fh: Dummy descriptor (not used)
+        // 10h-17h: GDT descriptor (not used)
+        // 18h-1Fh: Source segment descriptor
+        // 20h-27h: Destination segment descriptor
+        // 28h-2Fh: BIOS CS descriptor (not used)
+        // 30h-37h: Stack segment descriptor (not used)
+        //
+        // Segment descriptor format:
+        // +0: WORD - Segment limit (low 16 bits)
+        // +2: WORD - Base address (low 16 bits)  
+        // +4: BYTE - Base address (bits 16-23)
+        // +5: BYTE - Access rights
+        // +6: WORD - Reserved
+        
+        let cx = self.cpu.cx;
+        let es = self.cpu.es as u32;
+        let si = self.cpu.si as u32;
+        let gdt_addr = (es << 4) + si;
+        
+        // Read source descriptor (offset 0x18)
+        let src_base_low = self.cpu.memory.read(gdt_addr + 0x1A) as u32
+            | ((self.cpu.memory.read(gdt_addr + 0x1B) as u32) << 8);
+        let src_base_high = self.cpu.memory.read(gdt_addr + 0x1C) as u32;
+        let src_addr = (src_base_high << 16) | src_base_low;
+        
+        // Read destination descriptor (offset 0x20)
+        let dst_base_low = self.cpu.memory.read(gdt_addr + 0x22) as u32
+            | ((self.cpu.memory.read(gdt_addr + 0x23) as u32) << 8);
+        let dst_base_high = self.cpu.memory.read(gdt_addr + 0x24) as u32;
+        let dst_addr = (dst_base_high << 16) | dst_base_low;
+        
+        // Copy CX words (CX * 2 bytes)
+        let byte_count = (cx as u32) * 2;
+        
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!(
+                "INT 15h AH=87h: Move {} words ({} bytes) from 0x{:08X} to 0x{:08X}",
+                cx, byte_count, src_addr, dst_addr
+            );
+        }
+        
+        for i in 0..byte_count {
+            let byte = self.cpu.memory.read(src_addr + i);
+            self.cpu.memory.write(dst_addr + i, byte);
+        }
+        
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+        
+        // AH = 0 (success)
+        self.cpu.ax &= 0x00FF;
+        
+        51
     }
 
     /// INT 15h, AH=41h - Wait on External Event (PS/2)
