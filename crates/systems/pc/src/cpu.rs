@@ -1391,11 +1391,19 @@ impl PcCpu {
         // AL = number of sectors to read
         let count = (self.cpu.ax & 0xFF) as u8;
 
-        // Validate count: must be > 0 and < 128
-        if count == 0 || count >= 128 {
+        // Validate count: must be < 128
+        // NOTE: count=0 is valid and means "do nothing successfully" (used by DOS to test disk readiness)
+        if count >= 128 {
             eprintln!("INT 13h AH=02h: Invalid sector count={}", count);
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid parameter
             self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Handle count=0 as a successful no-op (DOS uses this to check disk readiness)
+        if count == 0 {
+            self.cpu.ax &= 0xFF00; // AH=0 (success), AL=0 (sectors read)
+            self.set_carry_flag(false);
             return 51;
         }
 
@@ -1500,6 +1508,21 @@ impl PcCpu {
 
         // AL = number of sectors to write
         let count = (self.cpu.ax & 0xFF) as u8;
+
+        // Validate count: must be < 128
+        // NOTE: count=0 is valid and means "do nothing successfully"
+        if count >= 128 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid parameter
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Handle count=0 as a successful no-op
+        if count == 0 {
+            self.cpu.ax &= 0xFF00; // AH=0 (success), AL=0 (sectors written)
+            self.set_carry_flag(false);
+            return 51;
+        }
 
         // CH = cylinder (low 8 bits)
         // CL = sector number (bits 0-5), high 2 bits of cylinder (bits 6-7)
@@ -2395,7 +2418,9 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         match ah {
+            0x41 => self.int15h_wait_on_external_event(),
             0x88 => self.int15h_get_extended_memory_size(),
+            0xC0 => self.int15h_get_system_configuration(),
             0xE8 => {
                 // Get Extended Memory Size (32-bit)
                 let al = (self.cpu.ax & 0xFF) as u8;
@@ -2425,6 +2450,86 @@ impl PcCpu {
                 51
             }
         }
+    }
+
+    /// INT 15h, AH=41h - Wait on External Event (PS/2)
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_wait_on_external_event(&mut self) -> u32 {
+        // AL = event type
+        // This is a PS/2 BIOS function for event waiting
+        // We don't support this, so just return with carry set (not supported)
+        self.set_carry_flag(true);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
+        51
+    }
+
+    /// INT 15h, AH=C0h - Get System Configuration
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_get_system_configuration(&mut self) -> u32 {
+        // Return pointer to system configuration table in ES:BX
+        // The table describes the system capabilities
+
+        // We'll create a minimal configuration table at a fixed location
+        // Real BIOS stores this in ROM, we'll use a location in conventional memory
+        let table_seg = 0xF000;
+        let table_offset = 0xE000;
+
+        // System configuration table format:
+        // Offset  Size  Description
+        // 00h     WORD  Number of bytes following (we'll use 8)
+        // 02h     BYTE  Model (0xFC = AT, 0xFE = XT, 0xFF = PC)
+        // 03h     BYTE  Submodel (00h)
+        // 04h     BYTE  BIOS revision level (00h)
+        // 05h     BYTE  Feature information byte 1
+        //         bit 7: DMA channel 3 used by hard disk BIOS
+        //         bit 6: 2nd 8259 installed (cascaded IRQ2)
+        //         bit 5: Real-time clock installed
+        //         bit 4: INT 15h/AH=4Fh called on INT 09h (keyboard intercept)
+        //         bit 3: wait for external event supported (INT 15h/AH=41h)
+        //         bit 2: extended BIOS data area allocated
+        //         bit 1: micro channel implemented
+        //         bit 0: reserved
+        // 06h     BYTE  Feature information byte 2
+        // 07h     BYTE  Feature information byte 3
+        // 08h     BYTE  Feature information byte 4
+        // 09h     BYTE  Feature information byte 5
+
+        // Write the configuration table to memory
+        let table_addr = ((table_seg as u32) << 4) + (table_offset as u32);
+
+        // Number of bytes following (8 bytes: model through feature 5)
+        self.cpu.memory.write(table_addr, 8);
+        self.cpu.memory.write(table_addr + 1, 0);
+
+        // Model byte: 0xFE = PC/XT
+        self.cpu.memory.write(table_addr + 2, 0xFE);
+
+        // Submodel: 00h
+        self.cpu.memory.write(table_addr + 3, 0x00);
+
+        // BIOS revision: 00h
+        self.cpu.memory.write(table_addr + 4, 0x00);
+
+        // Feature byte 1: 0x20 (bit 5 = RTC installed)
+        self.cpu.memory.write(table_addr + 5, 0x20);
+
+        // Feature bytes 2-5: all zeros
+        self.cpu.memory.write(table_addr + 6, 0x00);
+        self.cpu.memory.write(table_addr + 7, 0x00);
+        self.cpu.memory.write(table_addr + 8, 0x00);
+        self.cpu.memory.write(table_addr + 9, 0x00);
+
+        // Return ES:BX pointing to the table
+        self.cpu.es = table_seg;
+        self.cpu.bx = table_offset;
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        // AH = 0 (success)
+        self.cpu.ax &= 0x00FF;
+
+        51
     }
 
     /// INT 15h, AH=88h - Get Extended Memory Size
@@ -2673,8 +2778,9 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         match ah {
-            0x43 => self.int2fh_xms_installation_check(),
+            0x11 => self.int2fh_network_installation_check(),
             0x16 => self.int2fh_dpmi_installation_check(),
+            0x43 => self.int2fh_xms_installation_check(),
             _ => {
                 // Unsupported function - log and return
                 self.log_stub_interrupt(
@@ -2685,6 +2791,17 @@ impl PcCpu {
                 51
             }
         }
+    }
+
+    /// INT 2Fh, AH=11h - Network Redirector / Installation Check
+    #[allow(dead_code)] // Called from handle_int2fh
+    fn int2fh_network_installation_check(&mut self) -> u32 {
+        // AL contains subfunction
+        // This is used by DOS to check for network redirector
+        // We don't support networking, so return "not installed"
+        // AL = 0xFF means "not installed"
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFF;
+        51
     }
 
     /// INT 2Fh, AH=43h - XMS Installation Check
