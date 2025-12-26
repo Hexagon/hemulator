@@ -1478,7 +1478,8 @@ impl PcCpu {
                     buffer.len()
                 );
             }
-            let should_log_progress = LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
+            let should_log_progress =
+                LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
             for (i, &byte) in buffer.iter().enumerate() {
                 if should_log_progress && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
@@ -1503,6 +1504,26 @@ impl PcCpu {
         // AL = number of sectors read (on success)
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+
+            // Update ES:BX to point past the data that was just read
+            // This is critical for bootloaders that read multiple sectors in a loop
+            let bytes_read = (count as u32) * 512;
+
+            // Add bytes to BX, handling overflow into ES
+            // Real BIOS behavior: BX advances by bytes read, with carry into ES
+            let new_bx = (buffer_offset as u32) + bytes_read;
+
+            // If we overflow past 64KB (0x10000), we need to adjust ES
+            if new_bx >= 0x10000 {
+                // How many complete 64KB segments did we cross?
+                let segments_crossed = (new_bx >> 16) as u16;
+                // Add to ES (each segment is 0x1000 paragraphs)
+                self.cpu.es = self.cpu.es.wrapping_add(segments_crossed * 0x1000);
+                // BX is the remainder
+                self.cpu.bx = (new_bx & 0xFFFF) as u16;
+            } else {
+                self.cpu.bx = new_bx as u16;
+            }
         }
 
         51 // Approximate INT instruction timing
@@ -1576,6 +1597,26 @@ impl PcCpu {
         // AL = number of sectors written (on success)
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+
+            // Update ES:BX to point past the data that was just written
+            // This is critical for bootloaders that write multiple sectors in a loop
+            let bytes_written = (count as u32) * 512;
+
+            // Add bytes to BX, handling overflow into ES
+            // Real BIOS behavior: BX advances by bytes written, with carry into ES
+            let new_bx = (buffer_offset as u32) + bytes_written;
+
+            // If we overflow past 64KB (0x10000), we need to adjust ES
+            if new_bx >= 0x10000 {
+                // How many complete 64KB segments did we cross?
+                let segments_crossed = (new_bx >> 16) as u16;
+                // Add to ES (each segment is 0x1000 paragraphs)
+                self.cpu.es = self.cpu.es.wrapping_add(segments_crossed * 0x1000);
+                // BX is the remainder
+                self.cpu.bx = (new_bx & 0xFFFF) as u16;
+            } else {
+                self.cpu.bx = new_bx as u16;
+            }
         }
 
         51 // Approximate INT instruction timing
@@ -4441,5 +4482,252 @@ mod tests {
 
         // AL should be 0xFF (not installed)
         assert_eq!(cpu.cpu.ax & 0xFF, 0xFF);
+    }
+
+    #[test]
+    fn test_int13h_read_sectors_advances_esbx() {
+        // Test that INT 13h AH=02h advances ES:BX pointer after reading
+        let mut bus = PcBus::new();
+
+        // Create a floppy image with test data
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+
+        // Fill first two sectors with test patterns
+        for i in 0..512 {
+            floppy[i] = (i % 256) as u8; // First sector
+        }
+        for i in 512..1024 {
+            floppy[i] = ((i - 512) % 256) as u8; // Second sector
+        }
+
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=02h (read 1 sector)
+        cpu.cpu.ax = 0x0201; // AH=02h (read), AL=01 (1 sector)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00; // Buffer at 0x0000:0x7C00
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x01); // AL = sectors read
+
+        // ES:BX should be advanced by 512 bytes (0x200)
+        assert_eq!(cpu.cpu.es, 0x0000);
+        assert_eq!(cpu.cpu.bx, 0x7C00 + 0x200); // 0x7E00
+
+        // Verify data was copied to buffer
+        let buffer_addr = 0x7C00;
+        assert_eq!(cpu.cpu.memory.read(buffer_addr), 0);
+        assert_eq!(cpu.cpu.memory.read(buffer_addr + 255), 255);
+    }
+
+    #[test]
+    fn test_int13h_read_multiple_sectors_advances_esbx() {
+        // Test that INT 13h AH=02h advances ES:BX correctly for multiple sectors
+        let mut bus = PcBus::new();
+
+        // Create a floppy image with test data
+        let floppy = vec![0xAA; 1474560]; // 1.44MB, all 0xAA
+
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=02h (read 5 sectors)
+        cpu.cpu.ax = 0x0205; // AH=02h (read), AL=05 (5 sectors)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x8000; // Buffer at 0x0000:0x8000
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x05); // AL = 5 sectors read
+
+        // ES:BX should be advanced by 5 * 512 = 2560 bytes (0xA00)
+        assert_eq!(cpu.cpu.es, 0x0000);
+        assert_eq!(cpu.cpu.bx, 0x8000 + 0xA00); // 0x8A00
+    }
+
+    #[test]
+    fn test_int13h_read_sectors_with_segment_overflow() {
+        // Test that INT 13h AH=02h handles ES:BX advancement past segment boundary
+        let mut bus = PcBus::new();
+
+        // Create a floppy image
+        let floppy = vec![0xBB; 1474560]; // 1.44MB, all 0xBB
+
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=02h (read 4 sectors)
+        // Start at offset where reading won't cross 64KB within the read itself,
+        // but the final BX will be > 0xFFFF (demonstrating BX wrapping)
+        cpu.cpu.ax = 0x0204; // AH=02h (read), AL=04 (4 sectors = 2048 bytes)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x1000;
+        cpu.cpu.bx = 0xF800; // Buffer at 0x1000:0xF800
+                             // 0xF800 + 2048 = 0xF800 + 0x800 = 0x10000 (exactly at boundary)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x04); // AL = 4 sectors read
+
+        // ES:BX should wrap correctly
+        // Initial: 0x1000:0xF800
+        // Add 2048 bytes (0x800): 0xF800 + 0x800 = 0x10000
+        // Since 0x10000 >= 0x10000, we cross 1 segment
+        // Segments crossed = 0x10000 >> 16 = 1
+        // ES = 0x1000 + (1 * 0x1000) = 0x2000
+        // BX = 0x10000 & 0xFFFF = 0x0000
+        assert_eq!(cpu.cpu.es, 0x2000);
+        assert_eq!(cpu.cpu.bx, 0x0000);
+    }
+
+    #[test]
+    fn test_int13h_write_sectors_advances_esbx() {
+        // Test that INT 13h AH=03h advances ES:BX pointer after writing
+        let mut bus = PcBus::new();
+
+        // Create a blank floppy image
+        let floppy = vec![0; 1474560]; // 1.44MB
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write test data to memory at 0x0000:0x7C00
+        let buffer_addr = 0x7C00;
+        for i in 0..512 {
+            cpu.cpu.memory.write(buffer_addr + i, (i % 256) as u8);
+        }
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=03h (write 1 sector)
+        cpu.cpu.ax = 0x0301; // AH=03h (write), AL=01 (1 sector)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00; // Buffer at 0x0000:0x7C00
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x01); // AL = sectors written
+
+        // ES:BX should be advanced by 512 bytes (0x200)
+        assert_eq!(cpu.cpu.es, 0x0000);
+        assert_eq!(cpu.cpu.bx, 0x7C00 + 0x200); // 0x7E00
+    }
+
+    #[test]
+    fn test_int13h_write_multiple_sectors_advances_esbx() {
+        // Test that INT 13h AH=03h advances ES:BX correctly for multiple sectors
+        let mut bus = PcBus::new();
+
+        // Create a blank floppy image
+        let floppy = vec![0; 1474560]; // 1.44MB
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write test data to memory
+        let buffer_addr = 0x8000;
+        for i in 0..(3 * 512) {
+            cpu.cpu.memory.write(buffer_addr + i, 0xCC);
+        }
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=03h (write 3 sectors)
+        cpu.cpu.ax = 0x0303; // AH=03h (write), AL=03 (3 sectors)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x8000; // Buffer at 0x0000:0x8000
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x03); // AL = 3 sectors written
+
+        // ES:BX should be advanced by 3 * 512 = 1536 bytes (0x600)
+        assert_eq!(cpu.cpu.es, 0x0000);
+        assert_eq!(cpu.cpu.bx, 0x8000 + 0x600); // 0x8600
     }
 }
