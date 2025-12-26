@@ -148,30 +148,6 @@ This test is designed to help diagnose the FreeDOS/MS-DOS freeze issue by:
 **Known Issue:**
 Both FreeDOS and MS-DOS currently freeze during boot in the emulator. The comprehensive boot test helps isolate where the freeze occurs by testing each component independently.
 
-## Custom BIOS (`bios.bin`)
-
-**Location:** Root `test_roms/pc/` directory
-
-**File:** `bios.bin` (64KB)
-
-A minimal BIOS ROM for the IBM PC/XT emulator.
-
-**Building:**
-```bash
-cd ..  # From any test subdirectory
-./build.sh
-```
-
-**Features:**
-- Entry point at 0xFFFF:0x0000 (physical 0xFFFF0)
-- Segment and stack initialization
-- Boot sector loading from floppy/hard drive
-- Boot signature validation (0xAA55)
-- Jump to loaded boot sector at 0x0000:0x7C00
-- INT 13h (Disk Services) - Full implementation
-- INT 10h (Video Services) - Partial implementation
-- INT 16h (Keyboard Services) - Functional implementation
-
 ## Boot Process
 
 The PC emulator boot process:
@@ -203,13 +179,14 @@ For PC systems with multiple disk images, you can create a `.hemu` project file 
   "version": 1,
   "system": "pc",
   "mounts": {
-    "BIOS": "custom_bios.bin",
     "FloppyA": "dos622_boot.img",
     "HardDrive": "freedos.img"
   },
   "boot_priority": "FloppyFirst"
 }
 ```
+
+Note: BIOS mount is optional. If not specified, the built-in generated BIOS is used. Custom BIOS ROMs can be loaded with `"BIOS": "custom_bios.bin"` if needed.
 
 **Boot Priority Options:**
 - `FloppyFirst` - Boot from floppy A first, then hard drive C (default)
@@ -231,8 +208,9 @@ The PC emulator supports the following mount points:
 
 1. **BIOS** (Slot 1)
    - Extensions: `.bin`, `.rom`
-   - Required: No (has default)
-   - Default: Custom BIOS (this file)
+   - Required: No (has built-in BIOS)
+   - Default: Generated minimal BIOS (see `crates/systems/pc/src/bios.rs`)
+   - Note: Custom BIOS ROMs can be loaded if needed
 
 2. **FloppyA** (Floppy Drive A:)
    - Extensions: `.img`, `.ima`

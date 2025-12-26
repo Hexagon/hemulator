@@ -40,12 +40,12 @@ For PC/XT emulation, you can specify disk images for specific drive slots:
 # Load PC with both floppy and hard drive
 ./hemu --slot2 boot.img --slot4 harddrive.img
 
-# Load custom BIOS and disks
+# Optional: Load custom BIOS ROM (built-in BIOS used if not specified)
 ./hemu --slot1 custom_bios.bin --slot2 floppy.img --slot4 hdd.img
 ```
 
 **Slot Mapping for PC/XT**:
-- `--slot1 <file>`: BIOS ROM (default BIOS used if not specified)
+- `--slot1 <file>`: BIOS ROM (optional - built-in BIOS used if not specified)
 - `--slot2 <file>`: Floppy Drive A:
 - `--slot3 <file>`: Floppy Drive B:
 - `--slot4 <file>`: Hard Drive C:
