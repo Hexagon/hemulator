@@ -74,6 +74,11 @@ impl PcCpu {
         self.cpu.es = 0x0000;
     }
 
+    /// Check if the CPU is halted (e.g., waiting for keyboard input in INT 16h)
+    pub fn is_halted(&self) -> bool {
+        self.cpu.is_halted()
+    }
+
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
         // Check if the next instruction is a BIOS/DOS interrupt we need to handle
