@@ -130,11 +130,13 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xBE, 0xFE, 0x7D, // MOV SI, 0x7DFE (offset of boot signature)
         0x8A, 0x04, // MOV AL, [SI]
         0x3C, 0x55, // CMP AL, 0x55
-        0x75, 0x08, // JNZ skip_boot (if not equal, skip boot - jump 8 bytes)
+        0x75, 0x0C, // JNZ skip_boot (jump 12 bytes: 3+1+2+2+5)
         0x8A, 0x44, 0x01, // MOV AL, [SI+1]
         0x3C, 0xAA, // CMP AL, 0xAA
-        0x75, 0x02, // JNZ skip_boot (if not equal, skip boot - jump 2 bytes)
-        // Boot signature valid - jump to boot sector
+        0x75, 0x09, // JNZ skip_boot (jump 9 bytes: 2+2+5)
+        // Boot signature valid - set DL to boot drive and jump to boot sector
+        0xB2, 0x00, // MOV DL, 0x00 (boot drive = floppy A:)
+        0xB6, 0x00, // MOV DH, 0x00 (clear DH as well for safety)
         0xEA, 0x00, 0x7C, 0x00, 0x00, // JMP FAR 0x0000:0x7C00
         // skip_boot: No valid boot sector - infinite loop (HLT)
         // 0xF4,       // HLT

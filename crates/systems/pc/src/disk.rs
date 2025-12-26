@@ -75,7 +75,7 @@ impl DiskController {
             + (request.sector as u32 - 1);
 
         // Each sector is 512 bytes
-        let sector_size = 512;
+        let sector_size: u32 = 512;
         let offset = (lba * sector_size) as usize;
 
         // Check if read is within bounds
