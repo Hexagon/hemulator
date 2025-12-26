@@ -2,15 +2,48 @@
 
 This directory contains test ROMs and BIOS for the IBM PC/XT emulator.
 
-## Interactive Menu Test (menu.bin)
+## Directory Structure
 
-### File: `menu.bin` (512 bytes)
+Each test ROM has its own subdirectory with source, build script, and binaries:
+
+- **basic_boot/** - Simple boot sector test (writes "BOOT OK" to screen)
+- **menu/** - Interactive menu test (keyboard, video, basic operations)
+- **fileio/** - File I/O test (demonstrates INT 21h file operations)
+- **comprehensive_boot/** - Comprehensive boot test (CPU, memory, disk I/O, program loading)
+
+## Test ROMs
+
+### 1. Basic Boot Test (`basic_boot/`)
+
+**File:** `boot.bin` (512 bytes)
+
+A minimal bootable boot sector that writes "BOOT OK" to the screen in green text.
+
+**Building:**
+```bash
+cd basic_boot
+./build.sh
+```
+
+**Testing:**
+The boot sector is used in the smoke test `test_boot_sector_smoke_test` which:
+1. Creates a 1.44MB floppy image with the boot sector
+2. Boots from the floppy
+3. Verifies that "BOOT OK" is written to video memory
+
+**Usage:**
+- Load `test_floppy.img` in the emulator to see basic boot functionality
+
+### 2. Interactive Menu Test (`menu/`)
+
+**File:** `menu.bin` (512 bytes)
 
 An interactive bootable boot sector with a menu for manual testing of various features.
 
 **Building:**
 ```bash
-./build_menu.sh
+cd menu
+./build.sh
 ```
 
 **Features:**
@@ -28,11 +61,7 @@ An interactive bootable boot sector with a menu for manual testing of various fe
 5. Uses INT 10h (video services) for display
 6. Uses INT 16h (keyboard services) for input
 
-**Requirements:**
-- NASM assembler (`sudo apt-get install nasm`)
-
 **Usage:**
-- Build and create bootable floppy: `./build_menu.sh`
 - Load `menu_floppy.img` in the emulator
 - Press F3 in the emulator and select the image file
 - Select menu options by pressing 1, 2, 3, or Q
@@ -43,62 +72,93 @@ An interactive bootable boot sector with a menu for manual testing of various fe
 - **Option 3 (File I/O)**: Simulates file read/write operations with status messages
 - **Option Q (Quit)**: Halts the system with a goodbye message
 
-## Boot Sector Test (boot.bin)
+### 3. File I/O Test (`fileio/`)
 
-### File: `boot.bin` (512 bytes)
+**File:** `fileio_test.asm`
 
-A minimal bootable boot sector that writes "BOOT OK" to the screen in green text.
+A bootloader that demonstrates INT 21h file operations (DOS API).
 
 **Building:**
 ```bash
-./build_boot.sh
+cd fileio
+./build.sh
 ```
 
-**Requirements:**
-- NASM assembler (`sudo apt-get install nasm`)
+**Features:**
+- Attempts to open files (IO.SYS, MSDOS.SYS)
+- Demonstrates file reading
+- Demonstrates file creation and writing
+- Shows error codes for failed operations
 
-**Testing:**
-The boot sector is used in the smoke test `test_boot_sector_smoke_test` which:
-1. Creates a 1.44MB floppy image with the boot sector
-2. Boots from the floppy
-3. Verifies that "BOOT OK" is written to video memory
+**Note:** This test requires a DOS filesystem on the disk. Without DOS, it will show error codes but demonstrates the API usage.
+
+### 4. Comprehensive Boot Test (`comprehensive_boot/`)
+
+**File:** `comprehensive_boot.bin` (512 bytes)
+
+A thorough boot sector test that replicates the DOS boot process and helps diagnose boot-related issues.
+
+**Building:**
+```bash
+cd comprehensive_boot
+./build.sh
+```
+
+**Features:**
+
+**CPU Tests:**
+- Basic arithmetic (ADD, SUB)
+- Logical operations (AND, OR, XOR)
+- Shift operations (SHL, SHR)
+
+**Memory Tests:**
+- Read/write at various addresses
+- Pattern fill and verify (0x5AA5)
+- Sequential pattern testing
+
+**Disk I/O Tests:**
+- Disk reset (INT 13h, AH=00h)
+- Read multiple sectors (sectors 2-5)
+- Multi-track reads (head 0 and 1)
+- Simulates DOS boot sector reads
+
+**Program Loading Test:**
+- Multi-sector consecutive reads (5 sectors)
+- Simulates loading IO.SYS/MSDOS.SYS from disk
+- Tests sector advancement and buffer management
+
+**Interactive Prompt:**
+- If all tests pass, displays "BOOT>" prompt
+- Accepts keyboard input
+- Type 'q' or 'Q' to quit
 
 **Usage:**
-- Create a bootable floppy image: 
-  ```bash
-  dd if=boot.bin of=test_floppy.img bs=512 count=1 && dd if=/dev/zero bs=512 count=2879 >> test_floppy.img
-  ```
-- Load the floppy image in the emulator to test boot functionality
+- Load `comprehensive_boot.img` in the emulator
+- Tests run automatically on boot
+- Each test displays "OK" or "FAIL"
+- Successful boot reaches the "BOOT>" prompt
 
-### Creating Custom Boot Sectors
+**Purpose:**
+This test is designed to help diagnose the FreeDOS/MS-DOS freeze issue by:
+1. Replicating the DOS boot process (disk reads, multi-sector loading)
+2. Testing all CPU operations used during boot
+3. Verifying memory operations
+4. Simulating the IO.SYS/MSDOS.SYS loading sequence
 
-To create your own boot sector:
+**Known Issue:**
+Both FreeDOS and MS-DOS currently freeze during boot in the emulator. The comprehensive boot test helps isolate where the freeze occurs by testing each component independently.
 
-1. Write 16-bit x86 assembly code
-2. Assemble to a flat binary: `nasm -f bin yourboot.asm -o yourboot.bin`
-3. Ensure the file is exactly 512 bytes
-4. Ensure bytes 510-511 contain the boot signature `0x55 0xAA`
+## Custom BIOS (`bios.bin`)
 
-Example minimal structure:
-```asm
-BITS 16
-ORG 0x7C00
-start:
-    ; Your boot code here
-    cli
-    hlt
-times 510-($-$$) db 0
-dw 0xAA55    ; Boot signature
-```
+**Location:** Root `test_roms/pc/` directory
 
-## Custom BIOS (bios.bin)
-
-### File: `bios.bin` (64KB)
+**File:** `bios.bin` (64KB)
 
 A minimal BIOS ROM for the IBM PC/XT emulator.
 
 **Building:**
 ```bash
+cd ..  # From any test subdirectory
 ./build.sh
 ```
 
@@ -108,6 +168,9 @@ A minimal BIOS ROM for the IBM PC/XT emulator.
 - Boot sector loading from floppy/hard drive
 - Boot signature validation (0xAA55)
 - Jump to loaded boot sector at 0x0000:0x7C00
+- INT 13h (Disk Services) - Full implementation
+- INT 10h (Video Services) - Partial implementation
+- INT 16h (Keyboard Services) - Functional implementation
 
 ## Boot Process
 
@@ -186,10 +249,85 @@ The PC emulator supports the following mount points:
    - Required: No
    - Format: Raw disk image or VHD
 
+## Creating Custom Boot Sectors
+
+To create your own boot sector:
+
+1. Write 16-bit x86 assembly code
+2. Assemble to a flat binary: `nasm -f bin yourboot.asm -o yourboot.bin`
+3. Ensure the file is exactly 512 bytes
+4. Ensure bytes 510-511 contain the boot signature `0x55 0xAA`
+
+Example minimal structure:
+```asm
+BITS 16
+ORG 0x7C00
+start:
+    ; Your boot code here
+    cli
+    hlt
+times 510-($-$$) db 0
+dw 0xAA55    ; Boot signature
+```
+
+## Known Issues
+
+### FreeDOS/MS-DOS Boot Freeze
+
+Both FreeDOS and MS-DOS currently freeze during boot. The debug output shows:
+
+**FreeDOS:**
+- Successfully loads boot sector
+- Makes many INT 13h calls (100+ disk reads)
+- Reads sectors from cylinder 36
+- Eventually stops responding after reading cylinder 36, head 1, sector 18
+
+**MS-DOS:**
+- Successfully loads boot sector
+- Makes several INT 13h calls
+- Reads FAT and directory sectors
+- Encounters "Undefined 0xFF operation with op=7" errors
+- Stops responding
+
+The comprehensive boot test was created to help isolate this issue by testing:
+- CPU operations that DOS would use
+- Memory operations
+- Disk I/O patterns similar to DOS
+- Multi-sector reads like IO.SYS loading
+
+## Testing
+
+Each test ROM can be built and run independently:
+
+```bash
+# Build and test basic boot
+cd basic_boot
+./build.sh
+# Load test_floppy.img in emulator
+
+# Build and test menu
+cd ../menu
+./build.sh
+# Load menu_floppy.img in emulator
+
+# Build and test comprehensive boot
+cd ../comprehensive_boot
+./build.sh
+# Load comprehensive_boot.img in emulator
+```
+
+The emulator includes automated tests for the basic boot sector in `crates/systems/pc/src/lib.rs`:
+- `test_boot_sector_smoke_test` - Verifies basic boot functionality
+
+## Requirements
+
+- NASM assembler (`sudo apt-get install nasm`)
+- Tools: `dd`, `hexdump` (standard on Linux/Unix systems)
+
 ## Future Enhancements
 
-- Full INT 13h implementation for actual disk I/O
-- Boot sector loading and execution
-- INT 10h (Video Services)
-- INT 16h (Keyboard Services)
-- INT 19h (Bootstrap Loader)
+- Additional test ROMs for specific DOS functions
+- Tests for protected mode operations
+- Tests for video mode switching
+- Tests for INT 21h DOS API functions
+- Automated test suite for comprehensive boot test
