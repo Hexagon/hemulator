@@ -447,6 +447,31 @@ impl PcCpu {
         51
     }
 
+    /// Helper function to scroll the entire screen up by N lines
+    fn scroll_screen_up(&mut self, lines: u32, attr: u8) {
+        // Scroll entire screen (0,0) to (24,79)
+        for row in 0..25 {
+            for col in 0..80 {
+                let offset = (row * 80 + col) * 2;
+                let video_addr = 0xB8000 + offset;
+
+                if row + lines < 25 {
+                    // Copy from below
+                    let src_offset = ((row + lines) * 80 + col) * 2;
+                    let src_addr = 0xB8000 + src_offset;
+                    let ch = self.cpu.memory.read(src_addr);
+                    let at = self.cpu.memory.read(src_addr + 1);
+                    self.cpu.memory.write(video_addr, ch);
+                    self.cpu.memory.write(video_addr + 1, at);
+                } else {
+                    // Fill bottom lines with blanks
+                    self.cpu.memory.write(video_addr, b' ');
+                    self.cpu.memory.write(video_addr + 1, attr);
+                }
+            }
+        }
+    }
+
     /// INT 10h, AH=0Eh: Teletype output
     #[allow(dead_code)] // Called from handle_int10h
     fn int10h_teletype_output(&mut self) -> u32 {
@@ -476,7 +501,9 @@ impl PcCpu {
                 // Line feed
                 row += 1;
                 if row >= 25 {
-                    row = 24; // Stay at bottom
+                    // Scroll screen up by 1 line
+                    self.scroll_screen_up(1, 0x07);
+                    row = 24; // Stay at bottom after scroll
                 }
             }
             0x0D => {
@@ -497,7 +524,9 @@ impl PcCpu {
                     col = 0;
                     row += 1;
                     if row >= 25 {
-                        row = 24;
+                        // Scroll screen up by 1 line
+                        self.scroll_screen_up(1, 0x07);
+                        row = 24; // Stay at bottom after scroll
                     }
                 }
             }
