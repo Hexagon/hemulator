@@ -188,6 +188,7 @@ impl PcCpu {
 
             match int_num {
                 0x10 => return self.handle_int10h(), // Video BIOS
+                0x12 => return self.handle_int12h(), // Get memory size
                 0x13 => return self.handle_int13h(), // Disk services
                 0x15 => return self.handle_int15h(), // Extended services
                 0x16 => return self.handle_int16h(), // Keyboard services
@@ -1083,6 +1084,25 @@ impl PcCpu {
         let cx = self.cpu.cx;
         self.cpu.ax = cx; // Report all bytes written
         self.set_carry_flag(false);
+        51
+    }
+
+    /// Handle INT 12h - Get Memory Size
+    /// Returns the amount of conventional memory in KB in AX
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int12h(&mut self) -> u32 {
+        // Skip the INT 12h instruction (2 bytes: 0xCD 0x12)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get memory size from bus
+        let memory_kb = self.cpu.memory.memory_kb() as u16;
+
+        // Return memory size in AX
+        self.cpu.ax = memory_kb;
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
         51
     }
 
