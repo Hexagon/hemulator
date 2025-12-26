@@ -1942,4 +1942,340 @@ mod boot_output_tests {
 
         println!("Comprehensive boot test completed successfully!");
     }
+
+    #[test]
+    #[ignore] // Run manually with: cargo test --package emu_pc test_freedos_trace -- --ignored --nocapture
+    fn test_freedos_trace() {
+        use std::fs;
+        use std::path::Path;
+
+        // Try multiple possible paths since test runs from different directories
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img in any expected location");
+
+        let disk_data = fs::read(img_path).expect("Failed to read x86BOOT.img");
+        
+        println!("\n=== Running FreeDOS with detailed execution trace ===");
+        println!("Disk size: {} bytes", disk_data.len());
+        println!("This test helps diagnose the infinite loop issue");
+        println!("Enable EMU_LOG_INTERRUPTS=debug or EMU_TRACE_PC=1 for detailed output\n");
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        // Run for limited frames to observe behavior
+        for frame in 0..10 {
+            println!("\n--- Frame {} ---", frame);
+            let _ = sys.step_frame();
+
+            // Check CPU state
+            let regs = sys.cpu.get_registers();
+            println!(
+                "  CS:IP = {:04X}:{:04X}, AX={:04X}, BX={:04X}, CX={:04X}, DX={:04X}",
+                regs.cs, regs.ip, regs.ax, regs.bx, regs.cx, regs.dx
+            );
+        }
+
+        println!("\n=== Trace complete ===");
+    }
+
+    #[test]
+    fn inspect_freedos_stuck_location() {
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Inspecting FreeDOS stuck location ===");
+
+        // Run until we get to the stuck location
+        for _ in 0..5 {
+            let _ = sys.step_frame();
+        }
+
+        // Check what's at the stuck address
+        let regs = sys.cpu.get_registers();
+        println!("Stuck at CS:IP = {:04X}:{:04X}", regs.cs, regs.ip);
+
+        // Read bytes at this location
+        let phys_addr = ((regs.cs as u32) << 4) + (regs.ip as u32);
+        println!("Physical address: {:08X}", phys_addr);
+
+        let bus = sys.cpu.bus();
+        print!("Bytes at location: ");
+        for i in 0..16 {
+            let byte = bus.read(phys_addr + i);
+            print!("{:02X} ", byte);
+        }
+        println!();
+
+        // Check if it's a HLT (0xF4)
+        let opcode = bus.read(phys_addr);
+        println!("Opcode: 0x{:02X}", opcode);
+        if opcode == 0xF4 {
+            println!("✓ This is a HLT instruction - CPU is halted (expected behavior)");
+        } else if opcode == 0xF6 || opcode == 0xF7 {
+            println!("! This is a DIV/TEST/MUL instruction group - may be the fault location");
+            let modrm = bus.read(phys_addr + 1);
+            let reg = (modrm >> 3) & 0x07;
+            match reg {
+                0b110 => println!("  Subopcode: DIV (unsigned division)"),
+                0b111 => println!("  Subopcode: IDIV (signed division)"),
+                _ => println!("  Subopcode: Other ({})", reg),
+            }
+        } else {
+            println!("! Unexpected opcode - not HLT or DIV");
+        }
+    }
+
+    #[test]
+    fn trace_freedos_detailed_steps() {
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Detailed step-by-step execution trace ===");
+
+        // Run a few frames first
+        for _ in 0..3 {
+            let _ = sys.step_frame();
+        }
+
+        // Now step through individual instructions
+        println!("\nStepping through individual instructions:");
+        for step in 0..50 {
+            let regs_before = sys.cpu.get_registers();
+            let phys_addr = ((regs_before.cs as u32) << 4) + (regs_before.ip as u32);
+            let opcode = sys.cpu.bus().read(phys_addr);
+
+            // Execute one CPU step
+            sys.cpu.step();
+
+            let regs_after = sys.cpu.get_registers();
+
+            println!(
+                "Step {}: {:04X}:{:04X} opcode={:02X} -> {:04X}:{:04X}",
+                step, regs_before.cs, regs_before.ip, opcode, regs_after.cs, regs_after.ip
+            );
+
+            // If we're stuck at the same location, break
+            if regs_before.cs == regs_after.cs && regs_before.ip == regs_after.ip {
+                println!("  ⚠ Stuck at same location!");
+                if opcode == 0xF4 {
+                    println!("  → CPU is HALTed");
+                    break;
+                } else if opcode == 0xF6 || opcode == 0xF7 {
+                    println!("  → Possible DIV fault loop");
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trace_freedos_until_stuck() {
+        use std::collections::{HashSet, VecDeque};
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Tracing FreeDOS until it gets stuck ===");
+
+        // Keep track of recent locations to detect loops
+        let mut recent_ips: VecDeque<(u16, u16)> = VecDeque::new();
+
+        for step in 0..100000 {
+            let regs_before = sys.cpu.get_registers();
+            let cs = regs_before.cs;
+            let ip = regs_before.ip;
+
+            // Add to recent history
+            recent_ips.push_back((cs, ip));
+            if recent_ips.len() > 100 {
+                recent_ips.pop_front();
+            }
+
+            // Check for loop - if we've been at this location more than 10 times in recent history
+            let count = recent_ips
+                .iter()
+                .filter(|(c, i)| *c == cs && *i == ip)
+                .count();
+            if count > 10 {
+                println!(
+                    "\n🔴 LOOP DETECTED at CS:IP = {:04X}:{:04X} (visited {} times in last 100 steps)",
+                    cs, ip, count
+                );
+
+                // Show last 20 instructions
+                println!("\nLast 20 unique locations before loop:");
+                let mut seen = HashSet::new();
+                for (c, i) in recent_ips.iter().rev().take(20) {
+                    if seen.insert((*c, *i)) {
+                        let phys = ((*c as u32) << 4) + (*i as u32);
+                        let opc = sys.cpu.bus().read(phys);
+                        println!("  {:04X}:{:04X} (phys {:08X}) opcode={:02X}", c, i, phys, opc);
+                    }
+                }
+                break;
+            }
+
+            // Execute one step
+            sys.cpu.step();
+
+            if step % 10000 == 0 && step > 0 {
+                println!("Executed {} steps, currently at {:04X}:{:04X}", step, cs, ip);
+            }
+        }
+    }
+
+    #[test]
+    fn trace_freedos_loop_detail() {
+        use std::collections::HashMap;
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Detailed trace of loop at 12CE:0010 ===");
+
+        // Run until we hit the loop area
+        for _ in 0..10000 {
+            let regs = sys.cpu.get_registers();
+            if regs.cs == 0x12CE && regs.ip >= 0x000F && regs.ip <= 0x0020 {
+                println!("\n📍 Reached loop area!");
+                break;
+            }
+            sys.cpu.step();
+        }
+
+        // Now trace the loop in detail
+        let mut visit_counts: HashMap<u16, usize> = HashMap::new();
+        println!("\nDetailed instruction trace:");
+        for step in 0..200 {
+            let regs = sys.cpu.get_registers();
+            let cs = regs.cs;
+            let ip = regs.ip;
+
+            // Count visits
+            *visit_counts.entry(ip).or_insert(0) += 1;
+
+            // If we've looped too many times, show the pattern
+            if let Some(&count) = visit_counts.get(&ip) {
+                if count > 20 {
+                    println!(
+                        "\n❌ Infinite loop confirmed - IP {:04X} visited {} times",
+                        ip, count
+                    );
+                    println!("\nLoop pattern (instructions visited more than 5 times):");
+                    let mut sorted: Vec<_> = visit_counts.iter().collect();
+                    sorted.sort_by_key(|(ip, _)| **ip);
+                    for (ip, count) in sorted {
+                        if *count > 5 {
+                            let phys = ((cs as u32) << 4) + (*ip as u32);
+                            let opc = sys.cpu.bus().read(phys);
+                            let byte2 = sys.cpu.bus().read(phys + 1);
+                            let byte3 = sys.cpu.bus().read(phys + 2);
+                            println!(
+                                "  {:04X}:{:04X} visited {:3} times - {:02X} {:02X} {:02X}",
+                                cs, ip, count, opc, byte2, byte3
+                            );
+                        }
+                    }
+                    break;
+                }
+            }
+
+            let phys = ((cs as u32) << 4) + (ip as u32);
+            let opc = sys.cpu.bus().read(phys);
+            let byte2 = sys.cpu.bus().read(phys + 1);
+
+            println!(
+                "  {:2}: {:04X}:{:04X} opcode={:02X} {:02X} AX={:04X} CX={:04X} DX={:04X}",
+                step, cs, ip, opc, byte2, regs.ax, regs.cx, regs.dx
+            );
+
+            sys.cpu.step();
+        }
+    }
 }

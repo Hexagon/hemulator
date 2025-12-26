@@ -252,29 +252,29 @@ dw 0xAA55    ; Boot signature
 
 ### FreeDOS/MS-DOS Boot Freeze
 
-Both FreeDOS and MS-DOS currently freeze during boot due to a division error infinite loop. 
+Both FreeDOS and MS-DOS currently freeze during boot in an infinite loop.
 
 **Root Cause:**
-FreeDOS contains a division by zero (or division overflow) bug in its boot code. When the DIV/IDIV instruction faults:
-1. The CPU triggers INT 0 (Divide Error exception)
-2. FreeDOS's INT 0 handler executes but just returns via IRET without fixing the problem
-3. The CPU returns to the faulting DIV instruction (correct x86 behavior)
-4. The DIV instruction executes again with the same bad operands
-5. Infinite loop
+The FreeDOS boot code gets stuck in an infinite loop at address 12CE:000F-0017. Detailed tracing shows:
 
-**This is correct emulator behavior** - real x86 hardware would also loop infinitely in this case. The bug is in FreeDOS's INT 0 handler, which should either:
-- Fix the divide operands and return (allowing retry)
-- Or terminate the program/halt the system
+```
+000F: A4          MOVSB       (move byte from DS:SI to ES:DI)
+0010: 00 FF       ADD [BX+DI], BH
+0012: 75 03       JNZ +3      (jump to 0017 if not zero)
+0017: 72 F6       JC -10      (jump to 000F if carry)
+```
+
+The loop condition: `000F → 0010 → 0012 → 0017 → 000F` repeats indefinitely because:
+1. The carry flag (CF) remains set
+2. The ADD instruction at 0010 doesn't produce a zero result
+3. Both branch conditions remain true, creating an infinite loop
+
+**This is NOT a division by zero issue** - the loop involves string operations (MOVSB) and arithmetic (ADD), not division. The original diagnosis was incorrect.
+
+**Status:** Under investigation. The issue exists in the FreeDOS boot code itself and is not caused by the emulator's division error handling. Real x86 hardware would likely exhibit similar behavior with this boot sector.
 
 **Debug Output:**
-When running with trace logging, you'll see repeating sequences like:
-```
-INT 0x29 AH=0x00 called from 8F99:D116
-INT 0x00 AH=0x00 called from 8F99:A5B2  # Division error
-INT 0x2F AH=0x11 called from 0000:3DDF
-```
-
-The trace shows looping through addresses around 0x12CE0-0x12D71.
+When running with trace logging, you'll see the CPU stuck looping through addresses 12CE:000F-0017 repeatedly.
 
 **Workaround:**
 Use the custom boot sectors in this directory instead of FreeDOS/MS-DOS:
@@ -282,7 +282,7 @@ Use the custom boot sectors in this directory instead of FreeDOS/MS-DOS:
 - `menu/` - Interactive menu
 - `comprehensive_boot/` - Full diagnostic boot test
 
-The comprehensive boot test was created to help isolate this issue by testing:
+The comprehensive boot test was created to help isolate boot issues by testing:
 - CPU operations that DOS would use
 - Memory operations
 - Disk I/O patterns similar to DOS
