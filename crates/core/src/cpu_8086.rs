@@ -1254,7 +1254,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Now execute the instruction normally by recursing
                         let cycles = self.step();
                         self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
-                        return cycles;
+                        cycles
                     }
                 }
             }
@@ -1380,7 +1380,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Now execute the instruction normally by recursing
                         let cycles = self.step();
                         self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
-                        return cycles;
+                        cycles
                     }
                 }
             }
