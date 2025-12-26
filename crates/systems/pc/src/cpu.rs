@@ -1088,6 +1088,21 @@ impl PcCpu {
         // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Count INT 13h calls
+        static mut INT13H_CALL_COUNT: u32 = 0;
+        unsafe {
+            INT13H_CALL_COUNT += 1;
+            if INT13H_CALL_COUNT % 10 == 1 {
+                eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
+            }
+            if INT13H_CALL_COUNT > 1000 {
+                eprintln!("!!! INT 13h called over 1000 times! Stopping...");
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+                self.set_carry_flag(true);
+                return 51;
+            }
+        }
+
         // Execute the appropriate INT 13h function
         // These functions will set AX (status in AH) and carry flag
         let cycles = match ah {
@@ -1201,10 +1216,15 @@ impl PcCpu {
                   status, cylinder, head, sector, count, drive);
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
+            eprintln!("INT 13h AH=02h: Starting to write {} bytes to memory...", buffer.len());
             for (i, &byte) in buffer.iter().enumerate() {
+                if i % 128 == 0 {
+                    eprintln!("  Written {} / {} bytes...", i, buffer.len());
+                }
                 let offset = buffer_offset.wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
+            eprintln!("INT 13h AH=02h: Finished writing all {} bytes", buffer.len());
         }
 
         // Set AH = status

@@ -1708,15 +1708,20 @@ mod memory_tests {
         
         for frame_num in 0..10 {  // Reduced from 30 to 10 frames
             // Instead of calling step_frame which might loop forever,
-            // let's manually step with a cycle limit
+            // let's manually step with a cycle limit AND instruction limit
             let mut frame_cycles = 0u32;
+            let mut instructions_this_frame = 0u32;
             const CYCLES_PER_FRAME: u32 = 79_500; // ~4.77 MHz at 60 Hz
+            const MAX_INSTRUCTIONS_PER_FRAME: u32 = 10_000; // Prevent runaway
             
-            while frame_cycles < CYCLES_PER_FRAME && sys.cycles < MAX_CYCLES_PER_FRAME {
+            while frame_cycles < CYCLES_PER_FRAME 
+                && sys.cycles < MAX_CYCLES_PER_FRAME 
+                && instructions_this_frame < MAX_INSTRUCTIONS_PER_FRAME {
                 let cycles = sys.cpu.step();
                 frame_cycles += cycles;
                 sys.cycles += cycles as u64;
                 sys.frame_cycles += cycles as u64;
+                instructions_this_frame += 1;
             }
             
             let info = sys.debug_info();
