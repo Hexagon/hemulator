@@ -1653,7 +1653,6 @@ mod memory_tests {
     }
 
     #[test]
-    #[ignore] // Ignored: FreeDOS boot sector uses ENTER instruction that causes stack issues
     fn test_boot_x86boot_image() {
         use std::fs;
         use std::path::Path;

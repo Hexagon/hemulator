@@ -964,6 +964,32 @@ impl<M: Memory8086> Cpu8086<M> {
         }
     }
 
+    /// Helper for Read-Modify-Write operations on 16-bit values
+    /// Returns (value_read, seg, offset) to avoid double-fetching EA
+    fn read_rmw16(&mut self, modbits: u8, rm: u8) -> (u16, u16, u16) {
+        if modbits == 0b11 {
+            // Register mode - return dummy seg/offset
+            (self.get_reg16(rm), 0, 0)
+        } else {
+            // Memory mode - calculate EA once and return it
+            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+            let val = self.read_u16(seg, offset);
+            (val, seg, offset)
+        }
+    }
+
+    /// Helper for writing result of Read-Modify-Write operations on 16-bit values
+    /// Uses cached seg/offset to avoid recalculating EA
+    fn write_rmw16(&mut self, modbits: u8, rm: u8, val: u16, seg: u16, offset: u16) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg16(rm, val);
+        } else {
+            // Memory mode - use cached seg/offset
+            self.write_u16(seg, offset, val);
+        }
+    }
+
     /// Execute one instruction and return cycles used
     pub fn step(&mut self) -> u32 {
         if self.halted {
@@ -1509,12 +1535,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                
+                // Use RMW helpers to avoid double-fetching EA
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = rm_val.wrapping_add(reg_val);
                 let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
-
-                self.write_rm16(modbits, rm, result);
+                
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
