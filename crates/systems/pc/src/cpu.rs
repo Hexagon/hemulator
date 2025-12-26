@@ -174,16 +174,18 @@ impl PcCpu {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
-            // Log ALL interrupts
-            if int_num != 0x10 {
-                // Don't log INT 10h to reduce noise
-                let cs = self.cpu.cs;
-                let ip = self.cpu.ip;
-                let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
-                eprintln!(
-                    "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                    int_num, ah, cs, ip
-                );
+            // Log interrupts for debugging
+            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() {
+                if int_num != 0x10 {
+                    // Don't log INT 10h to reduce noise
+                    let cs = self.cpu.cs;
+                    let ip = self.cpu.ip;
+                    let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
+                }
             }
 
             match int_num {
@@ -1115,18 +1117,20 @@ impl PcCpu {
         // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
-        // Count INT 13h calls
-        static mut INT13H_CALL_COUNT: u32 = 0;
-        unsafe {
-            INT13H_CALL_COUNT += 1;
-            if INT13H_CALL_COUNT % 10 == 1 {
-                eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
-            }
-            if INT13H_CALL_COUNT > 1000 {
-                eprintln!("!!! INT 13h called over 1000 times! Stopping...");
-                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
-                self.set_carry_flag(true);
-                return 51;
+        // Count INT 13h calls for debugging
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            static mut INT13H_CALL_COUNT: u32 = 0;
+            unsafe {
+                INT13H_CALL_COUNT += 1;
+                if INT13H_CALL_COUNT % 10 == 1 {
+                    eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
+                }
+                if INT13H_CALL_COUNT > 1000 {
+                    eprintln!("!!! INT 13h called over 1000 times! Stopping...");
+                    self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+                    self.set_carry_flag(true);
+                    return 51;
+                }
             }
         }
 
@@ -1220,10 +1224,12 @@ impl PcCpu {
             return 51;
         }
 
-        eprintln!(
-            "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
-            count, cylinder, head, sector, drive, buffer_seg, buffer_offset
-        );
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            eprintln!(
+                "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
+                count, cylinder, head, sector, drive, buffer_seg, buffer_offset
+            );
+        }
 
         // Create disk request
         let request = DiskRequest {
@@ -1241,27 +1247,33 @@ impl PcCpu {
         // Perform read using bus helper method
         let status = self.cpu.memory.disk_read(&request, &mut buffer);
 
-        eprintln!(
-            "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
-            status, cylinder, head, sector, count, drive
-        );
+        if std::env::var("EMU_TRACE_INT13").is_ok() {
+            eprintln!(
+                "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
+                status, cylinder, head, sector, count, drive
+            );
+        }
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
-            eprintln!(
-                "INT 13h AH=02h: Starting to write {} bytes to memory...",
-                buffer.len()
-            );
+            if std::env::var("EMU_TRACE_INT13").is_ok() {
+                eprintln!(
+                    "INT 13h AH=02h: Starting to write {} bytes to memory...",
+                    buffer.len()
+                );
+            }
             for (i, &byte) in buffer.iter().enumerate() {
-                if i % 128 == 0 {
+                if std::env::var("EMU_TRACE_INT13").is_ok() && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
                 let offset = buffer_offset.wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
-            eprintln!(
-                "INT 13h AH=02h: Finished writing all {} bytes",
-                buffer.len()
-            );
+            if std::env::var("EMU_TRACE_INT13").is_ok() {
+                eprintln!(
+                    "INT 13h AH=02h: Finished writing all {} bytes",
+                    buffer.len()
+                );
+            }
         }
 
         // Set AH = status
