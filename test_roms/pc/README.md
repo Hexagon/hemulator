@@ -252,20 +252,35 @@ dw 0xAA55    ; Boot signature
 
 ### FreeDOS/MS-DOS Boot Freeze
 
-Both FreeDOS and MS-DOS currently freeze during boot. The debug output shows:
+Both FreeDOS and MS-DOS currently freeze during boot due to a division error infinite loop. 
 
-**FreeDOS:**
-- Successfully loads boot sector
-- Makes many INT 13h calls (100+ disk reads)
-- Reads sectors from cylinder 36
-- Eventually stops responding after reading cylinder 36, head 1, sector 18
+**Root Cause:**
+FreeDOS contains a division by zero (or division overflow) bug in its boot code. When the DIV/IDIV instruction faults:
+1. The CPU triggers INT 0 (Divide Error exception)
+2. FreeDOS's INT 0 handler executes but just returns via IRET without fixing the problem
+3. The CPU returns to the faulting DIV instruction (correct x86 behavior)
+4. The DIV instruction executes again with the same bad operands
+5. Infinite loop
 
-**MS-DOS:**
-- Successfully loads boot sector
-- Makes several INT 13h calls
-- Reads FAT and directory sectors
-- Encounters "Undefined 0xFF operation with op=7" errors
-- Stops responding
+**This is correct emulator behavior** - real x86 hardware would also loop infinitely in this case. The bug is in FreeDOS's INT 0 handler, which should either:
+- Fix the divide operands and return (allowing retry)
+- Or terminate the program/halt the system
+
+**Debug Output:**
+When running with trace logging, you'll see repeating sequences like:
+```
+INT 0x29 AH=0x00 called from 8F99:D116
+INT 0x00 AH=0x00 called from 8F99:A5B2  # Division error
+INT 0x2F AH=0x11 called from 0000:3DDF
+```
+
+The trace shows looping through addresses around 0x12CE0-0x12D71.
+
+**Workaround:**
+Use the custom boot sectors in this directory instead of FreeDOS/MS-DOS:
+- `basic_boot/` - Simple boot test
+- `menu/` - Interactive menu
+- `comprehensive_boot/` - Full diagnostic boot test
 
 The comprehensive boot test was created to help isolate this issue by testing:
 - CPU operations that DOS would use
