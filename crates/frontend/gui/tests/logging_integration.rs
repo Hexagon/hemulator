@@ -19,7 +19,7 @@ fn test_logging_n64_rdp_unknown_command() {
 
     // Load a minimal ROM (N64 requires at least 1MB)
     let mut rom = vec![0u8; 0x100000]; // 1MB
-    // Set magic bytes for N64 ROM
+                                       // Set magic bytes for N64 ROM
     rom[0] = 0x80;
     rom[1] = 0x37;
     rom[2] = 0x12;
@@ -94,8 +94,8 @@ fn test_logging_gb_mbc3_rtc_operations() {
 
     // Calculate header checksum
     let mut checksum: u8 = 0;
-    for i in 0x134..=0x14C {
-        checksum = checksum.wrapping_sub(rom[i]).wrapping_sub(1);
+    for &byte in rom.iter().take(0x14C + 1).skip(0x134) {
+        checksum = checksum.wrapping_sub(byte).wrapping_sub(1);
     }
     rom[0x14D] = checksum;
 
