@@ -899,12 +899,26 @@ There are two ways to mount disk images and BIOS:
     - AH=00h (Reset), AH=01h (Get Status), AH=02h (Read), AH=03h (Write)
     - AH=04h (Verify), AH=05h (Format), AH=08h (Get Params)
     - AH=15h (Get Disk Type), AH=16h (Change Status), AH=41h (Check Extensions)
+    - **Supports count=0 reads/writes** (used by DOS to check disk readiness) ✅
+  - INT 15h (Extended Services): **Core functions implemented** ✅
+    - AH=88h (Get Extended Memory), AH=C0h (Get System Configuration) ✅
+    - AH=E801h/E820h (Extended Memory Detection) ✅
+    - AH=41h (Wait on External Event) - returns "not supported" ✅
   - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
   - INT 21h (DOS): **Use Real DOS for File Operations** 
     - Character I/O fully functional (AH=01h, 02h, 06h, 07h, 08h, 09h, 0Ah, 0Bh)
     - File I/O stubs present but return errors (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
     - **For filesystem access**: Boot real DOS from a disk image - DOS will handle FAT12/FAT16 filesystems
     - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
+  - INT 2Fh (Multiplex): **Installation checks implemented** ✅
+    - AH=11h (Network Redirector Check) - returns "not installed" ✅
+    - AH=16h (DPMI), AH=43h (XMS) - installation checks functional
+- **DOS Compatibility**: **Improved** ✅
+  - **MS-DOS 3.3**: Now boots successfully with INT 15h AH=C0h support
+  - **FreeDOS**: Boots successfully with reduced stub warnings (INT 2Fh AH=11h)
+  - **MS-DOS 6.21**: Boots successfully with INT 13h count=0 support
+  - DOS can detect system configuration and extended memory properly
+  - Network redirector checks return proper "not installed" status
 - **DOS Filesystem Support**:
   - ✅ **Full filesystem support available via real DOS - FAT12, FAT16, and FAT32**
   - Mount a DOS boot disk (.img file with DOS installed)
