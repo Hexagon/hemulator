@@ -1269,7 +1269,7 @@ impl PcCpu {
         // Bits 6-7: Number of floppy drives if bit 0 is set
         if floppy_count > 0 {
             let floppy_bits = ((floppy_count - 1) & 0b11) as u16;
-            equipment_flags |= (floppy_bits << 6) as u16;
+            equipment_flags |= floppy_bits << 6;
         }
 
         // Bit 8: DMA installed (0 = yes, 1 = no) - we say no
@@ -2090,7 +2090,11 @@ impl PcCpu {
             0x05 => self.int1ah_set_date(),
             _ => {
                 // Unsupported function - log and do nothing
-                self.log_stub_interrupt(0x1A, Some(ah), "Time/Date Services (unsupported subfunction)");
+                self.log_stub_interrupt(
+                    0x1A,
+                    Some(ah),
+                    "Time/Date Services (unsupported subfunction)",
+                );
                 51
             }
         }
@@ -2400,7 +2404,11 @@ impl PcCpu {
                     0x20 => self.int15h_query_system_address_map(),
                     _ => {
                         // Unsupported function
-                        self.log_stub_interrupt(0x15, Some(ah), &format!("Extended Services, AL=0x{:02X} (unsupported)", al));
+                        self.log_stub_interrupt(
+                            0x15,
+                            Some(ah),
+                            &format!("Extended Services, AL=0x{:02X} (unsupported)", al),
+                        );
                         self.set_carry_flag(true);
                         51
                     }
@@ -2408,7 +2416,11 @@ impl PcCpu {
             }
             _ => {
                 // Unsupported function - log, set carry flag to indicate error
-                self.log_stub_interrupt(0x15, Some(ah), "Extended Services (unsupported subfunction)");
+                self.log_stub_interrupt(
+                    0x15,
+                    Some(ah),
+                    "Extended Services (unsupported subfunction)",
+                );
                 self.set_carry_flag(true);
                 51
             }
@@ -2578,7 +2590,11 @@ impl PcCpu {
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
         // Log stub call (should trigger reboot)
-        self.log_stub_interrupt(0x19, None, "Bootstrap Loader / System Reboot (stub - should trigger reboot)");
+        self.log_stub_interrupt(
+            0x19,
+            None,
+            "Bootstrap Loader / System Reboot (stub - should trigger reboot)",
+        );
 
         // INT 19h is the bootstrap loader interrupt
         // Called by:
@@ -2661,7 +2677,11 @@ impl PcCpu {
             0x16 => self.int2fh_dpmi_installation_check(),
             _ => {
                 // Unsupported function - log and return
-                self.log_stub_interrupt(0x2F, Some(ah), "Multiplex Interrupt (unsupported subfunction)");
+                self.log_stub_interrupt(
+                    0x2F,
+                    Some(ah),
+                    "Multiplex Interrupt (unsupported subfunction)",
+                );
                 51
             }
         }
