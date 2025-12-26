@@ -1077,8 +1077,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 match next_opcode {
                     // MOVSB
                     0xA4 => {
+                        // Apply segment override to source (DS:SI), destination is always ES:DI
+                        // Consume override once before the loop
+                        let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            let val = self.read(self.ds, self.si);
+                            let val = self.read(src_seg, self.si);
                             self.write(self.es, self.di, val);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(1);
@@ -1095,8 +1098,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // MOVSW
                     0xA5 => {
+                        // Apply segment override to source (DS:SI), destination is always ES:DI
+                        // Consume override once before the loop
+                        let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            let val = self.read_u16(self.ds, self.si);
+                            let val = self.read_u16(src_seg, self.si);
                             self.write_u16(self.es, self.di, val);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2);
@@ -1144,8 +1150,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // LODSB
                     0xAC => {
+                        // Apply segment override to source (DS:SI)
+                        let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            let val = self.read(self.ds, self.si);
+                            let val = self.read(src_seg, self.si);
                             self.ax = (self.ax & 0xFF00) | (val as u16);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(1);
@@ -1160,8 +1168,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // LODSW
                     0xAD => {
+                        // Apply segment override to source (DS:SI)
+                        let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            self.ax = self.read_u16(self.ds, self.si);
+                            self.ax = self.read_u16(src_seg, self.si);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2);
                             } else {
@@ -1177,18 +1187,20 @@ impl<M: Memory8086> Cpu8086<M> {
                     0xA6 => {
                         // Debug: Log the comparison if enabled
                         let debug_cmpsb = std::env::var("EMU_DEBUG_CMPSB").is_ok();
+                        // Apply segment override to source (DS:SI), destination is always ES:DI
+                        let src_seg = self.get_segment_with_override(self.ds);
                         if debug_cmpsb {
                             eprintln!("[REPE CMPSB] Starting: CX={:04X} DS:SI={:04X}:{:04X} ES:DI={:04X}:{:04X}", 
-                                self.cx, self.ds, self.si, self.es, self.di);
+                                self.cx, src_seg, self.si, self.es, self.di);
                         }
                         
                         while self.cx != 0 {
-                            let src = self.read(self.ds, self.si);
+                            let src = self.read(src_seg, self.si);
                             let dst = self.read(self.es, self.di);
                             
                             if debug_cmpsb {
-                                eprintln!("[REPE CMPSB] Comparing: DS:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})", 
-                                    self.ds, self.si, src, self.es, self.di, dst, self.cx);
+                                eprintln!("[REPE CMPSB] Comparing: SRC:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})", 
+                                    src_seg, self.si, src, self.es, self.di, dst, self.cx);
                             }
                             
                             let result = src.wrapping_sub(dst);
@@ -1224,8 +1236,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // CMPSW
                     0xA7 => {
+                        // Apply segment override to source (DS:SI), destination is always ES:DI
+                        let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            let src = self.read_u16(self.ds, self.si);
+                            let src = self.read_u16(src_seg, self.si);
                             let dst = self.read_u16(self.es, self.di);
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u32) < (dst as u32);
@@ -3938,7 +3952,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // MOV AL, moffs8 (0xA0) - Direct memory to AL
             0xA0 => {
                 let addr = self.fetch_u16();
-                let val = self.read(self.ds, addr);
+                let seg = self.get_segment_with_override(self.ds);
+                let val = self.read(seg, addr);
                 self.ax = (self.ax & 0xFF00) | (val as u16);
                 self.cycles += 10;
                 10
@@ -3947,7 +3962,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // MOV AX, moffs16 (0xA1) - Direct memory to AX
             0xA1 => {
                 let addr = self.fetch_u16();
-                let val = self.read_u16(self.ds, addr);
+                let seg = self.get_segment_with_override(self.ds);
+                let val = self.read_u16(seg, addr);
                 self.ax = val;
                 self.cycles += 10;
                 10
@@ -3956,8 +3972,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // MOV moffs8, AL (0xA2) - AL to direct memory
             0xA2 => {
                 let addr = self.fetch_u16();
+                let seg = self.get_segment_with_override(self.ds);
                 let al = (self.ax & 0xFF) as u8;
-                self.write(self.ds, addr, al);
+                self.write(seg, addr, al);
                 self.cycles += 10;
                 10
             }
@@ -3965,7 +3982,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // MOV moffs16, AX (0xA3) - AX to direct memory
             0xA3 => {
                 let addr = self.fetch_u16();
-                self.write_u16(self.ds, addr, self.ax);
+                let seg = self.get_segment_with_override(self.ds);
+                self.write_u16(seg, addr, self.ax);
                 self.cycles += 10;
                 10
             }
@@ -5305,8 +5323,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // MOVSB - Move String Byte (0xA4)
             0xA4 => {
-                // Move byte from DS:SI to ES:DI
-                let val = self.read(self.ds, self.si);
+                // Move byte from DS:SI to ES:DI (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                let val = self.read(src_seg, self.si);
                 self.write(self.es, self.di, val);
 
                 // Update SI and DI based on DF flag
@@ -5323,8 +5342,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // MOVSW - Move String Word (0xA5)
             0xA5 => {
-                // Move word from DS:SI to ES:DI
-                let val = self.read_u16(self.ds, self.si);
+                // Move word from DS:SI to ES:DI (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                let val = self.read_u16(src_seg, self.si);
                 self.write_u16(self.es, self.di, val);
 
                 // Update SI and DI based on DF flag
@@ -5341,8 +5361,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CMPSB - Compare String Byte (0xA6)
             0xA6 => {
-                // Compare byte at DS:SI with byte at ES:DI
-                let src = self.read(self.ds, self.si);
+                // Compare byte at DS:SI with byte at ES:DI (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                let src = self.read(src_seg, self.si);
                 let dst = self.read(self.es, self.di);
                 let result = src.wrapping_sub(dst);
                 let borrow = (src as u16) < (dst as u16);
@@ -5366,8 +5387,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CMPSW - Compare String Word (0xA7)
             0xA7 => {
-                // Compare word at DS:SI with word at ES:DI
-                let src = self.read_u16(self.ds, self.si);
+                // Compare word at DS:SI with word at ES:DI (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                let src = self.read_u16(src_seg, self.si);
                 let dst = self.read_u16(self.es, self.di);
                 let result = src.wrapping_sub(dst);
                 let borrow = (src as u32) < (dst as u32);
@@ -5422,8 +5444,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // LODSB - Load String Byte (0xAC)
             0xAC => {
-                // Load byte from DS:SI into AL
-                let val = self.read(self.ds, self.si);
+                // Load byte from DS:SI into AL (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                let val = self.read(src_seg, self.si);
                 self.ax = (self.ax & 0xFF00) | (val as u16);
 
                 // Update SI
@@ -5438,8 +5461,9 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // LODSW - Load String Word (0xAD)
             0xAD => {
-                // Load word from DS:SI into AX
-                self.ax = self.read_u16(self.ds, self.si);
+                // Load word from DS:SI into AX (with segment override support)
+                let src_seg = self.get_segment_with_override(self.ds);
+                self.ax = self.read_u16(src_seg, self.si);
 
                 // Update SI
                 if self.get_flag(FLAG_DF) {

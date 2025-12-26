@@ -571,6 +571,13 @@ impl Memory8086 for PcBus {
                 let offset = addr as usize;
                 if offset < self.ram.len() {
                     self.ram[offset] = val;
+                } else {
+                    // Debug: log when write is out of bounds
+                    use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+                    if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+                        eprintln!("!!! RAM write out of bounds: addr=0x{:08X}, offset={}, ram.len()={}", 
+                            addr, offset, self.ram.len());
+                    }
                 }
             }
             // Video memory (128KB) - writable
