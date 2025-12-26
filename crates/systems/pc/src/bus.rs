@@ -188,6 +188,11 @@ impl PcBus {
                 // Load boot sector to 0x0000:0x7C00 (physical address 0x7C00)
                 self.ram[0x7C00..0x7C00 + 512].copy_from_slice(boot_sector);
 
+                // Debug: Check boot sector signature and first few bytes
+                eprintln!("Boot sector loaded: signature={:02X}{:02X}, OEM={}", 
+                         self.ram[0x7C00 + 510], self.ram[0x7C00 + 511],
+                         String::from_utf8_lossy(&self.ram[0x7C00 + 3..0x7C00 + 11]));
+
                 self.boot_sector_loaded = true;
                 println!("Loaded boot sector from drive 0x{:02X}", drive);
                 return true;

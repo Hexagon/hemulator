@@ -4322,11 +4322,22 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC8 => {
                 let size = self.fetch_u16();
                 let _nesting = self.fetch_u8();
+                
+                if std::env::var("EMU_TRACE_PC").is_ok() {
+                    eprintln!("[ENTER] BP before={:04X}, SP before={:04X}, size={:04X}, nesting={:02X}",
+                              self.bp, self.sp, size, _nesting);
+                }
+                
                 // Simplified implementation
                 self.push(self.bp);
                 let frame_temp = self.sp;
                 self.bp = frame_temp;
                 self.sp = self.sp.wrapping_sub(size);
+                
+                if std::env::var("EMU_TRACE_PC").is_ok() {
+                    eprintln!("[ENTER] BP after={:04X}, SP after={:04X}", self.bp, self.sp);
+                }
+                
                 self.cycles += 15;
                 15
             }
@@ -5380,8 +5391,16 @@ impl<M: Memory8086> Cpu8086<M> {
             // RET far with immediate (0xCA) - pops return address and adds imm16 to SP
             0xCA => {
                 let pop_bytes = self.fetch_u16();
-                self.ip = self.pop();
-                self.cs = self.pop();
+                let ret_ip = self.pop();
+                let ret_cs = self.pop();
+                
+                if std::env::var("EMU_TRACE_PC").is_ok() {
+                    eprintln!("[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}", 
+                              self.sp.wrapping_add(4), pop_bytes, ret_ip, ret_cs);
+                }
+                
+                self.ip = ret_ip;
+                self.cs = ret_cs;
                 self.sp = self.sp.wrapping_add(pop_bytes);
                 self.cycles += 17;
                 17

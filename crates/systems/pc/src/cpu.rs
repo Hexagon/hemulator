@@ -80,6 +80,14 @@ impl PcCpu {
 
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
+        
+        // Enable PC tracing with EMU_TRACE_PC=1
+        if std::env::var("EMU_TRACE_PC").is_ok() {
+            // Only log if we're in the boot sector region or low memory (not ROM)
+            if physical_addr < 0xF0000 {
+                eprintln!("[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}", cs, ip, physical_addr, opcode);
+            }
+        }
 
         // Handle I/O instructions by intercepting them before execution
         match opcode {
@@ -157,9 +165,20 @@ impl PcCpu {
         }
 
         // Handle INT instructions
+        // We intercept INTs and handle them in Rust, but we must properly simulate
+        // the CPU's INT behavior: push FLAGS/CS/IP, clear IF/TF
         if opcode == 0xCD {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);
+            
+            // Log ALL interrupts
+            if int_num != 0x10 {  // Don't log INT 10h to reduce noise
+                let cs = self.cpu.cs;
+                let ip = self.cpu.ip;
+                let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                eprintln!("INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}", int_num, ah, cs, ip);
+            }
+            
             match int_num {
                 0x10 => return self.handle_int10h(), // Video BIOS
                 0x13 => return self.handle_int13h(), // Disk services
@@ -183,6 +202,7 @@ impl PcCpu {
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int10h(&mut self) -> u32 {
         // Skip the INT 10h instruction (2 bytes: 0xCD 0x10)
+        // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
         // Get function code from AH register
@@ -423,6 +443,13 @@ impl PcCpu {
         // AL = character, BH = page number, BL = foreground color (graphics mode)
         let ch = (self.cpu.ax & 0xFF) as u8;
         let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
+
+        // Log printable characters
+        if ch >= 0x20 && ch < 0x7F {
+            eprint!("{}", ch as char);
+        } else if ch == 0x0D {
+            eprintln!(); // Carriage return + line feed for stderr
+        }
 
         // Get cursor position
         let cursor_addr = 0x450 + (page as u32 * 2);
@@ -696,6 +723,7 @@ impl PcCpu {
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int16h(&mut self) -> u32 {
         // Skip the INT 16h instruction (2 bytes: 0xCD 0x16)
+        // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
         // Get function code from AH register
@@ -794,6 +822,7 @@ impl PcCpu {
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int21h(&mut self) -> u32 {
         // Skip the INT 21h instruction (2 bytes: 0xCD 0x21)
+        // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
         // Get function code from AH register
@@ -1052,13 +1081,16 @@ impl PcCpu {
 
     /// Handle INT 13h BIOS disk services
     fn handle_int13h(&mut self) -> u32 {
-        // Skip the INT 13h instruction (2 bytes: 0xCD 0x13)
-        self.cpu.ip = self.cpu.ip.wrapping_add(2);
-
-        // Get function code from AH register
+        // Get function code from AH register (before advancing IP)
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
-        match ah {
+        // Skip the INT 13h instruction (2 bytes: 0xCD 0x13)
+        // We intercept before CPU executes it, so just advance IP past it
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Execute the appropriate INT 13h function
+        // These functions will set AX (status in AH) and carry flag
+        let cycles = match ah {
             0x00 => self.int13h_reset(),
             0x01 => self.int13h_get_status(),
             0x02 => self.int13h_read_sectors(),
@@ -1074,12 +1106,15 @@ impl PcCpu {
             0x44 => self.int13h_extended_verify(),
             0x48 => self.int13h_get_extended_params(),
             _ => {
+                eprintln!("!!! UNSUPPORTED INT 13h function: AH=0x{:02X} !!!", ah);
                 // Unsupported function - set error in AH
                 self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
                 self.set_carry_flag(true);
                 51 // Approximate INT instruction timing
             }
-        }
+        };
+        
+        cycles
     }
 
     /// INT 13h, AH=00h: Reset disk system
@@ -1105,6 +1140,14 @@ impl PcCpu {
 
         // AL = number of sectors to read
         let count = (self.cpu.ax & 0xFF) as u8;
+        
+        // Validate count: must be > 0 and < 128
+        if count == 0 || count >= 128 {
+            eprintln!("INT 13h AH=02h: Invalid sector count={}", count);
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid parameter
+            self.set_carry_flag(true);
+            return 51;
+        }
 
         // CH = cylinder (low 8 bits)
         // CL = sector number (bits 0-5), high 2 bits of cylinder (bits 6-7)
@@ -1122,6 +1165,21 @@ impl PcCpu {
         // ES:BX = buffer address
         let buffer_seg = self.cpu.es;
         let buffer_offset = self.cpu.bx;
+        
+        // Check for 64KB boundary crossing (ES segment limit)
+        let bytes_needed = (count as u32) * 512;
+        if (buffer_offset as u32) + bytes_needed > 0x10000 {
+            eprintln!("INT 13h AH=02h: Would cross 64KB boundary at ES:BX={:04X}:{:04X}, count={}",
+                      buffer_seg, buffer_offset, count);
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x09 << 8); // DMA boundary error
+            self.set_carry_flag(true);
+            return 51;
+        }
+        
+        eprintln!("INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
+                  count, cylinder, head, sector, drive, buffer_seg, buffer_offset);
+
+
 
         // Create disk request
         let request = DiskRequest {
@@ -1139,6 +1197,8 @@ impl PcCpu {
         // Perform read using bus helper method
         let status = self.cpu.memory.disk_read(&request, &mut buffer);
 
+        eprintln!("INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
+                  status, cylinder, head, sector, count, drive);
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
             for (i, &byte) in buffer.iter().enumerate() {
@@ -1226,9 +1286,13 @@ impl PcCpu {
         // DL = drive number
         let drive = (self.cpu.dx & 0xFF) as u8;
 
+        eprintln!("INT 13h AH=08h: Get drive parameters for drive 0x{:02X}", drive);
+
         // Get drive parameters
         if let Some((cylinders, sectors_per_track, heads)) = DiskController::get_drive_params(drive)
         {
+            eprintln!("INT 13h AH=08h: Returning C={}, H={}, S={}", cylinders, heads, sectors_per_track);
+
             // BL = drive type (for floppies)
             if drive < 0x80 {
                 self.cpu.bx = (self.cpu.bx & 0xFF00) | 0x04; // 1.44MB floppy
