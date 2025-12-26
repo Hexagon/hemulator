@@ -147,8 +147,7 @@ The PC crate includes comprehensive tests:
   - **Mount validation tests** (disk size validation)
   - System integration tests
 
-- **Test BIOS**: `test_roms/pc/bios.bin` built from assembly
-- **Boot Sector**: `test_roms/pc/boot.bin` for boot testing
+- **Test Boot Sectors**: Various test ROMs in `test_roms/pc/` (see test_roms/pc/README.md)
 
 ## Usage Example
 
