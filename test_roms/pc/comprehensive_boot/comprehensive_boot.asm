@@ -184,6 +184,43 @@ start:
     mov si, msg_ok
     call print_string
 
+    ; ===== BIOS INTERRUPT TESTS =====
+    mov si, msg_bios
+    call print_string
+
+    ; Test INT 11h - Equipment List
+    int 0x11
+    ; Should return equipment word in AX
+    ; Just verify we got a response (non-zero is typical)
+    test ax, ax
+    jnz .eq_ok
+    ; Zero is also acceptable for minimal systems
+.eq_ok:
+
+    ; Test INT 12h - Get Memory Size
+    int 0x12
+    ; Should return memory size in KB (typically 640)
+    ; Verify we got something reasonable (at least 64KB)
+    cmp ax, 64
+    jge .mem_size_ok
+    jmp fail
+.mem_size_ok:
+
+    ; Test INT 1Ah, AH=00h - Read System Clock
+    mov ah, 0x00
+    int 0x1A
+    ; Returns tick count in CX:DX
+    ; Just verify it doesn't crash (any value is acceptable)
+
+    ; Test INT 08h - Timer Tick (just call it, should return)
+    int 0x08
+
+    ; Test INT 1Ch - Timer Tick Handler (just call it, should return)
+    int 0x1C
+
+    mov si, msg_ok
+    call print_string
+
     ; ===== ALL TESTS PASSED =====
     mov si, msg_pass
     call print_string
@@ -244,6 +281,7 @@ msg_cpu:        db 'CPU... ', 0
 msg_mem:        db 'MEM... ', 0
 msg_disk:       db 'DISK... ', 0
 msg_load:       db 'LOAD... ', 0
+msg_bios:       db 'BIOS... ', 0
 msg_ok:         db 'OK', 0x0D, 0x0A, 0
 msg_fail:       db 'FAIL', 0x0D, 0x0A, 0
 msg_pass:       db 0x0D, 0x0A, 'All OK!', 0x0D, 0x0A, 0

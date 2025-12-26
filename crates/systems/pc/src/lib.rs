@@ -353,7 +353,7 @@ impl System for PcSystem {
                 }
 
                 // Update mount status after writing to VRAM
-                drop(vram_mut);
+                let _ = vram_mut;
                 self.update_post_screen();
 
                 // Clear keyboard buffer
@@ -370,11 +370,11 @@ impl System for PcSystem {
                 bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
 
                 // Update countdown (60 frames per second)
-                let seconds_remaining = (self.boot_delay_frames + 59) / 60; // Round up
+                let seconds_remaining = self.boot_delay_frames.div_ceil(60); // Round up
                 bios::update_post_screen_countdown(vram_mut, seconds_remaining);
 
                 // Update mount status
-                drop(vram_mut);
+                let _ = vram_mut;
                 self.update_post_screen();
 
                 // Clear keyboard buffer every frame during POST to prevent buffering
@@ -397,7 +397,7 @@ impl System for PcSystem {
                             }
                         }
                     }
-                    drop(vram_mut);
+                    let _ = vram_mut;
 
                     // Initialize cursor position at (0,0) in BIOS data area
                     use emu_core::cpu_8086::Memory8086;
@@ -1012,9 +1012,7 @@ mod tests {
         // Clear VRAM to eliminate POST screen
         {
             let vram_mut = sys.cpu.bus_mut().vram_mut();
-            for i in 0..vram_mut.len() {
-                vram_mut[i] = 0;
-            }
+            vram_mut.fill(0);
         }
 
         // Load and execute boot sector
@@ -1119,9 +1117,7 @@ mod tests {
         // Clear VRAM to eliminate POST screen
         {
             let vram_mut = sys.cpu.bus_mut().vram_mut();
-            for i in 0..vram_mut.len() {
-                vram_mut[i] = 0;
-            }
+            vram_mut.fill(0);
         }
 
         // Load and execute boot sector
@@ -1775,7 +1771,7 @@ mod boot_output_tests {
 
         // Run a few frames
         for _ in 0..10 {
-            sys.step_frame();
+            let _ = sys.step_frame();
         }
 
         // Capture screen content
@@ -1791,7 +1787,7 @@ mod boot_output_tests {
                 let offset = text_base + (row * 80 + col) * 2;
                 if offset < vram.len() {
                     let ch = vram[offset];
-                    if ch >= 32 && ch < 127 {
+                    if (32..127).contains(&ch) {
                         line.push(ch as char);
                     } else if ch == 0 {
                         line.push(' ');
@@ -1860,9 +1856,7 @@ mod boot_output_tests {
         // Clear VRAM to eliminate POST screen
         {
             let vram_mut = sys.cpu.bus_mut().vram_mut();
-            for i in 0..vram_mut.len() {
-                vram_mut[i] = 0;
-            }
+            vram_mut.fill(0);
         }
 
         // Load and execute boot sector
@@ -1892,7 +1886,7 @@ mod boot_output_tests {
                 let offset = text_base + (row * 80 + col) * 2;
                 if offset < vram.len() {
                     let ch = vram[offset];
-                    if ch >= 32 && ch < 127 {
+                    if (32..127).contains(&ch) {
                         line.push(ch as char);
                     } else if ch == 0 {
                         line.push(' ');
@@ -1902,7 +1896,7 @@ mod boot_output_tests {
             let trimmed = line.trim_end();
             if !trimmed.is_empty() {
                 println!("{}", trimmed);
-                screen_output.push_str(&trimmed);
+                screen_output.push_str(trimmed);
                 screen_output.push('\n');
             }
         }

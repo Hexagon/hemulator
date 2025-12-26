@@ -821,8 +821,12 @@ fn main() {
                                         println!("Video mode: VGA");
                                         Box::new(emu_pc::SoftwareVgaAdapter::new())
                                     }
-                                    "CGA" | _ => {
+                                    "CGA" => {
                                         println!("Video mode: CGA");
+                                        Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                    }
+                                    _ => {
+                                        println!("Video mode: CGA (unknown mode, defaulting)");
                                         Box::new(emu_pc::SoftwareCgaAdapter::new())
                                     }
                                 }
@@ -895,7 +899,6 @@ fn main() {
             match std::fs::read(p) {
                 Ok(data) => match detect_rom_type(&data) {
                     Ok(SystemType::NES) => {
-                        status_message = "Detected NES ROM - Initializing...".to_string();
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut nes_sys = emu_nes::NesSystem::default();
                         // Use the mount point system to load the cartridge
@@ -916,7 +919,6 @@ fn main() {
                         }
                     }
                     Ok(SystemType::Atari2600) => {
-                        status_message = "Detected Atari 2600 ROM - Initializing...".to_string();
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut a2600_sys = emu_atari2600::Atari2600System::new();
                         if let Err(e) = a2600_sys.mount("Cartridge", &data) {
@@ -936,7 +938,6 @@ fn main() {
                         }
                     }
                     Ok(SystemType::GameBoy) => {
-                        status_message = "Detected Game Boy ROM - Initializing...".to_string();
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut gb_sys = emu_gb::GbSystem::new();
                         if let Err(e) = gb_sys.mount("Cartridge", &data) {
@@ -968,7 +969,6 @@ fn main() {
                         println!("Initialized PC system. Mount disk images to proceed.");
                     }
                     Ok(SystemType::SNES) => {
-                        status_message = "Detected SNES ROM - Initializing...".to_string();
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut snes_sys = emu_snes::SnesSystem::new();
                         if let Err(e) = snes_sys.mount("Cartridge", &data) {
@@ -988,7 +988,6 @@ fn main() {
                         }
                     }
                     Ok(SystemType::N64) => {
-                        status_message = "Detected N64 ROM - Initializing...".to_string();
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut n64_sys = emu_n64::N64System::new();
                         if let Err(e) = n64_sys.mount("Cartridge", &data) {
@@ -1256,8 +1255,8 @@ fn main() {
         }
 
         // Toggle help overlay (F1)
-        if ((is_pc && host_key_held && window.is_key_pressed(Key::F1, false))
-            || (!is_pc && window.is_key_pressed(Key::F1, false)))
+        if (is_pc && host_key_held && window.is_key_pressed(Key::F1, false))
+            || (!is_pc && window.is_key_pressed(Key::F1, false))
         {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
@@ -1267,8 +1266,8 @@ fn main() {
         }
 
         // Toggle speed selector (F2)
-        if ((is_pc && host_key_held && window.is_key_pressed(Key::F2, false))
-            || (!is_pc && window.is_key_pressed(Key::F2, false)))
+        if (is_pc && host_key_held && window.is_key_pressed(Key::F2, false))
+            || (!is_pc && window.is_key_pressed(Key::F2, false))
         {
             show_speed_selector = !show_speed_selector;
             show_help = false; // Close help if open
