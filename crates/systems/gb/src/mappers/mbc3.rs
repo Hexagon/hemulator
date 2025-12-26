@@ -20,6 +20,8 @@
 //! - 0x0B: RTC Days (lower 8 bits)
 //! - 0x0C: RTC Days (upper 1 bit) + Halt + Day Carry flags
 
+use emu_core::logging::{log, LogCategory, LogLevel};
+
 /// MBC3 mapper
 #[derive(Debug)]
 pub struct Mbc3 {
@@ -90,16 +92,46 @@ impl Mbc3 {
             }
             0x2000..=0x3FFF => {
                 // ROM Bank Number (7 bits)
-                self.rom_bank = val & 0x7F;
+                let new_bank = val & 0x7F;
+                if new_bank != self.rom_bank {
+                    log(LogCategory::Bus, LogLevel::Debug, || {
+                        format!(
+                            "GB MBC3: ROM bank switch: {} -> {}",
+                            self.rom_bank, new_bank
+                        )
+                    });
+                    self.rom_bank = new_bank;
+                } else {
+                    self.rom_bank = new_bank;
+                }
             }
             0x4000..=0x5FFF => {
                 // RAM Bank Number or RTC Register Select
-                self.ram_bank = val & 0x0F;
+                let new_bank = val & 0x0F;
+                if new_bank != self.ram_bank {
+                    if new_bank <= 0x03 {
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!(
+                                "GB MBC3: RAM bank switch: {} -> {}",
+                                self.ram_bank, new_bank
+                            )
+                        });
+                    } else if (0x08..=0x0C).contains(&new_bank) {
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("GB MBC3: RTC register select: 0x{:02X}", new_bank)
+                        });
+                    }
+                }
+                self.ram_bank = new_bank;
             }
             0x6000..=0x7FFF => {
                 // Latch Clock Data (0x00 -> 0x01 latches RTC)
                 if self.rtc_latch == 0x00 && val == 0x01 {
                     // RTC latch operation (stub - clock doesn't actually run)
+                    log(LogCategory::Stubs, LogLevel::Debug, || {
+                        "GB MBC3: RTC latch operation (stub - clock doesn't actually tick)"
+                            .to_string()
+                    });
                 }
                 self.rtc_latch = val;
             }
@@ -126,11 +158,36 @@ impl Mbc3 {
                     0xFF
                 }
             }
-            0x08 => self.rtc_s,  // RTC Seconds
-            0x09 => self.rtc_m,  // RTC Minutes
-            0x0A => self.rtc_h,  // RTC Hours
-            0x0B => self.rtc_dl, // RTC Days lower
-            0x0C => self.rtc_dh, // RTC Days upper
+            0x08 => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Seconds read (stub, value={})", self.rtc_s)
+                });
+                self.rtc_s
+            }
+            0x09 => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Minutes read (stub, value={})", self.rtc_m)
+                });
+                self.rtc_m
+            }
+            0x0A => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Hours read (stub, value={})", self.rtc_h)
+                });
+                self.rtc_h
+            }
+            0x0B => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Days lower read (stub, value={})", self.rtc_dl)
+                });
+                self.rtc_dl
+            }
+            0x0C => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Days upper read (stub, value={})", self.rtc_dh)
+                });
+                self.rtc_dh
+            }
             _ => 0xFF,
         }
     }
@@ -152,11 +209,36 @@ impl Mbc3 {
                     self.ram[offset] = val;
                 }
             }
-            0x08 => self.rtc_s = val,  // RTC Seconds
-            0x09 => self.rtc_m = val,  // RTC Minutes
-            0x0A => self.rtc_h = val,  // RTC Hours
-            0x0B => self.rtc_dl = val, // RTC Days lower
-            0x0C => self.rtc_dh = val, // RTC Days upper
+            0x08 => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Seconds write (stub, value={})", val)
+                });
+                self.rtc_s = val;
+            }
+            0x09 => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Minutes write (stub, value={})", val)
+                });
+                self.rtc_m = val;
+            }
+            0x0A => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Hours write (stub, value={})", val)
+                });
+                self.rtc_h = val;
+            }
+            0x0B => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Days lower write (stub, value={})", val)
+                });
+                self.rtc_dl = val;
+            }
+            0x0C => {
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("GB MBC3: RTC Days upper write (stub, value={})", val)
+                });
+                self.rtc_dh = val;
+            }
             _ => {}
         }
     }
