@@ -83,8 +83,10 @@ impl PcCpu {
         
         // Enable PC tracing with EMU_TRACE_PC=1
         if std::env::var("EMU_TRACE_PC").is_ok() {
-            // Log all addresses to see what's happening
-            eprintln!("[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}", cs, ip, physical_addr, opcode);
+            // Only log if we're in the boot sector region or low memory (not ROM)
+            if physical_addr < 0xF0000 {
+                eprintln!("[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}", cs, ip, physical_addr, opcode);
+            }
         }
 
         // Handle I/O instructions by intercepting them before execution
@@ -177,50 +179,19 @@ impl PcCpu {
                 eprintln!("INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}", int_num, ah, cs, ip);
             }
             
-            // Check if we handle this interrupt
-            let handled = matches!(int_num, 0x10 | 0x13 | 0x15 | 0x16 | 0x1A | 0x20 | 0x21 | 0x2F | 0x31 | 0x33);
-            
-            if handled {
-                // We're intercepting this INT - simulate proper INT behavior
-                // 1. Advance IP past the INT instruction (2 bytes)
-                let return_ip = self.cpu.ip.wrapping_add(2);
-                
-                // 2. Push FLAGS, CS, IP (in that order) - simulating hardware INT
-                // Manual stack push since push() is private
-                self.cpu.sp = self.cpu.sp.wrapping_sub(2);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp, (self.cpu.flags & 0xFF) as u8);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp.wrapping_add(1), ((self.cpu.flags >> 8) & 0xFF) as u8);
-                
-                self.cpu.sp = self.cpu.sp.wrapping_sub(2);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp, (self.cpu.cs & 0xFF) as u8);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp.wrapping_add(1), ((self.cpu.cs >> 8) & 0xFF) as u8);
-                
-                self.cpu.sp = self.cpu.sp.wrapping_sub(2);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp, (return_ip & 0xFF) as u8);
-                self.cpu.write_byte(self.cpu.ss, self.cpu.sp.wrapping_add(1), ((return_ip >> 8) & 0xFF) as u8);
-                
-                // 3. Set IP to the return address (our handler will "return" here)
-                self.cpu.ip = return_ip;
-                
-                // 4. Clear IF (0x0200) and TF (0x0100) flags (standard INT behavior)
-                self.cpu.flags &= !(0x0200 | 0x0100); // Clear IF and TF
-                
-                // 5. Call our handler
-                return match int_num {
-                    0x10 => self.handle_int10h(), // Video BIOS
-                    0x13 => self.handle_int13h(), // Disk services
-                    0x15 => self.handle_int15h(), // Extended services
-                    0x16 => self.handle_int16h(), // Keyboard services
-                    0x1A => self.handle_int1ah(), // Time/Date services
-                    0x20 => self.handle_int20h(), // DOS: Program terminate
-                    0x21 => self.handle_int21h(), // DOS API
-                    0x2F => self.handle_int2fh(), // Multiplex interrupt
-                    0x31 => self.handle_int31h(), // DPMI services
-                    0x33 => self.handle_int33h(), // Mouse services
-                    _ => unreachable!(), // We checked 'handled' above
-                };
+            match int_num {
+                0x10 => return self.handle_int10h(), // Video BIOS
+                0x13 => return self.handle_int13h(), // Disk services
+                0x15 => return self.handle_int15h(), // Extended services
+                0x16 => return self.handle_int16h(), // Keyboard services
+                0x1A => return self.handle_int1ah(), // Time/Date services
+                0x20 => return self.handle_int20h(), // DOS: Program terminate
+                0x21 => return self.handle_int21h(), // DOS API
+                0x2F => return self.handle_int2fh(), // Multiplex interrupt
+                0x31 => return self.handle_int31h(), // DPMI services
+                0x33 => return self.handle_int33h(), // Mouse services
+                _ => {}                              // Let CPU handle other interrupts normally
             }
-            // If not handled, let CPU execute it normally (will use IVT)
         }
 
         // Execute normally
@@ -230,8 +201,10 @@ impl PcCpu {
     /// Handle INT 10h - Video BIOS services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int10h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 10h instruction (2 bytes: 0xCD 0x10)
+        // We intercept before CPU executes it, so just advance IP past it
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -749,8 +722,10 @@ impl PcCpu {
     /// Handle INT 16h - Keyboard BIOS services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int16h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 16h instruction (2 bytes: 0xCD 0x16)
+        // We intercept before CPU executes it, so just advance IP past it
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -834,8 +809,9 @@ impl PcCpu {
     /// Handle INT 20h - DOS: Program terminate
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int20h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 20h instruction (2 bytes: 0xCD 0x20)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Program terminate - for now, just halt
         // In a real DOS environment, this would return to COMMAND.COM
         // We could set a flag here to indicate program termination
@@ -845,8 +821,10 @@ impl PcCpu {
     /// Handle INT 21h - DOS API
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int21h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 21h instruction (2 bytes: 0xCD 0x21)
+        // We intercept before CPU executes it, so just advance IP past it
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -1106,8 +1084,10 @@ impl PcCpu {
         // Get function code from AH register (before advancing IP)
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 13h instruction (2 bytes: 0xCD 0x13)
+        // We intercept before CPU executes it, so just advance IP past it
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Count INT 13h calls
         static mut INT13H_CALL_COUNT: u32 = 0;
         unsafe {
@@ -1826,8 +1806,9 @@ impl PcCpu {
     /// Handle INT 1Ah - Time and Date services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int1ah(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 1Ah instruction (2 bytes: 0xCD 0x1A)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -2003,8 +1984,9 @@ impl PcCpu {
     /// Handle INT 33h - Microsoft Mouse Driver services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int33h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 33h instruction (2 bytes: 0xCD 0x33)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AX register
         let ax = self.cpu.ax;
 
@@ -2132,8 +2114,9 @@ impl PcCpu {
     /// Handle INT 15h - Extended BIOS services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int15h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 15h instruction (2 bytes: 0xCD 0x15)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -2205,8 +2188,9 @@ impl PcCpu {
     /// Handle INT 2Fh - Multiplex interrupt
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int2fh(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 2Fh instruction (2 bytes: 0xCD 0x2F)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -2277,8 +2261,9 @@ impl PcCpu {
     /// Handle INT 31h - DPMI services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int31h(&mut self) -> u32 {
-        // Note: IP already advanced and FLAGS/CS/IP pushed by step() before calling this
-        
+        // Skip the INT 31h instruction (2 bytes: 0xCD 0x31)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
         // Get function code from AX register
         let ax = self.cpu.ax;
 
