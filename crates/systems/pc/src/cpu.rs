@@ -1402,7 +1402,7 @@ impl PcCpu {
 
         // Handle count=0 as a successful no-op (DOS uses this to check disk readiness)
         if count == 0 {
-            self.cpu.ax &= 0xFF00; // AH=0 (success), AL=0 (sectors read)
+            self.cpu.ax &= 0x00FF; // AH=0 (success), AL=0 (sectors read)
             self.set_carry_flag(false);
             return 51;
         }
@@ -1519,7 +1519,7 @@ impl PcCpu {
 
         // Handle count=0 as a successful no-op
         if count == 0 {
-            self.cpu.ax &= 0xFF00; // AH=0 (success), AL=0 (sectors written)
+            self.cpu.ax &= 0x00FF; // AH=0 (success), AL=0 (sectors written)
             self.set_carry_flag(false);
             return 51;
         }
@@ -2470,8 +2470,8 @@ impl PcCpu {
         // The table describes the system capabilities
 
         // We'll create a minimal configuration table at a fixed location
-        // Real BIOS stores this in ROM, we'll use a location in conventional memory
-        let table_seg = 0xF000;
+        // Real BIOS stores this in ROM, we'll use a location in conventional memory (high RAM)
+        let table_seg = 0x9000; // Use high conventional memory instead of ROM
         let table_offset = 0xE000;
 
         // System configuration table format:
@@ -4278,5 +4278,162 @@ mod tests {
         // Equipment flags should reflect VGA (bits 4-5 = 00)
         let equipment = cpu.cpu.ax;
         assert_eq!((equipment >> 4) & 0x03, 0b00); // VGA
+    }
+
+    #[test]
+    fn test_int13h_read_zero_sectors() {
+        // Test that reading 0 sectors succeeds without error (DOS 6.21 compatibility)
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 13h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=02h (read), AL=00h (0 sectors)
+        cpu.cpu.ax = 0x0200; // AH=02h (read), AL=00 (0 sectors)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00;
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed with AH=0, AL=0
+        assert_eq!(cpu.cpu.ax, 0x0000);
+
+        // Carry flag should be clear (success)
+        assert!(!cpu.get_carry_flag());
+    }
+
+    #[test]
+    fn test_int13h_write_zero_sectors() {
+        // Test that writing 0 sectors succeeds without error
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 13h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=03h (write), AL=00h (0 sectors)
+        cpu.cpu.ax = 0x0300; // AH=03h (write), AL=00 (0 sectors)
+        cpu.cpu.cx = 0x0001; // CH=00, CL=01 (cylinder 0, sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00;
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed with AH=0, AL=0
+        assert_eq!(cpu.cpu.ax, 0x0000);
+
+        // Carry flag should be clear (success)
+        assert!(!cpu.get_carry_flag());
+    }
+
+    #[test]
+    fn test_int15h_get_system_configuration() {
+        // Test INT 15h AH=C0h (Get System Configuration)
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=C0h
+        cpu.cpu.ax = 0xC000; // AH=C0h
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should succeed (CF clear, AH=0)
+        assert!(!cpu.get_carry_flag());
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00);
+
+        // ES:BX should point to configuration table (in high conventional memory)
+        assert_eq!(cpu.cpu.es, 0x9000);
+        assert_eq!(cpu.cpu.bx, 0xE000);
+
+        // Verify configuration table in memory
+        let table_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.bx as u32);
+
+        // First word should be 8 (number of bytes following)
+        let size = cpu.cpu.memory.read(table_addr) as u16
+            | ((cpu.cpu.memory.read(table_addr + 1) as u16) << 8);
+        assert_eq!(size, 8);
+
+        // Model byte should be 0xFE (PC/XT)
+        let model = cpu.cpu.memory.read(table_addr + 2);
+        assert_eq!(model, 0xFE);
+    }
+
+    #[test]
+    fn test_int15h_wait_on_external_event() {
+        // Test INT 15h AH=41h (Wait on External Event) - should return not supported
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=41h
+        cpu.cpu.ax = 0x4100; // AH=41h, AL=00
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should fail (CF set, AH=86h = function not supported)
+        assert!(cpu.get_carry_flag());
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x86);
+    }
+
+    #[test]
+    fn test_int2fh_network_installation_check() {
+        // Test INT 2Fh AH=11h (Network Installation Check)
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 2Fh instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x2F); // 2Fh
+
+        // Setup registers for AH=11h
+        cpu.cpu.ax = 0x1100; // AH=11h, AL=00
+
+        // Execute INT 2Fh
+        cpu.step();
+
+        // AL should be 0xFF (not installed)
+        assert_eq!(cpu.cpu.ax & 0xFF, 0xFF);
     }
 }
