@@ -681,7 +681,9 @@ impl CliArgs {
                     if let Some(path) = arg_iter.next() {
                         args.log_file = Some(path);
                     } else {
-                        eprintln!("Error: --log-file requires a file path (e.g., 'debug_trace.log').");
+                        eprintln!(
+                            "Error: --log-file requires a file path (e.g., 'debug_trace.log')."
+                        );
                         std::process::exit(1);
                     }
                 }
@@ -730,9 +732,7 @@ impl CliArgs {
         eprintln!(
             "  hemu --log-level info game.nes                 # Load with global info logging"
         );
-        eprintln!(
-            "  hemu --log-cpu trace --log-file trace.log game.nes # Log CPU trace to file"
-        );
+        eprintln!("  hemu --log-cpu trace --log-file trace.log game.nes # Log CPU trace to file");
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
         );
@@ -870,7 +870,7 @@ fn main() {
             emu_core::logging::LogCategory::Stubs,
             "Stubs",
         ),
-    ]  {
+    ] {
         if let Some(ref level_str) = opt_level_str {
             if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
                 log_config.set_level(category, level);
