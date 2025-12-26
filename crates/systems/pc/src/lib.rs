@@ -1706,13 +1706,13 @@ mod memory_tests {
         const MAX_STUCK_ITERATIONS: u32 = 5;
         const MAX_CYCLES_PER_FRAME: u64 = 100_000; // Limit cycles to prevent runaway
         
-        for frame_num in 0..10 {  // Reduced from 30 to 10 frames
+        for frame_num in 0..10 {  // Multiple frames to see boot progress
             // Instead of calling step_frame which might loop forever,
             // let's manually step with a cycle limit AND instruction limit
             let mut frame_cycles = 0u32;
             let mut instructions_this_frame = 0u32;
             const CYCLES_PER_FRAME: u32 = 79_500; // ~4.77 MHz at 60 Hz
-            const MAX_INSTRUCTIONS_PER_FRAME: u32 = 10_000; // Prevent runaway
+            const MAX_INSTRUCTIONS_PER_FRAME: u32 = 10_000; // Reasonable limit
             
             while frame_cycles < CYCLES_PER_FRAME 
                 && sys.cycles < MAX_CYCLES_PER_FRAME 
@@ -1723,6 +1723,9 @@ mod memory_tests {
                 sys.frame_cycles += cycles as u64;
                 instructions_this_frame += 1;
             }
+            
+            println!("Frame {}: Executed {} instructions, {} cycles", 
+                    frame_num, instructions_this_frame, frame_cycles);
             
             let info = sys.debug_info();
             
