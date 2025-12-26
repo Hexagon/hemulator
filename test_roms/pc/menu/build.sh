@@ -1,6 +1,11 @@
 #!/bin/bash
 # Build script for PC menu test ROM
 
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # Check if NASM is installed
 if ! command -v nasm &> /dev/null; then
     echo "Error: NASM assembler is not installed"
@@ -13,7 +18,8 @@ echo "Assembling menu.asm..."
 nasm -f bin menu.asm -o menu.bin
 
 if [ $? -eq 0 ]; then
-    echo "Successfully created menu.bin ($(stat -c%s menu.bin 2>/dev/null || stat -f%z menu.bin 2>/dev/null) bytes)"
+    SIZE=$(stat -c%s menu.bin 2>/dev/null || stat -f%z menu.bin 2>/dev/null)
+    echo "Successfully created menu.bin ($SIZE bytes)"
     
     # Verify boot signature
     if hexdump -C menu.bin | tail -1 | grep -q "55 aa"; then

@@ -971,12 +971,12 @@ mod tests {
 
     #[test]
     fn test_boot_sector_smoke_test() {
-        // This test uses the test boot sector from test_roms/pc/boot.bin
+        // This test uses the test boot sector from test_roms/pc/basic_boot/boot.bin
         // The boot sector writes "BOOT OK" to video memory using ES: segment override
 
         let boot_bin_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../test_roms/pc/boot.bin"
+            "/../../../test_roms/pc/basic_boot/boot.bin"
         );
 
         // Skip if boot.bin doesn't exist (not built yet)
@@ -985,7 +985,7 @@ mod tests {
                 "Skipping boot sector smoke test: {} not found",
                 boot_bin_path
             );
-            eprintln!("Build with: cd test_roms/pc && ./build_boot.sh");
+            eprintln!("Build with: cd test_roms/pc/basic_boot && ./build.sh");
             return;
         }
 
@@ -1656,7 +1656,7 @@ mod memory_tests {
     fn test_boot_x86boot_image() {
         use std::fs;
         use std::path::Path;
-        
+
         // Load x86BOOT.img (FreeDOS boot disk)
         // Try multiple possible paths since test runs from different directories
         let possible_paths = [
@@ -1664,52 +1664,58 @@ mod memory_tests {
             "../../../test_roms/pc/x86BOOT.img",
             "../../test_roms/pc/x86BOOT.img",
         ];
-        
-        let img_path = possible_paths.iter()
+
+        let img_path = possible_paths
+            .iter()
             .find(|p| Path::new(p).exists())
             .expect("Cannot find x86BOOT.img in any expected location");
-        
+
         let disk_data = fs::read(img_path).expect("Failed to read x86BOOT.img");
         println!("\n=== Boot Test with x86BOOT.img ===");
         println!("Disk size: {} bytes", disk_data.len());
-        
+
         // Check boot signature
         if disk_data.len() >= 512 {
             let sig = u16::from_le_bytes([disk_data[510], disk_data[511]]);
-            println!("Boot signature: 0x{:04X} {}", sig, if sig == 0xAA55 { "✅" } else { "❌" });
+            println!(
+                "Boot signature: 0x{:04X} {}",
+                sig,
+                if sig == 0xAA55 { "✅" } else { "❌" }
+            );
             assert_eq!(sig, 0xAA55, "Invalid boot signature");
         }
-        
+
         // Create PC system
         let mut sys = PcSystem::new();
-        
+
         // Mount the disk as floppy A
-        sys.mount("FloppyA", &disk_data).expect("Failed to mount floppy");
+        sys.mount("FloppyA", &disk_data)
+            .expect("Failed to mount floppy");
         assert!(sys.is_mounted("FloppyA"));
-        
+
         // Skip boot delay
         sys.boot_delay_frames = 0;
         sys.boot_started = false; // Will trigger boot sector load
-        
+
         // CRITICAL: Load boot sector before we start execution!
         sys.ensure_boot_sector_loaded();
-        
+
         println!("\n=== Running Boot Sequence ===");
         println!("Testing that boot sector loads and executes (produces console output)");
         println!("Note: Full boot may not complete due to complexity of FreeDOS boot code\n");
-        
+
         // Execute a few frames and check for console output
         let max_frames = 5;
         let mut console_output_detected = false;
-        
+
         for frame in 0..max_frames {
             // Use step_frame which is designed for production use
             let _result = sys.step_frame();
-            
+
             // Check video memory for output
             let vram = sys.cpu.bus().vram();
             let text_offset = 0x18000; // CGA text mode
-            
+
             // Check if any non-zero characters were written
             for i in (text_offset..text_offset + 2000).step_by(2) {
                 if i < vram.len() && vram[i] != 0 && vram[i] != 0x20 && vram[i] < 0x7F {
@@ -1718,21 +1724,30 @@ mod memory_tests {
                     break;
                 }
             }
-            
+
             if console_output_detected {
                 break;
             }
         }
-        
+
         let final_info = sys.debug_info();
         println!("\n=== Test Results ===");
         println!("Final CS:IP = {:04X}:{:04X}", final_info.cs, final_info.ip);
-        println!("Console output detected: {}", if console_output_detected { "YES ✅" } else { "NO ❌" });
-        
+        println!(
+            "Console output detected: {}",
+            if console_output_detected {
+                "YES ✅"
+            } else {
+                "NO ❌"
+            }
+        );
+
         // The test passes if we detected console output
-        assert!(console_output_detected, 
-                "Boot sector should produce console output");
-        
+        assert!(
+            console_output_detected,
+            "Boot sector should produce console output"
+        );
+
         println!("\n✅ Boot test passed - boot sector loads and produces output");
     }
 }
@@ -1750,26 +1765,26 @@ mod boot_output_tests {
             println!("x86BOOT.img not found, skipping");
             return;
         }
-        
+
         let disk_data = fs::read(img_path).unwrap();
         let mut sys = PcSystem::new();
         sys.mount("FloppyA", &disk_data).unwrap();
         sys.boot_delay_frames = 0;
         sys.boot_started = false;
         sys.ensure_boot_sector_loaded();
-        
+
         // Run a few frames
         for _ in 0..10 {
             sys.step_frame();
         }
-        
+
         // Capture screen content
         let vram = sys.cpu.bus().vram();
         let text_base = 0x18000; // CGA text mode offset
-        
+
         println!("\n=== FreeDOS Boot Screen ===");
         println!("Captured after 10 frames of execution:\n");
-        
+
         for row in 0..25 {
             let mut line = String::new();
             for col in 0..80 {
@@ -1791,5 +1806,124 @@ mod boot_output_tests {
             }
         }
         println!("\n=== End Screen Capture ===\n");
+    }
+
+    #[test]
+    fn test_comprehensive_boot() {
+        // This test uses the comprehensive boot test from test_roms/pc/comprehensive_boot/
+        // The boot sector performs CPU, memory, disk I/O, and program loading tests
+        // It helps diagnose the FreeDOS/MS-DOS freeze issue
+
+        let boot_bin_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/pc/comprehensive_boot/comprehensive_boot.bin"
+        );
+
+        // Skip if comprehensive_boot.bin doesn't exist (not built yet)
+        if !std::path::Path::new(boot_bin_path).exists() {
+            eprintln!(
+                "Skipping comprehensive boot test: {} not found",
+                boot_bin_path
+            );
+            eprintln!("Build with: cd test_roms/pc/comprehensive_boot && ./build.sh");
+            return;
+        }
+
+        let boot_sector =
+            std::fs::read(boot_bin_path).expect("Failed to read comprehensive_boot.bin");
+        assert_eq!(
+            boot_sector.len(),
+            512,
+            "Boot sector should be exactly 512 bytes"
+        );
+
+        // Create a floppy image with the boot sector and test data
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        floppy[0..512].copy_from_slice(&boot_sector);
+
+        // Add test data to sectors 2-20 (for disk read tests)
+        for sector in 2..=20 {
+            let offset = sector * 512;
+            let test_data = format!("TEST_DATA_SECTOR_{:02}", sector);
+            floppy[offset..offset + test_data.len()].copy_from_slice(test_data.as_bytes());
+        }
+
+        // Create system and mount floppy
+        let mut sys = PcSystem::new();
+        assert!(sys.mount("FloppyA", &floppy).is_ok());
+        sys.set_boot_priority(crate::BootPriority::FloppyFirst);
+
+        // Skip boot delay and manually load boot sector
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+
+        // Clear VRAM to eliminate POST screen
+        {
+            let vram_mut = sys.cpu.bus_mut().vram_mut();
+            for i in 0..vram_mut.len() {
+                vram_mut[i] = 0;
+            }
+        }
+
+        // Load and execute boot sector
+        let _ = sys.step_frame();
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(0x7C00);
+        sys.cpu.unhalt();
+
+        // Execute boot code for more frames to allow all tests to run
+        for _ in 0..50 {
+            let _ = sys.step_frame();
+        }
+
+        // Check where execution ended
+        let regs = sys.cpu.get_registers();
+        println!("After execution: CS={:04X} IP={:04X}", regs.cs, regs.ip);
+
+        // Capture screen output to verify test results
+        let vram = sys.cpu.bus().vram();
+        let text_base = 0x18000; // CGA text mode offset
+
+        println!("\n=== Comprehensive Boot Test Output ===");
+        let mut screen_output = String::new();
+        for row in 0..25 {
+            let mut line = String::new();
+            for col in 0..80 {
+                let offset = text_base + (row * 80 + col) * 2;
+                if offset < vram.len() {
+                    let ch = vram[offset];
+                    if ch >= 32 && ch < 127 {
+                        line.push(ch as char);
+                    } else if ch == 0 {
+                        line.push(' ');
+                    }
+                }
+            }
+            let trimmed = line.trim_end();
+            if !trimmed.is_empty() {
+                println!("{}", trimmed);
+                screen_output.push_str(&trimmed);
+                screen_output.push('\n');
+            }
+        }
+        println!("=== End Screen Capture ===\n");
+
+        // Verify that test messages appear in output
+        // The test should show "CPU... OK", "MEM... OK", "DISK... OK", "LOAD... OK"
+        assert!(
+            screen_output.contains("PC Boot Test")
+                || screen_output.contains("CPU")
+                || screen_output.contains("BOOT>"),
+            "Boot test banner or test output should appear"
+        );
+
+        // Check for test results (at least one test should complete)
+        let has_test_output = screen_output.contains("OK") || screen_output.contains("FAIL");
+        assert!(
+            has_test_output,
+            "Test output should contain OK or FAIL indicators"
+        );
+
+        println!("Comprehensive boot test completed successfully!");
     }
 }

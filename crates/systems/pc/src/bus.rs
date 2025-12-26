@@ -189,9 +189,12 @@ impl PcBus {
                 self.ram[0x7C00..0x7C00 + 512].copy_from_slice(boot_sector);
 
                 // Debug: Check boot sector signature and first few bytes
-                eprintln!("Boot sector loaded: signature={:02X}{:02X}, OEM={}", 
-                         self.ram[0x7C00 + 510], self.ram[0x7C00 + 511],
-                         String::from_utf8_lossy(&self.ram[0x7C00 + 3..0x7C00 + 11]));
+                eprintln!(
+                    "Boot sector loaded: signature={:02X}{:02X}, OEM={}",
+                    self.ram[0x7C00 + 510],
+                    self.ram[0x7C00 + 511],
+                    String::from_utf8_lossy(&self.ram[0x7C00 + 3..0x7C00 + 11])
+                );
 
                 self.boot_sector_loaded = true;
                 println!("Loaded boot sector from drive 0x{:02X}", drive);
@@ -383,7 +386,8 @@ impl PcBus {
             self.hard_drive.as_deref()
         };
 
-        self.disk_controller.read_sectors_lba(lba, count, buffer, disk_image)
+        self.disk_controller
+            .read_sectors_lba(lba, count, buffer, disk_image)
     }
 
     /// Perform a disk write operation using LBA
@@ -402,7 +406,8 @@ impl PcBus {
             self.hard_drive.as_mut()
         };
 
-        self.disk_controller.write_sectors_lba(lba, count, buffer, disk_mut)
+        self.disk_controller
+            .write_sectors_lba(lba, count, buffer, disk_mut)
     }
 
     /// Read from an I/O port
