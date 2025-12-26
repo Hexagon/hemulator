@@ -1509,6 +1509,10 @@ impl PcCpu {
             // This is critical for bootloaders that read multiple sectors in a loop
             let bytes_read = (count as u32) * 512;
 
+            // Save original ES:BX for logging
+            let original_es = self.cpu.es;
+            let original_bx = self.cpu.bx;
+
             // Add bytes to BX, handling overflow into ES
             // Real BIOS behavior: BX advances by bytes read, with carry into ES
             let new_bx = (buffer_offset as u32) + bytes_read;
@@ -1523,6 +1527,14 @@ impl PcCpu {
                 self.cpu.bx = (new_bx & 0xFFFF) as u16;
             } else {
                 self.cpu.bx = new_bx as u16;
+            }
+
+            // Log ES:BX advancement for debugging boot issues
+            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+                eprintln!(
+                    "INT 13h AH=02h: ES:BX advanced from {:04X}:{:04X} to {:04X}:{:04X} (+{} bytes)",
+                    original_es, original_bx, self.cpu.es, self.cpu.bx, bytes_read
+                );
             }
         }
 
@@ -1602,6 +1614,10 @@ impl PcCpu {
             // This is critical for bootloaders that write multiple sectors in a loop
             let bytes_written = (count as u32) * 512;
 
+            // Save original ES:BX for logging
+            let original_es = self.cpu.es;
+            let original_bx = self.cpu.bx;
+
             // Add bytes to BX, handling overflow into ES
             // Real BIOS behavior: BX advances by bytes written, with carry into ES
             let new_bx = (buffer_offset as u32) + bytes_written;
@@ -1616,6 +1632,14 @@ impl PcCpu {
                 self.cpu.bx = (new_bx & 0xFFFF) as u16;
             } else {
                 self.cpu.bx = new_bx as u16;
+            }
+
+            // Log ES:BX advancement for debugging boot issues
+            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+                eprintln!(
+                    "INT 13h AH=03h: ES:BX advanced from {:04X}:{:04X} to {:04X}:{:04X} (+{} bytes)",
+                    original_es, original_bx, self.cpu.es, self.cpu.bx, bytes_written
+                );
             }
         }
 
