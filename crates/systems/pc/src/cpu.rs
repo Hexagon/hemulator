@@ -211,15 +211,17 @@ impl PcCpu {
                 0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
                 0x19 => return self.handle_int19h(), // Bootstrap loader
                 0x1A => return self.handle_int1ah(), // Time/Date services
-                0x1B => return self.handle_int1bh(), // Ctrl-Break handler
-                0x1C => return self.handle_int1ch(), // Timer tick handler
+                // NOTE: INT 1Bh and 1Ch are meant to be hooked by DOS/programs, not intercepted by BIOS
+                // 0x1B => return self.handle_int1bh(), // Ctrl-Break handler (DOS/programs hook this)
+                // 0x1C => return self.handle_int1ch(), // Timer tick handler (programs hook this)
                 // NOTE: INT 20h and INT 21h are DOS functions, not BIOS
                 // DOS installs its own handlers - we don't intercept them
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
                 // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this)
-                0x2F => return self.handle_int2fh(), // Multiplex interrupt
-                0x31 => return self.handle_int31h(), // DPMI services
-                0x33 => return self.handle_int33h(), // Mouse services
+                // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
+                // 0x2F => return self.handle_int2fh(), // Multiplex interrupt (DOS/TSRs provide this)
+                // 0x31 => return self.handle_int31h(), // DPMI services (DPMI host provides this)
+                // 0x33 => return self.handle_int33h(), // Mouse services (mouse driver provides this)
                 0x4A => return self.handle_int4ah(), // RTC Alarm
                 _ => {}                              // Let CPU handle other interrupts normally
             }
