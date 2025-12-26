@@ -40,6 +40,7 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Parse log level from string (case-insensitive)
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "off" | "0" => Some(LogLevel::Off),
@@ -188,16 +189,6 @@ impl LogConfig {
         self.set_level(LogCategory::Interrupts, LogLevel::Off);
         self.set_level(LogCategory::Stubs, LogLevel::Off);
     }
-}
-
-/// Convenience macro for logging
-#[macro_export]
-macro_rules! log {
-    ($category:expr, $level:expr, $($arg:tt)*) => {
-        if $crate::logging::LogConfig::global().should_log($category, $level) {
-            eprintln!($($arg)*);
-        }
-    };
 }
 
 #[cfg(test)]

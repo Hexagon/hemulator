@@ -2,7 +2,6 @@
 //!
 //! The Atari 2600 (also known as the Atari Video Computer System or VCS) was a home video game
 //! console released in 1977. This module provides a complete emulation of the Atari 2600 hardware.
-
 //!
 //! # Architecture
 //!

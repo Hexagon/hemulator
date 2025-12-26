@@ -621,25 +621,60 @@ impl CliArgs {
                 }
                 // Logging configuration
                 "--log-level" => {
-                    args.log_level = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_level = Some(level);
+                    } else {
+                        eprintln!("Error: --log-level requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-cpu" => {
-                    args.log_cpu = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_cpu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-cpu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-bus" => {
-                    args.log_bus = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_bus = Some(level);
+                    } else {
+                        eprintln!("Error: --log-bus requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-ppu" => {
-                    args.log_ppu = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_ppu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-ppu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-apu" => {
-                    args.log_apu = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_apu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-apu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-interrupts" => {
-                    args.log_interrupts = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_interrupts = Some(level);
+                    } else {
+                        eprintln!("Error: --log-interrupts requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 "--log-stubs" => {
-                    args.log_stubs = arg_iter.next();
+                    if let Some(level) = arg_iter.next() {
+                        args.log_stubs = Some(level);
+                    } else {
+                        eprintln!("Error: --log-stubs requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
                 }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
@@ -790,75 +825,49 @@ fn main() {
         }
     }
 
-    if let Some(ref level_str) = cli_args.log_cpu {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::CPU, level);
-            eprintln!("CPU log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid CPU log level '{}', using 'off'",
-                level_str
-            );
-        }
-    }
-
-    if let Some(ref level_str) = cli_args.log_bus {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::Bus, level);
-            eprintln!("Bus log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid Bus log level '{}', using 'off'",
-                level_str
-            );
-        }
-    }
-
-    if let Some(ref level_str) = cli_args.log_ppu {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::PPU, level);
-            eprintln!("PPU log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid PPU log level '{}', using 'off'",
-                level_str
-            );
-        }
-    }
-
-    if let Some(ref level_str) = cli_args.log_apu {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::APU, level);
-            eprintln!("APU log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid APU log level '{}', using 'off'",
-                level_str
-            );
-        }
-    }
-
-    if let Some(ref level_str) = cli_args.log_interrupts {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::Interrupts, level);
-            eprintln!("Interrupts log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid Interrupts log level '{}', using 'off'",
-                level_str
-            );
-        }
-    }
-
-    if let Some(ref level_str) = cli_args.log_stubs {
-        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
-            log_config.set_level(emu_core::logging::LogCategory::Stubs, level);
-            eprintln!("Stubs log level: {:?}", level);
-        } else {
-            eprintln!(
-                "Warning: Invalid Stubs log level '{}', using 'off'",
-                level_str
-            );
+    // Configure category-specific log levels
+    for (opt_level_str, category, name) in [
+        (
+            &cli_args.log_cpu,
+            emu_core::logging::LogCategory::CPU,
+            "CPU",
+        ),
+        (
+            &cli_args.log_bus,
+            emu_core::logging::LogCategory::Bus,
+            "Bus",
+        ),
+        (
+            &cli_args.log_ppu,
+            emu_core::logging::LogCategory::PPU,
+            "PPU",
+        ),
+        (
+            &cli_args.log_apu,
+            emu_core::logging::LogCategory::APU,
+            "APU",
+        ),
+        (
+            &cli_args.log_interrupts,
+            emu_core::logging::LogCategory::Interrupts,
+            "Interrupts",
+        ),
+        (
+            &cli_args.log_stubs,
+            emu_core::logging::LogCategory::Stubs,
+            "Stubs",
+        ),
+    ] {
+        if let Some(ref level_str) = opt_level_str {
+            if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+                log_config.set_level(category, level);
+                eprintln!("{} log level: {:?}", name, level);
+            } else {
+                eprintln!(
+                    "Warning: Invalid {} log level '{}', using 'off'",
+                    name, level_str
+                );
+            }
         }
     }
 

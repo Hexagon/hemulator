@@ -6,6 +6,9 @@ use crate::bus::PcBus;
 use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
+/// BIOS video interrupt (INT 10h) - excluded from interrupt logging to reduce noise
+const VIDEO_INTERRUPT: u8 = 0x10;
+
 /// PC CPU wrapper
 pub struct PcCpu {
     cpu: Cpu8086<PcBus>,
@@ -175,11 +178,10 @@ impl PcCpu {
             // This is an INT instruction, check the interrupt number
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
-            // Log interrupts for debugging
+            // Log interrupts for debugging (skip VIDEO_INTERRUPT to reduce noise)
             if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug)
-                && int_num != 0x10
+                && int_num != VIDEO_INTERRUPT
             {
-                // Don't log INT 10h to reduce noise
                 let cs = self.cpu.cs;
                 let ip = self.cpu.ip;
                 let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
@@ -1476,9 +1478,9 @@ impl PcCpu {
                     buffer.len()
                 );
             }
+            let should_log_progress = LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
             for (i, &byte) in buffer.iter().enumerate() {
-                if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) && i % 128 == 0
-                {
+                if should_log_progress && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
                 let offset = buffer_offset.wrapping_add(i as u16);
