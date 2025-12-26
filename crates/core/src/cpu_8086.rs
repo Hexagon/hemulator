@@ -4320,6 +4320,21 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // ENTER (0xC8) - 80186+ instruction
             0xC8 => {
+                // Debug: check what bytes we're about to read
+                if std::env::var("EMU_TRACE_PC").is_ok() {
+                    let ip_before = self.ip;
+                    let byte1 = self.read(self.cs, ip_before);
+                    let byte2 = self.read(self.cs, ip_before.wrapping_add(1));
+                    let byte3 = self.read(self.cs, ip_before.wrapping_add(2));
+                    let phys_start = ((self.cs as u32) << 4) + (ip_before as u32);
+                    eprintln!("[ENTER DEBUG] CS:IP={:04X}:{:04X}, physical=0x{:05X}", 
+                              self.cs, ip_before, phys_start);
+                    eprintln!("[ENTER DEBUG] Next 3 bytes in memory: {:02X} {:02X} {:02X}", 
+                              byte1, byte2, byte3);
+                    eprintln!("[ENTER DEBUG] Will read as: size=0x{:02X}{:02X}, nesting=0x{:02X}",
+                              byte2, byte1, byte3);
+                }
+                
                 let size = self.fetch_u16();
                 let _nesting = self.fetch_u8();
                 
