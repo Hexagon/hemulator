@@ -102,7 +102,8 @@ impl PcSystem {
 
         // Write BIOS POST screen to video RAM with actual CPU model and memory
         let cpu_speed_mhz = Self::cpu_speed_for_model(cpu_model);
-        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model, memory_kb, cpu_speed_mhz);
+        let extended_kb = bus.extended_memory_kb();
+        bios::write_post_screen_to_vram(bus.vram_mut(), cpu_model, memory_kb, extended_kb, cpu_speed_mhz);
 
         let cpu = PcCpu::with_model(bus, cpu_model);
 
@@ -269,13 +270,14 @@ impl PcSystem {
         // Get CPU model and memory
         let cpu_model = self.cpu.model();
         let memory_kb = self.cpu.bus().memory_kb();
+        let extended_kb = self.cpu.bus().extended_memory_kb();
         let cpu_speed_mhz = self.cpu_speed_mhz();
 
         // Now get mutable borrow to update VRAM
         let vram = self.cpu.bus_mut().vram_mut();
 
         // Rewrite entire POST screen with current config
-        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, extended_kb, cpu_speed_mhz);
 
         // Update mount status
         bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
@@ -312,9 +314,10 @@ impl System for PcSystem {
         // Write BIOS POST screen to video RAM with current config
         let cpu_model = self.cpu.model();
         let memory_kb = self.cpu.bus().memory_kb();
+        let extended_kb = self.cpu.bus().extended_memory_kb();
         let cpu_speed_mhz = self.cpu_speed_mhz();
         let vram = self.cpu.bus_mut().vram_mut();
-        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
+        bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, extended_kb, cpu_speed_mhz);
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -333,11 +336,12 @@ impl System for PcSystem {
 
                 let cpu_model = self.cpu_model();
                 let memory_kb = self.memory_kb();
+                let extended_kb = self.cpu.bus().extended_memory_kb();
                 let cpu_speed_mhz = self.cpu_speed_mhz();
                 let vram_mut = self.cpu.bus_mut().vram_mut();
 
                 // Refresh POST screen
-                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
+                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, extended_kb, cpu_speed_mhz);
 
                 // Write abort message
                 let text_buffer_offset = 0x18000;
@@ -363,11 +367,12 @@ impl System for PcSystem {
 
                 let cpu_model = self.cpu_model();
                 let memory_kb = self.memory_kb();
+                let extended_kb = self.cpu.bus().extended_memory_kb();
                 let cpu_speed_mhz = self.cpu_speed_mhz();
                 let vram_mut = self.cpu.bus_mut().vram_mut();
 
                 // Refresh POST screen every frame during boot delay to show live clock
-                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
+                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, extended_kb, cpu_speed_mhz);
 
                 // Update countdown (60 frames per second)
                 let seconds_remaining = (self.boot_delay_frames + 59) / 60; // Round up
@@ -1560,8 +1565,8 @@ mod memory_tests {
     use super::*;
 
     #[test]
-    fn test_memory_size_clamping() {
-        // Test that memory size is clamped to valid range (256-640 KB)
+    fn test_memory_size_handling() {
+        // Test that conventional memory is clamped to 640KB, extended memory handled via XMS
 
         // Test below minimum (should clamp to 256)
         let sys = PcSystem::with_config(
@@ -1572,19 +1577,24 @@ mod memory_tests {
         assert_eq!(
             sys.memory_kb(),
             256,
-            "Memory should be clamped to 256KB minimum"
+            "Conventional memory should be clamped to 256KB minimum"
         );
 
-        // Test above maximum (should clamp to 640)
+        // Test above 640KB (conventional memory clamped to 640KB, rest goes to XMS)
         let sys = PcSystem::with_config(
             CpuModel::Intel8086,
-            1024, // Too high
+            2048, // 2MB total
             Box::new(SoftwareCgaAdapter::new()),
         );
         assert_eq!(
             sys.memory_kb(),
             640,
-            "Memory should be clamped to 640KB maximum"
+            "Conventional memory should be clamped to 640KB"
+        );
+        assert_eq!(
+            sys.cpu.bus().extended_memory_kb(),
+            1024, // 2048 - 1024 = 1024KB extended
+            "Extended memory should be 1024KB (2048KB total - 1024KB for conventional region)"
         );
 
         // Test valid values

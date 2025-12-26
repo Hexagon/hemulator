@@ -206,12 +206,14 @@ pub fn write_hemu_logo_to_vram(vram: &mut [u8]) {
 /// # Arguments
 /// * `vram` - Video RAM buffer to write to
 /// * `cpu_model` - CPU model to display
-/// * `memory_kb` - Memory size in KB to display
+/// * `memory_kb` - Conventional memory size in KB to display
+/// * `extended_kb` - Extended memory size in KB to display
 /// * `cpu_speed_mhz` - CPU speed in MHz to display
 pub fn write_post_screen_to_vram(
     vram: &mut [u8],
     cpu_model: CpuModel,
     memory_kb: u32,
+    extended_kb: u32,
     cpu_speed_mhz: f64,
 ) {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -329,6 +331,13 @@ pub fn write_post_screen_to_vram(
     write_line(7, 2, "Memory Test:", label_attr);
     let memory_str = format!("{}K OK", memory_kb);
     write_line(7, 15, &memory_str, 0x0A); // Bright green
+
+    // Display extended memory if present
+    if extended_kb > 0 {
+        write_line(8, 2, "Extended:", label_attr);
+        let extended_str = format!("{}K OK", extended_kb);
+        write_line(8, 15, &extended_str, 0x0A); // Bright green
+    }
 
     write_line(9, 2, "Disk Drives:", label_attr);
     write_line(10, 4, "Floppy A: Not present", 0x08); // Dark gray

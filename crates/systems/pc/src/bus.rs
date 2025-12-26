@@ -59,17 +59,21 @@ impl PcBus {
     }
 
     /// Create a new PC bus with a specific memory size in KB
-    /// Valid sizes: 256KB, 512KB, 640KB (maximum conventional memory)
+    /// Valid sizes: 256KB+ (conventional memory clamped to 640KB, rest becomes extended memory)
     pub fn with_memory_kb(kb: u32) -> Self {
-        // Clamp memory size to valid range (256KB-640KB)
-        let kb = kb.clamp(256, 640);
-        let ram_size = (kb as usize) * 1024;
+        // Conventional memory is clamped to 640KB (real PC hardware limit)
+        let conventional_kb = kb.clamp(256, 640);
+        let ram_size = (conventional_kb as usize) * 1024;
+
+        // Calculate extended memory (everything above 1024KB)
+        // Extended memory starts at 1MB, so total - 1MB = extended
+        let extended_kb = if kb > 1024 { kb - 1024 } else { 0 };
 
         let mut pit = Pit::new();
         pit.reset(); // Initialize with default system timer
 
-        // Initialize XMS with 15MB of extended memory (16MB total - 1MB conventional)
-        let mut xms = XmsDriver::new(15 * 1024);
+        // Initialize XMS with calculated extended memory
+        let mut xms = XmsDriver::new(extended_kb);
         xms.install();
         xms.init_umbs(); // Initialize Upper Memory Blocks
 
@@ -115,6 +119,11 @@ impl PcBus {
     /// Get the size of conventional memory in KB
     pub fn memory_kb(&self) -> u32 {
         (self.ram.len() / 1024) as u32
+    }
+
+    /// Get the size of extended memory in KB
+    pub fn extended_memory_kb(&self) -> u32 {
+        self.xms.total_extended_memory_kb()
     }
 
     /// Reset the bus to initial state
