@@ -3434,7 +3434,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x80 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm8(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw8(modbits, rm);
                 let imm = self.fetch_u8();
                 let result = match op {
                     0 => {
@@ -3510,7 +3510,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm8(modbits, rm, result);
+                    self.write_rmw8(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_8(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
@@ -3525,7 +3525,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x81 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                 let imm = self.fetch_u16();
                 let result = match op {
                     0 => {
@@ -3601,7 +3601,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm16(modbits, rm, result);
+                    self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
@@ -3622,7 +3622,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x83 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let rm_val = self.read_rm16(modbits, rm);
+                let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                 let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
                 let result = match op {
                     0 => {
@@ -3698,7 +3698,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     _ => unreachable!(),
                 };
                 if op != 7 {
-                    self.write_rm16(modbits, rm, result);
+                    self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
                     self.update_flags_16(result);
                 }
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
