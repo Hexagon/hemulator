@@ -339,3 +339,23 @@ See [LICENSE](LICENSE) file for details.
 ---
 
 **Note**: This emulator is for educational purposes. Users must provide their own legally obtained ROM files. The project does not include or distribute any copyrighted game data.
+
+### Debug Logging
+
+The emulator supports comprehensive debug logging via command-line flags. See [CONTRIBUTING.md](CONTRIBUTING.md#debug-logging) for detailed usage.
+
+Quick reference:
+```bash
+# Enable CPU debug logging
+cargo run --release -- --log-cpu debug game.nes
+
+# Enable multiple categories
+cargo run --release -- --log-cpu debug --log-interrupts info game.nes
+
+# Set global log level
+cargo run --release -- --log-level trace game.nes
+```
+
+Available log categories: `--log-cpu`, `--log-bus`, `--log-ppu`, `--log-apu`, `--log-interrupts`, `--log-stubs`
+
+Log levels: `off`, `error`, `warn`, `info`, `debug`, `trace`

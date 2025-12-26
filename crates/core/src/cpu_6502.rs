@@ -3,6 +3,8 @@
 //! This module provides a reusable, generic 6502 CPU implementation that can be used
 //! by any system (NES, Atari 2600, Apple II, etc.) by implementing the `Memory6502` trait.
 
+use crate::logging::{LogCategory, LogConfig, LogLevel};
+
 /// Memory interface trait for the 6502 CPU
 ///
 /// Systems using the 6502 must implement this trait to provide memory access.
@@ -14,27 +16,6 @@ pub trait Memory6502 {
     fn write(&mut self, addr: u16, val: u8);
 }
 
-use std::sync::OnceLock;
-
-fn log_unknown_ops() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_LOG_UNKNOWN_OPS").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
-}
-
-fn log_brk() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_LOG_BRK").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
-}
 /// MOS 6502 CPU state and execution engine
 ///
 /// This is a generic, reusable 6502 CPU implementation that works with any
@@ -1426,7 +1407,7 @@ impl<M: Memory6502> Cpu6502<M> {
                 // before pushing.
                 let pc_to_push = self.pc.wrapping_add(1);
                 let brk_pc = self.pc.wrapping_sub(1);
-                if log_brk() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Debug) {
                     eprintln!(
                         "CPU: BRK executed at PC={:04X}, pushing {:04X}, status={:02X}",
                         brk_pc, pc_to_push, self.status
@@ -1441,7 +1422,7 @@ impl<M: Memory6502> Cpu6502<M> {
 
                 self.status |= 0x04; // set I
                 self.pc = self.read_u16(0xFFFE);
-                if log_brk() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Debug) {
                     eprintln!("CPU: BRK jumped to {:04X}", self.pc);
                 }
                 self.cycles += 7;
@@ -1449,7 +1430,7 @@ impl<M: Memory6502> Cpu6502<M> {
             }
             _ => {
                 // Unknown opcode: treat as NOP to keep forward progress
-                if log_unknown_ops() {
+                if LogConfig::global().should_log(LogCategory::Stubs, LogLevel::Info) {
                     let pc = self.pc.wrapping_sub(1);
                     eprintln!(
                         "UNKNOWN OPCODE: pc=0x{:04X} op=0x{:02X} a=0x{:02X} x=0x{:02X} y=0x{:02X} sp=0x{:02X} p=0x{:02X}",

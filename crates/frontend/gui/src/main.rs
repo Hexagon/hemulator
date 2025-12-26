@@ -572,7 +572,6 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 /// Command-line arguments for the emulator
 #[derive(Debug, Default)]
 struct CliArgs {
-    keep_logs: bool,
     rom_path: Option<String>,
     slot1: Option<String>,                       // BIOS or primary file
     slot2: Option<String>,                       // FloppyA
@@ -580,6 +579,15 @@ struct CliArgs {
     slot4: Option<String>,                       // HardDrive
     slot5: Option<String>,                       // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
+    // Logging configuration
+    log_level: Option<String>,      // Global log level
+    log_cpu: Option<String>,        // CPU log level
+    log_bus: Option<String>,        // Bus log level
+    log_ppu: Option<String>,        // PPU log level
+    log_apu: Option<String>,        // APU log level
+    log_interrupts: Option<String>, // Interrupt log level
+    log_stubs: Option<String>,      // Stub/unimplemented log level
+    log_file: Option<String>,       // Log file path
 }
 
 impl CliArgs {
@@ -590,9 +598,6 @@ impl CliArgs {
 
         while let Some(arg) = arg_iter.next() {
             match arg.as_str() {
-                "--keep-logs" => {
-                    args.keep_logs = true;
-                }
                 "--slot1" => {
                     args.slot1 = arg_iter.next();
                 }
@@ -615,6 +620,71 @@ impl CliArgs {
                         }
                     }
                 }
+                // Logging configuration
+                "--log-level" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_level = Some(level);
+                    } else {
+                        eprintln!("Error: --log-level requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-cpu" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_cpu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-cpu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-bus" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_bus = Some(level);
+                    } else {
+                        eprintln!("Error: --log-bus requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-ppu" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_ppu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-ppu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-apu" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_apu = Some(level);
+                    } else {
+                        eprintln!("Error: --log-apu requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-interrupts" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_interrupts = Some(level);
+                    } else {
+                        eprintln!("Error: --log-interrupts requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-stubs" => {
+                    if let Some(level) = arg_iter.next() {
+                        args.log_stubs = Some(level);
+                    } else {
+                        eprintln!("Error: --log-stubs requires a value (e.g., 'debug').");
+                        std::process::exit(1);
+                    }
+                }
+                "--log-file" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.log_file = Some(path);
+                    } else {
+                        eprintln!("Error: --log-file requires a file path (e.g., 'debug_trace.log').");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -632,7 +702,6 @@ impl CliArgs {
         eprintln!("Usage: hemu [OPTIONS] [ROM_FILE]");
         eprintln!();
         eprintln!("Options:");
-        eprintln!("  --keep-logs              Preserve debug logging environment variables");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -641,12 +710,29 @@ impl CliArgs {
         eprintln!("  --create-blank-disk <path> <format>");
         eprintln!("                           Create a blank disk image");
         eprintln!();
+        eprintln!("Logging Options:");
+        eprintln!("  --log-level <LEVEL>      Set global log level (off, error, warn, info, debug, trace)");
+        eprintln!("  --log-cpu <LEVEL>        Set CPU log level");
+        eprintln!("  --log-bus <LEVEL>        Set bus/memory log level");
+        eprintln!("  --log-ppu <LEVEL>        Set PPU/graphics log level");
+        eprintln!("  --log-apu <LEVEL>        Set APU/audio log level");
+        eprintln!("  --log-interrupts <LEVEL> Set interrupt log level");
+        eprintln!("  --log-stubs <LEVEL>      Set unimplemented feature log level");
+        eprintln!("  --log-file <PATH>        Write logs to file instead of stderr");
+        eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
         eprintln!("  10m, 20m, 40m            Hard drive formats");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
+        eprintln!(
+            "  hemu --log-level info game.nes                 # Load with global info logging"
+        );
+        eprintln!(
+            "  hemu --log-cpu trace --log-file trace.log game.nes # Log CPU trace to file"
+        );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
         );
@@ -739,12 +825,78 @@ fn main() {
         }
     }
 
-    // The NES core has some env-var gated debug logging that can produce massive output
-    // (and effectively stall the GUI). Disable those by default for the GUI process.
-    // Use `--keep-logs` to preserve current env-var behavior.
-    if !cli_args.keep_logs {
-        env::remove_var("EMU_LOG_PPU_WRITES");
-        env::remove_var("EMU_LOG_UNKNOWN_OPS");
+    // Initialize the new logging system from command-line arguments
+    let log_config = emu_core::logging::LogConfig::global();
+
+    // Parse and set log levels from CLI args
+    if let Some(ref level_str) = cli_args.log_level {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_global_level(level);
+            eprintln!("Global log level: {:?}", level);
+        } else {
+            eprintln!("Warning: Invalid log level '{}', using 'off'", level_str);
+        }
+    }
+
+    // Configure category-specific log levels
+    for (opt_level_str, category, name) in [
+        (
+            &cli_args.log_cpu,
+            emu_core::logging::LogCategory::CPU,
+            "CPU",
+        ),
+        (
+            &cli_args.log_bus,
+            emu_core::logging::LogCategory::Bus,
+            "Bus",
+        ),
+        (
+            &cli_args.log_ppu,
+            emu_core::logging::LogCategory::PPU,
+            "PPU",
+        ),
+        (
+            &cli_args.log_apu,
+            emu_core::logging::LogCategory::APU,
+            "APU",
+        ),
+        (
+            &cli_args.log_interrupts,
+            emu_core::logging::LogCategory::Interrupts,
+            "Interrupts",
+        ),
+        (
+            &cli_args.log_stubs,
+            emu_core::logging::LogCategory::Stubs,
+            "Stubs",
+        ),
+    ]  {
+        if let Some(ref level_str) = opt_level_str {
+            if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+                log_config.set_level(category, level);
+                eprintln!("{} log level: {:?}", name, level);
+            } else {
+                eprintln!(
+                    "Warning: Invalid {} log level '{}', using 'off'",
+                    name, level_str
+                );
+            }
+        }
+    }
+
+    // Configure log file if specified
+    if let Some(ref log_file_path) = cli_args.log_file {
+        use std::path::PathBuf;
+        let path = PathBuf::from(log_file_path);
+        match log_config.set_log_file(path) {
+            Ok(()) => {
+                eprintln!("Logging to file: {}", log_file_path);
+            }
+            Err(e) => {
+                eprintln!("Error: Failed to open log file '{}': {}", log_file_path, e);
+                std::process::exit(1);
+            }
+        }
     }
 
     // Load settings

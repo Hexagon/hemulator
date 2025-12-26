@@ -2,19 +2,9 @@ use crate::apu::APU;
 use crate::cartridge::Cartridge;
 use crate::mappers::Mapper;
 use crate::ppu::Ppu;
+use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
-use std::sync::OnceLock;
-
-fn log_ppu_writes() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_LOG_PPU_WRITES").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
-}
 
 pub trait Bus {
     fn read(&self, addr: u16) -> u8;
@@ -210,7 +200,10 @@ impl Bus for NesBus {
             0x2000..=0x3FFF => {
                 let reg = 0x2000 + (addr - 0x2000) % 8;
                 // Log writes to PPU registers (0x2000..0x2007 and specifically 0x2006/0x2007)
-                if log_ppu_writes() && reg >= 0x2000 && reg <= 0x2007 {
+                if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+                    && reg >= 0x2000
+                    && reg <= 0x2007
+                {
                     eprintln!(
                         "PPU WRITE: addr=0x{:04X} reg=0x{:04X} val=0x{:02X}",
                         addr, reg, val

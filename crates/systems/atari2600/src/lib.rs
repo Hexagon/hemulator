@@ -128,6 +128,7 @@
 //! Total: 39 tests, all passing
 
 #![allow(clippy::upper_case_acronyms)]
+use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
 mod bus;
 mod cartridge;
@@ -287,10 +288,7 @@ impl System for Atari2600System {
         }
 
         // Debug: log frame completion
-        if std::env::var("EMU_LOG_ATARI_FRAME")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false)
-        {
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
             let final_scanline = self.cpu.bus().map(|b| b.tia.get_scanline()).unwrap_or(0);
             let tia_stats = self
                 .cpu
@@ -321,10 +319,7 @@ impl System for Atari2600System {
             // Dynamically determine visible window based on VBLANK timing
             let visible_start = bus.tia.visible_window_start_scanline();
 
-            if std::env::var("EMU_LOG_ATARI_FRAME")
-                .map(|v| v == "1" || v.to_lowercase() == "true")
-                .unwrap_or(false)
-            {
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
                 eprintln!("[ATARI RENDER] visible_start={}", visible_start);
             }
 
@@ -332,10 +327,7 @@ impl System for Atari2600System {
             self.renderer.render_frame(&bus.tia, visible_start);
         }
 
-        if std::env::var("EMU_LOG_ATARI_FRAME_PIXELS")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false)
-        {
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Trace) {
             let frame = self.renderer.get_frame();
             let non_black = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
