@@ -1618,66 +1618,168 @@ When no ROM is loaded or ROM fails to load, a default splash screen is displayed
 - Instructions: "Press F3 to open a ROM" and "Press F1 for help"
 - Clean dark blue background with cyan/white text
 
-## Debug Environment Variables
+## Logging System
 
-The emulator supports several environment variables for debugging. Set them to `1`, `true`, or `TRUE` to enable, or `0` (or any other value) to disable.
+The emulator uses a centralized logging system with command-line configuration. This replaces the legacy environment variable-based approach.
 
-### Core (6502 CPU)
+### Architecture
 
-- **`EMU_LOG_UNKNOWN_OPS`**: Log unknown/unimplemented 6502 opcodes to stderr
-  - Useful for finding missing CPU instruction implementations
-  - Applies to: NES, Atari 2600, and any other 6502-based systems
-  - Example: `$env:EMU_LOG_UNKNOWN_OPS=1; cargo run --release -- roms/nes/game.nes`
+**Location**: `crates/core/src/logging.rs`
 
-- **`EMU_LOG_BRK`**: Log BRK instruction execution with PC and status register
-  - Shows when BRK is executed and where it jumps to (IRQ vector)
-  - Helpful for debugging unexpected BRK loops or interrupt issues
-  - Applies to: NES, Atari 2600, and any other 6502-based systems
-  - Example: `$env:EMU_LOG_BRK=1; cargo run --release -- roms/nes/game.nes`
+The logging system provides:
+- **Thread-safe global configuration** using atomic operations
+- **Hierarchical log levels**: Off < Error < Warn < Info < Debug < Trace
+- **Log categories**: CPU, Bus, PPU, APU, Interrupts, Stubs
+- **Command-line configuration** via flags (replaces environment variables)
+- **Backward compatibility** with ENV variables (deprecated, shows warnings)
 
-### NES-Specific
+### Command-Line Logging Flags
 
-- **`EMU_LOG_PPU_WRITES`**: Log all PPU register writes
-  - Shows when games write to PPU registers ($2000-$2007)
-  - Useful for debugging graphics/rendering issues
-  - Example: `$env:EMU_LOG_PPU_WRITES=1; cargo run --release -- roms/nes/game.nes`
+Use these flags when running the emulator to enable debug logging:
 
-- **`EMU_LOG_IRQ`**: Log when IRQ interrupts are fired
-  - Shows when mapper or APU IRQs are pending and triggered
-  - Useful for debugging IRQ timing issues (e.g., MMC3 scanline counter)
-  - Example: `$env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/game.nes`
+- **`--log-level <LEVEL>`**: Set global log level (applies to all categories unless overridden)
+- **`--log-cpu <LEVEL>`**: CPU execution logging (instruction execution, PC tracing, BRK)
+- **`--log-bus <LEVEL>`**: Bus/memory access logging (disk I/O, INT13 calls)
+- **`--log-ppu <LEVEL>`**: PPU/graphics logging (register writes, rendering, TIA)
+- **`--log-apu <LEVEL>`**: APU/audio logging
+- **`--log-interrupts <LEVEL>`**: Interrupt logging (IRQ, NMI)
+- **`--log-stubs <LEVEL>`**: Unimplemented features/opcodes logging
 
-- **`EMU_TRACE_PC`**: Log program counter hotspots every 60 frames
-  - Shows the top 3 most frequently executed addresses
-  - Useful for performance profiling and finding infinite loops
-  - Lower volume than full PC tracing
-  - Example: `$env:EMU_TRACE_PC=1; cargo run --release -- roms/nes/game.nes`
-
-- **`EMU_TRACE_NES`**: Comprehensive NES system trace every 60 frames
-  - Logs frame index, PC, CPU steps/cycles, IRQ/NMI counts, MMC3 A12 edges, PPU registers, and interrupt vectors
-  - Useful for debugging complex system-level issues
-  - High-level overview of NES state over time
-  - Example: `$env:EMU_TRACE_NES=1; cargo run --release -- roms/nes/game.nes`
+**Log Levels** (in increasing verbosity):
+- `off` - No logging (default)
+- `error` - Critical errors only
+- `warn` - Warnings and errors
+- `info` - Informational messages (e.g., IRQ fired, frame completed)
+- `debug` - Detailed debugging (e.g., BRK execution, PPU writes, register dumps)
+- `trace` - Very verbose tracing (e.g., PC hotspots, every instruction) - performance impact
 
 ### Usage Examples
 
-**PowerShell usage** (Windows):
-```powershell
-# Enable logs
-$env:EMU_LOG_BRK=1; $env:EMU_LOG_IRQ=1; cargo run --release -- roms/nes/excitebike.nes
-
-# Disable logs (set to 0 or unset)
-$env:EMU_LOG_BRK=0; cargo run --release -- roms/nes/excitebike.nes
-```
-
-**Bash usage** (Linux/macOS):
 ```bash
-# Enable logs
-EMU_LOG_BRK=1 EMU_LOG_IRQ=1 cargo run --release -- roms/nes/excitebike.nes
+# Enable CPU debug logging
+cargo run --release -- --log-cpu debug game.nes
 
-# Disable logs (set to 0 or just don't set the variable)
-EMU_LOG_BRK=0 cargo run --release -- roms/nes/excitebike.nes
+# Enable multiple categories
+cargo run --release -- --log-cpu debug --log-interrupts info game.nes
+
+# Set global level (applies to all categories)
+cargo run --release -- --log-level info game.nes
+
+# Mix global and specific levels (specific overrides global)
+cargo run --release -- --log-level error --log-cpu trace game.nes
+
+# PC system with INT13 disk logging
+cargo run --release -- --log-bus debug --slot2 boot.img
+
+# Atari 2600 with PPU/TIA logging
+cargo run --release -- --log-ppu trace game.a26
 ```
 
-**Note**: All environment variables accept `1`, `true`, or `TRUE` to enable. Any other value (including `0`) or an unset variable will disable the log.
+### Log Category Mapping
+
+Each category maps to specific logging output:
+
+**CPU Category** (`--log-cpu`):
+- **Debug**: BRK instruction execution with PC and status register
+- **Trace**: Program counter hotspots every 60 frames, NES system trace, ENTER/RETF tracking
+
+**Bus Category** (`--log-bus`):
+- **Debug**: INT13 disk I/O operations (read/write sectors, parameters)
+
+**PPU Category** (`--log-ppu`):
+- **Debug**: PPU register writes, TIA register writes, visible window calculation
+- **Info**: Frame completion, render start
+- **Trace**: Scanline details, pixel statistics, TIA write details
+
+**Interrupts Category** (`--log-interrupts`):
+- **Info**: IRQ/NMI firing events
+- **Debug**: Interrupt handler execution, detailed interrupt state
+
+**Stubs Category** (`--log-stubs`):
+- **Info**: Unknown/unimplemented opcodes with full CPU state dump
+
+### Implementation Guide
+
+When adding logging to new code:
+
+1. **Import the logging module**:
+   ```rust
+   use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+   ```
+
+2. **Check if logging is enabled before expensive operations**:
+   ```rust
+   if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Debug) {
+       eprintln!("CPU: BRK at PC={:04X}", pc);
+   }
+   ```
+
+3. **Use appropriate log levels**:
+   - `Error`: Critical failures that prevent continued operation
+   - `Warn`: Unexpected but recoverable conditions
+   - `Info`: High-level state changes (interrupts fired, frames rendered)
+   - `Debug`: Detailed debugging information (register writes, state dumps)
+   - `Trace`: Very verbose execution traces (every instruction, PC tracking)
+
+4. **Use appropriate categories**:
+   - `CPU`: Instruction execution, program counter, CPU state
+   - `Bus`: Memory/IO access, disk operations
+   - `PPU`: Graphics register writes, rendering operations
+   - `APU`: Audio operations
+   - `Interrupts`: IRQ/NMI/interrupt handlers
+   - `Stubs`: Unimplemented features
+
+### Legacy Environment Variables (Deprecated)
+
+Environment variables are still supported for backward compatibility but emit deprecation warnings.
+Use `--keep-logs` to preserve ENV variable behavior without migrating to command-line flags:
+
+```bash
+# Use legacy ENV variables (deprecated)
+EMU_LOG_BRK=1 cargo run --release -- --keep-logs game.nes
+```
+
+When environment variables are detected, the system shows deprecation warnings with recommended command-line equivalents:
+
+```
+DEPRECATION WARNING: Environment variable EMU_LOG_BRK is deprecated. Use command-line flags instead.
+  Recommended: --log-cpu debug
+
+Environment-based logging will be removed in a future version.
+Please update your workflow to use command-line flags.
+```
+
+**ENV Variable to Command-Line Flag Migration**:
+
+| ENV Variable | Command-Line Flag | Level |
+|--------------|-------------------|-------|
+| `EMU_LOG_UNKNOWN_OPS` | `--log-stubs info` | Info |
+| `EMU_LOG_BRK` | `--log-cpu debug` | Debug |
+| `EMU_LOG_PPU_WRITES` | `--log-ppu debug` | Debug |
+| `EMU_LOG_IRQ` | `--log-interrupts info` | Info |
+| `EMU_TRACE_PC` | `--log-cpu trace` | Trace |
+| `EMU_TRACE_NES` | `--log-cpu trace` | Trace |
+| `EMU_TRACE_INTERRUPTS` | `--log-interrupts debug` | Debug |
+| `EMU_TRACE_INT13` | `--log-bus debug` | Debug |
+| `EMU_LOG_TIA_*` | `--log-ppu debug` | Debug |
+| `EMU_LOG_ATARI_FRAME` | `--log-ppu info` | Info |
+| `EMU_LOG_ATARI_FRAME_PIXELS` | `--log-ppu trace` | Trace |
+
+### Adding New Log Points
+
+When implementing new features, add appropriate logging:
+
+1. Identify the appropriate category and level
+2. Add logging checks only where needed (avoid spam)
+3. Use descriptive messages with relevant context
+4. Test logging at each level to ensure appropriate verbosity
+
+Example:
+```rust
+// In a new mapper implementation
+if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+    eprintln!("MMC5: Bank switch: PRG={} CHR={}", prg_bank, chr_bank);
+}
+```
+
 
