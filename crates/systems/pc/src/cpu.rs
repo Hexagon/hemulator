@@ -4,6 +4,7 @@
 
 use crate::bus::PcBus;
 use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
+use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
 /// PC CPU wrapper
 pub struct PcCpu {
@@ -82,7 +83,7 @@ impl PcCpu {
         let opcode = self.cpu.memory.read(physical_addr);
 
         // Enable PC tracing with EMU_TRACE_PC=1
-        if std::env::var("EMU_TRACE_PC").is_ok() {
+        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
             // Only log if we're in the boot sector region or low memory (not ROM)
             if physical_addr < 0xF0000 {
                 eprintln!(
@@ -175,7 +176,9 @@ impl PcCpu {
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
             // Log interrupts for debugging
-            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() && int_num != 0x10 {
+            if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug)
+                && int_num != 0x10
+            {
                 // Don't log INT 10h to reduce noise
                 let cs = self.cpu.cs;
                 let ip = self.cpu.ip;
@@ -1321,7 +1324,7 @@ impl PcCpu {
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
         // Count INT 13h calls for debugging
-        if std::env::var("EMU_TRACE_INT13").is_ok() {
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
             static mut INT13H_CALL_COUNT: u32 = 0;
             unsafe {
                 INT13H_CALL_COUNT += 1;
@@ -1436,7 +1439,7 @@ impl PcCpu {
             return 51;
         }
 
-        if std::env::var("EMU_TRACE_INT13").is_ok() {
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
             eprintln!(
                 "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
                 count, cylinder, head, sector, drive, buffer_seg, buffer_offset
@@ -1459,7 +1462,7 @@ impl PcCpu {
         // Perform read using bus helper method
         let status = self.cpu.memory.disk_read(&request, &mut buffer);
 
-        if std::env::var("EMU_TRACE_INT13").is_ok() {
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
             eprintln!(
                 "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
                 status, cylinder, head, sector, count, drive
@@ -1467,20 +1470,21 @@ impl PcCpu {
         }
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
-            if std::env::var("EMU_TRACE_INT13").is_ok() {
+            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
                 eprintln!(
                     "INT 13h AH=02h: Starting to write {} bytes to memory...",
                     buffer.len()
                 );
             }
             for (i, &byte) in buffer.iter().enumerate() {
-                if std::env::var("EMU_TRACE_INT13").is_ok() && i % 128 == 0 {
+                if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) && i % 128 == 0
+                {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
                 let offset = buffer_offset.wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
-            if std::env::var("EMU_TRACE_INT13").is_ok() {
+            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
                 eprintln!(
                     "INT 13h AH=02h: Finished writing all {} bytes",
                     buffer.len()
@@ -2741,7 +2745,7 @@ impl PcCpu {
 
         // Log stub call (this is called frequently, so maybe don't log by default)
         // Only log if EMU_TRACE_INTERRUPTS is set
-        if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() {
+        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
             self.log_stub_interrupt(0x1C, None, "Timer Tick User Handler (stub)");
         }
 

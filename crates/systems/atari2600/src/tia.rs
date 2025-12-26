@@ -112,6 +112,7 @@
 //! will display correctly with the current implementation.
 
 use emu_core::apu::PolynomialCounter;
+use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use serde::{Deserialize, Serialize};
 
 /// Per-scanline snapshot of TIA state for rendering
@@ -399,10 +400,7 @@ impl Tia {
 
         // Comprehensive write logging (first 1000 writes only)
         if self.writes_total <= 1000
-            && std::env::var("EMU_LOG_TIA_ALL_WRITES")
-                .map(|v| v == "1" || v.to_lowercase() == "true")
-                .unwrap_or(false)
-        {
+            && LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
             eprintln!(
                 "[TIA WRITE #{}] addr=0x{:02X} val=0x{:02X} scanline={}",
                 self.writes_total, addr, val, self.scanline
@@ -534,10 +532,7 @@ impl Tia {
                 self.writes_grp0 = self.writes_grp0.saturating_add(1);
                 if val != 0 {
                     self.writes_grp0_nonzero = self.writes_grp0_nonzero.saturating_add(1);
-                    if std::env::var("EMU_LOG_TIA_GRP")
-                        .map(|v| v == "1" || v.to_lowercase() == "true")
-                        .unwrap_or(false)
-                    {
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                         eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
@@ -547,10 +542,7 @@ impl Tia {
                 self.writes_grp1 = self.writes_grp1.saturating_add(1);
                 if val != 0 {
                     self.writes_grp1_nonzero = self.writes_grp1_nonzero.saturating_add(1);
-                    if std::env::var("EMU_LOG_TIA_GRP")
-                        .map(|v| v == "1" || v.to_lowercase() == "true")
-                        .unwrap_or(false)
-                    {
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                         eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
@@ -628,10 +620,7 @@ impl Tia {
             }
 
             // Debug logging
-            if std::env::var("EMU_LOG_SCANLINE")
-                .map(|v| v == "1" || v.to_lowercase() == "true")
-                .unwrap_or(false)
-            {
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Trace) {
                 eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
             }
         }
@@ -659,9 +648,7 @@ impl Tia {
     /// Try to infer the start of the visible picture area based on VBLANK timing
     pub fn visible_window_start_scanline(&self) -> u16 {
         // Find where VBLANK transitions from true to false
-        let debug = std::env::var("EMU_LOG_VISIBLE_START")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
+        let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
         for i in 1..262 {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();

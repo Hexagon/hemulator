@@ -580,6 +580,14 @@ struct CliArgs {
     slot4: Option<String>,                       // HardDrive
     slot5: Option<String>,                       // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
+    // Logging configuration
+    log_level: Option<String>,      // Global log level
+    log_cpu: Option<String>,        // CPU log level
+    log_bus: Option<String>,        // Bus log level
+    log_ppu: Option<String>,        // PPU log level
+    log_apu: Option<String>,        // APU log level
+    log_interrupts: Option<String>, // Interrupt log level
+    log_stubs: Option<String>,      // Stub/unimplemented log level
 }
 
 impl CliArgs {
@@ -615,6 +623,28 @@ impl CliArgs {
                         }
                     }
                 }
+                // Logging configuration
+                "--log-level" => {
+                    args.log_level = arg_iter.next();
+                }
+                "--log-cpu" => {
+                    args.log_cpu = arg_iter.next();
+                }
+                "--log-bus" => {
+                    args.log_bus = arg_iter.next();
+                }
+                "--log-ppu" => {
+                    args.log_ppu = arg_iter.next();
+                }
+                "--log-apu" => {
+                    args.log_apu = arg_iter.next();
+                }
+                "--log-interrupts" => {
+                    args.log_interrupts = arg_iter.next();
+                }
+                "--log-stubs" => {
+                    args.log_stubs = arg_iter.next();
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -632,7 +662,9 @@ impl CliArgs {
         eprintln!("Usage: hemu [OPTIONS] [ROM_FILE]");
         eprintln!();
         eprintln!("Options:");
-        eprintln!("  --keep-logs              Preserve debug logging environment variables");
+        eprintln!(
+            "  --keep-logs              Preserve debug logging environment variables (deprecated)"
+        );
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -641,12 +673,25 @@ impl CliArgs {
         eprintln!("  --create-blank-disk <path> <format>");
         eprintln!("                           Create a blank disk image");
         eprintln!();
+        eprintln!("Logging Options:");
+        eprintln!("  --log-level <LEVEL>      Set global log level (off, error, warn, info, debug, trace)");
+        eprintln!("  --log-cpu <LEVEL>        Set CPU log level");
+        eprintln!("  --log-bus <LEVEL>        Set bus/memory log level");
+        eprintln!("  --log-ppu <LEVEL>        Set PPU/graphics log level");
+        eprintln!("  --log-apu <LEVEL>        Set APU/audio log level");
+        eprintln!("  --log-interrupts <LEVEL> Set interrupt log level");
+        eprintln!("  --log-stubs <LEVEL>      Set unimplemented feature log level");
+        eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
         eprintln!("  10m, 20m, 40m            Hard drive formats");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
+        eprintln!(
+            "  hemu --log-level info game.nes                 # Load with global info logging"
+        );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
         );
@@ -745,6 +790,96 @@ fn main() {
     if !cli_args.keep_logs {
         env::remove_var("EMU_LOG_PPU_WRITES");
         env::remove_var("EMU_LOG_UNKNOWN_OPS");
+    }
+
+    // Initialize the new logging system from command-line arguments
+    let log_config = emu_core::logging::LogConfig::global();
+
+    // Parse and set log levels from CLI args
+    if let Some(ref level_str) = cli_args.log_level {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_global_level(level);
+            eprintln!("Global log level: {:?}", level);
+        } else {
+            eprintln!("Warning: Invalid log level '{}', using 'off'", level_str);
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_cpu {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::CPU, level);
+            eprintln!("CPU log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid CPU log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_bus {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::Bus, level);
+            eprintln!("Bus log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid Bus log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_ppu {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::PPU, level);
+            eprintln!("PPU log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid PPU log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_apu {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::APU, level);
+            eprintln!("APU log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid APU log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_interrupts {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::Interrupts, level);
+            eprintln!("Interrupts log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid Interrupts log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    if let Some(ref level_str) = cli_args.log_stubs {
+        if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
+            log_config.set_level(emu_core::logging::LogCategory::Stubs, level);
+            eprintln!("Stubs log level: {:?}", level);
+        } else {
+            eprintln!(
+                "Warning: Invalid Stubs log level '{}', using 'off'",
+                level_str
+            );
+        }
+    }
+
+    // Initialize from environment variables if --keep-logs is set (backward compatibility)
+    if cli_args.keep_logs {
+        log_config.init_from_env();
     }
 
     // Load settings

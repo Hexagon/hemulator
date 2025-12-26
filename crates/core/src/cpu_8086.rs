@@ -6,6 +6,7 @@
 //! Supports multiple CPU models: 8086, 80186, 80286, and their variants.
 
 use crate::cpu_8086_protected::ProtectedModeState;
+use crate::logging::{LogCategory, LogConfig, LogLevel};
 
 /// CPU model/variant selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -4394,7 +4395,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // ENTER (0xC8) - 80186+ instruction
             0xC8 => {
                 // Debug: check what bytes we're about to read
-                if std::env::var("EMU_TRACE_PC").is_ok() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     let ip_before = self.ip;
                     let byte1 = self.read(self.cs, ip_before);
                     let byte2 = self.read(self.cs, ip_before.wrapping_add(1));
@@ -4417,7 +4418,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let size = self.fetch_u16();
                 let _nesting = self.fetch_u8();
 
-                if std::env::var("EMU_TRACE_PC").is_ok() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!(
                         "[ENTER] BP before={:04X}, SP before={:04X}, size={:04X}, nesting={:02X}",
                         self.bp, self.sp, size, _nesting
@@ -4430,7 +4431,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.bp = frame_temp;
                 self.sp = self.sp.wrapping_sub(size);
 
-                if std::env::var("EMU_TRACE_PC").is_ok() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!("[ENTER] BP after={:04X}, SP after={:04X}", self.bp, self.sp);
                 }
 
@@ -5495,7 +5496,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let ret_ip = self.pop();
                 let ret_cs = self.pop();
 
-                if std::env::var("EMU_TRACE_PC").is_ok() {
+                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!(
                         "[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}",
                         self.sp.wrapping_add(4),

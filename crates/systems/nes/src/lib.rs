@@ -80,11 +80,11 @@ use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
+use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
 use ppu_renderer::{NesPpuRenderer, SoftwareNesPpuRenderer};
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 /// Debug information for the NES system.
 ///
@@ -102,36 +102,6 @@ pub struct DebugInfo {
     pub prg_banks: usize,
     /// Number of 8KB CHR banks (0 for CHR-RAM)
     pub chr_banks: usize,
-}
-
-fn trace_pc_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_TRACE_PC").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
-}
-
-fn log_irq() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_LOG_IRQ").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
-}
-
-fn trace_nes_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        matches!(
-            std::env::var("EMU_TRACE_NES").as_deref(),
-            Ok("1") | Ok("true") | Ok("TRUE")
-        )
-    })
 }
 
 /// Program counter hotspot tracking for performance analysis.
@@ -383,11 +353,12 @@ impl System for NesSystem {
         let mut mmc3_a12_edges: u32 = 0;
         let mut rendering_happened: bool = false;
 
-        let mut pc_hist: Option<HashMap<u16, u16>> = if trace_pc_enabled() {
-            Some(HashMap::with_capacity(1024))
-        } else {
-            None
-        };
+        let mut pc_hist: Option<HashMap<u16, u16>> =
+            if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
+                Some(HashMap::with_capacity(1024))
+            } else {
+                None
+            };
 
         // Prepare an output frame and render scanlines incrementally during visible time.
         let mut rendered_scanlines: u32 = 0;
@@ -455,7 +426,7 @@ impl System for NesSystem {
             }
 
             if irq_to_fire {
-                if log_irq() {
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Info) {
                     eprintln!("System: Firing IRQ! Mapper/APU pending.");
                 }
                 self.cpu.trigger_irq();
@@ -600,7 +571,7 @@ impl System for NesSystem {
             pc_hotspots: hotspots,
         };
 
-        if trace_nes_enabled() {
+        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
             // Log occasionally to avoid overwhelming the GUI.
             if self.frame_index.is_multiple_of(60) {
                 eprintln!(
@@ -621,7 +592,9 @@ impl System for NesSystem {
             }
         }
 
-        if trace_pc_enabled() && self.frame_index.is_multiple_of(60) {
+        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace)
+            && self.frame_index.is_multiple_of(60)
+        {
             let h0 = self.last_stats.pc_hotspots[0];
             let h1 = self.last_stats.pc_hotspots[1];
             let h2 = self.last_stats.pc_hotspots[2];
