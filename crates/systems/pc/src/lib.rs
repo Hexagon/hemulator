@@ -2278,4 +2278,207 @@ mod boot_output_tests {
             sys.cpu.step();
         }
     }
+
+    #[test]
+    fn analyze_loop_with_flags() {
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Analyzing loop with flag details ===");
+
+        // Run until we hit the loop area
+        for _ in 0..10000 {
+            let regs = sys.cpu.get_registers();
+            if regs.cs == 0x12CE && regs.ip == 0x000F {
+                break;
+            }
+            sys.cpu.step();
+        }
+
+        println!("\nLoop instructions:");
+        println!("  000F: A4          MOVSB");
+        println!("  0010: 00 FF       ADD byte [BX+DI], BH");
+        println!("  0012: 75 03       JNZ +3 (to 0017)");
+        println!("  0014: E8 75 00    CALL 008C");
+        println!("  0017: 72 F6       JC -10 (to 000F)");
+
+        // Trace a few iterations with full details
+        for iter in 0..10 {
+            println!("\n--- Iteration {} ---", iter);
+
+            for step in 0..5 {
+                let regs_before = sys.cpu.get_registers();
+                let ip = regs_before.ip;
+
+                let phys = ((regs_before.cs as u32) << 4) + (ip as u32);
+                let opc = sys.cpu.bus().read(phys);
+
+                // Decode flags
+                let cf = (regs_before.flags & 0x0001) != 0;
+                let pf = (regs_before.flags & 0x0004) != 0;
+                let af = (regs_before.flags & 0x0010) != 0;
+                let zf = (regs_before.flags & 0x0040) != 0;
+                let sf = (regs_before.flags & 0x0080) != 0;
+                let of = (regs_before.flags & 0x0800) != 0;
+
+                println!(
+                    "  {:04X}: {:02X}  SI={:04X} DI={:04X} BX={:04X}  CF={} ZF={} SF={} OF={} PF={} AF={}",
+                    ip,
+                    opc,
+                    regs_before.si,
+                    regs_before.di,
+                    regs_before.bx,
+                    cf as u8,
+                    zf as u8,
+                    sf as u8,
+                    of as u8,
+                    pf as u8,
+                    af as u8
+                );
+
+                // For MOVSB, show what's being copied
+                if opc == 0xA4 {
+                    let src_addr = ((regs_before.ds as u32) << 4) + (regs_before.si as u32);
+                    let dst_addr = ((regs_before.es as u32) << 4) + (regs_before.di as u32);
+                    let byte = sys.cpu.bus().read(src_addr);
+                    println!(
+                        "        MOVSB: [{:04X}:{:04X}]={:02X} -> [{:04X}:{:04X}]",
+                        regs_before.ds, regs_before.si, byte, regs_before.es, regs_before.di
+                    );
+                }
+
+                // For ADD, show the operation
+                if opc == 0x00 {
+                    let ea = regs_before.bx.wrapping_add(regs_before.di);
+                    let ea_addr = ((regs_before.ds as u32) << 4) + (ea as u32);
+                    let mem_val = sys.cpu.bus().read(ea_addr);
+                    let bh = (regs_before.bx >> 8) as u8;
+                    println!(
+                        "        ADD: [{:04X}]={:02X} + BH={:02X} = {:02X}",
+                        ea, mem_val, bh,
+                        mem_val.wrapping_add(bh)
+                    );
+                }
+
+                sys.cpu.step();
+
+                let regs_after = sys.cpu.get_registers();
+                if regs_after.ip == regs_before.ip && regs_after.cs == regs_before.cs {
+                    println!("  ⚠ WARNING: IP didn't advance!");
+                    break;
+                }
+            }
+
+            // Check if we're still in the loop
+            let regs = sys.cpu.get_registers();
+            if regs.cs != 0x12CE
+                || (regs.ip != 0x000F
+                    && regs.ip != 0x0010
+                    && regs.ip != 0x0012
+                    && regs.ip != 0x0017)
+            {
+                println!("\n✓ Exited loop! Now at {:04X}:{:04X}", regs.cs, regs.ip);
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn count_loop_iterations() {
+        use std::collections::HashMap;
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Counting loop iterations ===");
+
+        let mut iteration_count = 0;
+        let mut total_steps = 0;
+        let mut _loop_visits: HashMap<u16, usize> = HashMap::new();
+
+        for step in 0..500000 {
+            total_steps = step;
+            let regs = sys.cpu.get_registers();
+            let cs = regs.cs;
+            let ip = regs.ip;
+
+            // Track visits to loop entry point
+            if cs == 0x12CE && ip == 0x000F {
+                iteration_count += 1;
+                *_loop_visits.entry(ip).or_insert(0) += 1;
+
+                if iteration_count % 100 == 0 {
+                    println!("Loop iteration {}, total steps: {}", iteration_count, step);
+                }
+
+                // If we've been in the loop too many times, something's wrong
+                if iteration_count > 10000 {
+                    println!("\n❌ Loop executed {} times - seems stuck!", iteration_count);
+                    break;
+                }
+            }
+
+            sys.cpu.step();
+
+            // Check if we've moved away from the loop area
+            let regs_after = sys.cpu.get_registers();
+            if cs == 0x12CE && (ip >= 0x000F && ip <= 0x0017) {
+                // Still in loop area
+            } else if iteration_count > 0 && regs_after.cs != 0x12CE {
+                println!(
+                    "\n✓ Exited loop after {} iterations at step {}",
+                    iteration_count, step
+                );
+                println!("  Now at {:04X}:{:04X}", regs_after.cs, regs_after.ip);
+                break;
+            }
+        }
+
+        println!("\n=== Loop Statistics ===");
+        println!("Total iterations through 000F: {}", iteration_count);
+        println!("Total CPU steps: {}", total_steps);
+        if iteration_count > 0 {
+            println!(
+                "Average steps per iteration: {}",
+                total_steps / iteration_count
+            );
+        }
+    }
 }
