@@ -3760,14 +3760,15 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     self.get_reg8_high(reg - 4)
                 };
-                let rm_val = self.read_rm8(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
 
                 if reg < 4 {
                     self.set_reg8_low(reg, rm_val);
                 } else {
                     self.set_reg8_high(reg - 4, rm_val);
                 }
-                self.write_rm8(modbits, rm, reg_val);
+                self.write_rmw8(modbits, rm, reg_val, seg, offset);
 
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
                 if modbits == 0b11 {
@@ -3782,10 +3783,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
 
                 self.set_reg16(reg, rm_val);
-                self.write_rm16(modbits, rm, reg_val);
+                self.write_rmw16(modbits, rm, reg_val, seg, offset);
 
                 self.cycles += if modbits == 0b11 { 4 } else { 17 };
                 if modbits == 0b11 {
@@ -3958,11 +3960,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             11
                         }
                     }
-                    // NOT r/m8
+                    // NOT r/m8 - use RMW helpers to avoid double-fetching displacement
                     0b010 => {
-                        let val = self.read_rm8(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = !val;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
                         if modbits == 0b11 {
                             3
@@ -3970,11 +3972,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
-                    // NEG r/m8
+                    // NEG r/m8 - use RMW helpers to avoid double-fetching displacement
                     0b011 => {
-                        let val = self.read_rm8(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = 0u8.wrapping_sub(val);
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x80);
@@ -4109,11 +4111,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             11
                         }
                     }
-                    // NOT r/m16
+                    // NOT r/m16 - use RMW helpers to avoid double-fetching displacement
                     0b010 => {
-                        let val = self.read_rm16(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = !val;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.cycles += if modbits == 0b11 { 3 } else { 16 };
                         if modbits == 0b11 {
                             3
@@ -4121,11 +4123,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             16
                         }
                     }
-                    // NEG r/m16
+                    // NEG r/m16 - use RMW helpers to avoid double-fetching displacement
                     0b011 => {
-                        let val = self.read_rm16(modbits, rm);
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = 0u16.wrapping_sub(val);
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x8000);
@@ -4351,10 +4353,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC0 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
                 let count = self.fetch_u8();
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, count);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     5 + (4 * count as u64)
                 } else {
@@ -4371,10 +4374,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xC1 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
                 let count = self.fetch_u8();
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, count);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     5 + (4 * count as u64)
                 } else {
@@ -4489,9 +4493,10 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD0 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, 1);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 { 2 } else { 15 };
                 if modbits == 0b11 {
                     2
@@ -4504,9 +4509,10 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD1 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, 1);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 { 2 } else { 15 };
                 if modbits == 0b11 {
                     2
@@ -4519,10 +4525,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD2 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
                 let count = (self.cx & 0xFF) as u8;
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = self.shift_rotate_8(val, op, count);
-                self.write_rm8(modbits, rm, result);
+                self.write_rmw8(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     8 + (4 * count as u64)
                 } else {
@@ -4539,10 +4546,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xD3 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
                 let count = (self.cx & 0xFF) as u8;
+                // Use RMW helpers to avoid double-fetching displacement
+                let (val, seg, offset) = self.read_rmw16(modbits, rm);
                 let result = self.shift_rotate_16(val, op, count);
-                self.write_rm16(modbits, rm, result);
+                self.write_rmw16(modbits, rm, result, seg, offset);
                 self.cycles += if modbits == 0b11 {
                     8 + (4 * count as u64)
                 } else {
@@ -4786,22 +4794,23 @@ impl<M: Memory8086> Cpu8086<M> {
             0xFE => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm8(modbits, rm);
-
+                
                 match op {
                     0 => {
-                        // INC r/m8
+                        // INC r/m8 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7F;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_OF, overflow);
                     }
                     1 => {
-                        // DEC r/m8
+                        // DEC r/m8 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw8(modbits, rm);
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x80;
-                        self.write_rm8(modbits, rm, result);
+                        self.write_rmw8(modbits, rm, result, seg, offset);
                         self.update_flags_8(result);
                         self.set_flag(FLAG_OF, overflow);
                     }
@@ -4831,11 +4840,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
                 match op {
                     0 => {
-                        // INC r/m16
-                        let val = self.read_rm16(modbits, rm);
+                        // INC r/m16 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = val.wrapping_add(1);
                         let overflow = val == 0x7FFF;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -4846,11 +4855,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     1 => {
-                        // DEC r/m16
-                        let val = self.read_rm16(modbits, rm);
+                        // DEC r/m16 - use RMW helpers to avoid double-fetching displacement
+                        let (val, seg, offset) = self.read_rmw16(modbits, rm);
                         let result = val.wrapping_sub(1);
                         let overflow = val == 0x8000;
-                        self.write_rm16(modbits, rm, result);
+                        self.write_rmw16(modbits, rm, result, seg, offset);
                         self.update_flags_16(result);
                         self.set_flag(FLAG_OF, overflow);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
