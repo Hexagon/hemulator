@@ -248,7 +248,8 @@ impl PcCpu {
             0x13 => self.int10h_write_string(),
             0x1A => self.int10h_display_combination(),
             _ => {
-                // Unsupported function - just return
+                // Unsupported function - log and return
+                self.log_stub_interrupt(0x10, Some(ah), "Video BIOS (unsupported subfunction)");
                 51 // Approximate INT instruction timing
             }
         }
@@ -895,7 +896,8 @@ impl PcCpu {
             0x40 => self.int21h_write_file(),           // Write to file or device
             0x4C => self.int21h_terminate_with_code(),  // Terminate with return code
             _ => {
-                // Unsupported function - just return
+                // Unsupported function - log and return
+                self.log_stub_interrupt(0x21, Some(ah), "DOS API (unsupported subfunction)");
                 51
             }
         }
@@ -1133,6 +1135,9 @@ impl PcCpu {
         // Skip the INT 05h instruction (2 bytes: 0xCD 0x05)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Log stub call
+        self.log_stub_interrupt(0x05, None, "Print Screen/BOUND Exception");
+
         // INT 05h is used for:
         // 1. Print Screen (Shift+PrtSc) - not implemented in emulator
         // 2. BOUND instruction exception - array bounds check failure
@@ -1196,6 +1201,9 @@ impl PcCpu {
         // Skip the INT 09h instruction (2 bytes: 0xCD 0x09)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Log stub call (partial implementation)
+        self.log_stub_interrupt(0x09, None, "Keyboard Hardware Interrupt (partial stub)");
+
         // Hardware keyboard interrupt
         // This is typically triggered by keyboard controller when a key is pressed
         // The BIOS interrupt handler would:
@@ -1229,20 +1237,55 @@ impl PcCpu {
         // Bit 13: Serial printer installed (PCjr)
         // Bits 14-15: Number of parallel printers
 
-        // Default configuration:
-        // - Floppy drives installed (bit 0 = 1)
-        // - No math coprocessor (bit 1 = 0)
-        // - 64K+ RAM (bits 2-3 = 11)
-        // - CGA 80x25 color (bits 4-5 = 10)
-        // - 1 floppy drive (bits 6-7 = 00)
-        // - No DMA (bit 8 = 0) - actually yes on real hardware but we say no
-        // - 1 serial port (bits 9-11 = 001)
-        // - No game adapter (bit 12 = 0)
-        // - No serial printer (bit 13 = 0)
-        // - 1 parallel printer (bits 14-15 = 01)
+        // Query actual system configuration
+        let floppy_count = self.cpu.memory.floppy_count();
+        let video_type = self.cpu.memory.video_adapter_type();
 
-        let equipment_flags: u16 = 0b0100_0010_0010_1101;
-        // = 0x422D = Floppy, 64K RAM, CGA 80x25, 1 floppy, 1 serial, 1 parallel
+        // Build equipment flags dynamically
+        let mut equipment_flags: u16 = 0;
+
+        // Bit 0: Floppy drive(s) installed
+        if floppy_count > 0 {
+            equipment_flags |= 0b0000_0000_0000_0001;
+        }
+
+        // Bit 1: Math coprocessor - not emulated
+        // equipment_flags |= 0b0000_0000_0000_0010; // Not set
+
+        // Bits 2-3: System RAM (always 11 for 64K+)
+        equipment_flags |= 0b0000_0000_0000_1100;
+
+        // Bits 4-5: Initial video mode
+        use crate::bus::VideoAdapterType;
+        let video_mode_bits = match video_type {
+            VideoAdapterType::None => 0b00, // Treat as EGA/VGA
+            VideoAdapterType::Mda => 0b11,  // MDA 80x25
+            VideoAdapterType::Cga => 0b10,  // CGA 80x25 color
+            VideoAdapterType::Ega => 0b00,  // EGA
+            VideoAdapterType::Vga => 0b00,  // VGA
+        };
+        equipment_flags |= (video_mode_bits << 4) as u16;
+
+        // Bits 6-7: Number of floppy drives if bit 0 is set
+        if floppy_count > 0 {
+            let floppy_bits = ((floppy_count - 1) & 0b11) as u16;
+            equipment_flags |= (floppy_bits << 6) as u16;
+        }
+
+        // Bit 8: DMA installed (0 = yes, 1 = no) - we say no
+        // equipment_flags |= 0b0000_0001_0000_0000; // Not set (DMA present)
+
+        // Bits 9-11: Number of serial ports (1 port)
+        equipment_flags |= 0b0000_0010_0000_0000;
+
+        // Bit 12: Game adapter - not installed
+        // equipment_flags |= 0b0001_0000_0000_0000; // Not set
+
+        // Bit 13: Serial printer - not installed
+        // equipment_flags |= 0b0010_0000_0000_0000; // Not set
+
+        // Bits 14-15: Number of parallel printers (1 printer)
+        equipment_flags |= 0b0100_0000_0000_0000;
 
         self.cpu.ax = equipment_flags;
 
@@ -2046,7 +2089,8 @@ impl PcCpu {
             0x04 => self.int1ah_read_date(),
             0x05 => self.int1ah_set_date(),
             _ => {
-                // Unsupported function - do nothing
+                // Unsupported function - log and do nothing
+                self.log_stub_interrupt(0x1A, Some(ah), "Time/Date Services (unsupported subfunction)");
                 51
             }
         }
@@ -2356,13 +2400,15 @@ impl PcCpu {
                     0x20 => self.int15h_query_system_address_map(),
                     _ => {
                         // Unsupported function
+                        self.log_stub_interrupt(0x15, Some(ah), &format!("Extended Services, AL=0x{:02X} (unsupported)", al));
                         self.set_carry_flag(true);
                         51
                     }
                 }
             }
             _ => {
-                // Unsupported function - set carry flag to indicate error
+                // Unsupported function - log, set carry flag to indicate error
+                self.log_stub_interrupt(0x15, Some(ah), "Extended Services (unsupported subfunction)");
                 self.set_carry_flag(true);
                 51
             }
@@ -2420,6 +2466,9 @@ impl PcCpu {
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
+        // Log stub call
+        self.log_stub_interrupt(0x14, Some(ah), "Serial Port Services (stub)");
+
         match ah {
             0x00 => {
                 // Initialize serial port
@@ -2466,6 +2515,9 @@ impl PcCpu {
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
+        // Log stub call
+        self.log_stub_interrupt(0x17, Some(ah), "Printer Services (stub)");
+
         match ah {
             0x00 => {
                 // Print character
@@ -2502,6 +2554,9 @@ impl PcCpu {
         // Skip the INT 18h instruction (2 bytes: 0xCD 0x18)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Log stub call
+        self.log_stub_interrupt(0x18, None, "Cassette BASIC / Boot Failure (stub)");
+
         // On IBM PC/XT/AT, this would start ROM BASIC
         // On clones and modern systems, this indicates no bootable disk
         // We'll just halt the system
@@ -2521,6 +2576,9 @@ impl PcCpu {
     fn handle_int19h(&mut self) -> u32 {
         // Skip the INT 19h instruction (2 bytes: 0xCD 0x19)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Log stub call (should trigger reboot)
+        self.log_stub_interrupt(0x19, None, "Bootstrap Loader / System Reboot (stub - should trigger reboot)");
 
         // INT 19h is the bootstrap loader interrupt
         // Called by:
@@ -2544,6 +2602,9 @@ impl PcCpu {
         // Skip the INT 1Bh instruction (2 bytes: 0xCD 0x1B)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Log stub call
+        self.log_stub_interrupt(0x1B, None, "Ctrl-Break Handler (stub)");
+
         // Ctrl-Break handler
         // Default BIOS handler does nothing and returns
         // Programs can hook this interrupt to handle Ctrl-Break
@@ -2556,6 +2617,12 @@ impl PcCpu {
     fn handle_int1ch(&mut self) -> u32 {
         // Skip the INT 1Ch instruction (2 bytes: 0xCD 0x1C)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Log stub call (this is called frequently, so maybe don't log by default)
+        // Only log if EMU_TRACE_INTERRUPTS is set
+        if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() {
+            self.log_stub_interrupt(0x1C, None, "Timer Tick User Handler (stub)");
+        }
 
         // User timer tick handler
         // Called 18.2065 times per second by INT 08h
@@ -2570,6 +2637,9 @@ impl PcCpu {
     fn handle_int4ah(&mut self) -> u32 {
         // Skip the INT 4Ah instruction (2 bytes: 0xCD 0x4A)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Log stub call
+        self.log_stub_interrupt(0x4A, None, "Real-Time Clock Alarm (stub)");
 
         // RTC Alarm handler
         // Called by RTC hardware when alarm time is reached
@@ -2590,7 +2660,8 @@ impl PcCpu {
             0x43 => self.int2fh_xms_installation_check(),
             0x16 => self.int2fh_dpmi_installation_check(),
             _ => {
-                // Unsupported function - just return
+                // Unsupported function - log and return
+                self.log_stub_interrupt(0x2F, Some(ah), "Multiplex Interrupt (unsupported subfunction)");
                 51
             }
         }
@@ -2902,6 +2973,22 @@ impl PcCpu {
     #[allow(dead_code)]
     pub fn cycles(&self) -> u64 {
         self.cpu.cycles
+    }
+
+    /// Log a notice that a stub interrupt handler was called
+    /// This helps identify which interrupts are not fully implemented
+    fn log_stub_interrupt(&self, int_num: u8, ah: Option<u8>, description: &str) {
+        if let Some(ah_val) = ah {
+            eprintln!(
+                "NOTICE: Stub interrupt handler called: INT 0x{:02X}, AH=0x{:02X} ({}) at {:04X}:{:04X}",
+                int_num, ah_val, description, self.cpu.cs, self.cpu.ip
+            );
+        } else {
+            eprintln!(
+                "NOTICE: Stub interrupt handler called: INT 0x{:02X} ({}) at {:04X}:{:04X}",
+                int_num, description, self.cpu.cs, self.cpu.ip
+            );
+        }
     }
 }
 
@@ -3984,5 +4071,75 @@ mod tests {
 
         // Verify no error (CF clear)
         assert!(!cpu.get_carry_flag());
+    }
+
+    #[test]
+    fn test_int11h_equipment_list() {
+        use crate::bus::VideoAdapterType;
+
+        // Test with default configuration (CGA, no floppies)
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 11h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x11); // 11h
+
+        // Execute INT 11h
+        cpu.step();
+
+        // Equipment flags should reflect no floppy drives (bit 0 = 0)
+        // CGA 80x25 (bits 4-5 = 10)
+        let equipment = cpu.cpu.ax;
+        assert_eq!(equipment & 0x01, 0x00); // No floppy drives
+        assert_eq!((equipment >> 4) & 0x03, 0b10); // CGA 80x25
+
+        // Test with floppy drives mounted
+        let mut bus = PcBus::new();
+        bus.mount_floppy_a(vec![0; 1440 * 1024]); // 1.44MB floppy
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 11h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x11); // 11h
+
+        // Execute INT 11h
+        cpu.step();
+
+        // Equipment flags should reflect one floppy drive
+        let equipment = cpu.cpu.ax;
+        assert_eq!(equipment & 0x01, 0x01); // Floppy drive installed
+        assert_eq!((equipment >> 6) & 0x03, 0b00); // 1 floppy drive (0b00 = 1 drive)
+
+        // Test with VGA adapter
+        let mut bus = PcBus::new();
+        bus.set_video_adapter_type(VideoAdapterType::Vga);
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 11h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x11); // 11h
+
+        // Execute INT 11h
+        cpu.step();
+
+        // Equipment flags should reflect VGA (bits 4-5 = 00)
+        let equipment = cpu.cpu.ax;
+        assert_eq!((equipment >> 4) & 0x03, 0b00); // VGA
     }
 }

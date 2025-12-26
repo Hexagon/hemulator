@@ -39,6 +39,7 @@ pub use video_adapter::VideoAdapter;
 pub use video_adapter_software::SoftwareCgaAdapter;
 
 pub use bios::BootPriority; // Export boot priority
+pub use bus::VideoAdapterType; // Export video adapter type
 pub use disk::{create_blank_floppy, create_blank_hard_drive, FloppyFormat, HardDriveFormat}; // Export disk utilities for GUI
 pub use emu_core::cpu_8086::CpuModel as PcCpuModel; // Re-export for external use
 pub use keyboard::*; // Export keyboard scancodes for GUI integration
@@ -96,6 +97,10 @@ impl PcSystem {
     ) -> Self {
         let mut bus = PcBus::with_memory_kb(memory_kb);
 
+        // Determine video adapter type from adapter name
+        let adapter_type = Self::detect_video_adapter_type(video_adapter.name());
+        bus.set_video_adapter_type(adapter_type);
+
         // Load minimal BIOS
         let bios = generate_minimal_bios();
         bus.load_bios(&bios);
@@ -113,6 +118,23 @@ impl PcSystem {
             video: video_adapter,
             boot_started: false,
             boot_delay_frames: 300, // 5 seconds at 60 Hz
+        }
+    }
+
+    /// Detect video adapter type from adapter name
+    fn detect_video_adapter_type(name: &str) -> VideoAdapterType {
+        let name_lower = name.to_lowercase();
+        if name_lower.contains("vga") {
+            VideoAdapterType::Vga
+        } else if name_lower.contains("ega") {
+            VideoAdapterType::Ega
+        } else if name_lower.contains("cga") {
+            VideoAdapterType::Cga
+        } else if name_lower.contains("mda") || name_lower.contains("monochrome") {
+            VideoAdapterType::Mda
+        } else {
+            // Default to CGA if unknown
+            VideoAdapterType::Cga
         }
     }
 

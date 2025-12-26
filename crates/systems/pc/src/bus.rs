@@ -16,6 +16,21 @@ use crate::pit::Pit;
 use crate::xms::XmsDriver;
 use emu_core::cpu_8086::Memory8086;
 
+/// Video adapter type for equipment configuration
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoAdapterType {
+    /// No video adapter
+    None,
+    /// Monochrome Display Adapter (MDA)
+    Mda,
+    /// Color Graphics Adapter (CGA)
+    Cga,
+    /// Enhanced Graphics Adapter (EGA)
+    Ega,
+    /// Video Graphics Array (VGA)
+    Vga,
+}
+
 /// PC memory bus
 pub struct PcBus {
     /// Main RAM (640KB)
@@ -50,6 +65,8 @@ pub struct PcBus {
     pub xms: XmsDriver,
     /// DPMI (DOS Protected Mode Interface) driver
     pub dpmi: DpmiDriver,
+    /// Video adapter type for equipment configuration
+    video_adapter_type: VideoAdapterType,
 }
 
 impl PcBus {
@@ -94,6 +111,7 @@ impl PcBus {
             mouse: Mouse::new(),
             xms,
             dpmi,
+            video_adapter_type: VideoAdapterType::Cga, // Default to CGA
         };
 
         // Initialize Interrupt Vector Table (IVT) in low RAM
@@ -115,6 +133,34 @@ impl PcBus {
     /// Get the size of conventional memory in KB
     pub fn memory_kb(&self) -> u32 {
         (self.ram.len() / 1024) as u32
+    }
+
+    /// Set the video adapter type for equipment configuration
+    pub fn set_video_adapter_type(&mut self, adapter_type: VideoAdapterType) {
+        self.video_adapter_type = adapter_type;
+    }
+
+    /// Get the video adapter type
+    pub fn video_adapter_type(&self) -> VideoAdapterType {
+        self.video_adapter_type
+    }
+
+    /// Get the number of floppy drives installed
+    pub fn floppy_count(&self) -> u8 {
+        let mut count = 0;
+        if self.floppy_a.is_some() {
+            count += 1;
+        }
+        if self.floppy_b.is_some() {
+            count += 1;
+        }
+        count
+    }
+
+    /// Check if a hard drive is installed
+    #[allow(dead_code)] // Part of public API, may be used in the future
+    pub fn has_hard_drive(&self) -> bool {
+        self.hard_drive.is_some()
     }
 
     /// Reset the bus to initial state
