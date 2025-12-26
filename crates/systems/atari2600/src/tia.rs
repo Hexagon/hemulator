@@ -400,7 +400,8 @@ impl Tia {
 
         // Comprehensive write logging (first 1000 writes only)
         if self.writes_total <= 1000
-            && LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            && LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+        {
             eprintln!(
                 "[TIA WRITE #{}] addr=0x{:02X} val=0x{:02X} scanline={}",
                 self.writes_total, addr, val, self.scanline

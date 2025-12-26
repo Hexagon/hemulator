@@ -1478,7 +1478,8 @@ impl PcCpu {
                     buffer.len()
                 );
             }
-            let should_log_progress = LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
+            let should_log_progress =
+                LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
             for (i, &byte) in buffer.iter().enumerate() {
                 if should_log_progress && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());

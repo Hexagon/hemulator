@@ -4,6 +4,7 @@ use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 use crate::SnesError;
 use emu_core::cpu_65c816::Memory65c816;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::Cell;
 
 /// SNES memory bus
@@ -172,7 +173,12 @@ impl Memory65c816 for SnesBus {
                         }
                     }
                     // Other hardware registers
-                    0x2000..=0x5FFF => 0, // Stub
+                    0x2000..=0x5FFF => {
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("SNES: Read from stubbed hardware register 0x{:04X} (bank 0x{:02X})", addr, bank)
+                        });
+                        0 // Stub
+                    }
                     // WRAM (full at $6000-$7FFF in banks $00-$3F)
                     0x6000..=0x7FFF if bank < 0x40 => self.wram[(offset - 0x6000) as usize],
                     // Cartridge ROM

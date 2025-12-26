@@ -16,6 +16,7 @@
 //! - HDMA effects
 //! - Mosaic, color math, etc.
 
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
 
 const VRAM_SIZE: usize = 0x10000; // 64KB VRAM
@@ -367,7 +368,14 @@ impl Ppu {
             }
 
             // Other registers - stub (just accept writes)
-            _ => {}
+            _ => {
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES PPU: Unhandled register write: 0x{:04X} = 0x{:02X}",
+                        addr, val
+                    )
+                });
+            }
         }
     }
 

@@ -59,6 +59,7 @@
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
 use super::rdp_renderer_software::SoftwareRdpRenderer;
 use emu_core::graphics::ColorOps;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
 
 /// RDP register addresses (relative to 0x04100000)
@@ -827,6 +828,14 @@ impl Rdp {
                 let yh = (word0 & 0xFFF) / 4;
                 let xl = ((word1 >> 12) & 0xFFF) / 4;
                 let yl = (word1 & 0xFFF) / 4;
+                let tile = (word1 >> 24) & 0x07;
+
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: TEXTURE_RECTANGLE stub - rendering as solid fill (xl={}, yl={}, xh={}, yh={}, tile={})",
+                        xl, yl, xh, yh, tile
+                    )
+                });
 
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
@@ -839,6 +848,12 @@ impl Rdp {
                 // Configure rendering modes (cycle type, alpha blend, Z-buffer, etc.)
                 // For now, we just accept and ignore these settings
                 // Full implementation would configure the rendering pipeline
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: SET_OTHER_MODES stub - ignoring rendering mode configuration (word0=0x{:08X}, word1=0x{:08X})",
+                        word0, word1
+                    )
+                });
             }
             // SET_TILE (0x35)
             0x35 => {
@@ -926,7 +941,13 @@ impl Rdp {
                 // Synchronization commands - no-op in frame-based implementation
             }
             _ => {
-                // Unknown or unimplemented command - ignore for now
+                // Unknown or unimplemented command - log warning
+                log(LogCategory::Stubs, LogLevel::Warn, || {
+                    format!(
+                        "N64 RDP: Unknown RDP command: 0x{:02X} (word0=0x{:08X}, word1=0x{:08X})",
+                        cmd_id, word0, word1
+                    )
+                });
             }
         }
     }

@@ -216,14 +216,11 @@ impl LogConfig {
     /// Returns Ok(()) if successful, or an error if the file cannot be opened.
     pub fn set_log_file(&self, path: PathBuf) -> std::io::Result<()> {
         // Open the file first to validate it works
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+
         // Create a channel for log messages
         let (sender, receiver) = channel::<String>();
-        
+
         // Spawn background thread for async file writing
         thread::Builder::new()
             .name("log-writer".to_string())
@@ -239,12 +236,12 @@ impl LogConfig {
                 // Final flush when shutting down
                 let _ = file.flush();
             })?;
-        
+
         // Store the sender
         let mut log_sender = self.log_sender.lock().unwrap();
         *log_sender = Some(sender);
         self.file_logging_enabled.store(true, Ordering::Relaxed);
-        
+
         Ok(())
     }
 
