@@ -4517,11 +4517,11 @@ mod tests {
         let mut floppy = vec![0; 1474560]; // 1.44MB
 
         // Fill first two sectors with test patterns
-        for i in 0..512 {
-            floppy[i] = (i % 256) as u8; // First sector
+        for (i, byte) in floppy.iter_mut().enumerate().take(512) {
+            *byte = (i % 256) as u8; // First sector
         }
-        for i in 512..1024 {
-            floppy[i] = ((i - 512) % 256) as u8; // Second sector
+        for (i, byte) in floppy.iter_mut().enumerate().skip(512).take(512) {
+            *byte = (i % 256) as u8; // Second sector
         }
 
         bus.mount_floppy_a(floppy);
