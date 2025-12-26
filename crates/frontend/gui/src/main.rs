@@ -572,7 +572,6 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 /// Command-line arguments for the emulator
 #[derive(Debug, Default)]
 struct CliArgs {
-    keep_logs: bool,
     rom_path: Option<String>,
     slot1: Option<String>,                       // BIOS or primary file
     slot2: Option<String>,                       // FloppyA
@@ -598,9 +597,6 @@ impl CliArgs {
 
         while let Some(arg) = arg_iter.next() {
             match arg.as_str() {
-                "--keep-logs" => {
-                    args.keep_logs = true;
-                }
                 "--slot1" => {
                     args.slot1 = arg_iter.next();
                 }
@@ -662,9 +658,6 @@ impl CliArgs {
         eprintln!("Usage: hemu [OPTIONS] [ROM_FILE]");
         eprintln!();
         eprintln!("Options:");
-        eprintln!(
-            "  --keep-logs              Preserve debug logging environment variables (deprecated)"
-        );
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -784,14 +777,6 @@ fn main() {
         }
     }
 
-    // The NES core has some env-var gated debug logging that can produce massive output
-    // (and effectively stall the GUI). Disable those by default for the GUI process.
-    // Use `--keep-logs` to preserve current env-var behavior.
-    if !cli_args.keep_logs {
-        env::remove_var("EMU_LOG_PPU_WRITES");
-        env::remove_var("EMU_LOG_UNKNOWN_OPS");
-    }
-
     // Initialize the new logging system from command-line arguments
     let log_config = emu_core::logging::LogConfig::global();
 
@@ -875,11 +860,6 @@ fn main() {
                 level_str
             );
         }
-    }
-
-    // Initialize from environment variables if --keep-logs is set (backward compatibility)
-    if cli_args.keep_logs {
-        log_config.init_from_env();
     }
 
     // Load settings

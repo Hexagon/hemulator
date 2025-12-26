@@ -1620,7 +1620,7 @@ When no ROM is loaded or ROM fails to load, a default splash screen is displayed
 
 ## Logging System
 
-The emulator uses a centralized logging system with command-line configuration. This replaces the legacy environment variable-based approach.
+The emulator uses a centralized logging system with command-line configuration.
 
 ### Architecture
 
@@ -1630,8 +1630,7 @@ The logging system provides:
 - **Thread-safe global configuration** using atomic operations
 - **Hierarchical log levels**: Off < Error < Warn < Info < Debug < Trace
 - **Log categories**: CPU, Bus, PPU, APU, Interrupts, Stubs
-- **Command-line configuration** via flags (replaces environment variables)
-- **Backward compatibility** with ENV variables (deprecated, shows warnings)
+- **Command-line configuration** via flags
 
 ### Command-Line Logging Flags
 
@@ -1728,42 +1727,6 @@ When adding logging to new code:
    - `APU`: Audio operations
    - `Interrupts`: IRQ/NMI/interrupt handlers
    - `Stubs`: Unimplemented features
-
-### Legacy Environment Variables (Deprecated)
-
-Environment variables are still supported for backward compatibility but emit deprecation warnings.
-Use `--keep-logs` to preserve ENV variable behavior without migrating to command-line flags:
-
-```bash
-# Use legacy ENV variables (deprecated)
-EMU_LOG_BRK=1 cargo run --release -- --keep-logs game.nes
-```
-
-When environment variables are detected, the system shows deprecation warnings with recommended command-line equivalents:
-
-```
-DEPRECATION WARNING: Environment variable EMU_LOG_BRK is deprecated. Use command-line flags instead.
-  Recommended: --log-cpu debug
-
-Environment-based logging will be removed in a future version.
-Please update your workflow to use command-line flags.
-```
-
-**ENV Variable to Command-Line Flag Migration**:
-
-| ENV Variable | Command-Line Flag | Level |
-|--------------|-------------------|-------|
-| `EMU_LOG_UNKNOWN_OPS` | `--log-stubs info` | Info |
-| `EMU_LOG_BRK` | `--log-cpu debug` | Debug |
-| `EMU_LOG_PPU_WRITES` | `--log-ppu debug` | Debug |
-| `EMU_LOG_IRQ` | `--log-interrupts info` | Info |
-| `EMU_TRACE_PC` | `--log-cpu trace` | Trace |
-| `EMU_TRACE_NES` | `--log-cpu trace` | Trace |
-| `EMU_TRACE_INTERRUPTS` | `--log-interrupts debug` | Debug |
-| `EMU_TRACE_INT13` | `--log-bus debug` | Debug |
-| `EMU_LOG_TIA_*` | `--log-ppu debug` | Debug |
-| `EMU_LOG_ATARI_FRAME` | `--log-ppu info` | Info |
-| `EMU_LOG_ATARI_FRAME_PIXELS` | `--log-ppu trace` | Trace |
 
 ### Adding New Log Points
 

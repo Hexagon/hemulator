@@ -48,7 +48,7 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 ## Debug Logging
 
-The emulator supports debug logging through command-line arguments. This replaces the legacy environment variable-based approach.
+The emulator supports debug logging through command-line arguments.
 
 **For comprehensive logging documentation and implementation guidelines**, see [AGENTS.md](AGENTS.md#logging-system).
 
@@ -87,15 +87,3 @@ cargo run --release -- --log-level trace game.nes
 # Mix global and specific levels (specific overrides global)
 cargo run --release -- --log-level info --log-cpu trace game.nes
 ```
-
-### Legacy Environment Variables (Deprecated)
-
-Environment variables are still supported for backward compatibility but will be removed in a future version.
-Use `--keep-logs` to preserve environment variable behavior:
-
-```bash
-# Use legacy ENV variables (deprecated)
-EMU_LOG_BRK=1 cargo run --release -- --keep-logs game.nes
-```
-
-When environment variables are detected, deprecation warnings are shown with recommended command-line equivalents.
