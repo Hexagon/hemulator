@@ -175,17 +175,16 @@ impl PcCpu {
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
             // Log interrupts for debugging
-            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok()
-                && int_num != 0x10 {
-                    // Don't log INT 10h to reduce noise
-                    let cs = self.cpu.cs;
-                    let ip = self.cpu.ip;
-                    let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
-                    eprintln!(
-                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                        int_num, ah, cs, ip
-                    );
-                }
+            if std::env::var("EMU_TRACE_INTERRUPTS").is_ok() && int_num != 0x10 {
+                // Don't log INT 10h to reduce noise
+                let cs = self.cpu.cs;
+                let ip = self.cpu.ip;
+                let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+                eprintln!(
+                    "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                    int_num, ah, cs, ip
+                );
+            }
 
             match int_num {
                 0x05 => return self.handle_int05h(), // Print Screen / BOUND
@@ -1283,10 +1282,11 @@ impl PcCpu {
             static mut INT13H_CALL_COUNT: u32 = 0;
             unsafe {
                 INT13H_CALL_COUNT += 1;
-                if INT13H_CALL_COUNT % 10 == 1 {
-                    eprintln!("INT 13h call #{}", INT13H_CALL_COUNT);
+                let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
+                if count % 10 == 1 {
+                    eprintln!("INT 13h call #{}", count);
                 }
-                if INT13H_CALL_COUNT > 1000 {
+                if count > 1000 {
                     eprintln!("!!! INT 13h called over 1000 times! Stopping...");
                     self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
                     self.set_carry_flag(true);
@@ -2013,6 +2013,7 @@ impl PcCpu {
     }
 
     /// Get the carry flag value
+    #[allow(dead_code)] // Used in tests
     fn get_carry_flag(&self) -> bool {
         const FLAG_CF: u16 = 0x0001;
         (self.cpu.flags & FLAG_CF) != 0
