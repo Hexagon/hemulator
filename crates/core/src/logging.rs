@@ -9,22 +9,34 @@
 //! - **LogConfig**: Thread-safe global configuration using atomic operations
 //! - **LogLevel**: Hierarchical log levels (Off < Error < Warn < Info < Debug < Trace)
 //! - **LogCategory**: Different logging categories (CPU, Bus, PPU, APU, Interrupts, Stubs)
+//! - **log()**: Common logging function for all output with async file I/O
+//!
+//! # Performance
+//!
+//! Logging is designed to be non-blocking:
+//! - Messages are sent to a background thread via a channel
+//! - File I/O happens asynchronously, preventing emulation slowdown
+//! - Console output is immediate but minimal buffering prevents blocking
+//! - Zero overhead when logging is disabled
 //!
 //! # Usage
 //!
 //! ```rust
-//! use emu_core::logging::{LogConfig, LogLevel, LogCategory};
+//! use emu_core::logging::{log, LogLevel, LogCategory};
 //!
-//! // Initialize logging from command-line args
-//! LogConfig::global().set_level(LogCategory::CPU, LogLevel::Debug);
-//!
-//! // Check if logging is enabled for a category
-//! if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Info) {
-//!     eprintln!("CPU: Something happened");
-//! }
+//! // Log with lazy evaluation (zero cost when disabled)
+//! log(LogCategory::CPU, LogLevel::Debug, || {
+//!     format!("CPU: BRK at PC={:04X}", 0x1234)
+//! });
 //! ```
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::Mutex;
+use std::thread;
 
 /// Log level for controlling verbosity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -105,6 +117,10 @@ pub struct LogConfig {
     interrupt_level: AtomicU8,
     /// Stub/unimplemented feature log level
     stub_level: AtomicU8,
+    /// Channel for sending log messages to background thread
+    log_sender: Mutex<Option<Sender<String>>>,
+    /// Flag indicating if logging to file is enabled
+    file_logging_enabled: AtomicBool,
 }
 
 impl LogConfig {
@@ -118,6 +134,8 @@ impl LogConfig {
             apu_level: AtomicU8::new(LogLevel::Off as u8),
             interrupt_level: AtomicU8::new(LogLevel::Off as u8),
             stub_level: AtomicU8::new(LogLevel::Off as u8),
+            log_sender: Mutex::new(None),
+            file_logging_enabled: AtomicBool::new(false),
         }
     }
 
@@ -188,6 +206,116 @@ impl LogConfig {
         self.set_level(LogCategory::APU, LogLevel::Off);
         self.set_level(LogCategory::Interrupts, LogLevel::Off);
         self.set_level(LogCategory::Stubs, LogLevel::Off);
+    }
+
+    /// Set the log file path
+    ///
+    /// Starts a background thread for async file I/O to prevent blocking the emulation.
+    /// If a logging thread is already running, it will be stopped and a new one started.
+    ///
+    /// Returns Ok(()) if successful, or an error if the file cannot be opened.
+    pub fn set_log_file(&self, path: PathBuf) -> std::io::Result<()> {
+        // Open the file first to validate it works
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        
+        // Create a channel for log messages
+        let (sender, receiver) = channel::<String>();
+        
+        // Spawn background thread for async file writing
+        thread::Builder::new()
+            .name("log-writer".to_string())
+            .spawn(move || {
+                let mut file = file;
+                // Process messages until channel is closed
+                while let Ok(message) = receiver.recv() {
+                    // Write to file, ignore errors (logging shouldn't crash the app)
+                    let _ = writeln!(file, "{}", message);
+                    // Flush periodically to ensure logs aren't lost
+                    let _ = file.flush();
+                }
+                // Final flush when shutting down
+                let _ = file.flush();
+            })?;
+        
+        // Store the sender
+        let mut log_sender = self.log_sender.lock().unwrap();
+        *log_sender = Some(sender);
+        self.file_logging_enabled.store(true, Ordering::Relaxed);
+        
+        Ok(())
+    }
+
+    /// Clear the log file (close it and stop logging to file)
+    pub fn clear_log_file(&self) {
+        let mut log_sender = self.log_sender.lock().unwrap();
+        *log_sender = None;
+        self.file_logging_enabled.store(false, Ordering::Relaxed);
+        // Thread will automatically stop when sender is dropped
+    }
+
+    /// Write a message to the configured output (file or stderr)
+    ///
+    /// This is an internal method used by the public log() function.
+    /// Uses async I/O for file logging to prevent blocking.
+    fn write_message(&self, message: &str) {
+        if self.file_logging_enabled.load(Ordering::Relaxed) {
+            // Try to send to background thread (non-blocking)
+            let log_sender = self.log_sender.lock().unwrap();
+            if let Some(ref sender) = *log_sender {
+                // Send is non-blocking unless channel is full
+                // If send fails, fall back to stderr
+                if sender.send(message.to_string()).is_err() {
+                    eprintln!("{}", message);
+                }
+            } else {
+                // File logging was enabled but sender is gone, fall back to stderr
+                eprintln!("{}", message);
+            }
+        } else {
+            // Write to stderr (immediate, unbuffered)
+            eprintln!("{}", message);
+        }
+    }
+}
+
+/// Log a message with the specified category and level
+///
+/// This is the primary logging function that should be used throughout the codebase.
+/// The message is lazily evaluated via a closure, so complex formatting only occurs
+/// when logging is actually enabled for the given category and level.
+///
+/// # Arguments
+///
+/// * `category` - The logging category (CPU, Bus, PPU, etc.)
+/// * `level` - The log level (Error, Warn, Info, Debug, Trace)
+/// * `message_fn` - A closure that produces the message string
+///
+/// # Performance
+///
+/// - Zero overhead when logging is disabled (closure is never called)
+/// - Thread-safe file writing with automatic fallback to stderr
+/// - Single point of control for all logging output
+///
+/// # Examples
+///
+/// ```rust
+/// use emu_core::logging::{log, LogCategory, LogLevel};
+///
+/// log(LogCategory::CPU, LogLevel::Debug, || {
+///     format!("CPU: BRK at PC={:04X}", 0x1234)
+/// });
+/// ```
+pub fn log<F>(category: LogCategory, level: LogLevel, message_fn: F)
+where
+    F: FnOnce() -> String,
+{
+    let config = LogConfig::global();
+    if config.should_log(category, level) {
+        let message = message_fn();
+        config.write_message(&message);
     }
 }
 

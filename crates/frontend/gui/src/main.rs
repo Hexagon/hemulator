@@ -587,6 +587,7 @@ struct CliArgs {
     log_apu: Option<String>,        // APU log level
     log_interrupts: Option<String>, // Interrupt log level
     log_stubs: Option<String>,      // Stub/unimplemented log level
+    log_file: Option<String>,       // Log file path
 }
 
 impl CliArgs {
@@ -676,6 +677,14 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--log-file" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.log_file = Some(path);
+                    } else {
+                        eprintln!("Error: --log-file requires a file path (e.g., 'debug_trace.log').");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -709,6 +718,7 @@ impl CliArgs {
         eprintln!("  --log-apu <LEVEL>        Set APU/audio log level");
         eprintln!("  --log-interrupts <LEVEL> Set interrupt log level");
         eprintln!("  --log-stubs <LEVEL>      Set unimplemented feature log level");
+        eprintln!("  --log-file <PATH>        Write logs to file instead of stderr");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -719,6 +729,9 @@ impl CliArgs {
         eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
         eprintln!(
             "  hemu --log-level info game.nes                 # Load with global info logging"
+        );
+        eprintln!(
+            "  hemu --log-cpu trace --log-file trace.log game.nes # Log CPU trace to file"
         );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
@@ -857,7 +870,7 @@ fn main() {
             emu_core::logging::LogCategory::Stubs,
             "Stubs",
         ),
-    ] {
+    ]  {
         if let Some(ref level_str) = opt_level_str {
             if let Some(level) = emu_core::logging::LogLevel::from_str(level_str) {
                 log_config.set_level(category, level);
@@ -867,6 +880,21 @@ fn main() {
                     "Warning: Invalid {} log level '{}', using 'off'",
                     name, level_str
                 );
+            }
+        }
+    }
+
+    // Configure log file if specified
+    if let Some(ref log_file_path) = cli_args.log_file {
+        use std::path::PathBuf;
+        let path = PathBuf::from(log_file_path);
+        match log_config.set_log_file(path) {
+            Ok(()) => {
+                eprintln!("Logging to file: {}", log_file_path);
+            }
+            Err(e) => {
+                eprintln!("Error: Failed to open log file '{}': {}", log_file_path, e);
+                std::process::exit(1);
             }
         }
     }
