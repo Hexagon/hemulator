@@ -1962,7 +1962,7 @@ mod boot_output_tests {
             .expect("Cannot find x86BOOT.img in any expected location");
 
         let disk_data = fs::read(img_path).expect("Failed to read x86BOOT.img");
-        
+
         println!("\n=== Running FreeDOS with detailed execution trace ===");
         println!("Disk size: {} bytes", disk_data.len());
         println!("This test helps diagnose the infinite loop issue");
@@ -2177,7 +2177,10 @@ mod boot_output_tests {
                     if seen.insert((*c, *i)) {
                         let phys = ((*c as u32) << 4) + (*i as u32);
                         let opc = sys.cpu.bus().read(phys);
-                        println!("  {:04X}:{:04X} (phys {:08X}) opcode={:02X}", c, i, phys, opc);
+                        println!(
+                            "  {:04X}:{:04X} (phys {:08X}) opcode={:02X}",
+                            c, i, phys, opc
+                        );
                     }
                 }
                 break;
@@ -2187,7 +2190,10 @@ mod boot_output_tests {
             sys.cpu.step();
 
             if step % 10000 == 0 && step > 0 {
-                println!("Executed {} steps, currently at {:04X}:{:04X}", step, cs, ip);
+                println!(
+                    "Executed {} steps, currently at {:04X}:{:04X}",
+                    step, cs, ip
+                );
             }
         }
     }
@@ -2374,7 +2380,9 @@ mod boot_output_tests {
                     let bh = (regs_before.bx >> 8) as u8;
                     println!(
                         "        ADD: [{:04X}]={:02X} + BH={:02X} = {:02X}",
-                        ea, mem_val, bh,
+                        ea,
+                        mem_val,
+                        bh,
                         mem_val.wrapping_add(bh)
                     );
                 }
@@ -2450,7 +2458,10 @@ mod boot_output_tests {
 
                 // If we've been in the loop too many times, something's wrong
                 if iteration_count > 10000 {
-                    println!("\n❌ Loop executed {} times - seems stuck!", iteration_count);
+                    println!(
+                        "\n❌ Loop executed {} times - seems stuck!",
+                        iteration_count
+                    );
                     break;
                 }
             }
@@ -2479,6 +2490,79 @@ mod boot_output_tests {
                 "Average steps per iteration: {}",
                 total_steps / iteration_count
             );
+        }
+    }
+
+    #[test]
+    fn trace_loop_callers() {
+        use std::collections::HashSet;
+        use std::fs;
+        use std::path::Path;
+
+        let possible_paths = [
+            "test_roms/pc/x86BOOT.img",
+            "../../../test_roms/pc/x86BOOT.img",
+            "../../test_roms/pc/x86BOOT.img",
+        ];
+
+        let img_path = possible_paths
+            .iter()
+            .find(|p| Path::new(p).exists())
+            .expect("Cannot find x86BOOT.img");
+
+        let disk_data = fs::read(img_path).unwrap();
+
+        let mut sys = PcSystem::new();
+        sys.mount("FloppyA", &disk_data).unwrap();
+        sys.boot_delay_frames = 0;
+        sys.boot_started = false;
+        sys.ensure_boot_sector_loaded();
+
+        println!("\n=== Tracing what calls the loop ===");
+
+        let mut seen_callers = HashSet::new();
+        let mut loop_entry_count = 0;
+        let mut last_non_loop_addr = (0u16, 0u16); // (CS, IP)
+
+        for _step in 0..50000 {
+            let regs = sys.cpu.get_registers();
+            let cs = regs.cs;
+            let ip = regs.ip;
+
+            // Track when we enter the loop
+            if cs == 0x12CE && ip == 0x000F {
+                loop_entry_count += 1;
+
+                if loop_entry_count <= 20 || loop_entry_count % 100 == 0 {
+                    println!(
+                        "Entry #{}: Entered loop from {:04X}:{:04X}",
+                        loop_entry_count, last_non_loop_addr.0, last_non_loop_addr.1
+                    );
+                    seen_callers.insert(last_non_loop_addr);
+                }
+            }
+
+            // Track the last non-loop address
+            if cs != 0x12CE || (ip < 0x000F || ip > 0x0091) {
+                last_non_loop_addr = (cs, ip);
+            }
+
+            sys.cpu.step();
+
+            if loop_entry_count >= 500 {
+                println!("\n⚠ Stopping after {} loop entries", loop_entry_count);
+                break;
+            }
+        }
+
+        println!("\n=== Caller Summary ===");
+        println!("Total loop entries: {}", loop_entry_count);
+        println!("Unique callers: {}", seen_callers.len());
+        println!("\nUnique caller addresses:");
+        let mut sorted: Vec<_> = seen_callers.iter().collect();
+        sorted.sort();
+        for (cs, ip) in sorted {
+            println!("  {:04X}:{:04X}", cs, ip);
         }
     }
 }
