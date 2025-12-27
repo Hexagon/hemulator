@@ -671,8 +671,8 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Software renderer is fully functional (default)
   - OpenGL renderer is a stub (requires GL context from frontend)
   - To enable OpenGL stub: build with `--features opengl`
-  - Future OpenGL implementation blocked by minifb's lack of GL context exposure
-  - See `N64_RENDERER_ARCHITECTURE.md` for details on renderer design
+  - OpenGL integration with SDL2 frontend is planned
+  - See system README files for details on renderer design
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles

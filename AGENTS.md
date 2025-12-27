@@ -67,7 +67,7 @@
   - Tests should check frame dimensions and pixel data for expected patterns.
   - See existing smoke tests in `crates/systems/*/src/lib.rs` for examples.
 - **Cross-platform notes**:
-  - Frontend uses `minifb` and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
+  - Frontend uses SDL2 and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
   - For macOS specifics, `rodio` may require additional CI setup; document platform checks in CI config.
 - **When to notify maintainers**:
   - Failing build or tests, or lint errors.
@@ -1080,7 +1080,7 @@ Detailed implementation notes:
 
 ### Frontend (`crates/frontend/gui`)
 
-GUI frontend using minifb and rodio.
+GUI frontend using SDL2 and rodio.
 
 #### Video Processing System
 
@@ -1136,7 +1136,7 @@ pub trait VideoProcessor {
 
 **Integration Points:**
 - Settings: `video_backend` field in `config.json` ("software" or "opengl")
-- Main loop: Process frame buffer before sending to minifb window
+- Main loop: Process frame buffer before sending to window
 - Filter switching: F11 key cycles through CRT filters
 
 **Testing:**
@@ -1145,7 +1145,7 @@ pub trait VideoProcessor {
 - Both backends tested for build compatibility
 
 **Future Enhancements:**
-- Direct rendering to window (bypass minifb buffer copy)
+- Direct OpenGL rendering to window
 - Additional shader effects (curvature, bloom, color correction)
 - Runtime backend switching without restart
 - Custom shader loading from configuration
