@@ -1171,16 +1171,16 @@ impl<M: Memory8086> Cpu8086<M> {
                             eprintln!("[REPE CMPSB] Starting: CX={:04X} DS:SI={:04X}:{:04X} ES:DI={:04X}:{:04X}", 
                                 self.cx, src_seg, self.si, self.es, self.di);
                         }
-                        
+
                         while self.cx != 0 {
                             let src = self.read(src_seg, self.si);
                             let dst = self.read(self.es, self.di);
-                            
+
                             if debug_cmpsb {
                                 eprintln!("[REPE CMPSB] Comparing: SRC:{:04X}:{:04X}=0x{:02X} vs ES:{:04X}:{:04X}=0x{:02X} (CX={:04X})", 
                                     src_seg, self.si, src, self.es, self.di, dst, self.cx);
                             }
-                            
+
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u16) < (dst as u16);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
@@ -1204,11 +1204,15 @@ impl<M: Memory8086> Cpu8086<M> {
                                 break;
                             }
                         }
-                        
+
                         if debug_cmpsb {
-                            eprintln!("[REPE CMPSB] Finished: CX={:04X} ZF={}", self.cx, if self.get_flag(FLAG_ZF) { 1 } else { 0 });
+                            eprintln!(
+                                "[REPE CMPSB] Finished: CX={:04X} ZF={}",
+                                self.cx,
+                                if self.get_flag(FLAG_ZF) { 1 } else { 0 }
+                            );
                         }
-                        
+
                         self.cycles += total_cycles as u64;
                         total_cycles
                     }
@@ -9130,7 +9134,11 @@ mod tests {
         cpu.step();
 
         // On 8086, shifting by 32 should result in 0 (all bits shifted out)
-        assert_eq!(cpu.ax & 0xFF, 0, "8086 should shift by full count (32 shifts all bits out)");
+        assert_eq!(
+            cpu.ax & 0xFF,
+            0,
+            "8086 should shift by full count (32 shifts all bits out)"
+        );
     }
 
     #[test]
@@ -9149,7 +9157,11 @@ mod tests {
         cpu.step();
 
         // On 80186+, count 32 is masked to 0, so value should be unchanged
-        assert_eq!(cpu.ax & 0xFF, 0xFF, "80186 should mask count to 5 bits (32 -> 0)");
+        assert_eq!(
+            cpu.ax & 0xFF,
+            0xFF,
+            "80186 should mask count to 5 bits (32 -> 0)"
+        );
     }
 
     #[test]
@@ -9168,7 +9180,11 @@ mod tests {
         cpu.step();
 
         // On 80186+, count 33 is masked to 1, so 0xFF << 1 = 0xFE
-        assert_eq!(cpu.ax & 0xFF, 0xFE, "80186 should mask count to 5 bits (33 -> 1)");
+        assert_eq!(
+            cpu.ax & 0xFF,
+            0xFE,
+            "80186 should mask count to 5 bits (33 -> 1)"
+        );
     }
 
     #[test]
