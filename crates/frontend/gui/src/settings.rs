@@ -148,18 +148,32 @@ pub struct Settings {
     #[serde(default)]
     pub input: InputConfig,
 
+    #[serde(default = "default_window_width")]
     pub window_width: usize,
+    #[serde(default = "default_window_height")]
     pub window_height: usize,
     #[serde(default, skip_serializing)]
     pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
     pub display_filter: DisplayFilter,
-    #[serde(default, skip_serializing)] // Runtime only, not saved
+    #[serde(default = "default_emulation_speed", skip_serializing)] // Runtime only, not saved
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
     #[serde(default = "default_video_backend")]
     pub video_backend: String, // "software" or "opengl"
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
+}
+
+fn default_window_width() -> usize {
+    512 // 256 * 2 (default 2x scale)
+}
+
+fn default_window_height() -> usize {
+    480 // 240 * 2 (default 2x scale)
+}
+
+fn default_emulation_speed() -> f64 {
+    1.0 // Normal speed
 }
 
 fn default_video_backend() -> String {
@@ -327,5 +341,336 @@ mod tests {
         // Players 3 and 4 are unmapped by default
         assert!(settings.input.player3.a.is_empty());
         assert!(settings.input.player4.a.is_empty());
+    }
+}
+
+#[test]
+fn test_settings_missing_fields_deserialize() {
+    // Test the exact scenario from the bug report:
+    // When config.json has been serialized but is missing some fields,
+    // deserialization should use defaults for missing fields
+
+    // Case 1: Missing window_width and window_height
+    let json_missing_size = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": {
+      "a": "",
+      "b": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "player4": {
+      "a": "",
+      "b": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "host_modifier": "RightCtrl"
+  },
+  "video_backend": "software"
+}"#;
+
+    let result = serde_json::from_str::<Settings>(json_missing_size);
+    match result {
+        Ok(settings) => {
+            assert_eq!(
+                settings.window_width, 512,
+                "window_width should default to 512"
+            );
+            assert_eq!(
+                settings.window_height, 480,
+                "window_height should default to 480"
+            );
+            println!("Test passed: Missing fields use defaults correctly");
+        }
+        Err(e) => {
+            panic!(
+                "Test FAILED: Could not deserialize JSON with missing window size fields: {}",
+                e
+            );
+        }
+    }
+}
+
+#[test]
+fn test_settings_empty_json_deserialize() {
+    // Edge case: Completely empty JSON should use all defaults
+    let empty_json = "{}";
+
+    let result = serde_json::from_str::<Settings>(empty_json);
+    match result {
+        Ok(settings) => {
+            assert_eq!(
+                settings.window_width, 512,
+                "window_width should default to 512"
+            );
+            assert_eq!(
+                settings.window_height, 480,
+                "window_height should default to 480"
+            );
+            assert_eq!(
+                settings.video_backend, "software",
+                "video_backend should default to 'software'"
+            );
+            assert_eq!(
+                settings.input.player1.a, "Z",
+                "player1.a should default to 'Z'"
+            );
+            assert_eq!(
+                settings.input.host_modifier, "RightCtrl",
+                "host_modifier should default to 'RightCtrl'"
+            );
+            println!("Test passed: Empty JSON uses all defaults correctly");
+        }
+        Err(e) => {
+            panic!("Test FAILED: Could not deserialize empty JSON: {}", e);
+        }
+    }
+}
+
+#[test]
+fn test_settings_roundtrip_with_saved_config() {
+    use std::fs;
+
+    // This simulates the real-world scenario from the bug report:
+    // 1. App starts without config.json
+    // 2. Settings::load() returns defaults
+    // 3. settings.save() writes config.json
+    // 4. App restarts and loads config.json
+
+    let test_dir = std::env::temp_dir().join("hemulator_roundtrip_test");
+    let _ = fs::remove_dir_all(&test_dir); // Clean up from previous runs
+    fs::create_dir_all(&test_dir).unwrap();
+
+    // Change to test directory
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&test_dir).unwrap();
+
+    // Step 1: First launch - no config.json exists
+    let settings1 = Settings::load();
+    assert_eq!(settings1.window_width, 512);
+    assert_eq!(settings1.window_height, 480);
+
+    // Step 2: Save settings (creates config.json)
+    settings1.save().unwrap();
+
+    // Verify config.json was created
+    assert!(test_dir.join("config.json").exists());
+
+    // Step 3: Second launch - load from config.json
+    let settings2 = Settings::load();
+    assert_eq!(
+        settings2.window_width, 512,
+        "Loaded window_width should match saved value"
+    );
+    assert_eq!(
+        settings2.window_height, 480,
+        "Loaded window_height should match saved value"
+    );
+    assert_eq!(settings2.video_backend, "software");
+    assert_eq!(settings2.input.player1.a, "Z");
+
+    // Step 4: Simulate an old or partial config.json (manually edit it)
+    let config_content = fs::read_to_string(test_dir.join("config.json")).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+
+    // Remove window_width and window_height to simulate old config
+    if let serde_json::Value::Object(ref mut obj) = json {
+        obj.remove("window_width");
+        obj.remove("window_height");
+    }
+
+    // Write the modified config back
+    fs::write(
+        test_dir.join("config.json"),
+        serde_json::to_string_pretty(&json).unwrap(),
+    )
+    .unwrap();
+
+    // Step 5: Third launch - should still work with missing fields
+    let settings3 = Settings::load();
+    assert_eq!(
+        settings3.window_width, 512,
+        "Missing window_width should use default"
+    );
+    assert_eq!(
+        settings3.window_height, 480,
+        "Missing window_height should use default"
+    );
+
+    // Cleanup
+    std::env::set_current_dir(&original_dir).unwrap();
+    fs::remove_dir_all(&test_dir).unwrap();
+
+    println!("Roundtrip test passed!");
+}
+
+#[test]
+fn test_actual_problematic_config() {
+    // Test the exact config.json from the bug report
+    let problematic_json = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": {
+      "a": "",
+      "b": "",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "player4": {
+      "a": "",
+      "b": "",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "host_modifier": "RightCtrl"
+  },
+  "window_width": 640,
+  "window_height": 480,
+  "display_filter": "None",
+  "video_backend": "software"
+}"#;
+
+    println!("Testing problematic config JSON...");
+    let result = serde_json::from_str::<Settings>(problematic_json);
+    match result {
+        Ok(settings) => {
+            println!("Successfully deserialized!");
+            println!("window_width: {}", settings.window_width);
+            println!("window_height: {}", settings.window_height);
+            println!("display_filter: {:?}", settings.display_filter);
+            println!("video_backend: {}", settings.video_backend);
+            println!("player1.a: {}", settings.input.player1.a);
+            println!("player1.x: '{}'", settings.input.player1.x);
+        }
+        Err(e) => {
+            panic!("FAILED to deserialize: {}", e);
+        }
+    }
+}
+
+#[test]
+fn test_emulation_speed_default_issue() {
+    // The REAL bug: emulation_speed has #[serde(default)] which uses f64::default() = 0.0
+    // When it's 0.0, the emulator is paused, causing a black screen!
+
+    let problematic_json = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": { "a": "", "b": "", "select": "", "start": "", "up": "", "down": "", "left": "", "right": "" },
+    "player4": { "a": "", "b": "", "select": "", "start": "", "up": "", "down": "", "left": "", "right": "" },
+    "host_modifier": "RightCtrl"
+  },
+  "window_width": 640,
+  "window_height": 480,
+  "display_filter": "None",
+  "video_backend": "software"
+}"#;
+
+    let result = serde_json::from_str::<Settings>(problematic_json);
+    match result {
+        Ok(settings) => {
+            println!("Deserialized successfully");
+            println!("emulation_speed: {}", settings.emulation_speed);
+
+            // This is the bug! emulation_speed defaults to 0.0 instead of 1.0
+            // When it's 0.0, the emulator is paused!
+            if settings.emulation_speed == 0.0 {
+                panic!("BUG FOUND! emulation_speed is 0.0 (paused) instead of 1.0 (normal speed). This causes a black screen!");
+            }
+        }
+        Err(e) => {
+            panic!("Failed to deserialize: {}", e);
+        }
     }
 }
