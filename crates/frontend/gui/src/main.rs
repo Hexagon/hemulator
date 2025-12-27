@@ -13,13 +13,52 @@ use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 use window_backend::{string_to_key, Key, Sdl2Backend, WindowBackend};
+
+/// Runtime state for tracking currently loaded project and mounts
+/// This replaces the mount_points field in Settings which has been deprecated
+struct RuntimeState {
+    /// Currently loaded .hemu project file path (if any)
+    current_project_path: Option<PathBuf>,
+    /// Current mount points (mount_id -> file_path)
+    /// This is runtime-only and not persisted to config.json
+    current_mounts: HashMap<String, String>,
+}
+
+impl RuntimeState {
+    fn new() -> Self {
+        Self {
+            current_project_path: None,
+            current_mounts: HashMap::new(),
+        }
+    }
+
+    fn set_mount(&mut self, mount_id: String, path: String) {
+        self.current_mounts.insert(mount_id, path);
+    }
+
+    fn get_mount(&self, mount_id: &str) -> Option<&String> {
+        self.current_mounts.get(mount_id)
+    }
+
+    fn clear_mounts(&mut self) {
+        self.current_mounts.clear();
+    }
+
+    fn set_project_path(&mut self, path: PathBuf) {
+        self.current_project_path = Some(path);
+    }
+
+    fn clear_project_path(&mut self) {
+        self.current_project_path = None;
+    }
+}
 
 // System wrapper enum to support multiple emulated systems
 // Box large variants to prevent stack overflow
@@ -326,6 +365,12 @@ impl EmulatorSystem {
             sys.update_post_screen();
         }
     }
+
+    /// Check if this system requires the host key to be held for function keys
+    /// Only PC system requires this to allow ESC and function keys to pass through to the emulated system
+    fn requires_host_key_for_function_keys(&self) -> bool {
+        matches!(self, EmulatorSystem::PC(_))
+    }
 }
 
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
@@ -412,22 +457,48 @@ impl Source for StreamSource {
     }
 }
 
-/// Save PC virtual machine state to a .hemu project file
-fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_message: &mut String) {
-    if let EmulatorSystem::PC(pc_sys) = sys {
-        // Show file save dialog
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Hemulator Project", &["hemu"])
-            .set_file_name("virtual_machine.hemu")
-            .save_file()
-        {
-            let mut project = HemuProject::new("pc".to_string());
+/// Save current emulation state to a .hemu project file
+/// Works for all systems, not just PC
+fn save_project(
+    sys: &EmulatorSystem,
+    runtime_state: &RuntimeState,
+    settings: &Settings,
+    status_message: &mut String,
+) {
+    // Show file save dialog
+    let default_name = format!("{}_project.hemu", sys.system_name());
+    if let Some(path) = rfd::FileDialog::new()
+        .add_filter("Hemulator Project", &["hemu"])
+        .set_file_name(&default_name)
+        .save_file()
+    {
+        let mut project = HemuProject::new(sys.system_name().to_string());
 
-            // Get current mount points from settings
-            for (mount_id, mount_path) in &settings.mount_points {
+        // Copy current mount points from runtime state
+        // Filter to only include mounts relevant to this system
+        // Get system name first to avoid borrowing issue
+        let system_name = sys.system_name();
+        let relevant_mounts: Vec<&str> = match system_name {
+            "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
+            "nes" | "gameboy" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
+            _ => vec![],
+        };
+        
+        for (mount_id, mount_path) in &runtime_state.current_mounts {
+            if relevant_mounts.contains(&mount_id.as_str()) {
                 project.set_mount(mount_id.clone(), mount_path.clone());
             }
+        }
 
+        // Set display settings from current window state
+        project.set_display_settings(
+            settings.window_width,
+            settings.window_height,
+            settings.display_filter,
+        );
+
+        // For PC system, also save PC-specific configuration
+        if let EmulatorSystem::PC(pc_sys) = sys {
             // Get boot priority from PC system
             let priority = pc_sys.boot_priority();
             let priority_str = match priority {
@@ -471,19 +542,19 @@ fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_mes
                 "CGA"
             };
             project.set_video_mode(video_mode.to_string());
+        }
 
-            match project.save(&path) {
-                Ok(_) => {
-                    println!("Virtual machine saved to: {}", path.display());
-                    *status_message = format!(
-                        "VM saved: {}",
-                        path.file_name().unwrap_or_default().to_string_lossy()
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Failed to save virtual machine: {}", e);
-                    *status_message = format!("Failed to save VM: {}", e);
-                }
+        match project.save(&path) {
+            Ok(_) => {
+                println!("Project saved to: {}", path.display());
+                *status_message = format!(
+                    "Project saved: {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to save project: {}", e);
+                *status_message = format!("Failed to save project: {}", e);
             }
         }
     }
@@ -915,14 +986,11 @@ fn main() {
         eprintln!("Warning: Failed to save config.json: {}", e);
     }
 
-    // Determine ROM path: CLI argument takes precedence over settings
-    let rom_path = cli_args.rom_path.or_else(|| {
-        // Try new mount_points system first
-        settings
-            .get_mount_point("Cartridge")
-            .cloned()
-            .or_else(|| settings.last_rom_path.clone())
-    });
+    // Create runtime state for tracking current project and mounts
+    let mut runtime_state = RuntimeState::new();
+
+    // Determine ROM path: CLI argument takes precedence
+    let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
 
     let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
     let mut rom_hash: Option<String> = None;
@@ -1029,8 +1097,8 @@ fn main() {
                                     if let Err(e) = pc_sys.mount(mount_id, &data) {
                                         eprintln!("Failed to mount {}: {}", mount_id, e);
                                     } else {
-                                        settings.set_mount_point(
-                                            mount_id,
+                                        runtime_state.set_mount(
+                                            mount_id.clone(),
                                             full_path.to_string_lossy().to_string(),
                                         );
                                         println!("Mounted {}: {}", mount_id, relative_path);
@@ -1075,7 +1143,7 @@ fn main() {
                         } else {
                             rom_loaded = true;
                             sys = EmulatorSystem::NES(Box::new(nes_sys));
-                            settings.set_mount_point("Cartridge", p.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
                             settings.last_rom_path = Some(p.clone()); // Keep for backward compat
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
@@ -1094,7 +1162,7 @@ fn main() {
                         } else {
                             rom_loaded = true;
                             sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                            settings.set_mount_point("Cartridge", p.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
                             settings.last_rom_path = Some(p.clone());
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
@@ -1113,7 +1181,7 @@ fn main() {
                         } else {
                             rom_loaded = true;
                             sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                            settings.set_mount_point("Cartridge", p.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
                             settings.last_rom_path = Some(p.clone());
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
@@ -1144,7 +1212,7 @@ fn main() {
                         } else {
                             rom_loaded = true;
                             sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                            settings.set_mount_point("Cartridge", p.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
                             settings.last_rom_path = Some(p.clone());
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
@@ -1163,7 +1231,7 @@ fn main() {
                         } else {
                             rom_loaded = true;
                             sys = EmulatorSystem::N64(Box::new(n64_sys));
-                            settings.set_mount_point("Cartridge", p.clone());
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
                             settings.last_rom_path = Some(p.clone());
                             if let Err(e) = settings.save() {
                                 eprintln!("Warning: Failed to save settings: {}", e);
@@ -1209,7 +1277,7 @@ fn main() {
                     if let Err(e) = pc_sys.mount("BIOS", &data) {
                         eprintln!("Failed to mount BIOS from slot 1: {}", e);
                     } else {
-                        settings.set_mount_point("BIOS", slot1_path.clone());
+                        runtime_state.set_mount("BIOS".to_string(), slot1_path.clone());
                         println!("Loaded BIOS from slot 1: {}", slot1_path);
                     }
                 }
@@ -1224,7 +1292,7 @@ fn main() {
                     if let Err(e) = pc_sys.mount("FloppyA", &data) {
                         eprintln!("Failed to mount Floppy A from slot 2: {}", e);
                     } else {
-                        settings.set_mount_point("FloppyA", slot2_path.clone());
+                        runtime_state.set_mount("FloppyA".to_string(), slot2_path.clone());
                         println!("Loaded Floppy A from slot 2: {}", slot2_path);
                     }
                 }
@@ -1239,7 +1307,7 @@ fn main() {
                     if let Err(e) = pc_sys.mount("FloppyB", &data) {
                         eprintln!("Failed to mount Floppy B from slot 3: {}", e);
                     } else {
-                        settings.set_mount_point("FloppyB", slot3_path.clone());
+                        runtime_state.set_mount("FloppyB".to_string(), slot3_path.clone());
                         println!("Loaded Floppy B from slot 3: {}", slot3_path);
                     }
                 }
@@ -1254,7 +1322,7 @@ fn main() {
                     if let Err(e) = pc_sys.mount("HardDrive", &data) {
                         eprintln!("Failed to mount Hard Drive from slot 4: {}", e);
                     } else {
-                        settings.set_mount_point("HardDrive", slot4_path.clone());
+                        runtime_state.set_mount("HardDrive".to_string(), slot4_path.clone());
                         println!("Loaded Hard Drive from slot 4: {}", slot4_path);
                     }
                 }
@@ -1753,7 +1821,7 @@ fn main() {
                                     Ok(_) => {
                                         rom_loaded = true;
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        settings.set_mount_point(&mp_info.id, path_str.clone());
+                                        runtime_state.set_mount(mp_info.id.clone(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
@@ -2006,8 +2074,8 @@ fn main() {
                                             if let Err(e) = pc_sys.mount(mount_id, &data) {
                                                 eprintln!("Failed to mount {}: {}", mount_id, e);
                                             } else {
-                                                settings.set_mount_point(
-                                                    mount_id,
+                                                runtime_state.set_mount(
+                                                    mount_id.clone(),
                                                     full_path.to_string_lossy().to_string(),
                                                 );
                                                 any_mounted = true;
@@ -2082,7 +2150,7 @@ fn main() {
                                 Ok(_) => {
                                     rom_loaded = true;
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    settings.set_mount_point(&mp_info.id, path_str.clone());
+                                    runtime_state.set_mount(mp_info.id.clone(), path_str.clone());
                                     settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                     if let Err(e) = settings.save() {
                                         eprintln!("Warning: Failed to save settings: {}", e);
@@ -2161,15 +2229,13 @@ fn main() {
             show_debug = false;
         }
 
-        // F8 - Save PC virtual machine - only when host key is held
-        if host_key_held && window.is_key_pressed(Key::F8, false) {
-            if matches!(&sys, EmulatorSystem::PC(_)) {
-                // For PC system, F8 saves the virtual machine state
-                save_pc_virtual_machine(&sys, &settings, &mut status_message);
-            } else {
-                println!("Project files are only supported for multi-mount systems (PC)");
-                status_message = "Project files only for PC system".to_string();
-            }
+        // F8 - Save project for any system - only when host key is held for PC, no host key needed for others
+        let needs_host_key = sys.requires_host_key_for_function_keys();
+        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F8, false))
+            || (!needs_host_key && window.is_key_pressed(Key::F8, false))
+        {
+            // F8 saves project for all systems
+            save_project(&sys, &runtime_state, &settings, &mut status_message);
         }
 
         // Handle controller input / emulation step when ROM is loaded.
