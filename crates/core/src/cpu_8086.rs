@@ -11310,7 +11310,11 @@ mod tests {
         // Execute PUSH FS
         cpu.step();
         assert_eq!(cpu.sp, 0xFFFC, "SP should decrease by 2");
-        assert_eq!(cpu.read_u16(cpu.ss, cpu.sp), 0x1234, "FS value should be on stack");
+        assert_eq!(
+            cpu.read_u16(cpu.ss, cpu.sp),
+            0x1234,
+            "FS value should be on stack"
+        );
 
         // Modify FS
         cpu.fs = 0x5678;
@@ -11340,7 +11344,11 @@ mod tests {
         // Execute PUSH GS
         cpu.step();
         assert_eq!(cpu.sp, 0xFFFC, "SP should decrease by 2");
-        assert_eq!(cpu.read_u16(cpu.ss, cpu.sp), 0xABCD, "GS value should be on stack");
+        assert_eq!(
+            cpu.read_u16(cpu.ss, cpu.sp),
+            0xABCD,
+            "GS value should be on stack"
+        );
 
         // Modify GS
         cpu.gs = 0xEF01;
@@ -11441,9 +11449,12 @@ mod tests {
 
         // Execute 0x66 NOP
         cpu.step();
-        
+
         // The operand_size_override flag should be cleared after instruction
-        assert_eq!(cpu.operand_size_override, false, "Operand size override should be cleared after instruction");
+        assert!(
+            !cpu.operand_size_override,
+            "Operand size override should be cleared after instruction"
+        );
     }
 
     #[test]
@@ -11458,6 +11469,10 @@ mod tests {
         let initial_cycles = cpu.cycles;
         cpu.step();
         // Should execute but as invalid (returns early)
-        assert_eq!(cpu.cycles - initial_cycles, 10, "Invalid opcode should consume 10 cycles");
+        assert_eq!(
+            cpu.cycles - initial_cycles,
+            10,
+            "Invalid opcode should consume 10 cycles"
+        );
     }
 }
