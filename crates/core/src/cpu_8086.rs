@@ -109,6 +109,11 @@ impl CpuModel {
         matches!(self, CpuModel::IntelPentium | CpuModel::IntelPentiumMMX)
     }
 
+    /// Returns true if this CPU model supports MMX instructions
+    pub fn supports_mmx_instructions(&self) -> bool {
+        matches!(self, CpuModel::IntelPentiumMMX)
+    }
+
     /// Returns the name of the CPU model as a string
     pub fn name(&self) -> &'static str {
         match self {
@@ -232,6 +237,11 @@ pub struct Cpu8086<M: Memory8086> {
     /// Simplified implementation: only stores a few common MSRs
     /// Real Pentium has hundreds of MSRs, we store only what's needed
     msrs: std::collections::HashMap<u32, u64>,
+
+    /// MMX registers (Pentium MMX only)
+    /// 8 MMX registers (MM0-MM7), each 64 bits
+    /// These alias the FPU ST(0)-ST(7) registers in real hardware
+    mmx_regs: [u64; 8],
 }
 
 // Flag bit positions in FLAGS register
@@ -280,6 +290,7 @@ impl<M: Memory8086> Cpu8086<M> {
             protected_mode: ProtectedModeState::new(),
             tsc: 0,
             msrs: std::collections::HashMap::new(),
+            mmx_regs: [0; 8],
         }
     }
 
@@ -319,6 +330,8 @@ impl<M: Memory8086> Cpu8086<M> {
         // Reset TSC and MSRs
         self.tsc = 0;
         self.msrs.clear();
+        // Reset MMX registers
+        self.mmx_regs = [0; 8];
     }
 
     /// Get reference to protected mode state (80286+ only)
@@ -3284,6 +3297,589 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         self.cycles += 10;
                         10
+                    }
+                    // ===== MMX Instructions (Pentium MMX only) =====
+                    // EMMS - Empty MMX State (0x0F 0x77)
+                    0x77 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        // Clear MMX state - in practice, this marks FPU registers as available
+                        // For our simple implementation, we just reset the MMX registers
+                        self.mmx_regs = [0; 8];
+                        self.cycles += 1;
+                        1
+                    }
+                    // MOVD - Move Doubleword (0x0F 0x6E, 0x7E)
+                    0x6E => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        // MOVD mm, r/m32 - Move 32-bit value to MMX register (low 32 bits)
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let value = if modbits == 0b11 {
+                            // From register (16-bit in our implementation)
+                            self.get_reg16(rm) as u64
+                        } else {
+                            // From memory (read 32 bits)
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let low = self.read_u16(segment, offset);
+                            let high = self.read_u16(segment, offset.wrapping_add(2));
+                            ((high as u64) << 16) | (low as u64)
+                        };
+
+                        self.mmx_regs[reg as usize] = value;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    0x7E => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        // MOVD r/m32, mm - Move MMX register (low 32 bits) to 32-bit location
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let value = self.mmx_regs[reg as usize];
+
+                        if modbits == 0b11 {
+                            // To register (16-bit in our implementation)
+                            self.set_reg16(rm, (value & 0xFFFF) as u16);
+                        } else {
+                            // To memory (write 32 bits)
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            self.write_u16(segment, offset, (value & 0xFFFF) as u16);
+                            self.write_u16(
+                                segment,
+                                offset.wrapping_add(2),
+                                ((value >> 16) & 0xFFFF) as u16,
+                            );
+                        }
+
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // MOVQ - Move Quadword (0x0F 0x6F, 0x7F)
+                    0x6F => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        // MOVQ mm, mm/m64 - Move 64-bit value to MMX register
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let value = if modbits == 0b11 {
+                            // From MMX register
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            // From memory (read 64 bits)
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        self.mmx_regs[reg as usize] = value;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    0x7F => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        // MOVQ mm/m64, mm - Move MMX register to 64-bit location
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let value = self.mmx_regs[reg as usize];
+
+                        if modbits == 0b11 {
+                            // To MMX register
+                            self.mmx_regs[rm as usize] = value;
+                        } else {
+                            // To memory (write 64 bits)
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            for i in 0..4 {
+                                let word = ((value >> (i * 16)) & 0xFFFF) as u16;
+                                self.write_u16(segment, offset.wrapping_add(i * 2), word);
+                            }
+                        }
+
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PADDB - Packed Add Bytes (0x0F 0xFC)
+                    0xFC => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Add 8 bytes independently with wraparound
+                        for i in 0..8 {
+                            let a = ((dst >> (i * 8)) & 0xFF) as u8;
+                            let b = ((src >> (i * 8)) & 0xFF) as u8;
+                            let sum = a.wrapping_add(b);
+                            result |= (sum as u64) << (i * 8);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PADDW - Packed Add Words (0x0F 0xFD)
+                    0xFD => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Add 4 words independently with wraparound
+                        for i in 0..4 {
+                            let a = ((dst >> (i * 16)) & 0xFFFF) as u16;
+                            let b = ((src >> (i * 16)) & 0xFFFF) as u16;
+                            let sum = a.wrapping_add(b);
+                            result |= (sum as u64) << (i * 16);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PADDD - Packed Add Dwords (0x0F 0xFE)
+                    0xFE => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Add 2 dwords independently with wraparound
+                        for i in 0..2 {
+                            let a = ((dst >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let b = ((src >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let sum = a.wrapping_add(b);
+                            result |= (sum as u64) << (i * 32);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PSUBB - Packed Subtract Bytes (0x0F 0xF8)
+                    0xF8 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Subtract 8 bytes independently with wraparound
+                        for i in 0..8 {
+                            let a = ((dst >> (i * 8)) & 0xFF) as u8;
+                            let b = ((src >> (i * 8)) & 0xFF) as u8;
+                            let diff = a.wrapping_sub(b);
+                            result |= (diff as u64) << (i * 8);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PSUBW - Packed Subtract Words (0x0F 0xF9)
+                    0xF9 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Subtract 4 words independently with wraparound
+                        for i in 0..4 {
+                            let a = ((dst >> (i * 16)) & 0xFFFF) as u16;
+                            let b = ((src >> (i * 16)) & 0xFFFF) as u16;
+                            let diff = a.wrapping_sub(b);
+                            result |= (diff as u64) << (i * 16);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PSUBD - Packed Subtract Dwords (0x0F 0xFA)
+                    0xFA => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Subtract 2 dwords independently with wraparound
+                        for i in 0..2 {
+                            let a = ((dst >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let b = ((src >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let diff = a.wrapping_sub(b);
+                            result |= (diff as u64) << (i * 32);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PAND - Packed AND (0x0F 0xDB)
+                    0xDB => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        self.mmx_regs[reg as usize] &= src;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // POR - Packed OR (0x0F 0xEB)
+                    0xEB => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        self.mmx_regs[reg as usize] |= src;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PXOR - Packed XOR (0x0F 0xEF)
+                    0xEF => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        self.mmx_regs[reg as usize] ^= src;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PCMPEQB - Packed Compare Equal Bytes (0x0F 0x74)
+                    0x74 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Compare 8 bytes, set all bits to 1 if equal, 0 if not
+                        for i in 0..8 {
+                            let a = ((dst >> (i * 8)) & 0xFF) as u8;
+                            let b = ((src >> (i * 8)) & 0xFF) as u8;
+                            let cmp = if a == b { 0xFF } else { 0x00 };
+                            result |= (cmp as u64) << (i * 8);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PCMPEQW - Packed Compare Equal Words (0x0F 0x75)
+                    0x75 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Compare 4 words, set all bits to 1 if equal, 0 if not
+                        for i in 0..4 {
+                            let a = ((dst >> (i * 16)) & 0xFFFF) as u16;
+                            let b = ((src >> (i * 16)) & 0xFFFF) as u16;
+                            let cmp = if a == b { 0xFFFF } else { 0x0000 };
+                            result |= (cmp as u64) << (i * 16);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
+                    }
+                    // PCMPEQD - Packed Compare Equal Dwords (0x0F 0x76)
+                    0x76 => {
+                        if !self.model.supports_mmx_instructions() {
+                            self.cycles += 2;
+                            return 2;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+
+                        let src = if modbits == 0b11 {
+                            self.mmx_regs[rm as usize]
+                        } else {
+                            let (segment, offset, _) = self.calc_effective_address(modbits, rm);
+                            let mut val = 0u64;
+                            for i in 0..4 {
+                                let word = self.read_u16(segment, offset.wrapping_add(i * 2));
+                                val |= (word as u64) << (i * 16);
+                            }
+                            val
+                        };
+
+                        let dst = self.mmx_regs[reg as usize];
+                        let mut result = 0u64;
+
+                        // Compare 2 dwords, set all bits to 1 if equal, 0 if not
+                        for i in 0..2 {
+                            let a = ((dst >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let b = ((src >> (i * 32)) & 0xFFFFFFFF) as u32;
+                            let cmp: u32 = if a == b { 0xFFFFFFFF } else { 0x00000000 };
+                            result |= (cmp as u64) << (i * 32);
+                        }
+
+                        self.mmx_regs[reg as usize] = result;
+                        self.cycles += if modbits == 0b11 { 1 } else { 2 };
+                        if modbits == 0b11 {
+                            1
+                        } else {
+                            2
+                        }
                     }
                     _ => {
                         eprintln!(
@@ -10102,5 +10698,369 @@ mod tests {
         cpu.memory.load_program(0xFFFF0, &[0x0F, 0xC8]);
         cpu.step();
         assert_eq!(cpu.ax, 0x3412, "486 instructions should work on Pentium");
+    }
+
+    // ===== MMX Instruction Tests =====
+
+    #[test]
+    fn test_mmx_support_check() {
+        assert!(!CpuModel::Intel80486.supports_mmx_instructions());
+        assert!(!CpuModel::IntelPentium.supports_mmx_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_mmx_instructions());
+    }
+
+    #[test]
+    fn test_emms() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x1234567890ABCDEF;
+        cpu.mmx_regs[7] = 0xFEDCBA9876543210;
+
+        // EMMS (0x0F 0x77)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x77]);
+        cpu.step();
+
+        // All MMX registers should be cleared
+        for i in 0..8 {
+            assert_eq!(cpu.mmx_regs[i], 0, "MMX register {} should be cleared", i);
+        }
+    }
+
+    #[test]
+    fn test_movd_reg_to_mm() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x1234;
+
+        // MOVD MM0, EAX (0x0F 0x6E with ModR/M 0xC0 for MM0, EAX)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x6E, 0xC0]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0x1234, "MM0 should contain value from AX");
+    }
+
+    #[test]
+    fn test_movd_mm_to_reg() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[1] = 0xABCD;
+
+        // MOVD EAX, MM1 (0x0F 0x7E with ModR/M 0xC8 for MM1, EAX)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x7E, 0xC8]);
+        cpu.step();
+
+        assert_eq!(cpu.ax, 0xABCD, "AX should contain value from MM1");
+    }
+
+    #[test]
+    fn test_movq_mm_to_mm() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[2] = 0x1234567890ABCDEF;
+
+        // MOVQ MM0, MM2 (0x0F 0x6F with ModR/M 0xC2)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x6F, 0xC2]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0x1234567890ABCDEF, "MM0 should equal MM2");
+    }
+
+    #[test]
+    fn test_paddb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0102030405060708;
+        cpu.mmx_regs[1] = 0x0F0E0D0C0B0A0908;
+
+        // PADDB MM0, MM1 (0x0F 0xFC with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xFC, 0xC1]);
+        cpu.step();
+
+        // Each byte should add independently with wraparound
+        assert_eq!(cpu.mmx_regs[0], 0x1010101010101010);
+    }
+
+    #[test]
+    fn test_paddw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0001000200030004;
+        cpu.mmx_regs[1] = 0x000F000E000D000C;
+
+        // PADDW MM0, MM1 (0x0F 0xFD with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xFD, 0xC1]);
+        cpu.step();
+
+        // Each word should add independently
+        assert_eq!(cpu.mmx_regs[0], 0x0010001000100010);
+    }
+
+    #[test]
+    fn test_paddd() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0000000100000002;
+        cpu.mmx_regs[1] = 0x0000000F0000000E;
+
+        // PADDD MM0, MM1 (0x0F 0xFE with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xFE, 0xC1]);
+        cpu.step();
+
+        // Each dword should add independently
+        assert_eq!(cpu.mmx_regs[0], 0x0000001000000010);
+    }
+
+    #[test]
+    fn test_psubb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x1010101010101010;
+        cpu.mmx_regs[1] = 0x0102030405060708;
+
+        // PSUBB MM0, MM1 (0x0F 0xF8 with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xF8, 0xC1]);
+        cpu.step();
+
+        // Each byte should subtract independently
+        assert_eq!(cpu.mmx_regs[0], 0x0F0E0D0C0B0A0908);
+    }
+
+    #[test]
+    fn test_psubw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0010001000100010;
+        cpu.mmx_regs[1] = 0x0001000200030004;
+
+        // PSUBW MM0, MM1 (0x0F 0xF9 with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xF9, 0xC1]);
+        cpu.step();
+
+        // Each word should subtract independently
+        assert_eq!(cpu.mmx_regs[0], 0x000F000E000D000C);
+    }
+
+    #[test]
+    fn test_psubd() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0000001000000010;
+        cpu.mmx_regs[1] = 0x0000000100000002;
+
+        // PSUBD MM0, MM1 (0x0F 0xFA with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xFA, 0xC1]);
+        cpu.step();
+
+        // Each dword should subtract independently
+        assert_eq!(cpu.mmx_regs[0], 0x0000000F0000000E);
+    }
+
+    #[test]
+    fn test_pand() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0xFFFFFFFF00000000;
+        cpu.mmx_regs[1] = 0xFF00FF00FF00FF00;
+
+        // PAND MM0, MM1 (0x0F 0xDB with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xDB, 0xC1]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0xFF00FF0000000000);
+    }
+
+    #[test]
+    fn test_por() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0xFF00FF0000000000;
+        cpu.mmx_regs[1] = 0x00FF00FF00000000;
+
+        // POR MM0, MM1 (0x0F 0xEB with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xEB, 0xC1]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0xFFFFFFFF00000000);
+    }
+
+    #[test]
+    fn test_pxor() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0xFF00FF00FF00FF00;
+        cpu.mmx_regs[1] = 0x0F0F0F0F0F0F0F0F;
+
+        // PXOR MM0, MM1 (0x0F 0xEF with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xEF, 0xC1]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0xF00FF00FF00FF00F);
+    }
+
+    #[test]
+    fn test_pxor_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x1234567890ABCDEF;
+
+        // PXOR MM0, MM0 (common way to zero a register)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xEF, 0xC0]);
+        cpu.step();
+
+        assert_eq!(cpu.mmx_regs[0], 0, "PXOR with itself should zero register");
+    }
+
+    #[test]
+    fn test_pcmpeqb() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0102030405060708;
+        cpu.mmx_regs[1] = 0x0102FF0405FF0708;
+
+        // PCMPEQB MM0, MM1 (0x0F 0x74 with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x74, 0xC1]);
+        cpu.step();
+
+        // Bytes that are equal get 0xFF, different get 0x00
+        // Bytes 0,1,3,4,6,7 equal, bytes 2,5 different
+        assert_eq!(cpu.mmx_regs[0], 0xFFFF00FFFF00FFFF);
+    }
+
+    #[test]
+    fn test_pcmpeqw() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x0001000200030004;
+        cpu.mmx_regs[1] = 0x0001FFFF00030004;
+
+        // PCMPEQW MM0, MM1 (0x0F 0x75 with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x75, 0xC1]);
+        cpu.step();
+
+        // Words that are equal get 0xFFFF, different get 0x0000
+        assert_eq!(cpu.mmx_regs[0], 0xFFFF0000FFFFFFFF);
+    }
+
+    #[test]
+    fn test_pcmpeqd() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.mmx_regs[0] = 0x1234567812345678;
+        cpu.mmx_regs[1] = 0x12345678ABCDEF01;
+
+        // PCMPEQD MM0, MM1 (0x0F 0x76 with ModR/M 0xC1)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x76, 0xC1]);
+        cpu.step();
+
+        // Dwords that are equal get 0xFFFFFFFF, different get 0x00000000
+        // High dword: 0x12345678 == 0x12345678 -> 0xFFFFFFFF
+        // Low dword: 0x12345678 != 0xABCDEF01 -> 0x00000000
+        assert_eq!(cpu.mmx_regs[0], 0xFFFFFFFF00000000);
+    }
+
+    #[test]
+    fn test_mmx_invalid_on_pentium() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentium);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // EMMS should be invalid on regular Pentium (not MMX)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x77]);
+        let cycles = cpu.step();
+
+        assert_eq!(cycles, 2, "MMX instructions should be invalid on Pentium");
+    }
+
+    #[test]
+    fn test_mmx_memory_operations() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ds = 0x1000;
+        cpu.bx = 0x0100;
+
+        // Write test data to memory (64 bits = 4 words)
+        cpu.memory.write_u16(0x10100, 0x1234);
+        cpu.memory.write_u16(0x10102, 0x5678);
+        cpu.memory.write_u16(0x10104, 0x9ABC);
+        cpu.memory.write_u16(0x10106, 0xDEF0);
+
+        // MOVQ MM0, [BX] (0x0F 0x6F with ModR/M 0x07 for [BX])
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x6F, 0x07]);
+        cpu.step();
+
+        assert_eq!(
+            cpu.mmx_regs[0], 0xDEF09ABC56781234,
+            "MM0 should load from memory"
+        );
+
+        // Now write it back to a different location
+        cpu.ip = 0x0000;
+        cpu.bx = 0x0200;
+
+        // MOVQ [BX], MM0 (0x0F 0x7F with ModR/M 0x07)
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x7F, 0x07]);
+        cpu.step();
+
+        // Verify memory was written correctly
+        assert_eq!(cpu.memory.read_u16(0x10200), 0x1234);
+        assert_eq!(cpu.memory.read_u16(0x10202), 0x5678);
+        assert_eq!(cpu.memory.read_u16(0x10204), 0x9ABC);
+        assert_eq!(cpu.memory.read_u16(0x10206), 0xDEF0);
     }
 }
