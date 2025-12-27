@@ -1751,9 +1751,12 @@ impl PcCpu {
         let drive_exists = if drive < 0x80 {
             // Floppy drive - check if floppy is mounted
             self.cpu.memory.has_floppy(drive)
-        } else {
-            // Hard drive - check if hard drive is mounted
+        } else if drive == 0x80 {
+            // Hard drive C: - check if hard drive is mounted
             self.cpu.memory.has_hard_drive()
+        } else {
+            // Hard drive D: or higher - not supported
+            false
         };
 
         if !drive_exists {
@@ -1909,8 +1912,8 @@ impl PcCpu {
             }
         } else {
             // Hard drive
-            // Check if hard drive exists
-            if !self.cpu.memory.has_hard_drive() {
+            // Check if hard drive exists (only drive 0x80 supported)
+            if drive != 0x80 || !self.cpu.memory.has_hard_drive() {
                 // No such drive
                 self.cpu.ax &= 0x00FF; // AH = 00h (no such drive)
                 self.set_carry_flag(false);
