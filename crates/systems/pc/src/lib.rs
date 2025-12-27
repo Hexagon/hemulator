@@ -428,10 +428,119 @@ impl System for PcSystem {
                     }
                     let _ = vram_mut;
 
-                    // Initialize cursor position at (0,0) in BIOS data area
+                    // Initialize BIOS Data Area (BDA) at 0x0040:0x0000
+                    // DOS expects this to be properly initialized
                     use emu_core::cpu_8086::Memory8086;
-                    self.cpu.bus_mut().write(0x450, 0); // Column 0
-                    self.cpu.bus_mut().write(0x451, 0); // Row 0
+                    
+                    // COM port base addresses at 0x0040:0x0000 (4 words)
+                    // COM1 = 0x03F8, COM2 = 0x02F8, COM3/4 not installed (0)
+                    self.cpu.bus_mut().write(0x400, 0xF8);
+                    self.cpu.bus_mut().write(0x401, 0x03); // COM1
+                    self.cpu.bus_mut().write(0x402, 0xF8);
+                    self.cpu.bus_mut().write(0x403, 0x02); // COM2
+                    self.cpu.bus_mut().write(0x404, 0x00);
+                    self.cpu.bus_mut().write(0x405, 0x00); // COM3 (not installed)
+                    self.cpu.bus_mut().write(0x406, 0x00);
+                    self.cpu.bus_mut().write(0x407, 0x00); // COM4 (not installed)
+                    
+                    // LPT port base addresses at 0x0040:0x0008 (4 words)
+                    // LPT1 = 0x0378, LPT2/3/4 not installed
+                    self.cpu.bus_mut().write(0x408, 0x78);
+                    self.cpu.bus_mut().write(0x409, 0x03); // LPT1
+                    self.cpu.bus_mut().write(0x40A, 0x00);
+                    self.cpu.bus_mut().write(0x40B, 0x00); // LPT2 (not installed)
+                    self.cpu.bus_mut().write(0x40C, 0x00);
+                    self.cpu.bus_mut().write(0x40D, 0x00); // LPT3 (not installed)
+                    self.cpu.bus_mut().write(0x40E, 0x00);
+                    self.cpu.bus_mut().write(0x40F, 0x00); // LPT4 (not installed)
+                    
+                    // Equipment list word at 0x0040:0x0010
+                    // Bit 0: Floppy drives installed
+                    // Bits 4-5: Initial video mode (10=CGA 80x25)
+                    // Bits 6-7: Number of floppy drives - 1
+                    // Bits 9-11: Number of serial ports (1)
+                    // Bits 14-15: Number of parallel printers (1)
+                    let equipment_word: u16 = 0b0100_0010_0010_0001; // LPT1, COM1, Floppy, CGA
+                    self.cpu.bus_mut().write(0x410, (equipment_word & 0xFF) as u8);
+                    self.cpu.bus_mut().write(0x411, ((equipment_word >> 8) & 0xFF) as u8);
+                    
+                    // Memory size in KB at 0x0040:0x0013 (conventional memory, max 640KB)
+                    let memory_kb = self.cpu.bus().memory_kb().min(640);
+                    self.cpu.bus_mut().write(0x413, (memory_kb & 0xFF) as u8);
+                    self.cpu.bus_mut().write(0x414, ((memory_kb >> 8) & 0xFF) as u8);
+                    
+                    // Keyboard flags at 0x0040:0x0017 (shift states, etc.)
+                    self.cpu.bus_mut().write(0x417, 0x00); // No keys pressed
+                    self.cpu.bus_mut().write(0x418, 0x00); // Extended keyboard flags
+                    
+                    // Keyboard buffer head/tail pointers at 0x0040:0x001A and 0x001C
+                    self.cpu.bus_mut().write(0x41A, 0x1E); // Buffer head offset
+                    self.cpu.bus_mut().write(0x41B, 0x00);
+                    self.cpu.bus_mut().write(0x41C, 0x1E); // Buffer tail offset (empty)
+                    self.cpu.bus_mut().write(0x41D, 0x00);
+                    
+                    // Keyboard buffer start/end at 0x0040:0x0080 and 0x0082
+                    self.cpu.bus_mut().write(0x480, 0x1E); // Buffer start = 0x001E
+                    self.cpu.bus_mut().write(0x481, 0x00);
+                    self.cpu.bus_mut().write(0x482, 0x3E); // Buffer end = 0x003E (32 bytes)
+                    self.cpu.bus_mut().write(0x483, 0x00);
+                    
+                    // Video mode at 0x0040:0x0049 (03h = CGA 80x25 color text)
+                    self.cpu.bus_mut().write(0x449, 0x03);
+                    
+                    // Screen columns at 0x0040:0x004A (80 columns)
+                    self.cpu.bus_mut().write(0x44A, 80);
+                    self.cpu.bus_mut().write(0x44B, 0);
+                    
+                    // Video buffer size at 0x0040:0x004C (4000 bytes for 80x25)
+                    self.cpu.bus_mut().write(0x44C, 0xA0); // 4000 low byte
+                    self.cpu.bus_mut().write(0x44D, 0x0F); // 4000 high byte
+                    
+                    // Video buffer offset at 0x0040:0x004E (current page offset)
+                    self.cpu.bus_mut().write(0x44E, 0x00);
+                    self.cpu.bus_mut().write(0x44F, 0x00);
+                    
+                    // Cursor positions for 8 pages at 0x0040:0x0050 (16 bytes)
+                    for i in 0..16 {
+                        self.cpu.bus_mut().write(0x450 + i, 0); // All cursors at (0,0)
+                    }
+                    
+                    // Cursor shape at 0x0040:0x0060 (start/end scan lines)
+                    self.cpu.bus_mut().write(0x460, 0x0D); // Start line 13
+                    self.cpu.bus_mut().write(0x461, 0x0E); // End line 14
+                    
+                    // Active video page at 0x0040:0x0062
+                    self.cpu.bus_mut().write(0x462, 0x00); // Page 0
+                    
+                    // Video adapter base port at 0x0040:0x0063 (0x3D4 for CGA)
+                    self.cpu.bus_mut().write(0x463, 0xD4);
+                    self.cpu.bus_mut().write(0x464, 0x03); // 0x03D4
+                    
+                    // CGA mode register value at 0x0040:0x0065
+                    self.cpu.bus_mut().write(0x465, 0x29); // Text mode, enable video
+                    
+                    // CGA color palette at 0x0040:0x0066
+                    self.cpu.bus_mut().write(0x466, 0x30); // Default palette
+                    
+                    // Timer tick count at 0x0040:0x006C (4 bytes, updated by INT 08h)
+                    self.cpu.bus_mut().write(0x46C, 0x00);
+                    self.cpu.bus_mut().write(0x46D, 0x00);
+                    self.cpu.bus_mut().write(0x46E, 0x00);
+                    self.cpu.bus_mut().write(0x46F, 0x00);
+                    
+                    // Midnight flag at 0x0040:0x0070
+                    self.cpu.bus_mut().write(0x470, 0x00);
+                    
+                    // Break flag at 0x0040:0x0071 (Ctrl+Break pressed)
+                    self.cpu.bus_mut().write(0x471, 0x00);
+                    
+                    // Reset flag at 0x0040:0x0072 (warm boot indicator)
+                    self.cpu.bus_mut().write(0x472, 0x00);
+                    self.cpu.bus_mut().write(0x473, 0x00);
+                    
+                    // Number of hard drives at 0x0040:0x0075
+                    let hard_drive_count = if self.cpu.bus().hard_drive().is_some() { 1u8 } else { 0u8 };
+                    self.cpu.bus_mut().write(0x475, hard_drive_count);
 
                     // Set up BIOS interrupt vectors (normally done by BIOS init code)
                     // INT 0x10 (Video Services) at 0x0040
@@ -452,11 +561,14 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x5A, 0x00); // Segment low
                     self.cpu.bus_mut().write(0x5B, 0xF0); // Segment high (0xF000)
 
-                    // INT 0x21 (DOS Services) at 0x0084
+                    // NOTE: INT 0x21 (DOS Services) is NOT set up by BIOS
+                    // DOS will install its own INT 21h handler when it loads (IO.SYS/MSDOS.SYS)
+                    // Leave the INT 21h vector completely uninitialized (0x0000:0x0000)
+                    // so DOS can detect it's not installed and set it up properly
                     self.cpu.bus_mut().write(0x84, 0x00); // Offset low
-                    self.cpu.bus_mut().write(0x85, 0x04); // Offset high (0x0400)
+                    self.cpu.bus_mut().write(0x85, 0x00); // Offset high
                     self.cpu.bus_mut().write(0x86, 0x00); // Segment low
-                    self.cpu.bus_mut().write(0x87, 0xF0); // Segment high (0xF000)
+                    self.cpu.bus_mut().write(0x87, 0x00); // Segment high
 
                     // Load boot sector
                     self.ensure_boot_sector_loaded();
