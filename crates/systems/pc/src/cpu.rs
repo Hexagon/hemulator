@@ -4810,11 +4810,11 @@ mod tests {
     fn test_int13h_disk_parameter_table() {
         // Test that INT 13h AH=08h returns a valid disk parameter table pointer
         let mut bus = PcBus::new();
-        
+
         // Load BIOS to ensure disk parameter table is available
         let bios = crate::bios::generate_minimal_bios();
         bus.load_bios(&bios);
-        
+
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -4850,9 +4850,7 @@ mod tests {
         let dpt_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.di as u32);
 
         // Read the 11-byte disk parameter table
-        let dpt: Vec<u8> = (0..11)
-            .map(|i| cpu.cpu.memory.read(dpt_addr + i))
-            .collect();
+        let dpt: Vec<u8> = (0..11).map(|i| cpu.cpu.memory.read(dpt_addr + i)).collect();
 
         // Verify key parameters for 1.44MB floppy
         assert_eq!(dpt[3], 0x02, "Bytes per sector should be 0x02 (512 bytes)");
@@ -4930,7 +4928,10 @@ mod tests {
 
         // Verify BDA status is still 0 (success)
         let status_after_reset = cpu.cpu.memory.read(0x474);
-        assert_eq!(status_after_reset, 0x00, "BDA status should be 0 after reset");
+        assert_eq!(
+            status_after_reset, 0x00,
+            "BDA status should be 0 after reset"
+        );
     }
 
     #[test]
@@ -5011,13 +5012,14 @@ mod tests {
 
         // Verify AH contains the status from BDA
         let ah_status = ((cpu.cpu.ax >> 8) & 0xFF) as u8;
-        assert_eq!(
-            ah_status, 0x04,
-            "AH should contain status 0x04 from BDA"
-        );
+        assert_eq!(ah_status, 0x04, "AH should contain status 0x04 from BDA");
 
         // Verify carry flag is set (error)
-        assert_ne!(cpu.cpu.flags & 0x0001, 0, "Carry flag should be set for error");
+        assert_ne!(
+            cpu.cpu.flags & 0x0001,
+            0,
+            "Carry flag should be set for error"
+        );
     }
 
     #[test]
@@ -5026,13 +5028,13 @@ mod tests {
         // This is critical for DOS boot
         use crate::PcSystem;
         use emu_core::System;
-        
+
         let mut sys = PcSystem::new();
-        
+
         // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
         sys.boot_delay_frames = 1;
         sys.boot_started = false;
-        
+
         // Step one frame to trigger BDA initialization
         let _ = sys.step_frame();
 
@@ -5048,14 +5050,20 @@ mod tests {
         // Should point to F000:0250 (disk parameter table in BIOS)
         assert_eq!(segment, 0xF000, "INT 1Eh should point to BIOS segment");
         assert_eq!(offset, 0x0250, "INT 1Eh should point to DPT offset");
-        
+
         // Verify we can read the disk parameter table from this vector
         let dpt_addr = ((segment as u32) << 4) + (offset as u32);
         let dpt_byte3 = sys.cpu.bus().read(dpt_addr + 3);
         let dpt_byte4 = sys.cpu.bus().read(dpt_addr + 4);
-        
-        assert_eq!(dpt_byte3, 0x02, "DPT byte 3 should be 0x02 (512 bytes/sector)");
-        assert_eq!(dpt_byte4, 0x12, "DPT byte 4 should be 0x12 (18 sectors/track)");
+
+        assert_eq!(
+            dpt_byte3, 0x02,
+            "DPT byte 3 should be 0x02 (512 bytes/sector)"
+        );
+        assert_eq!(
+            dpt_byte4, 0x12,
+            "DPT byte 4 should be 0x12 (18 sectors/track)"
+        );
     }
 
     #[test]
@@ -5064,13 +5072,13 @@ mod tests {
         // This is critical for Windows and Linux boot
         use crate::PcSystem;
         use emu_core::System;
-        
+
         let mut sys = PcSystem::new();
-        
+
         // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
         sys.boot_delay_frames = 1;
         sys.boot_started = false;
-        
+
         // Step one frame to trigger BDA initialization
         let _ = sys.step_frame();
 
@@ -5081,13 +5089,16 @@ mod tests {
 
         // Should be 0x9FC0 (standard EBDA location at 639KB)
         assert_eq!(ebda_segment, 0x9FC0, "EBDA pointer should be at 0x9FC0");
-        
+
         // Verify EBDA starts with its size (1KB)
         let ebda_addr = (ebda_segment as u32) << 4;
         let ebda_size_low = sys.cpu.bus().read(ebda_addr);
         let ebda_size_high = sys.cpu.bus().read(ebda_addr + 1);
-        
+
         assert_eq!(ebda_size_low, 0x01, "EBDA size low byte should be 0x01");
-        assert_eq!(ebda_size_high, 0x00, "EBDA size high byte should be 0x00 (1KB)");
+        assert_eq!(
+            ebda_size_high, 0x00,
+            "EBDA size high byte should be 0x00 (1KB)"
+        );
     }
 }

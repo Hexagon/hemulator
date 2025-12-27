@@ -5595,7 +5595,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     // IMPORTANT: For memory operands with displacement, we must calculate
                     // the effective address (which fetches displacement bytes) BEFORE
                     // fetching the immediate value.
-                    
+
                     // Check if operand-size override (0x66) prefix is active
                     if self.operand_size_override && self.model.supports_80386_instructions() {
                         // 32-bit operand size: MOV r/m32, imm32
@@ -11514,7 +11514,8 @@ mod tests {
         // 0xC7 = MOV r/m, imm
         // ModR/M: 0xC0 (mod=11, op=0, r/m=AX)
         // Immediate: 0x78563412 (little-endian: 12 34 56 78)
-        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0xC0, 0x12, 0x34, 0x56, 0x78]);
+        cpu.memory
+            .load_program(0x0100, &[0x66, 0xC7, 0xC0, 0x12, 0x34, 0x56, 0x78]);
 
         cpu.ip = 0x0100;
         cpu.cs = 0x0000;
@@ -11522,7 +11523,7 @@ mod tests {
 
         // Execute 0x66 MOV AX, imm32
         cpu.step();
-        
+
         // In 16-bit mode, we only store the low 16 bits
         assert_eq!(cpu.ax, 0x3412, "AX should contain low 16 bits of immediate");
         // Verify IP advanced correctly (consumed all 7 bytes)
@@ -11540,7 +11541,10 @@ mod tests {
         // ModR/M: 0x06 (mod=00, op=0, r/m=110 = direct address)
         // Address: 0x0200
         // Immediate: 0xDEADBEEF (little-endian: EF BE AD DE)
-        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0x06, 0x00, 0x02, 0xEF, 0xBE, 0xAD, 0xDE]);
+        cpu.memory.load_program(
+            0x0100,
+            &[0x66, 0xC7, 0x06, 0x00, 0x02, 0xEF, 0xBE, 0xAD, 0xDE],
+        );
 
         cpu.ip = 0x0100;
         cpu.cs = 0x0000;
@@ -11548,7 +11552,7 @@ mod tests {
 
         // Execute 0x66 MOV [0x0200], imm32
         cpu.step();
-        
+
         // Verify 32-bit value was written to memory
         let val_low = cpu.memory.read_u16(0x10200);
         let val_high = cpu.memory.read_u16(0x10202);
