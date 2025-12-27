@@ -7,6 +7,10 @@ use emu_core::cpu_8086::CpuModel;
 
 pub use boot_priority::BootPriority;
 
+/// Offset of the Disk Parameter Table in the BIOS ROM (F000:0250)
+/// This table contains floppy drive parameters for 1.44MB format
+pub const DISK_PARAMETER_TABLE_OFFSET: u16 = 0x0250;
+
 mod boot_priority {
     /// Boot priority options
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -90,6 +94,25 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xCF, // IRET
     ];
     bios[int13h_offset..int13h_offset + int13h_handler.len()].copy_from_slice(&int13h_handler);
+
+    // Disk Parameter Table (DPT) for 1.44MB floppy at offset 0x250
+    // This table is used by INT 13h AH=08h and the floppy disk controller
+    // Standard 11-byte format for PC/AT floppy controller
+    let dpt_offset = 0x250;
+    let disk_parameter_table: Vec<u8> = vec![
+        0xDF, // Byte 0: Step rate (D), head unload time (F)
+        0x02, // Byte 1: Head load time (0), DMA mode (1)
+        0x25, // Byte 2: Motor turn-off delay (37 * 55ms = ~2 seconds)
+        0x02, // Byte 3: Bytes per sector (2 = 512 bytes)
+        0x12, // Byte 4: Sectors per track (18 for 1.44MB)
+        0x1B, // Byte 5: Gap length (27 bytes)
+        0xFF, // Byte 6: Data length (255 = not used when sector size specified)
+        0x6C, // Byte 7: Gap length for format (108 bytes)
+        0xF6, // Byte 8: Format filler byte (0xF6 standard)
+        0x0F, // Byte 9: Head settle time (15ms)
+        0x08, // Byte 10: Motor start time (8 * 125ms = 1 second)
+    ];
+    bios[dpt_offset..dpt_offset + disk_parameter_table.len()].copy_from_slice(&disk_parameter_table);
 
     // INT 16h handler at offset 0x300 - Keyboard Services
     let int16h_offset = 0x300;
