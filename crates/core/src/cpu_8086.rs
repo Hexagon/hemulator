@@ -446,7 +446,7 @@ impl<M: Memory8086> Cpu8086<M> {
     }
 
     /// Trigger a software interrupt (INT) or CPU exception
-    /// 
+    ///
     /// For software interrupts (is_exception=false): Uses current IP (after INT instruction)
     /// For CPU exceptions (is_exception=true): Uses instruction_start_ip (faulting instruction)
     #[inline]
@@ -454,7 +454,7 @@ impl<M: Memory8086> Cpu8086<M> {
         // Push FLAGS, CS, IP onto stack (in that order)
         self.push(self.flags);
         self.push(self.cs);
-        
+
         // For exceptions, save IP of faulting instruction
         // For software interrupts, save current IP (already advanced past INT)
         let saved_ip = if is_exception {
@@ -11050,7 +11050,7 @@ mod tests {
         // Setup: DIV by zero instruction at 0x2000:0x0100
         // DIV BL (0xF6 with ModR/M 0b11_110_011)
         cpu.memory.load_program(0x20100, &[0xF6, 0b11_110_011]);
-        
+
         cpu.ip = 0x0100;
         cpu.cs = 0x2000;
         cpu.ss = 0x3000;
@@ -11072,15 +11072,18 @@ mod tests {
         // Pop the values to verify
         let saved_ip = cpu.pop();
         let saved_cs = cpu.pop();
-        let saved_flags = cpu.pop();
+        let _saved_flags = cpu.pop();
 
         // The saved IP should point to the START of the DIV instruction (0x0100)
         // NOT to the byte after it (0x0102)
-        assert_eq!(saved_ip, 0x0100, "Saved IP should point to the faulting DIV instruction");
-        assert_eq!(saved_cs, 0x2000, "Saved CS should be the original code segment");
-        
-        // Flags should have been saved
-        assert_eq!(saved_flags & 0xFFFF, saved_flags, "Saved flags should be valid");
+        assert_eq!(
+            saved_ip, 0x0100,
+            "Saved IP should point to the faulting DIV instruction"
+        );
+        assert_eq!(
+            saved_cs, 0x2000,
+            "Saved CS should be the original code segment"
+        );
     }
 
     #[test]
@@ -11096,14 +11099,14 @@ mod tests {
         // Setup: DIV with overflow at 0x2000:0x0200
         // DIV BL (0xF6 with ModR/M 0b11_110_011)
         cpu.memory.load_program(0x20200, &[0xF6, 0b11_110_011]);
-        
+
         cpu.ip = 0x0200;
         cpu.cs = 0x2000;
         cpu.ss = 0x3000;
         cpu.sp = 0xFFFE;
         cpu.ax = 0xFFFF; // Dividend = 65535
         cpu.bx = 0x0001; // BL = 1 (divisor)
-        // 65535 / 1 = 65535, which doesn't fit in AL (max 255) -> overflow
+                         // 65535 / 1 = 65535, which doesn't fit in AL (max 255) -> overflow
 
         // Execute DIV instruction (should trigger INT 0 due to overflow)
         cpu.step();
@@ -11115,8 +11118,11 @@ mod tests {
         // Verify saved IP points to the faulting instruction
         assert_eq!(cpu.sp, 0xFFF8);
         let saved_ip = cpu.pop();
-        
-        assert_eq!(saved_ip, 0x0200, "Saved IP should point to the faulting DIV instruction on overflow");
+
+        assert_eq!(
+            saved_ip, 0x0200,
+            "Saved IP should point to the faulting DIV instruction on overflow"
+        );
     }
 
     #[test]
@@ -11132,7 +11138,7 @@ mod tests {
         // Setup: INT 10h instruction at 0x2000:0x0300
         // INT 10h is 0xCD 0x10 (2 bytes)
         cpu.memory.load_program(0x20300, &[0xCD, 0x10, 0x90]); // INT 10h, NOP
-        
+
         cpu.ip = 0x0300;
         cpu.cs = 0x2000;
         cpu.ss = 0x3000;
@@ -11148,9 +11154,12 @@ mod tests {
         // Verify saved IP points AFTER the INT instruction
         assert_eq!(cpu.sp, 0xFFF8);
         let saved_ip = cpu.pop();
-        
+
         // Software INT should save IP pointing to the next instruction (0x0302)
         // NOT to the INT instruction itself (0x0300)
-        assert_eq!(saved_ip, 0x0302, "Saved IP should point AFTER the INT instruction for software interrupts");
+        assert_eq!(
+            saved_ip, 0x0302,
+            "Saved IP should point AFTER the INT instruction for software interrupts"
+        );
     }
 }
