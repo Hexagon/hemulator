@@ -108,12 +108,13 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 
 When running PC/DOS programs, the emulator provides full keyboard passthrough by default. This means all keyboard keys are sent directly to the emulated PC, allowing you to type and use DOS programs naturally.
 
-#### Host Modifier Key
+#### Host Modifier Key (PC System Only)
 
 To access function keys (F1-F12) for emulator controls while running a PC program, hold the **Right Ctrl** key (the host modifier) while pressing the function key. For example:
-- **Right Ctrl + F3**: Open ROM/executable file dialog
+- **Right Ctrl + F3**: Open mount point selector
 - **Right Ctrl + F4**: Take screenshot
-- **Right Ctrl + F5**: Save state
+- **Right Ctrl + F7**: Load project file
+- **Right Ctrl + F8**: Save project file
 
 The host modifier key can be customized in `config.json` by changing the `host_modifier` field (default: `RightCtrl`).
 
@@ -121,6 +122,8 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 **With the host modifier**: Function keys control the emulator
 
 **Note**: ESC requires the host modifier (Right Ctrl + ESC) to exit the emulator in PC mode.
+
+**Other Systems**: NES, Game Boy, Atari 2600, SNES, and N64 do NOT require the host modifier key for function keys. Press function keys directly to control the emulator.
 
 **Known Limitation**: Some host key + key combinations may be intercepted by your operating system before reaching the emulator. For example, on Windows, Left Ctrl + ESC opens the Start menu and cannot be captured. If you experience issues with your chosen host modifier key:
 - Try using `RightCtrl` instead of `LeftCtrl` (default setting)
@@ -132,16 +135,18 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 | Key | Action | Description |
 |-----|--------|-------------|
 | F1 | Help Overlay | Show/hide all controls and key mappings |
-| F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) |
-| F3 | Load Media | Open mount point selector (if system has multiple slots) or file browser directly |
+| F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) - **runtime only, not saved** |
+| F3 | Select Mount Points | Open mount point selector (always shows submenu, even for single-mount systems) |
 | F4 | Screenshot | Save screenshot to `screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png` |
 | F5 | Save State | Save state (consoles only, opens slot selector 1-5) |
 | F6 | Load State | Load state (consoles only, opens slot selector 1-5) |
-| F7 | System Selector | Switch between emulated systems (when no ROM loaded) |
-| F8 | Save VM | Save virtual machine file (PC only, .hemu project) |
+| F7 | Load Project | Load `.hemu` project file (display settings, mounts, system config) |
+| F8 | Save Project | Save current configuration to `.hemu` project file (all systems) |
 | F10 | Debug Info | Show/hide debug information overlay |
 | F11 | CRT Filter | Cycle through CRT display filters |
 | F12 | Reset System | Restart the current game |
+
+**Note on Host Key (PC System Only)**: When running PC/DOS programs, you must hold **Right Ctrl** (or your configured host modifier key) while pressing function keys. This allows function keys to pass through to the DOS program when the host key is not held. Other systems (NES, Game Boy, etc.) do not require the host key for function keys.
 
 ### Emulation Speed Control (F2)
 
@@ -395,9 +400,31 @@ A-Z, Space, Enter, LeftShift, RightShift, LeftCtrl, RightCtrl, Up, Down, Left, R
 
 **Backward Compatibility**: If you have an old `config.json` with a `keyboard` field instead of `input`, it will be automatically migrated to `input.player1` on first load.
 
-**Mount Points**: The emulator now supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", future systems might have "BIOS", "Floppy1", etc.). When you press F3:
-- If the system has only one mount point (like NES), the file browser opens directly
-- If the system has multiple mount points, a selector appears first to choose which slot to load media into
+### Mount Points and Project Files
+
+**Mount Points**: The emulator supports multiple media slots per system. Each system defines mount points (e.g., NES has "Cartridge", PC has "BIOS", "FloppyA", "FloppyB", "HardDrive"). 
+
+When you press **F3** (Select Mount Points):
+- A mount point selector always appears showing all available slots for the current system
+- Select a slot (1-9) to open a file browser for that mount point
+- Even single-mount systems (NES, Game Boy) show the selector for consistency
+
+**Project Files (.hemu)**: Project files save your complete setup including mounts, display settings, and input configuration:
+- **F7** (Load Project): Load a `.hemu` project file
+  - Restores all mount points
+  - Applies display settings (window size, CRT filter)
+  - Can override input key mappings per-project
+  - Works for all systems (NES, PC, Game Boy, etc.)
+- **F8** (Save Project): Save current configuration to `.hemu` file
+  - Saves only relevant mount points for the system
+  - Saves current window size and CRT filter settings
+  - Can be used by all systems, not just PC
+  - File paths in project are relative to the `.hemu` file location
+
+**Configuration Files**:
+- `config.json`: Global settings (window size, input mappings, video backend) - mount points no longer saved here
+- `.hemu` files: Per-project settings (mounts, display overrides, system-specific config)
+- Runtime settings (emulation speed) are not persisted to any file
 
 ### Save States
 
@@ -415,11 +442,11 @@ Save states are stored in `saves/<rom_hash>/states.json`:
 - **NES**: Fully supported - save and load states with F5-F6 when a cartridge is loaded
 - **Atari 2600**: Fully supported - save and load states with F5-F6
 - **Game Boy**: Fully supported - save and load states with F5-F6
-- **PC/DOS**: Not supported - PC systems use **Virtual Machine files** (.hemu) instead
+- **PC/DOS**: Not supported - PC systems use **Project files** (.hemu) instead
   - **F8** saves the current VM configuration to a `.hemu` project file
+  - **F7** loads a `.hemu` project file to restore all settings
   - VM files include all mounted disk images, BIOS, and boot priority settings
   - Disk state is preserved in the disk image files themselves (as in a real PC)
-  - Load VM files via F3 to restore all mount points
   - This approach matches how real PCs work - state persists on disks, not in memory snapshots
 
 Example structure:

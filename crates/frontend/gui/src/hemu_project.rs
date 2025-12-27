@@ -1,8 +1,32 @@
-/// .hemu project file format for multi-mount systems
+/// .hemu project file format for all systems
+use crate::display_filter::DisplayFilter;
+use crate::settings::InputConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+/// Display settings (window size and CRT filter)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplaySettings {
+    /// Window width in pixels
+    pub window_width: usize,
+    /// Window height in pixels
+    pub window_height: usize,
+    /// CRT display filter
+    #[serde(default)]
+    pub display_filter: DisplayFilter,
+}
+
+impl Default for DisplaySettings {
+    fn default() -> Self {
+        Self {
+            window_width: 512,
+            window_height: 480,
+            display_filter: DisplayFilter::default(),
+        }
+    }
+}
 
 /// Represents a .hemu project file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +39,12 @@ pub struct HemuProject {
     /// Key: mount point ID (e.g., "BIOS", "FloppyA", "Cartridge")
     /// Value: file path (relative or absolute)
     pub mounts: HashMap<String, String>,
+    /// Display settings (window size and filter)
+    #[serde(default)]
+    pub display: DisplaySettings,
+    /// Optional input config override (overrides global config.json settings)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<InputConfig>,
     /// Boot priority for PC systems (optional, defaults to FloppyFirst)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boot_priority: Option<String>,
@@ -39,6 +69,8 @@ impl HemuProject {
             version: 1,
             system,
             mounts: HashMap::new(),
+            display: DisplaySettings::default(),
+            input: None,
             boot_priority: None,
             cpu_model: None,
             memory_kb: None,
@@ -113,6 +145,37 @@ impl HemuProject {
     /// Get video mode
     pub fn get_video_mode(&self) -> Option<&String> {
         self.video_mode.as_ref()
+    }
+
+    /// Set display settings
+    pub fn set_display_settings(&mut self, width: usize, height: usize, filter: DisplayFilter) {
+        self.display.window_width = width;
+        self.display.window_height = height;
+        self.display.display_filter = filter;
+    }
+
+    /// Get display settings
+    pub fn get_display_settings(&self) -> &DisplaySettings {
+        &self.display
+    }
+
+    /// Set input config override
+    pub fn set_input_override(&mut self, input: InputConfig) {
+        self.input = Some(input);
+    }
+
+    /// Get input config override
+    pub fn get_input_override(&self) -> Option<&InputConfig> {
+        self.input.as_ref()
+    }
+
+    /// Get the list of mount point IDs that are relevant for this system
+    pub fn relevant_mount_points(&self) -> Vec<&str> {
+        match self.system.as_str() {
+            "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
+            "nes" | "gb" | "gameboy" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
+            _ => vec![],
+        }
     }
 
     /// Check if system has multiple mount points (requires .hemu file)
