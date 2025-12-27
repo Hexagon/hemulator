@@ -9,6 +9,7 @@ pub use boot_priority::BootPriority;
 
 /// Offset of the Disk Parameter Table in the BIOS ROM (F000:0250)
 /// This table contains floppy drive parameters for 1.44MB format
+#[allow(dead_code)]
 pub const DISK_PARAMETER_TABLE_OFFSET: u16 = 0x0250;
 
 mod boot_priority {

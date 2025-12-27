@@ -4793,7 +4793,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                     // Fetch 32-bit immediate but only use lower 16 bits for now
                     let imm_low = self.fetch_u16();
-                    let imm_high = self.fetch_u16();
+                    let _imm_high = self.fetch_u16();
                     let imm = imm_low; // Use only lower 16 bits in 16-bit mode
                     // NOTE: In true 32-bit mode, we'd use the full 32-bit value
                     // For now, just consume the bytes to keep instruction stream in sync

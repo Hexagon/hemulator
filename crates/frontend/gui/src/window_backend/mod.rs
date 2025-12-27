@@ -84,6 +84,19 @@ pub enum Key {
     RightCtrl,
     LeftAlt,
     RightAlt,
+
+    // Punctuation and symbols
+    Comma,
+    Period,
+    Slash,
+    Semicolon,
+    Apostrophe,
+    LeftBracket,
+    RightBracket,
+    Backslash,
+    Minus,
+    Equals,
+    Backtick,
 }
 
 /// Window backend trait
@@ -185,6 +198,17 @@ pub fn string_to_key(s: &str) -> Option<Key> {
         "RightCtrl" => Some(Key::RightCtrl),
         "LeftAlt" => Some(Key::LeftAlt),
         "RightAlt" => Some(Key::RightAlt),
+        "Comma" => Some(Key::Comma),
+        "Period" => Some(Key::Period),
+        "Slash" => Some(Key::Slash),
+        "Semicolon" => Some(Key::Semicolon),
+        "Apostrophe" => Some(Key::Apostrophe),
+        "LeftBracket" => Some(Key::LeftBracket),
+        "RightBracket" => Some(Key::RightBracket),
+        "Backslash" => Some(Key::Backslash),
+        "Minus" => Some(Key::Minus),
+        "Equals" => Some(Key::Equals),
+        "Backtick" => Some(Key::Backtick),
         _ => None,
     }
 }
