@@ -153,19 +153,13 @@ pub struct Settings {
     #[serde(default, skip_serializing)]
     pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
-    pub mount_points: HashMap<String, String>, // mount_point_id -> file_path
-    #[serde(default)]
     pub display_filter: DisplayFilter,
-    #[serde(default = "default_emulation_speed")]
+    #[serde(default, skip_serializing)] // Runtime only, not saved
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
     #[serde(default = "default_video_backend")]
     pub video_backend: String, // "software" or "opengl"
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
-}
-
-fn default_emulation_speed() -> f64 {
-    1.0
 }
 
 fn default_video_backend() -> String {
@@ -180,7 +174,6 @@ impl Default for Settings {
             window_width: 512,  // 256 * 2 (default 2x scale)
             window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
-            mount_points: HashMap::new(),
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
             video_backend: "software".to_string(),
@@ -230,23 +223,6 @@ impl Settings {
         let contents = serde_json::to_string_pretty(self)?;
         fs::write(&path, contents)?;
         Ok(())
-    }
-
-    /// Set a mount point path
-    pub fn set_mount_point(&mut self, mount_point_id: &str, path: String) {
-        self.mount_points.insert(mount_point_id.to_string(), path);
-    }
-
-    /// Get a mount point path
-    #[allow(dead_code)]
-    pub fn get_mount_point(&self, mount_point_id: &str) -> Option<&String> {
-        self.mount_points.get(mount_point_id)
-    }
-
-    /// Clear a mount point path
-    #[allow(dead_code)]
-    pub fn clear_mount_point(&mut self, mount_point_id: &str) {
-        self.mount_points.remove(mount_point_id);
     }
 }
 

@@ -5543,6 +5543,7 @@ impl<M: Memory8086> Cpu8086<M> {
             }
 
             // MOV r/m8, imm8 (0xC6) - Group 11
+            // MOV r/m8, imm8 (0xC6) - Group 11
             0xC6 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
@@ -5566,7 +5567,13 @@ impl<M: Memory8086> Cpu8086<M> {
                         10
                     }
                 } else {
-                    // Undefined
+                    // Undefined - consume bytes to prevent desync
+                    // Calculate effective address to consume any displacement bytes
+                    if modbits != 0b11 {
+                        let _ = self.calc_effective_address(modbits, rm);
+                    }
+                    // Consume immediate byte
+                    let _ = self.fetch_u8();
                     eprintln!(
                         "Undefined 0xC6 operation with op={} at CS:IP={:04X}:{:04X}",
                         op,
@@ -5579,6 +5586,7 @@ impl<M: Memory8086> Cpu8086<M> {
             }
 
             // MOV r/m16, imm16 (0xC7) - Group 11
+            // With 0x66 prefix (80386+): MOV r/m32, imm32
             0xC7 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
@@ -5587,22 +5595,61 @@ impl<M: Memory8086> Cpu8086<M> {
                     // IMPORTANT: For memory operands with displacement, we must calculate
                     // the effective address (which fetches displacement bytes) BEFORE
                     // fetching the immediate value.
-                    if modbits == 0b11 {
-                        // Register mode - no displacement to fetch
-                        let imm = self.fetch_u16();
-                        self.write_rm16(modbits, rm, imm);
-                        self.cycles += 4;
-                        4
+                    
+                    // Check if operand-size override (0x66) prefix is active
+                    if self.operand_size_override && self.model.supports_80386_instructions() {
+                        // 32-bit operand size: MOV r/m32, imm32
+                        if modbits == 0b11 {
+                            // Register mode - fetch 32-bit immediate
+                            let imm_low = self.fetch_u16();
+                            let _imm_high = self.fetch_u16();
+                            // Store low 16 bits to destination register (partial 32-bit support)
+                            self.write_rm16(modbits, rm, imm_low);
+                            // Note: High 16 bits are discarded in 16-bit mode
+                            // This maintains instruction stream sync by consuming all bytes
+                            self.cycles += 4;
+                            4
+                        } else {
+                            // Memory mode - get effective address first
+                            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                            let imm_low = self.fetch_u16();
+                            let imm_high = self.fetch_u16();
+                            // Write 32 bits to memory (2 words)
+                            self.write_u16(seg, offset, imm_low);
+                            self.write_u16(seg, offset.wrapping_add(2), imm_high);
+                            self.cycles += 10;
+                            10
+                        }
                     } else {
-                        // Memory mode - get effective address first to consume displacement bytes
-                        let (seg, offset, _) = self.calc_effective_address(modbits, rm);
-                        let imm = self.fetch_u16(); // Now fetch immediate after displacement
-                        self.write_u16(seg, offset, imm);
-                        self.cycles += 10;
-                        10
+                        // 16-bit operand size: MOV r/m16, imm16
+                        if modbits == 0b11 {
+                            // Register mode - no displacement to fetch
+                            let imm = self.fetch_u16();
+                            self.write_rm16(modbits, rm, imm);
+                            self.cycles += 4;
+                            4
+                        } else {
+                            // Memory mode - get effective address first to consume displacement bytes
+                            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                            let imm = self.fetch_u16(); // Now fetch immediate after displacement
+                            self.write_u16(seg, offset, imm);
+                            self.cycles += 10;
+                            10
+                        }
                     }
                 } else {
-                    // Undefined
+                    // Undefined - consume bytes to prevent desync
+                    // Calculate effective address to consume any displacement bytes
+                    if modbits != 0b11 {
+                        let _ = self.calc_effective_address(modbits, rm);
+                    }
+                    // Consume immediate bytes based on operand size
+                    if self.operand_size_override && self.model.supports_80386_instructions() {
+                        let _ = self.fetch_u16(); // Consume 4 bytes total
+                        let _ = self.fetch_u16();
+                    } else {
+                        let _ = self.fetch_u16(); // Consume 2 bytes
+                    }
                     eprintln!(
                         "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X}",
                         op,
@@ -11455,6 +11502,60 @@ mod tests {
             !cpu.operand_size_override,
             "Operand size override should be cleared after instruction"
         );
+    }
+
+    #[test]
+    fn test_operand_size_override_mov_imm32() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: 0x66 0xC7 0xC0 (MOV EAX, imm32) at 0x0000:0x0100
+        // 0x66 = Operand-size override
+        // 0xC7 = MOV r/m, imm
+        // ModR/M: 0xC0 (mod=11, op=0, r/m=AX)
+        // Immediate: 0x78563412 (little-endian: 12 34 56 78)
+        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0xC0, 0x12, 0x34, 0x56, 0x78]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        cpu.ax = 0x0000;
+
+        // Execute 0x66 MOV AX, imm32
+        cpu.step();
+        
+        // In 16-bit mode, we only store the low 16 bits
+        assert_eq!(cpu.ax, 0x3412, "AX should contain low 16 bits of immediate");
+        // Verify IP advanced correctly (consumed all 7 bytes)
+        assert_eq!(cpu.ip, 0x0107, "IP should advance by 7 bytes");
+    }
+
+    #[test]
+    fn test_operand_size_override_mov_imm32_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: 0x66 0xC7 0x06 (MOV [addr], imm32) at 0x0000:0x0100
+        // 0x66 = Operand-size override
+        // 0xC7 = MOV r/m, imm
+        // ModR/M: 0x06 (mod=00, op=0, r/m=110 = direct address)
+        // Address: 0x0200
+        // Immediate: 0xDEADBEEF (little-endian: EF BE AD DE)
+        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0x06, 0x00, 0x02, 0xEF, 0xBE, 0xAD, 0xDE]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        cpu.ds = 0x1000;
+
+        // Execute 0x66 MOV [0x0200], imm32
+        cpu.step();
+        
+        // Verify 32-bit value was written to memory
+        let val_low = cpu.memory.read_u16(0x10200);
+        let val_high = cpu.memory.read_u16(0x10202);
+        assert_eq!(val_low, 0xBEEF, "Low word should be written");
+        assert_eq!(val_high, 0xDEAD, "High word should be written");
+        // Verify IP advanced correctly (consumed all 9 bytes)
+        assert_eq!(cpu.ip, 0x0109, "IP should advance by 9 bytes");
     }
 
     #[test]
