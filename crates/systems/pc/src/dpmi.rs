@@ -56,10 +56,10 @@ impl DpmiDriver {
     /// This sets the appropriate processor_type based on the CPU
     pub fn with_cpu_model(cpu_model: CpuModel) -> Self {
         let processor_type = match cpu_model {
-            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00,  // 8086
+            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00, // 8086
             CpuModel::Intel80186 | CpuModel::Intel80188 => 0x01, // 80186
-            CpuModel::Intel80286 => 0x02,                       // 80286
-            CpuModel::Intel80386 => 0x03,                       // 80386
+            CpuModel::Intel80286 => 0x02,                      // 80286
+            CpuModel::Intel80386 => 0x03,                      // 80386
             CpuModel::Intel80486
             | CpuModel::Intel80486SX
             | CpuModel::Intel80486DX2
@@ -70,9 +70,9 @@ impl DpmiDriver {
 
         DpmiDriver {
             installed: false,
-            version: 0x0090,      // DPMI 0.9 in BCD
-            processor_type,       // Set based on CPU model
-            mode: 0,              // 16-bit mode
+            version: 0x0090, // DPMI 0.9 in BCD
+            processor_type,  // Set based on CPU model
+            mode: 0,         // 16-bit mode
             max_descriptors: 256,
             allocated_descriptors: 0,
             entry_point: (0xF000, 0xE000), // Fake entry point
@@ -104,10 +104,10 @@ impl DpmiDriver {
     /// Set processor type based on CPU model
     pub fn set_processor_type_for_cpu(&mut self, cpu_model: CpuModel) {
         self.processor_type = match cpu_model {
-            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00,  // 8086
+            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00, // 8086
             CpuModel::Intel80186 | CpuModel::Intel80188 => 0x01, // 80186
-            CpuModel::Intel80286 => 0x02,                       // 80286
-            CpuModel::Intel80386 => 0x03,                       // 80386
+            CpuModel::Intel80286 => 0x02,                      // 80286
+            CpuModel::Intel80386 => 0x03,                      // 80386
             CpuModel::Intel80486
             | CpuModel::Intel80486SX
             | CpuModel::Intel80486DX2

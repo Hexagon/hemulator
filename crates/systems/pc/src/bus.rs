@@ -575,8 +575,12 @@ impl Memory8086 for PcBus {
                     // Debug: log when write is out of bounds
                     use emu_core::logging::{LogCategory, LogConfig, LogLevel};
                     if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                        eprintln!("!!! RAM write out of bounds: addr=0x{:08X}, offset={}, ram.len()={}", 
-                            addr, offset, self.ram.len());
+                        eprintln!(
+                            "!!! RAM write out of bounds: addr=0x{:08X}, offset={}, ram.len()={}",
+                            addr,
+                            offset,
+                            self.ram.len()
+                        );
                     }
                 }
             }
