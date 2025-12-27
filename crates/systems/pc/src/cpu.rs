@@ -218,6 +218,7 @@ impl PcCpu {
                 // DOS installs its own handlers - we don't intercept them
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
                 // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this)
+                0x2A => return self.handle_int2ah(), // Network Installation API (stub)
                 // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
                 // 0x2F => return self.handle_int2fh(), // Multiplex interrupt (DOS/TSRs provide this)
                 // 0x31 => return self.handle_int31h(), // DPMI services (DPMI host provides this)
@@ -937,8 +938,22 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int21h
     fn int21h_read_char_stdin(&mut self) -> u32 {
         // Returns: AL = character read
-        // For now, return 0 (no input available)
-        self.cpu.ax &= 0xFF00;
+        // This function should block until a character is available
+        // Use INT 16h AH=00h to get keyboard input
+
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+
+        // Call INT 16h AH=00h (read keystroke) to get character
+        self.cpu.ax = 0x0000; // AH=00h
+        self.int16h_read_keystroke();
+
+        // Get the ASCII character from AL (INT 16h returns scancode in AH, ASCII in AL)
+        let ascii = (self.cpu.ax & 0xFF) as u8;
+
+        // Restore AH, keep AL with the character
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+
         51
     }
 
@@ -965,9 +980,30 @@ impl PcCpu {
         let dl = (self.cpu.dx & 0xFF) as u8;
 
         if dl == 0xFF {
-            // Read character - for now, return 0 and set ZF
-            self.cpu.ax &= 0xFF00;
-            self.set_zero_flag(true);
+            // Read character - use INT 16h AH=01h to check for keystroke
+            let saved_ax = self.cpu.ax;
+            self.cpu.ax = 0x0100; // AH=01h (check keystroke)
+            self.int16h_check_keystroke();
+
+            // Check zero flag to see if key is available
+            let key_available = (self.cpu.flags & 0x0040) == 0; // ZF=0 means key available
+
+            if key_available {
+                // Key is available - read it with INT 16h AH=00h
+                self.cpu.ax = 0x0000; // AH=00h (read keystroke)
+                self.int16h_read_keystroke();
+
+                // Get ASCII character from AL
+                let ascii = (self.cpu.ax & 0xFF) as u8;
+
+                // Restore AH, keep AL with the character, set ZF=0
+                self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+                self.set_zero_flag(false);
+            } else {
+                // No key available - return 0 and set ZF=1
+                self.cpu.ax = saved_ax & 0xFF00;
+                self.set_zero_flag(true);
+            }
         } else {
             // Write character
             let saved_ax = self.cpu.ax;
@@ -982,16 +1018,46 @@ impl PcCpu {
     /// INT 21h, AH=07h: Direct stdin input without echo
     #[allow(dead_code)] // Called from handle_int21h
     fn int21h_direct_stdin(&mut self) -> u32 {
-        // Returns: AL = character read
-        self.cpu.ax &= 0xFF00;
+        // Returns: AL = character read (no echo)
+        // This function should block until a character is available
+        // Use INT 16h AH=00h to get keyboard input
+
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+
+        // Call INT 16h AH=00h (read keystroke) to get character
+        self.cpu.ax = 0x0000; // AH=00h
+        self.int16h_read_keystroke();
+
+        // Get the ASCII character from AL
+        let ascii = (self.cpu.ax & 0xFF) as u8;
+
+        // Restore AH, keep AL with the character
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+
         51
     }
 
     /// INT 21h, AH=08h: Read stdin without echo
     #[allow(dead_code)] // Called from handle_int21h
     fn int21h_stdin_no_echo(&mut self) -> u32 {
-        // Returns: AL = character read
-        self.cpu.ax &= 0xFF00;
+        // Returns: AL = character read (no echo)
+        // This function should block until a character is available
+        // Use INT 16h AH=00h to get keyboard input
+
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+
+        // Call INT 16h AH=00h (read keystroke) to get character
+        self.cpu.ax = 0x0000; // AH=00h
+        self.int16h_read_keystroke();
+
+        // Get the ASCII character from AL
+        let ascii = (self.cpu.ax & 0xFF) as u8;
+
+        // Restore AH, keep AL with the character
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+
         51
     }
 
@@ -1047,8 +1113,25 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int21h
     fn int21h_check_stdin(&mut self) -> u32 {
         // Returns: AL = 0xFF if character available, 0x00 if not
-        // For now, always return 0x00 (no input)
-        self.cpu.ax &= 0xFF00;
+        // Use INT 16h AH=01h to check for keystroke
+
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+
+        // Call INT 16h AH=01h (check keystroke)
+        self.cpu.ax = 0x0100; // AH=01h
+        self.int16h_check_keystroke();
+
+        // Check zero flag to see if key is available
+        let key_available = (self.cpu.flags & 0x0040) == 0; // ZF=0 means key available
+
+        // Set AL based on availability
+        if key_available {
+            self.cpu.ax = (saved_ax & 0xFF00) | 0xFF; // AL = 0xFF (character available)
+        } else {
+            self.cpu.ax = saved_ax & 0xFF00; // AL = 0x00 (no character)
+        }
+
         51
     }
 
@@ -1664,6 +1747,26 @@ impl PcCpu {
             drive
         );
 
+        // Check if drive exists
+        let drive_exists = if drive < 0x80 {
+            // Floppy drive - check if floppy is mounted
+            self.cpu.memory.has_floppy(drive)
+        } else if drive == 0x80 {
+            // Hard drive C: - check if hard drive is mounted
+            self.cpu.memory.has_hard_drive()
+        } else {
+            // Hard drive D: or higher - not supported
+            false
+        };
+
+        if !drive_exists {
+            eprintln!("INT 13h AH=08h: Drive 0x{:02X} does not exist", drive);
+            // Invalid drive - return error
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
         // Get drive parameters
         if let Some((cylinders, sectors_per_track, heads)) = DiskController::get_drive_params(drive)
         {
@@ -1809,6 +1912,14 @@ impl PcCpu {
             }
         } else {
             // Hard drive
+            // Check if hard drive exists (only drive 0x80 supported)
+            if drive != 0x80 || !self.cpu.memory.has_hard_drive() {
+                // No such drive
+                self.cpu.ax &= 0x00FF; // AH = 00h (no such drive)
+                self.set_carry_flag(false);
+                return 51;
+            }
+
             if let Some((cylinders, sectors_per_track, heads)) =
                 DiskController::get_drive_params(drive)
             {
@@ -2909,6 +3020,34 @@ impl PcCpu {
         51
     }
 
+    /// Handle INT 2Ah - Network Installation API
+    /// This is a DOS network function used during initialization
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int2ah(&mut self) -> u32 {
+        // Skip the INT 2Ah instruction (2 bytes: 0xCD 0x2A)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+        // Log the call for debugging
+        if LogConfig::global().should_log(LogCategory::Stubs, LogLevel::Debug) {
+            eprintln!(
+                "INT 0x2A AH=0x{:02X} called from {:04X}:{:04X}",
+                ah,
+                self.cpu.cs,
+                self.cpu.ip.wrapping_sub(2)
+            );
+        }
+
+        // Network Installation API stub
+        // All functions return AL=0 (not installed/not supported)
+        self.cpu.ax &= 0xFF00; // AL = 0 (not installed)
+        self.set_carry_flag(true); // CF = 1 (error/not installed)
+
+        51
+    }
+
     /// Handle INT 2Fh - Multiplex interrupt
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int2fh(&mut self) -> u32 {
@@ -3696,7 +3835,9 @@ mod tests {
 
     #[test]
     fn test_int13h_get_drive_params_floppy() {
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        // Mount a floppy disk so the drive exists
+        bus.mount_floppy_a(vec![0u8; 1474560]); // 1.44MB floppy
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -3744,7 +3885,9 @@ mod tests {
 
     #[test]
     fn test_int13h_get_drive_params_hard_drive() {
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        // Mount a hard drive so it exists
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]); // 10MB hard drive
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
