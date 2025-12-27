@@ -2880,6 +2880,26 @@ impl<M: Memory8086> Cpu8086<M> {
                             13
                         }
                     }
+                    // LSS - Load Far Pointer to SS (0x0F 0xB2) - 80386+
+                    0xB2 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        // LSS only works with memory operands
+                        if modbits != 0b11 {
+                            let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                            let offset = self.read_u16(seg, offset_ea);
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            self.set_reg16(reg, offset);
+                            self.ss = segment;
+                        }
+                        self.cycles += 7;
+                        7
+                    }
                     // LFS - Load Far Pointer to FS (0x0F 0xB4) - 80386+
                     0xB4 => {
                         if !self.model.supports_80386_instructions() {
@@ -11354,6 +11374,31 @@ mod tests {
         cpu.step();
         assert_eq!(cpu.bx, 0x5678, "BX should contain offset");
         assert_eq!(cpu.fs, 0x9ABC, "FS should contain segment");
+    }
+
+    #[test]
+    fn test_lss() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: LSS SP, [BX] at 0x0000:0x0100
+        // 0x0F 0xB2 = LSS
+        // ModR/M: 0b00_100_111 (mod=00, reg=SP=4, r/m=BX=7)
+        cpu.memory.load_program(0x0100, &[0x0F, 0xB2, 0b00_100_111]);
+
+        // Put far pointer data at DS:BX
+        cpu.ds = 0x3000;
+        cpu.bx = 0x0400;
+        cpu.memory.write_u16(0x30400, 0xFFFE); // Offset (new SP)
+        cpu.memory.write_u16(0x30402, 0x5000); // Segment (new SS)
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute LSS SP, [BX]
+        cpu.step();
+        assert_eq!(cpu.sp, 0xFFFE, "SP should contain offset");
+        assert_eq!(cpu.ss, 0x5000, "SS should contain segment");
     }
 
     #[test]
