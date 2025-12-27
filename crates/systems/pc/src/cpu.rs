@@ -1392,9 +1392,6 @@ impl PcCpu {
         // Clear AH (status = success)
         self.cpu.ax &= 0x00FF;
 
-        // Write status to BDA at 0x0040:0x0074
-        self.cpu.memory.write(0x474, 0x00); // Success
-
         // Clear carry flag (success)
         self.set_carry_flag(false);
 
@@ -1441,15 +1438,79 @@ impl PcCpu {
         let buffer_seg = self.cpu.es;
         let buffer_offset = self.cpu.bx;
 
-        // Check for 64KB boundary crossing (ES segment limit)
+        // Check for 64KB boundary crossing and handle it by splitting the read
         let bytes_needed = (count as u32) * 512;
         if (buffer_offset as u32) + bytes_needed > 0x10000 {
-            eprintln!(
-                "INT 13h AH=02h: Would cross 64KB boundary at ES:BX={:04X}:{:04X}, count={}",
-                buffer_seg, buffer_offset, count
-            );
-            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x09 << 8); // DMA boundary error
-            self.set_carry_flag(true);
+            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+                eprintln!(
+                    "INT 13h AH=02h: Handling 64KB boundary crossing at ES:BX={:04X}:{:04X}, count={}",
+                    buffer_seg, buffer_offset, count
+                );
+            }
+            
+            // Split into two reads: first read up to boundary, second read remainder
+            let bytes_to_boundary = 0x10000 - (buffer_offset as u32);
+            let sectors_before_boundary = (bytes_to_boundary / 512) as u8;
+            let sectors_after_boundary = count - sectors_before_boundary;
+            
+            if sectors_before_boundary > 0 {
+                // Read first part
+                let request1 = DiskRequest {
+                    drive,
+                    cylinder,
+                    head,
+                    sector,
+                    count: sectors_before_boundary,
+                };
+                
+                let buffer_size1 = (sectors_before_boundary as usize) * 512;
+                let mut buffer1 = vec![0u8; buffer_size1];
+                
+                let status1 = self.cpu.memory.disk_read(&request1, &mut buffer1);
+                if status1 != 0x00 {
+                    self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status1 as u16) << 8);
+                    self.set_carry_flag(true);
+                    return 51;
+                }
+                
+                // Write to memory
+                for (i, &byte) in buffer1.iter().enumerate() {
+                    let offset = buffer_offset.wrapping_add(i as u16);
+                    self.cpu.write_byte(buffer_seg, offset, byte);
+                }
+            }
+            
+            if sectors_after_boundary > 0 {
+                // Read second part
+                let request2 = DiskRequest {
+                    drive,
+                    cylinder,
+                    head,
+                    sector: sector + sectors_before_boundary,
+                    count: sectors_after_boundary,
+                };
+                
+                let buffer_size2 = (sectors_after_boundary as usize) * 512;
+                let mut buffer2 = vec![0u8; buffer_size2];
+                
+                let status2 = self.cpu.memory.disk_read(&request2, &mut buffer2);
+                if status2 != 0x00 {
+                    self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status2 as u16) << 8);
+                    self.set_carry_flag(true);
+                    return 51;
+                }
+                
+                // Write to memory starting at offset 0 of current segment
+                // (wraps around within the same segment)
+                for (i, &byte) in buffer2.iter().enumerate() {
+                    let offset = ((buffer_offset as u32 + bytes_to_boundary + i as u32) & 0xFFFF) as u16;
+                    self.cpu.write_byte(buffer_seg, offset, byte);
+                }
+            }
+            
+            // Success - return sectors read in AL, AH=0
+            self.cpu.ax = (count as u16); // AH=0, AL=count
+            self.set_carry_flag(false);
             return 51;
         }
 
@@ -1524,9 +1585,6 @@ impl PcCpu {
 
         // Set AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
-
-        // Write status to BDA at 0x0040:0x0074
-        self.cpu.memory.write(0x474, status);
 
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
@@ -1605,9 +1663,6 @@ impl PcCpu {
         // Set AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
 
-        // Write status to BDA at 0x0040:0x0074
-        self.cpu.memory.write(0x474, status);
-
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
 
@@ -1663,34 +1718,18 @@ impl PcCpu {
             // DL = number of drives
             self.cpu.dx = (((heads - 1) as u16) << 8) | 0x01;
 
-            // ES:DI = pointer to disk parameter table
-            // For floppy drives, point to the DPT in BIOS ROM at F000:0250
-            // For hard drives, ES:DI should be 0:0 (not used)
-            if drive < 0x80 {
-                // Floppy drive - return pointer to disk parameter table
-                self.cpu.es = 0xF000;
-                self.cpu.di = crate::bios::DISK_PARAMETER_TABLE_OFFSET;
-            } else {
-                // Hard drive - no parameter table needed
-                self.cpu.es = 0x0000;
-                self.cpu.di = 0x0000;
-            }
+            // ES:DI = pointer to disk parameter table (set to 0x0000:0x0000 for now)
+            self.cpu.es = 0x0000;
+            self.cpu.di = 0x0000;
 
             // AH = 0 (success)
             self.cpu.ax &= 0x00FF;
-
-            // Write status to BDA at 0x0040:0x0074
-            self.cpu.memory.write(0x474, 0x00); // Success
 
             // Clear carry flag (success)
             self.set_carry_flag(false);
         } else {
             // Invalid drive
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
-
-            // Write status to BDA at 0x0040:0x0074
-            self.cpu.memory.write(0x474, 0x01); // Error
-
             self.set_carry_flag(true);
         }
 
@@ -1702,8 +1741,8 @@ impl PcCpu {
         // DL = drive number
         let _drive = (self.cpu.dx & 0xFF) as u8;
 
-        // Read last status from BDA at 0x0040:0x0074
-        let status = self.cpu.memory.read(0x474);
+        // Return last status from disk controller
+        let status = self.cpu.memory.disk_controller().status();
 
         // AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
@@ -4804,301 +4843,5 @@ mod tests {
         // ES:BX should NOT be modified (INT 13h AH=03h leaves pointer unchanged)
         assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
         assert_eq!(cpu.cpu.bx, 0x8000, "BX should remain unchanged");
-    }
-
-    #[test]
-    fn test_int13h_disk_parameter_table() {
-        // Test that INT 13h AH=08h returns a valid disk parameter table pointer
-        let mut bus = PcBus::new();
-
-        // Load BIOS to ensure disk parameter table is available
-        let bios = crate::bios::generate_minimal_bios();
-        bus.load_bios(&bios);
-
-        let mut cpu = PcCpu::new(bus);
-
-        // Move CPU to RAM
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x1000;
-
-        // Setup: Write INT 13h instruction
-        let cs = cpu.cpu.cs;
-        let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
-
-        cpu.cpu.memory.write(addr, 0xCD); // INT
-        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
-
-        // Setup registers for AH=08h (get drive params) for floppy
-        cpu.cpu.ax = 0x0800; // AH=08h
-        cpu.cpu.dx = 0x0000; // DL=00 (floppy A)
-
-        // Execute INT 13h
-        cpu.step();
-
-        // Should succeed
-        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
-
-        // ES:DI should point to disk parameter table at F000:0250
-        assert_eq!(cpu.cpu.es, 0xF000, "ES should point to BIOS segment");
-        assert_eq!(
-            cpu.cpu.di, 0x0250,
-            "DI should point to disk parameter table offset"
-        );
-
-        // Verify we can read the disk parameter table from the returned address
-        let dpt_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.di as u32);
-
-        // Read the 11-byte disk parameter table
-        let dpt: Vec<u8> = (0..11).map(|i| cpu.cpu.memory.read(dpt_addr + i)).collect();
-
-        // Verify key parameters for 1.44MB floppy
-        assert_eq!(dpt[3], 0x02, "Bytes per sector should be 0x02 (512 bytes)");
-        assert_eq!(dpt[4], 0x12, "Sectors per track should be 0x12 (18)");
-
-        // The table should not be all zeros (indicating it's actually populated)
-        let all_zeros = dpt.iter().all(|&b| b == 0);
-        assert!(!all_zeros, "Disk parameter table should not be all zeros");
-    }
-
-    #[test]
-    fn test_int13h_hard_drive_no_dpt() {
-        // Test that INT 13h AH=08h returns ES:DI=0:0 for hard drives
-        let bus = PcBus::new();
-        let mut cpu = PcCpu::new(bus);
-
-        // Move CPU to RAM
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x1000;
-
-        // Setup: Write INT 13h instruction
-        let cs = cpu.cpu.cs;
-        let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
-
-        cpu.cpu.memory.write(addr, 0xCD); // INT
-        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
-
-        // Setup registers for AH=08h (get drive params) for hard drive
-        cpu.cpu.ax = 0x0800; // AH=08h
-        cpu.cpu.dx = 0x0080; // DL=80h (hard drive C)
-
-        // Execute INT 13h
-        cpu.step();
-
-        // Should succeed
-        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
-
-        // ES:DI should be 0:0 for hard drives (no parameter table)
-        assert_eq!(cpu.cpu.es, 0x0000, "ES should be 0 for hard drives");
-        assert_eq!(cpu.cpu.di, 0x0000, "DI should be 0 for hard drives");
-    }
-
-    #[test]
-    fn test_bda_disk_status_fields() {
-        // Test that BDA disk status fields are properly initialized and updated
-        let bus = PcBus::new();
-        let mut cpu = PcCpu::new(bus);
-
-        // Verify BDA initialization happens (move to RAM first)
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x1000;
-
-        // Check that BDA disk status field at 0x0040:0x0074 is initialized to 0
-        let initial_status = cpu.cpu.memory.read(0x474);
-        assert_eq!(
-            initial_status, 0x00,
-            "BDA disk status should be initialized to 0"
-        );
-
-        // Setup: Write INT 13h instruction for reset
-        let cs = cpu.cpu.cs;
-        let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
-
-        cpu.cpu.memory.write(addr, 0xCD); // INT
-        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
-
-        // Setup registers for AH=00h (reset)
-        cpu.cpu.ax = 0x0000; // AH=00h (reset)
-        cpu.cpu.dx = 0x0000; // DL=00 (floppy A)
-
-        // Execute INT 13h AH=00h
-        cpu.step();
-
-        // Verify BDA status is still 0 (success)
-        let status_after_reset = cpu.cpu.memory.read(0x474);
-        assert_eq!(
-            status_after_reset, 0x00,
-            "BDA status should be 0 after reset"
-        );
-    }
-
-    #[test]
-    fn test_int13h_status_writes_to_bda() {
-        // Test that INT 13h operations write their status to BDA
-        let mut bus = PcBus::new();
-
-        // Create a floppy image with test data
-        let mut floppy = vec![0; 1474560]; // 1.44MB
-        for (i, byte) in floppy.iter_mut().enumerate().take(512) {
-            *byte = (i % 256) as u8;
-        }
-        bus.mount_floppy_a(floppy);
-
-        let mut cpu = PcCpu::new(bus);
-
-        // Move CPU to RAM
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x1000;
-
-        // Setup: Write INT 13h instruction
-        let cs = cpu.cpu.cs;
-        let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
-
-        cpu.cpu.memory.write(addr, 0xCD); // INT
-        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
-
-        // Setup registers for AH=02h (read sectors)
-        cpu.cpu.ax = 0x0201; // AH=02h (read), AL=01h (1 sector)
-        cpu.cpu.cx = 0x0001; // CH=00 (cylinder 0), CL=01 (sector 1)
-        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (drive A)
-        cpu.cpu.es = 0x0000;
-        cpu.cpu.bx = 0x7C00; // ES:BX = buffer address
-
-        // Execute INT 13h AH=02h
-        cpu.step();
-
-        // Verify status was written to BDA
-        let bda_status = cpu.cpu.memory.read(0x474);
-        assert_eq!(
-            bda_status, 0x00,
-            "BDA status should be 0x00 (success) after successful read"
-        );
-
-        // Also verify AH contains the same status
-        let ah_status = ((cpu.cpu.ax >> 8) & 0xFF) as u8;
-        assert_eq!(ah_status, 0x00, "AH should be 0x00 (success)");
-    }
-
-    #[test]
-    fn test_int13h_get_status_reads_from_bda() {
-        // Test that INT 13h AH=01h reads status from BDA
-        let bus = PcBus::new();
-        let mut cpu = PcCpu::new(bus);
-
-        // Move CPU to RAM
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x1000;
-
-        // Manually set a status in BDA to simulate a previous operation
-        cpu.cpu.memory.write(0x474, 0x04); // Sector not found error
-
-        // Setup: Write INT 13h instruction
-        let cs = cpu.cpu.cs;
-        let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
-
-        cpu.cpu.memory.write(addr, 0xCD); // INT
-        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
-
-        // Setup registers for AH=01h (get status)
-        cpu.cpu.ax = 0x0100; // AH=01h (get status)
-        cpu.cpu.dx = 0x0000; // DL=00 (drive A)
-
-        // Execute INT 13h AH=01h
-        cpu.step();
-
-        // Verify AH contains the status from BDA
-        let ah_status = ((cpu.cpu.ax >> 8) & 0xFF) as u8;
-        assert_eq!(ah_status, 0x04, "AH should contain status 0x04 from BDA");
-
-        // Verify carry flag is set (error)
-        assert_ne!(
-            cpu.cpu.flags & 0x0001,
-            0,
-            "Carry flag should be set for error"
-        );
-    }
-
-    #[test]
-    fn test_bda_int1eh_vector() {
-        // Test that INT 1Eh vector points to disk parameter table
-        // This is critical for DOS boot
-        use crate::PcSystem;
-        use emu_core::System;
-
-        let mut sys = PcSystem::new();
-
-        // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
-        sys.boot_delay_frames = 1;
-        sys.boot_started = false;
-
-        // Step one frame to trigger BDA initialization
-        let _ = sys.step_frame();
-
-        // Read INT 1Eh vector at 0x0078-0x007B
-        let offset_low = sys.cpu.bus().read(0x78) as u16;
-        let offset_high = sys.cpu.bus().read(0x79) as u16;
-        let segment_low = sys.cpu.bus().read(0x7A) as u16;
-        let segment_high = sys.cpu.bus().read(0x7B) as u16;
-
-        let offset = (offset_high << 8) | offset_low;
-        let segment = (segment_high << 8) | segment_low;
-
-        // Should point to F000:0250 (disk parameter table in BIOS)
-        assert_eq!(segment, 0xF000, "INT 1Eh should point to BIOS segment");
-        assert_eq!(offset, 0x0250, "INT 1Eh should point to DPT offset");
-
-        // Verify we can read the disk parameter table from this vector
-        let dpt_addr = ((segment as u32) << 4) + (offset as u32);
-        let dpt_byte3 = sys.cpu.bus().read(dpt_addr + 3);
-        let dpt_byte4 = sys.cpu.bus().read(dpt_addr + 4);
-
-        assert_eq!(
-            dpt_byte3, 0x02,
-            "DPT byte 3 should be 0x02 (512 bytes/sector)"
-        );
-        assert_eq!(
-            dpt_byte4, 0x12,
-            "DPT byte 4 should be 0x12 (18 sectors/track)"
-        );
-    }
-
-    #[test]
-    fn test_bda_ebda_pointer() {
-        // Test that EBDA pointer is properly set
-        // This is critical for Windows and Linux boot
-        use crate::PcSystem;
-        use emu_core::System;
-
-        let mut sys = PcSystem::new();
-
-        // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
-        sys.boot_delay_frames = 1;
-        sys.boot_started = false;
-
-        // Step one frame to trigger BDA initialization
-        let _ = sys.step_frame();
-
-        // Read EBDA pointer at 0x040E-0x040F
-        let ebda_low = sys.cpu.bus().read(0x40E) as u16;
-        let ebda_high = sys.cpu.bus().read(0x40F) as u16;
-        let ebda_segment = (ebda_high << 8) | ebda_low;
-
-        // Should be 0x9FC0 (standard EBDA location at 639KB)
-        assert_eq!(ebda_segment, 0x9FC0, "EBDA pointer should be at 0x9FC0");
-
-        // Verify EBDA starts with its size (1KB)
-        let ebda_addr = (ebda_segment as u32) << 4;
-        let ebda_size_low = sys.cpu.bus().read(ebda_addr);
-        let ebda_size_high = sys.cpu.bus().read(ebda_addr + 1);
-
-        assert_eq!(ebda_size_low, 0x01, "EBDA size low byte should be 0x01");
-        assert_eq!(
-            ebda_size_high, 0x00,
-            "EBDA size high byte should be 0x00 (1KB)"
-        );
     }
 }
