@@ -222,6 +222,11 @@ pub struct Cpu8086<M: Memory8086> {
     /// Consumed and cleared after the next memory-accessing instruction
     segment_override: Option<SegmentOverride>,
 
+    /// Operand-size override for next instruction (0x66 prefix, 80386+)
+    /// When set, 16-bit operations become 32-bit and vice versa
+    /// Consumed and cleared after the next instruction
+    operand_size_override: bool,
+
     /// CPU model (8086, 80186, 80286, etc.)
     model: CpuModel,
 
@@ -290,6 +295,7 @@ impl<M: Memory8086> Cpu8086<M> {
             memory,
             halted: false,
             segment_override: None,
+            operand_size_override: false,
             model,
             protected_mode: ProtectedModeState::new(),
             tsc: 0,
@@ -2874,6 +2880,46 @@ impl<M: Memory8086> Cpu8086<M> {
                             13
                         }
                     }
+                    // LFS - Load Far Pointer to FS (0x0F 0xB4) - 80386+
+                    0xB4 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        // LFS only works with memory operands
+                        if modbits != 0b11 {
+                            let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                            let offset = self.read_u16(seg, offset_ea);
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            self.set_reg16(reg, offset);
+                            self.fs = segment;
+                        }
+                        self.cycles += 7;
+                        7
+                    }
+                    // LGS - Load Far Pointer to GS (0x0F 0xB5) - 80386+
+                    0xB5 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        let modrm = self.fetch_u8();
+                        let (modbits, reg, rm) = Self::decode_modrm(modrm);
+                        // LGS only works with memory operands
+                        if modbits != 0b11 {
+                            let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
+                            let offset = self.read_u16(seg, offset_ea);
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            self.set_reg16(reg, offset);
+                            self.gs = segment;
+                        }
+                        self.cycles += 7;
+                        7
+                    }
                     // SHLD - Double Precision Shift Left (0x0F 0xA4, 0xA5) - 80386+
                     0xA4 => {
                         if !self.model.supports_80386_instructions() {
@@ -2944,6 +2990,50 @@ impl<M: Memory8086> Cpu8086<M> {
                         } else {
                             5
                         }
+                    }
+                    // PUSH FS (0x0F 0xA0) - 80386+
+                    0xA0 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        self.push(self.fs);
+                        self.cycles += 2;
+                        2
+                    }
+                    // POP FS (0x0F 0xA1) - 80386+
+                    0xA1 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        self.fs = self.pop();
+                        self.cycles += 7;
+                        7
+                    }
+                    // PUSH GS (0x0F 0xA8) - 80386+
+                    0xA8 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        self.push(self.gs);
+                        self.cycles += 2;
+                        2
+                    }
+                    // POP GS (0x0F 0xA9) - 80386+
+                    0xA9 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
+                        self.gs = self.pop();
+                        self.cycles += 7;
+                        7
                     }
                     // MOV reg, CRx - Move from Control Register (0x0F 0x20) - 80386+
                     0x20 => {
@@ -6246,6 +6336,20 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.step() // Execute next instruction with GS override
             }
 
+            // Operand-size override prefix (0x66) - 80386+
+            0x66 => {
+                if !self.model.supports_80386_instructions() {
+                    // Invalid opcode on 8086/8088/80186/80286
+                    self.cycles += 10;
+                    return 10;
+                }
+                // Operand-size override prefix
+                // On 80386+, this toggles between 16-bit and 32-bit operand size
+                // For now, we set a flag and handle it in individual instructions
+                self.operand_size_override = true;
+                self.step() // Execute next instruction with operand size override
+            }
+
             // PUSH immediate word (0x68) - 80186+
             0x68 => {
                 if !self.model.supports_80186_instructions() {
@@ -6786,6 +6890,10 @@ impl<M: Memory8086> Cpu8086<M> {
                 1
             }
         };
+
+        // Clear operand-size override flag after instruction execution
+        // This flag is only valid for the immediately following instruction
+        self.operand_size_override = false;
 
         // Increment TSC on Pentium+ processors
         // TSC increments by the number of cycles executed
@@ -11161,5 +11269,150 @@ mod tests {
             saved_ip, 0x0302,
             "Saved IP should point AFTER the INT instruction for software interrupts"
         );
+    }
+
+    #[test]
+    fn test_push_pop_fs() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: PUSH FS, POP FS at 0x0000:0x0100
+        // 0x0F 0xA0 = PUSH FS
+        // 0x0F 0xA1 = POP FS
+        cpu.memory.load_program(0x0100, &[0x0F, 0xA0, 0x0F, 0xA1]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        cpu.ss = 0x1000;
+        cpu.sp = 0xFFFE;
+        cpu.fs = 0x1234;
+
+        // Execute PUSH FS
+        cpu.step();
+        assert_eq!(cpu.sp, 0xFFFC, "SP should decrease by 2");
+        assert_eq!(cpu.read_u16(cpu.ss, cpu.sp), 0x1234, "FS value should be on stack");
+
+        // Modify FS
+        cpu.fs = 0x5678;
+
+        // Execute POP FS
+        cpu.step();
+        assert_eq!(cpu.sp, 0xFFFE, "SP should be restored");
+        assert_eq!(cpu.fs, 0x1234, "FS should be restored from stack");
+    }
+
+    #[test]
+    fn test_push_pop_gs() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: PUSH GS, POP GS at 0x0000:0x0100
+        // 0x0F 0xA8 = PUSH GS
+        // 0x0F 0xA9 = POP GS
+        cpu.memory.load_program(0x0100, &[0x0F, 0xA8, 0x0F, 0xA9]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        cpu.ss = 0x1000;
+        cpu.sp = 0xFFFE;
+        cpu.gs = 0xABCD;
+
+        // Execute PUSH GS
+        cpu.step();
+        assert_eq!(cpu.sp, 0xFFFC, "SP should decrease by 2");
+        assert_eq!(cpu.read_u16(cpu.ss, cpu.sp), 0xABCD, "GS value should be on stack");
+
+        // Modify GS
+        cpu.gs = 0xEF01;
+
+        // Execute POP GS
+        cpu.step();
+        assert_eq!(cpu.sp, 0xFFFE, "SP should be restored");
+        assert_eq!(cpu.gs, 0xABCD, "GS should be restored from stack");
+    }
+
+    #[test]
+    fn test_lfs() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: LFS BX, [SI] at 0x0000:0x0100
+        // 0x0F 0xB4 = LFS
+        // ModR/M: 0b00_011_100 (mod=00, reg=BX=3, r/m=SI=4)
+        cpu.memory.load_program(0x0100, &[0x0F, 0xB4, 0b00_011_100]);
+
+        // Put far pointer data at DS:SI
+        cpu.ds = 0x1000;
+        cpu.si = 0x0200;
+        cpu.memory.write_u16(0x10200, 0x5678); // Offset
+        cpu.memory.write_u16(0x10202, 0x9ABC); // Segment
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute LFS BX, [SI]
+        cpu.step();
+        assert_eq!(cpu.bx, 0x5678, "BX should contain offset");
+        assert_eq!(cpu.fs, 0x9ABC, "FS should contain segment");
+    }
+
+    #[test]
+    fn test_lgs() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: LGS DX, [DI] at 0x0000:0x0100
+        // 0x0F 0xB5 = LGS
+        // ModR/M: 0b00_010_101 (mod=00, reg=DX=2, r/m=DI=5)
+        cpu.memory.load_program(0x0100, &[0x0F, 0xB5, 0b00_010_101]);
+
+        // Put far pointer data at DS:DI
+        cpu.ds = 0x2000;
+        cpu.di = 0x0300;
+        cpu.memory.write_u16(0x20300, 0x1122); // Offset
+        cpu.memory.write_u16(0x20302, 0x3344); // Segment
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute LGS DX, [DI]
+        cpu.step();
+        assert_eq!(cpu.dx, 0x1122, "DX should contain offset");
+        assert_eq!(cpu.gs, 0x3344, "GS should contain segment");
+    }
+
+    #[test]
+    fn test_operand_size_override_prefix() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        // Setup: 0x66 prefix followed by NOP at 0x0000:0x0100
+        // 0x66 = Operand-size override prefix
+        // 0x90 = NOP
+        cpu.memory.load_program(0x0100, &[0x66, 0x90]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute 0x66 NOP
+        cpu.step();
+        
+        // The operand_size_override flag should be cleared after instruction
+        assert_eq!(cpu.operand_size_override, false, "Operand size override should be cleared after instruction");
+    }
+
+    #[test]
+    fn test_fs_gs_invalid_on_80286() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80286);
+
+        // PUSH FS should be invalid on 80286
+        cpu.memory.load_program(0x0100, &[0x0F, 0xA0]);
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        let initial_cycles = cpu.cycles;
+        cpu.step();
+        // Should execute but as invalid (returns early)
+        assert_eq!(cpu.cycles - initial_cycles, 10, "Invalid opcode should consume 10 cycles");
     }
 }
