@@ -826,7 +826,7 @@ impl PcCpu {
             }
 
             // Found a make code - convert and return it
-            let ascii = scancode_to_ascii(scancode);
+            let ascii = self.scancode_to_ascii(scancode);
 
             // AH = scan code, AL = ASCII character
             self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
@@ -851,7 +851,7 @@ impl PcCpu {
 
         // Look for the first make code in the buffer (skip any break codes)
         if let Some(scancode) = self.cpu.memory.keyboard.peek_make_code() {
-            let ascii = scancode_to_ascii(scancode);
+            let ascii = self.scancode_to_ascii(scancode);
 
             // Set ZF = 0 (key available)
             self.set_zero_flag(false);
@@ -870,9 +870,11 @@ impl PcCpu {
     /// INT 16h, AH=02h: Get shift flags
     fn int16h_get_shift_flags(&mut self) -> u32 {
         // Returns: AL = shift flags
-        // Bit 0 = right shift, Bit 1 = left shift, etc.
-        // For now, return 0 (no keys pressed)
-        self.cpu.ax &= 0xFF00;
+        // Bit 0 = right shift, Bit 1 = left shift
+        // Bit 2 = Ctrl, Bit 3 = Alt
+        // Bit 4 = Scroll Lock, Bit 5 = Num Lock, Bit 6 = Caps Lock, Bit 7 = Insert
+        let flags = self.cpu.memory.keyboard.get_shift_flags();
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (flags as u16);
         51
     }
 
@@ -3266,9 +3268,115 @@ impl PcCpu {
             );
         }
     }
+
+    /// Convert PC scancode to ASCII character
+    /// Handles Ctrl, Shift, and Alt modifiers
+    fn scancode_to_ascii(&self, scancode: u8) -> u8 {
+        use crate::keyboard::*;
+
+        // Skip break codes (high bit set)
+        if scancode & 0x80 != 0 {
+            return 0;
+        }
+
+        // Check if Ctrl is pressed
+        let ctrl_pressed = self.cpu.memory.keyboard.is_ctrl_pressed();
+
+        // Handle Ctrl+key combinations for letters (generate control characters)
+        if ctrl_pressed {
+            match scancode {
+                SCANCODE_A => return 0x01, // Ctrl+A
+                SCANCODE_B => return 0x02, // Ctrl+B
+                SCANCODE_C => return 0x03, // Ctrl+C (break)
+                SCANCODE_D => return 0x04, // Ctrl+D
+                SCANCODE_E => return 0x05, // Ctrl+E
+                SCANCODE_F => return 0x06, // Ctrl+F
+                SCANCODE_G => return 0x07, // Ctrl+G (bell)
+                SCANCODE_H => return 0x08, // Ctrl+H (backspace)
+                SCANCODE_I => return 0x09, // Ctrl+I (tab)
+                SCANCODE_J => return 0x0A, // Ctrl+J (line feed)
+                SCANCODE_K => return 0x0B, // Ctrl+K
+                SCANCODE_L => return 0x0C, // Ctrl+L (form feed)
+                SCANCODE_M => return 0x0D, // Ctrl+M (carriage return)
+                SCANCODE_N => return 0x0E, // Ctrl+N
+                SCANCODE_O => return 0x0F, // Ctrl+O
+                SCANCODE_P => return 0x10, // Ctrl+P
+                SCANCODE_Q => return 0x11, // Ctrl+Q
+                SCANCODE_R => return 0x12, // Ctrl+R
+                SCANCODE_S => return 0x13, // Ctrl+S
+                SCANCODE_T => return 0x14, // Ctrl+T
+                SCANCODE_U => return 0x15, // Ctrl+U
+                SCANCODE_V => return 0x16, // Ctrl+V
+                SCANCODE_W => return 0x17, // Ctrl+W
+                SCANCODE_X => return 0x18, // Ctrl+X
+                SCANCODE_Y => return 0x19, // Ctrl+Y
+                SCANCODE_Z => return 0x1A, // Ctrl+Z (suspend)
+                _ => {}
+            }
+        }
+
+        // Normal character mapping (without modifiers)
+        match scancode {
+            SCANCODE_A => b'a',
+            SCANCODE_B => b'b',
+            SCANCODE_C => b'c',
+            SCANCODE_D => b'd',
+            SCANCODE_E => b'e',
+            SCANCODE_F => b'f',
+            SCANCODE_G => b'g',
+            SCANCODE_H => b'h',
+            SCANCODE_I => b'i',
+            SCANCODE_J => b'j',
+            SCANCODE_K => b'k',
+            SCANCODE_L => b'l',
+            SCANCODE_M => b'm',
+            SCANCODE_N => b'n',
+            SCANCODE_O => b'o',
+            SCANCODE_P => b'p',
+            SCANCODE_Q => b'q',
+            SCANCODE_R => b'r',
+            SCANCODE_S => b's',
+            SCANCODE_T => b't',
+            SCANCODE_U => b'u',
+            SCANCODE_V => b'v',
+            SCANCODE_W => b'w',
+            SCANCODE_X => b'x',
+            SCANCODE_Y => b'y',
+            SCANCODE_Z => b'z',
+            SCANCODE_0 => b'0',
+            SCANCODE_1 => b'1',
+            SCANCODE_2 => b'2',
+            SCANCODE_3 => b'3',
+            SCANCODE_4 => b'4',
+            SCANCODE_5 => b'5',
+            SCANCODE_6 => b'6',
+            SCANCODE_7 => b'7',
+            SCANCODE_8 => b'8',
+            SCANCODE_9 => b'9',
+            SCANCODE_SPACE => b' ',
+            SCANCODE_ENTER => b'\n', // Line feed (0x0A) - advances to next line
+            SCANCODE_BACKSPACE => 0x08,
+            SCANCODE_TAB => b'\t',
+            SCANCODE_ESC => 0x1B,
+            SCANCODE_COMMA => b',',
+            SCANCODE_PERIOD => b'.',
+            SCANCODE_SLASH => b'/',
+            SCANCODE_SEMICOLON => b';',
+            SCANCODE_APOSTROPHE => b'\'',
+            SCANCODE_LEFT_BRACKET => b'[',
+            SCANCODE_RIGHT_BRACKET => b']',
+            SCANCODE_BACKSLASH => b'\\',
+            SCANCODE_MINUS => b'-',
+            SCANCODE_EQUALS => b'=',
+            SCANCODE_BACKTICK => b'`',
+            _ => 0, // No ASCII equivalent
+        }
+    }
 }
 
 /// Convert PC scancode to ASCII character (simplified mapping)
+/// This is kept for compatibility but should not be used internally
+#[allow(dead_code)]
 fn scancode_to_ascii(scancode: u8) -> u8 {
     use crate::keyboard::*;
 

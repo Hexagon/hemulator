@@ -11,6 +11,11 @@ pub struct Keyboard {
     scancode_buffer: VecDeque<u8>,
     /// Maximum buffer size
     max_buffer_size: usize,
+    /// Modifier key states (for INT 16h AH=02h)
+    /// Bit 0 = Right Shift, Bit 1 = Left Shift
+    /// Bit 2 = Ctrl, Bit 3 = Alt
+    /// Bit 4 = Scroll Lock, Bit 5 = Num Lock, Bit 6 = Caps Lock, Bit 7 = Insert
+    shift_flags: u8,
 }
 
 impl Keyboard {
@@ -19,6 +24,7 @@ impl Keyboard {
         Self {
             scancode_buffer: VecDeque::with_capacity(16),
             max_buffer_size: 16,
+            shift_flags: 0,
         }
     }
 
@@ -48,6 +54,15 @@ impl Keyboard {
 
     /// Add a key press event (generates make code)
     pub fn key_press(&mut self, key: u8) {
+        // Update shift flags for modifier keys
+        match key {
+            SCANCODE_LEFT_SHIFT => self.shift_flags |= 0x02, // Bit 1 = Left Shift
+            SCANCODE_RIGHT_SHIFT => self.shift_flags |= 0x01, // Bit 0 = Right Shift
+            SCANCODE_LEFT_CTRL => self.shift_flags |= 0x04,  // Bit 2 = Ctrl
+            SCANCODE_LEFT_ALT => self.shift_flags |= 0x08,   // Bit 3 = Alt
+            _ => {}
+        }
+
         if self.scancode_buffer.len() < self.max_buffer_size {
             self.scancode_buffer.push_back(key);
         }
@@ -55,6 +70,15 @@ impl Keyboard {
 
     /// Add a key release event (generates break code)
     pub fn key_release(&mut self, key: u8) {
+        // Update shift flags for modifier keys
+        match key {
+            SCANCODE_LEFT_SHIFT => self.shift_flags &= !0x02, // Clear bit 1
+            SCANCODE_RIGHT_SHIFT => self.shift_flags &= !0x01, // Clear bit 0
+            SCANCODE_LEFT_CTRL => self.shift_flags &= !0x04,  // Clear bit 2
+            SCANCODE_LEFT_ALT => self.shift_flags &= !0x08,   // Clear bit 3
+            _ => {}
+        }
+
         if self.scancode_buffer.len() < self.max_buffer_size {
             self.scancode_buffer.push_back(key | 0x80); // Break code has high bit set
         }
@@ -70,6 +94,26 @@ impl Keyboard {
         self.scancode_buffer
             .iter()
             .any(|&code| code == SCANCODE_ESC)
+    }
+
+    /// Get the current shift flags (for INT 16h AH=02h)
+    pub fn get_shift_flags(&self) -> u8 {
+        self.shift_flags
+    }
+
+    /// Check if Ctrl is pressed
+    pub fn is_ctrl_pressed(&self) -> bool {
+        self.shift_flags & 0x04 != 0
+    }
+
+    /// Check if Alt is pressed
+    pub fn is_alt_pressed(&self) -> bool {
+        self.shift_flags & 0x08 != 0
+    }
+
+    /// Check if Shift is pressed
+    pub fn is_shift_pressed(&self) -> bool {
+        self.shift_flags & 0x03 != 0 // Either left or right shift
     }
 }
 
