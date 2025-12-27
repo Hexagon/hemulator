@@ -451,3 +451,80 @@ fn test_settings_empty_json_deserialize() {
         }
     }
 }
+
+#[test]
+fn test_settings_roundtrip_with_saved_config() {
+    use std::fs;
+
+    // This simulates the real-world scenario from the bug report:
+    // 1. App starts without config.json
+    // 2. Settings::load() returns defaults
+    // 3. settings.save() writes config.json
+    // 4. App restarts and loads config.json
+
+    let test_dir = std::env::temp_dir().join("hemulator_roundtrip_test");
+    let _ = fs::remove_dir_all(&test_dir); // Clean up from previous runs
+    fs::create_dir_all(&test_dir).unwrap();
+
+    // Change to test directory
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&test_dir).unwrap();
+
+    // Step 1: First launch - no config.json exists
+    let settings1 = Settings::load();
+    assert_eq!(settings1.window_width, 512);
+    assert_eq!(settings1.window_height, 480);
+
+    // Step 2: Save settings (creates config.json)
+    settings1.save().unwrap();
+
+    // Verify config.json was created
+    assert!(test_dir.join("config.json").exists());
+
+    // Step 3: Second launch - load from config.json
+    let settings2 = Settings::load();
+    assert_eq!(
+        settings2.window_width, 512,
+        "Loaded window_width should match saved value"
+    );
+    assert_eq!(
+        settings2.window_height, 480,
+        "Loaded window_height should match saved value"
+    );
+    assert_eq!(settings2.video_backend, "software");
+    assert_eq!(settings2.input.player1.a, "Z");
+
+    // Step 4: Simulate an old or partial config.json (manually edit it)
+    let config_content = fs::read_to_string(test_dir.join("config.json")).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+
+    // Remove window_width and window_height to simulate old config
+    if let serde_json::Value::Object(ref mut obj) = json {
+        obj.remove("window_width");
+        obj.remove("window_height");
+    }
+
+    // Write the modified config back
+    fs::write(
+        test_dir.join("config.json"),
+        serde_json::to_string_pretty(&json).unwrap(),
+    )
+    .unwrap();
+
+    // Step 5: Third launch - should still work with missing fields
+    let settings3 = Settings::load();
+    assert_eq!(
+        settings3.window_width, 512,
+        "Missing window_width should use default"
+    );
+    assert_eq!(
+        settings3.window_height, 480,
+        "Missing window_height should use default"
+    );
+
+    // Cleanup
+    std::env::set_current_dir(&original_dir).unwrap();
+    fs::remove_dir_all(&test_dir).unwrap();
+
+    println!("Roundtrip test passed!");
+}
