@@ -483,7 +483,7 @@ fn save_project(
             "nes" | "gameboy" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
             _ => vec![],
         };
-        
+
         for (mount_id, mount_path) in &runtime_state.current_mounts {
             if relevant_mounts.contains(&mount_id.as_str()) {
                 project.set_mount(mount_id.clone(), mount_path.clone());
@@ -651,15 +651,15 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 #[derive(Debug, Default)]
 struct CliArgs {
     rom_path: Option<String>,
-    system: Option<String>,                      // System to start (pc, nes, gb, atari2600, snes, n64)
-    slot1: Option<String>,                       // BIOS or primary file
-    slot2: Option<String>,                       // FloppyA
-    slot3: Option<String>,                       // FloppyB
-    slot4: Option<String>,                       // HardDrive
-    slot5: Option<String>,                       // Reserved for future use
+    system: Option<String>, // System to start (pc, nes, gb, atari2600, snes, n64)
+    slot1: Option<String>,  // BIOS or primary file
+    slot2: Option<String>,  // FloppyA
+    slot3: Option<String>,  // FloppyB
+    slot4: Option<String>,  // HardDrive
+    slot5: Option<String>,  // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
-    show_help: bool,                             // Show help message
-    show_version: bool,                          // Show version
+    show_help: bool,        // Show help message
+    show_version: bool,     // Show version
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -689,7 +689,9 @@ impl CliArgs {
                     if let Some(system) = arg_iter.next() {
                         args.system = Some(system);
                     } else {
-                        eprintln!("Error: --system requires a value (pc, nes, gb, atari2600, snes, n64).");
+                        eprintln!(
+                            "Error: --system requires a value (pc, nes, gb, atari2600, snes, n64)."
+                        );
                         std::process::exit(1);
                     }
                 }
@@ -796,7 +798,10 @@ impl CliArgs {
 
     /// Print usage information
     fn print_usage() {
-        eprintln!("Hemulator - Multi-System Emulator v{}", env!("CARGO_PKG_VERSION"));
+        eprintln!(
+            "Hemulator - Multi-System Emulator v{}",
+            env!("CARGO_PKG_VERSION")
+        );
         eprintln!();
         eprintln!("Usage: hemu [OPTIONS] [FILE]");
         eprintln!();
@@ -806,7 +811,9 @@ impl CliArgs {
         eprintln!("Options:");
         eprintln!("  -h, --help               Show this help message");
         eprintln!("  -v, --version            Show version information");
-        eprintln!("  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)");
+        eprintln!(
+            "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
+        );
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -1038,7 +1045,7 @@ fn main() {
 
     // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
-    
+
     // Validate that we have something to load or a system to start
     if cli_args.system.is_none() && rom_path.is_none() {
         eprintln!("Error: Must specify either a system (--system) or a file to load.");
@@ -1698,7 +1705,8 @@ fn main() {
 
         // Cycle CRT filter (F11) - only when host key is held
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F11, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F11, false)) {
+            || (!needs_host_key && window.is_key_pressed(Key::F11, false))
+        {
             settings.display_filter = settings.display_filter.next();
             // Update the backend's filter setting
             if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
@@ -1840,7 +1848,8 @@ fn main() {
                                     Ok(_) => {
                                         rom_loaded = true;
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        runtime_state.set_mount(mp_info.id.clone(), path_str.clone());
+                                        runtime_state
+                                            .set_mount(mp_info.id.clone(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
@@ -1988,14 +1997,16 @@ fn main() {
         // For PC systems, allow reset even without ROM to trigger boot
         let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F12, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F12, false)) && can_reset {
+            || (!needs_host_key && window.is_key_pressed(Key::F12, false)) && can_reset
+        {
             sys.reset();
             println!("System reset");
         }
 
         // F3 - Show mount point selector - always show submenu, no .hemu loading
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F3, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F3, false)) {
+            || (!needs_host_key && window.is_key_pressed(Key::F3, false))
+        {
             // Always show mount point selector, even for single-mount systems
             show_mount_selector = true;
             show_help = false;
@@ -2006,7 +2017,8 @@ fn main() {
 
         // Check for screenshot key (F4) - only when host key is held
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F4, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F4, false)) {
+            || (!needs_host_key && window.is_key_pressed(Key::F4, false))
+        {
             match save_screenshot(&buffer, width, height, sys.system_name()) {
                 Ok(path) => println!("Screenshot saved to: {}", path),
                 Err(e) => eprintln!("Failed to save screenshot: {}", e),
@@ -2052,17 +2064,19 @@ fn main() {
                         settings.window_width = project.display.window_width;
                         settings.window_height = project.display.window_height;
                         settings.display_filter = project.display.display_filter;
-                        
+
                         // Update CRT filter on backend
-                        if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+                        if let Some(sdl2_backend) =
+                            window.as_any_mut().downcast_mut::<Sdl2Backend>()
+                        {
                             sdl2_backend.set_filter(settings.display_filter);
                         }
-                        
+
                         // Apply input config override if present
                         if let Some(ref project_input) = project.input {
                             settings.input = project_input.clone();
                         }
-                        
+
                         // Handle system-specific loading based on project.system
                         match project.system.as_str() {
                             "pc" => {
@@ -2076,14 +2090,29 @@ fn main() {
                                         "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
                                         "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
                                         "Intel80486" => emu_core::cpu_8086::CpuModel::Intel80486,
-                                        "Intel80486SX" => emu_core::cpu_8086::CpuModel::Intel80486SX,
-                                        "Intel80486DX2" => emu_core::cpu_8086::CpuModel::Intel80486DX2,
-                                        "Intel80486SX2" => emu_core::cpu_8086::CpuModel::Intel80486SX2,
-                                        "Intel80486DX4" => emu_core::cpu_8086::CpuModel::Intel80486DX4,
-                                        "IntelPentium" => emu_core::cpu_8086::CpuModel::IntelPentium,
-                                        "IntelPentiumMMX" => emu_core::cpu_8086::CpuModel::IntelPentiumMMX,
+                                        "Intel80486SX" => {
+                                            emu_core::cpu_8086::CpuModel::Intel80486SX
+                                        }
+                                        "Intel80486DX2" => {
+                                            emu_core::cpu_8086::CpuModel::Intel80486DX2
+                                        }
+                                        "Intel80486SX2" => {
+                                            emu_core::cpu_8086::CpuModel::Intel80486SX2
+                                        }
+                                        "Intel80486DX4" => {
+                                            emu_core::cpu_8086::CpuModel::Intel80486DX4
+                                        }
+                                        "IntelPentium" => {
+                                            emu_core::cpu_8086::CpuModel::IntelPentium
+                                        }
+                                        "IntelPentiumMMX" => {
+                                            emu_core::cpu_8086::CpuModel::IntelPentiumMMX
+                                        }
                                         _ => {
-                                            eprintln!("Unknown CPU model: {}, using default Intel8086", cpu_str);
+                                            eprintln!(
+                                                "Unknown CPU model: {}, using default Intel8086",
+                                                cpu_str
+                                            );
                                             emu_core::cpu_8086::CpuModel::Intel8086
                                         }
                                     }
@@ -2100,7 +2129,10 @@ fn main() {
                                             "VGA" => Box::new(emu_pc::SoftwareVgaAdapter::new()),
                                             "CGA" => Box::new(emu_pc::SoftwareCgaAdapter::new()),
                                             _ => {
-                                                eprintln!("Unknown video mode: {}, using default CGA", video_str);
+                                                eprintln!(
+                                                    "Unknown video mode: {}, using default CGA",
+                                                    video_str
+                                                );
                                                 Box::new(emu_pc::SoftwareCgaAdapter::new())
                                             }
                                         }
@@ -2108,8 +2140,11 @@ fn main() {
                                         Box::new(emu_pc::SoftwareCgaAdapter::new())
                                     };
 
-                                let mut pc_sys =
-                                    emu_pc::PcSystem::with_config(cpu_model, memory_kb, video_adapter);
+                                let mut pc_sys = emu_pc::PcSystem::with_config(
+                                    cpu_model,
+                                    memory_kb,
+                                    video_adapter,
+                                );
 
                                 if let Some(priority_str) = project.get_boot_priority() {
                                     let priority = match priority_str.as_str() {
@@ -2124,7 +2159,8 @@ fn main() {
 
                                 // Load all mounts from project
                                 runtime_state.clear_mounts();
-                                let project_dir = path.parent().unwrap_or(std::path::Path::new("."));
+                                let project_dir =
+                                    path.parent().unwrap_or(std::path::Path::new("."));
                                 for (mount_id, mount_path) in &project.mounts {
                                     let full_path = project_dir.join(mount_path);
                                     match std::fs::read(&full_path) {
@@ -2139,7 +2175,10 @@ fn main() {
                                             }
                                         }
                                         Err(e) => {
-                                            eprintln!("Failed to read file for {}: {}", mount_id, e);
+                                            eprintln!(
+                                                "Failed to read file for {}: {}",
+                                                mount_id, e
+                                            );
                                         }
                                     }
                                 }
@@ -2152,17 +2191,22 @@ fn main() {
                             // Handle other systems (NES, GB, etc.)
                             "nes" => {
                                 runtime_state.clear_mounts();
-                                let project_dir = path.parent().unwrap_or(std::path::Path::new("."));
-                                
+                                let project_dir =
+                                    path.parent().unwrap_or(std::path::Path::new("."));
+
                                 if let Some(cart_path) = project.mounts.get("Cartridge") {
                                     let full_path = project_dir.join(cart_path);
                                     match std::fs::read(&full_path) {
                                         Ok(data) => {
                                             let mut nes_sys = emu_nes::NesSystem::default();
                                             if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                                status_message = format!("Failed to load ROM: {}", e);
+                                                status_message =
+                                                    format!("Failed to load ROM: {}", e);
                                             } else {
-                                                runtime_state.set_mount("Cartridge".to_string(), full_path.to_string_lossy().to_string());
+                                                runtime_state.set_mount(
+                                                    "Cartridge".to_string(),
+                                                    full_path.to_string_lossy().to_string(),
+                                                );
                                                 rom_hash = Some(GameSaves::rom_hash(&data));
                                                 sys = EmulatorSystem::NES(Box::new(nes_sys));
                                                 rom_loaded = true;
@@ -2179,20 +2223,20 @@ fn main() {
                                 status_message = format!("Unsupported system: {}", project.system);
                             }
                         }
-                        
+
                         runtime_state.set_project_path(path.clone());
-                        
+
                         // Update resolution
                         let (new_width, new_height) = sys.resolution();
                         width = new_width;
                         height = new_height;
                         buffer = vec![0; width * height];
-                        
+
                         // Save settings (window size, display filter, input if overridden)
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
                         }
-                        
+
                         println!("Loaded project from: {}", path_str);
                     }
                     Err(e) => {

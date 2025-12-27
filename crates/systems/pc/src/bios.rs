@@ -112,7 +112,8 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0x0F, // Byte 9: Head settle time (15ms)
         0x08, // Byte 10: Motor start time (8 * 125ms = 1 second)
     ];
-    bios[dpt_offset..dpt_offset + disk_parameter_table.len()].copy_from_slice(&disk_parameter_table);
+    bios[dpt_offset..dpt_offset + disk_parameter_table.len()]
+        .copy_from_slice(&disk_parameter_table);
 
     // INT 16h handler at offset 0x300 - Keyboard Services
     let int16h_offset = 0x300;
