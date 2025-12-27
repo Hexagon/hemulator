@@ -69,10 +69,46 @@ impl DiskController {
         };
 
         // Calculate LBA (Logical Block Address)
-        // LBA = (C × HPC + H) × SPT + (S - 1)
-        let lba = ((request.cylinder as u32 * heads as u32 + request.head as u32)
-            * sectors_per_track as u32)
-            + (request.sector as u32 - 1);
+        // SYSLINUX and some bootloaders use a hybrid addressing scheme:
+        // When C=0, H=0, and S > SPT (but S < 64), treat S as a direct LBA (linear sector number)
+        // This is only valid for the boot sector stage, not for normal operation
+        // Otherwise use standard CHS formula: LBA = (C × HPC + H) × SPT + (S - 1)
+        let lba = if request.cylinder == 0
+            && request.head == 0
+            && request.sector > sectors_per_track
+            && request.sector < 64
+        {
+            // Linear sector addressing (used by SYSLINUX boot sector)
+            if std::env::var("EMU_LOG_BUS").is_ok() {
+                eprintln!(
+                    "Disk read: Using linear addressing for S={} > SPT={}",
+                    request.sector, sectors_per_track
+                );
+            }
+            request.sector as u32 - 1
+        } else if request.cylinder >= 1024
+            || request.head >= heads
+            || request.sector == 0
+            || request.sector > 63
+        {
+            // Invalid CHS parameters - return error
+            if std::env::var("EMU_LOG_BUS").is_ok() {
+                eprintln!(
+                    "Disk read: Invalid CHS - C={} H={} S={} (max C=1023, H={}, S=1-63)",
+                    request.cylinder,
+                    request.head,
+                    request.sector,
+                    heads - 1
+                );
+            }
+            self.status = 0x01; // Invalid parameter
+            return self.status;
+        } else {
+            // Standard CHS addressing
+            ((request.cylinder as u32 * heads as u32 + request.head as u32)
+                * sectors_per_track as u32)
+                + (request.sector as u32 - 1)
+        };
 
         // Each sector is 512 bytes
         let sector_size: u32 = 512;

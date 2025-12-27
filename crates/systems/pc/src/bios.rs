@@ -211,6 +211,11 @@ pub fn generate_minimal_bios() -> Vec<u8> {
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x72, 0x00, // MOV [0x0072], AX
         // NOTE: INT 0x21 vector is NOT set up by BIOS - DOS will install it
+        // INT 0x2A (Network Installation API) - stub
+        0xB8, 0x40, 0x00, // MOV AX, 0x0040
+        0xA3, 0xA8, 0x00, // MOV [0x00A8], AX (INT 2Ah vector = 0x00A8)
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000
+        0xA3, 0xAA, 0x00, // MOV [0x00AA], AX
         0xFB, // STI - enable interrupts
         // Check if boot sector is loaded by checking signature at 0x7C00 + 510
         // We'll check if byte at 0x7DFE is 0x55 and 0x7DFF is 0xAA
