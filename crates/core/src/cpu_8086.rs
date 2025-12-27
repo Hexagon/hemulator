@@ -613,7 +613,13 @@ impl<M: Memory8086> Cpu8086<M> {
             return val;
         }
 
-        let count = count & 0x1F; // 8086: only lower 5 bits used
+        // On 80186+, shift count is masked to 5 bits (0-31)
+        // On 8086/8088, full 8-bit count is used (can shift by 0-255)
+        let count = if self.model.supports_80186_instructions() {
+            count & 0x1F
+        } else {
+            count
+        };
         let mut result = val;
 
         match op {
@@ -725,7 +731,13 @@ impl<M: Memory8086> Cpu8086<M> {
             return val;
         }
 
-        let count = count & 0x1F; // 8086: only lower 5 bits used
+        // On 80186+, shift count is masked to 5 bits (0-31)
+        // On 8086/8088, full 8-bit count is used (can shift by 0-255)
+        let count = if self.model.supports_80186_instructions() {
+            count & 0x1F
+        } else {
+            count
+        };
         let mut result = val;
 
         match op {
@@ -4466,6 +4478,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // Group 2 opcodes (0xC0) - Shift/rotate r/m8 by immediate byte (80186+)
             0xC0 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = self.fetch_u8();
@@ -4487,6 +4504,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // Group 2 opcodes (0xC1) - Shift/rotate r/m16 by immediate byte (80186+)
             0xC1 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = self.fetch_u8();
@@ -9090,5 +9112,100 @@ mod tests {
         let cycles = cpu.step();
         assert_eq!(cycles, 10, "BSF should work on 80386");
         assert_eq!(cpu.ax, 3); // First set bit is at position 3
+    }
+
+    #[test]
+    fn test_shift_count_masking_8086() {
+        // On 8086, shift count is NOT masked - full 8-bit count is used
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0020; // CL = 32 (shift by 32 on 8086 should shift all bits out)
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 8086, shifting by 32 should result in 0 (all bits shifted out)
+        assert_eq!(cpu.ax & 0xFF, 0, "8086 should shift by full count (32 shifts all bits out)");
+    }
+
+    #[test]
+    fn test_shift_count_masking_80186() {
+        // On 80186+, shift count IS masked to 5 bits (0-31)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0020; // CL = 32, but masked to 0 on 80186+
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 80186+, count 32 is masked to 0, so value should be unchanged
+        assert_eq!(cpu.ax & 0xFF, 0xFF, "80186 should mask count to 5 bits (32 -> 0)");
+    }
+
+    #[test]
+    fn test_shift_count_masking_80186_with_33() {
+        // Test with count 33 which should be masked to 1
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0021; // CL = 33, masked to 1 on 80186+
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 80186+, count 33 is masked to 1, so 0xFF << 1 = 0xFE
+        assert_eq!(cpu.ax & 0xFF, 0xFE, "80186 should mask count to 5 bits (33 -> 1)");
+    }
+
+    #[test]
+    fn test_shift_immediate_invalid_on_8086() {
+        // Test that shift by immediate (0xC0, 0xC1) is invalid on 8086
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // SHL AL, imm8 (0xC0 with ModR/M and immediate)
+        cpu.memory.load_program(0xFFFF0, &[0xC0, 0xE0, 0x04]); // SHL AL, 4
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "Shift by immediate should be invalid on 8086");
+
+        // SHL AX, imm8 (0xC1 with ModR/M and immediate)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0xC1, 0xE0, 0x04]); // SHL AX, 4
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "Shift by immediate should be invalid on 8086");
+    }
+
+    #[test]
+    fn test_shift_immediate_valid_on_80186() {
+        // Test that shift by immediate (0xC0, 0xC1) works on 80186
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+
+        // SHL AL, imm8 (0xC0 with ModR/M and immediate)
+        cpu.memory.load_program(0xFFFF0, &[0xC0, 0xE0, 0x04]); // SHL AL, 4
+        let cycles = cpu.step();
+        assert!(cycles > 10, "Shift by immediate should work on 80186");
+        assert_eq!(cpu.ax & 0xFF, 0xF0, "SHL AL, 4 should shift left by 4");
     }
 }
