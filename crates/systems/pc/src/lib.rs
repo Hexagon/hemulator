@@ -390,24 +390,13 @@ impl System for PcSystem {
             } else {
                 self.boot_delay_frames -= 1;
 
-                let cpu_model = self.cpu_model();
-                let memory_kb = self.memory_kb();
-                let cpu_speed_mhz = self.cpu_speed_mhz();
-                let vram_mut = self.cpu.bus_mut().vram_mut();
-
-                // Refresh POST screen every frame during boot delay to show live clock
-                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
-
-                // Update countdown (60 frames per second)
-                let seconds_remaining = self.boot_delay_frames.div_ceil(60); // Round up
-                bios::update_post_screen_countdown(vram_mut, seconds_remaining);
-
-                // Update mount status
-                let _ = vram_mut;
+                // Update mount status and POST screen
                 self.update_post_screen();
 
-                // Clear keyboard buffer every frame during POST to prevent buffering
-                self.cpu.bus_mut().keyboard.clear();
+                // Update countdown after updating POST screen (60 frames per second)
+                let seconds_remaining = self.boot_delay_frames.div_ceil(60); // Round up
+                let vram_mut = self.cpu.bus_mut().vram_mut();
+                bios::update_post_screen_countdown(vram_mut, seconds_remaining);
 
                 // If delay expired, allow boot to proceed
                 if self.boot_delay_frames == 0 {
