@@ -1592,9 +1592,10 @@ mod memory_tests {
 
     #[test]
     fn test_memory_size_clamping() {
-        // Test that memory size is clamped to valid range (256-640 KB)
+        // Test that conventional memory is clamped to valid range (256-640 KB)
+        // but total memory can be higher (extended memory)
 
-        // Test below minimum (should clamp to 256)
+        // Test below minimum (should clamp conventional to 256KB)
         let sys = PcSystem::with_config(
             CpuModel::Intel8086,
             100, // Too low
@@ -1606,25 +1607,171 @@ mod memory_tests {
             "Memory should be clamped to 256KB minimum"
         );
 
-        // Test above maximum (should clamp to 640)
+        // Test above 640KB (should have 640KB conventional + extended)
         let sys = PcSystem::with_config(
             CpuModel::Intel8086,
-            1024, // Too high
+            1024, // 1MB total
             Box::new(SoftwareCgaAdapter::new()),
         );
         assert_eq!(
             sys.memory_kb(),
+            1024,
+            "Total memory should be 1024KB (640KB conventional + 384KB extended)"
+        );
+        assert_eq!(
+            sys.cpu.bus().conventional_memory_kb(),
             640,
-            "Memory should be clamped to 640KB maximum"
+            "Conventional memory should be clamped to 640KB"
+        );
+        assert_eq!(
+            sys.cpu.bus().extended_memory_kb(),
+            384,
+            "Extended memory should be 384KB"
         );
 
-        // Test valid values
+        // Test valid values below 640KB
         let sys = PcSystem::with_config(
             CpuModel::Intel8086,
             512,
             Box::new(SoftwareCgaAdapter::new()),
         );
         assert_eq!(sys.memory_kb(), 512, "Memory should be 512KB");
+        assert_eq!(
+            sys.cpu.bus().conventional_memory_kb(),
+            512,
+            "Conventional memory should be 512KB"
+        );
+        assert_eq!(
+            sys.cpu.bus().extended_memory_kb(),
+            0,
+            "Extended memory should be 0KB"
+        );
+    }
+
+    #[test]
+    fn test_int12h_reports_conventional_memory() {
+        // Test that INT 12h correctly reports conventional memory (not total memory)
+        use emu_core::cpu_8086::CpuModel;
+
+        // Test with 512KB total (all conventional, no extended)
+        let mut sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            512,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+
+        // Prepare INT 12h instruction at address 0x1000
+        let addr = 0x1000;
+        sys.cpu.bus_mut().write(addr, 0xCD); // INT
+        sys.cpu.bus_mut().write(addr + 1, 0x12); // 12h
+
+        // Set CS:IP to the INT 12h instruction
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(addr as u16);
+
+        // Execute the INT 12h instruction
+        sys.cpu.step();
+
+        // INT 12h should return conventional memory in AX (512KB)
+        let regs = sys.cpu.get_registers();
+        assert_eq!(
+            regs.ax,
+            512,
+            "INT 12h should return 512KB conventional memory"
+        );
+
+        // Test with 1024KB total (640KB conventional + 384KB extended)
+        let mut sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            1024,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+
+        // Prepare INT 12h instruction at address 0x1000
+        sys.cpu.bus_mut().write(addr, 0xCD); // INT
+        sys.cpu.bus_mut().write(addr + 1, 0x12); // 12h
+
+        // Set CS:IP to the INT 12h instruction
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(addr as u16);
+
+        // Execute the INT 12h instruction
+        sys.cpu.step();
+
+        // INT 12h should return conventional memory in AX (640KB, not 1024KB)
+        let regs = sys.cpu.get_registers();
+        assert_eq!(
+            regs.ax,
+            640,
+            "INT 12h should return 640KB conventional memory (not total 1024KB)"
+        );
+    }
+
+    #[test]
+    fn test_int15h_reports_extended_memory() {
+        // Test that INT 15h AH=88h correctly reports extended memory
+        use emu_core::cpu_8086::CpuModel;
+
+        // Test with 1024KB total (640KB conventional + 384KB extended)
+        let mut sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            1024,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+
+        // Prepare INT 15h, AH=88h instruction at address 0x1000
+        let addr = 0x1000;
+        sys.cpu.bus_mut().write(addr, 0xB4); // MOV AH, 88h
+        sys.cpu.bus_mut().write(addr + 1, 0x88);
+        sys.cpu.bus_mut().write(addr + 2, 0xCD); // INT
+        sys.cpu.bus_mut().write(addr + 3, 0x15); // 15h
+
+        // Set CS:IP to the instruction
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(addr as u16);
+
+        // Execute MOV AH, 88h
+        sys.cpu.step();
+        // Execute INT 15h
+        sys.cpu.step();
+
+        // INT 15h AH=88h should return extended memory in AX (384KB)
+        let regs = sys.cpu.get_registers();
+        assert_eq!(
+            regs.ax,
+            384,
+            "INT 15h AH=88h should return 384KB extended memory"
+        );
+
+        // Test with 512KB total (no extended memory)
+        let mut sys = PcSystem::with_config(
+            CpuModel::Intel8086,
+            512,
+            Box::new(SoftwareCgaAdapter::new()),
+        );
+
+        // Prepare INT 15h, AH=88h instruction at address 0x1000
+        sys.cpu.bus_mut().write(addr, 0xB4); // MOV AH, 88h
+        sys.cpu.bus_mut().write(addr + 1, 0x88);
+        sys.cpu.bus_mut().write(addr + 2, 0xCD); // INT
+        sys.cpu.bus_mut().write(addr + 3, 0x15); // 15h
+
+        // Set CS:IP to the instruction
+        sys.cpu.set_cs(0x0000);
+        sys.cpu.set_ip(addr as u16);
+
+        // Execute MOV AH, 88h
+        sys.cpu.step();
+        // Execute INT 15h
+        sys.cpu.step();
+
+        // INT 15h AH=88h should return 0 extended memory
+        let regs = sys.cpu.get_registers();
+        assert_eq!(
+            regs.ax,
+            0,
+            "INT 15h AH=88h should return 0KB extended memory for 512KB system"
+        );
     }
 
     #[test]

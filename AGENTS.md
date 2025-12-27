@@ -680,9 +680,10 @@ Detailed implementation notes:
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation
   - `PcCpu` wraps `Cpu8086<PcBus>` to provide PC-specific interface
-  - PC bus includes: 640KB RAM, 128KB VRAM, 256KB ROM area, disk controller, keyboard
+  - PC bus includes: configurable conventional memory (256-640KB), configurable extended memory (XMS), 128KB VRAM, 256KB ROM area, disk controller, keyboard
   - **Memory Map**:
-    - 0x00000-0x9FFFF: Conventional memory (640KB)
+    - 0x00000-0x9FFFF: Conventional memory (max 640KB, configurable 256-640KB)
+    - Extended memory: Accessible via XMS driver (configurable, starts at 0 if total memory <= 640KB)
     - 0xA0000-0xBFFFF: Video memory (128KB)
     - 0xC0000-0xFFFFF: ROM area (256KB, includes BIOS)
     - 0xF0000-0xFFFFF: BIOS ROM (64KB)

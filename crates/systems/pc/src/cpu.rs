@@ -1313,10 +1313,10 @@ impl PcCpu {
         // Skip the INT 12h instruction (2 bytes: 0xCD 0x12)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
-        // Get memory size from bus
-        let memory_kb = self.cpu.memory.memory_kb() as u16;
+        // Get conventional memory size from bus (max 640KB)
+        let memory_kb = self.cpu.memory.conventional_memory_kb() as u16;
 
-        // Return memory size in AX
+        // Return conventional memory size in AX
         self.cpu.ax = memory_kb;
 
         // Clear carry flag (success)
