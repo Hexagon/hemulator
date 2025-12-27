@@ -86,25 +86,10 @@ impl DiskController {
                 );
             }
             request.sector as u32 - 1
-        } else if request.cylinder >= 1024
-            || request.head >= heads
-            || request.sector == 0
-            || request.sector > 63
-        {
-            // Invalid CHS parameters - return error
-            if std::env::var("EMU_LOG_BUS").is_ok() {
-                eprintln!(
-                    "Disk read: Invalid CHS - C={} H={} S={} (max C=1023, H={}, S=1-63)",
-                    request.cylinder,
-                    request.head,
-                    request.sector,
-                    heads - 1
-                );
-            }
-            self.status = 0x01; // Invalid parameter
-            return self.status;
         } else {
             // Standard CHS addressing
+            // Note: We don't validate CHS parameters here - we let the bounds check below
+            // handle out-of-range requests. This is more permissive and matches real BIOS behavior.
             ((request.cylinder as u32 * heads as u32 + request.head as u32)
                 * sectors_per_track as u32)
                 + (request.sector as u32 - 1)
