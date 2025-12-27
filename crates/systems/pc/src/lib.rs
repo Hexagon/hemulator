@@ -157,6 +157,13 @@ impl PcSystem {
             CpuModel::Intel80186 | CpuModel::Intel80188 => 8.0,
             CpuModel::Intel80286 => 12.0,
             CpuModel::Intel80386 => 20.0,
+            CpuModel::Intel80486 => 25.0,       // 486 DX-25
+            CpuModel::Intel80486SX => 20.0,     // 486 SX-20
+            CpuModel::Intel80486DX2 => 50.0,    // 486 DX2-50 (25 MHz x2)
+            CpuModel::Intel80486SX2 => 50.0,    // 486 SX2-50 (25 MHz x2)
+            CpuModel::Intel80486DX4 => 100.0,   // 486 DX4-100 (33 MHz x3)
+            CpuModel::IntelPentium => 60.0,     // Pentium 60 MHz (first generation)
+            CpuModel::IntelPentiumMMX => 166.0, // Pentium MMX 166 MHz (common)
         }
     }
 

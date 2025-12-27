@@ -1492,9 +1492,12 @@ impl PcCpu {
                     "INT 13h AH=02h: Finished writing all {} bytes",
                     buffer.len()
                 );
-                
+
                 // Verify the write by reading back the first 32 bytes
-                eprint!("INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:", buffer_seg, buffer_offset);
+                eprint!(
+                    "INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:",
+                    buffer_seg, buffer_offset
+                );
                 for i in 0..32.min(buffer.len()) {
                     if i % 16 == 0 {
                         eprint!("\n  {:04X}:", i);
@@ -1516,7 +1519,7 @@ impl PcCpu {
         // AL = number of sectors read (on success)
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
-            
+
             // Note: INT 13h AH=02h does NOT modify ES:BX
             // The buffer pointer remains unchanged after the read
             // (unlike some other BIOS calls that advance pointers)

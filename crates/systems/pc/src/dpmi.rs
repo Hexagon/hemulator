@@ -7,6 +7,8 @@
 
 #![allow(dead_code)] // Some methods used by tests and future features
 
+use crate::CpuModel;
+
 /// DPMI (DOS Protected Mode Interface) driver state
 ///
 /// Implements DPMI 0.9 specification for protected mode memory management,
@@ -17,7 +19,7 @@ pub struct DpmiDriver {
     installed: bool,
     /// DPMI version (major.minor in BCD format)
     version: u16,
-    /// Processor type (03h = 80386, 04h = 80486, etc.)
+    /// Processor type (03h = 80386, 04h = 80486, 05h = Pentium, etc.)
     processor_type: u8,
     /// Current DPMI mode (0 = 16-bit, 1 = 32-bit)
     mode: u8,
@@ -45,12 +47,32 @@ struct DpmiDescriptor {
 
 impl DpmiDriver {
     /// Create a new DPMI driver (not installed by default)
+    /// Defaults to 80386 processor type
     pub fn new() -> Self {
+        Self::with_cpu_model(CpuModel::Intel80386)
+    }
+
+    /// Create a new DPMI driver with a specific CPU model
+    /// This sets the appropriate processor_type based on the CPU
+    pub fn with_cpu_model(cpu_model: CpuModel) -> Self {
+        let processor_type = match cpu_model {
+            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00, // 8086
+            CpuModel::Intel80186 | CpuModel::Intel80188 => 0x01, // 80186
+            CpuModel::Intel80286 => 0x02,                      // 80286
+            CpuModel::Intel80386 => 0x03,                      // 80386
+            CpuModel::Intel80486
+            | CpuModel::Intel80486SX
+            | CpuModel::Intel80486DX2
+            | CpuModel::Intel80486SX2
+            | CpuModel::Intel80486DX4 => 0x04, // 80486
+            CpuModel::IntelPentium | CpuModel::IntelPentiumMMX => 0x05, // Pentium
+        };
+
         DpmiDriver {
             installed: false,
-            version: 0x0090,      // DPMI 0.9 in BCD
-            processor_type: 0x03, // 80386
-            mode: 0,              // 16-bit mode
+            version: 0x0090, // DPMI 0.9 in BCD
+            processor_type,  // Set based on CPU model
+            mode: 0,         // 16-bit mode
             max_descriptors: 256,
             allocated_descriptors: 0,
             entry_point: (0xF000, 0xE000), // Fake entry point
@@ -77,6 +99,22 @@ impl DpmiDriver {
     /// Get processor type
     pub fn processor_type(&self) -> u8 {
         self.processor_type
+    }
+
+    /// Set processor type based on CPU model
+    pub fn set_processor_type_for_cpu(&mut self, cpu_model: CpuModel) {
+        self.processor_type = match cpu_model {
+            CpuModel::Intel8086 | CpuModel::Intel8088 => 0x00, // 8086
+            CpuModel::Intel80186 | CpuModel::Intel80188 => 0x01, // 80186
+            CpuModel::Intel80286 => 0x02,                      // 80286
+            CpuModel::Intel80386 => 0x03,                      // 80386
+            CpuModel::Intel80486
+            | CpuModel::Intel80486SX
+            | CpuModel::Intel80486DX2
+            | CpuModel::Intel80486SX2
+            | CpuModel::Intel80486DX4 => 0x04, // 80486
+            CpuModel::IntelPentium | CpuModel::IntelPentiumMMX => 0x05, // Pentium
+        };
     }
 
     /// Get entry point segment

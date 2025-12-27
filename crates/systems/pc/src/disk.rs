@@ -80,8 +80,16 @@ impl DiskController {
 
         // Log LBA calculation for debugging
         if let Ok(_) = std::env::var("EMU_LOG_BUS") {
-            eprintln!("Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
-                request.cylinder, request.head, request.sector, lba, offset, sectors_per_track, heads);
+            eprintln!(
+                "Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
+                request.cylinder,
+                request.head,
+                request.sector,
+                lba,
+                offset,
+                sectors_per_track,
+                heads
+            );
         }
 
         // Check if read is within bounds
