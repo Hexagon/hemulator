@@ -274,18 +274,18 @@ pub fn create_help_overlay(
         "Function Keys (with Right Alt):",
         "  F1  - Help",
         "  F2  - Speed",
-        "  F3  - Open ROM/Project",
+        "  F3  - Mount points",
         "  F4  - Screenshot",
         "  F5  - Save state",
         "  F6  - Load state",
-        "  F7  - Switch system",
-        "  F8  - New project (PC)",
+        "  F7  - Load project",
+        "  F8  - Save project",
         "  F10 - Debug info",
         "  F11 - CRT filter",
         "  F12 - Reset",
         "  ESC - Exit emulator",
         "",
-        "Without Right Alt: All keys pass to client",
+        "Without Right Ctrl: All keys pass to DOS",
         "(ESC works in DOS, BIOS, etc.)",
         "",
         "Press F1 to close",
@@ -882,13 +882,13 @@ pub fn create_splash_screen_with_status(
         0xFFF0F0F0,
     );
 
-    // "Press F7 to switch system" (25 characters)
-    let inst2_x = (width - 25 * FONT_WIDTH) / 2;
+    // "Press F7 to load project" (24 characters)
+    let inst2_x = (width - 24 * FONT_WIDTH) / 2;
     draw_text(
         &mut buffer,
         width,
         height,
-        "Press F7 to switch system",
+        "Press F7 to load project",
         inst2_x,
         inst_y + FONT_HEIGHT + 4,
         0xFFF0F0F0,
