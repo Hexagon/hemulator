@@ -156,7 +156,7 @@ pub struct Settings {
     pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
     pub display_filter: DisplayFilter,
-    #[serde(default, skip_serializing)] // Runtime only, not saved
+    #[serde(default = "default_emulation_speed", skip_serializing)] // Runtime only, not saved
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
     #[serde(default = "default_video_backend")]
     pub video_backend: String, // "software" or "opengl"
@@ -170,6 +170,10 @@ fn default_window_width() -> usize {
 
 fn default_window_height() -> usize {
     480 // 240 * 2 (default 2x scale)
+}
+
+fn default_emulation_speed() -> f64 {
+    1.0 // Normal speed
 }
 
 fn default_video_backend() -> String {
@@ -527,4 +531,146 @@ fn test_settings_roundtrip_with_saved_config() {
     fs::remove_dir_all(&test_dir).unwrap();
 
     println!("Roundtrip test passed!");
+}
+
+#[test]
+fn test_actual_problematic_config() {
+    // Test the exact config.json from the bug report
+    let problematic_json = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": {
+      "a": "",
+      "b": "",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "player4": {
+      "a": "",
+      "b": "",
+      "x": "",
+      "y": "",
+      "l": "",
+      "r": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "host_modifier": "RightCtrl"
+  },
+  "window_width": 640,
+  "window_height": 480,
+  "display_filter": "None",
+  "video_backend": "software"
+}"#;
+
+    println!("Testing problematic config JSON...");
+    let result = serde_json::from_str::<Settings>(problematic_json);
+    match result {
+        Ok(settings) => {
+            println!("Successfully deserialized!");
+            println!("window_width: {}", settings.window_width);
+            println!("window_height: {}", settings.window_height);
+            println!("display_filter: {:?}", settings.display_filter);
+            println!("video_backend: {}", settings.video_backend);
+            println!("player1.a: {}", settings.input.player1.a);
+            println!("player1.x: '{}'", settings.input.player1.x);
+        }
+        Err(e) => {
+            panic!("FAILED to deserialize: {}", e);
+        }
+    }
+}
+
+#[test]
+fn test_emulation_speed_default_issue() {
+    // The REAL bug: emulation_speed has #[serde(default)] which uses f64::default() = 0.0
+    // When it's 0.0, the emulator is paused, causing a black screen!
+
+    let problematic_json = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": { "a": "", "b": "", "select": "", "start": "", "up": "", "down": "", "left": "", "right": "" },
+    "player4": { "a": "", "b": "", "select": "", "start": "", "up": "", "down": "", "left": "", "right": "" },
+    "host_modifier": "RightCtrl"
+  },
+  "window_width": 640,
+  "window_height": 480,
+  "display_filter": "None",
+  "video_backend": "software"
+}"#;
+
+    let result = serde_json::from_str::<Settings>(problematic_json);
+    match result {
+        Ok(settings) => {
+            println!("Deserialized successfully");
+            println!("emulation_speed: {}", settings.emulation_speed);
+
+            // This is the bug! emulation_speed defaults to 0.0 instead of 1.0
+            // When it's 0.0, the emulator is paused!
+            if settings.emulation_speed == 0.0 {
+                panic!("BUG FOUND! emulation_speed is 0.0 (paused) instead of 1.0 (normal speed). This causes a black screen!");
+            }
+        }
+        Err(e) => {
+            panic!("Failed to deserialize: {}", e);
+        }
+    }
 }
