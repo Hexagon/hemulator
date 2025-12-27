@@ -4786,18 +4786,18 @@ impl<M: Memory8086> Cpu8086<M> {
             0x81 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                
+
                 // Check for operand-size override (0x66 prefix)
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit operand size
                     let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                     // Fetch 32-bit immediate but only use lower 16 bits for now
                     let imm_low = self.fetch_u16();
-                    let imm_high = self.fetch_u16();
+                    let _imm_high = self.fetch_u16();
                     let imm = imm_low; // Use only lower 16 bits in 16-bit mode
-                    // NOTE: In true 32-bit mode, we'd use the full 32-bit value
-                    // For now, just consume the bytes to keep instruction stream in sync
-                    
+                                       // NOTE: In true 32-bit mode, we'd use the full 32-bit value
+                                       // For now, just consume the bytes to keep instruction stream in sync
+
                     let result = match op {
                         0 => {
                             // ADD
@@ -4876,7 +4876,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.update_flags_16(result);
                     }
                     self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                    if modbits == 0b11 { 4 } else { 17 }
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        17
+                    }
                 } else {
                     // 16-bit operand size (normal mode)
                     let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
@@ -4959,7 +4963,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.update_flags_16(result);
                     }
                     self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                    if modbits == 0b11 { 4 } else { 17 }
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        17
+                    }
                 }
             }
 
@@ -5685,7 +5693,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     // IMPORTANT: For memory operands with displacement, we must calculate
                     // the effective address (which fetches displacement bytes) BEFORE
                     // fetching the immediate value.
-                    
+
                     // Check if operand-size override (0x66) prefix is active
                     if self.operand_size_override && self.model.supports_80386_instructions() {
                         // 32-bit operand size: MOV r/m32, imm32
@@ -11604,7 +11612,8 @@ mod tests {
         // 0xC7 = MOV r/m, imm
         // ModR/M: 0xC0 (mod=11, op=0, r/m=AX)
         // Immediate: 0x78563412 (little-endian: 12 34 56 78)
-        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0xC0, 0x12, 0x34, 0x56, 0x78]);
+        cpu.memory
+            .load_program(0x0100, &[0x66, 0xC7, 0xC0, 0x12, 0x34, 0x56, 0x78]);
 
         cpu.ip = 0x0100;
         cpu.cs = 0x0000;
@@ -11612,7 +11621,7 @@ mod tests {
 
         // Execute 0x66 MOV AX, imm32
         cpu.step();
-        
+
         // In 16-bit mode, we only store the low 16 bits
         assert_eq!(cpu.ax, 0x3412, "AX should contain low 16 bits of immediate");
         // Verify IP advanced correctly (consumed all 7 bytes)
@@ -11630,7 +11639,10 @@ mod tests {
         // ModR/M: 0x06 (mod=00, op=0, r/m=110 = direct address)
         // Address: 0x0200
         // Immediate: 0xDEADBEEF (little-endian: EF BE AD DE)
-        cpu.memory.load_program(0x0100, &[0x66, 0xC7, 0x06, 0x00, 0x02, 0xEF, 0xBE, 0xAD, 0xDE]);
+        cpu.memory.load_program(
+            0x0100,
+            &[0x66, 0xC7, 0x06, 0x00, 0x02, 0xEF, 0xBE, 0xAD, 0xDE],
+        );
 
         cpu.ip = 0x0100;
         cpu.cs = 0x0000;
@@ -11638,7 +11650,7 @@ mod tests {
 
         // Execute 0x66 MOV [0x0200], imm32
         cpu.step();
-        
+
         // Verify 32-bit value was written to memory
         let val_low = cpu.memory.read_u16(0x10200);
         let val_high = cpu.memory.read_u16(0x10202);

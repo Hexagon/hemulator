@@ -257,6 +257,17 @@ impl EmulatorSystem {
                 Key::LeftShift | Key::RightShift => Some(emu_pc::SCANCODE_LEFT_SHIFT),
                 Key::LeftCtrl | Key::RightCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
                 Key::LeftAlt | Key::RightAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
+                Key::Comma => Some(emu_pc::SCANCODE_COMMA),
+                Key::Period => Some(emu_pc::SCANCODE_PERIOD),
+                Key::Slash => Some(emu_pc::SCANCODE_SLASH),
+                Key::Semicolon => Some(emu_pc::SCANCODE_SEMICOLON),
+                Key::Apostrophe => Some(emu_pc::SCANCODE_APOSTROPHE),
+                Key::LeftBracket => Some(emu_pc::SCANCODE_LEFT_BRACKET),
+                Key::RightBracket => Some(emu_pc::SCANCODE_RIGHT_BRACKET),
+                Key::Backslash => Some(emu_pc::SCANCODE_BACKSLASH),
+                Key::Minus => Some(emu_pc::SCANCODE_MINUS),
+                Key::Equals => Some(emu_pc::SCANCODE_EQUALS),
+                Key::Backtick => Some(emu_pc::SCANCODE_BACKTICK),
                 _ => None,
             };
 
@@ -2319,6 +2330,17 @@ fn main() {
                     Key::LeftCtrl,
                     Key::RightCtrl,
                     Key::LeftAlt,
+                    Key::Comma,
+                    Key::Period,
+                    Key::Slash,
+                    Key::Semicolon,
+                    Key::Apostrophe,
+                    Key::LeftBracket,
+                    Key::RightBracket,
+                    Key::Backslash,
+                    Key::Minus,
+                    Key::Equals,
+                    Key::Backtick,
                 ];
 
                 for &key in &all_keys {

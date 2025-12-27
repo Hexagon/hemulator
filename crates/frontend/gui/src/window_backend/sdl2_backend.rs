@@ -168,6 +168,17 @@ impl Sdl2Backend {
             Keycode::RCtrl => Some(Key::RightCtrl),
             Keycode::LAlt => Some(Key::LeftAlt),
             Keycode::RAlt => Some(Key::RightAlt),
+            Keycode::Comma => Some(Key::Comma),
+            Keycode::Period => Some(Key::Period),
+            Keycode::Slash => Some(Key::Slash),
+            Keycode::Semicolon => Some(Key::Semicolon),
+            Keycode::Quote => Some(Key::Apostrophe),
+            Keycode::LeftBracket => Some(Key::LeftBracket),
+            Keycode::RightBracket => Some(Key::RightBracket),
+            Keycode::Backslash => Some(Key::Backslash),
+            Keycode::Minus => Some(Key::Minus),
+            Keycode::Equals => Some(Key::Equals),
+            Keycode::Backquote => Some(Key::Backtick),
             _ => None,
         }
     }
