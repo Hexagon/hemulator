@@ -451,8 +451,15 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x40B, 0x00); // LPT2 (not installed)
                     self.cpu.bus_mut().write(0x40C, 0x00);
                     self.cpu.bus_mut().write(0x40D, 0x00); // LPT3 (not installed)
-                    self.cpu.bus_mut().write(0x40E, 0x00);
-                    self.cpu.bus_mut().write(0x40F, 0x00); // LPT4 (not installed)
+                    // Note: 0x40E-0x40F is overwritten below with EBDA pointer
+                    
+                    // Extended BIOS Data Area (EBDA) segment pointer at 0x0040:0x000E
+                    // Points to segment where EBDA starts (typically 0x9FC0 for 1KB EBDA)
+                    // Critical for Windows, Linux, and some DOS programs
+                    // We'll place it at top of conventional memory minus 1KB
+                    let ebda_segment = 0x9FC0u16; // Standard location: 639KB mark
+                    self.cpu.bus_mut().write(0x40E, (ebda_segment & 0xFF) as u8);
+                    self.cpu.bus_mut().write(0x40F, ((ebda_segment >> 8) & 0xFF) as u8);
                     
                     // Equipment list word at 0x0040:0x0010
                     // Bit 0: Floppy drives installed
@@ -571,6 +578,14 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x59, 0x03); // Offset high (0x0300)
                     self.cpu.bus_mut().write(0x5A, 0x00); // Segment low
                     self.cpu.bus_mut().write(0x5B, 0xF0); // Segment high (0xF000)
+                    
+                    // INT 0x1E (Diskette Parameter Table) at 0x0078
+                    // CRITICAL for DOS: Points to floppy disk parameter table
+                    // This vector is used by INT 13h and must point to valid DPT
+                    self.cpu.bus_mut().write(0x78, 0x50); // Offset low (0x0250)
+                    self.cpu.bus_mut().write(0x79, 0x02); // Offset high
+                    self.cpu.bus_mut().write(0x7A, 0x00); // Segment low
+                    self.cpu.bus_mut().write(0x7B, 0xF0); // Segment high (F000:0250)
 
                     // NOTE: INT 0x21 (DOS Services) is NOT set up by BIOS
                     // DOS will install its own INT 21h handler when it loads (IO.SYS/MSDOS.SYS)
@@ -580,6 +595,19 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x85, 0x00); // Offset high
                     self.cpu.bus_mut().write(0x86, 0x00); // Segment low
                     self.cpu.bus_mut().write(0x87, 0x00); // Segment high
+                    
+                    // Initialize Extended BIOS Data Area (EBDA) at 0x9FC0:0x0000
+                    // This is critical for Windows and Linux boot
+                    let ebda_base = 0x9FC00u32; // Physical address (segment 0x9FC0)
+                    
+                    // First word of EBDA should contain its size in KB (1KB = 0x0001)
+                    self.cpu.bus_mut().write(ebda_base, 0x01);
+                    self.cpu.bus_mut().write(ebda_base + 1, 0x00);
+                    
+                    // Clear rest of EBDA (1KB total)
+                    for offset in 2..1024 {
+                        self.cpu.bus_mut().write(ebda_base + offset, 0x00);
+                    }
 
                     // Load boot sector
                     self.ensure_boot_sector_loaded();

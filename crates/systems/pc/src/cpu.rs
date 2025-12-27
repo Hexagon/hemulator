@@ -4940,8 +4940,8 @@ mod tests {
 
         // Create a floppy image with test data
         let mut floppy = vec![0; 1474560]; // 1.44MB
-        for i in 0..512 {
-            floppy[i] = (i % 256) as u8;
+        for (i, byte) in floppy.iter_mut().enumerate().take(512) {
+            *byte = (i % 256) as u8;
         }
         bus.mount_floppy_a(floppy);
 
@@ -5018,5 +5018,76 @@ mod tests {
 
         // Verify carry flag is set (error)
         assert_ne!(cpu.cpu.flags & 0x0001, 0, "Carry flag should be set for error");
+    }
+
+    #[test]
+    fn test_bda_int1eh_vector() {
+        // Test that INT 1Eh vector points to disk parameter table
+        // This is critical for DOS boot
+        use crate::PcSystem;
+        use emu_core::System;
+        
+        let mut sys = PcSystem::new();
+        
+        // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
+        sys.boot_delay_frames = 1;
+        sys.boot_started = false;
+        
+        // Step one frame to trigger BDA initialization
+        let _ = sys.step_frame();
+
+        // Read INT 1Eh vector at 0x0078-0x007B
+        let offset_low = sys.cpu.bus().read(0x78) as u16;
+        let offset_high = sys.cpu.bus().read(0x79) as u16;
+        let segment_low = sys.cpu.bus().read(0x7A) as u16;
+        let segment_high = sys.cpu.bus().read(0x7B) as u16;
+
+        let offset = (offset_high << 8) | offset_low;
+        let segment = (segment_high << 8) | segment_low;
+
+        // Should point to F000:0250 (disk parameter table in BIOS)
+        assert_eq!(segment, 0xF000, "INT 1Eh should point to BIOS segment");
+        assert_eq!(offset, 0x0250, "INT 1Eh should point to DPT offset");
+        
+        // Verify we can read the disk parameter table from this vector
+        let dpt_addr = ((segment as u32) << 4) + (offset as u32);
+        let dpt_byte3 = sys.cpu.bus().read(dpt_addr + 3);
+        let dpt_byte4 = sys.cpu.bus().read(dpt_addr + 4);
+        
+        assert_eq!(dpt_byte3, 0x02, "DPT byte 3 should be 0x02 (512 bytes/sector)");
+        assert_eq!(dpt_byte4, 0x12, "DPT byte 4 should be 0x12 (18 sectors/track)");
+    }
+
+    #[test]
+    fn test_bda_ebda_pointer() {
+        // Test that EBDA pointer is properly set
+        // This is critical for Windows and Linux boot
+        use crate::PcSystem;
+        use emu_core::System;
+        
+        let mut sys = PcSystem::new();
+        
+        // Set boot delay to 1 so it becomes 0 after decrement, triggering BDA init
+        sys.boot_delay_frames = 1;
+        sys.boot_started = false;
+        
+        // Step one frame to trigger BDA initialization
+        let _ = sys.step_frame();
+
+        // Read EBDA pointer at 0x040E-0x040F
+        let ebda_low = sys.cpu.bus().read(0x40E) as u16;
+        let ebda_high = sys.cpu.bus().read(0x40F) as u16;
+        let ebda_segment = (ebda_high << 8) | ebda_low;
+
+        // Should be 0x9FC0 (standard EBDA location at 639KB)
+        assert_eq!(ebda_segment, 0x9FC0, "EBDA pointer should be at 0x9FC0");
+        
+        // Verify EBDA starts with its size (1KB)
+        let ebda_addr = (ebda_segment as u32) << 4;
+        let ebda_size_low = sys.cpu.bus().read(ebda_addr);
+        let ebda_size_high = sys.cpu.bus().read(ebda_addr + 1);
+        
+        assert_eq!(ebda_size_low, 0x01, "EBDA size low byte should be 0x01");
+        assert_eq!(ebda_size_high, 0x00, "EBDA size high byte should be 0x00 (1KB)");
     }
 }
