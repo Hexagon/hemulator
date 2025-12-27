@@ -242,6 +242,10 @@ pub struct Cpu8086<M: Memory8086> {
     /// 8 MMX registers (MM0-MM7), each 64 bits
     /// These alias the FPU ST(0)-ST(7) registers in real hardware
     mmx_regs: [u64; 8],
+
+    /// Instruction start IP - saved at the beginning of each instruction
+    /// Used for CPU exceptions to point to the faulting instruction
+    instruction_start_ip: u16,
 }
 
 // Flag bit positions in FLAGS register
@@ -291,6 +295,7 @@ impl<M: Memory8086> Cpu8086<M> {
             tsc: 0,
             msrs: std::collections::HashMap::new(),
             mmx_regs: [0; 8],
+            instruction_start_ip: 0,
         }
     }
 
@@ -440,14 +445,24 @@ impl<M: Memory8086> Cpu8086<M> {
         val
     }
 
-    /// Trigger a software interrupt (INT)
-    /// This is used for both explicit INT instructions and CPU-generated exceptions (e.g., divide error)
+    /// Trigger a software interrupt (INT) or CPU exception
+    ///
+    /// For software interrupts (is_exception=false): Uses current IP (after INT instruction)
+    /// For CPU exceptions (is_exception=true): Uses instruction_start_ip (faulting instruction)
     #[inline]
-    fn trigger_interrupt(&mut self, int_num: u8) {
+    fn trigger_interrupt(&mut self, int_num: u8, is_exception: bool) {
         // Push FLAGS, CS, IP onto stack (in that order)
         self.push(self.flags);
         self.push(self.cs);
-        self.push(self.ip);
+
+        // For exceptions, save IP of faulting instruction
+        // For software interrupts, save current IP (already advanced past INT)
+        let saved_ip = if is_exception {
+            self.instruction_start_ip
+        } else {
+            self.ip
+        };
+        self.push(saved_ip);
 
         // Clear IF and TF flags
         self.set_flag(FLAG_IF, false);
@@ -463,7 +478,7 @@ impl<M: Memory8086> Cpu8086<M> {
         // if int_num == 0 {
         //     eprintln!(
         //         "INT 0 triggered: IVT[0] = {:04X}:{:04X}, returning to CS:IP={:04X}:{:04X}",
-        //         new_cs, new_ip, self.cs, self.ip
+        //         new_cs, new_ip, self.cs, saved_ip
         //     );
         // }
 
@@ -1142,6 +1157,9 @@ impl<M: Memory8086> Cpu8086<M> {
             }
             return 1;
         }
+
+        // Save instruction start IP for CPU exceptions
+        self.instruction_start_ip = self.ip;
 
         let opcode = self.fetch_u8();
 
@@ -5166,16 +5184,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b110 => {
                         let divisor = self.read_rm8(modbits, rm);
                         if divisor == 0 {
-                            // Division by zero - trigger INT 0
-                            self.trigger_interrupt(0);
+                            // Division by zero - trigger INT 0 as exception
+                            self.trigger_interrupt(0, true);
                         } else {
                             let dividend = self.ax;
                             let quotient = dividend / (divisor as u16);
                             let remainder = dividend % (divisor as u16);
                             // Check for overflow (quotient > 255)
                             if quotient > 0xFF {
-                                // Division overflow - trigger INT 0
-                                self.trigger_interrupt(0);
+                                // Division overflow - trigger INT 0 as exception
+                                self.trigger_interrupt(0, true);
                             } else {
                                 self.ax = (remainder << 8) | quotient;
                             }
@@ -5191,16 +5209,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b111 => {
                         let divisor = self.read_rm8(modbits, rm) as i8;
                         if divisor == 0 {
-                            // Division by zero - trigger INT 0
-                            self.trigger_interrupt(0);
+                            // Division by zero - trigger INT 0 as exception
+                            self.trigger_interrupt(0, true);
                         } else {
                             let dividend = self.ax as i16;
                             let quotient = dividend / (divisor as i16);
                             let remainder = dividend % (divisor as i16);
                             // Check for overflow (quotient out of -128..127 range)
                             if !(-128..=127).contains(&quotient) {
-                                // Division overflow - trigger INT 0
-                                self.trigger_interrupt(0);
+                                // Division overflow - trigger INT 0 as exception
+                                self.trigger_interrupt(0, true);
                             } else {
                                 let quot_u8 = quotient as u8;
                                 let rem_u8 = remainder as u8;
@@ -5321,16 +5339,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b110 => {
                         let divisor = self.read_rm16(modbits, rm);
                         if divisor == 0 {
-                            // Division by zero - trigger INT 0
-                            self.trigger_interrupt(0);
+                            // Division by zero - trigger INT 0 as exception
+                            self.trigger_interrupt(0, true);
                         } else {
                             let dividend = ((self.dx as u32) << 16) | (self.ax as u32);
                             let quotient = dividend / (divisor as u32);
                             let remainder = dividend % (divisor as u32);
                             // Check for overflow (quotient > 65535)
                             if quotient > 0xFFFF {
-                                // Division overflow - trigger INT 0
-                                self.trigger_interrupt(0);
+                                // Division overflow - trigger INT 0 as exception
+                                self.trigger_interrupt(0, true);
                             } else {
                                 self.ax = quotient as u16;
                                 self.dx = remainder as u16;
@@ -5347,16 +5365,16 @@ impl<M: Memory8086> Cpu8086<M> {
                     0b111 => {
                         let divisor = self.read_rm16(modbits, rm) as i16;
                         if divisor == 0 {
-                            // Division by zero - trigger INT 0
-                            self.trigger_interrupt(0);
+                            // Division by zero - trigger INT 0 as exception
+                            self.trigger_interrupt(0, true);
                         } else {
                             let dividend = (((self.dx as u32) << 16) | (self.ax as u32)) as i32;
                             let quotient = dividend / (divisor as i32);
                             let remainder = dividend % (divisor as i32);
                             // Check for overflow (quotient out of -32768..32767 range)
                             if !(-32768..=32767).contains(&quotient) {
-                                // Division overflow - trigger INT 0
-                                self.trigger_interrupt(0);
+                                // Division overflow - trigger INT 0 as exception
+                                self.trigger_interrupt(0, true);
                             } else {
                                 self.ax = quotient as u16;
                                 self.dx = remainder as u16;
@@ -5605,23 +5623,8 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // INT 3 (0xCC) - Breakpoint interrupt
             0xCC => {
-                // Push flags, CS, IP
-                self.push(self.flags);
-                self.push(self.cs);
-                self.push(self.ip);
-
-                // Clear IF and TF
-                self.set_flag(FLAG_IF, false);
-                self.set_flag(FLAG_TF, false);
-
-                // Jump to interrupt vector 3
-                let ivt_offset = 3 * 4;
-                let new_ip = self.read_u16(0, ivt_offset);
-                let new_cs = self.read_u16(0, ivt_offset + 2);
-
-                self.ip = new_ip;
-                self.cs = new_cs;
-
+                // Software interrupt - use current IP
+                self.trigger_interrupt(3, false);
                 self.cycles += 52;
                 52
             }
@@ -5629,23 +5632,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // INTO - Interrupt on Overflow (0xCE)
             0xCE => {
                 if self.get_flag(FLAG_OF) {
-                    // Push flags, CS, IP
-                    self.push(self.flags);
-                    self.push(self.cs);
-                    self.push(self.ip);
-
-                    // Clear IF and TF
-                    self.set_flag(FLAG_IF, false);
-                    self.set_flag(FLAG_TF, false);
-
-                    // Jump to interrupt vector 4
-                    let ivt_offset = 4 * 4;
-                    let new_ip = self.read_u16(0, ivt_offset);
-                    let new_cs = self.read_u16(0, ivt_offset + 2);
-
-                    self.ip = new_ip;
-                    self.cs = new_cs;
-
+                    // Software interrupt - use current IP
+                    self.trigger_interrupt(4, false);
                     self.cycles += 53;
                     53
                 } else {
@@ -5733,8 +5721,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let base = self.fetch_u8();
                 let al = (self.ax & 0xFF) as u8;
                 if base == 0 {
-                    // Division by zero - trigger INT 0 (divide error exception)
-                    self.trigger_interrupt(0);
+                    // Division by zero - trigger INT 0 as exception
+                    self.trigger_interrupt(0, true);
                     self.cycles += 51; // Same as INT instruction
                     51
                 } else {
@@ -6206,24 +6194,9 @@ impl<M: Memory8086> Cpu8086<M> {
                 let lower_bound = self.read_u16(self.ds, ea) as i16;
                 let upper_bound = self.read_u16(self.ds, ea.wrapping_add(2)) as i16;
 
-                // If index is out of bounds, generate INT 5
+                // If index is out of bounds, generate INT 5 as exception
                 if index < lower_bound || index > upper_bound {
-                    // Push flags, CS, IP
-                    self.push(self.flags);
-                    self.push(self.cs);
-                    self.push(self.ip);
-
-                    // Clear IF and TF
-                    self.set_flag(FLAG_IF, false);
-                    self.set_flag(FLAG_TF, false);
-
-                    // Jump to interrupt vector 5
-                    let ivt_offset = 5 * 4;
-                    let new_ip = self.read_u16(0, ivt_offset);
-                    let new_cs = self.read_u16(0, ivt_offset + 2);
-
-                    self.ip = new_ip;
-                    self.cs = new_cs;
+                    self.trigger_interrupt(5, true);
                     self.cycles += 33; // Approximate
                     33
                 } else {
@@ -6785,7 +6758,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // INT n - Software Interrupt
             0xCD => {
                 let int_num = self.fetch_u8();
-                self.trigger_interrupt(int_num);
+                self.trigger_interrupt(int_num, false);
                 self.cycles += 51; // Approximate timing for INT instruction
                 51
             }
@@ -11062,5 +11035,131 @@ mod tests {
         assert_eq!(cpu.memory.read_u16(0x10202), 0x5678);
         assert_eq!(cpu.memory.read_u16(0x10204), 0x9ABC);
         assert_eq!(cpu.memory.read_u16(0x10206), 0xDEF0);
+    }
+
+    #[test]
+    fn test_div_by_zero_exception_saves_faulting_ip() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Setup: INT 0 vector points to a simple IRET at 0x1000:0x0000
+        cpu.memory.write_u16(0x0000, 0x0000); // IP = 0x0000
+        cpu.memory.write_u16(0x0002, 0x1000); // CS = 0x1000
+        cpu.memory.load_program(0x10000, &[0xCF]); // IRET at 0x1000:0x0000
+
+        // Setup: DIV by zero instruction at 0x2000:0x0100
+        // DIV BL (0xF6 with ModR/M 0b11_110_011)
+        cpu.memory.load_program(0x20100, &[0xF6, 0b11_110_011]);
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x2000;
+        cpu.ss = 0x3000;
+        cpu.sp = 0xFFFE;
+        cpu.ax = 100; // Dividend
+        cpu.bx = 0x0000; // BL = 0 (divisor)
+
+        // Execute DIV instruction (should trigger INT 0)
+        cpu.step();
+
+        // After INT 0, we should be at the INT 0 handler (0x1000:0x0000)
+        assert_eq!(cpu.cs, 0x1000, "CS should point to INT 0 handler segment");
+        assert_eq!(cpu.ip, 0x0000, "IP should point to INT 0 handler offset");
+
+        // Stack should contain: FLAGS, CS=0x2000, IP=0x0100 (start of DIV instruction)
+        // SP was 0xFFFE, after 3 pushes it's 0xFFFE - 6 = 0xFFF8
+        assert_eq!(cpu.sp, 0xFFF8, "Stack pointer should have 3 words pushed");
+
+        // Pop the values to verify
+        let saved_ip = cpu.pop();
+        let saved_cs = cpu.pop();
+        let _saved_flags = cpu.pop();
+
+        // The saved IP should point to the START of the DIV instruction (0x0100)
+        // NOT to the byte after it (0x0102)
+        assert_eq!(
+            saved_ip, 0x0100,
+            "Saved IP should point to the faulting DIV instruction"
+        );
+        assert_eq!(
+            saved_cs, 0x2000,
+            "Saved CS should be the original code segment"
+        );
+    }
+
+    #[test]
+    fn test_div_overflow_exception_saves_faulting_ip() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Setup: INT 0 vector points to a simple IRET at 0x1000:0x0000
+        cpu.memory.write_u16(0x0000, 0x0000); // IP = 0x0000
+        cpu.memory.write_u16(0x0002, 0x1000); // CS = 0x1000
+        cpu.memory.load_program(0x10000, &[0xCF]); // IRET at 0x1000:0x0000
+
+        // Setup: DIV with overflow at 0x2000:0x0200
+        // DIV BL (0xF6 with ModR/M 0b11_110_011)
+        cpu.memory.load_program(0x20200, &[0xF6, 0b11_110_011]);
+
+        cpu.ip = 0x0200;
+        cpu.cs = 0x2000;
+        cpu.ss = 0x3000;
+        cpu.sp = 0xFFFE;
+        cpu.ax = 0xFFFF; // Dividend = 65535
+        cpu.bx = 0x0001; // BL = 1 (divisor)
+                         // 65535 / 1 = 65535, which doesn't fit in AL (max 255) -> overflow
+
+        // Execute DIV instruction (should trigger INT 0 due to overflow)
+        cpu.step();
+
+        // After INT 0, we should be at the INT 0 handler
+        assert_eq!(cpu.cs, 0x1000);
+        assert_eq!(cpu.ip, 0x0000);
+
+        // Verify saved IP points to the faulting instruction
+        assert_eq!(cpu.sp, 0xFFF8);
+        let saved_ip = cpu.pop();
+
+        assert_eq!(
+            saved_ip, 0x0200,
+            "Saved IP should point to the faulting DIV instruction on overflow"
+        );
+    }
+
+    #[test]
+    fn test_software_int_saves_next_ip() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::new(mem);
+
+        // Setup: INT 0x10 vector points to a simple IRET at 0x1000:0x0000
+        cpu.memory.write_u16(0x0010 * 4, 0x0000); // IP = 0x0000
+        cpu.memory.write_u16(0x0010 * 4 + 2, 0x1000); // CS = 0x1000
+        cpu.memory.load_program(0x10000, &[0xCF]); // IRET at 0x1000:0x0000
+
+        // Setup: INT 10h instruction at 0x2000:0x0300
+        // INT 10h is 0xCD 0x10 (2 bytes)
+        cpu.memory.load_program(0x20300, &[0xCD, 0x10, 0x90]); // INT 10h, NOP
+
+        cpu.ip = 0x0300;
+        cpu.cs = 0x2000;
+        cpu.ss = 0x3000;
+        cpu.sp = 0xFFFE;
+
+        // Execute INT 10h instruction
+        cpu.step();
+
+        // After INT, we should be at the INT 10h handler
+        assert_eq!(cpu.cs, 0x1000);
+        assert_eq!(cpu.ip, 0x0000);
+
+        // Verify saved IP points AFTER the INT instruction
+        assert_eq!(cpu.sp, 0xFFF8);
+        let saved_ip = cpu.pop();
+
+        // Software INT should save IP pointing to the next instruction (0x0302)
+        // NOT to the INT instruction itself (0x0300)
+        assert_eq!(
+            saved_ip, 0x0302,
+            "Saved IP should point AFTER the INT instruction for software interrupts"
+        );
     }
 }
