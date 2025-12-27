@@ -1,20 +1,27 @@
-//! SNES PPU (Picture Processing Unit) - Minimal Implementation
+//! SNES PPU (Picture Processing Unit) - Functional Implementation
 //!
-//! This is a minimal stub implementation to demonstrate basic functionality.
-//! It supports:
-//! - Basic VRAM access via registers $2116-$2119
-//! - Basic CGRAM (palette) access via $2121-$2122
-//! - Screen enable/disable via $2100
-//! - Rendering a simple checkerboard pattern from VRAM
+//! This is a functional PPU implementation supporting Modes 0 & 1, sprites, and scrolling.
 //!
-//! NOT implemented (would require extensive work):
-//! - Full PPU modes (Mode 0-7)
-//! - Sprites (OAM)
-//! - Background layers with proper tile mapping
-//! - Scrolling
-//! - Windows and masks
+//! **Implemented Features**:
+//! - Mode 0: 4 BG layers, 2bpp each (4 colors per tile)
+//! - Mode 1: 2 BG layers 4bpp + 1 BG layer 2bpp (most common commercial mode)
+//! - Sprite rendering: 128 sprites, 4bpp, multiple size modes, priority rendering
+//! - Full scrolling support on all BG layers
+//! - VRAM access via registers $2115-$2119 (with increment control)
+//! - CGRAM (palette) access via $2121-$2122 (256 colors, 15-bit BGR)
+//! - OAM access via $2101-$2104
+//! - Screen enable/disable via $2100 (force blank + brightness)
+//! - Layer enable/disable via $212C (main screen designation)
+//! - Status registers: $213F (STAT78), $4212 (HVBJOY)
+//!
+//! **NOT Implemented** (future enhancements):
+//! - PPU Modes 2-7 (only used by ~40% of games)
+//! - Windows and color windows ($2123-$212B)
 //! - HDMA effects
-//! - Mosaic, color math, etc.
+//! - Mosaic effects ($2106)
+//! - Color math ($2130-$2132)
+//! - Sub-screen support ($212D)
+//! - Advanced tilemap sizes (only 32x32 currently supported)
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -45,6 +52,10 @@ pub struct Ppu {
 
     /// VRAM address register ($2116/$2117)
     vram_addr: u16,
+    /// VRAM address increment mode ($2115)
+    /// Bit 7: Increment on high byte access (0) or low byte access (1)
+    /// Bits 0-1: Address increment amount (00=1, 01=32, 10/11=128)
+    vmain: u8,
     /// CGRAM address register ($2121)
     cgram_addr: u8,
     /// CGRAM write latch (alternates between low and high byte)
@@ -53,6 +64,16 @@ pub struct Ppu {
     oam_addr: u16,
     /// OAM write latch
     oam_write_latch: bool,
+
+    /// PPU1 open bus value (last byte written to $2100-$213F)
+    ppu1_open_bus: u8,
+    /// PPU2 open bus value (last byte read from $2137-$213F)
+    ppu2_open_bus: u8,
+
+    /// V-blank NMI flag (cleared on read of $213F)
+    nmi_flag: bool,
+    /// H/V-blank flag and joypad status ($4212)
+    hvbjoy: u8,
 
     /// Screen display register ($2100) - bit 7 = force blank, bits 0-3 = brightness
     screen_display: u8,
@@ -127,10 +148,15 @@ impl Ppu {
             cgram: vec![0; CGRAM_SIZE],
             oam: vec![0; OAM_SIZE],
             vram_addr: 0,
+            vmain: 0x80, // Default: increment on high byte access
             cgram_addr: 0,
             cgram_write_latch: false,
             oam_addr: 0,
             oam_write_latch: false,
+            ppu1_open_bus: 0,
+            ppu2_open_bus: 0,
+            nmi_flag: false,
+            hvbjoy: 0,
             screen_display: 0x80, // Start with screen blanked
             bgmode: 0,
             bg1sc: 0,
@@ -156,6 +182,11 @@ impl Ppu {
 
     /// Write to PPU registers
     pub fn write_register(&mut self, addr: u16, val: u8) {
+        // Track open bus for PPU1 registers ($2100-$213F)
+        if (0x2100..=0x213F).contains(&addr) {
+            self.ppu1_open_bus = val;
+        }
+
         match addr {
             // $2100 - INIDISP - Screen Display Register
             0x2100 => {
@@ -312,6 +343,11 @@ impl Ppu {
                 }
             }
 
+            // $2115 - VMAIN - VRAM Address Increment Mode
+            0x2115 => {
+                self.vmain = val;
+            }
+
             // $2116 - VMADDL - VRAM Address (low byte)
             0x2116 => {
                 self.vram_addr = (self.vram_addr & 0xFF00) | val as u16;
@@ -326,15 +362,27 @@ impl Ppu {
             0x2118 => {
                 let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
-                // Auto-increment VRAM address
-                self.vram_addr = self.vram_addr.wrapping_add(1);
+                // Auto-increment VRAM address if VMAIN bit 7 is set (increment on low byte)
+                if self.vmain & 0x80 != 0 {
+                    self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
+                }
             }
 
             // $2119 - VMDATAH - VRAM Data Write (high byte)
             0x2119 => {
-                // Write to the current address minus 1 (since it was incremented by low byte write)
-                let addr = (self.vram_addr.wrapping_sub(1) as usize) % (VRAM_SIZE / 2);
+                let addr = if self.vmain & 0x80 != 0 {
+                    // If incrementing on low byte, high byte write uses current address
+                    (self.vram_addr.wrapping_sub(self.get_vram_increment()) as usize)
+                        % (VRAM_SIZE / 2)
+                } else {
+                    // If incrementing on high byte, use current address
+                    (self.vram_addr as usize) % (VRAM_SIZE / 2)
+                };
                 self.vram[addr * 2 + 1] = val;
+                // Auto-increment VRAM address if VMAIN bit 7 is clear (increment on high byte)
+                if self.vmain & 0x80 == 0 {
+                    self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
+                }
             }
 
             // $2121 - CGADD - CGRAM Address
@@ -367,6 +415,31 @@ impl Ppu {
                 self.tm = val;
             }
 
+            // $2106 - MOSAIC - Mosaic Size and Enable (stub - not implemented)
+            0x2106 => {
+                // Stub: Accept write but don't implement mosaic
+            }
+
+            // $2123-$212B - Window registers (stub - not implemented)
+            0x2123..=0x212B => {
+                // Stub: Accept window configuration but don't implement
+            }
+
+            // $212D - TS - Sub-screen Designation (stub - not implemented)
+            0x212D => {
+                // Stub: Accept write but don't implement sub-screen
+            }
+
+            // $212E-$212F - Window mask designation (stub - not implemented)
+            0x212E | 0x212F => {
+                // Stub: Accept window mask but don't implement
+            }
+
+            // $2130-$2133 - Color math and screen mode registers (stub - not implemented)
+            0x2130..=0x2133 => {
+                // Stub: Accept color math configuration but don't implement
+            }
+
             // Other registers - stub (just accept writes)
             _ => {
                 log(LogCategory::PPU, LogLevel::Debug, || {
@@ -382,12 +455,95 @@ impl Ppu {
     /// Read from PPU registers
     pub fn read_register(&self, addr: u16) -> u8 {
         match addr {
-            // $2100 - INIDISP - Screen Display Register (write-only, return open bus)
-            0x2100 => 0,
+            // $2134 - MPYL - Multiplication Result (low byte) - stub
+            0x2134 => 0,
+
+            // $2135 - MPYM - Multiplication Result (middle byte) - stub
+            0x2135 => 0,
+
+            // $2136 - MPYH - Multiplication Result (high byte) - stub
+            0x2136 => 0,
+
+            // $2137 - SLHV - Software Latch for H/V Counter
+            0x2137 => {
+                // Reading this register latches H/V counter values
+                // We don't implement this
+                0
+            }
+
+            // $2138 - OAMDATAREAD - OAM Data Read
+            0x2138 => {
+                let addr = self.oam_addr as usize;
+                if addr < OAM_SIZE {
+                    self.oam[addr]
+                } else {
+                    0
+                }
+            }
+
+            // $2139 - VMDATALREAD - VRAM Data Read (low byte)
+            0x2139 => {
+                let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
+                self.vram[addr * 2]
+            }
+
+            // $213A - VMDATAHREAD - VRAM Data Read (high byte)
+            0x213A => {
+                let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
+                self.vram[addr * 2 + 1]
+            }
+
+            // $213B - CGDATAREAD - CGRAM Data Read
+            0x213B => {
+                let addr = if self.cgram_write_latch {
+                    (self.cgram_addr as usize * 2 + 1) % CGRAM_SIZE
+                } else {
+                    (self.cgram_addr as usize * 2) % CGRAM_SIZE
+                };
+                self.cgram[addr]
+            }
+
+            // $213C - OPHCT - Horizontal Counter (stub)
+            0x213C => 0,
+
+            // $213D - OPVCT - Vertical Counter (stub)
+            0x213D => 0,
+
+            // $213E - STAT77 - PPU Status (stub)
+            0x213E => {
+                // Bit 7: Time over flag
+                // Bit 6: Range over flag
+                // Bits 0-5: PPU version
+                0x01 // Version 1
+            }
+
+            // $213F - STAT78 - PPU Status and NMI Flag
+            0x213F => {
+                // Bit 7: NMI flag (cleared on read)
+                // Bit 6: Master/slave mode
+                // Bits 0-3: PPU version
+                // Note: In real hardware, reading this clears the NMI flag
+                // But we can't do that in a &self method. The caller should call clear_nmi_flag()
+                (if self.nmi_flag { 0x80 } else { 0x00 }) | 0x01 // Version 1
+            }
+
+            // $4212 - HVBJOY - H/V-Blank and Joypad Status
+            0x4212 => {
+                // Bit 7: V-blank flag
+                // Bit 6: H-blank flag
+                // Bit 0: Joypad auto-read in progress
+                self.hvbjoy
+            }
 
             // Most PPU registers are write-only
-            // For now, return 0 for all reads
-            _ => 0,
+            // Return open bus value (last written value) for undefined reads
+            _ => {
+                if (0x2100..=0x213F).contains(&addr) {
+                    self.ppu1_open_bus
+                } else {
+                    self.ppu2_open_bus
+                }
+            }
         }
     }
 
@@ -449,6 +605,39 @@ impl Ppu {
         }
 
         frame
+    }
+
+    /// Get VRAM address increment amount based on VMAIN register
+    fn get_vram_increment(&self) -> u16 {
+        match self.vmain & 0x03 {
+            0 => 1,   // Increment by 1 word
+            1 => 32,  // Increment by 32 words
+            _ => 128, // Increment by 128 words (both 2 and 3)
+        }
+    }
+
+    /// Set V-blank flag (called by system during vertical blanking)
+    pub fn set_vblank(&mut self, vblank: bool) {
+        if vblank {
+            self.nmi_flag = true;
+            self.hvbjoy |= 0x80; // Set V-blank bit
+        } else {
+            self.hvbjoy &= !0x80; // Clear V-blank bit
+        }
+    }
+
+    /// Set H-blank flag (called by system during horizontal blanking)
+    pub fn set_hblank(&mut self, hblank: bool) {
+        if hblank {
+            self.hvbjoy |= 0x40; // Set H-blank bit
+        } else {
+            self.hvbjoy &= !0x40; // Clear H-blank bit
+        }
+    }
+
+    /// Clear NMI flag (called when $213F is read)
+    pub fn clear_nmi_flag(&mut self) {
+        self.nmi_flag = false;
     }
 
     /// Render a single BG layer in 2bpp mode (4 colors)
@@ -1440,5 +1629,185 @@ mod tests {
         }
 
         assert!(has_pixels, "Mode 1 should render 4bpp tiles");
+    }
+
+    #[test]
+    fn test_vmain_register() {
+        let mut ppu = Ppu::new();
+
+        // Test default VMAIN (0x80 - increment on low byte)
+        assert_eq!(ppu.vmain, 0x80);
+        assert_eq!(ppu.get_vram_increment(), 1);
+
+        // Test increment mode 0 (increment by 1)
+        ppu.write_register(0x2115, 0x00);
+        assert_eq!(ppu.vmain, 0x00);
+        assert_eq!(ppu.get_vram_increment(), 1);
+
+        // Test increment mode 1 (increment by 32)
+        ppu.write_register(0x2115, 0x01);
+        assert_eq!(ppu.vmain, 0x01);
+        assert_eq!(ppu.get_vram_increment(), 32);
+
+        // Test increment mode 2 (increment by 128)
+        ppu.write_register(0x2115, 0x02);
+        assert_eq!(ppu.vmain, 0x02);
+        assert_eq!(ppu.get_vram_increment(), 128);
+
+        // Test increment mode 3 (also increment by 128)
+        ppu.write_register(0x2115, 0x03);
+        assert_eq!(ppu.vmain, 0x03);
+        assert_eq!(ppu.get_vram_increment(), 128);
+
+        // Test increment on high byte (bit 7 clear)
+        ppu.write_register(0x2115, 0x00);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10); // Address $1000
+        ppu.write_register(0x2118, 0xAA); // Write low byte
+        assert_eq!(ppu.vram_addr, 0x1000); // Should not increment yet
+        ppu.write_register(0x2119, 0xBB); // Write high byte
+        assert_eq!(ppu.vram_addr, 0x1001); // Should increment after high byte
+
+        // Test increment on low byte (bit 7 set)
+        ppu.write_register(0x2115, 0x80);
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20); // Address $2000
+        ppu.write_register(0x2118, 0xCC); // Write low byte
+        assert_eq!(ppu.vram_addr, 0x2001); // Should increment after low byte
+    }
+
+    #[test]
+    fn test_vram_read_registers() {
+        let mut ppu = Ppu::new();
+
+        // Set up some test data in VRAM
+        ppu.vram[0x1000 * 2] = 0xAA;
+        ppu.vram[0x1000 * 2 + 1] = 0xBB;
+
+        // Set VRAM address to $1000
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x10);
+
+        // Read low byte
+        let low = ppu.read_register(0x2139);
+        assert_eq!(low, 0xAA);
+
+        // Read high byte
+        let high = ppu.read_register(0x213A);
+        assert_eq!(high, 0xBB);
+    }
+
+    #[test]
+    fn test_cgram_read_register() {
+        let mut ppu = Ppu::new();
+
+        // Write a color to CGRAM
+        ppu.write_register(0x2121, 0x05); // Address color 5
+        ppu.write_register(0x2122, 0x1F); // Red low byte
+        ppu.write_register(0x2122, 0x00); // Red high byte
+
+        // Reset address to color 5
+        ppu.write_register(0x2121, 0x05);
+
+        // Read the color back
+        let low = ppu.read_register(0x213B);
+        assert_eq!(low, 0x1F);
+    }
+
+    #[test]
+    fn test_oam_read_register() {
+        let mut ppu = Ppu::new();
+
+        // Write some data to OAM
+        ppu.write_register(0x2102, 0x10); // OAM address $10
+        ppu.write_register(0x2103, 0x00);
+        ppu.write_register(0x2104, 0xAB); // Write data
+
+        // Reset address
+        ppu.write_register(0x2102, 0x10);
+        ppu.write_register(0x2103, 0x00);
+
+        // Read back
+        let val = ppu.read_register(0x2138);
+        assert_eq!(val, 0xAB);
+    }
+
+    #[test]
+    fn test_status_registers() {
+        let mut ppu = Ppu::new();
+
+        // Test STAT77 (PPU version)
+        let stat77 = ppu.read_register(0x213E);
+        assert_eq!(stat77 & 0x0F, 0x01); // Version 1
+
+        // Test STAT78 without NMI flag
+        let stat78 = ppu.read_register(0x213F);
+        assert_eq!(stat78 & 0x80, 0x00); // NMI flag clear
+        assert_eq!(stat78 & 0x0F, 0x01); // Version 1
+
+        // Set NMI flag and test again
+        ppu.set_vblank(true);
+        let stat78_nmi = ppu.read_register(0x213F);
+        assert_eq!(stat78_nmi & 0x80, 0x80); // NMI flag set
+    }
+
+    #[test]
+    fn test_hvbjoy_register() {
+        let mut ppu = Ppu::new();
+
+        // Initially no flags should be set
+        let hvbjoy = ppu.read_register(0x4212);
+        assert_eq!(hvbjoy, 0x00);
+
+        // Set V-blank
+        ppu.set_vblank(true);
+        let hvbjoy_vblank = ppu.read_register(0x4212);
+        assert_eq!(hvbjoy_vblank & 0x80, 0x80);
+
+        // Set H-blank
+        ppu.set_hblank(true);
+        let hvbjoy_both = ppu.read_register(0x4212);
+        assert_eq!(hvbjoy_both & 0xC0, 0xC0); // Both V-blank and H-blank set
+
+        // Clear V-blank
+        ppu.set_vblank(false);
+        let hvbjoy_hblank = ppu.read_register(0x4212);
+        assert_eq!(hvbjoy_hblank & 0x80, 0x00); // V-blank clear
+        assert_eq!(hvbjoy_hblank & 0x40, 0x40); // H-blank still set
+    }
+
+    #[test]
+    fn test_window_registers_stub() {
+        let mut ppu = Ppu::new();
+
+        // Test that window registers accept writes without crashing
+        ppu.write_register(0x2106, 0xFF); // MOSAIC
+        ppu.write_register(0x2123, 0xFF); // W12SEL
+        ppu.write_register(0x2124, 0xFF); // W34SEL
+        ppu.write_register(0x2125, 0xFF); // WOBJSEL
+        ppu.write_register(0x2126, 0xFF); // WH0
+        ppu.write_register(0x2127, 0xFF); // WH1
+        ppu.write_register(0x2128, 0xFF); // WH2
+        ppu.write_register(0x2129, 0xFF); // WH3
+        ppu.write_register(0x212A, 0xFF); // WBGLOG
+        ppu.write_register(0x212B, 0xFF); // WOBJLOG
+        ppu.write_register(0x212D, 0xFF); // TS (sub-screen)
+        ppu.write_register(0x212E, 0xFF); // TMW
+        ppu.write_register(0x212F, 0xFF); // TSW
+
+        // Just verify no crash - these are stubs
+    }
+
+    #[test]
+    fn test_color_math_registers_stub() {
+        let mut ppu = Ppu::new();
+
+        // Test that color math registers accept writes without crashing
+        ppu.write_register(0x2130, 0xFF); // CGWSEL
+        ppu.write_register(0x2131, 0xFF); // CGADSUB
+        ppu.write_register(0x2132, 0xFF); // COLDATA
+        ppu.write_register(0x2133, 0xFF); // SETINI
+
+        // Just verify no crash - these are stubs
     }
 }
