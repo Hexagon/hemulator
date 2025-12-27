@@ -613,7 +613,13 @@ impl<M: Memory8086> Cpu8086<M> {
             return val;
         }
 
-        let count = count & 0x1F; // 8086: only lower 5 bits used
+        // On 80186+, shift count is masked to 5 bits (0-31)
+        // On 8086/8088, full 8-bit count is used (can shift by 0-255)
+        let count = if self.model.supports_80186_instructions() {
+            count & 0x1F
+        } else {
+            count
+        };
         let mut result = val;
 
         match op {
@@ -725,7 +731,13 @@ impl<M: Memory8086> Cpu8086<M> {
             return val;
         }
 
-        let count = count & 0x1F; // 8086: only lower 5 bits used
+        // On 80186+, shift count is masked to 5 bits (0-31)
+        // On 8086/8088, full 8-bit count is used (can shift by 0-255)
+        let count = if self.model.supports_80186_instructions() {
+            count & 0x1F
+        } else {
+            count
+        };
         let mut result = val;
 
         match op {
@@ -2544,6 +2556,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // MOVSX - Move with Sign Extension (0x0F 0xBE, 0xBF) - 80386+
                     0xBE => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         // MOVSX r16, r/m8
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
@@ -2558,6 +2575,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     0xBF => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         // MOVSX r32, r/m16 (80386 only - not fully supported yet)
                         let _modrm = self.fetch_u8();
                         self.cycles += 3;
@@ -2565,6 +2587,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // MOVZX - Move with Zero Extension (0x0F 0xB6, 0xB7) - 80386+
                     0xB6 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         // MOVZX r16, r/m8
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
@@ -2578,6 +2605,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     0xB7 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         // MOVZX r32, r/m16 (80386 only - not fully supported yet)
                         let _modrm = self.fetch_u8();
                         self.cycles += 3;
@@ -2585,6 +2617,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BSF - Bit Scan Forward (0x0F 0xBC) - 80386+
                     0xBC => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let val = self.read_rm16(modbits, rm);
@@ -2606,6 +2643,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BSR - Bit Scan Reverse (0x0F 0xBD) - 80386+
                     0xBD => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let val = self.read_rm16(modbits, rm);
@@ -2627,6 +2669,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BT - Bit Test (0x0F 0xA3) - 80386+
                     0xA3 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let bit_index = self.get_reg16(reg);
@@ -2642,6 +2689,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BTS - Bit Test and Set (0x0F 0xAB) - 80386+
                     0xAB => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let bit_index = self.get_reg16(reg);
@@ -2659,6 +2711,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BTR - Bit Test and Reset (0x0F 0xB3) - 80386+
                     0xB3 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let bit_index = self.get_reg16(reg);
@@ -2676,6 +2733,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // BTC - Bit Test and Complement (0x0F 0xBB) - 80386+
                     0xBB => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, reg, rm) = Self::decode_modrm(modrm);
                         let bit_index = self.get_reg16(reg);
@@ -2693,6 +2755,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // SHLD - Double Precision Shift Left (0x0F 0xA4, 0xA5) - 80386+
                     0xA4 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (_modbits, _reg, _rm) = Self::decode_modrm(modrm);
                         let _count = self.fetch_u8();
@@ -2701,6 +2768,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         3
                     }
                     0xA5 => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let _modrm = self.fetch_u8();
                         // SHLD with CL
                         // Stub: Not fully implemented
@@ -2709,6 +2781,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // SHRD - Double Precision Shift Right (0x0F 0xAC, 0xAD) - 80386+
                     0xAC => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (_modbits, _reg, _rm) = Self::decode_modrm(modrm);
                         let _count = self.fetch_u8();
@@ -2717,6 +2794,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         3
                     }
                     0xAD => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let _modrm = self.fetch_u8();
                         // SHRD with CL
                         // Stub: Not fully implemented
@@ -2725,6 +2807,11 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // SETcc - Set Byte on Condition (0x0F 0x90-0x9F) - 80386+
                     0x90..=0x9F => {
+                        if !self.model.supports_80386_instructions() {
+                            // Invalid opcode on 8086/8088/80186/80286
+                            self.cycles += 10;
+                            return 10;
+                        }
                         let modrm = self.fetch_u8();
                         let (modbits, _reg, rm) = Self::decode_modrm(modrm);
                         let condition = next_opcode & 0x0F;
@@ -4391,6 +4478,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // Group 2 opcodes (0xC0) - Shift/rotate r/m8 by immediate byte (80186+)
             0xC0 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = self.fetch_u8();
@@ -4412,6 +4504,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // Group 2 opcodes (0xC1) - Shift/rotate r/m16 by immediate byte (80186+)
             0xC1 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = self.fetch_u8();
@@ -4433,6 +4530,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // ENTER (0xC8) - 80186+ instruction
             0xC8 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 // Debug: check what bytes we're about to read
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     let ip_before = self.ip;
@@ -4480,6 +4582,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // LEAVE (0xC9) - 80186+ instruction
             0xC9 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 self.sp = self.bp;
                 self.bp = self.pop();
                 self.cycles += 8;
@@ -5038,6 +5145,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSHA - Push All General Registers (0x60) - 80186+
             0x60 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let temp_sp = self.sp;
                 self.push(self.ax);
                 self.push(self.cx);
@@ -5053,6 +5165,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // POPA - Pop All General Registers (0x61) - 80186+
             0x61 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 self.di = self.pop();
                 self.si = self.pop();
                 self.bp = self.pop();
@@ -5067,6 +5184,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // BOUND - Check Array Index Against Bounds (0x62) - 80186+
             0x62 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let index = self.get_reg16(reg) as i16;
@@ -5119,6 +5241,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // FS segment override prefix (0x64) - 80386+
             0x64 => {
+                if !self.model.supports_80386_instructions() {
+                    // Invalid opcode on 8086/8088/80186/80286
+                    self.cycles += 10;
+                    return 10;
+                }
                 // FS segment override prefix
                 self.segment_override = Some(SegmentOverride::FS);
                 self.step() // Execute next instruction with FS override
@@ -5126,6 +5253,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // GS segment override prefix (0x65) - 80386+
             0x65 => {
+                if !self.model.supports_80386_instructions() {
+                    // Invalid opcode on 8086/8088/80186/80286
+                    self.cycles += 10;
+                    return 10;
+                }
                 // GS segment override prefix
                 self.segment_override = Some(SegmentOverride::GS);
                 self.step() // Execute next instruction with GS override
@@ -5133,6 +5265,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH immediate word (0x68) - 80186+
             0x68 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let val = self.fetch_u16();
                 self.push(val);
                 self.cycles += 3;
@@ -5141,6 +5278,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // IMUL r16, r/m16, imm16 (0x69) - 80186+
             0x69 => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let rm_val = self.read_rm16(modbits, rm) as i16;
@@ -5166,6 +5308,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH immediate byte (0x6A) - 80186+
             0x6A => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let val = self.fetch_u8() as i8 as i16 as u16; // Sign extend
                 self.push(val);
                 self.cycles += 3;
@@ -5174,6 +5321,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // IMUL r16, r/m16, imm8 (0x6B) - 80186+
             0x6B => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
                 let rm_val = self.read_rm16(modbits, rm) as i16;
@@ -5199,6 +5351,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // INSB - Input String Byte (0x6C) - 80186+
             0x6C => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 // Read from I/O port DX, write to ES:DI
                 let port = self.dx;
                 let val = self.io_read(port);
@@ -5216,6 +5373,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // INSW - Input String Word (0x6D) - 80186+
             0x6D => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 // Read from I/O port DX, write to ES:DI
                 let port = self.dx;
                 let val = self.io_read_word(port);
@@ -5233,6 +5395,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OUTSB - Output String Byte (0x6E) - 80186+
             0x6E => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 // Read from DS:SI, write to I/O port DX
                 let val = self.read(self.ds, self.si);
                 let port = self.dx;
@@ -5250,6 +5417,11 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OUTSW - Output String Word (0x6F) - 80186+
             0x6F => {
+                if !self.model.supports_80186_instructions() {
+                    // Invalid opcode on 8086/8088
+                    self.cycles += 10;
+                    return 10;
+                }
                 // Read from DS:SI, write to I/O port DX
                 let val = self.read_u16(self.ds, self.si);
                 let port = self.dx;
@@ -8651,5 +8823,389 @@ mod tests {
 
         let result = (cpu.memory.read(0x5FF1) as u16) << 8 | cpu.memory.read(0x5FF0) as u16;
         assert_eq!(result, 0x00FE, "SBB result should include borrow");
+    }
+
+    // ===== CPU Model Validation Tests =====
+
+    #[test]
+    fn test_80186_instructions_invalid_on_8086() {
+        // Test that 80186 instructions are rejected on 8086/8088
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test PUSHA (0x60)
+        cpu.memory.load_program(0xFFFF0, &[0x60]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "PUSHA should be invalid on 8086");
+
+        // Test POPA (0x61)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x61]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "POPA should be invalid on 8086");
+
+        // Test BOUND (0x62)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x62, 0xC0]); // BOUND AX, AX (with ModRM)
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BOUND should be invalid on 8086");
+
+        // Test PUSH imm16 (0x68)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x68, 0x34, 0x12]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "PUSH imm16 should be invalid on 8086");
+
+        // Test PUSH imm8 (0x6A)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6A, 0x42]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "PUSH imm8 should be invalid on 8086");
+
+        // Test IMUL imm16 (0x69)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x69, 0xC0, 0x10, 0x00]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "IMUL imm16 should be invalid on 8086");
+
+        // Test IMUL imm8 (0x6B)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6B, 0xC0, 0x10]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "IMUL imm8 should be invalid on 8086");
+
+        // Test INSB (0x6C)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6C]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "INSB should be invalid on 8086");
+
+        // Test INSW (0x6D)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6D]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "INSW should be invalid on 8086");
+
+        // Test OUTSB (0x6E)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6E]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "OUTSB should be invalid on 8086");
+
+        // Test OUTSW (0x6F)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x6F]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "OUTSW should be invalid on 8086");
+
+        // Test ENTER (0xC8)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0xC8, 0x10, 0x00, 0x00]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "ENTER should be invalid on 8086");
+
+        // Test LEAVE (0xC9)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0xC9]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "LEAVE should be invalid on 8086");
+    }
+
+    #[test]
+    fn test_80386_instructions_invalid_on_8086() {
+        // Test that 80386 instructions are rejected on 8086/8088
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test FS segment override (0x64)
+        cpu.memory.load_program(0xFFFF0, &[0x64, 0x90]); // FS: NOP
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "FS segment override should be invalid on 8086");
+
+        // Test GS segment override (0x65)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x65, 0x90]); // GS: NOP
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "GS segment override should be invalid on 8086");
+
+        // Test MOVSX (0x0F 0xBE)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "MOVSX should be invalid on 8086");
+
+        // Test MOVZX (0x0F 0xB6)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xB6, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "MOVZX should be invalid on 8086");
+
+        // Test BSF (0x0F 0xBC)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BSF should be invalid on 8086");
+
+        // Test BSR (0x0F 0xBD)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBD, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BSR should be invalid on 8086");
+
+        // Test BT (0x0F 0xA3)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xA3, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BT should be invalid on 8086");
+
+        // Test BTS (0x0F 0xAB)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xAB, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BTS should be invalid on 8086");
+
+        // Test BTR (0x0F 0xB3)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xB3, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BTR should be invalid on 8086");
+
+        // Test BTC (0x0F 0xBB)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBB, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BTC should be invalid on 8086");
+
+        // Test SHLD (0x0F 0xA4)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xA4, 0xC0, 0x01]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "SHLD should be invalid on 8086");
+
+        // Test SHRD (0x0F 0xAC)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xAC, 0xC0, 0x01]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "SHRD should be invalid on 8086");
+
+        // Test SETcc (0x0F 0x90)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x90, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "SETO should be invalid on 8086");
+    }
+
+    #[test]
+    fn test_80386_instructions_invalid_on_80186() {
+        // Test that 80386 instructions are rejected on 80186
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test MOVSX (0x0F 0xBE) - should be invalid on 80186
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "MOVSX should be invalid on 80186");
+
+        // Test BSF (0x0F 0xBC) - should be invalid on 80186
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BSF should be invalid on 80186");
+    }
+
+    #[test]
+    fn test_80386_instructions_invalid_on_80286() {
+        // Test that 80386 instructions are rejected on 80286
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80286);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test MOVSX (0x0F 0xBE) - should be invalid on 80286
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "MOVSX should be invalid on 80286");
+
+        // Test BSF (0x0F 0xBC) - should be invalid on 80286
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC0]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BSF should be invalid on 80286");
+
+        // Test FS segment override (0x64) - should be invalid on 80286
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0x64, 0x90]); // FS: NOP
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "FS segment override should be invalid on 80286");
+    }
+
+    #[test]
+    fn test_80186_instructions_valid_on_80186() {
+        // Test that 80186 instructions work correctly on 80186
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.sp = 0x0100;
+        cpu.ss = 0x1000;
+
+        // Test PUSH imm16 (0x68) - should work on 80186
+        cpu.memory.load_program(0xFFFF0, &[0x68, 0x34, 0x12]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 3, "PUSH imm16 should work on 80186");
+        assert_eq!(cpu.sp, 0x00FE);
+
+        // Test PUSHA (0x60) - should work on 80186
+        cpu.ip = 0x0000;
+        cpu.ax = 0x1111;
+        cpu.memory.load_program(0xFFFF0, &[0x60]);
+        let cycles = cpu.step();
+        assert_eq!(cycles, 36, "PUSHA should work on 80186");
+    }
+
+    #[test]
+    fn test_80286_instructions_valid_on_80286() {
+        // Test that 80286 instructions work correctly on 80286
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80286);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test LMSW (0x0F 0x01 /6) - should work on 80286
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0x01, 0xF0]); // LMSW AX
+        let cycles = cpu.step();
+        assert!(cycles > 0, "LMSW should work on 80286");
+    }
+
+    #[test]
+    fn test_80386_instructions_valid_on_80386() {
+        // Test that 80386 instructions work correctly on 80386
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // Test MOVSX (0x0F 0xBE) - should work on 80386
+        cpu.bx = 0x00FF;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBE, 0xC3]); // MOVSX AX, BL
+        let cycles = cpu.step();
+        assert_eq!(cycles, 3, "MOVSX should work on 80386");
+        assert_eq!(cpu.ax, 0xFFFF); // 0xFF sign-extended
+
+        // Test BSF (0x0F 0xBC) - should work on 80386
+        cpu.ip = 0x0000;
+        cpu.bx = 0x0008;
+        cpu.memory.load_program(0xFFFF0, &[0x0F, 0xBC, 0xC3]); // BSF AX, BX
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "BSF should work on 80386");
+        assert_eq!(cpu.ax, 3); // First set bit is at position 3
+    }
+
+    #[test]
+    fn test_shift_count_masking_8086() {
+        // On 8086, shift count is NOT masked - full 8-bit count is used
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0020; // CL = 32 (shift by 32 on 8086 should shift all bits out)
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 8086, shifting by 32 should result in 0 (all bits shifted out)
+        assert_eq!(cpu.ax & 0xFF, 0, "8086 should shift by full count (32 shifts all bits out)");
+    }
+
+    #[test]
+    fn test_shift_count_masking_80186() {
+        // On 80186+, shift count IS masked to 5 bits (0-31)
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0020; // CL = 32, but masked to 0 on 80186+
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 80186+, count 32 is masked to 0, so value should be unchanged
+        assert_eq!(cpu.ax & 0xFF, 0xFF, "80186 should mask count to 5 bits (32 -> 0)");
+    }
+
+    #[test]
+    fn test_shift_count_masking_80186_with_33() {
+        // Test with count 33 which should be masked to 1
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+        cpu.cx = 0x0021; // CL = 33, masked to 1 on 80186+
+
+        // SHL AL, CL (0xD2 with ModR/M 0b11_100_000)
+        cpu.memory.load_program(0xFFFF0, &[0xD2, 0xE0]);
+        cpu.step();
+
+        // On 80186+, count 33 is masked to 1, so 0xFF << 1 = 0xFE
+        assert_eq!(cpu.ax & 0xFF, 0xFE, "80186 should mask count to 5 bits (33 -> 1)");
+    }
+
+    #[test]
+    fn test_shift_immediate_invalid_on_8086() {
+        // Test that shift by immediate (0xC0, 0xC1) is invalid on 8086
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel8086);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+
+        // SHL AL, imm8 (0xC0 with ModR/M and immediate)
+        cpu.memory.load_program(0xFFFF0, &[0xC0, 0xE0, 0x04]); // SHL AL, 4
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "Shift by immediate should be invalid on 8086");
+
+        // SHL AX, imm8 (0xC1 with ModR/M and immediate)
+        cpu.ip = 0x0000;
+        cpu.memory.load_program(0xFFFF0, &[0xC1, 0xE0, 0x04]); // SHL AX, 4
+        let cycles = cpu.step();
+        assert_eq!(cycles, 10, "Shift by immediate should be invalid on 8086");
+    }
+
+    #[test]
+    fn test_shift_immediate_valid_on_80186() {
+        // Test that shift by immediate (0xC0, 0xC1) works on 80186
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80186);
+
+        cpu.ip = 0x0000;
+        cpu.cs = 0xFFFF;
+        cpu.ax = 0x00FF;
+
+        // SHL AL, imm8 (0xC0 with ModR/M and immediate)
+        cpu.memory.load_program(0xFFFF0, &[0xC0, 0xE0, 0x04]); // SHL AL, 4
+        let cycles = cpu.step();
+        assert!(cycles > 10, "Shift by immediate should work on 80186");
+        assert_eq!(cpu.ax & 0xFF, 0xF0, "SHL AL, 4 should shift left by 4");
     }
 }
