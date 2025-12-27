@@ -1675,8 +1675,7 @@ mod memory_tests {
         // INT 12h should return conventional memory in AX (512KB)
         let regs = sys.cpu.get_registers();
         assert_eq!(
-            regs.ax,
-            512,
+            regs.ax, 512,
             "INT 12h should return 512KB conventional memory"
         );
 
@@ -1701,8 +1700,7 @@ mod memory_tests {
         // INT 12h should return conventional memory in AX (640KB, not 1024KB)
         let regs = sys.cpu.get_registers();
         assert_eq!(
-            regs.ax,
-            640,
+            regs.ax, 640,
             "INT 12h should return 640KB conventional memory (not total 1024KB)"
         );
     }
@@ -1738,8 +1736,7 @@ mod memory_tests {
         // INT 15h AH=88h should return extended memory in AX (384KB)
         let regs = sys.cpu.get_registers();
         assert_eq!(
-            regs.ax,
-            384,
+            regs.ax, 384,
             "INT 15h AH=88h should return 384KB extended memory"
         );
 
@@ -1768,8 +1765,7 @@ mod memory_tests {
         // INT 15h AH=88h should return 0 extended memory
         let regs = sys.cpu.get_registers();
         assert_eq!(
-            regs.ax,
-            0,
+            regs.ax, 0,
             "INT 15h AH=88h should return 0KB extended memory for 512KB system"
         );
     }

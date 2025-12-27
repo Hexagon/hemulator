@@ -76,11 +76,11 @@ impl PcBus {
     }
 
     /// Create a new PC bus with a specific memory size in KB
-    /// 
+    ///
     /// The memory_kb parameter specifies total system memory:
     /// - If memory_kb <= 640: All memory is conventional (640KB max)
     /// - If memory_kb > 640: 640KB conventional + rest as extended memory
-    /// 
+    ///
     /// Valid range: 256KB minimum, no maximum (extended memory can be very large)
     pub fn with_memory_kb(kb: u32) -> Self {
         // Conventional memory is clamped to 256-640KB range
@@ -89,7 +89,7 @@ impl PcBus {
 
         // Extended memory is any memory beyond 640KB
         // Real PCs have extended memory starting at 1MB, but we calculate it from the total
-        let extended_kb = if kb > 640 { kb - 640 } else { 0 };
+        let extended_kb = kb.saturating_sub(640);
 
         let mut pit = Pit::new();
         pit.reset(); // Initialize with default system timer
@@ -152,6 +152,7 @@ impl PcBus {
     }
 
     /// Get the size of extended memory in KB (above 1MB)
+    #[allow(dead_code)] // Public API for external use
     pub fn extended_memory_kb(&self) -> u32 {
         self.xms.total_extended_memory_kb()
     }
