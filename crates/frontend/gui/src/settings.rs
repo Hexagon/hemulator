@@ -329,3 +329,70 @@ mod tests {
         assert!(settings.input.player4.a.is_empty());
     }
 }
+
+#[test]
+fn test_settings_missing_fields_deserialize() {
+    // Test the exact scenario from the bug report:
+    // When config.json has been serialized but is missing some fields,
+    // deserialization should use defaults for missing fields
+    
+    // Case 1: Missing window_width and window_height
+    let json_missing_size = r#"{
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    },
+    "player2": {
+      "a": "U",
+      "b": "O",
+      "select": "RightShift",
+      "start": "P",
+      "up": "I",
+      "down": "K",
+      "left": "J",
+      "right": "L"
+    },
+    "player3": {
+      "a": "",
+      "b": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "player4": {
+      "a": "",
+      "b": "",
+      "select": "",
+      "start": "",
+      "up": "",
+      "down": "",
+      "left": "",
+      "right": ""
+    },
+    "host_modifier": "RightCtrl"
+  },
+  "video_backend": "software"
+}"#;
+    
+    let result = serde_json::from_str::<Settings>(json_missing_size);
+    match result {
+        Ok(settings) => {
+            assert_eq!(settings.window_width, 512, "window_width should default to 512");
+            assert_eq!(settings.window_height, 480, "window_height should default to 480");
+            println!("Test passed: Missing fields use defaults correctly");
+        }
+        Err(e) => {
+            panic!("Test FAILED: Could not deserialize JSON with missing window size fields: {}", e);
+        }
+    }
+}
