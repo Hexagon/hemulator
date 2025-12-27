@@ -1654,9 +1654,18 @@ impl PcCpu {
             // DL = number of drives
             self.cpu.dx = (((heads - 1) as u16) << 8) | 0x01;
 
-            // ES:DI = pointer to disk parameter table (set to 0x0000:0x0000 for now)
-            self.cpu.es = 0x0000;
-            self.cpu.di = 0x0000;
+            // ES:DI = pointer to disk parameter table
+            // For floppy drives, point to the DPT in BIOS ROM at F000:0250
+            // For hard drives, ES:DI should be 0:0 (not used)
+            if drive < 0x80 {
+                // Floppy drive - return pointer to disk parameter table
+                self.cpu.es = 0xF000;
+                self.cpu.di = crate::bios::DISK_PARAMETER_TABLE_OFFSET;
+            } else {
+                // Hard drive - no parameter table needed
+                self.cpu.es = 0x0000;
+                self.cpu.di = 0x0000;
+            }
 
             // AH = 0 (success)
             self.cpu.ax &= 0x00FF;
@@ -4779,5 +4788,90 @@ mod tests {
         // ES:BX should NOT be modified (INT 13h AH=03h leaves pointer unchanged)
         assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
         assert_eq!(cpu.cpu.bx, 0x8000, "BX should remain unchanged");
+    }
+
+    #[test]
+    fn test_int13h_disk_parameter_table() {
+        // Test that INT 13h AH=08h returns a valid disk parameter table pointer
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params) for floppy
+        cpu.cpu.ax = 0x0800; // AH=08h
+        cpu.cpu.dx = 0x0000; // DL=00 (floppy A)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+
+        // ES:DI should point to disk parameter table at F000:0250
+        assert_eq!(cpu.cpu.es, 0xF000, "ES should point to BIOS segment");
+        assert_eq!(
+            cpu.cpu.di, 0x0250,
+            "DI should point to disk parameter table offset"
+        );
+
+        // Verify we can read the disk parameter table from the returned address
+        let dpt_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.di as u32);
+
+        // Read the 11-byte disk parameter table
+        let dpt: Vec<u8> = (0..11)
+            .map(|i| cpu.cpu.memory.read(dpt_addr + i))
+            .collect();
+
+        // Verify key parameters for 1.44MB floppy
+        assert_eq!(dpt[3], 0x02, "Bytes per sector should be 0x02 (512 bytes)");
+        assert_eq!(dpt[4], 0x12, "Sectors per track should be 0x12 (18)");
+
+        // The table should not be all zeros (indicating it's actually populated)
+        let all_zeros = dpt.iter().all(|&b| b == 0);
+        assert!(!all_zeros, "Disk parameter table should not be all zeros");
+    }
+
+    #[test]
+    fn test_int13h_hard_drive_no_dpt() {
+        // Test that INT 13h AH=08h returns ES:DI=0:0 for hard drives
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params) for hard drive
+        cpu.cpu.ax = 0x0800; // AH=08h
+        cpu.cpu.dx = 0x0080; // DL=80h (hard drive C)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should succeed
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
+
+        // ES:DI should be 0:0 for hard drives (no parameter table)
+        assert_eq!(cpu.cpu.es, 0x0000, "ES should be 0 for hard drives");
+        assert_eq!(cpu.cpu.di, 0x0000, "DI should be 0 for hard drives");
     }
 }
