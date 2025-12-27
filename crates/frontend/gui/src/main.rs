@@ -1597,10 +1597,27 @@ fn main() {
         let needs_host_key = sys.requires_host_key_for_function_keys();
 
         // Only exit on ESC if host key is held (when required by system), else allow ESC always
+        // But first check if any overlay is open - close it instead of exiting
         if (needs_host_key && host_key_held && window.is_key_down(Key::Escape))
             || (!needs_host_key && window.is_key_down(Key::Escape))
         {
-            break;
+            // Close overlays first, only exit if no overlay is open
+            if show_help
+                || show_slot_selector
+                || show_mount_selector
+                || show_speed_selector
+                || show_disk_format_selector
+                || show_debug
+            {
+                show_help = false;
+                show_slot_selector = false;
+                show_mount_selector = false;
+                show_speed_selector = false;
+                show_disk_format_selector = false;
+                show_debug = false;
+            } else {
+                break;
+            }
         }
 
         // Toggle help overlay (F1)
@@ -1610,6 +1627,7 @@ fn main() {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
+            show_disk_format_selector = false; // Close disk format selector if open
             show_speed_selector = false; // Close speed selector if open
             show_debug = false; // Close debug if open
         }
@@ -1622,6 +1640,7 @@ fn main() {
             show_help = false; // Close help if open
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
+            show_disk_format_selector = false; // Close disk format selector if open
             show_debug = false; // Close debug if open
         }
 
@@ -1845,7 +1864,9 @@ fn main() {
             } else if window.is_key_pressed(Key::Key8, false) {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
-                selected_index = Some(8);
+                // Key 9: Show disk format selector for creating new blank disk
+                show_mount_selector = false;
+                show_disk_format_selector = true;
             }
 
             if let Some(idx) = selected_index {
@@ -1906,6 +1927,103 @@ fn main() {
             // Render mount point selector
             let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
+        }
+
+        // Handle disk format selector
+        if show_disk_format_selector {
+            // Check for format selection (1-7)
+            let mut selected_format: Option<usize> = None;
+
+            if window.is_key_pressed(Key::Key1, false) {
+                selected_format = Some(0);
+            } else if window.is_key_pressed(Key::Key2, false) {
+                selected_format = Some(1);
+            } else if window.is_key_pressed(Key::Key3, false) {
+                selected_format = Some(2);
+            } else if window.is_key_pressed(Key::Key4, false) {
+                selected_format = Some(3);
+            } else if window.is_key_pressed(Key::Key5, false) {
+                selected_format = Some(4);
+            } else if window.is_key_pressed(Key::Key6, false) {
+                selected_format = Some(5);
+            } else if window.is_key_pressed(Key::Key7, false) {
+                selected_format = Some(6);
+            }
+
+            if let Some(fmt_idx) = selected_format {
+                show_disk_format_selector = false;
+
+                // Create the blank disk based on selected format
+                let (disk_data, default_name, description) = match fmt_idx {
+                    0 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy360K),
+                        "floppy_360k.img",
+                        "360KB Floppy",
+                    ),
+                    1 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy720K),
+                        "floppy_720k.img",
+                        "720KB Floppy",
+                    ),
+                    2 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_2M),
+                        "floppy_1_2m.img",
+                        "1.2MB Floppy",
+                    ),
+                    3 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M),
+                        "floppy_1_44m.img",
+                        "1.44MB Floppy",
+                    ),
+                    4 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive10M),
+                        "hdd_10m.img",
+                        "10MB Hard Drive",
+                    ),
+                    5 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20M),
+                        "hdd_20m.img",
+                        "20MB Hard Drive",
+                    ),
+                    6 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive40M),
+                        "hdd_40m.img",
+                        "40MB Hard Drive",
+                    ),
+                    _ => {
+                        eprintln!("Invalid disk format index: {}", fmt_idx);
+                        continue;
+                    }
+                };
+
+                // Show save dialog
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Disk Image", &["img"])
+                    .add_filter("All Files", &["*"])
+                    .set_file_name(default_name)
+                    .save_file()
+                {
+                    match std::fs::write(&path, &disk_data) {
+                        Ok(_) => {
+                            println!("Created {} disk image: {}", description, path.display());
+                            status_message = format!("Created {} disk image", description);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save disk image: {}", e);
+                            status_message = format!("Failed to save disk: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // Render disk format selector
+            let format_buffer = ui_render::create_disk_format_selector(width, height);
+            if let Err(e) = window.update_with_buffer(&format_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
             }
@@ -2026,6 +2144,7 @@ fn main() {
             show_mount_selector = true;
             show_help = false;
             show_slot_selector = false;
+            show_disk_format_selector = false;
             show_speed_selector = false;
             show_debug = false;
         }
