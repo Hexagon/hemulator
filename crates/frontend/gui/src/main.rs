@@ -1979,7 +1979,17 @@ fn main() {
                                         "Intel80188" => emu_core::cpu_8086::CpuModel::Intel80188,
                                         "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
                                         "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
-                                        _ => emu_core::cpu_8086::CpuModel::Intel8086,
+                                        "Intel80486" => emu_core::cpu_8086::CpuModel::Intel80486,
+                                        "Intel80486SX" => emu_core::cpu_8086::CpuModel::Intel80486SX,
+                                        "Intel80486DX2" => emu_core::cpu_8086::CpuModel::Intel80486DX2,
+                                        "Intel80486SX2" => emu_core::cpu_8086::CpuModel::Intel80486SX2,
+                                        "Intel80486DX4" => emu_core::cpu_8086::CpuModel::Intel80486DX4,
+                                        "IntelPentium" => emu_core::cpu_8086::CpuModel::IntelPentium,
+                                        "IntelPentiumMMX" => emu_core::cpu_8086::CpuModel::IntelPentiumMMX,
+                                        _ => {
+                                            eprintln!("Unknown CPU model: {}, using default Intel8086", cpu_str);
+                                            emu_core::cpu_8086::CpuModel::Intel8086
+                                        }
                                     }
                                 } else {
                                     emu_core::cpu_8086::CpuModel::Intel8086
@@ -1993,7 +2003,10 @@ fn main() {
                                             "EGA" => Box::new(emu_pc::SoftwareEgaAdapter::new()),
                                             "VGA" => Box::new(emu_pc::SoftwareVgaAdapter::new()),
                                             "CGA" => Box::new(emu_pc::SoftwareCgaAdapter::new()),
-                                            _ => Box::new(emu_pc::SoftwareCgaAdapter::new()),
+                                            _ => {
+                                                eprintln!("Unknown video mode: {}, using default CGA", video_str);
+                                                Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                            }
                                         }
                                     } else {
                                         Box::new(emu_pc::SoftwareCgaAdapter::new())
@@ -2094,8 +2107,7 @@ fn main() {
             }
         }
 
-        // F8 - Save project for any system - only when host key is held for PC, no host key needed for others
-        let needs_host_key = sys.requires_host_key_for_function_keys();
+        // F8 - Save project for any system
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F8, false))
             || (!needs_host_key && window.is_key_pressed(Key::F8, false))
         {
