@@ -1313,10 +1313,10 @@ impl PcCpu {
         // Skip the INT 12h instruction (2 bytes: 0xCD 0x12)
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
-        // Get memory size from bus
-        let memory_kb = self.cpu.memory.memory_kb() as u16;
+        // Get conventional memory size from bus (max 640KB)
+        let memory_kb = self.cpu.memory.conventional_memory_kb() as u16;
 
-        // Return memory size in AX
+        // Return conventional memory size in AX
         self.cpu.ax = memory_kb;
 
         // Clear carry flag (success)
@@ -2509,49 +2509,49 @@ impl PcCpu {
         //
         // Segment descriptor format:
         // +0: WORD - Segment limit (low 16 bits)
-        // +2: WORD - Base address (low 16 bits)  
+        // +2: WORD - Base address (low 16 bits)
         // +4: BYTE - Base address (bits 16-23)
         // +5: BYTE - Access rights
         // +6: WORD - Reserved
-        
+
         let cx = self.cpu.cx;
         let es = self.cpu.es as u32;
         let si = self.cpu.si as u32;
         let gdt_addr = (es << 4) + si;
-        
+
         // Read source descriptor (offset 0x18)
         let src_base_low = self.cpu.memory.read(gdt_addr + 0x1A) as u32
             | ((self.cpu.memory.read(gdt_addr + 0x1B) as u32) << 8);
         let src_base_high = self.cpu.memory.read(gdt_addr + 0x1C) as u32;
         let src_addr = (src_base_high << 16) | src_base_low;
-        
+
         // Read destination descriptor (offset 0x20)
         let dst_base_low = self.cpu.memory.read(gdt_addr + 0x22) as u32
             | ((self.cpu.memory.read(gdt_addr + 0x23) as u32) << 8);
         let dst_base_high = self.cpu.memory.read(gdt_addr + 0x24) as u32;
         let dst_addr = (dst_base_high << 16) | dst_base_low;
-        
+
         // Copy CX words (CX * 2 bytes)
         let byte_count = (cx as u32) * 2;
-        
+
         if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
             eprintln!(
                 "INT 15h AH=87h: Move {} words ({} bytes) from 0x{:08X} to 0x{:08X}",
                 cx, byte_count, src_addr, dst_addr
             );
         }
-        
+
         for i in 0..byte_count {
             let byte = self.cpu.memory.read(src_addr + i);
             self.cpu.memory.write(dst_addr + i, byte);
         }
-        
+
         // Clear carry flag (success)
         self.set_carry_flag(false);
-        
+
         // AH = 0 (success)
         self.cpu.ax &= 0x00FF;
-        
+
         51
     }
 

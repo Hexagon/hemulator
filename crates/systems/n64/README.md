@@ -57,12 +57,10 @@ For detailed architecture documentation, see the **[Renderer Implementation Guid
 
 **Feature Flag**: Build with `--features opengl` to include
 
-**Blocker**: Requires OpenGL context from frontend
-- Current frontend uses `minifb` which doesn't expose GL context
-- Full implementation requires either:
-  - Headless GL context (EGL/WGL)
-  - Frontend migration to SDL2 or winit+glutin
-  - Separate rendering window with GL context
+**Integration**: Requires OpenGL context from frontend
+- Current frontend uses SDL2 which supports OpenGL context
+- Full implementation requires integration of OpenGL context creation
+- Separate rendering window with GL context is an option
 
 **Architecture**: Template in place showing how to implement:
 - OpenGL FBO for offscreen rendering

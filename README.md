@@ -12,7 +12,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, CGA text and graphics modes
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
-- 🖥️ **Cross-Platform GUI**: Built with minifb for Windows, Linux, and macOS
+- 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
 - 🎨 **Video Processing**: Modular architecture supporting both software and OpenGL-accelerated rendering
 - 🎞️ **CRT Filters**: Hardware-accelerated shader-based CRT effects (scanlines, phosphor, full CRT)
 - 🎵 **Audio Support**: Integrated audio playback via rodio (NES and Atari 2600 audio implemented)
@@ -222,7 +222,7 @@ hemulator/
 │   │   ├── n64/        # 🚧 N64 emulation (in development, 3D rendering)
 │   │   └── pc/         # 🧪 IBM PC/XT emulation (experimental)
 │   └── frontend/
-│       └── gui/        # GUI frontend (minifb + rodio) - builds as 'hemu'
+│       └── gui/        # GUI frontend (SDL2 + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
 ├── saves/              # Save state directory (per-ROM)
 ├── MANUAL.md           # User manual (included in releases)
@@ -298,10 +298,9 @@ The project follows a modular architecture:
   - **PC (`emu_pc`)**: 🧪 Experimental IBM PC/XT emulator with 8086 CPU and BIOS stub
   
 - **Frontend (`emu_gui`)**: GUI application
-  - Window management with `minifb`
+  - Window management with SDL2
   - Audio playback with `rodio`
   - Settings and save state management
-  - ROM loading and system selection
   - ROM loading and system selection
 
 ### Adding New Mappers
@@ -332,7 +331,7 @@ See [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- Built with [minifb](https://github.com/emoon/rust_minifb) for cross-platform windowing
+- Built with [SDL2](https://www.libsdl.org/) for cross-platform windowing and rendering
 - Audio playback via [rodio](https://github.com/RustAudio/rodio)
 - NES mapper references from [NESDev Wiki](https://www.nesdev.org/)
 

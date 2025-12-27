@@ -671,8 +671,8 @@ For N64 games, the standard controller mappings apply with these button equivale
   - Software renderer is fully functional (default)
   - OpenGL renderer is a stub (requires GL context from frontend)
   - To enable OpenGL stub: build with `--features opengl`
-  - Future OpenGL implementation blocked by minifb's lack of GL context exposure
-  - See `N64_RENDERER_ARCHITECTURE.md` for details on renderer design
+  - OpenGL integration with SDL2 frontend is planned
+  - See system README files for details on renderer design
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles
@@ -757,7 +757,12 @@ For N64 games, the standard controller mappings apply with these button equivale
   - **80386**: MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc
   - CPU model selection support for running software with different instruction set requirements
   - See `AGENTS.md` for full instruction set details
-- **Memory bus** (640KB RAM, 128KB VRAM, 256KB ROM)
+- **Memory bus** (configurable conventional + extended memory, 128KB VRAM, 256KB ROM)
+  - **Conventional memory**: 256KB-640KB (PC/XT compatible, visible to all software)
+  - **Extended memory**: Above 640KB (accessible via XMS, for protected mode or extended software)
+  - **Total memory**: Configurable from 256KB (minimum) to much larger (e.g., 16MB+)
+  - INT 12h reports conventional memory (max 640KB)
+  - INT 15h AH=88h reports extended memory (above 1MB equivalent)
 - **Custom BIOS** with POST screen
   - 64KB BIOS ROM with traditional PC BIOS POST (Power-On Self-Test) screen
   - Displays on boot: BIOS version, CPU type, memory test, disk drives, boot priority
@@ -825,11 +830,20 @@ Example configuration file:
   - Intel80386: Adds 32-bit operations (MOVSX, MOVZX, BSF, BSR, etc.)
 
 - **`memory_kb`** (optional, default: 640)
-  - Valid range: 256-640 KB (will be clamped to this range)
-  - Common values: 256, 512, 640 (maximum conventional memory)
-  - Controls the amount of conventional memory available to software
-  - IBM PC/XT: 256KB typical, 640KB maximum
-  - Most DOS software requires at least 512KB
+  - Specifies total system memory in KB
+  - If memory_kb <= 640: All memory is conventional (PC/XT compatible)
+  - If memory_kb > 640: 640KB conventional + remainder as extended memory
+  - Minimum: 256KB (conventional only)
+  - No maximum for total memory (extended memory can be very large)
+  - Common configurations:
+    - 256KB: Early PC/XT (all conventional)
+    - 512KB: Typical PC/XT (all conventional)
+    - 640KB: Maximum conventional memory (DOS limit)
+    - 1024KB (1MB): 640KB conventional + 384KB extended
+    - 16384KB (16MB): 640KB conventional + 15.75MB extended
+  - INT 12h BIOS call reports conventional memory (max 640KB)
+  - INT 15h BIOS call (AH=88h) reports extended memory
+  - Most DOS software requires at least 512KB conventional memory
 
 - **`video_mode`** (optional, default: "CGA")
   - Valid values: `"CGA"`, `"EGA"`, `"VGA"`
