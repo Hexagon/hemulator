@@ -541,6 +541,17 @@ impl System for PcSystem {
                     // Number of hard drives at 0x0040:0x0075
                     let hard_drive_count = if self.cpu.bus().hard_drive().is_some() { 1u8 } else { 0u8 };
                     self.cpu.bus_mut().write(0x475, hard_drive_count);
+                    
+                    // Disk-related BDA fields for INT 13h
+                    // Last disk operation status at 0x0040:0x0074
+                    self.cpu.bus_mut().write(0x474, 0x00); // Success (no error)
+                    
+                    // Floppy disk controller state at 0x0040:0x008B-0x008F
+                    self.cpu.bus_mut().write(0x48B, 0x00); // Diskette data state
+                    self.cpu.bus_mut().write(0x48C, 0x00); // Diskette motor status (off)
+                    self.cpu.bus_mut().write(0x48D, 0x00); // Diskette motor timeout
+                    self.cpu.bus_mut().write(0x48E, 0x00); // Disk status return code
+                    self.cpu.bus_mut().write(0x48F, 0x00); // Diskette controller status
 
                     // Set up BIOS interrupt vectors (normally done by BIOS init code)
                     // INT 0x10 (Video Services) at 0x0040

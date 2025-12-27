@@ -1392,6 +1392,9 @@ impl PcCpu {
         // Clear AH (status = success)
         self.cpu.ax &= 0x00FF;
 
+        // Write status to BDA at 0x0040:0x0074
+        self.cpu.memory.write(0x474, 0x00); // Success
+
         // Clear carry flag (success)
         self.set_carry_flag(false);
 
@@ -1522,6 +1525,9 @@ impl PcCpu {
         // Set AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
 
+        // Write status to BDA at 0x0040:0x0074
+        self.cpu.memory.write(0x474, status);
+
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
 
@@ -1599,6 +1605,9 @@ impl PcCpu {
         // Set AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
 
+        // Write status to BDA at 0x0040:0x0074
+        self.cpu.memory.write(0x474, status);
+
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
 
@@ -1670,11 +1679,18 @@ impl PcCpu {
             // AH = 0 (success)
             self.cpu.ax &= 0x00FF;
 
+            // Write status to BDA at 0x0040:0x0074
+            self.cpu.memory.write(0x474, 0x00); // Success
+
             // Clear carry flag (success)
             self.set_carry_flag(false);
         } else {
             // Invalid drive
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+
+            // Write status to BDA at 0x0040:0x0074
+            self.cpu.memory.write(0x474, 0x01); // Error
+
             self.set_carry_flag(true);
         }
 
@@ -1686,8 +1702,8 @@ impl PcCpu {
         // DL = drive number
         let _drive = (self.cpu.dx & 0xFF) as u8;
 
-        // Return last status from disk controller
-        let status = self.cpu.memory.disk_controller().status();
+        // Read last status from BDA at 0x0040:0x0074
+        let status = self.cpu.memory.read(0x474);
 
         // AH = status
         self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
@@ -4793,7 +4809,12 @@ mod tests {
     #[test]
     fn test_int13h_disk_parameter_table() {
         // Test that INT 13h AH=08h returns a valid disk parameter table pointer
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        
+        // Load BIOS to ensure disk parameter table is available
+        let bios = crate::bios::generate_minimal_bios();
+        bus.load_bios(&bios);
+        
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -4873,5 +4894,129 @@ mod tests {
         // ES:DI should be 0:0 for hard drives (no parameter table)
         assert_eq!(cpu.cpu.es, 0x0000, "ES should be 0 for hard drives");
         assert_eq!(cpu.cpu.di, 0x0000, "DI should be 0 for hard drives");
+    }
+
+    #[test]
+    fn test_bda_disk_status_fields() {
+        // Test that BDA disk status fields are properly initialized and updated
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Verify BDA initialization happens (move to RAM first)
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Check that BDA disk status field at 0x0040:0x0074 is initialized to 0
+        let initial_status = cpu.cpu.memory.read(0x474);
+        assert_eq!(
+            initial_status, 0x00,
+            "BDA disk status should be initialized to 0"
+        );
+
+        // Setup: Write INT 13h instruction for reset
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=00h (reset)
+        cpu.cpu.ax = 0x0000; // AH=00h (reset)
+        cpu.cpu.dx = 0x0000; // DL=00 (floppy A)
+
+        // Execute INT 13h AH=00h
+        cpu.step();
+
+        // Verify BDA status is still 0 (success)
+        let status_after_reset = cpu.cpu.memory.read(0x474);
+        assert_eq!(status_after_reset, 0x00, "BDA status should be 0 after reset");
+    }
+
+    #[test]
+    fn test_int13h_status_writes_to_bda() {
+        // Test that INT 13h operations write their status to BDA
+        let mut bus = PcBus::new();
+
+        // Create a floppy image with test data
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+        for i in 0..512 {
+            floppy[i] = (i % 256) as u8;
+        }
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=02h (read sectors)
+        cpu.cpu.ax = 0x0201; // AH=02h (read), AL=01h (1 sector)
+        cpu.cpu.cx = 0x0001; // CH=00 (cylinder 0), CL=01 (sector 1)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (drive A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00; // ES:BX = buffer address
+
+        // Execute INT 13h AH=02h
+        cpu.step();
+
+        // Verify status was written to BDA
+        let bda_status = cpu.cpu.memory.read(0x474);
+        assert_eq!(
+            bda_status, 0x00,
+            "BDA status should be 0x00 (success) after successful read"
+        );
+
+        // Also verify AH contains the same status
+        let ah_status = ((cpu.cpu.ax >> 8) & 0xFF) as u8;
+        assert_eq!(ah_status, 0x00, "AH should be 0x00 (success)");
+    }
+
+    #[test]
+    fn test_int13h_get_status_reads_from_bda() {
+        // Test that INT 13h AH=01h reads status from BDA
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Manually set a status in BDA to simulate a previous operation
+        cpu.cpu.memory.write(0x474, 0x04); // Sector not found error
+
+        // Setup: Write INT 13h instruction
+        let cs = cpu.cpu.cs;
+        let ip = cpu.cpu.ip;
+        let addr = ((cs as u32) << 4) + (ip as u32);
+
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=01h (get status)
+        cpu.cpu.ax = 0x0100; // AH=01h (get status)
+        cpu.cpu.dx = 0x0000; // DL=00 (drive A)
+
+        // Execute INT 13h AH=01h
+        cpu.step();
+
+        // Verify AH contains the status from BDA
+        let ah_status = ((cpu.cpu.ax >> 8) & 0xFF) as u8;
+        assert_eq!(
+            ah_status, 0x04,
+            "AH should contain status 0x04 from BDA"
+        );
+
+        // Verify carry flag is set (error)
+        assert_ne!(cpu.cpu.flags & 0x0001, 0, "Carry flag should be set for error");
     }
 }
