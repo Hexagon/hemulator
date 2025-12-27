@@ -148,7 +148,9 @@ pub struct Settings {
     #[serde(default)]
     pub input: InputConfig,
 
+    #[serde(default = "default_window_width")]
     pub window_width: usize,
+    #[serde(default = "default_window_height")]
     pub window_height: usize,
     #[serde(default, skip_serializing)]
     pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
@@ -160,6 +162,14 @@ pub struct Settings {
     pub video_backend: String, // "software" or "opengl"
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
+}
+
+fn default_window_width() -> usize {
+    512 // 256 * 2 (default 2x scale)
+}
+
+fn default_window_height() -> usize {
+    480 // 240 * 2 (default 2x scale)
 }
 
 fn default_video_backend() -> String {
@@ -335,7 +345,7 @@ fn test_settings_missing_fields_deserialize() {
     // Test the exact scenario from the bug report:
     // When config.json has been serialized but is missing some fields,
     // deserialization should use defaults for missing fields
-    
+
     // Case 1: Missing window_width and window_height
     let json_missing_size = r#"{
   "input": {
@@ -383,16 +393,61 @@ fn test_settings_missing_fields_deserialize() {
   },
   "video_backend": "software"
 }"#;
-    
+
     let result = serde_json::from_str::<Settings>(json_missing_size);
     match result {
         Ok(settings) => {
-            assert_eq!(settings.window_width, 512, "window_width should default to 512");
-            assert_eq!(settings.window_height, 480, "window_height should default to 480");
+            assert_eq!(
+                settings.window_width, 512,
+                "window_width should default to 512"
+            );
+            assert_eq!(
+                settings.window_height, 480,
+                "window_height should default to 480"
+            );
             println!("Test passed: Missing fields use defaults correctly");
         }
         Err(e) => {
-            panic!("Test FAILED: Could not deserialize JSON with missing window size fields: {}", e);
+            panic!(
+                "Test FAILED: Could not deserialize JSON with missing window size fields: {}",
+                e
+            );
+        }
+    }
+}
+
+#[test]
+fn test_settings_empty_json_deserialize() {
+    // Edge case: Completely empty JSON should use all defaults
+    let empty_json = "{}";
+
+    let result = serde_json::from_str::<Settings>(empty_json);
+    match result {
+        Ok(settings) => {
+            assert_eq!(
+                settings.window_width, 512,
+                "window_width should default to 512"
+            );
+            assert_eq!(
+                settings.window_height, 480,
+                "window_height should default to 480"
+            );
+            assert_eq!(
+                settings.video_backend, "software",
+                "video_backend should default to 'software'"
+            );
+            assert_eq!(
+                settings.input.player1.a, "Z",
+                "player1.a should default to 'Z'"
+            );
+            assert_eq!(
+                settings.input.host_modifier, "RightCtrl",
+                "host_modifier should default to 'RightCtrl'"
+            );
+            println!("Test passed: Empty JSON uses all defaults correctly");
+        }
+        Err(e) => {
+            panic!("Test FAILED: Could not deserialize empty JSON: {}", e);
         }
     }
 }
