@@ -1523,6 +1523,9 @@ fn main() {
     // Mount point selector state
     let mut show_mount_selector = false;
 
+    // Disk format selector state (for creating blank disks)
+    let mut show_disk_format_selector = false;
+
     // PC keyboard state tracking
     let mut prev_keys: HashSet<Key> = HashSet::new();
 
