@@ -1501,9 +1501,12 @@ impl PcCpu {
                     "INT 13h AH=02h: Finished writing all {} bytes",
                     buffer.len()
                 );
-                
+
                 // Verify the write by reading back the first 32 bytes
-                eprint!("INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:", buffer_seg, buffer_offset);
+                eprint!(
+                    "INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:",
+                    buffer_seg, buffer_offset
+                );
                 for i in 0..32.min(buffer.len()) {
                     if i % 16 == 0 {
                         eprint!("\n  {:04X}:", i);
@@ -1525,7 +1528,7 @@ impl PcCpu {
         // AL = number of sectors read (on success)
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
-            
+
             // Note: INT 13h AH=02h does NOT modify ES:BX
             // The buffer pointer remains unchanged after the read
             // (unlike some other BIOS calls that advance pointers)
@@ -1603,37 +1606,9 @@ impl PcCpu {
         if status == 0x00 {
             self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
 
-            // Update ES:BX to point past the data that was just written
-            // This is critical for bootloaders that write multiple sectors in a loop
-            let bytes_written = (count as u32) * 512;
-
-            // Save original ES:BX for logging
-            let original_es = self.cpu.es;
-            let original_bx = self.cpu.bx;
-
-            // Add bytes to BX, handling overflow into ES
-            // Real BIOS behavior: BX advances by bytes written, with carry into ES
-            let new_bx = (buffer_offset as u32) + bytes_written;
-
-            // If we overflow past 64KB (0x10000), we need to adjust ES
-            if new_bx >= 0x10000 {
-                // How many complete 64KB segments did we cross?
-                let segments_crossed = (new_bx >> 16) as u16;
-                // Add to ES (each segment is 0x1000 paragraphs)
-                self.cpu.es = self.cpu.es.wrapping_add(segments_crossed * 0x1000);
-                // BX is the remainder
-                self.cpu.bx = (new_bx & 0xFFFF) as u16;
-            } else {
-                self.cpu.bx = new_bx as u16;
-            }
-
-            // Log ES:BX advancement for debugging boot issues
-            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                eprintln!(
-                    "INT 13h AH=03h: ES:BX advanced from {:04X}:{:04X} to {:04X}:{:04X} (+{} bytes)",
-                    original_es, original_bx, self.cpu.es, self.cpu.bx, bytes_written
-                );
-            }
+            // Note: INT 13h AH=03h does NOT modify ES:BX
+            // The buffer pointer remains unchanged after the write
+            // (just like AH=02h read sectors)
         }
 
         51 // Approximate INT instruction timing
@@ -4611,9 +4586,9 @@ mod tests {
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
         assert_eq!(cpu.cpu.ax & 0xFF, 0x01); // AL = sectors read
 
-        // ES:BX should be advanced by 512 bytes (0x200)
-        assert_eq!(cpu.cpu.es, 0x0000);
-        assert_eq!(cpu.cpu.bx, 0x7C00 + 0x200); // 0x7E00
+        // ES:BX should NOT be modified (INT 13h AH=02h leaves pointer unchanged)
+        assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
+        assert_eq!(cpu.cpu.bx, 0x7C00, "BX should remain unchanged");
 
         // Verify data was copied to buffer
         let buffer_addr = 0x7C00;
@@ -4622,7 +4597,7 @@ mod tests {
     }
 
     #[test]
-    fn test_int13h_read_multiple_sectors_advances_esbx() {
+    fn test_int13h_read_multiple_sectors_does_not_modify_esbx() {
         // Test that INT 13h AH=02h advances ES:BX correctly for multiple sectors
         let mut bus = PcBus::new();
 
@@ -4659,13 +4634,13 @@ mod tests {
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
         assert_eq!(cpu.cpu.ax & 0xFF, 0x05); // AL = 5 sectors read
 
-        // ES:BX should be advanced by 5 * 512 = 2560 bytes (0xA00)
-        assert_eq!(cpu.cpu.es, 0x0000);
-        assert_eq!(cpu.cpu.bx, 0x8000 + 0xA00); // 0x8A00
+        // ES:BX should NOT be modified (INT 13h AH=02h leaves pointer unchanged)
+        assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
+        assert_eq!(cpu.cpu.bx, 0x8000, "BX should remain unchanged");
     }
 
     #[test]
-    fn test_int13h_read_sectors_with_segment_overflow() {
+    fn test_int13h_read_large_buffer_does_not_modify_esbx() {
         // Test that INT 13h AH=02h handles ES:BX advancement past segment boundary
         let mut bus = PcBus::new();
 
@@ -4705,19 +4680,13 @@ mod tests {
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
         assert_eq!(cpu.cpu.ax & 0xFF, 0x04); // AL = 4 sectors read
 
-        // ES:BX should wrap correctly
-        // Initial: 0x1000:0xF800
-        // Add 2048 bytes (0x800): 0xF800 + 0x800 = 0x10000
-        // Since 0x10000 >= 0x10000, we cross 1 segment
-        // Segments crossed = 0x10000 >> 16 = 1
-        // ES = 0x1000 + (1 * 0x1000) = 0x2000
-        // BX = 0x10000 & 0xFFFF = 0x0000
-        assert_eq!(cpu.cpu.es, 0x2000);
-        assert_eq!(cpu.cpu.bx, 0x0000);
+        // ES:BX should NOT be modified (INT 13h AH=02h leaves pointer unchanged)
+        assert_eq!(cpu.cpu.es, 0x1000, "ES should remain unchanged");
+        assert_eq!(cpu.cpu.bx, 0xF800, "BX should remain unchanged");
     }
 
     #[test]
-    fn test_int13h_write_sectors_advances_esbx() {
+    fn test_int13h_write_sectors_does_not_modify_esbx() {
         // Test that INT 13h AH=03h advances ES:BX pointer after writing
         let mut bus = PcBus::new();
 
@@ -4759,13 +4728,13 @@ mod tests {
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
         assert_eq!(cpu.cpu.ax & 0xFF, 0x01); // AL = sectors written
 
-        // ES:BX should be advanced by 512 bytes (0x200)
-        assert_eq!(cpu.cpu.es, 0x0000);
-        assert_eq!(cpu.cpu.bx, 0x7C00 + 0x200); // 0x7E00
+        // ES:BX should NOT be modified (INT 13h AH=03h leaves pointer unchanged)
+        assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
+        assert_eq!(cpu.cpu.bx, 0x7C00, "BX should remain unchanged");
     }
 
     #[test]
-    fn test_int13h_write_multiple_sectors_advances_esbx() {
+    fn test_int13h_write_multiple_sectors_does_not_modify_esbx() {
         // Test that INT 13h AH=03h advances ES:BX correctly for multiple sectors
         let mut bus = PcBus::new();
 
@@ -4807,8 +4776,8 @@ mod tests {
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00); // Status = success
         assert_eq!(cpu.cpu.ax & 0xFF, 0x03); // AL = 3 sectors written
 
-        // ES:BX should be advanced by 3 * 512 = 1536 bytes (0x600)
-        assert_eq!(cpu.cpu.es, 0x0000);
-        assert_eq!(cpu.cpu.bx, 0x8000 + 0x600); // 0x8600
+        // ES:BX should NOT be modified (INT 13h AH=03h leaves pointer unchanged)
+        assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
+        assert_eq!(cpu.cpu.bx, 0x8000, "BX should remain unchanged");
     }
 }

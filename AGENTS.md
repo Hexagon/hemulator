@@ -893,9 +893,31 @@ Detailed implementation notes:
     - **API**: `set_controller(idx, state)` method with button constants
   - **PPU (Picture Processing Unit)**:
     - Implementation in `crates/systems/snes/ppu.rs`
-    - VRAM access via registers $2116-$2119 (word-addressed, 64KB)
+    - VRAM access via registers $2115-$2119 (word-addressed, 64KB)
+      - $2115 (VMAIN): VRAM address increment control (1/32/128 words, increment on low/high byte)
+      - $2116-$2117: VRAM address (word-addressed)
+      - $2118-$2119: VRAM data write (low/high byte)
+      - $2139-$213A: VRAM data read (low/high byte)
     - CGRAM (palette) access via $2121-$2122 (256 colors, 15-bit BGR format)
+      - $2121 (CGADD): CGRAM address
+      - $2122 (CGDATA): CGRAM data write (2-byte latch)
+      - $213B (CGDATAREAD): CGRAM data read
+    - OAM access via $2101-$2104
+      - $2101 (OBSEL): OBJ size and base address
+      - $2102-$2103 (OAMADDL/H): OAM address
+      - $2104 (OAMDATA): OAM data write
+      - $2138 (OAMDATAREAD): OAM data read
     - Screen enable/disable via $2100 (force blank + brightness control)
+    - Status registers:
+      - $213E (STAT77): PPU1 status (time over, range over, version)
+      - $213F (STAT78): PPU1 status with NMI flag (cleared on read)
+      - $4212 (HVBJOY): H/V-blank and joypad status
+    - Window and color math registers (stub - not implemented):
+      - $2106 (MOSAIC): Mosaic size and enable
+      - $2123-$212B: Window configuration
+      - $212D (TS): Sub-screen designation
+      - $212E-$212F: Window mask designation
+      - $2130-$2133: Color math configuration
     - **Mode 0 Support** (4 BG layers, 2bpp each):
       - BG mode register ($2105 - BGMODE)
       - BG tilemap address registers ($2107-$210A - BG1SC-BG4SC)
@@ -921,7 +943,7 @@ Detailed implementation notes:
       - Horizontal and vertical flipping
       - Configurable VRAM base address
     - **NOT implemented**: Modes 2-7, windows, HDMA, mosaic, color math
-  - All tests pass (34 tests: 5 cartridge, 18 PPU including sprites/scrolling/modes, 6 controller, 5 system)
+  - All tests pass (42 tests: 5 cartridge, 26 PPU including register tests, 6 controller, 5 system)
 
 - **N64 (`emu_n64`)**: Basic implementation with RDP graphics
   - Uses `cpu_mips_r4300i` from core with N64-specific bus implementation

@@ -79,9 +79,17 @@ impl DiskController {
         let offset = (lba * sector_size) as usize;
 
         // Log LBA calculation for debugging
-        if let Ok(_) = std::env::var("EMU_LOG_BUS") {
-            eprintln!("Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
-                request.cylinder, request.head, request.sector, lba, offset, sectors_per_track, heads);
+        if std::env::var("EMU_LOG_BUS").is_ok() {
+            eprintln!(
+                "Disk read: C={} H={} S={} -> LBA={} offset=0x{:X} (SPT={}, heads={})",
+                request.cylinder,
+                request.head,
+                request.sector,
+                lba,
+                offset,
+                sectors_per_track,
+                heads
+            );
         }
 
         // Check if read is within bounds
@@ -95,13 +103,13 @@ impl DiskController {
         buffer[..bytes_to_copy].copy_from_slice(&disk_image[offset..offset + bytes_to_copy]);
 
         // Log first few bytes of data read
-        if let Ok(_) = std::env::var("EMU_LOG_BUS") {
+        if std::env::var("EMU_LOG_BUS").is_ok() {
             eprint!("First 128 bytes read:");
-            for i in 0..128.min(bytes_to_copy) {
+            for (i, &byte) in buffer.iter().enumerate().take(128.min(bytes_to_copy)) {
                 if i % 16 == 0 {
                     eprint!("\n  {:04X}:", i);
                 }
-                eprint!(" {:02X}", buffer[i]);
+                eprint!(" {:02X}", byte);
             }
             eprintln!();
         }
