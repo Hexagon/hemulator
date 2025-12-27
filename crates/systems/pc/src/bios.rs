@@ -384,6 +384,13 @@ pub fn write_post_screen_to_vram(
         CpuModel::Intel80188 => "Intel 80188",
         CpuModel::Intel80286 => "Intel 80286",
         CpuModel::Intel80386 => "Intel 80386",
+        CpuModel::Intel80486 => "Intel 80486",
+        CpuModel::Intel80486SX => "Intel 80486 SX",
+        CpuModel::Intel80486DX2 => "Intel 80486 DX2",
+        CpuModel::Intel80486SX2 => "Intel 80486 SX2",
+        CpuModel::Intel80486DX4 => "Intel 80486 DX4",
+        CpuModel::IntelPentium => "Intel Pentium",
+        CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
     };
     // Display the actual emulated CPU speed
     let cpu_display = if cpu_speed_mhz.fract() == 0.0 {

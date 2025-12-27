@@ -447,6 +447,13 @@ fn save_pc_virtual_machine(sys: &EmulatorSystem, settings: &Settings, status_mes
                 emu_core::cpu_8086::CpuModel::Intel80188 => "Intel80188",
                 emu_core::cpu_8086::CpuModel::Intel80286 => "Intel80286",
                 emu_core::cpu_8086::CpuModel::Intel80386 => "Intel80386",
+                emu_core::cpu_8086::CpuModel::Intel80486 => "Intel80486",
+                emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel80486SX",
+                emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel80486DX2",
+                emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel80486SX2",
+                emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel80486DX4",
+                emu_core::cpu_8086::CpuModel::IntelPentium => "IntelPentium",
+                emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "IntelPentiumMMX",
             };
             project.set_cpu_model(cpu_str.to_string());
 
@@ -945,6 +952,13 @@ fn main() {
                                 "Intel80188" => emu_core::cpu_8086::CpuModel::Intel80188,
                                 "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
                                 "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
+                                "Intel80486" => emu_core::cpu_8086::CpuModel::Intel80486,
+                                "Intel80486SX" => emu_core::cpu_8086::CpuModel::Intel80486SX,
+                                "Intel80486DX2" => emu_core::cpu_8086::CpuModel::Intel80486DX2,
+                                "Intel80486SX2" => emu_core::cpu_8086::CpuModel::Intel80486SX2,
+                                "Intel80486DX4" => emu_core::cpu_8086::CpuModel::Intel80486DX4,
+                                "IntelPentium" => emu_core::cpu_8086::CpuModel::IntelPentium,
+                                "IntelPentiumMMX" => emu_core::cpu_8086::CpuModel::IntelPentiumMMX,
                                 _ => {
                                     eprintln!(
                                         "Unknown CPU model: {}, using default Intel8086",
@@ -1922,6 +1936,13 @@ fn main() {
                                         "Intel80188" => emu_core::cpu_8086::CpuModel::Intel80188,
                                         "Intel80286" => emu_core::cpu_8086::CpuModel::Intel80286,
                                         "Intel80386" => emu_core::cpu_8086::CpuModel::Intel80386,
+                                        "Intel80486" => emu_core::cpu_8086::CpuModel::Intel80486,
+                                        "Intel80486SX" => emu_core::cpu_8086::CpuModel::Intel80486SX,
+                                        "Intel80486DX2" => emu_core::cpu_8086::CpuModel::Intel80486DX2,
+                                        "Intel80486SX2" => emu_core::cpu_8086::CpuModel::Intel80486SX2,
+                                        "Intel80486DX4" => emu_core::cpu_8086::CpuModel::Intel80486DX4,
+                                        "IntelPentium" => emu_core::cpu_8086::CpuModel::IntelPentium,
+                                        "IntelPentiumMMX" => emu_core::cpu_8086::CpuModel::IntelPentiumMMX,
                                         _ => {
                                             eprintln!(
                                                 "Unknown CPU model: {}, using default Intel8086",

@@ -24,6 +24,20 @@ pub enum CpuModel {
     Intel80286,
     /// Intel 80386 (1985) - 32-bit processor with 32-bit registers and addressing
     Intel80386,
+    /// Intel 80486 (1989) - Integrated FPU, 8KB cache, pipelining
+    Intel80486,
+    /// Intel 80486 SX (1991) - 486 without FPU
+    Intel80486SX,
+    /// Intel 80486 DX2 (1992) - 486 with 2x clock multiplier
+    Intel80486DX2,
+    /// Intel 80486 SX2 (1992) - 486 SX with 2x clock multiplier
+    Intel80486SX2,
+    /// Intel 80486 DX4 (1994) - 486 with 3x clock multiplier (despite the name)
+    Intel80486DX4,
+    /// Intel Pentium (1993) - Superscalar architecture, dual integer pipelines
+    IntelPentium,
+    /// Intel Pentium MMX (1997) - Pentium with MMX SIMD extensions
+    IntelPentiumMMX,
 }
 
 impl CpuModel {
@@ -35,17 +49,64 @@ impl CpuModel {
                 | CpuModel::Intel80188
                 | CpuModel::Intel80286
                 | CpuModel::Intel80386
+                | CpuModel::Intel80486
+                | CpuModel::Intel80486SX
+                | CpuModel::Intel80486DX2
+                | CpuModel::Intel80486SX2
+                | CpuModel::Intel80486DX4
+                | CpuModel::IntelPentium
+                | CpuModel::IntelPentiumMMX
         )
     }
 
     /// Returns true if this CPU model supports 80286+ instructions
     pub fn supports_80286_instructions(&self) -> bool {
-        matches!(self, CpuModel::Intel80286 | CpuModel::Intel80386)
+        matches!(
+            self,
+            CpuModel::Intel80286
+                | CpuModel::Intel80386
+                | CpuModel::Intel80486
+                | CpuModel::Intel80486SX
+                | CpuModel::Intel80486DX2
+                | CpuModel::Intel80486SX2
+                | CpuModel::Intel80486DX4
+                | CpuModel::IntelPentium
+                | CpuModel::IntelPentiumMMX
+        )
     }
 
     /// Returns true if this CPU model supports 80386+ instructions
     pub fn supports_80386_instructions(&self) -> bool {
-        matches!(self, CpuModel::Intel80386)
+        matches!(
+            self,
+            CpuModel::Intel80386
+                | CpuModel::Intel80486
+                | CpuModel::Intel80486SX
+                | CpuModel::Intel80486DX2
+                | CpuModel::Intel80486SX2
+                | CpuModel::Intel80486DX4
+                | CpuModel::IntelPentium
+                | CpuModel::IntelPentiumMMX
+        )
+    }
+
+    /// Returns true if this CPU model supports 80486+ instructions
+    pub fn supports_80486_instructions(&self) -> bool {
+        matches!(
+            self,
+            CpuModel::Intel80486
+                | CpuModel::Intel80486SX
+                | CpuModel::Intel80486DX2
+                | CpuModel::Intel80486SX2
+                | CpuModel::Intel80486DX4
+                | CpuModel::IntelPentium
+                | CpuModel::IntelPentiumMMX
+        )
+    }
+
+    /// Returns true if this CPU model supports Pentium+ instructions
+    pub fn supports_pentium_instructions(&self) -> bool {
+        matches!(self, CpuModel::IntelPentium | CpuModel::IntelPentiumMMX)
     }
 
     /// Returns the name of the CPU model as a string
@@ -57,6 +118,13 @@ impl CpuModel {
             CpuModel::Intel80188 => "Intel 80188",
             CpuModel::Intel80286 => "Intel 80286",
             CpuModel::Intel80386 => "Intel 80386",
+            CpuModel::Intel80486 => "Intel 80486",
+            CpuModel::Intel80486SX => "Intel 80486 SX",
+            CpuModel::Intel80486DX2 => "Intel 80486 DX2",
+            CpuModel::Intel80486SX2 => "Intel 80486 SX2",
+            CpuModel::Intel80486DX4 => "Intel 80486 DX4",
+            CpuModel::IntelPentium => "Intel Pentium",
+            CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
         }
     }
 }
@@ -7208,15 +7276,69 @@ mod tests {
 
     #[test]
     fn test_cpu_model_feature_flags() {
+        // 80186+ instructions support
         assert!(!CpuModel::Intel8086.supports_80186_instructions());
         assert!(!CpuModel::Intel8088.supports_80186_instructions());
         assert!(CpuModel::Intel80186.supports_80186_instructions());
         assert!(CpuModel::Intel80188.supports_80186_instructions());
         assert!(CpuModel::Intel80286.supports_80186_instructions());
+        assert!(CpuModel::Intel80386.supports_80186_instructions());
+        assert!(CpuModel::Intel80486.supports_80186_instructions());
+        assert!(CpuModel::Intel80486SX.supports_80186_instructions());
+        assert!(CpuModel::Intel80486DX2.supports_80186_instructions());
+        assert!(CpuModel::Intel80486SX2.supports_80186_instructions());
+        assert!(CpuModel::Intel80486DX4.supports_80186_instructions());
+        assert!(CpuModel::IntelPentium.supports_80186_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_80186_instructions());
 
+        // 80286+ instructions support
         assert!(!CpuModel::Intel8086.supports_80286_instructions());
         assert!(!CpuModel::Intel80186.supports_80286_instructions());
         assert!(CpuModel::Intel80286.supports_80286_instructions());
+        assert!(CpuModel::Intel80386.supports_80286_instructions());
+        assert!(CpuModel::Intel80486.supports_80286_instructions());
+        assert!(CpuModel::Intel80486SX.supports_80286_instructions());
+        assert!(CpuModel::Intel80486DX2.supports_80286_instructions());
+        assert!(CpuModel::Intel80486SX2.supports_80286_instructions());
+        assert!(CpuModel::Intel80486DX4.supports_80286_instructions());
+        assert!(CpuModel::IntelPentium.supports_80286_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_80286_instructions());
+
+        // 80386+ instructions support
+        assert!(!CpuModel::Intel8086.supports_80386_instructions());
+        assert!(!CpuModel::Intel80286.supports_80386_instructions());
+        assert!(CpuModel::Intel80386.supports_80386_instructions());
+        assert!(CpuModel::Intel80486.supports_80386_instructions());
+        assert!(CpuModel::Intel80486SX.supports_80386_instructions());
+        assert!(CpuModel::Intel80486DX2.supports_80386_instructions());
+        assert!(CpuModel::Intel80486SX2.supports_80386_instructions());
+        assert!(CpuModel::Intel80486DX4.supports_80386_instructions());
+        assert!(CpuModel::IntelPentium.supports_80386_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_80386_instructions());
+
+        // 80486+ instructions support
+        assert!(!CpuModel::Intel8086.supports_80486_instructions());
+        assert!(!CpuModel::Intel80286.supports_80486_instructions());
+        assert!(!CpuModel::Intel80386.supports_80486_instructions());
+        assert!(CpuModel::Intel80486.supports_80486_instructions());
+        assert!(CpuModel::Intel80486SX.supports_80486_instructions());
+        assert!(CpuModel::Intel80486DX2.supports_80486_instructions());
+        assert!(CpuModel::Intel80486SX2.supports_80486_instructions());
+        assert!(CpuModel::Intel80486DX4.supports_80486_instructions());
+        assert!(CpuModel::IntelPentium.supports_80486_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_80486_instructions());
+
+        // Pentium+ instructions support
+        assert!(!CpuModel::Intel8086.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80286.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80386.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80486.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80486SX.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80486DX2.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80486SX2.supports_pentium_instructions());
+        assert!(!CpuModel::Intel80486DX4.supports_pentium_instructions());
+        assert!(CpuModel::IntelPentium.supports_pentium_instructions());
+        assert!(CpuModel::IntelPentiumMMX.supports_pentium_instructions());
     }
 
     #[test]
@@ -7226,6 +7348,59 @@ mod tests {
         assert_eq!(CpuModel::Intel80186.name(), "Intel 80186");
         assert_eq!(CpuModel::Intel80188.name(), "Intel 80188");
         assert_eq!(CpuModel::Intel80286.name(), "Intel 80286");
+        assert_eq!(CpuModel::Intel80386.name(), "Intel 80386");
+        assert_eq!(CpuModel::Intel80486.name(), "Intel 80486");
+        assert_eq!(CpuModel::Intel80486SX.name(), "Intel 80486 SX");
+        assert_eq!(CpuModel::Intel80486DX2.name(), "Intel 80486 DX2");
+        assert_eq!(CpuModel::Intel80486SX2.name(), "Intel 80486 SX2");
+        assert_eq!(CpuModel::Intel80486DX4.name(), "Intel 80486 DX4");
+        assert_eq!(CpuModel::IntelPentium.name(), "Intel Pentium");
+        assert_eq!(CpuModel::IntelPentiumMMX.name(), "Intel Pentium MMX");
+    }
+
+    #[test]
+    fn test_486_cpu_models() {
+        // Test that 486 models can be created and used
+        let mem = ArrayMemory::new();
+        let cpu_dx = Cpu8086::with_model(mem, CpuModel::Intel80486);
+        assert_eq!(cpu_dx.model(), CpuModel::Intel80486);
+        assert!(cpu_dx.model().supports_80486_instructions());
+
+        let mem = ArrayMemory::new();
+        let cpu_sx = Cpu8086::with_model(mem, CpuModel::Intel80486SX);
+        assert_eq!(cpu_sx.model(), CpuModel::Intel80486SX);
+        assert!(cpu_sx.model().supports_80486_instructions());
+
+        let mem = ArrayMemory::new();
+        let cpu_dx2 = Cpu8086::with_model(mem, CpuModel::Intel80486DX2);
+        assert_eq!(cpu_dx2.model(), CpuModel::Intel80486DX2);
+        assert!(cpu_dx2.model().supports_80486_instructions());
+
+        let mem = ArrayMemory::new();
+        let cpu_sx2 = Cpu8086::with_model(mem, CpuModel::Intel80486SX2);
+        assert_eq!(cpu_sx2.model(), CpuModel::Intel80486SX2);
+        assert!(cpu_sx2.model().supports_80486_instructions());
+
+        let mem = ArrayMemory::new();
+        let cpu_dx4 = Cpu8086::with_model(mem, CpuModel::Intel80486DX4);
+        assert_eq!(cpu_dx4.model(), CpuModel::Intel80486DX4);
+        assert!(cpu_dx4.model().supports_80486_instructions());
+    }
+
+    #[test]
+    fn test_pentium_cpu_models() {
+        // Test that Pentium models can be created and used
+        let mem = ArrayMemory::new();
+        let cpu_p5 = Cpu8086::with_model(mem, CpuModel::IntelPentium);
+        assert_eq!(cpu_p5.model(), CpuModel::IntelPentium);
+        assert!(cpu_p5.model().supports_pentium_instructions());
+        assert!(cpu_p5.model().supports_80486_instructions());
+
+        let mem = ArrayMemory::new();
+        let cpu_mmx = Cpu8086::with_model(mem, CpuModel::IntelPentiumMMX);
+        assert_eq!(cpu_mmx.model(), CpuModel::IntelPentiumMMX);
+        assert!(cpu_mmx.model().supports_pentium_instructions());
+        assert!(cpu_mmx.model().supports_80486_instructions());
     }
 
     // ===== Multiply/Divide Tests =====
