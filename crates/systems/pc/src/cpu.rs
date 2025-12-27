@@ -1448,68 +1448,33 @@ impl PcCpu {
                 );
             }
             
-            // Split into two reads: first read up to boundary, second read remainder
-            let bytes_to_boundary = 0x10000 - (buffer_offset as u32);
-            let sectors_before_boundary = (bytes_to_boundary / 512) as u8;
-            let sectors_after_boundary = count - sectors_before_boundary;
+            // Read data to temporary buffer
+            let request = DiskRequest {
+                drive,
+                cylinder,
+                head,
+                sector,
+                count,
+            };
             
-            if sectors_before_boundary > 0 {
-                // Read first part
-                let request1 = DiskRequest {
-                    drive,
-                    cylinder,
-                    head,
-                    sector,
-                    count: sectors_before_boundary,
-                };
-                
-                let buffer_size1 = (sectors_before_boundary as usize) * 512;
-                let mut buffer1 = vec![0u8; buffer_size1];
-                
-                let status1 = self.cpu.memory.disk_read(&request1, &mut buffer1);
-                if status1 != 0x00 {
-                    self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status1 as u16) << 8);
-                    self.set_carry_flag(true);
-                    return 51;
-                }
-                
-                // Write to memory
-                for (i, &byte) in buffer1.iter().enumerate() {
-                    let offset = buffer_offset.wrapping_add(i as u16);
-                    self.cpu.write_byte(buffer_seg, offset, byte);
-                }
+            let buffer_size = (count as usize) * 512;
+            let mut buffer = vec![0u8; buffer_size];
+            
+            let status = self.cpu.memory.disk_read(&request, &mut buffer);
+            if status != 0x00 {
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+                self.set_carry_flag(true);
+                return 51;
             }
             
-            if sectors_after_boundary > 0 {
-                // Read second part
-                let request2 = DiskRequest {
-                    drive,
-                    cylinder,
-                    head,
-                    sector: sector + sectors_before_boundary,
-                    count: sectors_after_boundary,
-                };
-                
-                let buffer_size2 = (sectors_after_boundary as usize) * 512;
-                let mut buffer2 = vec![0u8; buffer_size2];
-                
-                let status2 = self.cpu.memory.disk_read(&request2, &mut buffer2);
-                if status2 != 0x00 {
-                    self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status2 as u16) << 8);
-                    self.set_carry_flag(true);
-                    return 51;
-                }
-                
-                // Write to memory starting at offset 0 of current segment
-                // (wraps around within the same segment)
-                for (i, &byte) in buffer2.iter().enumerate() {
-                    let offset = ((buffer_offset as u32 + bytes_to_boundary + i as u32) & 0xFFFF) as u16;
-                    self.cpu.write_byte(buffer_seg, offset, byte);
-                }
+            // Write to memory with wrapping at 64KB boundary
+            for (i, &byte) in buffer.iter().enumerate() {
+                let offset = buffer_offset.wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_seg, offset, byte);
             }
             
             // Success - return sectors read in AL, AH=0
-            self.cpu.ax = (count as u16); // AH=0, AL=count
+            self.cpu.ax = count as u16; // AH=0, AL=count
             self.set_carry_flag(false);
             return 51;
         }
