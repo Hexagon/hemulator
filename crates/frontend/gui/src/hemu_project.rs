@@ -155,21 +155,25 @@ impl HemuProject {
     }
 
     /// Get display settings
+    #[allow(dead_code)]
     pub fn get_display_settings(&self) -> &DisplaySettings {
         &self.display
     }
 
     /// Set input config override
+    #[allow(dead_code)]
     pub fn set_input_override(&mut self, input: InputConfig) {
         self.input = Some(input);
     }
 
     /// Get input config override
+    #[allow(dead_code)]
     pub fn get_input_override(&self) -> Option<&InputConfig> {
         self.input.as_ref()
     }
 
     /// Get the list of mount point IDs that are relevant for this system
+    #[allow(dead_code)]
     pub fn relevant_mount_points(&self) -> Vec<&str> {
         match self.system.as_str() {
             "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
