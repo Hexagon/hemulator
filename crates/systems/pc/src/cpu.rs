@@ -1447,7 +1447,7 @@ impl PcCpu {
                     buffer_seg, buffer_offset, count
                 );
             }
-            
+
             // Read data to temporary buffer
             let request = DiskRequest {
                 drive,
@@ -1456,23 +1456,23 @@ impl PcCpu {
                 sector,
                 count,
             };
-            
+
             let buffer_size = (count as usize) * 512;
             let mut buffer = vec![0u8; buffer_size];
-            
+
             let status = self.cpu.memory.disk_read(&request, &mut buffer);
             if status != 0x00 {
                 self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
                 self.set_carry_flag(true);
                 return 51;
             }
-            
+
             // Write to memory with wrapping at 64KB boundary
             for (i, &byte) in buffer.iter().enumerate() {
                 let offset = buffer_offset.wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
-            
+
             // Success - return sectors read in AL, AH=0
             self.cpu.ax = count as u16; // AH=0, AL=count
             self.set_carry_flag(false);
@@ -3312,6 +3312,17 @@ fn scancode_to_ascii(scancode: u8) -> u8 {
         SCANCODE_BACKSPACE => 0x08,
         SCANCODE_TAB => b'\t',
         SCANCODE_ESC => 0x1B,
+        SCANCODE_COMMA => b',',
+        SCANCODE_PERIOD => b'.',
+        SCANCODE_SLASH => b'/',
+        SCANCODE_SEMICOLON => b';',
+        SCANCODE_APOSTROPHE => b'\'',
+        SCANCODE_LEFT_BRACKET => b'[',
+        SCANCODE_RIGHT_BRACKET => b']',
+        SCANCODE_BACKSLASH => b'\\',
+        SCANCODE_MINUS => b'-',
+        SCANCODE_EQUALS => b'=',
+        SCANCODE_BACKTICK => b'`',
         _ => 0, // No ASCII equivalent
     }
 }
