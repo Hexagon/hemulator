@@ -925,6 +925,7 @@ pub fn create_splash_screen_with_status(
 }
 
 /// Create system selector overlay
+#[allow(dead_code)]
 pub fn create_system_selector_overlay(width: usize, height: usize) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];

@@ -43,6 +43,7 @@ impl RuntimeState {
         self.current_mounts.insert(mount_id, path);
     }
 
+    #[allow(dead_code)]
     fn get_mount(&self, mount_id: &str) -> Option<&String> {
         self.current_mounts.get(mount_id)
     }
@@ -55,6 +56,7 @@ impl RuntimeState {
         self.current_project_path = Some(path);
     }
 
+    #[allow(dead_code)]
     fn clear_project_path(&mut self) {
         self.current_project_path = None;
     }
@@ -1217,10 +1219,9 @@ fn main() {
                         pc_sys.update_post_screen();
 
                         sys = EmulatorSystem::PC(Box::new(pc_sys));
+                        rom_loaded = true; // Allow POST screen to be displayed
                         status_message = "PC virtual machine loaded".to_string();
                         println!("Switched to PC system");
-                        // Note: rom_loaded stays false for PC unless we actually load an executable
-                        // This allows POST screen to be displayed
 
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
