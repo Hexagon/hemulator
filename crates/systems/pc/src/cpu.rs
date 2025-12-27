@@ -1747,6 +1747,23 @@ impl PcCpu {
             drive
         );
 
+        // Check if drive exists
+        let drive_exists = if drive < 0x80 {
+            // Floppy drive - check if floppy is mounted
+            self.cpu.memory.has_floppy(drive)
+        } else {
+            // Hard drive - check if hard drive is mounted
+            self.cpu.memory.has_hard_drive()
+        };
+
+        if !drive_exists {
+            eprintln!("INT 13h AH=08h: Drive 0x{:02X} does not exist", drive);
+            // Invalid drive - return error
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
         // Get drive parameters
         if let Some((cylinders, sectors_per_track, heads)) = DiskController::get_drive_params(drive)
         {
@@ -1892,6 +1909,14 @@ impl PcCpu {
             }
         } else {
             // Hard drive
+            // Check if hard drive exists
+            if !self.cpu.memory.has_hard_drive() {
+                // No such drive
+                self.cpu.ax &= 0x00FF; // AH = 00h (no such drive)
+                self.set_carry_flag(false);
+                return 51;
+            }
+
             if let Some((cylinders, sectors_per_track, heads)) =
                 DiskController::get_drive_params(drive)
             {
@@ -3807,7 +3832,9 @@ mod tests {
 
     #[test]
     fn test_int13h_get_drive_params_floppy() {
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        // Mount a floppy disk so the drive exists
+        bus.mount_floppy_a(vec![0u8; 1474560]); // 1.44MB floppy
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -3855,7 +3882,9 @@ mod tests {
 
     #[test]
     fn test_int13h_get_drive_params_hard_drive() {
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        // Mount a hard drive so it exists
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]); // 10MB hard drive
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
