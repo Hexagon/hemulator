@@ -1,7 +1,7 @@
 //! PC keyboard input handling
 //!
 //! This module implements basic keyboard input for the PC emulator.
-//! It translates minifb Key events to PC keyboard scancodes.
+//! It translates window backend Key events to PC keyboard scancodes.
 
 use std::collections::VecDeque;
 

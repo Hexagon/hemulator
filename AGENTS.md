@@ -67,7 +67,7 @@
   - Tests should check frame dimensions and pixel data for expected patterns.
   - See existing smoke tests in `crates/systems/*/src/lib.rs` for examples.
 - **Cross-platform notes**:
-  - Frontend uses `minifb` and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
+  - Frontend uses SDL2 and `rodio` which are cross-platform; CI should include at least Linux and Windows runners.
   - For macOS specifics, `rodio` may require additional CI setup; document platform checks in CI config.
 - **When to notify maintainers**:
   - Failing build or tests, or lint errors.
@@ -680,9 +680,10 @@ Detailed implementation notes:
 - **PC (`emu_pc`)**: Experimental IBM PC/XT emulation
   - Uses `cpu_8086` from core with PC-specific bus implementation
   - `PcCpu` wraps `Cpu8086<PcBus>` to provide PC-specific interface
-  - PC bus includes: 640KB RAM, 128KB VRAM, 256KB ROM area, disk controller, keyboard
+  - PC bus includes: configurable conventional memory (256-640KB), configurable extended memory (XMS), 128KB VRAM, 256KB ROM area, disk controller, keyboard
   - **Memory Map**:
-    - 0x00000-0x9FFFF: Conventional memory (640KB)
+    - 0x00000-0x9FFFF: Conventional memory (max 640KB, configurable 256-640KB)
+    - Extended memory: Accessible via XMS driver (configurable, starts at 0 if total memory <= 640KB)
     - 0xA0000-0xBFFFF: Video memory (128KB)
     - 0xC0000-0xFFFFF: ROM area (256KB, includes BIOS)
     - 0xF0000-0xFFFFF: BIOS ROM (64KB)
@@ -1080,7 +1081,7 @@ Detailed implementation notes:
 
 ### Frontend (`crates/frontend/gui`)
 
-GUI frontend using minifb and rodio.
+GUI frontend using SDL2 and rodio.
 
 #### Video Processing System
 
@@ -1136,7 +1137,7 @@ pub trait VideoProcessor {
 
 **Integration Points:**
 - Settings: `video_backend` field in `config.json` ("software" or "opengl")
-- Main loop: Process frame buffer before sending to minifb window
+- Main loop: Process frame buffer before sending to window
 - Filter switching: F11 key cycles through CRT filters
 
 **Testing:**
@@ -1145,7 +1146,7 @@ pub trait VideoProcessor {
 - Both backends tested for build compatibility
 
 **Future Enhancements:**
-- Direct rendering to window (bypass minifb buffer copy)
+- Direct OpenGL rendering to window
 - Additional shader effects (curvature, bloom, color correction)
 - Runtime backend switching without restart
 - Custom shader loading from configuration

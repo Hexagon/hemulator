@@ -245,8 +245,8 @@ impl VideoProcessor for OpenGLProcessor {
             self.gl.clear(glow::COLOR_BUFFER_BIT);
             self.gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
-            // For now, we still return the original buffer since minifb expects CPU buffer
-            // In a full implementation, this would render directly to window
+            // For now, we still return the original buffer since the window expects CPU buffer
+            // In a full implementation, this would render directly to window via OpenGL context
             Ok(buffer.to_vec())
         }
     }

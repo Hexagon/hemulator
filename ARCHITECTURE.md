@@ -33,7 +33,7 @@ Hemulator is built on a modular architecture that separates reusable emulation c
 ┌────────────────────────────────────────────────────────────────┐
 │                         Frontend (GUI)                         │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  • Window Management (minifb)                            │  │
+│  │  • Window Management (SDL2)                              │  │
 │  │  • Audio Playback (rodio)                                │  │
 │  │  • Input Handling (keyboard, future gamepad support)     │  │
 │  │  • Settings Management (config.json)                     │  │
@@ -216,7 +216,7 @@ The GUI frontend provides a unified interface to all systems.
 
 ### Key Components
 
-- **Window Management**: minifb for cross-platform windowing
+- **Window Management**: SDL2 for cross-platform windowing and OpenGL context
 - **Audio Playback**: rodio for cross-platform audio
 - **Input**: Keyboard (with configurable mappings)
 - **Settings**: Persistent configuration (config.json)

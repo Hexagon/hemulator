@@ -70,10 +70,12 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     bios[int10h_offset..int10h_offset + int10h_handler.len()].copy_from_slice(&int10h_handler);
 
     // INT 12h handler at offset 0x180 - Get Memory Size
+    // NOTE: The actual INT 12h handler is implemented in cpu.rs (handle_int12h)
+    // which correctly reads the memory size from the bus.
+    // This BIOS ROM handler is a fallback that should not be called in normal operation.
     let int12h_offset = 0x180;
     let int12h_handler: Vec<u8> = vec![
-        // Return 640KB in AX (standard PC conventional memory)
-        0xB8, 0x80, 0x02, // MOV AX, 0x0280 (640 in decimal)
+        // Just return (the CPU will intercept INT 12h before this executes)
         0xF8, // CLC (clear carry flag - success)
         0xCF, // IRET
     ];

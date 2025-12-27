@@ -76,17 +76,26 @@ impl PcBus {
     }
 
     /// Create a new PC bus with a specific memory size in KB
-    /// Valid sizes: 256KB, 512KB, 640KB (maximum conventional memory)
+    ///
+    /// The memory_kb parameter specifies total system memory:
+    /// - If memory_kb <= 640: All memory is conventional (640KB max)
+    /// - If memory_kb > 640: 640KB conventional + rest as extended memory
+    ///
+    /// Valid range: 256KB minimum, no maximum (extended memory can be very large)
     pub fn with_memory_kb(kb: u32) -> Self {
-        // Clamp memory size to valid range (256KB-640KB)
-        let kb = kb.clamp(256, 640);
-        let ram_size = (kb as usize) * 1024;
+        // Conventional memory is clamped to 256-640KB range
+        let conventional_kb = kb.clamp(256, 640);
+        let ram_size = (conventional_kb as usize) * 1024;
+
+        // Extended memory is any memory beyond 640KB
+        // Real PCs have extended memory starting at 1MB, but we calculate it from the total
+        let extended_kb = kb.saturating_sub(640);
 
         let mut pit = Pit::new();
         pit.reset(); // Initialize with default system timer
 
-        // Initialize XMS with 15MB of extended memory (16MB total - 1MB conventional)
-        let mut xms = XmsDriver::new(15 * 1024);
+        // Initialize XMS with calculated extended memory
+        let mut xms = XmsDriver::new(extended_kb);
         xms.install();
         xms.init_umbs(); // Initialize Upper Memory Blocks
 
@@ -130,9 +139,22 @@ impl PcBus {
         bus
     }
 
-    /// Get the size of conventional memory in KB
+    /// Get the total system memory in KB (conventional + extended)
     pub fn memory_kb(&self) -> u32 {
+        let conventional_kb = (self.ram.len() / 1024) as u32;
+        let extended_kb = self.xms.total_extended_memory_kb();
+        conventional_kb + extended_kb
+    }
+
+    /// Get the size of conventional memory in KB (max 640KB)
+    pub fn conventional_memory_kb(&self) -> u32 {
         (self.ram.len() / 1024) as u32
+    }
+
+    /// Get the size of extended memory in KB (above 1MB)
+    #[allow(dead_code)] // Public API for external use
+    pub fn extended_memory_kb(&self) -> u32 {
+        self.xms.total_extended_memory_kb()
     }
 
     /// Set the video adapter type for equipment configuration
