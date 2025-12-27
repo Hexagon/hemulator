@@ -651,12 +651,15 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 #[derive(Debug, Default)]
 struct CliArgs {
     rom_path: Option<String>,
+    system: Option<String>,                      // System to start (pc, nes, gb, atari2600, snes, n64)
     slot1: Option<String>,                       // BIOS or primary file
     slot2: Option<String>,                       // FloppyA
     slot3: Option<String>,                       // FloppyB
     slot4: Option<String>,                       // HardDrive
     slot5: Option<String>,                       // Reserved for future use
     create_blank_disk: Option<(String, String)>, // (path, format)
+    show_help: bool,                             // Show help message
+    show_version: bool,                          // Show version
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -676,6 +679,20 @@ impl CliArgs {
 
         while let Some(arg) = arg_iter.next() {
             match arg.as_str() {
+                "--help" | "-h" => {
+                    args.show_help = true;
+                }
+                "--version" | "-v" => {
+                    args.show_version = true;
+                }
+                "--system" | "-S" => {
+                    if let Some(system) = arg_iter.next() {
+                        args.system = Some(system);
+                    } else {
+                        eprintln!("Error: --system requires a value (pc, nes, gb, atari2600, snes, n64).");
+                        std::process::exit(1);
+                    }
+                }
                 "--slot1" => {
                     args.slot1 = arg_iter.next();
                 }
@@ -779,9 +796,17 @@ impl CliArgs {
 
     /// Print usage information
     fn print_usage() {
-        eprintln!("Usage: hemu [OPTIONS] [ROM_FILE]");
+        eprintln!("Hemulator - Multi-System Emulator v{}", env!("CARGO_PKG_VERSION"));
+        eprintln!();
+        eprintln!("Usage: hemu [OPTIONS] [FILE]");
+        eprintln!();
+        eprintln!("Arguments:");
+        eprintln!("  [FILE]                   ROM file or .hemu project file to load");
         eprintln!();
         eprintln!("Options:");
+        eprintln!("  -h, --help               Show this help message");
+        eprintln!("  -v, --version            Show version information");
+        eprintln!("  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -806,6 +831,9 @@ impl CliArgs {
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!("  hemu project.hemu                              # Load project file");
+        eprintln!("  hemu --system pc                               # Start clean PC system");
+        eprintln!("  hemu --system nes                              # Start clean NES system");
         eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
         eprintln!(
             "  hemu --log-level info game.nes                 # Load with global info logging"
@@ -822,11 +850,30 @@ impl CliArgs {
             "  hemu --create-blank-disk hdd.img 20m           # Create 20MB hard drive image"
         );
     }
+
+    /// Print version information
+    fn print_version() {
+        println!("Hemulator v{}", env!("CARGO_PKG_VERSION"));
+        println!("Multi-System Emulator");
+        println!("Supported systems: NES, Game Boy, Atari 2600, PC/DOS, SNES, N64");
+    }
 }
 
 fn main() {
     // Parse command-line arguments
     let cli_args = CliArgs::parse();
+
+    // Handle --help
+    if cli_args.show_help {
+        CliArgs::print_usage();
+        std::process::exit(0);
+    }
+
+    // Handle --version
+    if cli_args.show_version {
+        CliArgs::print_version();
+        std::process::exit(0);
+    }
 
     // Handle --create-blank-disk command
     if let Some((path, format_str)) = &cli_args.create_blank_disk {
@@ -989,18 +1036,67 @@ fn main() {
     // Create runtime state for tracking current project and mounts
     let mut runtime_state = RuntimeState::new();
 
-    // Determine ROM path: CLI argument takes precedence
+    // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
+    
+    // Validate that we have something to load or a system to start
+    if cli_args.system.is_none() && rom_path.is_none() {
+        eprintln!("Error: Must specify either a system (--system) or a file to load.");
+        eprintln!();
+        CliArgs::print_usage();
+        std::process::exit(1);
+    }
 
-    let mut sys: EmulatorSystem = EmulatorSystem::NES(Box::default());
+    let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
     let mut status_message = String::new();
 
-    // Try to load ROM if path is available
-    // Note: We still use ROM type detection at startup to determine which system to instantiate.
-    // The mount point system works within a system for managing media slots.
+    // Initialize system based on --system parameter if specified
+    if let Some(ref system_name) = cli_args.system {
+        match system_name.to_lowercase().as_str() {
+            "nes" => {
+                sys = EmulatorSystem::NES(Box::default());
+                status_message = "Clean NES system started".to_string();
+                println!("Started clean NES system");
+            }
+            "gb" | "gameboy" => {
+                sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                status_message = "Clean Game Boy system started".to_string();
+                println!("Started clean Game Boy system");
+            }
+            "atari2600" | "atari" => {
+                sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
+                status_message = "Clean Atari 2600 system started".to_string();
+                println!("Started clean Atari 2600 system");
+            }
+            "pc" => {
+                sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                status_message = "Clean PC system started".to_string();
+                println!("Started clean PC system");
+            }
+            "snes" => {
+                sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                status_message = "Clean SNES system started".to_string();
+                println!("Started clean SNES system");
+            }
+            "n64" => {
+                sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
+                status_message = "Clean N64 system started".to_string();
+                println!("Started clean N64 system");
+            }
+            _ => {
+                eprintln!("Error: Unknown system '{}'", system_name);
+                eprintln!("Valid systems: pc, nes, gb, atari2600, snes, n64");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // No --system specified, default to NES for now (will be replaced by file loading below)
+        sys = EmulatorSystem::NES(Box::default());
+    }
 
+    // Try to load ROM/project file if path is available
     // Check if it's a .hemu project file first (before reading as ROM)
     if let Some(p) = &rom_path {
         if p.to_lowercase().ends_with(".hemu") {
