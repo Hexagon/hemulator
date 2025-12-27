@@ -518,8 +518,15 @@ impl PcCpu {
         // Handle special characters
         match ch {
             0x08 => {
-                // Backspace
-                col = col.saturating_sub(1);
+                // Backspace - move cursor back and erase character
+                if col > 0 {
+                    col = col.saturating_sub(1);
+                    // Erase the character at the new cursor position
+                    let offset = (row * 80 + col) * 2;
+                    let video_addr = 0xB8000 + offset;
+                    self.cpu.memory.write(video_addr, b' '); // Write space
+                    self.cpu.memory.write(video_addr + 1, 0x07); // Default attribute
+                }
             }
             0x0A => {
                 // Line feed
@@ -3308,7 +3315,7 @@ fn scancode_to_ascii(scancode: u8) -> u8 {
         SCANCODE_8 => b'8',
         SCANCODE_9 => b'9',
         SCANCODE_SPACE => b' ',
-        SCANCODE_ENTER => b'\r',
+        SCANCODE_ENTER => b'\n', // Line feed (0x0A) - advances to next line
         SCANCODE_BACKSPACE => 0x08,
         SCANCODE_TAB => b'\t',
         SCANCODE_ESC => 0x1B,
