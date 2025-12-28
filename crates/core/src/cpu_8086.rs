@@ -7061,8 +7061,11 @@ impl<M: Memory8086> Cpu8086<M> {
                 32
             }
 
+            #[allow(unreachable_patterns)]
             _ => {
                 // Unknown/unimplemented opcode
+                // Note: This pattern is technically unreachable as all 256 opcodes are covered,
+                // but we keep it for safety and to handle potential future refactoring
                 eprintln!(
                     "Unknown 8086 opcode: 0x{:02X} at CS:IP={:04X}:{:04X}",
                     opcode,
