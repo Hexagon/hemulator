@@ -1280,14 +1280,14 @@ impl PcCpu {
 
         match device_name {
             "CON" => {
-                // Console device - return handle 0 (stdin) for read, 1 (stdout) for write
+                // Console device - bidirectional (read and write)
                 // Access mode: 0=read, 1=write, 2=read/write
                 let access_mode = (self.cpu.ax & 0xFF) as u8;
                 let handle = match access_mode {
                     0 => 0, // Read mode - stdin
                     1 => 1, // Write mode - stdout
-                    2 => 0, // Read/Write mode - use stdin (CON is primarily input)
-                    _ => 0,
+                    2 => 1, // Read/Write mode - stdout (CON is bidirectional, use stdout as primary)
+                    _ => 1, // Default to stdout
                 };
                 self.cpu.ax = handle;
                 self.set_carry_flag(false); // Success
@@ -1300,13 +1300,15 @@ impl PcCpu {
                 });
             }
             "NUL" => {
-                // Null device - we'll use handle 3 (stdaux) as a dummy
-                // All reads return EOF, all writes are discarded
+                // Null device - all reads return EOF, all writes are discarded
+                // Use handle 3 (stdaux) as a dummy handle for null device
+                // Note: In this fallback implementation, handle 3 serves multiple purposes
+                // Real DOS would use internal device driver chain for proper device handling
                 self.cpu.ax = 3;
                 self.set_carry_flag(false); // Success
 
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "INT 0x21 AH=0x3D: Opened NUL device, returning handle 3".to_string()
+                    "INT 0x21 AH=0x3D: Opened NUL device, returning handle 3 (dummy)".to_string()
                 });
             }
             "PRN" | "LPT1" | "LPT2" | "LPT3" => {
@@ -1323,6 +1325,8 @@ impl PcCpu {
             }
             "AUX" | "COM1" | "COM2" | "COM3" | "COM4" => {
                 // Serial/Auxiliary device - use handle 3 (stdaux)
+                // Note: All serial devices map to the same handle in this simple fallback
+                // Real DOS would use internal device driver chain for proper device handling
                 self.cpu.ax = 3;
                 self.set_carry_flag(false); // Success
 
@@ -1334,12 +1338,13 @@ impl PcCpu {
                 });
             }
             "CLOCK$" => {
-                // Clock device (special) - treat as NUL
+                // Clock device (special) - treat as NUL for simplicity
+                // Maps to handle 3 in this fallback implementation
                 self.cpu.ax = 3;
                 self.set_carry_flag(false); // Success
 
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "INT 0x21 AH=0x3D: Opened CLOCK$ device, returning handle 3".to_string()
+                    "INT 0x21 AH=0x3D: Opened CLOCK$ device, returning handle 3 (dummy)".to_string()
                 });
             }
             _ => {
@@ -3475,14 +3480,15 @@ impl PcCpu {
 
         // Use INT 10h teletype output to display the character
         // This is a fast path that DOS uses for console output
-        // Save current AX
+        // We directly call int10h_teletype_output() which reads AH=0Eh and AL=character
+        // Save current AX to preserve it across the call
         let saved_ax = self.cpu.ax;
 
-        // Call INT 10h AH=0Eh (teletype output)
+        // Set up AX for INT 10h AH=0Eh (teletype output), AL=character
         self.cpu.ax = 0x0E00 | (character as u16);
         self.int10h_teletype_output();
 
-        // Restore AX
+        // Restore original AX value
         self.cpu.ax = saved_ax;
 
         51
