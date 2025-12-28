@@ -227,6 +227,11 @@ pub struct Cpu8086<M: Memory8086> {
     /// Consumed and cleared after the next instruction
     operand_size_override: bool,
 
+    /// Address-size override for next instruction (0x67 prefix, 80386+)
+    /// When set, 16-bit addressing becomes 32-bit and vice versa
+    /// Consumed and cleared after the next instruction
+    address_size_override: bool,
+
     /// CPU model (8086, 80186, 80286, etc.)
     model: CpuModel,
 
@@ -296,6 +301,7 @@ impl<M: Memory8086> Cpu8086<M> {
             halted: false,
             segment_override: None,
             operand_size_override: false,
+            address_size_override: false,
             model,
             protected_mode: ProtectedModeState::new(),
             tsc: 0,
@@ -461,8 +467,8 @@ impl<M: Memory8086> Cpu8086<M> {
         self.push(self.flags);
         self.push(self.cs);
 
-        // For exceptions, save IP of faulting instruction
-        // For software interrupts, save current IP (already advanced past INT)
+        // For exceptions, save IP of faulting instruction (to allow restart after fixing issue)
+        // For software interrupts, save current IP (already advanced past INT instruction)
         let saved_ip = if is_exception {
             self.instruction_start_ip
         } else {
@@ -479,14 +485,6 @@ impl<M: Memory8086> Cpu8086<M> {
         let ivt_offset = (int_num as u16) * 4;
         let new_ip = self.read_u16(0, ivt_offset);
         let new_cs = self.read_u16(0, ivt_offset + 2);
-
-        // Debug: Log INT 0 (divide error) calls (disabled - too verbose)
-        // if int_num == 0 {
-        //     eprintln!(
-        //         "INT 0 triggered: IVT[0] = {:04X}:{:04X}, returning to CS:IP={:04X}:{:04X}",
-        //         new_cs, new_ip, self.cs, saved_ip
-        //     );
-        // }
 
         // Jump to interrupt handler
         self.ip = new_ip;
@@ -5308,8 +5306,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
 
                 match reg {
-                    // TEST r/m8, imm8
-                    0b000 => {
+                    // TEST r/m8, imm8 (subopcode 0 and 1 are both TEST)
+                    0b000 | 0b001 => {
                         let val = self.read_rm8(modbits, rm);
                         let imm = self.fetch_u8();
                         let result = val & imm;
@@ -5736,7 +5734,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                 } else {
-                    // Undefined - consume bytes to prevent desync
+                    // Undefined operation - Group 11 only supports op=0 for MOV
+                    // Consume bytes to prevent desync
                     // Calculate effective address to consume any displacement bytes
                     if modbits != 0b11 {
                         let _ = self.calc_effective_address(modbits, rm);
@@ -5748,8 +5747,9 @@ impl<M: Memory8086> Cpu8086<M> {
                     } else {
                         let _ = self.fetch_u16(); // Consume 2 bytes
                     }
+                    // Note: This is likely invalid code; treat as NOP to continue execution
                     eprintln!(
-                        "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X}",
+                        "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
                         op,
                         self.cs,
                         self.ip.wrapping_sub(2)
@@ -6334,14 +6334,18 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                     _ => {
+                        // Undefined operation - Group 5 only supports ops 0-6
+                        // Consume any displacement bytes to prevent desync
+                        if modbits != 0b11 {
+                            let _ = self.calc_effective_address(modbits, rm);
+                        }
+                        // Note: This is likely invalid code; treat as NOP to continue execution
                         eprintln!(
-                            "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X}",
+                            "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
                             op,
                             self.cs,
                             self.ip.wrapping_sub(2)
                         );
-                        // For undefined operations, we'll just NOP and continue
-                        // This prevents the system from crashing completely
                         self.cycles += 1;
                         1
                     }
@@ -6513,6 +6517,20 @@ impl<M: Memory8086> Cpu8086<M> {
                 // For now, we set a flag and handle it in individual instructions
                 self.operand_size_override = true;
                 self.step() // Execute next instruction with operand size override
+            }
+
+            // Address-size override prefix (0x67) - 80386+
+            0x67 => {
+                if !self.model.supports_80386_instructions() {
+                    // Invalid opcode on 8086/8088/80186/80286
+                    self.cycles += 10;
+                    return 10;
+                }
+                // Address-size override prefix
+                // On 80386+, this toggles between 16-bit and 32-bit addressing
+                // For now, we set a flag and handle it in individual instructions
+                self.address_size_override = true;
+                self.step() // Execute next instruction with address size override
             }
 
             // PUSH immediate word (0x68) - 80186+
@@ -7056,9 +7074,10 @@ impl<M: Memory8086> Cpu8086<M> {
             }
         };
 
-        // Clear operand-size override flag after instruction execution
-        // This flag is only valid for the immediately following instruction
+        // Clear override flags after instruction execution
+        // These flags are only valid for the immediately following instruction
         self.operand_size_override = false;
+        self.address_size_override = false;
 
         // Increment TSC on Pentium+ processors
         // TSC increments by the number of cycles executed

@@ -116,6 +116,31 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     bios[dpt_offset..dpt_offset + disk_parameter_table.len()]
         .copy_from_slice(&disk_parameter_table);
 
+    // System Configuration Table at 0xE000 (for INT 15h AH=C0h)
+    // This table describes the system capabilities and is returned by INT 15h AH=C0h
+    let sysconf_offset = 0xE000;
+    let system_configuration_table: Vec<u8> = vec![
+        0x08, 0x00, // WORD: Number of bytes following (8 bytes)
+        0xFC,       // BYTE: Model (0xFC = AT, 0xFD = PCjr, 0xFE = XT, 0xFF = PC)
+        0x00,       // BYTE: Submodel (00h)
+        0x01,       // BYTE: BIOS revision level (01h)
+        0x70,       // BYTE: Feature byte 1
+                    //   bit 7: DMA channel 3 used by hard disk BIOS (0)
+                    //   bit 6: 2nd 8259 installed (cascaded IRQ2) (1)
+                    //   bit 5: Real-time clock installed (1)
+                    //   bit 4: INT 15h/AH=4Fh called on INT 09h (keyboard intercept) (1)
+                    //   bit 3: wait for external event supported (INT 15h/AH=41h) (0)
+                    //   bit 2: extended BIOS data area allocated (0)
+                    //   bit 1: micro channel implemented (0)
+                    //   bit 0: reserved (0)
+        0x00,       // BYTE: Feature byte 2 (00h)
+        0x00,       // BYTE: Feature byte 3 (00h)
+        0x00,       // BYTE: Feature byte 4 (00h)
+        0x00,       // BYTE: Feature byte 5 (00h)
+    ];
+    bios[sysconf_offset..sysconf_offset + system_configuration_table.len()]
+        .copy_from_slice(&system_configuration_table);
+
     // INT 16h handler at offset 0x300 - Keyboard Services
     let int16h_offset = 0x300;
     let int16h_handler: Vec<u8> = vec![
