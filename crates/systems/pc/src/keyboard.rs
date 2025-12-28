@@ -459,11 +459,19 @@ mod tests {
         // Modifier keys should update shift flags but NOT be buffered
         kb.key_press(SCANCODE_LEFT_SHIFT);
         assert!(!kb.has_data(), "Left Shift should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x02, 0x02, "Left Shift flag should be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x02,
+            0x02,
+            "Left Shift flag should be set"
+        );
 
         kb.key_press(SCANCODE_RIGHT_SHIFT);
         assert!(!kb.has_data(), "Right Shift should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x01, 0x01, "Right Shift flag should be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x01,
+            0x01,
+            "Right Shift flag should be set"
+        );
 
         kb.key_press(SCANCODE_LEFT_CTRL);
         assert!(!kb.has_data(), "Left Ctrl should not be buffered");
@@ -471,7 +479,11 @@ mod tests {
 
         kb.key_press(SCANCODE_RIGHT_CTRL);
         assert!(!kb.has_data(), "Right Ctrl should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x04, 0x04, "Ctrl flag should still be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x04,
+            0x04,
+            "Ctrl flag should still be set"
+        );
 
         kb.key_press(SCANCODE_LEFT_ALT);
         assert!(!kb.has_data(), "Left Alt should not be buffered");
@@ -479,7 +491,11 @@ mod tests {
 
         kb.key_press(SCANCODE_RIGHT_ALT);
         assert!(!kb.has_data(), "Right Alt/AltGr should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x08, 0x08, "Alt flag should still be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x08,
+            0x08,
+            "Alt flag should still be set"
+        );
         assert!(kb.is_altgr_pressed(), "AltGr pressed flag should be set");
 
         // Regular keys should still be buffered
