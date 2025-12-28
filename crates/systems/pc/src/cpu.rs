@@ -7,6 +7,7 @@ use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
 /// BIOS video interrupt (INT 10h) - excluded from interrupt logging to reduce noise
+#[allow(dead_code)]
 const VIDEO_INTERRUPT: u8 = 0x10;
 
 /// PC CPU wrapper
@@ -52,11 +53,13 @@ impl PcCpu {
     }
 
     /// Set CS register
+    #[allow(dead_code)]
     pub fn set_cs(&mut self, value: u16) {
         self.cpu.cs = value;
     }
 
     /// Set IP register
+    #[allow(dead_code)]
     pub fn set_ip(&mut self, value: u16) {
         self.cpu.ip = value;
     }
@@ -93,11 +96,21 @@ impl PcCpu {
         // Enable PC tracing with EMU_TRACE_PC=1
         if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
             // Only log if we're in the boot sector region or low memory (not ROM)
-            if physical_addr < 0xF0000 {
-                eprintln!(
-                    "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
-                    cs, ip, physical_addr, opcode
-                );
+            // BUT: Always log F000 and FFFF segments to see BIOS execution
+            let in_bios = cs == 0xF000 || cs == 0xFFFF;
+            if physical_addr < 0xF0000 || in_bios {
+                // Extra logging for suspicious addresses
+                if physical_addr < 0x100 || (0x7D70..=0x7D80).contains(&physical_addr) || in_bios {
+                    eprintln!(
+                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
+                        cs, ip, physical_addr, opcode, self.cpu.sp
+                    );
+                } else {
+                    eprintln!(
+                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
+                        cs, ip, physical_addr, opcode
+                    );
+                }
             }
         }
 
@@ -184,16 +197,31 @@ impl PcCpu {
             let int_num = self.cpu.memory.read(physical_addr + 1);
 
             // Log interrupts for debugging (skip VIDEO_INTERRUPT to reduce noise)
-            if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug)
-                && int_num != VIDEO_INTERRUPT
-            {
-                let cs = self.cpu.cs;
-                let ip = self.cpu.ip;
-                let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
-                eprintln!(
-                    "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                    int_num, ah, cs, ip
-                );
+            // Some frequently-called interrupts are only logged at trace level
+            let cs = self.cpu.cs;
+            let ip = self.cpu.ip;
+            let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+
+            // Determine appropriate log level for this interrupt
+            let is_high_frequency = (int_num == 0x28 && ah == 0x02) // DOS idle
+                || (int_num == 0x16 && ah == 0x01); // Keyboard check (non-blocking)
+
+            if is_high_frequency {
+                // Only log these at trace level to avoid spam
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
+                }
+            } else {
+                // Log all other interrupts at debug level
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
+                }
             }
 
             match int_num {
@@ -214,13 +242,17 @@ impl PcCpu {
                 // NOTE: INT 1Bh and 1Ch are meant to be hooked by DOS/programs, not intercepted by BIOS
                 // 0x1B => return self.handle_int1bh(), // Ctrl-Break handler (DOS/programs hook this)
                 // 0x1C => return self.handle_int1ch(), // Timer tick handler (programs hook this)
-                // NOTE: INT 20h and INT 21h are DOS functions, not BIOS
-                // DOS installs its own handlers - we don't intercept them
+                // NOTE: INT 20h and INT 21h are DOS API functions, not BIOS functions
+                // DOS (FreeDOS, MS-DOS, etc.) installs its own handlers for these interrupts during boot.
+                // The emulator must NOT intercept these - doing so breaks DOS's keyboard input, file I/O,
+                // and other critical functions. Let the CPU execute DOS's installed INT 21h handler normally.
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
-                // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this)
+                // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this - DO NOT INTERCEPT)
+                0x28 => return self.handle_int28h(), // DOS idle callout
                 0x2A => return self.handle_int2ah(), // Network Installation API (stub)
                 // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
-                // 0x2F => return self.handle_int2fh(), // Multiplex interrupt (DOS/TSRs provide this)
+                // HIMEM.SYS will hook INT 2Fh AH=43h for XMS support
+                // 0x2F => return self.handle_int2fh(), // Multiplex interrupt (DOS provides this)
                 // 0x31 => return self.handle_int31h(), // DPMI services (DPMI host provides this)
                 // 0x33 => return self.handle_int33h(), // Mouse services (mouse driver provides this)
                 0x4A => return self.handle_int4ah(), // RTC Alarm
@@ -519,14 +551,10 @@ impl PcCpu {
         // Handle special characters
         match ch {
             0x08 => {
-                // Backspace - move cursor back and erase character
+                // Backspace - ONLY move cursor back, do NOT erase character
+                // DOS/applications handle erasure by outputting: backspace, space, backspace
                 if col > 0 {
                     col = col.saturating_sub(1);
-                    // Erase the character at the new cursor position
-                    let offset = (row * 80 + col) * 2;
-                    let video_addr = 0xB8000 + offset;
-                    self.cpu.memory.write(video_addr, b' '); // Write space
-                    self.cpu.memory.write(video_addr + 1, 0x07); // Default attribute
                 }
             }
             0x0A => {
@@ -817,17 +845,26 @@ impl PcCpu {
         // Note: In a real BIOS, this would block until a key is available
         // We emulate blocking by halting the CPU until keyboard input arrives
 
-        // Drain all break codes from the buffer to find a make code
-        while self.cpu.memory.keyboard.has_data() {
+        // Check for available keystroke (only make codes are in the buffer now)
+        if self.cpu.memory.keyboard.has_data() {
             let scancode = self.cpu.memory.keyboard.read_scancode();
 
-            // Skip break codes (key release) - only return make codes (key press)
-            if scancode & 0x80 != 0 {
-                continue; // Skip this break code and check next
-            }
-
-            // Found a make code - convert and return it
+            // Convert scancode to ASCII
             let ascii = self.scancode_to_ascii(scancode);
+
+            // Log at trace level for debugging
+            if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
+                eprintln!(
+                    "INT 16h AH=00h: Read scancode=0x{:02X} ascii=0x{:02X} '{}'",
+                    scancode,
+                    ascii,
+                    if (0x20..0x7F).contains(&ascii) {
+                        ascii as char
+                    } else {
+                        '?'
+                    }
+                );
+            }
 
             // AH = scan code, AL = ASCII character
             self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
@@ -837,7 +874,7 @@ impl PcCpu {
             return 51;
         }
 
-        // No make codes in buffer - halt CPU to wait for input
+        // No keys in buffer - halt CPU to wait for input
         // This emulates the blocking behavior of INT 16h AH=00h
         // The CPU will remain halted until keyboard input arrives and unhalts it
         self.cpu.set_halted(true);
@@ -1185,6 +1222,28 @@ impl PcCpu {
         // Returns: CF clear if success, AX = file handle
         //          CF set if error, AX = error code (02h = file not found, 03h = path not found, 04h = no handles, 05h = access denied, 0Ch = invalid access)
 
+        // Read the filename from memory
+        let ds = self.cpu.ds;
+        let dx = self.cpu.dx;
+        let mut filename = String::new();
+        let mut offset = 0u16;
+        loop {
+            let addr = ((ds as u32) << 4) + ((dx.wrapping_add(offset)) as u32);
+            let byte = self.cpu.memory.read(addr);
+            if byte == 0 {
+                break;
+            }
+            filename.push(byte as char);
+            offset = offset.wrapping_add(1);
+            if offset > 255 {
+                break; // Safety limit
+            }
+        }
+
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("INT 0x21 AH=0x3D: Attempting to open file: '{}'", filename)
+        });
+
         // For now, return "file not found" error
         // In a real implementation, we would look up the file on the mounted disk
         self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x02; // File not found
@@ -1395,6 +1454,13 @@ impl PcCpu {
 
         self.cpu.ax = equipment_flags;
 
+        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+            eprintln!(
+                "INT 11h: Returning equipment word 0x{:04X} (floppy={}, video={:?})",
+                equipment_flags, floppy_count, video_type
+            );
+        }
+
         51
     }
 
@@ -1417,14 +1483,86 @@ impl PcCpu {
         51
     }
 
+    /// Simulate INT instruction: push FLAGS, CS, IP and clear IF
+    fn simulate_int_call(&mut self) {
+        // Calculate return address (IP points to INT opcode, return is INT+2)
+        let return_ip = self.cpu.ip.wrapping_add(2);
+
+        // Push FLAGS
+        let sp = self.cpu.sp.wrapping_sub(2);
+        let ss = self.cpu.ss;
+        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        self.cpu
+            .memory
+            .write(flags_addr, (self.cpu.flags & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
+        self.cpu.sp = sp;
+
+        // Clear IF flag to prevent nested interrupts (standard x86 INT behavior)
+        const FLAG_IF: u16 = 0x0200;
+        self.cpu.flags &= !FLAG_IF;
+
+        // Push CS
+        let sp = self.cpu.sp.wrapping_sub(2);
+        let cs_addr = ((ss as u32) << 4) + (sp as u32);
+        self.cpu.memory.write(cs_addr, (self.cpu.cs & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(cs_addr + 1, ((self.cpu.cs >> 8) & 0xFF) as u8);
+        self.cpu.sp = sp;
+
+        // Push return IP
+        let sp = self.cpu.sp.wrapping_sub(2);
+        let ip_addr = ((ss as u32) << 4) + (sp as u32);
+        self.cpu.memory.write(ip_addr, (return_ip & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(ip_addr + 1, ((return_ip >> 8) & 0xFF) as u8);
+        self.cpu.sp = sp;
+
+        // Update IP to point past the INT instruction
+        self.cpu.ip = return_ip;
+    }
+
+    /// Simulate IRET: pop IP, CS, FLAGS from stack
+    fn simulate_iret(&mut self) {
+        // Pop IP
+        let sp = self.cpu.sp;
+        let ss = self.cpu.ss;
+        let ip_addr = ((ss as u32) << 4) + (sp as u32);
+        let new_ip = self.cpu.memory.read(ip_addr) as u16
+            | ((self.cpu.memory.read(ip_addr + 1) as u16) << 8);
+        self.cpu.sp = sp.wrapping_add(2);
+
+        // Pop CS
+        let sp = self.cpu.sp;
+        let cs_addr = ((ss as u32) << 4) + (sp as u32);
+        let new_cs = self.cpu.memory.read(cs_addr) as u16
+            | ((self.cpu.memory.read(cs_addr + 1) as u16) << 8);
+        self.cpu.sp = sp.wrapping_add(2);
+
+        // Pop FLAGS
+        let sp = self.cpu.sp;
+        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        let new_flags = self.cpu.memory.read(flags_addr) as u16
+            | ((self.cpu.memory.read(flags_addr + 1) as u16) << 8);
+        self.cpu.sp = sp.wrapping_add(2);
+
+        // Update CPU state
+        self.cpu.ip = new_ip;
+        self.cpu.cs = new_cs;
+        self.cpu.flags = new_flags;
+    }
+
     /// Handle INT 13h BIOS disk services
     fn handle_int13h(&mut self) -> u32 {
-        // Get function code from AH register (before advancing IP)
-        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
+        // Simulate INT instruction: push FLAGS, CS, IP and advance past INT opcode
+        self.simulate_int_call();
 
-        // Skip the INT 13h instruction (2 bytes: 0xCD 0x13)
-        // We intercept before CPU executes it, so just advance IP past it
-        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+        // Get function code from AH register
+        let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         // Count INT 13h calls for debugging
         if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
@@ -1469,6 +1607,9 @@ impl PcCpu {
                 51 // Approximate INT instruction timing
             }
         };
+
+        // Simulate IRET to return from interrupt
+        self.simulate_iret();
 
         cycles
     }
@@ -2719,59 +2860,23 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int15h
     fn int15h_get_system_configuration(&mut self) -> u32 {
         // Return pointer to system configuration table in ES:BX
-        // The table describes the system capabilities
+        // The table is located in BIOS ROM at F000:E000
+        let table_seg = 0xF000; // BIOS ROM segment
+        let table_offset = 0xE000; // Offset in ROM
 
-        // We'll create a minimal configuration table at a fixed location
-        // Real BIOS stores this in ROM, we'll use a location in conventional memory (high RAM)
-        let table_seg = 0x9000; // Use high conventional memory instead of ROM
-        let table_offset = 0xE000;
+        // The table is pre-populated in the BIOS ROM by generate_minimal_bios()
+        // System configuration table format (10 bytes total):
+        // 00h-01h: WORD - Number of bytes following (8)
+        // 02h: BYTE - Model (0xFC = AT, 0xFE = XT, 0xFF = PC)
+        // 03h: BYTE - Submodel
+        // 04h: BYTE - BIOS revision level
+        // 05h: BYTE - Feature information byte 1
+        // 06h: BYTE - Feature information byte 2
+        // 07h: BYTE - Feature information byte 3
+        // 08h: BYTE - Feature information byte 4
+        // 09h: BYTE - Feature information byte 5
 
-        // System configuration table format:
-        // Offset  Size  Description
-        // 00h     WORD  Number of bytes following (we'll use 8)
-        // 02h     BYTE  Model (0xFC = AT, 0xFE = XT, 0xFF = PC)
-        // 03h     BYTE  Submodel (00h)
-        // 04h     BYTE  BIOS revision level (00h)
-        // 05h     BYTE  Feature information byte 1
-        //         bit 7: DMA channel 3 used by hard disk BIOS
-        //         bit 6: 2nd 8259 installed (cascaded IRQ2)
-        //         bit 5: Real-time clock installed
-        //         bit 4: INT 15h/AH=4Fh called on INT 09h (keyboard intercept)
-        //         bit 3: wait for external event supported (INT 15h/AH=41h)
-        //         bit 2: extended BIOS data area allocated
-        //         bit 1: micro channel implemented
-        //         bit 0: reserved
-        // 06h     BYTE  Feature information byte 2
-        // 07h     BYTE  Feature information byte 3
-        // 08h     BYTE  Feature information byte 4
-        // 09h     BYTE  Feature information byte 5
-
-        // Write the configuration table to memory
-        let table_addr = ((table_seg as u32) << 4) + (table_offset as u32);
-
-        // Number of bytes following (8 bytes: model through feature 5)
-        self.cpu.memory.write(table_addr, 8);
-        self.cpu.memory.write(table_addr + 1, 0);
-
-        // Model byte: 0xFE = PC/XT
-        self.cpu.memory.write(table_addr + 2, 0xFE);
-
-        // Submodel: 00h
-        self.cpu.memory.write(table_addr + 3, 0x00);
-
-        // BIOS revision: 00h
-        self.cpu.memory.write(table_addr + 4, 0x00);
-
-        // Feature byte 1: 0x20 (bit 5 = RTC installed)
-        self.cpu.memory.write(table_addr + 5, 0x20);
-
-        // Feature bytes 2-5: all zeros
-        self.cpu.memory.write(table_addr + 6, 0x00);
-        self.cpu.memory.write(table_addr + 7, 0x00);
-        self.cpu.memory.write(table_addr + 8, 0x00);
-        self.cpu.memory.write(table_addr + 9, 0x00);
-
-        // Return ES:BX pointing to the table
+        // Return ES:BX pointing to the table in ROM
         self.cpu.es = table_seg;
         self.cpu.bx = table_offset;
 
@@ -2780,6 +2885,48 @@ impl PcCpu {
 
         // AH = 0 (success)
         self.cpu.ax &= 0x00FF;
+
+        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+            // Read and display the actual table contents
+            let table_addr = ((table_seg as u32) << 4) + (table_offset as u32);
+            let byte_count = self.cpu.memory.read(table_addr) as u16
+                | ((self.cpu.memory.read(table_addr + 1) as u16) << 8);
+            eprintln!(
+                "INT 15h AH=C0h: Returning ES={:04X} BX={:04X} (table at {:08X})",
+                self.cpu.es, self.cpu.bx, table_addr
+            );
+            eprintln!("  Table contents:");
+            eprintln!("    Byte count: {} (0x{:04X})", byte_count, byte_count);
+            eprintln!("    Model: 0x{:02X}", self.cpu.memory.read(table_addr + 2));
+            eprintln!(
+                "    Submodel: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 3)
+            );
+            eprintln!(
+                "    BIOS rev: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 4)
+            );
+            eprintln!(
+                "    Feature 1: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 5)
+            );
+            eprintln!(
+                "    Feature 2: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 6)
+            );
+            eprintln!(
+                "    Feature 3: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 7)
+            );
+            eprintln!(
+                "    Feature 4: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 8)
+            );
+            eprintln!(
+                "    Feature 5: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 9)
+            );
+        }
 
         51
     }
@@ -3020,6 +3167,19 @@ impl PcCpu {
         51
     }
 
+    /// Handle INT 28h - DOS Idle Interrupt
+    /// Called by DOS when waiting for keyboard input
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int28h(&mut self) -> u32 {
+        // Skip the INT 28h instruction (2 bytes: 0xCD 0x28)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // DOS idle hook - TSRs and background programs can hook this
+        // For emulator, just return immediately (noop)
+        // DOS calls this in a loop while waiting for input
+        51
+    }
+
     /// Handle INT 2Ah - Network Installation API
     /// This is a DOS network function used during initialization
     #[allow(dead_code)] // Called dynamically based on interrupt number
@@ -3101,10 +3261,10 @@ impl PcCpu {
             }
             0x10 => {
                 // Get XMS driver address
-                // In a real implementation, this would return ES:BX pointing to the XMS driver
-                // For now, we'll use a fake segment:offset
-                self.cpu.es = 0xC000; // Fake XMS driver segment
-                self.cpu.bx = 0x0000; // Offset
+                // Return ES:BX pointing to XMS driver entry point in BIOS ROM
+                // The entry point is at F000:E010 in the BIOS ROM
+                self.cpu.es = 0xF000; // BIOS segment
+                self.cpu.bx = 0xE010; // Offset of XMS entry point
                 51
             }
             _ => 51,
@@ -3493,7 +3653,7 @@ impl PcCpu {
             SCANCODE_8 => b'8',
             SCANCODE_9 => b'9',
             SCANCODE_SPACE => b' ',
-            SCANCODE_ENTER => b'\n', // Line feed (0x0A) - advances to next line
+            SCANCODE_ENTER => b'\r', // Carriage return (0x0D) - DOS expects CR not LF
             SCANCODE_BACKSPACE => 0x08,
             SCANCODE_TAB => b'\t',
             SCANCODE_ESC => 0x1B,
@@ -3562,7 +3722,7 @@ fn scancode_to_ascii(scancode: u8) -> u8 {
         SCANCODE_8 => b'8',
         SCANCODE_9 => b'9',
         SCANCODE_SPACE => b' ',
-        SCANCODE_ENTER => b'\n', // Line feed (0x0A) - advances to next line
+        SCANCODE_ENTER => b'\r', // Carriage return (0x0D) - DOS expects CR not LF
         SCANCODE_BACKSPACE => 0x08,
         SCANCODE_TAB => b'\t',
         SCANCODE_ESC => 0x1B,

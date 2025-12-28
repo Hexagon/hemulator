@@ -63,12 +63,14 @@ impl Keyboard {
             _ => {}
         }
 
+        // Only store make codes (key presses) in the buffer for INT 16h
+        // Break codes (key releases) are not needed for keyboard input
         if self.scancode_buffer.len() < self.max_buffer_size {
             self.scancode_buffer.push_back(key);
         }
     }
 
-    /// Add a key release event (generates break code)
+    /// Add a key release event (updates shift flags only, no scancode buffered)
     pub fn key_release(&mut self, key: u8) {
         // Update shift flags for modifier keys
         match key {
@@ -79,9 +81,9 @@ impl Keyboard {
             _ => {}
         }
 
-        if self.scancode_buffer.len() < self.max_buffer_size {
-            self.scancode_buffer.push_back(key | 0x80); // Break code has high bit set
-        }
+        // Do NOT buffer break codes - INT 16h only needs make codes
+        // The break code was needed for hardware keyboard controllers, but not for
+        // BIOS keyboard services which only report key presses, not releases
     }
 
     /// Clear the scancode buffer

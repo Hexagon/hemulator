@@ -480,7 +480,7 @@ impl PcBus {
 
     /// Read from an I/O port
     pub fn io_read(&self, port: u16) -> u8 {
-        match port {
+        let value = match port {
             // PIT Channel 0 (system timer)
             0x40 => {
                 // Reading would need mutable access to update read state
@@ -509,7 +509,15 @@ impl PcBus {
                 value
             }
             _ => 0xFF, // Default for unimplemented ports
+        };
+
+        // Log I/O reads for debugging
+        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Trace) {
+            eprintln!("I/O read port 0x{:04X} = 0x{:02X}", port, value);
         }
+
+        value
     }
 
     /// Write to an I/O port

@@ -625,13 +625,11 @@ impl System for PcSystem {
                         self.cpu.bus_mut().write(ebda_base + offset, 0x00);
                     }
 
-                    // Load boot sector
+                    // Load boot sector so BIOS can detect it
                     self.ensure_boot_sector_loaded();
 
-                    // Jump directly to boot sector at 0x0000:0x7C00
-                    // Skip BIOS init since we're delaying boot
-                    self.cpu.set_cs(0x0000);
-                    self.cpu.set_ip(0x7C00);
+                    // Let CPU continue from reset vector (FFFF:0000)
+                    // BIOS POST code will run, set up IVT, and jump to boot sector
                 }
             }
 
