@@ -68,6 +68,22 @@ impl Keyboard {
                 | SCANCODE_RIGHT_ALT
         );
 
+        // Check if this is a function key (F1-F10)
+        // Function keys don't have ASCII mappings and cause FreeDOS to loop when buffered
+        let is_function_key = matches!(
+            key,
+            SCANCODE_F1
+                | SCANCODE_F2
+                | SCANCODE_F3
+                | SCANCODE_F4
+                | SCANCODE_F5
+                | SCANCODE_F6
+                | SCANCODE_F7
+                | SCANCODE_F8
+                | SCANCODE_F9
+                | SCANCODE_F10
+        );
+
         // Update shift flags for modifier keys
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags |= 0x02, // Bit 1 = Left Shift
@@ -82,10 +98,11 @@ impl Keyboard {
             _ => {}
         }
 
-        // Only store non-modifier make codes in the buffer for INT 16h
-        // Modifier keys (Shift, Ctrl, Alt) only update shift flags, not the scancode buffer
-        // This prevents INT 16h from reading modifier scancodes which would cause FreeDOS to loop
-        if !is_modifier && self.scancode_buffer.len() < self.max_buffer_size {
+        // Only store regular make codes in the buffer for INT 16h
+        // Skip modifiers (they only update shift flags)
+        // Skip function keys (they have no ASCII mapping and cause FreeDOS to loop)
+        // Programs that need function keys should use direct keyboard port access
+        if !is_modifier && !is_function_key && self.scancode_buffer.len() < self.max_buffer_size {
             self.scancode_buffer.push_back(key);
         }
     }
@@ -459,11 +476,19 @@ mod tests {
         // Modifier keys should update shift flags but NOT be buffered
         kb.key_press(SCANCODE_LEFT_SHIFT);
         assert!(!kb.has_data(), "Left Shift should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x02, 0x02, "Left Shift flag should be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x02,
+            0x02,
+            "Left Shift flag should be set"
+        );
 
         kb.key_press(SCANCODE_RIGHT_SHIFT);
         assert!(!kb.has_data(), "Right Shift should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x01, 0x01, "Right Shift flag should be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x01,
+            0x01,
+            "Right Shift flag should be set"
+        );
 
         kb.key_press(SCANCODE_LEFT_CTRL);
         assert!(!kb.has_data(), "Left Ctrl should not be buffered");
@@ -471,7 +496,11 @@ mod tests {
 
         kb.key_press(SCANCODE_RIGHT_CTRL);
         assert!(!kb.has_data(), "Right Ctrl should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x04, 0x04, "Ctrl flag should still be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x04,
+            0x04,
+            "Ctrl flag should still be set"
+        );
 
         kb.key_press(SCANCODE_LEFT_ALT);
         assert!(!kb.has_data(), "Left Alt should not be buffered");
@@ -479,12 +508,62 @@ mod tests {
 
         kb.key_press(SCANCODE_RIGHT_ALT);
         assert!(!kb.has_data(), "Right Alt/AltGr should not be buffered");
-        assert_eq!(kb.get_shift_flags() & 0x08, 0x08, "Alt flag should still be set");
+        assert_eq!(
+            kb.get_shift_flags() & 0x08,
+            0x08,
+            "Alt flag should still be set"
+        );
         assert!(kb.is_altgr_pressed(), "AltGr pressed flag should be set");
 
         // Regular keys should still be buffered
         kb.key_press(SCANCODE_A);
         assert!(kb.has_data(), "Regular keys should be buffered");
         assert_eq!(kb.read_scancode(), SCANCODE_A);
+    }
+
+    #[test]
+    fn test_function_keys_not_buffered() {
+        let mut kb = Keyboard::new();
+
+        // Function keys should NOT be buffered (they have no ASCII mapping and cause FreeDOS to loop)
+        kb.key_press(SCANCODE_F1);
+        assert!(!kb.has_data(), "F1 should not be buffered");
+
+        kb.key_press(SCANCODE_F2);
+        assert!(!kb.has_data(), "F2 should not be buffered");
+
+        kb.key_press(SCANCODE_F3);
+        assert!(!kb.has_data(), "F3 should not be buffered");
+
+        kb.key_press(SCANCODE_F4);
+        assert!(!kb.has_data(), "F4 should not be buffered");
+
+        kb.key_press(SCANCODE_F5);
+        assert!(!kb.has_data(), "F5 should not be buffered");
+
+        kb.key_press(SCANCODE_F6);
+        assert!(!kb.has_data(), "F6 should not be buffered");
+
+        kb.key_press(SCANCODE_F7);
+        assert!(!kb.has_data(), "F7 should not be buffered");
+
+        kb.key_press(SCANCODE_F8);
+        assert!(!kb.has_data(), "F8 should not be buffered");
+
+        kb.key_press(SCANCODE_F9);
+        assert!(!kb.has_data(), "F9 should not be buffered");
+
+        kb.key_press(SCANCODE_F10);
+        assert!(!kb.has_data(), "F10 should not be buffered");
+
+        // Regular keys should still be buffered
+        kb.key_press(SCANCODE_A);
+        assert!(kb.has_data(), "Regular keys should be buffered");
+        assert_eq!(kb.read_scancode(), SCANCODE_A);
+
+        // Enter key should still be buffered (it has ASCII mapping '\r')
+        kb.key_press(SCANCODE_ENTER);
+        assert!(kb.has_data(), "Enter should be buffered");
+        assert_eq!(kb.read_scancode(), SCANCODE_ENTER);
     }
 }
