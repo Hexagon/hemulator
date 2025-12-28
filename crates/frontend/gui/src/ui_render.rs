@@ -757,6 +757,8 @@ pub fn create_mount_point_selector(
         display_lines.push(line.as_str());
     }
     display_lines.push("");
+    display_lines.push("  9 - Create New Blank Disk");
+    display_lines.push("");
     display_lines.push("Press number to select, ESC to cancel");
 
     let start_x = (width.saturating_sub(30 * FONT_WIDTH)) / 2;
@@ -816,6 +818,101 @@ pub fn create_speed_selector_overlay(width: usize, height: usize, current_speed:
     all_lines.push("Press 0-5 to select, ESC to cancel");
 
     let start_x = (width.saturating_sub(35 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &all_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create a disk format selector overlay for creating blank disks
+pub fn create_disk_format_selector(width: usize, height: usize) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let title = "CREATE BLANK DISK - Select Format";
+
+    // Disk format options
+    let formats = [
+        "1 - Floppy 360KB (5.25\" DD)",
+        "2 - Floppy 720KB (3.5\" DD)",
+        "3 - Floppy 1.2MB (5.25\" HD)",
+        "4 - Floppy 1.44MB (3.5\" HD)",
+        "5 - Hard Drive 20MB",
+        "6 - Hard Drive 250MB",
+        "7 - Hard Drive 1GB",
+        "8 - Hard Drive 20GB",
+    ];
+
+    let mut all_lines = Vec::new();
+    all_lines.push(title);
+    all_lines.push("");
+
+    for format in &formats {
+        all_lines.push(*format);
+    }
+
+    all_lines.push("");
+    all_lines.push("Press 1-8 to select format, ESC to cancel");
+
+    let start_x = (width.saturating_sub(40 * FONT_WIDTH)) / 2;
+    let start_y = height / 3;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &all_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 2,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
+/// Create a save image selector overlay (PC only)
+pub fn create_pc_save_selector(
+    width: usize,
+    height: usize,
+    mount_points: &[emu_core::MountPointInfo],
+    mounted: &[bool], // Which mount points have data
+) -> Vec<u32> {
+    // Semi-transparent dark background
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let title = "PERSIST DISK IMAGES";
+
+    let mut all_lines = vec![title, "", "  1 - Persist All Images", ""];
+
+    // Add individual mount points that are mounted
+    let mut mount_lines = Vec::new();
+    let mut next_key = 2;
+    for (i, mp) in mount_points.iter().enumerate() {
+        if i < mounted.len() && mounted[i] {
+            mount_lines.push(format!("  {} - {}", next_key, mp.name));
+            next_key += 1;
+        }
+    }
+
+    for line in &mount_lines {
+        all_lines.push(line.as_str());
+    }
+
+    all_lines.push("");
+    all_lines.push("Press number to select, ESC to cancel");
+
+    let start_x = (width.saturating_sub(30 * FONT_WIDTH)) / 2;
     let start_y = height / 3;
 
     draw_text_lines(

@@ -309,6 +309,21 @@ impl PcSystem {
         // Update mount status
         bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
     }
+
+    /// Get a reference to floppy A disk image (for saving)
+    pub fn get_floppy_a(&self) -> Option<&[u8]> {
+        self.cpu.bus().floppy_a()
+    }
+
+    /// Get a reference to floppy B disk image (for saving)
+    pub fn get_floppy_b(&self) -> Option<&[u8]> {
+        self.cpu.bus().floppy_b()
+    }
+
+    /// Get a reference to hard drive disk image (for saving)
+    pub fn get_hard_drive(&self) -> Option<&[u8]> {
+        self.cpu.bus().hard_drive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -390,24 +405,13 @@ impl System for PcSystem {
             } else {
                 self.boot_delay_frames -= 1;
 
-                let cpu_model = self.cpu_model();
-                let memory_kb = self.memory_kb();
-                let cpu_speed_mhz = self.cpu_speed_mhz();
-                let vram_mut = self.cpu.bus_mut().vram_mut();
-
-                // Refresh POST screen every frame during boot delay to show live clock
-                bios::write_post_screen_to_vram(vram_mut, cpu_model, memory_kb, cpu_speed_mhz);
-
-                // Update countdown (60 frames per second)
-                let seconds_remaining = self.boot_delay_frames.div_ceil(60); // Round up
-                bios::update_post_screen_countdown(vram_mut, seconds_remaining);
-
-                // Update mount status
-                let _ = vram_mut;
+                // Update mount status and POST screen
                 self.update_post_screen();
 
-                // Clear keyboard buffer every frame during POST to prevent buffering
-                self.cpu.bus_mut().keyboard.clear();
+                // Update countdown after updating POST screen (60 frames per second)
+                let seconds_remaining = self.boot_delay_frames.div_ceil(60); // Round up
+                let vram_mut = self.cpu.bus_mut().vram_mut();
+                bios::update_post_screen_countdown(vram_mut, seconds_remaining);
 
                 // If delay expired, allow boot to proceed
                 if self.boot_delay_frames == 0 {
@@ -996,7 +1000,7 @@ mod tests {
         // Create disk images
         let floppy_a = crate::create_blank_floppy(crate::FloppyFormat::Floppy1_44M);
         let floppy_b = crate::create_blank_floppy(crate::FloppyFormat::Floppy720K);
-        let hard_drive = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive10M);
+        let hard_drive = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive20M);
 
         // Mount all disks
         assert!(sys.mount("FloppyA", &floppy_a).is_ok());
@@ -1035,14 +1039,17 @@ mod tests {
         assert_eq!(floppy_1_44m.len(), 1474560);
 
         // Test all hard drive formats
-        let hd_10m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive10M);
-        assert_eq!(hd_10m.len(), 10653696);
-
         let hd_20m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive20M);
-        assert_eq!(hd_20m.len(), 21307392);
+        assert_eq!(hd_20m.len(), 20_971_520); // 20MB
 
-        let hd_40m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive40M);
-        assert_eq!(hd_40m.len(), 42618880);
+        let hd_250m = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive250M);
+        assert_eq!(hd_250m.len(), 262_144_000); // 250MB
+
+        let hd_1g = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive1G);
+        assert_eq!(hd_1g.len(), 1_073_741_824); // 1GB
+
+        let hd_20g = crate::create_blank_hard_drive(crate::HardDriveFormat::HardDrive20G);
+        assert_eq!(hd_20g.len(), 21_474_836_480); // 20GB
     }
 
     #[test]

@@ -379,6 +379,20 @@ impl EmulatorSystem {
         }
     }
 
+    /// Get disk image for saving (PC only)
+    fn get_disk_image(&self, mount_id: &str) -> Option<&[u8]> {
+        if let EmulatorSystem::PC(sys) = self {
+            match mount_id {
+                "FloppyA" => sys.get_floppy_a(),
+                "FloppyB" => sys.get_floppy_b(),
+                "HardDrive" => sys.get_hard_drive(),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     /// Check if this system requires the host key to be held for function keys
     /// Only PC system requires this to allow ESC and function keys to pass through to the emulated system
     fn requires_host_key_for_function_keys(&self) -> bool {
@@ -847,7 +861,7 @@ impl CliArgs {
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
-        eprintln!("  10m, 20m, 40m            Hard drive formats");
+        eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
@@ -934,15 +948,6 @@ fn main() {
                 println!("Created 1.44MB floppy disk: {}", path);
                 std::process::exit(0);
             }
-            "10m" => {
-                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive10M);
-                if let Err(e) = fs::write(path, disk) {
-                    eprintln!("Error creating disk image: {}", e);
-                    std::process::exit(1);
-                }
-                println!("Created 10MB hard drive image: {}", path);
-                std::process::exit(0);
-            }
             "20m" => {
                 let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20M);
                 if let Err(e) = fs::write(path, disk) {
@@ -952,13 +957,31 @@ fn main() {
                 println!("Created 20MB hard drive image: {}", path);
                 std::process::exit(0);
             }
-            "40m" => {
-                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive40M);
+            "250m" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive250M);
                 if let Err(e) = fs::write(path, disk) {
                     eprintln!("Error creating disk image: {}", e);
                     std::process::exit(1);
                 }
-                println!("Created 40MB hard drive image: {}", path);
+                println!("Created 250MB hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            "1g" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive1G);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 1GB hard drive image: {}", path);
+                std::process::exit(0);
+            }
+            "20g" => {
+                let disk = emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20G);
+                if let Err(e) = fs::write(path, disk) {
+                    eprintln!("Error creating disk image: {}", e);
+                    std::process::exit(1);
+                }
+                println!("Created 20GB hard drive image: {}", path);
                 std::process::exit(0);
             }
             _ => {
@@ -1523,6 +1546,9 @@ fn main() {
     // Mount point selector state
     let mut show_mount_selector = false;
 
+    // Disk format selector state (for creating blank disks)
+    let mut show_disk_format_selector = false;
+
     // PC keyboard state tracking
     let mut prev_keys: HashSet<Key> = HashSet::new();
 
@@ -1594,10 +1620,27 @@ fn main() {
         let needs_host_key = sys.requires_host_key_for_function_keys();
 
         // Only exit on ESC if host key is held (when required by system), else allow ESC always
+        // But first check if any overlay is open - close it instead of exiting
         if (needs_host_key && host_key_held && window.is_key_down(Key::Escape))
             || (!needs_host_key && window.is_key_down(Key::Escape))
         {
-            break;
+            // Close overlays first, only exit if no overlay is open
+            if show_help
+                || show_slot_selector
+                || show_mount_selector
+                || show_speed_selector
+                || show_disk_format_selector
+                || show_debug
+            {
+                show_help = false;
+                show_slot_selector = false;
+                show_mount_selector = false;
+                show_speed_selector = false;
+                show_disk_format_selector = false;
+                show_debug = false;
+            } else {
+                break;
+            }
         }
 
         // Toggle help overlay (F1)
@@ -1607,6 +1650,7 @@ fn main() {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
+            show_disk_format_selector = false; // Close disk format selector if open
             show_speed_selector = false; // Close speed selector if open
             show_debug = false; // Close debug if open
         }
@@ -1619,6 +1663,7 @@ fn main() {
             show_help = false; // Close help if open
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
+            show_disk_format_selector = false; // Close disk format selector if open
             show_debug = false; // Close debug if open
         }
 
@@ -1761,56 +1806,151 @@ fn main() {
 
         // Handle slot selector
         if show_slot_selector {
-            // Check for slot selection (1-5) or cancel (ESC)
-            let mut selected_slot: Option<u8> = None;
+            // For PC system in SAVE mode, show disk persist menu instead of save state slots
+            if matches!(&sys, EmulatorSystem::PC(_)) && slot_selector_mode == "SAVE" {
+                // PC disk persist menu
+                let mount_points = sys.mount_points();
+                let mounted: Vec<bool> = mount_points
+                    .iter()
+                    .map(|mp| sys.get_disk_image(&mp.id).is_some())
+                    .collect();
 
-            if window.is_key_pressed(Key::Key1, false) {
-                selected_slot = Some(1);
-            } else if window.is_key_pressed(Key::Key2, false) {
-                selected_slot = Some(2);
-            } else if window.is_key_pressed(Key::Key3, false) {
-                selected_slot = Some(3);
-            } else if window.is_key_pressed(Key::Key4, false) {
-                selected_slot = Some(4);
-            } else if window.is_key_pressed(Key::Key5, false) {
-                selected_slot = Some(5);
-            }
+                // Check for selection (1 = persist all, 2+ = individual mounts)
+                let mut selected_option: Option<usize> = None;
 
-            if let Some(slot) = selected_slot {
-                show_slot_selector = false;
+                if window.is_key_pressed(Key::Key1, false) {
+                    selected_option = Some(0); // Persist all
+                } else if window.is_key_pressed(Key::Key2, false) {
+                    selected_option = Some(1);
+                } else if window.is_key_pressed(Key::Key3, false) {
+                    selected_option = Some(2);
+                } else if window.is_key_pressed(Key::Key4, false) {
+                    selected_option = Some(3);
+                } else if window.is_key_pressed(Key::Key5, false) {
+                    selected_option = Some(4);
+                } else if window.is_key_pressed(Key::Key6, false) {
+                    selected_option = Some(5);
+                }
 
-                if let Some(ref hash) = rom_hash {
-                    if slot_selector_mode == "SAVE" {
-                        // Check if system supports save states
-                        if !sys.supports_save_states() {
-                            eprintln!("Save states are not supported for this system");
-                        } else {
-                            // Save state
-                            let state = sys.save_state();
-                            match serde_json::to_vec(&state) {
-                                Ok(data) => match game_saves.save_slot(slot, &data, hash) {
-                                    Ok(_) => println!("Saved state to slot {}", slot),
-                                    Err(e) => eprintln!("Failed to save to slot {}: {}", slot, e),
-                                },
-                                Err(e) => eprintln!("Failed to serialize state: {}", e),
-                            }
-                        }
-                    } else {
-                        // Load state
-                        if !sys.supports_save_states() {
-                            eprintln!("Save states are not supported for this system");
-                        } else {
-                            match game_saves.load_slot(slot, hash) {
-                                Ok(data) => {
-                                    match serde_json::from_slice::<serde_json::Value>(&data) {
-                                        Ok(state) => match sys.load_state(&state) {
-                                            Ok(_) => println!("Loaded state from slot {}", slot),
-                                            Err(e) => eprintln!("Failed to load state: {}", e),
-                                        },
-                                        Err(e) => eprintln!("Failed to parse save state: {}", e),
+                if let Some(option) = selected_option {
+                    show_slot_selector = false;
+
+                    if option == 0 {
+                        // Persist all images
+                        let mut saved_count = 0;
+                        for (i, mp) in mount_points.iter().enumerate() {
+                            if i < mounted.len() && mounted[i] {
+                                if let Some(disk_data) = sys.get_disk_image(&mp.id) {
+                                    if let Some(path) = runtime_state.get_mount(&mp.id) {
+                                        match std::fs::write(path, disk_data) {
+                                            Ok(_) => {
+                                                println!("Saved {} to {}", mp.name, path);
+                                                saved_count += 1;
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Failed to save {} to {}: {}",
+                                                    mp.name, path, e
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        eprintln!("No path stored for {}", mp.name);
                                     }
                                 }
-                                Err(e) => eprintln!("Failed to load from slot {}: {}", slot, e),
+                            }
+                        }
+                        println!("Persisted {} disk image(s)", saved_count);
+                    } else {
+                        // Persist individual image
+                        // Map option 1-5 to mount point index, skipping unmounted ones
+                        let mut current_option = 1;
+                        for (i, mp) in mount_points.iter().enumerate() {
+                            if i < mounted.len() && mounted[i] {
+                                if current_option == option {
+                                    if let Some(disk_data) = sys.get_disk_image(&mp.id) {
+                                        if let Some(path) = runtime_state.get_mount(&mp.id) {
+                                            match std::fs::write(path, disk_data) {
+                                                Ok(_) => println!("Saved {} to {}", mp.name, path),
+                                                Err(e) => eprintln!(
+                                                    "Failed to save {} to {}: {}",
+                                                    mp.name, path, e
+                                                ),
+                                            }
+                                        } else {
+                                            eprintln!("No path stored for {}", mp.name);
+                                        }
+                                    }
+                                    break;
+                                }
+                                current_option += 1;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Regular save/load state handling for other systems
+                // Check for slot selection (1-5) or cancel (ESC)
+                let mut selected_slot: Option<u8> = None;
+
+                if window.is_key_pressed(Key::Key1, false) {
+                    selected_slot = Some(1);
+                } else if window.is_key_pressed(Key::Key2, false) {
+                    selected_slot = Some(2);
+                } else if window.is_key_pressed(Key::Key3, false) {
+                    selected_slot = Some(3);
+                } else if window.is_key_pressed(Key::Key4, false) {
+                    selected_slot = Some(4);
+                } else if window.is_key_pressed(Key::Key5, false) {
+                    selected_slot = Some(5);
+                }
+
+                if let Some(slot) = selected_slot {
+                    show_slot_selector = false;
+
+                    if let Some(ref hash) = rom_hash {
+                        if slot_selector_mode == "SAVE" {
+                            // Check if system supports save states
+                            if !sys.supports_save_states() {
+                                eprintln!("Save states are not supported for this system");
+                            } else {
+                                // Save state
+                                let state = sys.save_state();
+                                match serde_json::to_vec(&state) {
+                                    Ok(data) => match game_saves.save_slot(slot, &data, hash) {
+                                        Ok(_) => println!("Saved state to slot {}", slot),
+                                        Err(e) => {
+                                            eprintln!("Failed to save to slot {}: {}", slot, e)
+                                        }
+                                    },
+                                    Err(e) => eprintln!("Failed to serialize state: {}", e),
+                                }
+                            }
+                        } else {
+                            // Load state
+                            if !sys.supports_save_states() {
+                                eprintln!("Save states are not supported for this system");
+                            } else {
+                                match game_saves.load_slot(slot, hash) {
+                                    Ok(data) => {
+                                        match serde_json::from_slice::<serde_json::Value>(&data) {
+                                            Ok(state) => match sys.load_state(&state) {
+                                                Ok(_) => {
+                                                    println!("Loaded state from slot {}", slot)
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Failed to load state: {}", e)
+                                                }
+                                            },
+                                            Err(e) => {
+                                                eprintln!("Failed to parse save state: {}", e)
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to load from slot {}: {}", slot, e)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1842,7 +1982,9 @@ fn main() {
             } else if window.is_key_pressed(Key::Key8, false) {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
-                selected_index = Some(8);
+                // Key 9: Show disk format selector for creating new blank disk
+                show_mount_selector = false;
+                show_disk_format_selector = true;
             }
 
             if let Some(idx) = selected_index {
@@ -1903,6 +2045,110 @@ fn main() {
             // Render mount point selector
             let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
+                eprintln!("Window update error: {}", e);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
+        }
+
+        // Handle disk format selector
+        if show_disk_format_selector {
+            // Check for format selection (1-7)
+            let mut selected_format: Option<usize> = None;
+
+            if window.is_key_pressed(Key::Key1, false) {
+                selected_format = Some(0);
+            } else if window.is_key_pressed(Key::Key2, false) {
+                selected_format = Some(1);
+            } else if window.is_key_pressed(Key::Key3, false) {
+                selected_format = Some(2);
+            } else if window.is_key_pressed(Key::Key4, false) {
+                selected_format = Some(3);
+            } else if window.is_key_pressed(Key::Key5, false) {
+                selected_format = Some(4);
+            } else if window.is_key_pressed(Key::Key6, false) {
+                selected_format = Some(5);
+            } else if window.is_key_pressed(Key::Key7, false) {
+                selected_format = Some(6);
+            } else if window.is_key_pressed(Key::Key8, false) {
+                selected_format = Some(7);
+            }
+
+            if let Some(fmt_idx) = selected_format {
+                show_disk_format_selector = false;
+
+                // Create the blank disk based on selected format
+                let (disk_data, default_name, description) = match fmt_idx {
+                    0 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy360K),
+                        "floppy_360k.img",
+                        "360KB Floppy",
+                    ),
+                    1 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy720K),
+                        "floppy_720k.img",
+                        "720KB Floppy",
+                    ),
+                    2 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_2M),
+                        "floppy_1_2m.img",
+                        "1.2MB Floppy",
+                    ),
+                    3 => (
+                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M),
+                        "floppy_1_44m.img",
+                        "1.44MB Floppy",
+                    ),
+                    4 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20M),
+                        "hdd_20m.img",
+                        "20MB Hard Drive",
+                    ),
+                    5 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive250M),
+                        "hdd_250m.img",
+                        "250MB Hard Drive",
+                    ),
+                    6 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive1G),
+                        "hdd_1g.img",
+                        "1GB Hard Drive",
+                    ),
+                    7 => (
+                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20G),
+                        "hdd_20g.img",
+                        "20GB Hard Drive",
+                    ),
+                    _ => {
+                        eprintln!("Invalid disk format index: {}", fmt_idx);
+                        continue;
+                    }
+                };
+
+                // Show save dialog
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Disk Image", &["img"])
+                    .add_filter("All Files", &["*"])
+                    .set_file_name(default_name)
+                    .save_file()
+                {
+                    match std::fs::write(&path, &disk_data) {
+                        Ok(_) => {
+                            println!("Created {} disk image: {}", description, path.display());
+                            status_message = format!("Created {} disk image", description);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save disk image: {}", e);
+                            status_message = format!("Failed to save disk: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // Render disk format selector
+            let format_buffer = ui_render::create_disk_format_selector(width, height);
+            if let Err(e) = window.update_with_buffer(&format_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
             }
@@ -2023,6 +2269,7 @@ fn main() {
             show_mount_selector = true;
             show_help = false;
             show_slot_selector = false;
+            show_disk_format_selector = false;
             show_speed_selector = false;
             show_debug = false;
         }
@@ -2038,8 +2285,14 @@ fn main() {
         }
 
         // F5 - Save state slot selector - only when host key is held
+        // For PC, show disk image persist menu instead
         if host_key_held && rom_loaded && window.is_key_pressed(Key::F5, false) {
-            if sys.supports_save_states() {
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                // PC system: show disk persist menu
+                show_slot_selector = true;
+                slot_selector_mode = "SAVE";
+                show_help = false;
+            } else if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "SAVE";
                 show_help = false;
@@ -2049,8 +2302,12 @@ fn main() {
         }
 
         // F6 - Show load state slot selector - only when host key is held
+        // For PC, F6 does nothing (no load for disk images)
         if host_key_held && rom_loaded && window.is_key_pressed(Key::F6, false) {
-            if sys.supports_save_states() {
+            if matches!(&sys, EmulatorSystem::PC(_)) {
+                // PC system: F6 not used for disk images
+                eprintln!("F6 is not used for PC disk images. Use F5 to persist disk images.");
+            } else if sys.supports_save_states() {
                 show_slot_selector = true;
                 slot_selector_mode = "LOAD";
                 show_help = false;
@@ -2414,22 +2671,37 @@ fn main() {
             &[]
         } else if show_slot_selector {
             // Render slot selector overlay
-            let has_saves = [
-                game_saves.slots.contains_key(&1),
-                game_saves.slots.contains_key(&2),
-                game_saves.slots.contains_key(&3),
-                game_saves.slots.contains_key(&4),
-                game_saves.slots.contains_key(&5),
-            ];
-            let slot_buffer = ui_render::create_slot_selector_overlay(
-                width,
-                height,
-                slot_selector_mode,
-                &has_saves,
-            );
-            if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
+            // For PC system in SAVE mode, show disk persist menu
+            if matches!(&sys, EmulatorSystem::PC(_)) && slot_selector_mode == "SAVE" {
+                let mount_points = sys.mount_points();
+                let mounted: Vec<bool> = mount_points
+                    .iter()
+                    .map(|mp| sys.get_disk_image(&mp.id).is_some())
+                    .collect();
+                let slot_buffer =
+                    ui_render::create_pc_save_selector(width, height, &mount_points, &mounted);
+                if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
+                    eprintln!("Window update error: {}", e);
+                    break;
+                }
+            } else {
+                let has_saves = [
+                    game_saves.slots.contains_key(&1),
+                    game_saves.slots.contains_key(&2),
+                    game_saves.slots.contains_key(&3),
+                    game_saves.slots.contains_key(&4),
+                    game_saves.slots.contains_key(&5),
+                ];
+                let slot_buffer = ui_render::create_slot_selector_overlay(
+                    width,
+                    height,
+                    slot_selector_mode,
+                    &has_saves,
+                );
+                if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
+                    eprintln!("Window update error: {}", e);
+                    break;
+                }
             }
             &[]
         } else if show_mount_selector {
