@@ -6592,9 +6592,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
                 // Address-size override prefix
                 // On 80386+, this toggles between 16-bit and 32-bit addressing
-                // For now, we set a flag and *plan* to handle it in individual instructions.
-                // FUTURE ENHANCEMENT: Implement 32-bit addressing in effective address calculation
-                //                     for 80386+ support. Not critical for 8086/80186/80286 emulation.
+                // For now, we set a flag but don't fully implement 32-bit addressing modes.
+                // IMPLEMENTATION NOTE: Full 32-bit addressing requires:
+                //   - 32-bit registers (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP)
+                //   - SIB byte decoding for [EAX+EBX*4+disp32] style addressing
+                //   - ModR/M extensions for 32-bit modes
+                // Most 16-bit DOS/Windows software doesn't use this prefix in practice.
+                // FUTURE ENHANCEMENT: Implement full 32-bit addressing for complete 386+ compatibility.
                 //                     See CPU_REVIEW_RESULTS.md - marked as "Long Term" enhancement.
                 self.address_size_override = true;
                 self.step() // Execute next instruction with address size override
