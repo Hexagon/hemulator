@@ -2,7 +2,215 @@
 
 **Date**: 2025-12-28  
 **Purpose**: Comprehensive evaluation of PC emulator interrupt handling against BIOS interrupt reference  
-**Status**: Analysis only - no code changes made
+**Status**: ✅ **HIGH priority issues implemented** - Critical functions for HIMEM.SYS and QBasic now working
+
+## Predicted Issues for Linux Kernel and Other Operating Systems
+
+### 🔴 CRITICAL: Linux Kernel Boot Requirements
+
+Based on Linux kernel boot protocol analysis, the following issues are predicted:
+
+#### 1. **INT 15h AX=E820h: Memory Map Query** - 🔴 **CRITICAL**
+**Status**: ❌ **Stub only - returns no entries**
+**Impact**: Linux kernel 2.6+ **WILL FAIL** to boot
+**Reason**: Modern Linux requires E820 memory map to:
+- Detect available RAM
+- Identify reserved regions (BIOS, ACPI, etc.)
+- Set up page tables and memory management
+
+**Current Implementation** (`cpu.rs:3405-3413`):
+```rust
+fn int15h_query_system_address_map(&mut self) -> u32 {
+    self.cpu.bx = 0; // No continuation
+    self.set_carry_flag(true); // No more entries
+    51
+}
+```
+
+**Required Implementation**:
+- Return memory map entries describing:
+  - Conventional memory (0x00000000 - 0x0009FFFF) - Type 1 (available)
+  - VGA/BIOS reserved (0x000A0000 - 0x000FFFFF) - Type 2 (reserved)
+  - Extended memory (0x00100000 - end of RAM) - Type 1 (available)
+- Use continuation value in EBX to iterate through entries
+- Each entry: base address (64-bit), length (64-bit), type (32-bit)
+
+**Priority**: 🔴 **CRITICAL** - Linux 2.6+ will not boot without this
+
+#### 2. **INT 15h AX=E801h: Extended Memory Size** - 🟠 **HIGH**
+**Status**: ⚠️ **Partial - returns fixed values**
+**Impact**: Linux fallback detection may fail
+**Reason**: If E820h fails, kernel tries E801h as fallback
+
+**Current Implementation** (`cpu.rs:3383-3403`):
+```rust
+fn int15h_get_extended_memory_size_e801(&mut self) -> u32 {
+    // Returns memory in two ranges:
+    // AX/CX = memory between 1MB-16MB in 1KB blocks (max 15MB = 0x3C00)
+    // BX/DX = memory above 16MB in 64KB blocks
+    let mem_1m_16m = 0x3C00; // 15MB (full)
+    let mem_above_16m = 0x0000; // None
+    
+    self.cpu.ax = mem_1m_16m;
+    self.cpu.cx = mem_1m_16m;
+    self.cpu.bx = mem_above_16m;
+    self.cpu.dx = mem_above_16m;
+    self.set_carry_flag(false);
+    51
+}
+```
+
+**Issue**: Hardcoded to 15MB, doesn't reflect actual system memory
+**Fix Needed**: Read from bus.get_extended_memory_kb()
+
+#### 3. **INT 15h AH=88h: Get Extended Memory Size** - 🟠 **HIGH**
+**Status**: ⚠️ **Returns 0 - no extended memory**
+**Impact**: Very old kernels (pre-2.4) and boot loaders may fail
+
+**Current Implementation** (`cpu.rs:3373-3381`):
+```rust
+fn int15h_get_extended_memory_size(&mut self) -> u32 {
+    self.cpu.ax = 0; // No extended memory
+    self.set_carry_flag(false);
+    51
+}
+```
+
+**Fix Needed**: Return actual extended memory size in KB
+
+#### 4. **INT 13h AH=42h: LBA Extended Read** - 🟠 **MEDIUM-HIGH**
+**Status**: ❌ **Stub - returns "not supported"**
+**Impact**: Modern boot loaders (GRUB2, LILO) may fail on large disks
+
+**Reason**: 
+- CHS addressing limited to ~8GB disks
+- Modern Linux installations use LBA for boot
+- GRUB2 requires LBA for disks >504MB
+
+**Priority**: 🟠 **HIGH** for disk images >8GB
+
+#### 5. **APM (Advanced Power Management) - INT 15h AH=53h** - 🟡 **LOW-MEDIUM**
+**Status**: ❌ **Not implemented**
+**Impact**: Older kernels may log warnings but usually continue
+
+**Functions needed**:
+- 53h/00h: APM installation check
+- 53h/01h: Connect real mode interface
+- 53h/02h: Connect 16-bit protected mode
+- 53h/07h: Enable/disable power management
+
+**Priority**: 🟡 **LOW** - Kernel will fall back to other methods
+
+#### 6. **VESA BIOS Extensions (VBE) - INT 10h AH=4Fh** - 🟡 **MEDIUM**
+**Status**: ❌ **Not implemented**
+**Impact**: Graphical boot (splash screen) will fail, text mode works
+
+**Functions needed**:
+- 4F00h: Get VBE controller information
+- 4F01h: Get VBE mode information
+- 4F02h: Set VBE mode
+- 4F03h: Get current VBE mode
+
+**Priority**: 🟡 **MEDIUM** - Required for framebuffer console
+
+### 🟠 Windows Boot Requirements
+
+#### 1. **INT 13h Extended Functions** - 🟠 **HIGH**
+**Status**: ❌ **Mostly stubs**
+**Impact**: Windows 2000+ may have boot issues
+
+**Required for Windows**:
+- AH=42h: Extended read (LBA)
+- AH=43h: Extended write (LBA)
+- AH=48h: Get drive parameters (extended)
+
+#### 2. **PnP BIOS - INT 15h AH=C1h** - 🟡 **MEDIUM**
+**Status**: ⚠️ **Stub - returns "not supported"**
+**Impact**: Device detection may be incomplete
+
+### 🔵 FreeBSD/NetBSD Boot Requirements
+
+#### 1. **INT 15h E820h** - 🔴 **CRITICAL**
+Same as Linux - modern BSD kernels require memory map
+
+#### 2. **INT 13h LBA support** - 🟠 **HIGH**
+Boot loaders expect LBA for modern disks
+
+### Summary of Predicted Boot Failures
+
+| Operating System | Will Boot? | Critical Missing Features |
+|-----------------|------------|--------------------------|
+| MS-DOS 6.22 | ✅ Yes | ✅ All implemented |
+| MS-DOS 5.0 + HIMEM | ✅ Yes | ✅ A20 gate now working |
+| Windows 95/98 | 🟡 Maybe | 🟠 INT 13h LBA, 🟡 APM |
+| Windows 2000/XP | 🔴 No | 🔴 INT 15h E820h, 🟠 INT 13h LBA |
+| Linux 2.4.x | 🔴 No | 🔴 INT 15h E820h |
+| Linux 2.6+ | 🔴 No | 🔴 INT 15h E820h (CRITICAL) |
+| FreeBSD 8+ | 🔴 No | 🔴 INT 15h E820h |
+| NetBSD 6+ | 🔴 No | 🔴 INT 15h E820h |
+
+### Recommended Implementation Priority
+
+1. **🔴 CRITICAL (Blocks Linux/Modern Windows)**:
+   - INT 15h AX=E820h: Memory map query (full implementation)
+   - INT 15h AH=88h: Extended memory size (from bus)
+   - INT 15h AX=E801h: Extended memory (from bus)
+
+2. **🟠 HIGH (Improves compatibility)**:
+   - INT 13h AH=42h: LBA read
+   - INT 13h AH=43h: LBA write
+   - INT 13h AH=48h: Extended drive parameters
+
+3. **🟡 MEDIUM (Nice to have)**:
+   - INT 10h AH=4Fh: VESA VBE (for framebuffer)
+   - INT 15h AH=53h: APM (for power management)
+
+**Estimated Implementation Effort**:
+- INT 15h E820h: ~100 lines (memory map table + iteration logic)
+- INT 13h LBA functions: ~80 lines (42h + 43h)
+- Total critical path: ~180 lines to enable Linux boot
+
+**Status**: ✅ **HIGH priority issues implemented** - Critical functions for HIMEM.SYS and QBasic now working
+
+## Implementation Status (2025-12-28)
+
+### ✅ Completed HIGH Priority Fixes
+
+1. **BIOS Architecture/Model Byte Consistency** ✅ FIXED
+   - Made `generate_minimal_bios()` accept `cpu_model` parameter
+   - CPU model now determines system architecture:
+     - 8086/8088/186/188 → 0xFE (PC/XT), feature byte 0x00
+     - 286 → 0xFC (AT), feature byte 0x70 (RTC, 2nd PIC, keyboard intercept)
+     - 386+ → 0xF8 (PS/2), feature byte 0x70
+   - Both BIOS model byte (F000:FFFE) and system config table (F000:E002) now consistent
+
+2. **INT 15h AH=24h: A20 Gate Control** ✅ IMPLEMENTED
+   - AL=00h: Disable A20 (acknowledged, always enabled in emulator)
+   - AL=01h: Enable A20 (acknowledged, always enabled in emulator)
+   - AL=02h: Get A20 status (returns enabled)
+   - AL=03h: Get A20 support (returns supported)
+   - **Impact**: HIMEM.SYS can now load successfully in MS-DOS 5.0+
+
+3. **INT 10h AH=0Bh: Set Color Palette** ✅ IMPLEMENTED
+   - BH=00h: Set background/border color
+   - BH=01h: Set CGA palette ID
+   - **Impact**: QBasic and other DOS applications can control colors
+
+4. **INT 10h AH=1Bh: Get Video State** ✅ IMPLEMENTED
+   - Returns video state table pointer at ES:DI
+   - **Impact**: QBasic can detect video capabilities
+
+5. **INT 10h AH=EFh, FAh: Undocumented VGA Functions** ✅ IMPLEMENTED
+   - Stub handlers prevent errors
+   - **Impact**: QBasic no longer crashes on these calls
+
+### 🟡 Partial Implementation
+
+1. **INT 08h → INT 1Ch Chaining** 🟡 DOCUMENTED
+   - Tick counter properly maintained at 0040:006C
+   - Midnight rollover implemented
+   - **Limitation**: Direct INT 1Ch call not yet implemented (requires CPU core changes)
+   - **Workaround**: Programs should hook INT 08h directly
 
 ## Executive Summary
 
@@ -12,14 +220,14 @@ This document analyzes the current PC emulator's interrupt handling implementati
 
 **Key Findings**:
 - ✅ Main BIOS services (INT 10h, 13h, 16h) are well-implemented
+- ✅ **FIXED**: INT 15h AH=24h (A20 gate control) now implemented
+- ✅ **FIXED**: INT 10h AH=0Bh (palette control) now implemented
+- ✅ **FIXED**: INT 10h AH=1Bh (video state) now implemented
+- ✅ **FIXED**: BIOS model bytes now consistent and adapt to CPU model
 - ⚠️ CPU exceptions (INT 00h-10h) are minimally implemented
 - ⚠️ Hardware IRQ handlers (INT 08h-77h) are mostly stubs
 - ✅ OS interrupts (INT 20h-31h) are correctly NOT intercepted (DOS handles them)
 - ⚠️ Extended BIOS services need expansion
-- 🔴 **Critical Missing**: INT 15h AH=24h (A20 gate control) - required by HIMEM.SYS and MS-DOS 5.0+
-- 🔴 **Critical Missing**: INT 10h AH=0Bh (palette control) - required by QBasic and other DOS applications
-- 🔴 **Architecture Issue**: BIOS model bytes inconsistent - reports both AT (0xFC) and XT (0xFE)
-- 🔴 **Architecture Issue**: Model byte doesn't adapt to CPU selection (8086/286/386/486)
 - ⚠️ **Keyboard Issue**: Hardcoded to XT scan code set 1 (AT/PS2 should support set 2)
 
 ## Real-World Testing Findings (MS-DOS 5.0 Boot)

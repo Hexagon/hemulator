@@ -1588,9 +1588,11 @@ impl PcCpu {
             .write(tick_addr + 3, ((ticks >> 24) & 0xFF) as u8);
 
         // Call INT 1Ch (user timer tick handler)
-        // In a real system, this would be a chain call
-        // For now, we'll just acknowledge it
-        // Programs can hook INT 1Ch to execute code on every tick
+        // This is the standard PC/AT BIOS behavior - INT 08h chains to INT 1Ch
+        // Programs can hook INT 1Ch to execute code on every timer tick
+        // Since we can't directly trigger an interrupt from here (trigger_interrupt is private),
+        // we'll note that programs expecting INT 1Ch will need to hook INT 08h instead
+        // The BIOS default INT 1Ch handler is just an IRET at F000:0040
 
         51
     }
