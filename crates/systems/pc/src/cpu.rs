@@ -5577,7 +5577,7 @@ mod tests {
     #[test]
     fn test_keyboard_shift_modifier() {
         use crate::keyboard::*;
-        
+
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
@@ -5611,13 +5611,13 @@ mod tests {
     #[test]
     fn test_keyboard_shift_symbols() {
         use crate::keyboard::*;
-        
+
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
         // Test all shifted number keys
         cpu.cpu.memory.keyboard.key_press(SCANCODE_LEFT_SHIFT);
-        
+
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_1), b'!');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_2), b'@');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_3), b'#');
@@ -5628,7 +5628,7 @@ mod tests {
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_8), b'*');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_9), b'(');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_0), b')');
-        
+
         // Test shifted punctuation
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_MINUS), b'_');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_EQUALS), b'+');
@@ -5638,14 +5638,14 @@ mod tests {
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_PERIOD), b'>');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_SLASH), b'?');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_BACKTICK), b'~');
-        
+
         cpu.cpu.memory.keyboard.key_release(SCANCODE_LEFT_SHIFT);
     }
 
     #[test]
     fn test_keyboard_altgr_modifier() {
         use crate::keyboard::*;
-        
+
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
