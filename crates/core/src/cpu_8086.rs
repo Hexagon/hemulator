@@ -12424,5 +12424,4 @@ mod tests {
         assert_eq!(final_bytes, 0, "Bytes remaining should be 0");
         assert_eq!(cpu.cx, 4, "Should have 4 iterations (3+3+3+1=10)");
     }
-
 }
