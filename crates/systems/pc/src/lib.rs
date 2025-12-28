@@ -101,8 +101,8 @@ impl PcSystem {
         let adapter_type = Self::detect_video_adapter_type(video_adapter.name());
         bus.set_video_adapter_type(adapter_type);
 
-        // Load minimal BIOS
-        let bios = generate_minimal_bios();
+        // Load minimal BIOS (pass CPU model for architecture-appropriate BIOS)
+        let bios = generate_minimal_bios(cpu_model);
         bus.load_bios(&bios);
 
         // Write BIOS POST screen to video RAM with actual CPU model and memory
@@ -825,8 +825,9 @@ impl System for PcSystem {
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         match mount_point_id {
             "BIOS" => {
-                // Reload default BIOS
-                let bios = generate_minimal_bios();
+                // Reload default BIOS with current CPU model
+                let cpu_model = self.cpu.model();
+                let bios = generate_minimal_bios(cpu_model);
                 self.cpu.bus_mut().load_bios(&bios);
                 Ok(())
             }
