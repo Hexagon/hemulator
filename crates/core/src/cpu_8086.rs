@@ -2040,10 +2040,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u16) < (reg_val as u16);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(rm_val, reg_val);
 
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -2061,10 +2063,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u32) < (reg_val as u32);
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(rm_val, reg_val);
 
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -2086,10 +2090,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val.wrapping_sub(rm_val);
                 let borrow = (reg_val as u16) < (rm_val as u16);
                 let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(reg_val, rm_val);
 
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -2107,10 +2113,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val.wrapping_sub(rm_val);
                 let borrow = (reg_val as u32) < (rm_val as u32);
                 let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(reg_val, rm_val);
 
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -2427,11 +2435,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = al.wrapping_sub(val);
                 let borrow = (al as u16) < (val as u16);
                 let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(al, val);
 
                 self.ax = (self.ax & 0xFF00) | (result as u16);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
@@ -2442,11 +2452,13 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = self.ax.wrapping_sub(val);
                 let borrow = (self.ax as u32) < (val as u32);
                 let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(self.ax, val);
 
                 self.ax = result;
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
@@ -2458,10 +2470,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = al.wrapping_sub(val);
                 let borrow = (al as u16) < (val as u16);
                 let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(al, val);
 
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
@@ -2472,10 +2486,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = self.ax.wrapping_sub(val);
                 let borrow = (self.ax as u32) < (val as u32);
                 let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(self.ax, val);
 
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
@@ -4145,11 +4161,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
                 let carry = (rm_val as u16 + reg_val as u16 + carry_in as u16) > 0xFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 including carry-in
+                let af = ((rm_val & 0x0F) + (reg_val & 0x0F) + carry_in) > 0x0F;
 
                 self.write_rmw8(modbits, rm, result, seg, offset);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
                 if modbits == 0b11 {
                     3
@@ -4168,11 +4187,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
                 let carry = (rm_val as u32 + reg_val as u32 + carry_in as u32) > 0xFFFF;
                 let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x8000) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                let af = (((rm_val & 0x0F) + (reg_val & 0x0F) + carry_in) & 0x10) != 0;
 
                 self.write_rmw16(modbits, rm, result, seg, offset);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
                 if modbits == 0b11 {
                     3
@@ -4195,6 +4217,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
                 let carry = (reg_val as u16 + rm_val as u16 + carry_in as u16) > 0xFF;
                 let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 including carry-in
+                let af = ((reg_val & 0x0F) + (rm_val & 0x0F) + carry_in) > 0x0F;
 
                 if reg < 4 {
                     self.set_reg8_low(reg, result);
@@ -4204,6 +4228,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -4222,11 +4247,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
                 let carry = (reg_val as u32 + rm_val as u32 + carry_in as u32) > 0xFFFF;
                 let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x8000) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                let af = (((reg_val & 0x0F) + (rm_val & 0x0F) + carry_in) & 0x10) != 0;
 
                 self.set_reg16(reg, result);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
                 if modbits == 0b11 {
                     3
@@ -4243,11 +4271,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = al.wrapping_add(val).wrapping_add(carry_in);
                 let carry = (al as u16 + val as u16 + carry_in as u16) > 0xFF;
                 let overflow = ((al ^ result) & (val ^ result) & 0x80) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 including carry-in
+                let af = ((al & 0x0F) + (val & 0x0F) + carry_in) > 0x0F;
 
                 self.ax = (self.ax & 0xFF00) | (result as u16);
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
@@ -4259,11 +4290,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = self.ax.wrapping_add(val).wrapping_add(carry_in);
                 let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
                 let overflow = ((self.ax ^ result) & (val ^ result) & 0x8000) != 0;
+                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                let af = (((self.ax & 0x0F) + (val & 0x0F) + carry_in) & 0x10) != 0;
 
                 self.ax = result;
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
                 self.cycles += 4;
                 4
             }
