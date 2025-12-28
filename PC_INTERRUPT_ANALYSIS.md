@@ -18,6 +18,9 @@ This document analyzes the current PC emulator's interrupt handling implementati
 - ⚠️ Extended BIOS services need expansion
 - 🔴 **Critical Missing**: INT 15h AH=24h (A20 gate control) - required by HIMEM.SYS and MS-DOS 5.0+
 - 🔴 **Critical Missing**: INT 10h AH=0Bh (palette control) - required by QBasic and other DOS applications
+- 🔴 **Architecture Issue**: BIOS model bytes inconsistent - reports both AT (0xFC) and XT (0xFE)
+- 🔴 **Architecture Issue**: Model byte doesn't adapt to CPU selection (8086/286/386/486)
+- ⚠️ **Keyboard Issue**: Hardcoded to XT scan code set 1 (AT/PS2 should support set 2)
 
 ## Real-World Testing Findings (MS-DOS 5.0 Boot)
 
@@ -50,6 +53,119 @@ Based on real-world testing, these functions are upgraded to **HIGH** priority:
 - INT 15h AH=24h: A20 gate control (breaks HIMEM.SYS)
 - INT 10h AH=0Bh: Set color palette (used by many DOS apps)
 - INT 10h AH=1Bh: Get video state (used by QBasic)
+
+---
+
+## Architecture and System Model Handling
+
+### Current Implementation Issues
+
+The emulator has **inconsistent architecture reporting** that doesn't adapt to the selected CPU model:
+
+#### 1. **BIOS Model Byte Mismatch**
+
+**Location**: `bios.rs:271` and `bios.rs:124`
+
+- **System Configuration Table** (INT 15h AH=C0h): Reports **0xFC** (AT system)
+- **BIOS Model Byte** (F000:FFFE): Reports **0xFE** (PC/XT)
+- **Issue**: These should match and adapt based on CPU model
+
+**Standard PC Architecture Models**:
+```
+0xFF = Original PC (8088)
+0xFE = PC/XT (8088)
+0xFD = PCjr
+0xFC = PC/AT (80286+)
+0xFB = PC/XT Model 286
+0xFA = PS/2 Model 25/30 (8086)
+0xF9 = PC Convertible
+0xF8 = PS/2 Model 80 (80386)
+```
+
+**Expected Mapping**:
+- Intel 8086/8088 → 0xFE (PC/XT) or 0xFF (PC)
+- Intel 80186/80188 → 0xFE (XT-compatible)
+- Intel 80286 → 0xFC (AT)
+- Intel 80386+ → 0xF8 (PS/2 Model 80) or 0xFC (AT-compatible)
+
+#### 2. **Keyboard Scan Code Set**
+
+**Location**: `keyboard.rs`
+
+- **Current**: Uses PC/XT scan code set 1 (hardcoded)
+- **Issue**: AT and PS/2 systems should support scan code set 2
+- **Impact**: Some DOS software may check keyboard type via INT 16h or port 60h
+
+**Scan Code Set Evolution**:
+- **PC/XT**: Scan code set 1 only
+- **AT**: Scan code set 2 (default), can switch to set 1
+- **PS/2**: Scan code set 2 or 3
+
+#### 3. **Feature Byte Inconsistency**
+
+**Location**: `bios.rs:127-135`
+
+Current feature byte 1 (`0x70`):
+```
+bit 6: 2nd 8259 installed (1) ← AT/PS2 feature
+bit 5: Real-time clock (1)    ← AT/PS2 feature
+bit 4: INT 15h/AH=4Fh (1)     ← AT/PS2 feature
+```
+
+**Issue**: Features indicate AT system, but model byte says XT
+
+#### 4. **Temperature Sensors**
+
+**Status**: ❌ **Not implemented**
+
+- **PC/XT/AT**: No temperature sensor support in BIOS
+- **Modern PS/2+**: Some models have thermal monitoring
+- **Recommendation**: Not needed for DOS compatibility
+- **Note**: Temperature sensors are not reported through standard BIOS interrupts in PC/AT era systems
+
+### Recommendations
+
+#### 🔴 **HIGH Priority**: Fix Architecture Consistency
+
+1. **Make BIOS generation dynamic** based on CPU model:
+   ```rust
+   pub fn generate_minimal_bios(cpu_model: CpuModel) -> Vec<u8> {
+       let model_byte = match cpu_model {
+           CpuModel::Intel8086 | CpuModel::Intel8088 => 0xFE, // PC/XT
+           CpuModel::Intel80186 | CpuModel::Intel80188 => 0xFE, // XT-compatible
+           CpuModel::Intel80286 => 0xFC, // AT
+           _ => 0xF8, // PS/2 Model 80 (386+)
+       };
+       // ... use model_byte in both locations
+   }
+   ```
+
+2. **Match feature bytes to model**:
+   - XT (0xFE): Feature byte 1 = `0x00` (no RTC, no 2nd PIC)
+   - AT (0xFC): Feature byte 1 = `0x70` (RTC, 2nd PIC, keyboard intercept)
+   - PS/2 (0xF8): Feature byte 1 = `0x70`, additional features in bytes 2-5
+
+3. **Update INT 15h AH=C0h handler** to match model byte
+
+#### 🟠 **MEDIUM Priority**: Keyboard Scan Code Set Support
+
+- Implement scan code set 2 for AT/PS/2 models
+- Add keyboard controller command to switch sets (port 60h/64h)
+- Current set 1 implementation is acceptable for XT mode
+
+#### 🟡 **LOW Priority**: Extended System Information
+
+- Add submodel byte based on specific 286/386/486 variant
+- Temperature sensors: Not needed for DOS compatibility
+
+### Code Impact
+
+- **BIOS generation**: ~30 lines (add cpu_model parameter, switch logic)
+- **Update callers**: ~10 lines (pass cpu_model to generate_minimal_bios)
+- **Feature byte logic**: ~20 lines (conditional feature byte generation)
+- **Total**: ~60 lines
+
+**Risk**: 🟢 **LOW** - Changes are localized to BIOS generation
 
 ---
 
@@ -712,6 +828,20 @@ These interrupts are provided by DOS or other operating systems. **The emulator 
    - **Files**: `cpu.rs` (add to handle_int10h match statement)
    - **Action**: Return immediately (stub/no-op)
 
+5. **Fix BIOS Architecture/Model Byte Inconsistency**
+   - **Impact**: **CRITICAL** - Ensures proper system identification for DOS and applications
+   - **Effort**: ~60 lines of code
+   - **Files**: 
+     - `bios.rs:42` (make generate_minimal_bios accept cpu_model parameter)
+     - `bios.rs:124` (system config table model byte - match CPU)
+     - `bios.rs:271` (BIOS model byte at FFFE - match CPU)
+     - `lib.rs:105` (pass cpu_model to generate_minimal_bios)
+   - **Functions needed**:
+     - Map CPU model to appropriate PC architecture (PC/XT/AT/PS2)
+     - Set model byte: 0xFE for 8086/8088, 0xFC for 286+, 0xF8 for 386+
+     - Set feature bytes to match architecture (RTC, 2nd PIC for AT+)
+   - **Rationale**: Software checks BIOS model to determine available features
+
 ### 🟠 **MEDIUM Priority** (Improves Compatibility)
 
 1. **INT 08h Enhancement**: Chain to INT 1Ch for user timer hook
@@ -734,6 +864,13 @@ These interrupts are provided by DOS or other operating systems. **The emulator 
    - **Impact**: Support for large disks (>8GB)
    - **Effort**: ~40 lines
    - **Files**: `cpu.rs:2360` (int13h_extended_read)
+
+5. **Keyboard Scan Code Set Support (AT/PS2 systems)**
+   - **Impact**: Improves AT/PS2 compatibility, some software checks keyboard type
+   - **Effort**: ~50 lines
+   - **Files**: `keyboard.rs` (add scan code set 2 translation)
+   - **Rationale**: AT and PS/2 systems default to scan code set 2
+   - **Note**: Current set 1 works for most DOS software
 
 ### 🟡 **LOW Priority** (Nice to Have)
 
@@ -779,20 +916,27 @@ The PC emulator's interrupt handling follows best practices by:
 2. **INT 10h AH=0Bh**: Set color palette (HIGH priority) - **REQUIRED for QBasic and many DOS apps**
 3. **INT 10h AH=1Bh**: Get video state (HIGH priority) - **REQUIRED for QBasic**
 4. **INT 10h AH=EFh, FAh**: Undocumented VGA stubs (HIGH priority) - **REQUIRED for QBasic**
-5. INT 08h: Chain to INT 1Ch (MEDIUM priority) - tick counter already works
-6. INT 15h AH=86h: Wait function (MEDIUM priority)
-7. INT 41h: Hard disk parameter table (MEDIUM priority)
+5. **BIOS Architecture Consistency**: Fix model byte mismatch (HIGH priority) - **REQUIRED for proper system identification**
+6. INT 08h: Chain to INT 1Ch (MEDIUM priority) - tick counter already works
+7. INT 15h AH=86h: Wait function (MEDIUM priority)
+8. INT 41h: Hard disk parameter table (MEDIUM priority)
+9. Keyboard scan code set 2 (MEDIUM priority) - for AT/PS2 compatibility
 
 **Estimated Total Effort**: 
-- HIGH priority (critical for DOS 5.0/QBasic): ~75 lines of code
-- MEDIUM priority improvements: ~80 lines of code
-- **Total**: ~155 lines
+- HIGH priority (critical for DOS 5.0/QBasic and system identification): ~135 lines of code
+  - Interrupt functions: ~75 lines
+  - Architecture/model byte fixes: ~60 lines
+- MEDIUM priority improvements: ~130 lines of code
+  - Interrupt enhancements: ~80 lines
+  - Keyboard scan code set 2: ~50 lines
+- **Total**: ~265 lines
 
 **Risk Assessment**: 🟢 **LOW** - Changes are isolated and well-understood
 
 **Testing Notes**: Analysis updated based on real-world testing with:
 - MS-DOS 5.0 boot sequence (HIMEM.SYS failure)
 - QBasic application (video function failures)
+- Architecture verification (model byte inconsistency found)
 
 ---
 
