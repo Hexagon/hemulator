@@ -16,6 +16,8 @@ pub struct Keyboard {
     /// Bit 2 = Ctrl, Bit 3 = Alt
     /// Bit 4 = Scroll Lock, Bit 5 = Num Lock, Bit 6 = Caps Lock, Bit 7 = Insert
     shift_flags: u8,
+    /// Track Right Alt (AltGr) separately for international character support
+    altgr_pressed: bool,
 }
 
 impl Keyboard {
@@ -25,6 +27,7 @@ impl Keyboard {
             scancode_buffer: VecDeque::with_capacity(16),
             max_buffer_size: 16,
             shift_flags: 0,
+            altgr_pressed: false,
         }
     }
 
@@ -58,8 +61,12 @@ impl Keyboard {
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags |= 0x02, // Bit 1 = Left Shift
             SCANCODE_RIGHT_SHIFT => self.shift_flags |= 0x01, // Bit 0 = Right Shift
-            SCANCODE_LEFT_CTRL => self.shift_flags |= 0x04,  // Bit 2 = Ctrl
-            SCANCODE_LEFT_ALT => self.shift_flags |= 0x08,   // Bit 3 = Alt
+            SCANCODE_LEFT_CTRL | SCANCODE_RIGHT_CTRL => self.shift_flags |= 0x04, // Bit 2 = Ctrl
+            SCANCODE_LEFT_ALT => self.shift_flags |= 0x08,   // Bit 3 = Alt (Left Alt)
+            SCANCODE_RIGHT_ALT => {
+                self.shift_flags |= 0x08; // Bit 3 = Alt (for compatibility)
+                self.altgr_pressed = true; // Track AltGr separately
+            }
             _ => {}
         }
 
@@ -76,8 +83,12 @@ impl Keyboard {
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags &= !0x02, // Clear bit 1
             SCANCODE_RIGHT_SHIFT => self.shift_flags &= !0x01, // Clear bit 0
-            SCANCODE_LEFT_CTRL => self.shift_flags &= !0x04,  // Clear bit 2
+            SCANCODE_LEFT_CTRL | SCANCODE_RIGHT_CTRL => self.shift_flags &= !0x04, // Clear bit 2
             SCANCODE_LEFT_ALT => self.shift_flags &= !0x08,   // Clear bit 3
+            SCANCODE_RIGHT_ALT => {
+                self.shift_flags &= !0x08; // Clear bit 3
+                self.altgr_pressed = false; // Clear AltGr flag
+            }
             _ => {}
         }
 
@@ -116,6 +127,11 @@ impl Keyboard {
     /// Check if Shift is pressed
     pub fn is_shift_pressed(&self) -> bool {
         self.shift_flags & 0x03 != 0 // Either left or right shift
+    }
+
+    /// Check if AltGr (Right Alt) is pressed
+    pub fn is_altgr_pressed(&self) -> bool {
+        self.altgr_pressed
     }
 }
 
@@ -194,6 +210,9 @@ pub const SCANCODE_F7: u8 = 0x41;
 pub const SCANCODE_F8: u8 = 0x42;
 pub const SCANCODE_F9: u8 = 0x43;
 pub const SCANCODE_F10: u8 = 0x44;
+// Extended scancodes (normally E0-prefixed, but we use simplified values)
+pub const SCANCODE_RIGHT_CTRL: u8 = 0x5D; // Right Ctrl (extended scancode E0 1D)
+pub const SCANCODE_RIGHT_ALT: u8 = 0x5E; // Right Alt/AltGr (extended scancode E0 38)
 
 #[cfg(test)]
 mod tests {
@@ -222,10 +241,7 @@ mod tests {
         let mut kb = Keyboard::new();
 
         kb.key_release(SCANCODE_A);
-        assert!(kb.has_data());
-
-        let code = kb.read_scancode();
-        assert_eq!(code, SCANCODE_A | 0x80); // Break code
+        // Key releases don't generate scancodes anymore (INT 16h only needs make codes)
         assert!(!kb.has_data());
     }
 
@@ -236,9 +252,9 @@ mod tests {
         kb.key_press(SCANCODE_A);
         kb.key_release(SCANCODE_A);
 
+        // Only the make code should be in the buffer
         assert!(kb.has_data());
         assert_eq!(kb.read_scancode(), SCANCODE_A);
-        assert_eq!(kb.read_scancode(), SCANCODE_A | 0x80);
         assert!(!kb.has_data());
     }
 
@@ -299,23 +315,24 @@ mod tests {
     fn test_peek_make_code() {
         let mut kb = Keyboard::new();
 
-        // Add a break code followed by a make code
-        kb.key_release(SCANCODE_A); // Break code
+        // With the new behavior, key_release doesn't add scancodes
+        // So we just test with make codes
+        kb.key_press(SCANCODE_A); // Make code
         kb.key_press(SCANCODE_B); // Make code
 
-        // peek_make_code should skip the break code and find the make code
+        // peek_make_code should find the first make code
+        assert_eq!(kb.peek_make_code(), Some(SCANCODE_A));
+
+        // peek_scancode should return the first item
+        assert_eq!(kb.peek_scancode(), SCANCODE_A);
+
+        // Reading should get first make code
+        assert_eq!(kb.read_scancode(), SCANCODE_A);
+
+        // Now peek_make_code should return the second make code
         assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
 
-        // peek_scancode should still return the first item (break code)
-        assert_eq!(kb.peek_scancode(), SCANCODE_A | 0x80);
-
-        // Reading should get break code first
-        assert_eq!(kb.read_scancode(), SCANCODE_A | 0x80);
-
-        // Now peek_make_code should return the make code
-        assert_eq!(kb.peek_make_code(), Some(SCANCODE_B));
-
-        // Read the make code
+        // Read the second make code
         assert_eq!(kb.read_scancode(), SCANCODE_B);
 
         // No more data
@@ -326,11 +343,12 @@ mod tests {
     fn test_peek_make_code_only_break_codes() {
         let mut kb = Keyboard::new();
 
-        // Add only break codes
+        // With the new behavior, key_release doesn't add scancodes
+        // So the buffer should remain empty
         kb.key_release(SCANCODE_A);
         kb.key_release(SCANCODE_B);
 
-        // Should return None since no make codes
+        // Should return None since no make codes (and buffer is empty)
         assert_eq!(kb.peek_make_code(), None);
     }
 }

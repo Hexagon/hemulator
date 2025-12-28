@@ -3640,8 +3640,10 @@ impl PcCpu {
             return 0;
         }
 
-        // Check if Ctrl is pressed
+        // Check modifier states
         let ctrl_pressed = self.cpu.memory.keyboard.is_ctrl_pressed();
+        let shift_pressed = self.cpu.memory.keyboard.is_shift_pressed();
+        let altgr_pressed = self.cpu.memory.keyboard.is_altgr_pressed();
 
         // Handle Ctrl+key combinations for letters (generate control characters)
         if ctrl_pressed {
@@ -3672,6 +3674,82 @@ impl PcCpu {
                 SCANCODE_X => return 0x18, // Ctrl+X
                 SCANCODE_Y => return 0x19, // Ctrl+Y
                 SCANCODE_Z => return 0x1A, // Ctrl+Z (suspend)
+                _ => {}
+            }
+        }
+
+        // Handle AltGr combinations (for international characters)
+        // Common US International keyboard layout
+        if altgr_pressed {
+            match scancode {
+                SCANCODE_2 => return b'@',
+                SCANCODE_3 => return b'#',
+                SCANCODE_4 => return b'$',
+                SCANCODE_5 => return 0xA7, // § (section sign) - extended ASCII
+                SCANCODE_7 => return b'{',
+                SCANCODE_8 => return b'[',
+                SCANCODE_9 => return b']',
+                SCANCODE_0 => return b'}',
+                SCANCODE_EQUALS => return b'\\',
+                SCANCODE_Q => return 0xE6, // æ (ae ligature) - extended ASCII
+                SCANCODE_E => return 0xA2, // ¢ (cent) - extended ASCII
+                SCANCODE_BACKSLASH => return b'|',
+                _ => {}
+            }
+        }
+
+        // Handle letters with Shift modifier
+        if shift_pressed {
+            match scancode {
+                SCANCODE_A => return b'A',
+                SCANCODE_B => return b'B',
+                SCANCODE_C => return b'C',
+                SCANCODE_D => return b'D',
+                SCANCODE_E => return b'E',
+                SCANCODE_F => return b'F',
+                SCANCODE_G => return b'G',
+                SCANCODE_H => return b'H',
+                SCANCODE_I => return b'I',
+                SCANCODE_J => return b'J',
+                SCANCODE_K => return b'K',
+                SCANCODE_L => return b'L',
+                SCANCODE_M => return b'M',
+                SCANCODE_N => return b'N',
+                SCANCODE_O => return b'O',
+                SCANCODE_P => return b'P',
+                SCANCODE_Q => return b'Q',
+                SCANCODE_R => return b'R',
+                SCANCODE_S => return b'S',
+                SCANCODE_T => return b'T',
+                SCANCODE_U => return b'U',
+                SCANCODE_V => return b'V',
+                SCANCODE_W => return b'W',
+                SCANCODE_X => return b'X',
+                SCANCODE_Y => return b'Y',
+                SCANCODE_Z => return b'Z',
+                // Shifted number keys
+                SCANCODE_0 => return b')',
+                SCANCODE_1 => return b'!',
+                SCANCODE_2 => return b'@',
+                SCANCODE_3 => return b'#',
+                SCANCODE_4 => return b'$',
+                SCANCODE_5 => return b'%',
+                SCANCODE_6 => return b'^',
+                SCANCODE_7 => return b'&',
+                SCANCODE_8 => return b'*',
+                SCANCODE_9 => return b'(',
+                // Shifted punctuation
+                SCANCODE_COMMA => return b'<',
+                SCANCODE_PERIOD => return b'>',
+                SCANCODE_SLASH => return b'?',
+                SCANCODE_SEMICOLON => return b':',
+                SCANCODE_APOSTROPHE => return b'"',
+                SCANCODE_LEFT_BRACKET => return b'{',
+                SCANCODE_RIGHT_BRACKET => return b'}',
+                SCANCODE_BACKSLASH => return b'|',
+                SCANCODE_MINUS => return b'_',
+                SCANCODE_EQUALS => return b'+',
+                SCANCODE_BACKTICK => return b'~',
                 _ => {}
             }
         }
