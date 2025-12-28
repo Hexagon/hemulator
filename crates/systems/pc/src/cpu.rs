@@ -244,10 +244,25 @@ impl PcCpu {
                 // 0x1C => return self.handle_int1ch(), // Timer tick handler (programs hook this)
                 // NOTE: INT 20h and INT 21h are DOS API functions, not BIOS functions
                 // DOS (FreeDOS, MS-DOS, etc.) installs its own handlers for these interrupts during boot.
-                // The emulator must NOT intercept these - doing so breaks DOS's keyboard input, file I/O,
-                // and other critical functions. Let the CPU execute DOS's installed INT 21h handler normally.
+                // For standalone programs (COM/EXE without DOS), we provide basic INT 21h support.
+                // If DOS has installed its own handler, we let the CPU execute it normally.
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
-                // 0x21 => return self.handle_int21h(), // DOS API (DOS provides this - DO NOT INTERCEPT)
+                0x21 => {
+                    // Check if DOS has installed an INT 21h handler (vector != 0x0000:0x0000)
+                    let int21_offset = self.cpu.memory.read(0x84) as u16
+                        | ((self.cpu.memory.read(0x85) as u16) << 8);
+                    let int21_segment = self.cpu.memory.read(0x86) as u16
+                        | ((self.cpu.memory.read(0x87) as u16) << 8);
+
+                    // If DOS has installed a handler, let the CPU execute it
+                    if int21_segment != 0 || int21_offset != 0 {
+                        // DOS handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No DOS handler, use our fallback handler for standalone programs
+                        return self.handle_int21h();
+                    }
+                }
                 0x28 => return self.handle_int28h(), // DOS idle callout
                 0x2A => return self.handle_int2ah(), // Network Installation API (stub)
                 // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
@@ -1258,8 +1273,18 @@ impl PcCpu {
         // Returns: CF clear if success
         //          CF set if error, AX = error code (06h = invalid handle)
 
-        // For now, always succeed (no-op)
-        self.set_carry_flag(false);
+        let handle = self.cpu.bx;
+
+        // Standard handles (0-4) cannot be closed
+        // File handles >= 5 are user files, but not supported yet
+        if handle >= 5 {
+            // Return "invalid handle" error since we don't support file I/O
+            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.set_carry_flag(true);
+        } else {
+            // Standard handles: succeed but do nothing (can't close stdin/stdout/stderr)
+            self.set_carry_flag(false);
+        }
         51
     }
 
@@ -1272,9 +1297,23 @@ impl PcCpu {
         // Returns: CF clear if success, AX = number of bytes read
         //          CF set if error, AX = error code (05h = access denied, 06h = invalid handle)
 
-        // For now, return 0 bytes read (EOF)
-        self.cpu.ax = 0x0000; // 0 bytes read
-        self.set_carry_flag(false);
+        let handle = self.cpu.bx;
+
+        // Standard DOS file handles:
+        // 0 = stdin, 1 = stdout, 2 = stderr, 3 = stdaux, 4 = stdprn
+        // Handles >= 5 are user-opened files
+
+        if handle >= 5 {
+            // File handles >= 5 are not supported (no file system implementation yet)
+            // Return "invalid handle" error
+            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.set_carry_flag(true);
+        } else {
+            // Standard handles: return 0 bytes read (EOF)
+            // This is correct behavior for stdin when no input is available
+            self.cpu.ax = 0x0000; // 0 bytes read
+            self.set_carry_flag(false);
+        }
         51
     }
 
@@ -1287,10 +1326,24 @@ impl PcCpu {
         // Returns: CF clear if success, AX = number of bytes written
         //          CF set if error, AX = error code (05h = access denied, 06h = invalid handle)
 
-        // For now, report all bytes written but don't actually write anywhere
+        let handle = self.cpu.bx;
         let cx = self.cpu.cx;
-        self.cpu.ax = cx; // Report all bytes written
-        self.set_carry_flag(false);
+
+        // Standard DOS file handles:
+        // 0 = stdin, 1 = stdout, 2 = stderr, 3 = stdaux, 4 = stdprn
+        // Handles >= 5 are user-opened files
+
+        if handle >= 5 {
+            // File handles >= 5 are not supported (no file system implementation yet)
+            // Return "invalid handle" error
+            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.set_carry_flag(true);
+        } else {
+            // Standard handles: report all bytes written (but don't actually write)
+            // Real implementation would write to console/device
+            self.cpu.ax = cx; // Report all bytes written
+            self.set_carry_flag(false);
+        }
         51
     }
 
@@ -4687,7 +4740,7 @@ mod tests {
     }
 
     #[test]
-    fn test_int21h_read_file() {
+    fn test_int21h_read_file_invalid_handle() {
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
@@ -4700,9 +4753,9 @@ mod tests {
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
-        // AH=3Fh (read file), BX=file handle, CX=bytes to read
+        // AH=3Fh (read file), BX=file handle >= 5, CX=bytes to read
         cpu.cpu.ax = 0x3F00;
-        cpu.cpu.bx = 0x0005; // file handle
+        cpu.cpu.bx = 0x0005; // file handle (user file, not supported)
         cpu.cpu.cx = 0x0040; // 64 bytes
         cpu.cpu.ds = 0x0000;
         cpu.cpu.dx = 0x3000; // buffer address
@@ -4710,14 +4763,14 @@ mod tests {
         // Execute INT 21h
         cpu.step();
 
-        // Verify no error (CF clear)
-        assert!(!cpu.get_carry_flag());
-        // Verify 0 bytes read (EOF, since no file is actually open)
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        // Verify error (CF set) since file handles >= 5 are not supported
+        assert!(cpu.get_carry_flag());
+        // Verify error code 0x06 (invalid handle)
+        assert_eq!(cpu.cpu.ax, 0x0006);
     }
 
     #[test]
-    fn test_int21h_write_file() {
+    fn test_int21h_read_file_stdin() {
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
@@ -4730,9 +4783,39 @@ mod tests {
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
-        // AH=40h (write file), BX=file handle, CX=bytes to write
+        // AH=3Fh (read file), BX=0 (stdin), CX=bytes to read
+        cpu.cpu.ax = 0x3F00;
+        cpu.cpu.bx = 0x0000; // stdin
+        cpu.cpu.cx = 0x0040; // 64 bytes
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x3000; // buffer address
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify no error (CF clear) for stdin
+        assert!(!cpu.get_carry_flag());
+        // Verify 0 bytes read (EOF/no input available)
+        assert_eq!(cpu.cpu.ax, 0x0000);
+    }
+
+    #[test]
+    fn test_int21h_write_file_invalid_handle() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=40h (write file), BX=file handle >= 5, CX=bytes to write
         cpu.cpu.ax = 0x4000;
-        cpu.cpu.bx = 0x0005; // file handle
+        cpu.cpu.bx = 0x0005; // file handle (user file, not supported)
         cpu.cpu.cx = 0x0020; // 32 bytes
         cpu.cpu.ds = 0x0000;
         cpu.cpu.dx = 0x3000; // buffer address
@@ -4740,14 +4823,14 @@ mod tests {
         // Execute INT 21h
         cpu.step();
 
-        // Verify no error (CF clear)
-        assert!(!cpu.get_carry_flag());
-        // Verify all bytes reported as written
-        assert_eq!(cpu.cpu.ax, 0x0020);
+        // Verify error (CF set) since file handles >= 5 are not supported
+        assert!(cpu.get_carry_flag());
+        // Verify error code 0x06 (invalid handle)
+        assert_eq!(cpu.cpu.ax, 0x0006);
     }
 
     #[test]
-    fn test_int21h_close_file() {
+    fn test_int21h_write_file_stdout() {
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
@@ -4760,14 +4843,71 @@ mod tests {
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
-        // AH=3Eh (close file), BX=file handle
-        cpu.cpu.ax = 0x3E00;
-        cpu.cpu.bx = 0x0005; // file handle
+        // AH=40h (write file), BX=1 (stdout), CX=bytes to write
+        cpu.cpu.ax = 0x4000;
+        cpu.cpu.bx = 0x0001; // stdout
+        cpu.cpu.cx = 0x0020; // 32 bytes
+        cpu.cpu.ds = 0x0000;
+        cpu.cpu.dx = 0x3000; // buffer address
 
         // Execute INT 21h
         cpu.step();
 
-        // Verify no error (CF clear)
+        // Verify no error (CF clear) for stdout
+        assert!(!cpu.get_carry_flag());
+        // Verify all bytes reported as written
+        assert_eq!(cpu.cpu.ax, 0x0020);
+    }
+
+    #[test]
+    fn test_int21h_close_file_invalid_handle() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=3Eh (close file), BX=file handle >= 5
+        cpu.cpu.ax = 0x3E00;
+        cpu.cpu.bx = 0x0005; // file handle (user file, not supported)
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify error (CF set) since file handles >= 5 are not supported
+        assert!(cpu.get_carry_flag());
+        // Verify error code 0x06 (invalid handle)
+        assert_eq!(cpu.cpu.ax, 0x0006);
+    }
+
+    #[test]
+    fn test_int21h_close_file_stdout() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 21h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x21); // 21h
+
+        // AH=3Eh (close file), BX=1 (stdout)
+        cpu.cpu.ax = 0x3E00;
+        cpu.cpu.bx = 0x0001; // stdout (standard handle, cannot be closed but no error)
+
+        // Execute INT 21h
+        cpu.step();
+
+        // Verify no error (CF clear) for standard handles
         assert!(!cpu.get_carry_flag());
     }
 
