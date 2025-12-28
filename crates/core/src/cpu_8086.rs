@@ -12393,7 +12393,9 @@ mod tests {
         assert_eq!(final_bytes, 0, "Bytes remaining should be 0");
         assert_eq!(cpu.cx, 4, "Should have 4 iterations (3+3+3+1=10)");
     }
-}
+
+    #[test]
+    fn test_file_read_loop_pattern() {
         // Test the exact pattern that FreeDOS type.c uses:
         // while((len = dos_read(fd, buf, sizeof(buf))) >= 0) {
         //     if (len == 0) break;
