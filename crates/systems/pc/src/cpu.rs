@@ -206,24 +206,21 @@ impl PcCpu {
             let is_high_frequency = (int_num == 0x28 && ah == 0x02) // DOS idle
                 || (int_num == 0x16 && ah == 0x01); // Keyboard check (non-blocking)
 
-            // Enable INT 10h logging for debugging (normally excluded to reduce noise)
-            if true {
-                if is_high_frequency {
-                    // Only log these at trace level to avoid spam
-                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
-                        eprintln!(
-                            "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                            int_num, ah, cs, ip
-                        );
-                    }
-                } else {
-                    // Log all other interrupts at debug level
-                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                        eprintln!(
-                            "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
-                            int_num, ah, cs, ip
-                        );
-                    }
+            if is_high_frequency {
+                // Only log these at trace level to avoid spam
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
+                }
+            } else {
+                // Log all other interrupts at debug level
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                    eprintln!(
+                        "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
+                        int_num, ah, cs, ip
+                    );
                 }
             }
 
@@ -1502,6 +1499,10 @@ impl PcCpu {
             .memory
             .write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
         self.cpu.sp = sp;
+
+        // Clear IF flag to prevent nested interrupts (standard x86 INT behavior)
+        const FLAG_IF: u16 = 0x0200;
+        self.cpu.flags &= !FLAG_IF;
 
         // Push CS
         let sp = self.cpu.sp.wrapping_sub(2);
