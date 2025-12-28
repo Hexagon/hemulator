@@ -526,35 +526,23 @@ mod tests {
         let mut kb = Keyboard::new();
 
         // Function keys should NOT be buffered (they have no ASCII mapping and cause FreeDOS to loop)
-        kb.key_press(SCANCODE_F1);
-        assert!(!kb.has_data(), "F1 should not be buffered");
+        let function_keys = [
+            (SCANCODE_F1, "F1"),
+            (SCANCODE_F2, "F2"),
+            (SCANCODE_F3, "F3"),
+            (SCANCODE_F4, "F4"),
+            (SCANCODE_F5, "F5"),
+            (SCANCODE_F6, "F6"),
+            (SCANCODE_F7, "F7"),
+            (SCANCODE_F8, "F8"),
+            (SCANCODE_F9, "F9"),
+            (SCANCODE_F10, "F10"),
+        ];
 
-        kb.key_press(SCANCODE_F2);
-        assert!(!kb.has_data(), "F2 should not be buffered");
-
-        kb.key_press(SCANCODE_F3);
-        assert!(!kb.has_data(), "F3 should not be buffered");
-
-        kb.key_press(SCANCODE_F4);
-        assert!(!kb.has_data(), "F4 should not be buffered");
-
-        kb.key_press(SCANCODE_F5);
-        assert!(!kb.has_data(), "F5 should not be buffered");
-
-        kb.key_press(SCANCODE_F6);
-        assert!(!kb.has_data(), "F6 should not be buffered");
-
-        kb.key_press(SCANCODE_F7);
-        assert!(!kb.has_data(), "F7 should not be buffered");
-
-        kb.key_press(SCANCODE_F8);
-        assert!(!kb.has_data(), "F8 should not be buffered");
-
-        kb.key_press(SCANCODE_F9);
-        assert!(!kb.has_data(), "F9 should not be buffered");
-
-        kb.key_press(SCANCODE_F10);
-        assert!(!kb.has_data(), "F10 should not be buffered");
+        for (scancode, name) in &function_keys {
+            kb.key_press(*scancode);
+            assert!(!kb.has_data(), "{} should not be buffered", name);
+        }
 
         // Regular keys should still be buffered
         kb.key_press(SCANCODE_A);
