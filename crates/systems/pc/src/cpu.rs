@@ -3035,6 +3035,7 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         match ah {
+            0x24 => self.int15h_a20_gate_control(),
             0x41 => self.int15h_wait_on_external_event(),
             0x87 => self.int15h_extended_memory_block_move(),
             0x88 => self.int15h_get_extended_memory_size(),
@@ -3142,6 +3143,67 @@ impl PcCpu {
         self.set_carry_flag(true);
         self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
         51
+    }
+
+    /// INT 15h, AH=24h - A20 Gate Control (PS/2 and later)
+    /// Critical for HIMEM.SYS and extended memory access
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_a20_gate_control(&mut self) -> u32 {
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x00 => {
+                // Disable A20 gate
+                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
+                // Return success
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=00h: Disable A20 gate (acknowledged)".to_string()
+                });
+            }
+            0x01 => {
+                // Enable A20 gate
+                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
+                // Return success
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=01h: Enable A20 gate (acknowledged)".to_string()
+                });
+            }
+            0x02 => {
+                // Get A20 gate status
+                // Return: AX = 0x0001 (A20 gate is enabled)
+                self.cpu.ax = 0x0001; // AH = 0x00 (success), AL = 0x01 (enabled)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=02h: Get A20 status (returning enabled)".to_string()
+                });
+            }
+            0x03 => {
+                // Get A20 gate support
+                // Return: BX = 0x0001 (supported via keyboard controller or port 92h)
+                self.cpu.bx = 0x0001; // Supported
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=03h: Get A20 support (returning supported)".to_string()
+                });
+            }
+            _ => {
+                // Unsupported subfunction
+                self.log_stub_interrupt(
+                    0x15,
+                    Some(0x24),
+                    &format!("A20 Gate Control, AL=0x{:02X} (unsupported)", al),
+                );
+                self.set_carry_flag(true);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x86; // AH = 0x86 (function not supported)
+            }
+        }
+
+        51 // Return cycles
     }
 
     /// INT 15h, AH=C0h - Get System Configuration
@@ -5392,7 +5454,12 @@ mod tests {
     #[test]
     fn test_int15h_get_system_configuration() {
         // Test INT 15h AH=C0h (Get System Configuration)
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        
+        // Load BIOS so the configuration table exists at F000:E000
+        let bios = crate::bios::generate_minimal_bios(CpuModel::Intel8086);
+        bus.load_bios(&bios);
+        
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -5414,8 +5481,8 @@ mod tests {
         assert!(!cpu.get_carry_flag());
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00);
 
-        // ES:BX should point to configuration table (in high conventional memory)
-        assert_eq!(cpu.cpu.es, 0x9000);
+        // ES:BX should point to configuration table (in BIOS ROM at F000:E000)
+        assert_eq!(cpu.cpu.es, 0xF000);
         assert_eq!(cpu.cpu.bx, 0xE000);
 
         // Verify configuration table in memory
@@ -5426,7 +5493,7 @@ mod tests {
             | ((cpu.cpu.memory.read(table_addr + 1) as u16) << 8);
         assert_eq!(size, 8);
 
-        // Model byte should be 0xFE (PC/XT)
+        // Model byte should be 0xFE (PC/XT) - the default when using Intel8086
         let model = cpu.cpu.memory.read(table_addr + 2);
         assert_eq!(model, 0xFE);
     }
