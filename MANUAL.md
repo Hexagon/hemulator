@@ -954,9 +954,15 @@ There are two ways to mount disk images and BIOS:
       - This allows CD-ROM drivers and other PCI-aware software to gracefully handle absence of PCI
   - INT 21h (DOS): **Use Real DOS for File Operations** 
     - Character I/O fully functional (AH=01h, 02h, 06h, 07h, 08h, 09h, 0Ah, 0Bh)
-    - File I/O stubs present but return errors (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
+    - File I/O stubs present - fallback handler supports device names (CON, NUL, PRN, AUX, etc.) for standalone programs
+    - **Device Support**: INT 21h AH=3Dh recognizes DOS device names (CON, NUL, PRN, AUX, COM1-4, LPT1-3) ✅
+      - Returns appropriate standard file handles (0=stdin, 1=stdout, 3=stdaux, 4=stdprn)
+      - Allows DOS CON driver initialization to succeed
     - **For filesystem access**: Boot real DOS from a disk image - DOS will handle FAT12/FAT16 filesystems
     - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
+  - INT 29h (Fast Console Output): **Implemented** ✅
+    - Used by DOS for fast character output
+    - Redirects to INT 10h teletype output for display
   - INT 2Fh (Multiplex): **Installation checks implemented** ✅
     - AH=11h (Network Redirector Check) - returns "not installed" ✅
     - AH=16h (DPMI), AH=43h (XMS) - installation checks functional

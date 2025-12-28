@@ -273,6 +273,7 @@ impl PcCpu {
                     }
                 }
                 0x28 => return self.handle_int28h(), // DOS idle callout
+                0x29 => return self.handle_int29h(), // Fast console output
                 0x2A => return self.handle_int2ah(), // Network Installation API (stub)
                 // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
                 // HIMEM.SYS will hook INT 2Fh AH=43h for XMS support
@@ -1268,10 +1269,91 @@ impl PcCpu {
             format!("INT 0x21 AH=0x3D: Attempting to open file: '{}'", filename)
         });
 
-        // For now, return "file not found" error
-        // In a real implementation, we would look up the file on the mounted disk
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x02; // File not found
-        self.set_carry_flag(true);
+        // Check if this is a DOS device name (case-insensitive)
+        // Standard DOS devices: CON, PRN, AUX, NUL, COM1-4, LPT1-3, CLOCK$
+        let filename_upper = filename.to_uppercase();
+        let device_name = filename_upper
+            .split(':')
+            .next()
+            .unwrap_or(&filename_upper)
+            .trim();
+
+        match device_name {
+            "CON" => {
+                // Console device - return handle 0 (stdin) for read, 1 (stdout) for write
+                // Access mode: 0=read, 1=write, 2=read/write
+                let access_mode = (self.cpu.ax & 0xFF) as u8;
+                let handle = match access_mode {
+                    0 => 0, // Read mode - stdin
+                    1 => 1, // Write mode - stdout
+                    2 => 0, // Read/Write mode - use stdin (CON is primarily input)
+                    _ => 0,
+                };
+                self.cpu.ax = handle;
+                self.set_carry_flag(false); // Success
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 0x21 AH=0x3D: Opened CON device, returning handle {} (access mode {})",
+                        handle, access_mode
+                    )
+                });
+            }
+            "NUL" => {
+                // Null device - we'll use handle 3 (stdaux) as a dummy
+                // All reads return EOF, all writes are discarded
+                self.cpu.ax = 3;
+                self.set_carry_flag(false); // Success
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 0x21 AH=0x3D: Opened NUL device, returning handle 3".to_string()
+                });
+            }
+            "PRN" | "LPT1" | "LPT2" | "LPT3" => {
+                // Printer device - use handle 4 (stdprn)
+                self.cpu.ax = 4;
+                self.set_carry_flag(false); // Success
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 0x21 AH=0x3D: Opened printer device {}, returning handle 4",
+                        device_name
+                    )
+                });
+            }
+            "AUX" | "COM1" | "COM2" | "COM3" | "COM4" => {
+                // Serial/Auxiliary device - use handle 3 (stdaux)
+                self.cpu.ax = 3;
+                self.set_carry_flag(false); // Success
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 0x21 AH=0x3D: Opened serial device {}, returning handle 3",
+                        device_name
+                    )
+                });
+            }
+            "CLOCK$" => {
+                // Clock device (special) - treat as NUL
+                self.cpu.ax = 3;
+                self.set_carry_flag(false); // Success
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 0x21 AH=0x3D: Opened CLOCK$ device, returning handle 3".to_string()
+                });
+            }
+            _ => {
+                // Not a recognized device - treat as file (not supported)
+                // Return "file not found" error
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x02; // File not found
+                self.set_carry_flag(true);
+
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!("INT 0x21 AH=0x3D: File '{}' not found (not a device, file I/O not supported)", filename)
+                });
+            }
+        }
+
         51
     }
 
@@ -2715,7 +2797,7 @@ impl PcCpu {
         // But we set specific values to indicate "not present"
         self.cpu.ax &= 0x00FF;
 
-        // EDX should contain "PCI " signature if present
+        // DX should contain "PCI " signature (lower 16 bits of EDX) if present
         // We return 0 to indicate no PCI BIOS
         self.cpu.dx = 0x0000;
 
@@ -3378,6 +3460,31 @@ impl PcCpu {
         // DOS idle hook - TSRs and background programs can hook this
         // For emulator, just return immediately (noop)
         // DOS calls this in a loop while waiting for input
+        51
+    }
+
+    /// Handle INT 29h - Fast Console Output
+    /// Used by DOS for fast character output (bypasses normal INT 21h)
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int29h(&mut self) -> u32 {
+        // Skip the INT 29h instruction (2 bytes: 0xCD 0x29)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // AL = character to output
+        let character = (self.cpu.ax & 0xFF) as u8;
+
+        // Use INT 10h teletype output to display the character
+        // This is a fast path that DOS uses for console output
+        // Save current AX
+        let saved_ax = self.cpu.ax;
+
+        // Call INT 10h AH=0Eh (teletype output)
+        self.cpu.ax = 0x0E00 | (character as u16);
+        self.int10h_teletype_output();
+
+        // Restore AX
+        self.cpu.ax = saved_ax;
+
         51
     }
 
