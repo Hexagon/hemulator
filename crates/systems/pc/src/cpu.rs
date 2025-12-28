@@ -973,6 +973,7 @@ impl PcCpu {
             0x0A => self.int21h_buffered_input(),       // Buffered input
             0x0B => self.int21h_check_stdin(),          // Check stdin status
             0x25 => self.int21h_set_interrupt_vector(), // Set interrupt vector
+            0x2C => self.int21h_get_system_time(),      // Get system time
             0x35 => self.int21h_get_interrupt_vector(), // Get interrupt vector
             0x3C => self.int21h_create_file(),          // Create or truncate file
             0x3D => self.int21h_open_file(),            // Open existing file
@@ -1193,6 +1194,33 @@ impl PcCpu {
             self.cpu.ax = saved_ax & 0xFF00; // AL = 0x00 (no character)
         }
 
+        51
+    }
+
+    /// INT 21h, AH=2Ch: Get system time
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_get_system_time(&mut self) -> u32 {
+        // Returns: CH = hour (0-23), CL = minutes (0-59)
+        //          DH = seconds (0-59), DL = hundredths (0-99)
+        
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        
+        let total_seconds = now.as_secs();
+        let seconds_of_day = (total_seconds % 86400) as u32;
+        
+        let hours = seconds_of_day / 3600;
+        let minutes = (seconds_of_day % 3600) / 60;
+        let seconds = seconds_of_day % 60;
+        let hundredths = (now.subsec_nanos() / 10_000_000) as u8; // Convert nanoseconds to hundredths
+        
+        // Set return values
+        self.cpu.cx = ((hours as u16) << 8) | (minutes as u16); // CH=hours, CL=minutes
+        self.cpu.dx = ((seconds as u16) << 8) | (hundredths as u16); // DH=seconds, DL=hundredths
+        
         51
     }
 
@@ -3267,12 +3295,12 @@ impl PcCpu {
             0x82 => {
                 // AH=0x82: Get Network Resource Information
                 // FreeDOS calls this during prompt display
-                // Return AL=0x00 (no network), CF=0 (success) to prevent retry loop
+                // The real fix was implementing INT 21h AH=2Ch (Get System Time)
+                // which FreeDOS calls in the same loop. Without it, FreeDOS got
+                // garbage time values and kept looping.
                 
-                // Always log this at info level to verify the fix is working
-                eprintln!("[INT 2A FIX] AH=0x82 returning CF=0 to prevent retry loop");
-                
-                self.cpu.ax &= 0xFF00; // AL = 0 (no network resources)
+                // Return AL=0xFF (not installed), CF=0 (success)
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFF; // AL = 0xFF (not installed)
                 self.set_carry_flag(false); // CF = 0 (success - don't retry)
             }
             _ => {
