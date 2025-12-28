@@ -5734,8 +5734,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                     }
                 } else {
-                    // Undefined operation - Group 11 only supports op=0 for MOV
-                    // Consume bytes to prevent desync
+                    // Undefined operation - For opcode 0xC7 (Group 11), only op=0 is defined for MOV
+                    // Consume bytes for this invalid 0xC7 instruction to prevent desync
                     // Calculate effective address to consume any displacement bytes
                     if modbits != 0b11 {
                         let _ = self.calc_effective_address(modbits, rm);
@@ -6528,7 +6528,9 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
                 // Address-size override prefix
                 // On 80386+, this toggles between 16-bit and 32-bit addressing
-                // For now, we set a flag and handle it in individual instructions
+                // For now, we set a flag and *plan* to handle it in individual instructions.
+                // TODO: Implement use of `address_size_override` in effective address calculation
+                //       so that 32-bit addressing is actually honored on 80386+.
                 self.address_size_override = true;
                 self.step() // Execute next instruction with address size override
             }
