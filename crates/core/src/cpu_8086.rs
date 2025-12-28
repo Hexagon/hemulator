@@ -11854,7 +11854,7 @@ mod tests {
         cpu.memory.load_program(
             0x0100,
             &[
-                0xE3, 0x03, // JCXZ +3          @ 0x0100 (jumps to 0x0102+3=0x0105 if CX=0)
+                0xE3, 0x04, // JCXZ +4          @ 0x0100 (jumps to 0x0102+4=0x0106 if CX=0)
                 0x43, // INC BX           @ 0x0102
                 0x43, // INC BX           @ 0x0103
                 0xEB, 0x02, // JMP +2           @ 0x0104 (skip to HLT)
@@ -11986,7 +11986,7 @@ mod tests {
             &[
                 0x43, // INC BX               @ 0x0100
                 0xFE, 0x0E, 0x00, 0x02, // DEC BYTE [0x0200]    @ 0x0101
-                0x75, 0xF8, // JNZ -8               @ 0x0105 (jumps to 0x0107-8=0x0100)
+                0x75, 0xF9, // JNZ -7               @ 0x0105 (jumps to 0x0107-7=0x0100)
                 0xF4, // HLT                  @ 0x0107
             ],
         );
@@ -12101,8 +12101,8 @@ mod tests {
 
         assert_eq!(cpu.memory.read(0x0200), 0, "Should count down to 0");
         assert_eq!(
-            iterations, 21,
-            "Should take 21 instructions (10 loops * 2 + 1 final)"
+            iterations, 30,
+            "Should take 30 instructions (10 loops * 3 instructions, HLT not counted)"
         );
     }
 
