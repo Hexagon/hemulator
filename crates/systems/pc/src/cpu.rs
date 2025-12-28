@@ -2502,6 +2502,7 @@ impl PcCpu {
             0x03 => self.int1ah_set_real_time_clock(),
             0x04 => self.int1ah_read_date(),
             0x05 => self.int1ah_set_date(),
+            0xB1 => self.int1ah_pci_bios(),
             _ => {
                 // Unsupported function - log and do nothing
                 self.log_stub_interrupt(
@@ -2666,6 +2667,144 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int1ah
     fn int1ah_set_date(&mut self) -> u32 {
         // Read-only implementation - ignore the set request
+        51
+    }
+
+    /// INT 1Ah, AH=B1h - PCI BIOS Services
+    #[allow(dead_code)] // Called from handle_int1ah
+    fn int1ah_pci_bios(&mut self) -> u32 {
+        // Get subfunction from AL register
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x01 => self.int1ah_pci_installation_check(),
+            0x02 => self.int1ah_pci_find_device(),
+            0x03 => self.int1ah_pci_find_class_code(),
+            0x08 => self.int1ah_pci_read_config_byte(),
+            0x09 => self.int1ah_pci_read_config_word(),
+            0x0A => self.int1ah_pci_read_config_dword(),
+            0x0B => self.int1ah_pci_write_config_byte(),
+            0x0C => self.int1ah_pci_write_config_word(),
+            0x0D => self.int1ah_pci_write_config_dword(),
+            _ => {
+                // Unsupported PCI BIOS function - log and return error
+                self.log_stub_interrupt(
+                    0x1A,
+                    Some(0xB1),
+                    &format!("PCI BIOS (unsupported subfunction AL=0x{:02X})", al),
+                );
+                // Set carry flag to indicate error
+                self.set_carry_flag(true);
+                // AH = error code (0x81 = function not supported)
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8100;
+                51
+            }
+        }
+    }
+
+    /// INT 1Ah, AH=B1h, AL=01h - PCI BIOS Installation Check
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_installation_check(&mut self) -> u32 {
+        // Return "PCI BIOS not present" to indicate no PCI bus
+        // This is the correct response for a PC/XT which doesn't have PCI
+
+        // Clear carry flag (function supported)
+        self.set_carry_flag(false);
+
+        // AH = 0x00 (function completed successfully)
+        // But we set specific values to indicate "not present"
+        self.cpu.ax &= 0x00FF;
+
+        // EDX should contain "PCI " signature if present
+        // We return 0 to indicate no PCI BIOS
+        self.cpu.dx = 0x0000;
+
+        // BX = PCI BIOS version (0x0000 = not present)
+        self.cpu.bx = 0x0000;
+
+        // CX = last PCI bus number (0 = no PCI)
+        self.cpu.cx = 0x0000;
+
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=02h - PCI Find Device
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_find_device(&mut self) -> u32 {
+        // Return "device not found" since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x86 (device not found)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8600;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=03h - PCI Find Class Code
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_find_class_code(&mut self) -> u32 {
+        // Return "device not found" since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x86 (device not found)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8600;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=08h - PCI Read Configuration Byte
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_read_config_byte(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=09h - PCI Read Configuration Word
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_read_config_word(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=0Ah - PCI Read Configuration Dword
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_read_config_dword(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=0Bh - PCI Write Configuration Byte
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_write_config_byte(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=0Ch - PCI Write Configuration Word
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_write_config_word(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
+        51
+    }
+
+    /// INT 1Ah, AH=B1h, AL=0Dh - PCI Write Configuration Dword
+    #[allow(dead_code)] // Called from int1ah_pci_bios
+    fn int1ah_pci_write_config_dword(&mut self) -> u32 {
+        // Return error since we have no PCI bus
+        self.set_carry_flag(true);
+        // AH = 0x87 (bad register number)
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | 0x8700;
         51
     }
 
