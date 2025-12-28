@@ -3268,6 +3268,10 @@ impl PcCpu {
                 // AH=0x82: Get Network Resource Information
                 // FreeDOS calls this during prompt display
                 // Return AL=0x00 (no network), CF=0 (success) to prevent retry loop
+                
+                // Always log this at info level to verify the fix is working
+                eprintln!("[INT 2A FIX] AH=0x82 returning CF=0 to prevent retry loop");
+                
                 self.cpu.ax &= 0xFF00; // AL = 0 (no network resources)
                 self.set_carry_flag(false); // CF = 0 (success - don't retry)
             }
