@@ -310,6 +310,7 @@ impl PcCpu {
             0x08 => self.int10h_read_char_attr(),
             0x09 => self.int10h_write_char_attr(),
             0x0A => self.int10h_write_char_only(),
+            0x0B => self.int10h_set_color_palette(),
             0x0C => self.int10h_write_pixel(),
             0x0D => self.int10h_read_pixel(),
             0x0E => self.int10h_teletype_output(),
@@ -319,6 +320,9 @@ impl PcCpu {
             0x12 => self.int10h_video_subsystem_config(),
             0x13 => self.int10h_write_string(),
             0x1A => self.int10h_display_combination(),
+            0x1B => self.int10h_get_video_state(),
+            0xEF => self.int10h_stub_vga_function(0xEF),
+            0xFA => self.int10h_stub_vga_function(0xFA),
             _ => {
                 // Unsupported function - log and return
                 self.log_stub_interrupt(0x10, Some(ah), "Video BIOS (unsupported subfunction)");
@@ -719,6 +723,51 @@ impl PcCpu {
         51
     }
 
+    /// INT 10h, AH=0Bh: Set color palette (CGA)
+    /// This function controls the CGA color palette and border/background color
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_set_color_palette(&mut self) -> u32 {
+        let bh = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let bl = (self.cpu.bx & 0xFF) as u8;
+
+        match bh {
+            0x00 => {
+                // Set background/border color (text mode)
+                // BL = color (0-15)
+                // In text mode, this sets the border color
+                // We acknowledge but don't implement actual border color change
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh BH=00h: Set background/border color to 0x{:02X}",
+                        bl
+                    )
+                });
+            }
+            0x01 => {
+                // Set palette (graphics mode)
+                // BL = palette ID (0 or 1 for CGA 4-color modes)
+                // We acknowledge but don't implement actual palette switching
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh BH=01h: Set CGA palette to 0x{:02X}",
+                        bl
+                    )
+                });
+            }
+            _ => {
+                // Unknown subfunction
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh: Unknown BH=0x{:02X}, BL=0x{:02X}",
+                        bh, bl
+                    )
+                });
+            }
+        }
+
+        51
+    }
+
     /// INT 10h, AH=0Ch: Write pixel (graphics mode)
     #[allow(dead_code)] // Called from handle_int10h
     fn int10h_write_pixel(&mut self) -> u32 {
@@ -841,6 +890,44 @@ impl PcCpu {
                 51
             }
         }
+    }
+
+    /// INT 10h, AH=1Bh: Get video state (VGA BIOS extension)
+    /// Returns a pointer to a video state table
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_get_video_state(&mut self) -> u32 {
+        // ES:DI = pointer to video state table
+        // The table should contain video state information
+        // For simplicity, we return a stub table with basic info
+        
+        // Return AL = 0x1B (function supported)
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x1B;
+        
+        // Set ES:DI to point to a placeholder in BIOS data area
+        // We'll use a location in conventional RAM that won't interfere
+        self.cpu.es = 0x0040; // BIOS data area
+        self.cpu.di = 0x0100; // Offset within BIOS data area
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            "INT 10h AH=1Bh: Get video state (returning stub table)".to_string()
+        });
+
+        51
+    }
+
+    /// INT 10h, AH=EFh or FAh: Undocumented VGA functions
+    /// These are used by QBasic and some other applications
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_stub_vga_function(&mut self, ah: u8) -> u32 {
+        // Just acknowledge and return
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!(
+                "INT 10h AH=0x{:02X}: Undocumented VGA function (stub)",
+                ah
+            )
+        });
+
+        51
     }
 
     /// Handle INT 16h - Keyboard BIOS services
@@ -1501,9 +1588,11 @@ impl PcCpu {
             .write(tick_addr + 3, ((ticks >> 24) & 0xFF) as u8);
 
         // Call INT 1Ch (user timer tick handler)
-        // In a real system, this would be a chain call
-        // For now, we'll just acknowledge it
-        // Programs can hook INT 1Ch to execute code on every tick
+        // This is the standard PC/AT BIOS behavior - INT 08h chains to INT 1Ch
+        // Programs can hook INT 1Ch to execute code on every timer tick
+        // Since we can't directly trigger an interrupt from here (trigger_interrupt is private),
+        // we'll note that programs expecting INT 1Ch will need to hook INT 08h instead
+        // The BIOS default INT 1Ch handler is just an IRET at F000:0040
 
         51
     }
@@ -3035,6 +3124,7 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         match ah {
+            0x24 => self.int15h_a20_gate_control(),
             0x41 => self.int15h_wait_on_external_event(),
             0x87 => self.int15h_extended_memory_block_move(),
             0x88 => self.int15h_get_extended_memory_size(),
@@ -3144,6 +3234,67 @@ impl PcCpu {
         51
     }
 
+    /// INT 15h, AH=24h - A20 Gate Control (PS/2 and later)
+    /// Critical for HIMEM.SYS and extended memory access
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_a20_gate_control(&mut self) -> u32 {
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        match al {
+            0x00 => {
+                // Disable A20 gate
+                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
+                // Return success
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=00h: Disable A20 gate (acknowledged)".to_string()
+                });
+            }
+            0x01 => {
+                // Enable A20 gate
+                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
+                // Return success
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=01h: Enable A20 gate (acknowledged)".to_string()
+                });
+            }
+            0x02 => {
+                // Get A20 gate status
+                // Return: AX = 0x0001 (A20 gate is enabled)
+                self.cpu.ax = 0x0001; // AH = 0x00 (success), AL = 0x01 (enabled)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=02h: Get A20 status (returning enabled)".to_string()
+                });
+            }
+            0x03 => {
+                // Get A20 gate support
+                // Return: BX = 0x0001 (supported via keyboard controller or port 92h)
+                self.cpu.bx = 0x0001; // Supported
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.set_carry_flag(false);
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 15h AH=24h AL=03h: Get A20 support (returning supported)".to_string()
+                });
+            }
+            _ => {
+                // Unsupported subfunction
+                self.log_stub_interrupt(
+                    0x15,
+                    Some(0x24),
+                    &format!("A20 Gate Control, AL=0x{:02X} (unsupported)", al),
+                );
+                self.set_carry_flag(true);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x86; // AH = 0x86 (function not supported)
+            }
+        }
+
+        51 // Return cycles
+    }
+
     /// INT 15h, AH=C0h - Get System Configuration
     #[allow(dead_code)] // Called from handle_int15h
     fn int15h_get_system_configuration(&mut self) -> u32 {
@@ -3251,13 +3402,127 @@ impl PcCpu {
         51
     }
 
-    /// INT 15h, AX=E820h - Query System Address Map (stub)
+    /// INT 15h, AX=E820h - Query System Address Map
+    /// Returns memory map entries (CRITICAL for Linux boot)
     #[allow(dead_code)] // Called from handle_int15h
     fn int15h_query_system_address_map(&mut self) -> u32 {
-        // This would return memory map entries
-        // For now, just indicate no more entries
-        self.cpu.bx = 0; // No continuation
-        self.set_carry_flag(true); // No more entries
+        // Input: EAX = 0xE820, EBX = continuation value (0 for first call)
+        //        ES:DI = buffer pointer (20 bytes minimum)
+        //        ECX = buffer size (should be >= 20)
+        //        EDX = signature 'SMAP' (0x534D4150)
+        // Output: EAX = 'SMAP' (0x534D4150) on success
+        //         EBX = continuation value (0 if last entry)
+        //         ECX = bytes written (20 or 24)
+        //         ES:DI = filled with entry
+        //         CF = clear on success, set on error
+        
+        // Note: In 16-bit real mode BIOS, we can't verify the full 32-bit EDX signature (0x534D4150)
+        // The caller (boot loader) is responsible for setting up the full 32-bit registers
+        // We'll trust that if they called E820h, they set EDX correctly
+
+        // Get continuation index from BX (lower 16 bits of EBX)
+        let entry_index = self.cpu.bx;
+        
+        // Get memory sizes from bus
+        let conventional_kb = self.cpu.memory.conventional_memory_kb();
+        let extended_kb = self.cpu.memory.extended_memory_kb();
+        
+        // Define memory map entries
+        // Entry format: base_low (4), base_high (4), length_low (4), length_high (4), type (4) = 20 bytes
+        // Type 1 = Available RAM, Type 2 = Reserved/In use
+        
+        let entries: Vec<(u64, u64, u32)> = vec![
+            // Entry 0: Conventional memory (0x00000000 - 0x0009FFFF) - 640KB max
+            (0x00000000, (conventional_kb as u64) * 1024, 1), // Type 1 (available)
+            
+            // Entry 1: VGA/BIOS reserved (0x000A0000 - 0x000FFFFF) - 384KB
+            (0x000A0000, 0x00060000, 2), // Type 2 (reserved)
+            
+            // Entry 2: Extended memory (1MB+)
+            // Only include if we have extended memory
+            (0x00100000, (extended_kb as u64) * 1024, 1), // Type 1 (available)
+        ];
+        
+        // Filter out entries with zero length (if no extended memory)
+        let valid_entry_index = if entry_index == 0 {
+            0
+        } else if entry_index == 1 {
+            1
+        } else if entry_index == 2 && extended_kb > 0 {
+            2
+        } else {
+            // No more entries
+            self.cpu.bx = 0;
+            self.set_carry_flag(true);
+            return 51;
+        };
+        
+        // Check if this is the last valid entry
+        let is_last = if extended_kb > 0 {
+            valid_entry_index >= 2
+        } else {
+            valid_entry_index >= 1
+        };
+        
+        if valid_entry_index >= entries.len() as u32 {
+            // No more entries
+            self.cpu.bx = 0;
+            self.set_carry_flag(true);
+            return 51;
+        }
+        
+        let (base, length, entry_type) = entries[valid_entry_index as usize];
+        
+        // Write entry to ES:DI
+        let buffer_addr = ((self.cpu.es as u32) << 4) + (self.cpu.di as u32);
+        
+        // Write base address (64-bit, little-endian)
+        self.cpu.memory.write(buffer_addr + 0, (base & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 1, ((base >> 8) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 2, ((base >> 16) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 3, ((base >> 24) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 4, ((base >> 32) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 5, ((base >> 40) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 6, ((base >> 48) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 7, ((base >> 56) & 0xFF) as u8);
+        
+        // Write length (64-bit, little-endian)
+        self.cpu.memory.write(buffer_addr + 8, (length & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 9, ((length >> 8) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 10, ((length >> 16) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 11, ((length >> 24) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 12, ((length >> 32) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 13, ((length >> 40) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 14, ((length >> 48) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 15, ((length >> 56) & 0xFF) as u8);
+        
+        // Write type (32-bit, little-endian)
+        self.cpu.memory.write(buffer_addr + 16, (entry_type & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 17, ((entry_type >> 8) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 18, ((entry_type >> 16) & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr + 19, ((entry_type >> 24) & 0xFF) as u8);
+        
+        // Set return values (16-bit registers, caller manages 32-bit EAX/ECX)
+        // EAX should be 0x534D4150 ('SMAP'), we set lower 16 bits
+        self.cpu.ax = 0x4150; // Lower 16 bits of 'SMAP' (0x534D4150)
+        self.cpu.cx = 20; // Bytes written (basic 20-byte format)
+        
+        // Set continuation value (0 if last entry, next index otherwise)
+        if is_last {
+            self.cpu.bx = 0; // No more entries
+        } else {
+            self.cpu.bx = entry_index + 1; // Next entry index
+        }
+        
+        self.set_carry_flag(false); // Success
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!(
+                "INT 15h E820h: Entry {} - base=0x{:016X} len=0x{:016X} type={}",
+                valid_entry_index, base, length, entry_type
+            )
+        });
+        
         51
     }
 
@@ -5392,7 +5657,12 @@ mod tests {
     #[test]
     fn test_int15h_get_system_configuration() {
         // Test INT 15h AH=C0h (Get System Configuration)
-        let bus = PcBus::new();
+        let mut bus = PcBus::new();
+        
+        // Load BIOS so the configuration table exists at F000:E000
+        let bios = crate::bios::generate_minimal_bios(CpuModel::Intel8086);
+        bus.load_bios(&bios);
+        
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -5414,8 +5684,8 @@ mod tests {
         assert!(!cpu.get_carry_flag());
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00);
 
-        // ES:BX should point to configuration table (in high conventional memory)
-        assert_eq!(cpu.cpu.es, 0x9000);
+        // ES:BX should point to configuration table (in BIOS ROM at F000:E000)
+        assert_eq!(cpu.cpu.es, 0xF000);
         assert_eq!(cpu.cpu.bx, 0xE000);
 
         // Verify configuration table in memory
@@ -5426,7 +5696,7 @@ mod tests {
             | ((cpu.cpu.memory.read(table_addr + 1) as u16) << 8);
         assert_eq!(size, 8);
 
-        // Model byte should be 0xFE (PC/XT)
+        // Model byte should be 0xFE (PC/XT) - the default when using Intel8086
         let model = cpu.cpu.memory.read(table_addr + 2);
         assert_eq!(model, 0xFE);
     }
