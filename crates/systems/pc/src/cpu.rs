@@ -10,6 +10,15 @@ use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 #[allow(dead_code)]
 const VIDEO_INTERRUPT: u8 = 0x10;
 
+/// INT 21h vector table offset (low word) in memory
+const INT21H_VECTOR_OFFSET: u32 = 0x84;
+
+/// INT 21h vector table segment (high word) in memory
+const INT21H_VECTOR_SEGMENT: u32 = 0x86;
+
+/// DOS error code: invalid file handle
+const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
+
 /// PC CPU wrapper
 pub struct PcCpu {
     cpu: Cpu8086<PcBus>,
@@ -249,10 +258,10 @@ impl PcCpu {
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
                 0x21 => {
                     // Check if DOS has installed an INT 21h handler (vector != 0x0000:0x0000)
-                    let int21_offset = self.cpu.memory.read(0x84) as u16
-                        | ((self.cpu.memory.read(0x85) as u16) << 8);
-                    let int21_segment = self.cpu.memory.read(0x86) as u16
-                        | ((self.cpu.memory.read(0x87) as u16) << 8);
+                    let int21_offset = self.cpu.memory.read(INT21H_VECTOR_OFFSET) as u16
+                        | ((self.cpu.memory.read(INT21H_VECTOR_OFFSET + 1) as u16) << 8);
+                    let int21_segment = self.cpu.memory.read(INT21H_VECTOR_SEGMENT) as u16
+                        | ((self.cpu.memory.read(INT21H_VECTOR_SEGMENT + 1) as u16) << 8);
 
                     // If DOS has installed a handler, let the CPU execute it
                     if int21_segment != 0 || int21_offset != 0 {
@@ -1279,7 +1288,7 @@ impl PcCpu {
         // File handles >= 5 are user files, but not supported yet
         if handle >= 5 {
             // Return "invalid handle" error since we don't support file I/O
-            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
             self.set_carry_flag(true);
         } else {
             // Standard handles: succeed but do nothing (can't close stdin/stdout/stderr)
@@ -1306,7 +1315,7 @@ impl PcCpu {
         if handle >= 5 {
             // File handles >= 5 are not supported (no file system implementation yet)
             // Return "invalid handle" error
-            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
             self.set_carry_flag(true);
         } else {
             // Standard handles: return 0 bytes read (EOF)
@@ -1336,7 +1345,7 @@ impl PcCpu {
         if handle >= 5 {
             // File handles >= 5 are not supported (no file system implementation yet)
             // Return "invalid handle" error
-            self.cpu.ax = 0x0006; // Error code: invalid handle
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
             self.set_carry_flag(true);
         } else {
             // Standard handles: report all bytes written (but don't actually write)
@@ -4765,8 +4774,8 @@ mod tests {
 
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
-        // Verify error code 0x06 (invalid handle)
-        assert_eq!(cpu.cpu.ax, 0x0006);
+        // Verify error code (invalid handle)
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
     }
 
     #[test]
@@ -4825,8 +4834,8 @@ mod tests {
 
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
-        // Verify error code 0x06 (invalid handle)
-        assert_eq!(cpu.cpu.ax, 0x0006);
+        // Verify error code (invalid handle)
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
     }
 
     #[test]
@@ -4882,8 +4891,8 @@ mod tests {
 
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
-        // Verify error code 0x06 (invalid handle)
-        assert_eq!(cpu.cpu.ax, 0x0006);
+        // Verify error code (invalid handle)
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
     }
 
     #[test]
