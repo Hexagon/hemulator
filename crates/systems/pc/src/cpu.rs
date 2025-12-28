@@ -5341,6 +5341,109 @@ mod tests {
     }
 
     #[test]
+    fn test_int13h_read_file_from_disk_image() {
+        // Test reading a simulated file from a disk image
+        // This simulates what happens when DOS reads a file using INT 13h
+        let mut bus = PcBus::new();
+
+        // Create a floppy image with simulated file content
+        let mut floppy = vec![0; 1474560]; // 1.44MB
+
+        // Simulate a file in sectors 10-12 (CHS sector numbers, 1-based)
+        // These correspond to LBA 9-11 (0-based)
+        // Fill these sectors with recognizable test data
+        let file_start_lba = 9; // LBA for CHS sector 10
+        let file_sectors = 3;
+
+        for lba in 0..file_sectors {
+            let offset = (file_start_lba + lba) * 512;
+            for i in 0..512 {
+                // Simple pattern: just use byte offset within sector
+                floppy[offset + i] = (i % 256) as u8;
+            }
+        }
+
+        bus.mount_floppy_a(floppy);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Test 1: Read first sector of the "file" (CHS sector 10 = LBA 9)
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        cpu.cpu.ax = 0x0201; // AH=02h (read), AL=01 (1 sector)
+        cpu.cpu.cx = 0x000A; // CH=00, CL=10 (cylinder 0, sector 10)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x7C00; // Buffer
+
+        cpu.step();
+
+        // Should succeed
+        assert!(!cpu.get_carry_flag(), "Read should succeed");
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00, "Status should be success");
+
+        // Verify data pattern from first sector
+        let buffer = 0x7C00;
+        assert_eq!(cpu.cpu.memory.read(buffer), 0); // offset 0
+        assert_eq!(cpu.cpu.memory.read(buffer + 15), 15); // offset 15
+        assert_eq!(cpu.cpu.memory.read(buffer + 255), 255); // offset 255
+
+        // Test 2: Read all file sectors at once (CHS sectors 10-12 = LBA 9-11)
+        cpu.cpu.ip = 0x1000; // Reset IP
+        cpu.cpu.ax = 0x0203; // AH=02h (read), AL=03 (3 sectors)
+        cpu.cpu.cx = 0x000A; // CH=00, CL=10 (cylinder 0, sector 10)
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x8000; // Different buffer
+
+        cpu.step();
+
+        // Should succeed
+        assert!(!cpu.get_carry_flag(), "Multi-sector read should succeed");
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00, "Status should be success");
+
+        // Verify data from all three sectors
+        let buffer2 = 0x8000;
+        // First sector
+        assert_eq!(cpu.cpu.memory.read(buffer2), 0);
+        assert_eq!(cpu.cpu.memory.read(buffer2 + 255), 255);
+        // Second sector (same pattern repeats)
+        assert_eq!(cpu.cpu.memory.read(buffer2 + 512), 0);
+        assert_eq!(cpu.cpu.memory.read(buffer2 + 512 + 255), 255);
+        // Third sector
+        assert_eq!(cpu.cpu.memory.read(buffer2 + 1024), 0);
+        assert_eq!(cpu.cpu.memory.read(buffer2 + 1024 + 255), 255);
+
+        // Test 3: Try to read beyond the "file" (CHS sector 13 = LBA 12, empty)
+        cpu.cpu.ip = 0x1000; // Reset IP
+        cpu.cpu.ax = 0x0201; // AH=02h (read), AL=01 (1 sector)
+        cpu.cpu.cx = 0x000D; // CH=00, CL=13 (cylinder 0, sector 13) - past the file
+        cpu.cpu.dx = 0x0000; // DH=00 (head 0), DL=00 (floppy A)
+        cpu.cpu.es = 0x0000;
+        cpu.cpu.bx = 0x9000; // Another buffer
+
+        cpu.step();
+
+        // Should succeed (sector exists on disk)
+        assert!(
+            !cpu.get_carry_flag(),
+            "Read beyond file should succeed if sector exists"
+        );
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x00, "Status should be success");
+
+        // Verify data is zero (empty sector)
+        let buffer3 = 0x9000;
+        assert_eq!(cpu.cpu.memory.read(buffer3), 0x00);
+        assert_eq!(cpu.cpu.memory.read(buffer3 + 511), 0x00);
+    }
+
+    #[test]
     fn test_int13h_write_multiple_sectors_does_not_modify_esbx() {
         // Test that INT 13h AH=03h advances ES:BX correctly for multiple sectors
         let mut bus = PcBus::new();
