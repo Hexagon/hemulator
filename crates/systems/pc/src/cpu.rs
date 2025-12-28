@@ -5568,4 +5568,96 @@ mod tests {
         assert_eq!(cpu.cpu.es, 0x0000, "ES should remain unchanged");
         assert_eq!(cpu.cpu.bx, 0x8000, "BX should remain unchanged");
     }
+
+    #[test]
+    fn test_keyboard_shift_modifier() {
+        use crate::keyboard::*;
+        
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Test lowercase 'a' without shift
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_A);
+        let ascii = cpu.scancode_to_ascii(SCANCODE_A);
+        assert_eq!(ascii, b'a', "Without shift, 'a' should be lowercase");
+
+        // Test uppercase 'A' with shift
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_LEFT_SHIFT);
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_A);
+        let ascii = cpu.scancode_to_ascii(SCANCODE_A);
+        assert_eq!(ascii, b'A', "With shift, 'a' should be uppercase 'A'");
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_A);
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_LEFT_SHIFT);
+
+        // Test Shift+1 = !
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_LEFT_SHIFT);
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_1);
+        let ascii = cpu.scancode_to_ascii(SCANCODE_1);
+        assert_eq!(ascii, b'!', "Shift+1 should produce '!'");
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_1);
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_LEFT_SHIFT);
+
+        // Test plain '1' without shift
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_1);
+        let ascii = cpu.scancode_to_ascii(SCANCODE_1);
+        assert_eq!(ascii, b'1', "Without shift, '1' should be '1'");
+    }
+
+    #[test]
+    fn test_keyboard_shift_symbols() {
+        use crate::keyboard::*;
+        
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Test all shifted number keys
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_LEFT_SHIFT);
+        
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_1), b'!');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_2), b'@');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_3), b'#');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_4), b'$');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_5), b'%');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_6), b'^');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_7), b'&');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_8), b'*');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_9), b'(');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_0), b')');
+        
+        // Test shifted punctuation
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_MINUS), b'_');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_EQUALS), b'+');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_SEMICOLON), b':');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_APOSTROPHE), b'"');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_COMMA), b'<');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_PERIOD), b'>');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_SLASH), b'?');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_BACKTICK), b'~');
+        
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_LEFT_SHIFT);
+    }
+
+    #[test]
+    fn test_keyboard_altgr_modifier() {
+        use crate::keyboard::*;
+        
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Test AltGr+2 = @
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_RIGHT_ALT);
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_2);
+        let ascii = cpu.scancode_to_ascii(SCANCODE_2);
+        assert_eq!(ascii, b'@', "AltGr+2 should produce '@'");
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_2);
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_RIGHT_ALT);
+
+        // Test AltGr+7 = {
+        cpu.cpu.memory.keyboard.key_press(SCANCODE_RIGHT_ALT);
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_7), b'{');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_8), b'[');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_9), b']');
+        assert_eq!(cpu.scancode_to_ascii(SCANCODE_0), b'}');
+        cpu.cpu.memory.keyboard.key_release(SCANCODE_RIGHT_ALT);
+    }
 }
