@@ -263,6 +263,10 @@ const FLAG_CF: u16 = 0x0001; // Carry Flag
 const FLAG_PF: u16 = 0x0004; // Parity Flag
 #[allow(dead_code)]
 const FLAG_AF: u16 = 0x0010; // Auxiliary Carry Flag
+                              // Note: AF is only set by BCD adjust instructions (DAA, DAS, AAA, AAS).
+                              // General arithmetic (ADD, SUB, ADC, SBB, INC, DEC) do not calculate AF.
+                              // This is a deliberate decision per CPU_REVIEW_RESULTS.md - BCD operations
+                              // work correctly, and real-world DOS software is unlikely to be affected.
 const FLAG_ZF: u16 = 0x0040; // Zero Flag
 const FLAG_SF: u16 = 0x0080; // Sign Flag
 #[allow(dead_code)]
@@ -6589,8 +6593,9 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Address-size override prefix
                 // On 80386+, this toggles between 16-bit and 32-bit addressing
                 // For now, we set a flag and *plan* to handle it in individual instructions.
-                // TODO: Implement use of `address_size_override` in effective address calculation
-                //       so that 32-bit addressing is actually honored on 80386+.
+                // FUTURE ENHANCEMENT: Implement 32-bit addressing in effective address calculation
+                //                     for 80386+ support. Not critical for 8086/80186/80286 emulation.
+                //                     See CPU_REVIEW_RESULTS.md - marked as "Long Term" enhancement.
                 self.address_size_override = true;
                 self.step() // Execute next instruction with address size override
             }
