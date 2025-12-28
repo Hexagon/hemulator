@@ -946,11 +946,23 @@ There are two ways to mount disk images and BIOS:
     - AH=E801h/E820h (Extended Memory Detection) ✅
     - AH=41h (Wait on External Event) - returns "not supported" ✅
   - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
+  - INT 1Ah (Time/Date Services): **Time/Date and PCI BIOS functions implemented** ✅
+    - AH=00h-05h (Time/Date): Read/Set system clock, RTC time/date ✅
+    - AH=B1h (PCI BIOS): Returns "not present" for PC/XT (no PCI bus) ✅
+      - AL=01h (Installation Check), AL=02h (Find Device), AL=03h (Find Class)
+      - AL=08h-0Dh (Read/Write Configuration Space) all return appropriate errors
+      - This allows CD-ROM drivers and other PCI-aware software to gracefully handle absence of PCI
   - INT 21h (DOS): **Use Real DOS for File Operations** 
     - Character I/O fully functional (AH=01h, 02h, 06h, 07h, 08h, 09h, 0Ah, 0Bh)
-    - File I/O stubs present but return errors (AH=3Ch create, 3Dh open, 3Eh close, 3Fh read, 40h write)
+    - File I/O stubs present - fallback handler supports device names (CON, NUL, PRN, AUX, etc.) for standalone programs
+    - **Device Support**: INT 21h AH=3Dh recognizes DOS device names (CON, NUL, PRN, AUX, COM1-4, LPT1-3) ✅
+      - Returns appropriate standard file handles (0=stdin, 1=stdout, 3=stdaux, 4=stdprn)
+      - Allows DOS CON driver initialization to succeed
     - **For filesystem access**: Boot real DOS from a disk image - DOS will handle FAT12/FAT16 filesystems
     - System functions (INT 21h AH=25h, 35h, 4Ch) are functional
+  - INT 29h (Fast Console Output): **Implemented** ✅
+    - Used by DOS for fast character output
+    - Redirects to INT 10h teletype output for display
   - INT 2Fh (Multiplex): **Installation checks implemented** ✅
     - AH=11h (Network Redirector Check) - returns "not installed" ✅
     - AH=16h (DPMI), AH=43h (XMS) - installation checks functional
@@ -960,6 +972,8 @@ There are two ways to mount disk images and BIOS:
   - **MS-DOS 6.21**: Boots successfully with INT 13h count=0 support
   - DOS can detect system configuration and extended memory properly
   - Network redirector checks return proper "not installed" status
+  - **CD-ROM Drivers**: PCI BIOS support (INT 1Ah AH=B1h) allows CD-ROM drivers to gracefully handle absence of CD-ROM hardware
+    - Drivers like BANANA will detect "no PCI bus" and skip initialization without halting the boot process
 - **DOS Filesystem Support**:
   - ✅ **Full filesystem support available via real DOS - FAT12, FAT16, and FAT32**
   - Mount a DOS boot disk (.img file with DOS installed)
