@@ -310,6 +310,7 @@ impl PcCpu {
             0x08 => self.int10h_read_char_attr(),
             0x09 => self.int10h_write_char_attr(),
             0x0A => self.int10h_write_char_only(),
+            0x0B => self.int10h_set_color_palette(),
             0x0C => self.int10h_write_pixel(),
             0x0D => self.int10h_read_pixel(),
             0x0E => self.int10h_teletype_output(),
@@ -319,6 +320,9 @@ impl PcCpu {
             0x12 => self.int10h_video_subsystem_config(),
             0x13 => self.int10h_write_string(),
             0x1A => self.int10h_display_combination(),
+            0x1B => self.int10h_get_video_state(),
+            0xEF => self.int10h_stub_vga_function(0xEF),
+            0xFA => self.int10h_stub_vga_function(0xFA),
             _ => {
                 // Unsupported function - log and return
                 self.log_stub_interrupt(0x10, Some(ah), "Video BIOS (unsupported subfunction)");
@@ -719,6 +723,51 @@ impl PcCpu {
         51
     }
 
+    /// INT 10h, AH=0Bh: Set color palette (CGA)
+    /// This function controls the CGA color palette and border/background color
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_set_color_palette(&mut self) -> u32 {
+        let bh = ((self.cpu.bx >> 8) & 0xFF) as u8;
+        let bl = (self.cpu.bx & 0xFF) as u8;
+
+        match bh {
+            0x00 => {
+                // Set background/border color (text mode)
+                // BL = color (0-15)
+                // In text mode, this sets the border color
+                // We acknowledge but don't implement actual border color change
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh BH=00h: Set background/border color to 0x{:02X}",
+                        bl
+                    )
+                });
+            }
+            0x01 => {
+                // Set palette (graphics mode)
+                // BL = palette ID (0 or 1 for CGA 4-color modes)
+                // We acknowledge but don't implement actual palette switching
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh BH=01h: Set CGA palette to 0x{:02X}",
+                        bl
+                    )
+                });
+            }
+            _ => {
+                // Unknown subfunction
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
+                        "INT 10h AH=0Bh: Unknown BH=0x{:02X}, BL=0x{:02X}",
+                        bh, bl
+                    )
+                });
+            }
+        }
+
+        51
+    }
+
     /// INT 10h, AH=0Ch: Write pixel (graphics mode)
     #[allow(dead_code)] // Called from handle_int10h
     fn int10h_write_pixel(&mut self) -> u32 {
@@ -841,6 +890,44 @@ impl PcCpu {
                 51
             }
         }
+    }
+
+    /// INT 10h, AH=1Bh: Get video state (VGA BIOS extension)
+    /// Returns a pointer to a video state table
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_get_video_state(&mut self) -> u32 {
+        // ES:DI = pointer to video state table
+        // The table should contain video state information
+        // For simplicity, we return a stub table with basic info
+        
+        // Return AL = 0x1B (function supported)
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x1B;
+        
+        // Set ES:DI to point to a placeholder in BIOS data area
+        // We'll use a location in conventional RAM that won't interfere
+        self.cpu.es = 0x0040; // BIOS data area
+        self.cpu.di = 0x0100; // Offset within BIOS data area
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            "INT 10h AH=1Bh: Get video state (returning stub table)".to_string()
+        });
+
+        51
+    }
+
+    /// INT 10h, AH=EFh or FAh: Undocumented VGA functions
+    /// These are used by QBasic and some other applications
+    #[allow(dead_code)] // Called from handle_int10h
+    fn int10h_stub_vga_function(&mut self, ah: u8) -> u32 {
+        // Just acknowledge and return
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!(
+                "INT 10h AH=0x{:02X}: Undocumented VGA function (stub)",
+                ah
+            )
+        });
+
+        51
     }
 
     /// Handle INT 16h - Keyboard BIOS services
