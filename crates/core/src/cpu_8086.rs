@@ -263,9 +263,9 @@ const FLAG_CF: u16 = 0x0001; // Carry Flag
 const FLAG_PF: u16 = 0x0004; // Parity Flag
 #[allow(dead_code)]
 const FLAG_AF: u16 = 0x0010; // Auxiliary Carry Flag
-                              // Note: AF is now calculated by all arithmetic operations (ADD, SUB, ADC, SBB,
-                              // INC, DEC, NEG, CMP) as per CPU_REVIEW_RESULTS.md recommendations.
-                              // BCD adjust instructions (DAA, DAS, AAA, AAS) also maintain AF correctly.
+                             // Note: AF is now calculated by all arithmetic operations (ADD, SUB, ADC, SBB,
+                             // INC, DEC, NEG, CMP) as per CPU_REVIEW_RESULTS.md recommendations.
+                             // BCD adjust instructions (DAA, DAS, AAA, AAS) also maintain AF correctly.
 const FLAG_ZF: u16 = 0x0040; // Zero Flag
 const FLAG_SF: u16 = 0x0080; // Sign Flag
 #[allow(dead_code)]
