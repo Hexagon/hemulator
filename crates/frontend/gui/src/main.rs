@@ -13,7 +13,7 @@ use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -207,82 +207,6 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
             EmulatorSystem::N64(_) => {} // N64 controller support stub
         }
-    }
-
-    fn handle_keyboard(&mut self, key: Key, pressed: bool) {
-        if let EmulatorSystem::PC(sys) = self {
-            // Map keys to PC scancodes
-            let scancode = match key {
-                Key::A => Some(emu_pc::SCANCODE_A),
-                Key::B => Some(emu_pc::SCANCODE_B),
-                Key::C => Some(emu_pc::SCANCODE_C),
-                Key::D => Some(emu_pc::SCANCODE_D),
-                Key::E => Some(emu_pc::SCANCODE_E),
-                Key::F => Some(emu_pc::SCANCODE_F),
-                Key::G => Some(emu_pc::SCANCODE_G),
-                Key::H => Some(emu_pc::SCANCODE_H),
-                Key::I => Some(emu_pc::SCANCODE_I),
-                Key::J => Some(emu_pc::SCANCODE_J),
-                Key::K => Some(emu_pc::SCANCODE_K),
-                Key::L => Some(emu_pc::SCANCODE_L),
-                Key::M => Some(emu_pc::SCANCODE_M),
-                Key::N => Some(emu_pc::SCANCODE_N),
-                Key::O => Some(emu_pc::SCANCODE_O),
-                Key::P => Some(emu_pc::SCANCODE_P),
-                Key::Q => Some(emu_pc::SCANCODE_Q),
-                Key::R => Some(emu_pc::SCANCODE_R),
-                Key::S => Some(emu_pc::SCANCODE_S),
-                Key::T => Some(emu_pc::SCANCODE_T),
-                Key::U => Some(emu_pc::SCANCODE_U),
-                Key::V => Some(emu_pc::SCANCODE_V),
-                Key::W => Some(emu_pc::SCANCODE_W),
-                Key::X => Some(emu_pc::SCANCODE_X),
-                Key::Y => Some(emu_pc::SCANCODE_Y),
-                Key::Z => Some(emu_pc::SCANCODE_Z),
-                Key::Key0 => Some(emu_pc::SCANCODE_0),
-                Key::Key1 => Some(emu_pc::SCANCODE_1),
-                Key::Key2 => Some(emu_pc::SCANCODE_2),
-                Key::Key3 => Some(emu_pc::SCANCODE_3),
-                Key::Key4 => Some(emu_pc::SCANCODE_4),
-                Key::Key5 => Some(emu_pc::SCANCODE_5),
-                Key::Key6 => Some(emu_pc::SCANCODE_6),
-                Key::Key7 => Some(emu_pc::SCANCODE_7),
-                Key::Key8 => Some(emu_pc::SCANCODE_8),
-                Key::Key9 => Some(emu_pc::SCANCODE_9),
-                Key::Space => Some(emu_pc::SCANCODE_SPACE),
-                Key::Enter => Some(emu_pc::SCANCODE_ENTER),
-                Key::Backspace => Some(emu_pc::SCANCODE_BACKSPACE),
-                Key::Tab => Some(emu_pc::SCANCODE_TAB),
-                Key::Escape => Some(emu_pc::SCANCODE_ESC),
-                Key::LeftShift => Some(emu_pc::SCANCODE_LEFT_SHIFT),
-                Key::RightShift => Some(emu_pc::SCANCODE_RIGHT_SHIFT),
-                Key::LeftCtrl => Some(emu_pc::SCANCODE_LEFT_CTRL),
-                Key::RightCtrl => Some(emu_pc::SCANCODE_RIGHT_CTRL),
-                Key::LeftAlt => Some(emu_pc::SCANCODE_LEFT_ALT),
-                Key::RightAlt => Some(emu_pc::SCANCODE_RIGHT_ALT),
-                Key::Comma => Some(emu_pc::SCANCODE_COMMA),
-                Key::Period => Some(emu_pc::SCANCODE_PERIOD),
-                Key::Slash => Some(emu_pc::SCANCODE_SLASH),
-                Key::Semicolon => Some(emu_pc::SCANCODE_SEMICOLON),
-                Key::Apostrophe => Some(emu_pc::SCANCODE_APOSTROPHE),
-                Key::LeftBracket => Some(emu_pc::SCANCODE_LEFT_BRACKET),
-                Key::RightBracket => Some(emu_pc::SCANCODE_RIGHT_BRACKET),
-                Key::Backslash => Some(emu_pc::SCANCODE_BACKSLASH),
-                Key::Minus => Some(emu_pc::SCANCODE_MINUS),
-                Key::Equals => Some(emu_pc::SCANCODE_EQUALS),
-                Key::Backtick => Some(emu_pc::SCANCODE_BACKTICK),
-                _ => None,
-            };
-
-            if let Some(sc) = scancode {
-                if pressed {
-                    sys.key_press(sc);
-                } else {
-                    sys.key_release(sc);
-                }
-            }
-        }
-        // Other systems don't use keyboard input
     }
 
     fn get_debug_info_nes(&self) -> Option<emu_nes::DebugInfo> {
@@ -1552,9 +1476,6 @@ fn main() {
     // Disk format selector state (for creating blank disks)
     let mut show_disk_format_selector = false;
 
-    // PC keyboard state tracking
-    let mut prev_keys: HashSet<Key> = HashSet::new();
-
     // Speed selector state
     let mut show_speed_selector = false;
 
@@ -2541,90 +2462,18 @@ fn main() {
         if should_step {
             // Handle keyboard input for PC system
             if matches!(&sys, EmulatorSystem::PC(_)) {
-                // PC system: Poll all keys and detect press/release edges
-                // Only pass keys to the client if host key is NOT held
-                let all_keys = [
-                    Key::A,
-                    Key::B,
-                    Key::C,
-                    Key::D,
-                    Key::E,
-                    Key::F,
-                    Key::G,
-                    Key::H,
-                    Key::I,
-                    Key::J,
-                    Key::K,
-                    Key::L,
-                    Key::M,
-                    Key::N,
-                    Key::O,
-                    Key::P,
-                    Key::Q,
-                    Key::R,
-                    Key::S,
-                    Key::T,
-                    Key::U,
-                    Key::V,
-                    Key::W,
-                    Key::X,
-                    Key::Y,
-                    Key::Z,
-                    Key::Key0,
-                    Key::Key1,
-                    Key::Key2,
-                    Key::Key3,
-                    Key::Key4,
-                    Key::Key5,
-                    Key::Key6,
-                    Key::Key7,
-                    Key::Key8,
-                    Key::Key9,
-                    Key::Space,
-                    Key::Enter,
-                    Key::Backspace,
-                    Key::Tab,
-                    Key::Escape,
-                    Key::LeftShift,
-                    Key::RightShift,
-                    Key::LeftCtrl,
-                    Key::RightCtrl,
-                    Key::LeftAlt,
-                    Key::Comma,
-                    Key::Period,
-                    Key::Slash,
-                    Key::Semicolon,
-                    Key::Apostrophe,
-                    Key::LeftBracket,
-                    Key::RightBracket,
-                    Key::Backslash,
-                    Key::Minus,
-                    Key::Equals,
-                    Key::Backtick,
-                ];
-
-                for &key in &all_keys {
-                    let is_down = window.is_key_down(key);
-                    let was_down = prev_keys.contains(&key);
-
-                    // Only pass key events to client if host key is NOT held
-                    // This allows ESC and function keys to work in the client
-                    if !host_key_held {
-                        if is_down && !was_down {
-                            // Key pressed
-                            sys.handle_keyboard(key, true);
-                            prev_keys.insert(key);
-                        } else if !is_down && was_down {
-                            // Key released
-                            sys.handle_keyboard(key, false);
-                            prev_keys.remove(&key);
-                        }
-                    } else {
-                        // Host key is held - update tracking but don't send to client
-                        if is_down {
-                            prev_keys.insert(key);
-                        } else {
-                            prev_keys.remove(&key);
+                // PC system: Use SDL2 scancodes directly for accurate physical key mapping
+                // This bypasses the Key enum and directly maps SDL2 scancodes to PC scancodes
+                if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                        // Handle pressed scancodes (only if host key is not held)
+                        if !host_key_held {
+                            for &scancode in sdl2_backend.get_sdl2_scancodes_pressed() {
+                                pc_sys.key_press_sdl2(scancode);
+                            }
+                            for &scancode in sdl2_backend.get_sdl2_scancodes_released() {
+                                pc_sys.key_release_sdl2(scancode);
+                            }
                         }
                     }
                 }

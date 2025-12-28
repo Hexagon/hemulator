@@ -216,6 +216,92 @@ pub const SCANCODE_F10: u8 = 0x44;
 pub const SCANCODE_RIGHT_CTRL: u8 = 0x5D; // Right Ctrl (extended scancode E0 1D)
 pub const SCANCODE_RIGHT_ALT: u8 = 0x5E; // Right Alt/AltGr (extended scancode E0 38)
 
+/// Convert SDL2-style scancode (u32) to PC scancode (u8)
+/// SDL2 scancodes are physical key positions that match PC keyboard layout
+/// This allows direct mapping without going through character translation
+#[allow(dead_code)]
+pub fn sdl2_scancode_to_pc(sdl_scancode: u32) -> Option<u8> {
+    // SDL2 scancodes match USB HID scancodes which are similar to PC scancodes
+    // See: https://wiki.libsdl.org/SDL2/SDL_Scancode
+    match sdl_scancode {
+        // Function keys
+        58 => Some(SCANCODE_F1),  // SDL_SCANCODE_F1
+        59 => Some(SCANCODE_F2),  // SDL_SCANCODE_F2
+        60 => Some(SCANCODE_F3),  // SDL_SCANCODE_F3
+        61 => Some(SCANCODE_F4),  // SDL_SCANCODE_F4
+        62 => Some(SCANCODE_F5),  // SDL_SCANCODE_F5
+        63 => Some(SCANCODE_F6),  // SDL_SCANCODE_F6
+        64 => Some(SCANCODE_F7),  // SDL_SCANCODE_F7
+        65 => Some(SCANCODE_F8),  // SDL_SCANCODE_F8
+        66 => Some(SCANCODE_F9),  // SDL_SCANCODE_F9
+        67 => Some(SCANCODE_F10), // SDL_SCANCODE_F10
+        // Number row
+        39 => Some(SCANCODE_0), // SDL_SCANCODE_0
+        30 => Some(SCANCODE_1), // SDL_SCANCODE_1
+        31 => Some(SCANCODE_2), // SDL_SCANCODE_2
+        32 => Some(SCANCODE_3), // SDL_SCANCODE_3
+        33 => Some(SCANCODE_4), // SDL_SCANCODE_4
+        34 => Some(SCANCODE_5), // SDL_SCANCODE_5
+        35 => Some(SCANCODE_6), // SDL_SCANCODE_6
+        36 => Some(SCANCODE_7), // SDL_SCANCODE_7
+        37 => Some(SCANCODE_8), // SDL_SCANCODE_8
+        38 => Some(SCANCODE_9), // SDL_SCANCODE_9
+        // Letter keys (QWERTY layout)
+        4 => Some(SCANCODE_A),  // SDL_SCANCODE_A
+        5 => Some(SCANCODE_B),  // SDL_SCANCODE_B
+        6 => Some(SCANCODE_C),  // SDL_SCANCODE_C
+        7 => Some(SCANCODE_D),  // SDL_SCANCODE_D
+        8 => Some(SCANCODE_E),  // SDL_SCANCODE_E
+        9 => Some(SCANCODE_F),  // SDL_SCANCODE_F
+        10 => Some(SCANCODE_G), // SDL_SCANCODE_G
+        11 => Some(SCANCODE_H), // SDL_SCANCODE_H
+        12 => Some(SCANCODE_I), // SDL_SCANCODE_I
+        13 => Some(SCANCODE_J), // SDL_SCANCODE_J
+        14 => Some(SCANCODE_K), // SDL_SCANCODE_K
+        15 => Some(SCANCODE_L), // SDL_SCANCODE_L
+        16 => Some(SCANCODE_M), // SDL_SCANCODE_M
+        17 => Some(SCANCODE_N), // SDL_SCANCODE_N
+        18 => Some(SCANCODE_O), // SDL_SCANCODE_O
+        19 => Some(SCANCODE_P), // SDL_SCANCODE_P
+        20 => Some(SCANCODE_Q), // SDL_SCANCODE_Q
+        21 => Some(SCANCODE_R), // SDL_SCANCODE_R
+        22 => Some(SCANCODE_S), // SDL_SCANCODE_S
+        23 => Some(SCANCODE_T), // SDL_SCANCODE_T
+        24 => Some(SCANCODE_U), // SDL_SCANCODE_U
+        25 => Some(SCANCODE_V), // SDL_SCANCODE_V
+        26 => Some(SCANCODE_W), // SDL_SCANCODE_W
+        27 => Some(SCANCODE_X), // SDL_SCANCODE_X
+        28 => Some(SCANCODE_Y), // SDL_SCANCODE_Y
+        29 => Some(SCANCODE_Z), // SDL_SCANCODE_Z
+        // Special keys
+        41 => Some(SCANCODE_ESC),       // SDL_SCANCODE_ESCAPE
+        40 => Some(SCANCODE_ENTER),     // SDL_SCANCODE_RETURN
+        42 => Some(SCANCODE_BACKSPACE), // SDL_SCANCODE_BACKSPACE
+        43 => Some(SCANCODE_TAB),       // SDL_SCANCODE_TAB
+        44 => Some(SCANCODE_SPACE),     // SDL_SCANCODE_SPACE
+        // Modifiers
+        225 => Some(SCANCODE_LEFT_SHIFT),  // SDL_SCANCODE_LSHIFT
+        229 => Some(SCANCODE_RIGHT_SHIFT), // SDL_SCANCODE_RSHIFT
+        224 => Some(SCANCODE_LEFT_CTRL),   // SDL_SCANCODE_LCTRL
+        228 => Some(SCANCODE_RIGHT_CTRL),  // SDL_SCANCODE_RCTRL
+        226 => Some(SCANCODE_LEFT_ALT),    // SDL_SCANCODE_LALT
+        230 => Some(SCANCODE_RIGHT_ALT),   // SDL_SCANCODE_RALT (AltGr)
+        // Punctuation
+        54 => Some(SCANCODE_COMMA),         // SDL_SCANCODE_COMMA
+        55 => Some(SCANCODE_PERIOD),        // SDL_SCANCODE_PERIOD
+        56 => Some(SCANCODE_SLASH),         // SDL_SCANCODE_SLASH
+        51 => Some(SCANCODE_SEMICOLON),     // SDL_SCANCODE_SEMICOLON
+        52 => Some(SCANCODE_APOSTROPHE),    // SDL_SCANCODE_APOSTROPHE
+        47 => Some(SCANCODE_LEFT_BRACKET),  // SDL_SCANCODE_LEFTBRACKET
+        48 => Some(SCANCODE_RIGHT_BRACKET), // SDL_SCANCODE_RIGHTBRACKET
+        49 => Some(SCANCODE_BACKSLASH),     // SDL_SCANCODE_BACKSLASH
+        45 => Some(SCANCODE_MINUS),         // SDL_SCANCODE_MINUS
+        46 => Some(SCANCODE_EQUALS),        // SDL_SCANCODE_EQUALS
+        53 => Some(SCANCODE_BACKTICK),      // SDL_SCANCODE_GRAVE
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

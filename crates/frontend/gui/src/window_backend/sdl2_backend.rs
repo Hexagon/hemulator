@@ -31,6 +31,10 @@ pub struct Sdl2Backend {
     event_pump: EventPump,
     pressed_keys: HashSet<Key>,
     key_pressed_once: HashSet<Key>,
+    /// SDL2 scancodes pressed this frame (for direct PC scancode mapping)
+    sdl2_scancodes_pressed: HashSet<u32>,
+    /// SDL2 scancodes released this frame (for direct PC scancode mapping)
+    sdl2_scancodes_released: HashSet<u32>,
     is_open: bool,
     current_filter: DisplayFilter,
 }
@@ -97,6 +101,8 @@ impl Sdl2Backend {
             event_pump,
             pressed_keys: HashSet::new(),
             key_pressed_once: HashSet::new(),
+            sdl2_scancodes_pressed: HashSet::new(),
+            sdl2_scancodes_released: HashSet::new(),
             is_open: true,
             current_filter: DisplayFilter::None,
         })
@@ -269,6 +275,16 @@ impl Sdl2Backend {
     pub fn set_filter(&mut self, filter: DisplayFilter) {
         self.current_filter = filter;
     }
+
+    /// Get SDL2 scancodes pressed this frame (for direct PC scancode mapping)
+    pub fn get_sdl2_scancodes_pressed(&self) -> &HashSet<u32> {
+        &self.sdl2_scancodes_pressed
+    }
+
+    /// Get SDL2 scancodes released this frame (for direct PC scancode mapping)
+    pub fn get_sdl2_scancodes_released(&self) -> &HashSet<u32> {
+        &self.sdl2_scancodes_released
+    }
 }
 
 impl WindowBackend for Sdl2Backend {
@@ -343,6 +359,8 @@ impl WindowBackend for Sdl2Backend {
     fn poll_events(&mut self) {
         // Clear one-time press flags at start of frame
         self.key_pressed_once.clear();
+        self.sdl2_scancodes_pressed.clear();
+        self.sdl2_scancodes_released.clear();
 
         // Poll all events
         for event in self.event_pump.poll_iter() {
@@ -356,6 +374,11 @@ impl WindowBackend for Sdl2Backend {
                     repeat: false,
                     ..
                 } => {
+                    // Track SDL2 scancode for direct PC mapping
+                    if let Some(sc) = scancode {
+                        self.sdl2_scancodes_pressed.insert(sc as u32);
+                    }
+
                     // Try keycode first, fall back to scancode for international keyboards
                     let key = keycode
                         .and_then(Self::from_sdl2_key)
@@ -372,6 +395,8 @@ impl WindowBackend for Sdl2Backend {
                     repeat: true,
                     ..
                 } => {
+                    // Don't track repeated scancodes
+
                     // Try keycode first, fall back to scancode for international keyboards
                     let key = keycode
                         .and_then(Self::from_sdl2_key)
@@ -385,6 +410,11 @@ impl WindowBackend for Sdl2Backend {
                 Event::KeyUp {
                     keycode, scancode, ..
                 } => {
+                    // Track SDL2 scancode for direct PC mapping
+                    if let Some(sc) = scancode {
+                        self.sdl2_scancodes_released.insert(sc as u32);
+                    }
+
                     // Try keycode first, fall back to scancode for international keyboards
                     let key = keycode
                         .and_then(Self::from_sdl2_key)
