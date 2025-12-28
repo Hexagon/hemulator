@@ -2,7 +2,7 @@
 # Assembles source.asm and creates/updates temp.img with the result
 
 param(
-    [string]$NasmPath = "C:\Users\robin\AppData\Local\bin\NASM\nasm.exe",
+    [string]$NasmPath = "",
     [string]$SourceAsm = "source.asm",
     [string]$OutputCom = "TEST.COM",
     [string]$TempImage = "images\temp.img"
@@ -13,6 +13,24 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceAsm = Join-Path $ScriptDir $SourceAsm
 $OutputCom = Join-Path $ScriptDir $OutputCom
 $TempImage = Join-Path $ScriptDir $TempImage
+
+# Find NASM executable
+if ([string]::IsNullOrEmpty($NasmPath)) {
+    # Try global PATH first
+    $nasmCmd = Get-Command nasm.exe -ErrorAction SilentlyContinue
+    if ($nasmCmd) {
+        $NasmPath = $nasmCmd.Source
+        Write-Host "Using NASM from PATH: $NasmPath" -ForegroundColor Gray
+    } else {
+        # Fallback to user profile location
+        $NasmPath = "$env:USERPROFILE\AppData\Local\bin\NASM\nasm.exe"
+        if (-not (Test-Path $NasmPath)) {
+            Write-Error "NASM not found. Install NASM or specify -NasmPath parameter."
+            exit 1
+        }
+        Write-Host "Using NASM from user profile: $NasmPath" -ForegroundColor Gray
+    }
+}
 
 # Step 1: Assemble source.asm to TEST.COM
 Write-Host "=== Assembling $SourceAsm ===" -ForegroundColor Cyan
