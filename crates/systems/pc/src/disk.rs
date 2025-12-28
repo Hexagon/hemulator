@@ -324,30 +324,34 @@ impl FloppyFormat {
 /// Standard hard drive formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardDriveFormat {
-    /// 10MB hard drive (306 cylinders, 17 sectors, 4 heads)
-    HardDrive10M,
     /// 20MB hard drive (612 cylinders, 17 sectors, 4 heads)
     HardDrive20M,
-    /// 40MB hard drive (980 cylinders, 17 sectors, 5 heads)
-    HardDrive40M,
+    /// 250MB hard drive (500 cylinders, 63 sectors, 16 heads)
+    HardDrive250M,
+    /// 1GB hard drive (2048 cylinders, 63 sectors, 16 heads)
+    HardDrive1G,
+    /// 20GB hard drive (40960 cylinders, 63 sectors, 16 heads)
+    HardDrive20G,
 }
 
 impl HardDriveFormat {
     /// Get the size in bytes for this format
     pub fn size_bytes(&self) -> usize {
         match self {
-            HardDriveFormat::HardDrive10M => 10653696, // ~10MB
-            HardDriveFormat::HardDrive20M => 21307392, // ~20MB
-            HardDriveFormat::HardDrive40M => 42618880, // ~40MB
+            HardDriveFormat::HardDrive20M => 20_971_520, // 20MB (20 * 1024 * 1024)
+            HardDriveFormat::HardDrive250M => 262_144_000, // 250MB (250 * 1024 * 1024)
+            HardDriveFormat::HardDrive1G => 1_073_741_824, // 1GB (1024 * 1024 * 1024)
+            HardDriveFormat::HardDrive20G => 21_474_836_480, // 20GB (20 * 1024 * 1024 * 1024)
         }
     }
 
     /// Get the geometry (cylinders, sectors_per_track, heads) for this format
     pub fn geometry(&self) -> (u16, u8, u8) {
         match self {
-            HardDriveFormat::HardDrive10M => (306, 17, 4),
             HardDriveFormat::HardDrive20M => (612, 17, 4),
-            HardDriveFormat::HardDrive40M => (980, 17, 5),
+            HardDriveFormat::HardDrive250M => (500, 63, 16),
+            HardDriveFormat::HardDrive1G => (2048, 63, 16),
+            HardDriveFormat::HardDrive20G => (40960, 63, 16),
         }
     }
 }
@@ -519,16 +523,16 @@ mod tests {
     }
 
     #[test]
-    fn test_create_blank_hard_drive_10m() {
-        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive10M);
-        assert_eq!(disk.len(), 10653696);
+    fn test_create_blank_hard_drive_20m() {
+        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive20M);
+        assert_eq!(disk.len(), 20_971_520); // 20MB
         assert_eq!(disk[0], 0);
     }
 
     #[test]
-    fn test_create_blank_hard_drive_20m() {
-        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive20M);
-        assert_eq!(disk.len(), 21307392);
+    fn test_create_blank_hard_drive_250m() {
+        let disk = create_blank_hard_drive(HardDriveFormat::HardDrive250M);
+        assert_eq!(disk.len(), 262_144_000); // 250MB
     }
 
     #[test]
@@ -541,8 +545,8 @@ mod tests {
 
     #[test]
     fn test_hard_drive_format_geometry() {
-        let (c, s, h) = HardDriveFormat::HardDrive10M.geometry();
-        assert_eq!(c, 306);
+        let (c, s, h) = HardDriveFormat::HardDrive20M.geometry();
+        assert_eq!(c, 612);
         assert_eq!(s, 17);
         assert_eq!(h, 4);
     }
