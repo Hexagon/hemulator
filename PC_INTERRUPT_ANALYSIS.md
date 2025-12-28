@@ -16,6 +16,42 @@ This document analyzes the current PC emulator's interrupt handling implementati
 - ⚠️ Hardware IRQ handlers (INT 08h-77h) are mostly stubs
 - ✅ OS interrupts (INT 20h-31h) are correctly NOT intercepted (DOS handles them)
 - ⚠️ Extended BIOS services need expansion
+- 🔴 **Critical Missing**: INT 15h AH=24h (A20 gate control) - required by HIMEM.SYS and MS-DOS 5.0+
+- 🔴 **Critical Missing**: INT 10h AH=0Bh (palette control) - required by QBasic and other DOS applications
+
+## Real-World Testing Findings (MS-DOS 5.0 Boot)
+
+Testing with MS-DOS 5.0 and QBasic revealed the following critical missing interrupts:
+
+### Boot Failures
+```
+HIMEM: DOS XMS Driver, Version 2.78 - 09/19/91
+NOTICE: Stub interrupt handler called: INT 0x15, AH=0x24 (Extended Services) at 024B:073B
+ERROR: Unable to control A20 line!
+XMS Driver not installed.
+HMA not available : Loading DOS low
+```
+
+**Issue**: INT 15h AH=24h (A20 gate control) is not implemented, preventing HIMEM.SYS from loading.
+
+### QBasic Failures
+```
+A:\>qbasic
+NOTICE: Stub interrupt handler called: INT 0x10, AH=0x1B (Video BIOS) at 23F5:7E1F
+NOTICE: Stub interrupt handler called: INT 0x10, AH=0xEF (Video BIOS) at 23F5:7E1F
+NOTICE: Stub interrupt handler called: INT 0x10, AH=0xFA (Video BIOS) at 47C1:0AED
+```
+
+**Issue**: Multiple INT 10h video functions missing (AH=0Bh, 1Bh, EFh, FAh), causing display issues in QBasic.
+
+### Priority Upgrade
+
+Based on real-world testing, these functions are upgraded to **HIGH** priority:
+- INT 15h AH=24h: A20 gate control (breaks HIMEM.SYS)
+- INT 10h AH=0Bh: Set color palette (used by many DOS apps)
+- INT 10h AH=1Bh: Get video state (used by QBasic)
+
+---
 
 ## 1. CPU Exceptions (INT 00h-10h) - BIOS Responsibility
 
@@ -134,22 +170,29 @@ These are the primary BIOS software interrupts that provide hardware abstraction
 
 **Additional INT 10h functions NOT implemented**:
 - 04h: Read light pen position (rarely used)
-- 0Bh: Set color palette (CGA-specific, less common)
+- **0Bh: Set color palette (CGA-specific) - 🔴 HIGH PRIORITY - used by QBasic and many DOS apps**
 - 14h-19h: Various LCD/video functions (uncommon)
-- 1Bh: Video state (VGA BIOS extension)
+- **1Bh: Get video state (VGA BIOS extension) - 🔴 HIGH PRIORITY - used by QBasic**
 - 1Ch: Save/restore video state (VGA BIOS extension)
+- **EFh, FAh: Undocumented VGA functions - used by QBasic**
 
 **Analysis**: 
 - ✅ **Excellent coverage** of core functions
 - ✅ All commonly-used functions are implemented
-- ⚠️ Missing some advanced VGA functions (1Bh, 1Ch)
+- 🔴 **CRITICAL**: Missing INT 10h AH=0Bh (set palette) breaks color display in many DOS apps
+- 🔴 **CRITICAL**: Missing INT 10h AH=1Bh (get video state) causes QBasic display issues
+- ⚠️ Missing undocumented functions EFh, FAh used by some applications
 
 **Recommendation**:
-- **Priority: LOW** - Current implementation covers 95% of typical usage
-- **Action**: Add INT 10h AH=1Bh (get video state) for VGA compatibility
-- **Rationale**: Some VGA programs query video state; others are rarely used
+- **Priority: HIGH** - Implement INT 10h AH=0Bh (set color palette) - **REQUIRED for proper color support**
+- **Priority: HIGH** - Implement INT 10h AH=1Bh (get video state) - **REQUIRED for QBasic**
+- **Priority: LOW** - Add stubs for undocumented functions (EFh, FAh) to prevent errors
+- **Rationale**: QBasic and many DOS applications rely on these functions for proper display
 
-**Code Impact**: ~20 lines for AH=1Bh
+**Code Impact**: 
+- AH=0Bh: ~15 lines (set palette register or overscan color)
+- AH=1Bh: ~30 lines (return video state structure)
+- AH=EFh, FAh: ~5 lines each (stub handlers)
 
 ### INT 11h - Equipment Determination
 
@@ -238,7 +281,7 @@ These are the primary BIOS software interrupts that provide hardware abstraction
 | E8h | Extended memory size | ✅ Stub | `cpu.rs:2485` int15h_get_extended_memory() | Returns 0 (no extended memory) |
 
 **Additional INT 15h functions NOT implemented**:
-- 24h: Set A20 gate (PS/2+ protected mode)
+- **24h: Set A20 gate (PS/2+ protected mode) - 🔴 HIGH PRIORITY**
 - 87h: Move extended memory block
 - 88h: Get extended memory size (older method)
 - 89h: Switch to protected mode (AT+)
@@ -247,16 +290,19 @@ These are the primary BIOS software interrupts that provide hardware abstraction
 **Analysis**:
 - ✅ System configuration table properly implemented
 - ⚠️ Wait function (86h) should delay, not return immediately
-- ⚠️ Missing A20 gate and extended memory functions
+- 🔴 **CRITICAL**: Missing A20 gate (24h) breaks HIMEM.SYS and prevents DOS from using extended memory
+- ⚠️ Missing extended memory functions
 - ⚠️ Missing E820h (memory map) for modern boot loaders
 
 **Recommendation**:
+- **Priority: HIGH** - Implement INT 15h AH=24h (A20 gate control) - **REQUIRED for HIMEM.SYS**
 - **Priority: MEDIUM** - Implement INT 15h AH=86h (wait) properly
 - **Priority: LOW** - Add INT 15h AH=88h (extended memory size)
 - **Priority: LOW** - Add INT 15h AH=E820h (memory map) for modern loaders
-- **Rationale**: Wait function affects timing-sensitive code; memory map needed for modern OSes
+- **Rationale**: A20 gate is critical for MS-DOS 5.0+ and Windows 3.x; wait function affects timing-sensitive code
 
 **Code Impact**: 
+- AH=24h: ~20 lines (A20 gate enable/disable/status)
 - AH=86h: ~10 lines (simple delay loop or timestamp check)
 - AH=88h: ~5 lines (return extended memory size)
 - AH=E820h: ~30 lines (memory map structure)
@@ -632,9 +678,39 @@ These interrupts are provided by DOS or other operating systems. **The emulator 
 
 ## 8. Recommendations by Priority
 
-### 🔴 **HIGH Priority** (Affects Common Programs)
+### 🔴 **HIGH Priority** (Breaks Real-World Software)
 
-*None - core functionality is solid*
+**Based on MS-DOS 5.0 and QBasic testing:**
+
+1. **INT 15h AH=24h**: Implement A20 gate control
+   - **Impact**: **CRITICAL** - HIMEM.SYS fails to load without this, preventing extended memory access
+   - **Effort**: ~20 lines of code
+   - **Files**: `cpu.rs` (add int15h_a20_gate function)
+   - **Functions needed**: 
+     - AL=00h: Disable A20 (return success)
+     - AL=01h: Enable A20 (return success)
+     - AL=02h: Get A20 status (return enabled)
+     - AL=03h: Get A20 gate support (return supported)
+
+2. **INT 10h AH=0Bh**: Implement set color palette
+   - **Impact**: **CRITICAL** - Many DOS applications including QBasic rely on palette control
+   - **Effort**: ~15 lines of code
+   - **Files**: `cpu.rs` (add int10h_set_color_palette function)
+   - **Functions needed**:
+     - BH=00h: Set background/border color (BL=color)
+     - BH=01h: Set palette (BL=palette ID)
+
+3. **INT 10h AH=1Bh**: Implement get video state
+   - **Impact**: **CRITICAL** - QBasic and other applications query video capabilities
+   - **Effort**: ~30 lines of code
+   - **Files**: `cpu.rs` (add int10h_get_video_state function)
+   - **Returns**: ES:DI = pointer to video state structure
+
+4. **INT 10h AH=EFh, FAh**: Add stub handlers for undocumented functions
+   - **Impact**: Prevents "unsupported subfunction" errors in QBasic
+   - **Effort**: ~5 lines each
+   - **Files**: `cpu.rs` (add to handle_int10h match statement)
+   - **Action**: Return immediately (stub/no-op)
 
 ### 🟠 **MEDIUM Priority** (Improves Compatibility)
 
@@ -662,11 +738,11 @@ These interrupts are provided by DOS or other operating systems. **The emulator 
 ### 🟡 **LOW Priority** (Nice to Have)
 
 1. **INT 70h-77h**: Add AT+ IRQ stubs
-2. **INT 10h AH=1Bh**: Add video state function
-3. **INT 16h AH=10h-12h**: Add extended keyboard functions
-4. **INT 1Ah AH=02h-07h**: Add RTC functions
-5. **INT 2Fh**: Add XMS detection stub
-6. **CPU Exceptions**: Add logging for INT 01h-04h, 06h-10h
+2. **INT 16h AH=10h-12h**: Add extended keyboard functions
+3. **INT 1Ah AH=02h-07h**: Add RTC functions
+4. **INT 2Fh**: Add XMS detection stub
+5. **CPU Exceptions**: Add logging for INT 01h-04h, 06h-10h
+6. **INT 10h AH=04h**: Read light pen position (rarely used)
 
 ---
 
@@ -698,14 +774,25 @@ The PC emulator's interrupt handling follows best practices by:
 - Providing smart fallback for standalone programs
 - Correctly handling hardware interrupts (INT 08h, 09h)
 
-**Most Important Improvements**:
-1. Add INT 08h chain to INT 1Ch (MEDIUM priority) - tick counter already works
-2. Fix INT 15h AH=86h wait function (MEDIUM priority)
-3. Add INT 41h hard disk parameter table (MEDIUM priority)
+**Most Important Improvements** (Based on Real-World Testing):
+1. **INT 15h AH=24h**: A20 gate control (HIGH priority) - **REQUIRED for HIMEM.SYS**
+2. **INT 10h AH=0Bh**: Set color palette (HIGH priority) - **REQUIRED for QBasic and many DOS apps**
+3. **INT 10h AH=1Bh**: Get video state (HIGH priority) - **REQUIRED for QBasic**
+4. **INT 10h AH=EFh, FAh**: Undocumented VGA stubs (HIGH priority) - **REQUIRED for QBasic**
+5. INT 08h: Chain to INT 1Ch (MEDIUM priority) - tick counter already works
+6. INT 15h AH=86h: Wait function (MEDIUM priority)
+7. INT 41h: Hard disk parameter table (MEDIUM priority)
 
-**Estimated Total Effort**: ~80 lines of code for all MEDIUM priority improvements
+**Estimated Total Effort**: 
+- HIGH priority (critical for DOS 5.0/QBasic): ~75 lines of code
+- MEDIUM priority improvements: ~80 lines of code
+- **Total**: ~155 lines
 
 **Risk Assessment**: 🟢 **LOW** - Changes are isolated and well-understood
+
+**Testing Notes**: Analysis updated based on real-world testing with:
+- MS-DOS 5.0 boot sequence (HIMEM.SYS failure)
+- QBasic application (video function failures)
 
 ---
 
