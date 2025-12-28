@@ -7,6 +7,7 @@ use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
 /// BIOS video interrupt (INT 10h) - excluded from interrupt logging to reduce noise
+#[allow(dead_code)]
 const VIDEO_INTERRUPT: u8 = 0x10;
 
 /// PC CPU wrapper
@@ -52,11 +53,13 @@ impl PcCpu {
     }
 
     /// Set CS register
+    #[allow(dead_code)]
     pub fn set_cs(&mut self, value: u16) {
         self.cpu.cs = value;
     }
 
     /// Set IP register
+    #[allow(dead_code)]
     pub fn set_ip(&mut self, value: u16) {
         self.cpu.ip = value;
     }
@@ -97,7 +100,7 @@ impl PcCpu {
             let in_bios = cs == 0xF000 || cs == 0xFFFF;
             if physical_addr < 0xF0000 || in_bios {
                 // Extra logging for suspicious addresses
-                if physical_addr < 0x100 || (physical_addr >= 0x7D70 && physical_addr <= 0x7D80) || in_bios {
+                if physical_addr < 0x100 || (0x7D70..=0x7D80).contains(&physical_addr) || in_bios {
                     eprintln!(
                         "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
                         cs, ip, physical_addr, opcode, self.cpu.sp
@@ -198,11 +201,11 @@ impl PcCpu {
             let cs = self.cpu.cs;
             let ip = self.cpu.ip;
             let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
-            
+
             // Determine appropriate log level for this interrupt
             let is_high_frequency = (int_num == 0x28 && ah == 0x02) // DOS idle
                 || (int_num == 0x16 && ah == 0x01); // Keyboard check (non-blocking)
-            
+
             // Enable INT 10h logging for debugging (normally excluded to reduce noise)
             if true {
                 if is_high_frequency {
@@ -858,7 +861,7 @@ impl PcCpu {
                     "INT 16h AH=00h: Read scancode=0x{:02X} ascii=0x{:02X} '{}'",
                     scancode,
                     ascii,
-                    if ascii >= 0x20 && ascii < 0x7F {
+                    if (0x20..0x7F).contains(&ascii) {
                         ascii as char
                     } else {
                         '?'
@@ -1487,29 +1490,37 @@ impl PcCpu {
     fn simulate_int_call(&mut self) {
         // Calculate return address (IP points to INT opcode, return is INT+2)
         let return_ip = self.cpu.ip.wrapping_add(2);
-        
+
         // Push FLAGS
         let sp = self.cpu.sp.wrapping_sub(2);
         let ss = self.cpu.ss;
         let flags_addr = ((ss as u32) << 4) + (sp as u32);
-        self.cpu.memory.write(flags_addr, (self.cpu.flags & 0xFF) as u8);
-        self.cpu.memory.write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(flags_addr, (self.cpu.flags & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
         self.cpu.sp = sp;
-        
+
         // Push CS
         let sp = self.cpu.sp.wrapping_sub(2);
         let cs_addr = ((ss as u32) << 4) + (sp as u32);
         self.cpu.memory.write(cs_addr, (self.cpu.cs & 0xFF) as u8);
-        self.cpu.memory.write(cs_addr + 1, ((self.cpu.cs >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(cs_addr + 1, ((self.cpu.cs >> 8) & 0xFF) as u8);
         self.cpu.sp = sp;
-        
+
         // Push return IP
         let sp = self.cpu.sp.wrapping_sub(2);
         let ip_addr = ((ss as u32) << 4) + (sp as u32);
         self.cpu.memory.write(ip_addr, (return_ip & 0xFF) as u8);
-        self.cpu.memory.write(ip_addr + 1, ((return_ip >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(ip_addr + 1, ((return_ip >> 8) & 0xFF) as u8);
         self.cpu.sp = sp;
-        
+
         // Update IP to point past the INT instruction
         self.cpu.ip = return_ip;
     }
@@ -1548,7 +1559,7 @@ impl PcCpu {
     fn handle_int13h(&mut self) -> u32 {
         // Simulate INT instruction: push FLAGS, CS, IP and advance past INT opcode
         self.simulate_int_call();
-        
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -2877,7 +2888,7 @@ impl PcCpu {
         if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
             // Read and display the actual table contents
             let table_addr = ((table_seg as u32) << 4) + (table_offset as u32);
-            let byte_count = self.cpu.memory.read(table_addr) as u16 
+            let byte_count = self.cpu.memory.read(table_addr) as u16
                 | ((self.cpu.memory.read(table_addr + 1) as u16) << 8);
             eprintln!(
                 "INT 15h AH=C0h: Returning ES={:04X} BX={:04X} (table at {:08X})",
@@ -2886,13 +2897,34 @@ impl PcCpu {
             eprintln!("  Table contents:");
             eprintln!("    Byte count: {} (0x{:04X})", byte_count, byte_count);
             eprintln!("    Model: 0x{:02X}", self.cpu.memory.read(table_addr + 2));
-            eprintln!("    Submodel: 0x{:02X}", self.cpu.memory.read(table_addr + 3));
-            eprintln!("    BIOS rev: 0x{:02X}", self.cpu.memory.read(table_addr + 4));
-            eprintln!("    Feature 1: 0x{:02X}", self.cpu.memory.read(table_addr + 5));
-            eprintln!("    Feature 2: 0x{:02X}", self.cpu.memory.read(table_addr + 6));
-            eprintln!("    Feature 3: 0x{:02X}", self.cpu.memory.read(table_addr + 7));
-            eprintln!("    Feature 4: 0x{:02X}", self.cpu.memory.read(table_addr + 8));
-            eprintln!("    Feature 5: 0x{:02X}", self.cpu.memory.read(table_addr + 9));
+            eprintln!(
+                "    Submodel: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 3)
+            );
+            eprintln!(
+                "    BIOS rev: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 4)
+            );
+            eprintln!(
+                "    Feature 1: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 5)
+            );
+            eprintln!(
+                "    Feature 2: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 6)
+            );
+            eprintln!(
+                "    Feature 3: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 7)
+            );
+            eprintln!(
+                "    Feature 4: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 8)
+            );
+            eprintln!(
+                "    Feature 5: 0x{:02X}",
+                self.cpu.memory.read(table_addr + 9)
+            );
         }
 
         51

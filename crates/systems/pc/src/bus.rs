@@ -510,13 +510,13 @@ impl PcBus {
             }
             _ => 0xFF, // Default for unimplemented ports
         };
-        
+
         // Log I/O reads for debugging
         use emu_core::logging::{LogCategory, LogConfig, LogLevel};
         if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Trace) {
             eprintln!("I/O read port 0x{:04X} = 0x{:02X}", port, value);
         }
-        
+
         value
     }
 
