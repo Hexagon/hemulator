@@ -263,10 +263,9 @@ const FLAG_CF: u16 = 0x0001; // Carry Flag
 const FLAG_PF: u16 = 0x0004; // Parity Flag
 #[allow(dead_code)]
 const FLAG_AF: u16 = 0x0010; // Auxiliary Carry Flag
-                              // Note: AF is only set by BCD adjust instructions (DAA, DAS, AAA, AAS).
-                              // General arithmetic (ADD, SUB, ADC, SBB, INC, DEC) do not calculate AF.
-                              // This is a deliberate decision per CPU_REVIEW_RESULTS.md - BCD operations
-                              // work correctly, and real-world DOS software is unlikely to be affected.
+                              // Note: AF is now calculated by all arithmetic operations (ADD, SUB, ADC, SBB,
+                              // INC, DEC, NEG, CMP) as per CPU_REVIEW_RESULTS.md recommendations.
+                              // BCD adjust instructions (DAA, DAS, AAA, AAS) also maintain AF correctly.
 const FLAG_ZF: u16 = 0x0040; // Zero Flag
 const FLAG_SF: u16 = 0x0080; // Sign Flag
 #[allow(dead_code)]
@@ -715,7 +714,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// AF is set when there's a carry from bit 3 to bit 4
     #[inline]
     fn calc_af_add_8(a: u8, b: u8) -> bool {
-        ((a & 0x0F) + (b & 0x0F)) > 0x0F
+        (((a & 0x0F) + (b & 0x0F)) & 0x10) != 0
     }
 
     /// Calculate Auxiliary Flag for 8-bit subtraction
