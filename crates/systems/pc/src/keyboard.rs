@@ -57,6 +57,17 @@ impl Keyboard {
 
     /// Add a key press event (generates make code)
     pub fn key_press(&mut self, key: u8) {
+        // Check if this is a modifier key
+        let is_modifier = matches!(
+            key,
+            SCANCODE_LEFT_SHIFT
+                | SCANCODE_RIGHT_SHIFT
+                | SCANCODE_LEFT_CTRL
+                | SCANCODE_RIGHT_CTRL
+                | SCANCODE_LEFT_ALT
+                | SCANCODE_RIGHT_ALT
+        );
+
         // Update shift flags for modifier keys
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags |= 0x02, // Bit 1 = Left Shift
@@ -71,9 +82,10 @@ impl Keyboard {
             _ => {}
         }
 
-        // Only store make codes (key presses) in the buffer for INT 16h
-        // Break codes (key releases) are not needed for keyboard input
-        if self.scancode_buffer.len() < self.max_buffer_size {
+        // Only store non-modifier make codes in the buffer for INT 16h
+        // Modifier keys (Shift, Ctrl, Alt) only update shift flags, not the scancode buffer
+        // This prevents INT 16h from reading modifier scancodes which would cause FreeDOS to loop
+        if !is_modifier && self.scancode_buffer.len() < self.max_buffer_size {
             self.scancode_buffer.push_back(key);
         }
     }
@@ -438,5 +450,41 @@ mod tests {
 
         // Should return None since no make codes (and buffer is empty)
         assert_eq!(kb.peek_make_code(), None);
+    }
+
+    #[test]
+    fn test_modifier_keys_not_buffered() {
+        let mut kb = Keyboard::new();
+
+        // Modifier keys should update shift flags but NOT be buffered
+        kb.key_press(SCANCODE_LEFT_SHIFT);
+        assert!(!kb.has_data(), "Left Shift should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x02, 0x02, "Left Shift flag should be set");
+
+        kb.key_press(SCANCODE_RIGHT_SHIFT);
+        assert!(!kb.has_data(), "Right Shift should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x01, 0x01, "Right Shift flag should be set");
+
+        kb.key_press(SCANCODE_LEFT_CTRL);
+        assert!(!kb.has_data(), "Left Ctrl should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x04, 0x04, "Ctrl flag should be set");
+
+        kb.key_press(SCANCODE_RIGHT_CTRL);
+        assert!(!kb.has_data(), "Right Ctrl should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x04, 0x04, "Ctrl flag should still be set");
+
+        kb.key_press(SCANCODE_LEFT_ALT);
+        assert!(!kb.has_data(), "Left Alt should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x08, 0x08, "Alt flag should be set");
+
+        kb.key_press(SCANCODE_RIGHT_ALT);
+        assert!(!kb.has_data(), "Right Alt/AltGr should not be buffered");
+        assert_eq!(kb.get_shift_flags() & 0x08, 0x08, "Alt flag should still be set");
+        assert!(kb.is_altgr_pressed(), "AltGr pressed flag should be set");
+
+        // Regular keys should still be buffered
+        kb.key_press(SCANCODE_A);
+        assert!(kb.has_data(), "Regular keys should be buffered");
+        assert_eq!(kb.read_scancode(), SCANCODE_A);
     }
 }
