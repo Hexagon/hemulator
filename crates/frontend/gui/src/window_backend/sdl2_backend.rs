@@ -4,7 +4,7 @@ use super::{Key, WindowBackend};
 use crate::display_filter::DisplayFilter;
 use crate::video_processor::{OpenGLProcessor, SoftwareProcessor, VideoProcessor};
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Scancode};
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::Canvas;
 use sdl2::video::{GLProfile, Window};
@@ -31,6 +31,10 @@ pub struct Sdl2Backend {
     event_pump: EventPump,
     pressed_keys: HashSet<Key>,
     key_pressed_once: HashSet<Key>,
+    /// SDL2 scancodes pressed this frame (for direct PC scancode mapping)
+    sdl2_scancodes_pressed: HashSet<u32>,
+    /// SDL2 scancodes released this frame (for direct PC scancode mapping)
+    sdl2_scancodes_released: HashSet<u32>,
     is_open: bool,
     current_filter: DisplayFilter,
 }
@@ -97,6 +101,8 @@ impl Sdl2Backend {
             event_pump,
             pressed_keys: HashSet::new(),
             key_pressed_once: HashSet::new(),
+            sdl2_scancodes_pressed: HashSet::new(),
+            sdl2_scancodes_released: HashSet::new(),
             is_open: true,
             current_filter: DisplayFilter::None,
         })
@@ -183,8 +189,101 @@ impl Sdl2Backend {
         }
     }
 
+    /// Convert SDL2 Scancode to our unified Key (for physical key positions)
+    /// This is used as a fallback when keycode doesn't map, which helps with
+    /// international keyboards where the logical key differs from physical position
+    fn from_sdl2_scancode(s: Scancode) -> Option<Key> {
+        match s {
+            Scancode::F1 => Some(Key::F1),
+            Scancode::F2 => Some(Key::F2),
+            Scancode::F3 => Some(Key::F3),
+            Scancode::F4 => Some(Key::F4),
+            Scancode::F5 => Some(Key::F5),
+            Scancode::F6 => Some(Key::F6),
+            Scancode::F7 => Some(Key::F7),
+            Scancode::F8 => Some(Key::F8),
+            Scancode::F9 => Some(Key::F9),
+            Scancode::F10 => Some(Key::F10),
+            Scancode::F11 => Some(Key::F11),
+            Scancode::F12 => Some(Key::F12),
+            Scancode::Num0 => Some(Key::Key0),
+            Scancode::Num1 => Some(Key::Key1),
+            Scancode::Num2 => Some(Key::Key2),
+            Scancode::Num3 => Some(Key::Key3),
+            Scancode::Num4 => Some(Key::Key4),
+            Scancode::Num5 => Some(Key::Key5),
+            Scancode::Num6 => Some(Key::Key6),
+            Scancode::Num7 => Some(Key::Key7),
+            Scancode::Num8 => Some(Key::Key8),
+            Scancode::Num9 => Some(Key::Key9),
+            Scancode::A => Some(Key::A),
+            Scancode::B => Some(Key::B),
+            Scancode::C => Some(Key::C),
+            Scancode::D => Some(Key::D),
+            Scancode::E => Some(Key::E),
+            Scancode::F => Some(Key::F),
+            Scancode::G => Some(Key::G),
+            Scancode::H => Some(Key::H),
+            Scancode::I => Some(Key::I),
+            Scancode::J => Some(Key::J),
+            Scancode::K => Some(Key::K),
+            Scancode::L => Some(Key::L),
+            Scancode::M => Some(Key::M),
+            Scancode::N => Some(Key::N),
+            Scancode::O => Some(Key::O),
+            Scancode::P => Some(Key::P),
+            Scancode::Q => Some(Key::Q),
+            Scancode::R => Some(Key::R),
+            Scancode::S => Some(Key::S),
+            Scancode::T => Some(Key::T),
+            Scancode::U => Some(Key::U),
+            Scancode::V => Some(Key::V),
+            Scancode::W => Some(Key::W),
+            Scancode::X => Some(Key::X),
+            Scancode::Y => Some(Key::Y),
+            Scancode::Z => Some(Key::Z),
+            Scancode::Up => Some(Key::Up),
+            Scancode::Down => Some(Key::Down),
+            Scancode::Left => Some(Key::Left),
+            Scancode::Right => Some(Key::Right),
+            Scancode::Escape => Some(Key::Escape),
+            Scancode::Return => Some(Key::Enter),
+            Scancode::Space => Some(Key::Space),
+            Scancode::Tab => Some(Key::Tab),
+            Scancode::Backspace => Some(Key::Backspace),
+            Scancode::LShift => Some(Key::LeftShift),
+            Scancode::RShift => Some(Key::RightShift),
+            Scancode::LCtrl => Some(Key::LeftCtrl),
+            Scancode::RCtrl => Some(Key::RightCtrl),
+            Scancode::LAlt => Some(Key::LeftAlt),
+            Scancode::RAlt => Some(Key::RightAlt),
+            Scancode::Comma => Some(Key::Comma),
+            Scancode::Period => Some(Key::Period),
+            Scancode::Slash => Some(Key::Slash),
+            Scancode::Semicolon => Some(Key::Semicolon),
+            Scancode::Apostrophe => Some(Key::Apostrophe),
+            Scancode::LeftBracket => Some(Key::LeftBracket),
+            Scancode::RightBracket => Some(Key::RightBracket),
+            Scancode::Backslash => Some(Key::Backslash),
+            Scancode::Minus => Some(Key::Minus),
+            Scancode::Equals => Some(Key::Equals),
+            Scancode::Grave => Some(Key::Backtick),
+            _ => None,
+        }
+    }
+
     pub fn set_filter(&mut self, filter: DisplayFilter) {
         self.current_filter = filter;
+    }
+
+    /// Get SDL2 scancodes pressed this frame (for direct PC scancode mapping)
+    pub fn get_sdl2_scancodes_pressed(&self) -> &HashSet<u32> {
+        &self.sdl2_scancodes_pressed
+    }
+
+    /// Get SDL2 scancodes released this frame (for direct PC scancode mapping)
+    pub fn get_sdl2_scancodes_released(&self) -> &HashSet<u32> {
+        &self.sdl2_scancodes_released
     }
 }
 
@@ -260,6 +359,8 @@ impl WindowBackend for Sdl2Backend {
     fn poll_events(&mut self) {
         // Clear one-time press flags at start of frame
         self.key_pressed_once.clear();
+        self.sdl2_scancodes_pressed.clear();
+        self.sdl2_scancodes_released.clear();
 
         // Poll all events
         for event in self.event_pump.poll_iter() {
@@ -268,30 +369,58 @@ impl WindowBackend for Sdl2Backend {
                     self.is_open = false;
                 }
                 Event::KeyDown {
-                    keycode: Some(keycode),
+                    keycode,
+                    scancode,
                     repeat: false,
                     ..
                 } => {
-                    if let Some(key) = Self::from_sdl2_key(keycode) {
+                    // Track SDL2 scancode for direct PC mapping
+                    if let Some(sc) = scancode {
+                        self.sdl2_scancodes_pressed.insert(sc as u32);
+                    }
+
+                    // Try keycode first, fall back to scancode for international keyboards
+                    let key = keycode
+                        .and_then(Self::from_sdl2_key)
+                        .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                    if let Some(key) = key {
                         self.pressed_keys.insert(key);
                         self.key_pressed_once.insert(key);
                     }
                 }
                 Event::KeyDown {
-                    keycode: Some(keycode),
+                    keycode,
+                    scancode,
                     repeat: true,
                     ..
                 } => {
-                    if let Some(key) = Self::from_sdl2_key(keycode) {
+                    // Don't track repeated scancodes
+
+                    // Try keycode first, fall back to scancode for international keyboards
+                    let key = keycode
+                        .and_then(Self::from_sdl2_key)
+                        .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                    if let Some(key) = key {
                         self.pressed_keys.insert(key);
                         // Don't add to key_pressed_once for repeat events
                     }
                 }
                 Event::KeyUp {
-                    keycode: Some(keycode),
-                    ..
+                    keycode, scancode, ..
                 } => {
-                    if let Some(key) = Self::from_sdl2_key(keycode) {
+                    // Track SDL2 scancode for direct PC mapping
+                    if let Some(sc) = scancode {
+                        self.sdl2_scancodes_released.insert(sc as u32);
+                    }
+
+                    // Try keycode first, fall back to scancode for international keyboards
+                    let key = keycode
+                        .and_then(Self::from_sdl2_key)
+                        .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                    if let Some(key) = key {
                         self.pressed_keys.remove(&key);
                     }
                 }

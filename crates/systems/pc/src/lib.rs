@@ -217,6 +217,22 @@ impl PcSystem {
         self.cpu.bus_mut().keyboard.key_release(scancode);
     }
 
+    /// Handle keyboard input from SDL2 scancode (called by GUI with SDL2 backend)
+    /// This bypasses the Key enum and directly maps SDL2 scancodes to PC scancodes
+    pub fn key_press_sdl2(&mut self, sdl_scancode: u32) {
+        if let Some(pc_scancode) = keyboard::sdl2_scancode_to_pc(sdl_scancode) {
+            self.key_press(pc_scancode);
+        }
+    }
+
+    /// Handle keyboard release from SDL2 scancode (called by GUI with SDL2 backend)
+    /// This bypasses the Key enum and directly maps SDL2 scancodes to PC scancodes
+    pub fn key_release_sdl2(&mut self, sdl_scancode: u32) {
+        if let Some(pc_scancode) = keyboard::sdl2_scancode_to_pc(sdl_scancode) {
+            self.key_release(pc_scancode);
+        }
+    }
+
     /// Set boot priority
     pub fn set_boot_priority(&mut self, priority: bios::BootPriority) {
         self.cpu.bus_mut().set_boot_priority(priority);
