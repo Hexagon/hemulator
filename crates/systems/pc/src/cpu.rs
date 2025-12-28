@@ -3253,7 +3253,7 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         // Log the call for debugging
-        if LogConfig::global().should_log(LogCategory::Stubs, LogLevel::Debug) {
+        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
             eprintln!(
                 "INT 0x2A AH=0x{:02X} called from {:04X}:{:04X}",
                 ah,
@@ -3262,10 +3262,22 @@ impl PcCpu {
             );
         }
 
-        // Network Installation API stub
-        // All functions return AL=0 (not installed/not supported)
-        self.cpu.ax &= 0xFF00; // AL = 0 (not installed)
-        self.set_carry_flag(true); // CF = 1 (error/not installed)
+        // Handle specific functions
+        match ah {
+            0x82 => {
+                // AH=0x82: Get Network Resource Information
+                // FreeDOS calls this during prompt display
+                // Return AL=0x00 (no network), CF=0 (success) to prevent retry loop
+                self.cpu.ax &= 0xFF00; // AL = 0 (no network resources)
+                self.set_carry_flag(false); // CF = 0 (success - don't retry)
+            }
+            _ => {
+                // Other Network Installation API functions
+                // Return AL=0 (not installed/not supported), CF=1 (error)
+                self.cpu.ax &= 0xFF00; // AL = 0 (not installed)
+                self.set_carry_flag(true); // CF = 1 (error/not installed)
+            }
+        }
 
         51
     }
