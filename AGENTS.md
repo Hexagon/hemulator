@@ -218,3 +218,41 @@ For comprehensive logging documentation, see **[CONTRIBUTING.md](CONTRIBUTING.md
 - Example: `cargo run --release -- --log-cpu debug game.nes`
 
 **For agents**: When adding logging to new code, use appropriate categories and levels. See CONTRIBUTING.md for implementation details.
+## PC/DOS Testing Workbench
+
+For rapid iteration when developing or debugging PC system code, use the workbench environment:
+
+**Location**: `workbench/`
+
+**Purpose**: Streamlined workflow for testing x86/DOS assembly code without manually editing disk images.
+
+**Setup**:
+```
+workbench/
+├── workbench.hemu      # Config: A: = FreeDOS, B: = test disk
+├── source.asm          # Your test code
+├── build.ps1           # Assembles and injects into B:
+└── images/
+    ├── x86boot.img     # FreeDOS boot disk (A:)
+    └── temp.img        # Auto-created test disk (B:)
+```
+
+**Workflow**:
+1. Edit `workbench/source.asm`
+2. Run `.\workbench\build.ps1` (assembles to TEST.COM, injects into B: drive)
+3. Run `cargo run --release -- workbench\workbench.hemu`
+4. In FreeDOS: `B:\TEST.COM`
+
+**Benefits**:
+- **Fast iteration**: No manual disk image manipulation
+- **Clean separation**: Boot OS (A:) vs test code (B:)
+- **Automated**: Build script handles assembly and injection
+- **Reusable**: FreeDOS stays on A:, only B: changes per test
+
+**Use cases**:
+- Testing INT 21h file I/O implementations
+- Debugging DOS system calls
+- Reproducing FreeDOS command behavior
+- Isolating emulator bugs from DOS environment
+
+See `workbench/README.md` for detailed instructions and examples.
