@@ -61,8 +61,9 @@ impl Keyboard {
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags |= 0x02, // Bit 1 = Left Shift
             SCANCODE_RIGHT_SHIFT => self.shift_flags |= 0x01, // Bit 0 = Right Shift
-            SCANCODE_LEFT_CTRL | SCANCODE_RIGHT_CTRL => self.shift_flags |= 0x04, // Bit 2 = Ctrl
-            SCANCODE_LEFT_ALT => self.shift_flags |= 0x08,   // Bit 3 = Alt (Left Alt)
+            SCANCODE_LEFT_CTRL => self.shift_flags |= 0x04,   // Bit 2 = Ctrl
+            SCANCODE_RIGHT_CTRL => self.shift_flags |= 0x04,  // Bit 2 = Ctrl
+            SCANCODE_LEFT_ALT => self.shift_flags |= 0x08,    // Bit 3 = Alt (Left Alt)
             SCANCODE_RIGHT_ALT => {
                 self.shift_flags |= 0x08; // Bit 3 = Alt (for compatibility)
                 self.altgr_pressed = true; // Track AltGr separately
@@ -83,8 +84,9 @@ impl Keyboard {
         match key {
             SCANCODE_LEFT_SHIFT => self.shift_flags &= !0x02, // Clear bit 1
             SCANCODE_RIGHT_SHIFT => self.shift_flags &= !0x01, // Clear bit 0
-            SCANCODE_LEFT_CTRL | SCANCODE_RIGHT_CTRL => self.shift_flags &= !0x04, // Clear bit 2
-            SCANCODE_LEFT_ALT => self.shift_flags &= !0x08,   // Clear bit 3
+            SCANCODE_LEFT_CTRL => self.shift_flags &= !0x04,   // Clear bit 2
+            SCANCODE_RIGHT_CTRL => self.shift_flags &= !0x04,  // Clear bit 2
+            SCANCODE_LEFT_ALT => self.shift_flags &= !0x08,    // Clear bit 3
             SCANCODE_RIGHT_ALT => {
                 self.shift_flags &= !0x08; // Clear bit 3
                 self.altgr_pressed = false; // Clear AltGr flag

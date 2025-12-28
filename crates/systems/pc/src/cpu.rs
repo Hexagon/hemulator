@@ -3635,6 +3635,11 @@ impl PcCpu {
     fn scancode_to_ascii(&self, scancode: u8) -> u8 {
         use crate::keyboard::*;
 
+        // Extended ASCII character constants for AltGr combinations
+        const SECTION_SIGN: u8 = 0xA7; // §
+        const CENT_SIGN: u8 = 0xA2; // ¢
+        const AE_LIGATURE: u8 = 0xE6; // æ
+
         // Skip break codes (high bit set)
         if scancode & 0x80 != 0 {
             return 0;
@@ -3685,14 +3690,14 @@ impl PcCpu {
                 SCANCODE_2 => return b'@',
                 SCANCODE_3 => return b'#',
                 SCANCODE_4 => return b'$',
-                SCANCODE_5 => return 0xA7, // § (section sign) - extended ASCII
+                SCANCODE_5 => return SECTION_SIGN, // § (section sign)
                 SCANCODE_7 => return b'{',
                 SCANCODE_8 => return b'[',
                 SCANCODE_9 => return b']',
                 SCANCODE_0 => return b'}',
                 SCANCODE_EQUALS => return b'\\',
-                SCANCODE_Q => return 0xE6, // æ (ae ligature) - extended ASCII
-                SCANCODE_E => return 0xA2, // ¢ (cent) - extended ASCII
+                SCANCODE_Q => return AE_LIGATURE, // æ (ae ligature)
+                SCANCODE_E => return CENT_SIGN,   // ¢ (cent sign)
                 SCANCODE_BACKSLASH => return b'|',
                 _ => {}
             }
