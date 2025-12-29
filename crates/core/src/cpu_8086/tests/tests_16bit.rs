@@ -3,14 +3,9 @@
 //! This module contains tests for 16-bit operations on AX, BX, CX, DX, SI, DI, BP, SP
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{
-    Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_DF, FLAG_OF, FLAG_PF, FLAG_SF, FLAG_ZF,
-};
+use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
 
-// Helper function for tests to calculate physical address
-fn physical_address(segment: u16, offset: u16) -> u32 {
-    ((segment as u32) << 4) + (offset as u32)
-}
+use super::physical_address;
 
 #[test]
 fn test_mov_immediate_16bit() {
