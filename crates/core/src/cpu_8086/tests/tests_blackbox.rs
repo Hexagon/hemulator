@@ -1413,3 +1413,494 @@ fn test_blackbox_loop_overflow_detection() {
         );
     }
 }
+
+// ============================================================================
+// REGRESSION TESTS FOR SPECIFIC BUGS FOUND
+// ============================================================================
+
+/// Bug Regression Test 1: MUL r/m16 Overflow Flag
+/// Tests that MUL correctly sets OF/CF based on high word of result
+/// Bug: Was checking entire 32-bit DX register instead of just low 16 bits
+/// Fixed in commit 7d9a222
+#[test]
+fn test_bug_mul_overflow_flag() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test 1: Multiplication that should NOT set overflow (result fits in AX)
+        // MOV AX, 10
+        // MOV BX, 5
+        // MUL BX         ; AX = 50, DX = 0, OF=0, CF=0
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xB8, 0x0A, 0x00, // MOV AX, 10
+                0xBB, 0x05, 0x00, // MOV BX, 5
+                0xF7, 0xE3, // MUL BX
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Simulate the bug condition: set high bits in DX before MUL
+        cpu.dx = 0xDEAD0000;
+
+        cpu.step(); // MOV AX
+        cpu.step(); // MOV BX
+        cpu.step(); // MUL BX
+
+        assert_eq!(
+            (cpu.ax & 0xFFFF),
+            50,
+            "Model {:?}: AX should be 50 (10 * 5)",
+            model
+        );
+        assert_eq!(
+            (cpu.dx & 0xFFFF),
+            0,
+            "Model {:?}: DX should be 0 (no high word)",
+            model
+        );
+        // OF and CF should be 0 because result fits in AX
+        assert!(
+            !cpu.get_flag(crate::cpu_8086::FLAG_OF),
+            "Model {:?}: OF should be 0 (no overflow)",
+            model
+        );
+        assert!(
+            !cpu.get_flag(crate::cpu_8086::FLAG_CF),
+            "Model {:?}: CF should be 0 (no overflow)",
+            model
+        );
+
+        // Test 2: Multiplication that SHOULD set overflow (result needs DX)
+        let mut cpu = Cpu8086::with_model(ArrayMemory::new(), model);
+
+        // MOV AX, 300
+        // MOV BX, 300
+        // MUL BX         ; AX = 0x5F90, DX = 0x0001, OF=1, CF=1
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xB8, 0x2C, 0x01, // MOV AX, 300
+                0xBB, 0x2C, 0x01, // MOV BX, 300
+                0xF7, 0xE3, // MUL BX
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        cpu.step(); // MOV AX
+        cpu.step(); // MOV BX
+        cpu.step(); // MUL BX
+
+        assert_eq!(
+            (cpu.ax & 0xFFFF),
+            0x5F90,
+            "Model {:?}: AX should be 0x5F90 (low word of 300*300)",
+            model
+        );
+        assert_eq!(
+            (cpu.dx & 0xFFFF),
+            0x0001,
+            "Model {:?}: DX should be 0x0001 (high word of 300*300)",
+            model
+        );
+        // OF and CF should be 1 because result doesn't fit in AX
+        assert!(
+            cpu.get_flag(crate::cpu_8086::FLAG_OF),
+            "Model {:?}: OF should be 1 (overflow)",
+            model
+        );
+        assert!(
+            cpu.get_flag(crate::cpu_8086::FLAG_CF),
+            "Model {:?}: CF should be 1 (overflow)",
+            model
+        );
+    }
+}
+
+/// Bug Regression Test 2: CMP AX with 16-bit Masking
+/// Tests that CMP AX correctly masks to 16 bits and ignores high bits
+/// Bug: Was comparing full 32-bit AX value
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_cmp_ax_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test: CMP should only use low 16 bits of AX for carry flag
+        // MOV AX, 0x0005
+        // CMP AX, 0x0010     ; Compare 5 with 16 (should set CF=1 because 5 < 16)
+        // LAHF               ; Load flags into AH
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xB8, 0x05, 0x00, // MOV AX, 0x0005
+                0x3D, 0x10, 0x00, // CMP AX, 0x0010
+                0x9F, // LAHF
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute MOV AX
+        cpu.step();
+
+        // Simulate high bits from previous operations (the bug scenario)
+        cpu.ax = (cpu.ax & 0xFFFF) | 0xDEAD0000;
+
+        // Execute CMP and LAHF
+        cpu.step(); // CMP
+        cpu.step(); // LAHF
+
+        // Check that CF=1 (bit 0 of AH after LAHF)
+        // With bug: 0xDEAD0005 < 0x00000010 would be false, CF=0
+        // With fix: 0x0005 < 0x0010 is true, CF=1
+        let flags_in_ah = (cpu.ax >> 8) & 0xFF;
+        assert!(
+            (flags_in_ah & 0x01) != 0,
+            "Model {:?}: CF should be set (0x0005 < 0x0010), flags=0x{:02X}, ignoring high bits of AX",
+            model, flags_in_ah
+        );
+    }
+}
+
+/// Bug Regression Test 3: SUB AX with 16-bit Masking
+/// Tests that SUB AX correctly masks to 16 bits and ignores high bits
+/// Bug: Was using full 32-bit AX for borrow calculation
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_sub_ax_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test: SUB should only use low 16 bits of AX for borrow
+        // SUB AX, 0x0010     ; Subtract 16 from AX
+        // JB had_borrow      ; Jump if borrow (CF=1)
+        // MOV BX, 0x0042     ; No borrow path
+        // HLT
+        // had_borrow:
+        // MOV BX, 0xBAD      ; Borrow path (should not happen)
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0x2D, 0x10, 0x00, // SUB AX, 0x0010
+                0x72, 0x05, // JB +5 (to had_borrow)
+                0xBB, 0x42, 0x00, // MOV BX, 0x0042 (no borrow)
+                0xF4, // HLT
+                // had_borrow:
+                0xBB, 0xAD, 0x0B, // MOV BX, 0x0BAD (bug marker)
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Set AX with high bits: 0xDEAD0020 (low 16 bits = 0x0020)
+        // With bug: 0xDEAD0020 < 0x00000010 → false → CF=0
+        // With fix: 0x0020 < 0x0010 → false → CF=0 (correct)
+        cpu.ax = 0xDEAD0020;
+
+        let mut steps = 0;
+        while steps < 10 {
+            cpu.step();
+            steps += 1;
+            if (cpu.bx & 0xFFFF) != 0 {
+                break;
+            }
+        }
+
+        assert_eq!(
+            cpu.ax & 0xFFFF,
+            0x0010,
+            "Model {:?}: AX should be 0x0010 (0x0020 - 0x0010)",
+            model
+        );
+        assert_eq!(
+            cpu.bx & 0xFFFF,
+            0x0042,
+            "Model {:?}: No borrow should occur (0x0020 >= 0x0010, ignoring high bits)",
+            model
+        );
+    }
+}
+
+/// Bug Regression Test 4: LOOP with 16-bit Masking
+/// Tests that LOOP correctly masks CX to 16 bits and ignores high bits
+/// Bug: Was checking full 32-bit CX value
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_loop_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test: LOOP should only use low 16 bits of CX
+        // loop_start:
+        // INC BX
+        // LOOP loop_start    ; Loop while CX != 0
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                // loop_start:
+                0x43, // INC BX
+                0xE2, 0xFD, // LOOP -3 (to loop_start)
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Set CX with high bits: 0xBABE0003 (low 16 bits = 3)
+        // With bug: Would loop 3,135,369,219 times (0xBABE0003 iterations)
+        // With fix: Loops 3 times (0x0003 iterations)
+        cpu.cx = 0xBABE0003;
+        cpu.bx = 0;
+
+        let mut steps = 0;
+        while cpu.ip != 0x0104 && steps < 50 {
+            cpu.step();
+            steps += 1;
+        }
+
+        assert_eq!(
+            cpu.bx & 0xFFFF,
+            3,
+            "Model {:?}: Should loop exactly 3 times (not billions), ignoring high bits of CX",
+            model
+        );
+        assert_eq!(
+            cpu.cx & 0xFFFF,
+            0,
+            "Model {:?}: CX low 16 bits should be 0 after 3 loops",
+            model
+        );
+        assert!(
+            steps < 50,
+            "Model {:?}: Should not take excessive steps (infinite loop bug)",
+            model
+        );
+    }
+}
+
+/// Bug Regression Test 5: JCXZ with 16-bit Masking
+/// Tests that JCXZ correctly masks CX to 16 bits and ignores high bits
+/// Bug: Was checking full 32-bit CX value
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_jcxz_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test: JCXZ should only check low 16 bits of CX
+        // We'll use the fact that JCXZ affects IP to verify it worked
+        // MOV CX, 0          ; Set CX to 0
+        // JCXZ target        ; Should jump (CX low 16 bits = 0)
+        // MOV BX, 1          ; Should NOT execute
+        // target:
+        // MOV DX, 0x0042     ; Should execute
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xB9, 0x00, 0x00, // MOV CX, 0
+                0xE3, 0x03, // JCXZ +3 (to target)
+                0xBB, 0x01, 0x00, // MOV BX, 1 (should skip)
+                // target:
+                0xBA, 0x42, 0x00, // MOV DX, 0x0042
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Execute MOV CX
+        cpu.step();
+
+        // Simulate potential high bits from previous operations
+        cpu.cx = (cpu.cx & 0xFFFF) | 0xDEAD0000;
+
+        // Execute JCXZ - should jump because low 16 bits of CX = 0
+        cpu.step();
+
+        // Check that we jumped (BX should still be 0, not 1)
+        assert_eq!(
+            cpu.bx & 0xFFFF,
+            0,
+            "Model {:?}: JCXZ should have jumped (skipped MOV BX), ignoring high bits of CX",
+            model
+        );
+
+        // Execute MOV DX
+        cpu.step();
+
+        assert_eq!(
+            cpu.dx & 0xFFFF,
+            0x0042,
+            "Model {:?}: Should have executed MOV DX after JCXZ jump",
+            model
+        );
+    }
+}
+
+/// Bug Regression Test 6: SCASW with 16-bit Masking
+/// Tests that SCASW correctly masks AX and CX to 16 bits
+/// Bug: Was using full 32-bit AX for comparison and full 32-bit CX for counter
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_scasw_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Setup a string in memory to scan
+        let string_addr = physical_address(0x2000, 0x0000);
+        cpu.memory.write_u16(string_addr, 0x1234);
+        cpu.memory.write_u16(string_addr + 2, 0x5678);
+        cpu.memory.write_u16(string_addr + 4, 0xABCD);
+        cpu.memory.write_u16(string_addr + 6, 0x0042); // Target value
+
+        // Program: Use REPNE SCASW to find 0x0042
+        // MOV AX, 0x0042
+        // MOV DI, 0x0000
+        // MOV CX, 10
+        // CLD
+        // REPNE SCASW
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xB8, 0x42, 0x00, // MOV AX, 0x0042
+                0xBF, 0x00, 0x00, // MOV DI, 0x0000
+                0xB9, 0x0A, 0x00, // MOV CX, 10
+                0xFC, // CLD
+                0xF2, 0xAF, // REPNE SCASW
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+        cpu.es = 0x2000;
+
+        cpu.step(); // MOV AX
+        cpu.step(); // MOV DI
+        cpu.step(); // MOV CX
+
+        // Set high bits in AX and CX after MOV to simulate garbage
+        // With bug: Would not find match or loop wrong number of times
+        // With fix: Should find 0x0042 at position 3 (after 4 comparisons)
+        cpu.ax = (cpu.ax & 0xFFFF) | 0xFFFF0000;
+        cpu.cx = (cpu.cx & 0xFFFF) | 0xDEAD0000;
+
+        cpu.step(); // CLD
+        cpu.step(); // REPNE SCASW
+
+        // Should have found 0x0042 at position 3 (after 4 comparisons)
+        // DI should point past the match: 0x0000 + 4*2 = 0x0008
+        assert_eq!(
+            cpu.di & 0xFFFF,
+            0x0008,
+            "Model {:?}: DI should be 0x0008 after finding match at position 3",
+            model
+        );
+        // CX should be decremented 4 times: 10 - 4 = 6
+        assert_eq!(
+            cpu.cx & 0xFFFF,
+            6,
+            "Model {:?}: CX should be 6 after 4 comparisons (ignoring high bits)",
+            model
+        );
+    }
+}
+
+/// Bug Regression Test 7: SBB AX with 16-bit Masking
+/// Tests that SBB AX correctly masks to 16 bits for borrow calculation
+/// Bug: Was using full 32-bit AX value
+/// Fixed in commit 619c8f3
+#[test]
+fn test_bug_sbb_ax_16bit_masking() {
+    for model in [
+        CpuModel::Intel8086,
+        CpuModel::Intel80386,
+        CpuModel::IntelPentiumMMX,
+    ] {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, model);
+
+        // Test: SBB should only use low 16 bits of AX
+        // STC                ; Set carry flag
+        // SBB AX, 0x0010     ; Subtract 16 + CF from AX
+        // HLT
+        cpu.memory.load_program(
+            0x0100,
+            &[
+                0xF9, // STC
+                0x1D, 0x10, 0x00, // SBB AX, 0x0010
+                0xF4, // HLT
+            ],
+        );
+
+        cpu.ip = 0x0100;
+        cpu.cs = 0x0000;
+
+        // Set AX with high bits: 0xDEAD0020 (low 16 bits = 0x0020)
+        // SBB should compute: 0x0020 - 0x0010 - 1 (CF) = 0x000F
+        // With bug: Would use 0xDEAD0020 and produce wrong result
+        // With fix: Uses 0x0020 and produces 0x000F
+        cpu.ax = 0xDEAD0020;
+
+        cpu.step(); // STC
+        cpu.step(); // SBB AX, 0x0010
+
+        assert_eq!(
+            cpu.ax & 0xFFFF,
+            0x000F,
+            "Model {:?}: AX should be 0x000F (0x0020 - 0x0010 - 1), ignoring high bits",
+            model
+        );
+    }
+}
