@@ -623,6 +623,8 @@ struct CliArgs {
     create_blank_disk: Option<(String, String)>, // (path, format)
     show_help: bool,        // Show help message
     show_version: bool,     // Show version
+    fullscreen: bool,       // Start in fullscreen mode (no GUI)
+    monitor_only: bool,     // Monitor-only mode (just system display, no GUI)
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -747,6 +749,12 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--fullscreen" => {
+                    args.fullscreen = true;
+                }
+                "--monitor-only" => {
+                    args.monitor_only = true;
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -794,6 +802,10 @@ impl CliArgs {
         eprintln!("  --log-interrupts <LEVEL> Set interrupt log level");
         eprintln!("  --log-stubs <LEVEL>      Set unimplemented feature log level");
         eprintln!("  --log-file <PATH>        Write logs to file instead of stderr");
+        eprintln!();
+        eprintln!("Display Options:");
+        eprintln!("  --fullscreen             Start in fullscreen mode (no GUI, F11 to toggle)");
+        eprintln!("  --monitor-only           Monitor-only mode (just system display, no GUI)");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -1475,6 +1487,10 @@ fn main() {
     // Debug overlay state
     let mut show_debug = false;
 
+    // GUI mode state (true = GUI visible, false = fullscreen/monitor-only)
+    // Start based on CLI flags: --fullscreen or --monitor-only disables GUI
+    let mut gui_visible = !cli_args.fullscreen && !cli_args.monitor_only;
+
     // Slot selector state
     let mut show_slot_selector = false;
     let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
@@ -1576,9 +1592,10 @@ fn main() {
             }
         }
 
-        // Toggle help overlay (F1)
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F1, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F1, false))
+        // Toggle help overlay (F1) - only when GUI is visible
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F1, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F1, false)))
         {
             show_help = !show_help;
             show_slot_selector = false; // Close slot selector if open
@@ -1588,9 +1605,10 @@ fn main() {
             show_debug = false; // Close debug if open
         }
 
-        // Toggle speed selector (F2)
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F2, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F2, false))
+        // Toggle speed selector (F2) - only when GUI is visible
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F2, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F2, false)))
         {
             show_speed_selector = !show_speed_selector;
             show_help = false; // Close help if open
@@ -1600,10 +1618,11 @@ fn main() {
             show_debug = false; // Close debug if open
         }
 
-        // Toggle debug overlay (F10)
+        // Toggle debug overlay (F10) - only when GUI is visible
         let can_debug = rom_loaded || needs_host_key; // Allow debug for PC even without ROM
-        if ((needs_host_key && host_key_held && window.is_key_pressed(Key::F10, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F10, false)))
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F10, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F10, false)))
             && can_debug
         {
             show_debug = !show_debug;
@@ -1707,19 +1726,28 @@ fn main() {
             }
         }
 
-        // Cycle CRT filter (F11) - only when host key is held
+        // Toggle GUI visibility (F11) - fullscreen/monitor-only mode
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F11, false))
             || (!needs_host_key && window.is_key_pressed(Key::F11, false))
         {
-            settings.display_filter = settings.display_filter.next();
-            // Update the backend's filter setting
-            if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                sdl2_backend.set_filter(settings.display_filter);
+            gui_visible = !gui_visible;
+            if !gui_visible {
+                // Hide all overlays when switching to monitor-only/fullscreen mode
+                show_help = false;
+                show_slot_selector = false;
+                show_mount_selector = false;
+                show_speed_selector = false;
+                show_disk_format_selector = false;
+                show_debug = false;
             }
-            if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save CRT filter setting: {}", e);
-            }
-            println!("CRT Filter: {}", settings.display_filter.name());
+            println!(
+                "Display mode: {}",
+                if gui_visible {
+                    "GUI"
+                } else {
+                    "Monitor-only (fullscreen)"
+                }
+            );
         }
 
         // Handle speed selector
@@ -2234,9 +2262,10 @@ fn main() {
             println!("System reset");
         }
 
-        // F3 - Show mount point selector - always show submenu, no .hemu loading
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F3, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F3, false))
+        // F3 - Show mount point selector - only when GUI is visible
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F3, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F3, false)))
         {
             // Always show mount point selector, even for single-mount systems
             show_mount_selector = true;
@@ -2247,7 +2276,7 @@ fn main() {
             show_debug = false;
         }
 
-        // Check for screenshot key (F4) - only when host key is held
+        // Check for screenshot key (F4) - works in both GUI and monitor-only mode
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F4, false))
             || (!needs_host_key && window.is_key_pressed(Key::F4, false))
         {
@@ -2257,9 +2286,9 @@ fn main() {
             }
         }
 
-        // F5 - Save state slot selector - only when host key is held
+        // F5 - Save state slot selector - only when GUI is visible and host key is held
         // For PC, show disk image persist menu instead
-        if host_key_held && rom_loaded && window.is_key_pressed(Key::F5, false) {
+        if gui_visible && host_key_held && rom_loaded && window.is_key_pressed(Key::F5, false) {
             if matches!(&sys, EmulatorSystem::PC(_)) {
                 // PC system: show disk persist menu
                 show_slot_selector = true;
@@ -2274,9 +2303,9 @@ fn main() {
             }
         }
 
-        // F6 - Show load state slot selector - only when host key is held
+        // F6 - Show load state slot selector - only when GUI is visible and host key is held
         // For PC, F6 does nothing (no load for disk images)
-        if host_key_held && rom_loaded && window.is_key_pressed(Key::F6, false) {
+        if gui_visible && host_key_held && rom_loaded && window.is_key_pressed(Key::F6, false) {
             if matches!(&sys, EmulatorSystem::PC(_)) {
                 // PC system: F6 not used for disk images
                 eprintln!("F6 is not used for PC disk images. Use F5 to persist disk images.");
@@ -2289,9 +2318,10 @@ fn main() {
             }
         }
 
-        // F7 - Load project file (.hemu) - no backward compatibility for system selector
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F7, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F7, false))
+        // F7 - Load project file (.hemu) - only when GUI is visible
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F7, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F7, false)))
         {
             // Show file open dialog for .hemu files
             if let Some(path) = rfd::FileDialog::new()
@@ -2489,9 +2519,10 @@ fn main() {
             }
         }
 
-        // F8 - Save project for any system
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F8, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F8, false))
+        // F8 - Save project for any system - only when GUI is visible
+        if gui_visible
+            && ((needs_host_key && host_key_held && window.is_key_pressed(Key::F8, false))
+                || (!needs_host_key && window.is_key_pressed(Key::F8, false)))
         {
             // F8 saves project for all systems
             save_project(&sys, &runtime_state, &settings, &mut status_message);

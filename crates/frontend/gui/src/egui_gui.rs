@@ -69,6 +69,7 @@ pub enum GuiAction {
     SaveProjectAs,
     Exit,
     ToggleDebug,
+    ToggleGui, // Toggle GUI visibility (fullscreen/monitor-only mode)
     SelectCrtFilter(DisplayFilter),
     OpenMountPoint(String), // mount point ID
     CreateBlankDisk,
