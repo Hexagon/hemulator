@@ -4,7 +4,7 @@
 //! These instructions are noted in REFERENCE.md as "often implemented incorrectly"
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{Cpu8086, FLAG_AF, FLAG_CF, FLAG_PF, FLAG_SF, FLAG_ZF};
+use crate::cpu_8086::{Cpu8086, FLAG_AF, FLAG_CF, FLAG_ZF};
 
 #[test]
 fn test_daa_no_adjust_needed() {

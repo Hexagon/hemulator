@@ -12,10 +12,7 @@
 use crate::cpu_8086::ArrayMemory;
 use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_ZF};
 
-// Helper function for tests to calculate physical address
-fn physical_address(segment: u16, offset: u16) -> u32 {
-    ((segment as u32) << 4) + (offset as u32)
-}
+use super::physical_address;
 
 /// Black box test 1: Extended Arithmetic Chain
 /// Tests ADD, SUB, MUL, DIV, INC, DEC, NEG, AND, OR, XOR on same values

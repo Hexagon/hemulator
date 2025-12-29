@@ -7,6 +7,8 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_8086.md`
 
+#![allow(clippy::unnecessary_cast)] // Many casts are intentional for clarity
+
 use crate::cpu_8086_protected::ProtectedModeState;
 use crate::logging::{LogCategory, LogConfig, LogLevel};
 
@@ -4082,7 +4084,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Update other flags based on comparison
                         let result = self.ax.wrapping_sub(rm_val as u32);
                         self.set_flag(FLAG_SF, (result & 0x8000) != 0);
-                        self.set_flag(FLAG_PF, (result & 0xFF).count_ones() % 2 == 0);
+                        self.set_flag(FLAG_PF, (result & 0xFF).count_ones().is_multiple_of(2));
                         let carry = (self.ax as u16) < rm_val;
                         let overflow = (((self.ax as u16) ^ rm_val)
                             & ((self.ax as u16) ^ (result as u16))
@@ -8070,8 +8072,6 @@ impl Memory8086 for ArrayMemory {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Include organized test modules
     mod tests_16bit;
     mod tests_32bit;
@@ -8085,7 +8085,8 @@ mod tests {
     mod tests_shifts;
 
     // Helper function for tests to calculate physical address
-    fn physical_address(segment: u16, offset: u16) -> u32 {
+    #[allow(dead_code)]
+    pub(crate) fn physical_address(segment: u16, offset: u16) -> u32 {
         ((segment as u32) << 4) + (offset as u32)
     }
 }
