@@ -2326,7 +2326,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let old_cf = self.get_flag(FLAG_CF);
 
                 if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
-                    al = al.wrapping_add(6u32);
+                    al = al.wrapping_add(6u8);
                     self.set_flag(FLAG_AF, true);
                 } else {
                     self.set_flag(FLAG_AF, false);
@@ -2359,7 +2359,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let old_cf = self.get_flag(FLAG_CF);
 
                 if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
-                    al = al.wrapping_sub(6u32);
+                    al = al.wrapping_sub(6u8);
                     self.set_flag(FLAG_AF, true);
                 } else {
                     self.set_flag(FLAG_AF, false);
@@ -3060,7 +3060,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                             self.set_reg16(reg, offset);
                             self.ss = segment;
                         }
@@ -3080,7 +3080,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                             self.set_reg16(reg, offset);
                             self.fs = segment;
                         }
@@ -3100,7 +3100,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                             self.set_reg16(reg, offset);
                             self.gs = segment;
                         }
@@ -3509,7 +3509,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         self.set_flag(FLAG_SF, (result & 0x8000) != 0);
                         self.set_flag(FLAG_PF, (result & 0xFF).count_ones() % 2 == 0);
                         let carry = (self.ax as u32) < (rm_val as u32);
-                        let overflow = ((self.ax ^ rm_val) & (self.ax ^ result) & 0x8000) != 0;
+                        let overflow = (((self.ax as u16) ^ rm_val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
                         self.set_flag(FLAG_CF, carry);
                         self.set_flag(FLAG_OF, overflow);
 
@@ -4336,7 +4336,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let af = ((((self.ax as u16) & 0x0F) + (val & 0x0F) + carry_in) & 0x10) != 0;
 
                 self.ax = result as u32;
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
                 self.set_flag(FLAG_AF, af);
@@ -4505,7 +4505,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
 
                 self.ax = result as u32;
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.set_flag(FLAG_AF, af);
@@ -5865,7 +5865,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 if modbits != 0b11 {
                     let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                     let offset = self.read_u16(seg, offset_ea);
-                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                     self.set_reg16(reg, offset);
                     self.es = segment;
                 }
@@ -5881,7 +5881,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 if modbits != 0b11 {
                     let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                     let offset = self.read_u16(seg, offset_ea);
-                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                     self.set_reg16(reg, offset);
                     self.ds = segment;
                 }
@@ -6266,9 +6266,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // XLAT/XLATB (0xD7)
             0xD7 => {
                 let al = (self.ax & 0xFF) as u8;
-                let offset = self.bx.wrapping_add(al as u16);
+                let offset = self.bx.wrapping_add((al as u16) as u32);
                 let seg = self.get_segment_with_override(self.ds);
-                let val = self.read(seg, offset);
+                let val = self.read(seg, offset as u16);
                 self.ax = (self.ax & 0xFFFF_FF00) | (val as u32);
                 self.cycles += 11;
                 11
@@ -6557,7 +6557,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // CALL m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
-                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                         self.push(self.cs);
                         self.push(self.ip as u16);
                         self.ip = offset as u32;
@@ -6580,7 +6580,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // JMP m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
-                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
                         self.ip = offset as u32;
                         self.cs = segment;
                         self.cycles += 24;
