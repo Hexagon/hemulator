@@ -599,3 +599,92 @@ fn test_xadd8() {
     );
     assert_eq!(cpu.cx & 0xFF, 0x0A, "CL should be old memory value (10)");
 }
+
+#[test]
+fn test_mov_ah_imm8_preserves_al() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // MOV AH, 0xAB (0xB4, 0xAB)
+    cpu.memory.load_program(0xFFFF0, &[0xB4, 0xAB]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x12345678; // Start with a known value
+
+    cpu.step();
+
+    // Expected: AX should be 0x1234AB78 (AH=0xAB, AL=0x78 preserved)
+    assert_eq!(cpu.ax & 0xFF, 0x78, "AL should be preserved");
+    assert_eq!((cpu.ax >> 8) & 0xFF, 0xAB, "AH should be set to 0xAB");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x1234_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_mov_ch_imm8_preserves_cl() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // MOV CH, 0xCD (0xB5, 0xCD)
+    cpu.memory.load_program(0xFFFF0, &[0xB5, 0xCD]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.cx = 0x11223344;
+
+    cpu.step();
+
+    assert_eq!(cpu.cx & 0xFF, 0x44, "CL should be preserved");
+    assert_eq!((cpu.cx >> 8) & 0xFF, 0xCD, "CH should be set to 0xCD");
+    assert_eq!(
+        cpu.cx & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_mov_dh_imm8_preserves_dl() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // MOV DH, 0xEF (0xB6, 0xEF)
+    cpu.memory.load_program(0xFFFF0, &[0xB6, 0xEF]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.dx = 0xAABBCCDD;
+
+    cpu.step();
+
+    assert_eq!(cpu.dx & 0xFF, 0xDD, "DL should be preserved");
+    assert_eq!((cpu.dx >> 8) & 0xFF, 0xEF, "DH should be set to 0xEF");
+    assert_eq!(
+        cpu.dx & 0xFFFF_0000,
+        0xAABB_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_mov_bh_imm8_preserves_bl() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // MOV BH, 0x99 (0xB7, 0x99)
+    cpu.memory.load_program(0xFFFF0, &[0xB7, 0x99]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.bx = 0x11223344;
+
+    cpu.step();
+
+    assert_eq!(cpu.bx & 0xFF, 0x44, "BL should be preserved");
+    assert_eq!((cpu.bx >> 8) & 0xFF, 0x99, "BH should be set to 0x99");
+    assert_eq!(
+        cpu.bx & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+}

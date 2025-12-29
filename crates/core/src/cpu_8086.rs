@@ -597,10 +597,10 @@ impl<M: Memory8086> Cpu8086<M> {
             reg
         );
         match reg {
-            0 => self.ax = (self.ax & 0xFFFF_FF00) | ((val as u32) << 8), // AH
-            1 => self.cx = (self.cx & 0xFFFF_FF00) | ((val as u32) << 8), // CH
-            2 => self.dx = (self.dx & 0xFFFF_FF00) | ((val as u32) << 8), // DH
-            3 => self.bx = (self.bx & 0xFFFF_FF00) | ((val as u32) << 8), // BH
+            0 => self.ax = (self.ax & 0xFFFF_00FF) | ((val as u32) << 8), // AH
+            1 => self.cx = (self.cx & 0xFFFF_00FF) | ((val as u32) << 8), // CH
+            2 => self.dx = (self.dx & 0xFFFF_00FF) | ((val as u32) << 8), // DH
+            3 => self.bx = (self.bx & 0xFFFF_00FF) | ((val as u32) << 8), // BH
             _ => unreachable!(),
         }
     }
