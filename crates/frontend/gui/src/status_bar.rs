@@ -32,7 +32,7 @@ impl StatusBar {
         }
 
         let bar_y = height - STATUS_BAR_HEIGHT;
-        
+
         // Draw background for status bar (dark gray)
         for y in bar_y..height {
             for x in 0..width {

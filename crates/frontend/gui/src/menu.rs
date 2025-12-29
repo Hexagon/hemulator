@@ -21,8 +21,8 @@ pub enum MenuAction {
     Speed(SpeedSetting),
 
     // State menu
-    SaveState(u8),  // 1-5
-    LoadState(u8),  // 1-5
+    SaveState(u8), // 1-5
+    LoadState(u8), // 1-5
 
     // View menu
     Screenshot,
@@ -244,15 +244,7 @@ impl MenuBar {
                 0xFFFFFFFF // White
             };
 
-            ui_render::draw_text(
-                buffer,
-                width,
-                height,
-                &menu.label,
-                x_offset,
-                8,
-                color,
-            );
+            ui_render::draw_text(buffer, width, height, &menu.label, x_offset, 8, color);
 
             x_offset += MENU_ITEM_WIDTH;
         }
@@ -265,7 +257,14 @@ impl MenuBar {
         }
     }
 
-    fn render_dropdown(&self, buffer: &mut [u32], width: usize, height: usize, menu_idx: usize, menu: &Submenu) {
+    fn render_dropdown(
+        &self,
+        buffer: &mut [u32],
+        width: usize,
+        height: usize,
+        menu_idx: usize,
+        menu: &Submenu,
+    ) {
         let dropdown_x = 8 + menu_idx * MENU_ITEM_WIDTH;
         let dropdown_y = MENU_BAR_HEIGHT;
         let dropdown_width = 250; // Fixed width for dropdown

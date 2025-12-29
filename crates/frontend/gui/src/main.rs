@@ -1742,7 +1742,12 @@ fn main() {
         if ctrl_held && !shift_held && window.is_key_pressed(Key::O, false) {
             // Trigger F3 handler (mount points)
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("ROM Files", &["nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe"])
+                .add_filter(
+                    "ROM Files",
+                    &[
+                        "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe",
+                    ],
+                )
                 .add_filter("All Files", &["*"])
                 .pick_file()
             {
@@ -1796,7 +1801,7 @@ fn main() {
                     5 => Key::Key5,
                     _ => continue,
                 };
-                
+
                 if window.is_key_pressed(key, false) {
                     let state_data = sys.save_state();
                     // Serialize to bytes
@@ -1832,13 +1837,15 @@ fn main() {
                     5 => Key::Key5,
                     _ => continue,
                 };
-                
+
                 if window.is_key_pressed(key, false) {
                     if let Some(ref hash) = rom_hash {
                         match game_saves.load_slot(i, hash) {
                             Ok(state_bytes) => {
                                 // Deserialize from bytes
-                                if let Ok(state_data) = serde_json::from_slice::<serde_json::Value>(&state_bytes) {
+                                if let Ok(state_data) =
+                                    serde_json::from_slice::<serde_json::Value>(&state_bytes)
+                                {
                                     if let Err(e) = sys.load_state(&state_data) {
                                         eprintln!("Failed to load state: {}", e);
                                         status_message = format!("Failed to load state: {}", e);
@@ -1862,7 +1869,6 @@ fn main() {
                 }
             }
         }
-
 
         // Handle speed selector
         if show_speed_selector {
@@ -2790,13 +2796,13 @@ fn main() {
         let mut frame_with_ui = if !frame_to_present.is_empty() && (menu_bar.is_visible() || true) {
             // Always show status bar
             let mut ui_buffer = frame_to_present.to_vec();
-            
+
             // Render status bar at bottom
             status_bar.render(&mut ui_buffer, width, height);
-            
+
             // Render menu bar at top
             menu_bar.render(&mut ui_buffer, width, height);
-            
+
             ui_buffer
         } else {
             frame_to_present.to_vec()
@@ -2808,7 +2814,6 @@ fn main() {
                 break;
             }
         }
-
 
         // Dynamic frame pacing based on timing mode (NTSC ~60.1 FPS, PAL ~50.0 FPS)
         let frame_dt = last_frame.elapsed();
