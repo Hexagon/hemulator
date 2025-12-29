@@ -781,8 +781,13 @@ For N64 games, the standard controller mappings apply with these button equivale
   - **8086/8088**: All base instructions (MOV, arithmetic, logical, control flow, stack, flags)
   - **80186/80188**: PUSHA/POPA, BOUND, PUSH immediate, IMUL immediate, INS/OUTS, ENTER/LEAVE
   - **80286**: Protected mode instruction stubs (LMSW, LAR, LSL, CLTS)
-  - **80386**: MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc
+  - **80386**: Full 32-bit register support with operand size override (0x66 prefix)
+    - **32-bit Registers**: EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP, EIP, EFLAGS
+    - **32-bit Addressing**: SIB (Scale-Index-Base) byte support for complex addressing modes
+    - **32-bit Instructions**: MOV, ADD, SUB, AND, OR, XOR, TEST, CMP with 32-bit operands
+    - MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc (bit manipulation and conditional operations)
   - CPU model selection support for running software with different instruction set requirements
+  - Maintains full backward compatibility - 16-bit operations work on low 16 bits of 32-bit registers
   - See `AGENTS.md` for full instruction set details
 - **Memory bus** (configurable conventional + extended memory, 128KB VRAM, 256KB ROM)
   - **Conventional memory**: 256KB-640KB (PC/XT compatible, visible to all software)

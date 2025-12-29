@@ -70,7 +70,7 @@ impl PcCpu {
     /// Set IP register
     #[allow(dead_code)]
     pub fn set_ip(&mut self, value: u16) {
-        self.cpu.ip = value;
+        self.cpu.ip = value as u32;
     }
 
     /// Reset the CPU to initial state
@@ -79,9 +79,9 @@ impl PcCpu {
 
         // Restore PC boot state
         self.cpu.cs = 0xFFFF;
-        self.cpu.ip = 0x0000;
+        self.cpu.ip = 0x0000u32;
         self.cpu.ss = 0x0000;
-        self.cpu.sp = 0xFFFE;
+        self.cpu.sp = 0xFFFEu32;
         self.cpu.ds = 0x0000;
         self.cpu.es = 0x0000;
     }
@@ -129,7 +129,7 @@ impl PcCpu {
             0xE4 => {
                 let port = self.cpu.memory.read(physical_addr + 1) as u16;
                 let val = self.cpu.memory.io_read(port);
-                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u16);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u32);
                 self.cpu.ip = self.cpu.ip.wrapping_add(2);
                 return 10;
             }
@@ -138,7 +138,7 @@ impl PcCpu {
                 let port = self.cpu.memory.read(physical_addr + 1) as u16;
                 let val = self.cpu.memory.io_read(port);
                 let val_high = self.cpu.memory.io_read(port.wrapping_add(1));
-                self.cpu.ax = (val as u16) | ((val_high as u16) << 8);
+                self.cpu.ax = (val as u32) | ((val_high as u32) << 8);
                 self.cpu.ip = self.cpu.ip.wrapping_add(2);
                 return 10;
             }
@@ -162,24 +162,24 @@ impl PcCpu {
             }
             // IN AL, DX (0xEC)
             0xEC => {
-                let port = self.cpu.dx;
+                let port = self.cpu.dx as u16;
                 let val = self.cpu.memory.io_read(port);
-                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u16);
+                self.cpu.ax = (self.cpu.ax & 0xFF00) | (val as u32);
                 self.cpu.ip = self.cpu.ip.wrapping_add(1);
                 return 8;
             }
             // IN AX, DX (0xED)
             0xED => {
-                let port = self.cpu.dx;
+                let port = self.cpu.dx as u16;
                 let val = self.cpu.memory.io_read(port);
                 let val_high = self.cpu.memory.io_read(port.wrapping_add(1));
-                self.cpu.ax = (val as u16) | ((val_high as u16) << 8);
+                self.cpu.ax = (val as u32) | ((val_high as u32) << 8);
                 self.cpu.ip = self.cpu.ip.wrapping_add(1);
                 return 8;
             }
             // OUT DX, AL (0xEE)
             0xEE => {
-                let port = self.cpu.dx;
+                let port = self.cpu.dx as u16;
                 let val = (self.cpu.ax & 0xFF) as u8;
                 self.cpu.memory.io_write(port, val);
                 self.cpu.ip = self.cpu.ip.wrapping_add(1);
@@ -187,7 +187,7 @@ impl PcCpu {
             }
             // OUT DX, AX (0xEF)
             0xEF => {
-                let port = self.cpu.dx;
+                let port = self.cpu.dx as u16;
                 let val_low = (self.cpu.ax & 0xFF) as u8;
                 let val_high = ((self.cpu.ax >> 8) & 0xFF) as u8;
                 self.cpu.memory.io_write(port, val_low);
@@ -377,8 +377,8 @@ impl PcCpu {
         let col = self.cpu.memory.read(cursor_addr);
         let row = self.cpu.memory.read(cursor_addr + 1);
 
-        self.cpu.dx = ((row as u16) << 8) | (col as u16);
-        self.cpu.cx = 0x0607; // Default cursor shape
+        self.cpu.dx = ((row as u32) << 8) | (col as u32);
+        self.cpu.cx = 0x0607u32; // Default cursor shape
         51
     }
 
@@ -498,7 +498,7 @@ impl PcCpu {
         let ch = self.cpu.memory.read(video_addr);
         let attr = self.cpu.memory.read(video_addr + 1);
 
-        self.cpu.ax = ((attr as u16) << 8) | (ch as u16);
+        self.cpu.ax = ((attr as u32) << 8) | (ch as u32);
         51
     }
 
@@ -633,7 +633,7 @@ impl PcCpu {
     fn int10h_get_video_mode(&mut self) -> u32 {
         // Returns: AL = mode, AH = columns, BH = page
         // Default to mode 3 (80x25 color text)
-        self.cpu.ax = 0x5003; // AH=80 columns, AL=mode 3
+        self.cpu.ax = 0x5003u32; // AH=80 columns, AL=mode 3
         self.cpu.bx &= 0x00FF; // BH=0 (page 0)
         51
     }
@@ -803,7 +803,7 @@ impl PcCpu {
         };
 
         // Return color in AL
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | (color as u16);
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (color as u32);
         51
     }
 
@@ -876,7 +876,7 @@ impl PcCpu {
                 //         BL = active display code
                 //         BH = alternate display code
                 self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x1A;
-                self.cpu.bx = 0x0008; // VGA with color display
+                self.cpu.bx = 0x0008u32; // VGA with color display
                 51
             }
             _ => {
@@ -900,7 +900,7 @@ impl PcCpu {
         // Set ES:DI to point to a placeholder in BIOS data area
         // We'll use a location in conventional RAM that won't interfere
         self.cpu.es = 0x0040; // BIOS data area
-        self.cpu.di = 0x0100; // Offset within BIOS data area
+        self.cpu.di = 0x0100u32; // Offset within BIOS data area
 
         emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
             "INT 10h AH=1Bh: Get video state (returning stub table)".to_string()
@@ -970,7 +970,7 @@ impl PcCpu {
             }
 
             // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+            self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
 
             // Ensure CPU is not halted when we return a key
             self.cpu.set_halted(false);
@@ -981,7 +981,7 @@ impl PcCpu {
         // This emulates the blocking behavior of INT 16h AH=00h
         // The CPU will remain halted until keyboard input arrives and unhalts it
         self.cpu.set_halted(true);
-        self.cpu.ax = 0x0000;
+        self.cpu.ax = 0x0000u32;
         51
     }
 
@@ -998,11 +998,11 @@ impl PcCpu {
             self.set_zero_flag(false);
 
             // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u16) << 8) | (ascii as u16);
+            self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
         } else {
             // No make code available
             self.set_zero_flag(true); // ZF = 1 (no key)
-            self.cpu.ax = 0x0000;
+            self.cpu.ax = 0x0000u32;
         }
 
         51
@@ -1015,7 +1015,7 @@ impl PcCpu {
         // Bit 2 = Ctrl, Bit 3 = Alt
         // Bit 4 = Scroll Lock, Bit 5 = Num Lock, Bit 6 = Caps Lock, Bit 7 = Insert
         let flags = self.cpu.memory.keyboard.get_shift_flags();
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | (flags as u16);
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (flags as u32);
         51
     }
 
@@ -1085,14 +1085,14 @@ impl PcCpu {
         let saved_ax = self.cpu.ax;
 
         // Call INT 16h AH=00h (read keystroke) to get character
-        self.cpu.ax = 0x0000; // AH=00h
+        self.cpu.ax = 0x0000u32; // AH=00h
         self.int16h_read_keystroke();
 
         // Get the ASCII character from AL (INT 16h returns scancode in AH, ASCII in AL)
         let ascii = (self.cpu.ax & 0xFF) as u8;
 
         // Restore AH, keep AL with the character
-        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u32);
 
         51
     }
@@ -1106,7 +1106,7 @@ impl PcCpu {
         // Use INT 10h teletype output to display character
         // Save current AX
         let saved_ax = self.cpu.ax;
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u16);
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u32);
         self.int10h_teletype_output();
         self.cpu.ax = saved_ax;
 
@@ -1122,7 +1122,7 @@ impl PcCpu {
         if dl == 0xFF {
             // Read character - use INT 16h AH=01h to check for keystroke
             let saved_ax = self.cpu.ax;
-            self.cpu.ax = 0x0100; // AH=01h (check keystroke)
+            self.cpu.ax = 0x0100u32; // AH=01h (check keystroke)
             self.int16h_check_keystroke();
 
             // Check zero flag to see if key is available
@@ -1130,24 +1130,24 @@ impl PcCpu {
 
             if key_available {
                 // Key is available - read it with INT 16h AH=00h
-                self.cpu.ax = 0x0000; // AH=00h (read keystroke)
+                self.cpu.ax = 0x0000u32; // AH=00h (read keystroke)
                 self.int16h_read_keystroke();
 
                 // Get ASCII character from AL
                 let ascii = (self.cpu.ax & 0xFF) as u8;
 
                 // Restore AH, keep AL with the character, set ZF=0
-                self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+                self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u32);
                 self.set_zero_flag(false);
             } else {
                 // No key available - return 0 and set ZF=1
-                self.cpu.ax = saved_ax & 0xFF00;
+                self.cpu.ax = (saved_ax & 0xFF00) as u32;
                 self.set_zero_flag(true);
             }
         } else {
             // Write character
             let saved_ax = self.cpu.ax;
-            self.cpu.ax = (self.cpu.ax & 0xFF00) | (dl as u16);
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (dl as u32);
             self.int10h_teletype_output();
             self.cpu.ax = saved_ax;
         }
@@ -1166,14 +1166,14 @@ impl PcCpu {
         let saved_ax = self.cpu.ax;
 
         // Call INT 16h AH=00h (read keystroke) to get character
-        self.cpu.ax = 0x0000; // AH=00h
+        self.cpu.ax = 0x0000u32; // AH=00h
         self.int16h_read_keystroke();
 
         // Get the ASCII character from AL
         let ascii = (self.cpu.ax & 0xFF) as u8;
 
         // Restore AH, keep AL with the character
-        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u32);
 
         51
     }
@@ -1189,14 +1189,14 @@ impl PcCpu {
         let saved_ax = self.cpu.ax;
 
         // Call INT 16h AH=00h (read keystroke) to get character
-        self.cpu.ax = 0x0000; // AH=00h
+        self.cpu.ax = 0x0000u32; // AH=00h
         self.int16h_read_keystroke();
 
         // Get the ASCII character from AL
         let ascii = (self.cpu.ax & 0xFF) as u8;
 
         // Restore AH, keep AL with the character
-        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u16);
+        self.cpu.ax = (saved_ax & 0xFF00) | (ascii as u32);
 
         51
     }
@@ -1219,7 +1219,7 @@ impl PcCpu {
 
             // Use INT 10h teletype output
             let saved_ax = self.cpu.ax;
-            self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u16);
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (ch as u32);
             self.int10h_teletype_output();
             self.cpu.ax = saved_ax;
 
@@ -1259,7 +1259,7 @@ impl PcCpu {
         let saved_ax = self.cpu.ax;
 
         // Call INT 16h AH=01h (check keystroke)
-        self.cpu.ax = 0x0100; // AH=01h
+        self.cpu.ax = 0x0100u32; // AH=01h
         self.int16h_check_keystroke();
 
         // Check zero flag to see if key is available
@@ -1269,7 +1269,7 @@ impl PcCpu {
         if key_available {
             self.cpu.ax = (saved_ax & 0xFF00) | 0xFF; // AL = 0xFF (character available)
         } else {
-            self.cpu.ax = saved_ax & 0xFF00; // AL = 0x00 (no character)
+            self.cpu.ax = (saved_ax & 0xFF00) as u32; // AL = 0x00 (no character)
         }
 
         51
@@ -1290,7 +1290,7 @@ impl PcCpu {
         // Returns: ES:BX = interrupt vector
         // For now, return a dummy value
         self.cpu.es = 0x0000;
-        self.cpu.bx = 0x0000;
+        self.cpu.bx = 0x0000u32;
         51
     }
 
@@ -1331,7 +1331,7 @@ impl PcCpu {
         let mut filename = String::new();
         let mut offset = 0u16;
         loop {
-            let addr = ((ds as u32) << 4) + ((dx.wrapping_add(offset)) as u32);
+            let addr = ((ds as u32) << 4) + (dx.wrapping_add(offset as u32));
             let byte = self.cpu.memory.read(addr);
             if byte == 0 {
                 break;
@@ -1453,7 +1453,7 @@ impl PcCpu {
         // File handles >= 5 are user files, but not supported yet
         if handle >= 5 {
             // Return "invalid handle" error since we don't support file I/O
-            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE as u32;
             self.set_carry_flag(true);
         } else {
             // Standard handles: succeed but do nothing (can't close stdin/stdout/stderr)
@@ -1480,12 +1480,12 @@ impl PcCpu {
         if handle >= 5 {
             // File handles >= 5 are not supported (no file system implementation yet)
             // Return "invalid handle" error
-            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE as u32;
             self.set_carry_flag(true);
         } else {
             // Standard handles: return 0 bytes read (EOF)
             // This is correct behavior for stdin when no input is available
-            self.cpu.ax = 0x0000; // 0 bytes read
+            self.cpu.ax = 0x0000u32; // 0 bytes read
             self.set_carry_flag(false);
         }
         51
@@ -1510,12 +1510,12 @@ impl PcCpu {
         if handle >= 5 {
             // File handles >= 5 are not supported (no file system implementation yet)
             // Return "invalid handle" error
-            self.cpu.ax = DOS_ERROR_INVALID_HANDLE;
+            self.cpu.ax = DOS_ERROR_INVALID_HANDLE as u32;
             self.set_carry_flag(true);
         } else {
             // Standard handles: report all bytes written (but don't actually write)
             // Real implementation would write to console/device
-            self.cpu.ax = cx; // Report all bytes written
+            self.cpu.ax = cx as u32; // Report all bytes written
             self.set_carry_flag(false);
         }
         51
@@ -1681,7 +1681,7 @@ impl PcCpu {
         // Bits 14-15: Number of parallel printers (1 printer)
         equipment_flags |= 0b0100_0000_0000_0000;
 
-        self.cpu.ax = equipment_flags;
+        self.cpu.ax = equipment_flags as u32;
 
         if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
             eprintln!(
@@ -1704,7 +1704,7 @@ impl PcCpu {
         let memory_kb = self.cpu.memory.conventional_memory_kb() as u16;
 
         // Return conventional memory size in AX
-        self.cpu.ax = memory_kb;
+        self.cpu.ax = memory_kb as u32;
 
         // Clear carry flag (success)
         self.set_carry_flag(false);
@@ -1730,7 +1730,7 @@ impl PcCpu {
         self.cpu.sp = sp;
 
         // Clear IF flag to prevent nested interrupts (standard x86 INT behavior)
-        const FLAG_IF: u16 = 0x0200;
+        const FLAG_IF: u32 = 0x0200;
         self.cpu.flags &= !FLAG_IF;
 
         // Push CS
@@ -1780,9 +1780,9 @@ impl PcCpu {
         self.cpu.sp = sp.wrapping_add(2);
 
         // Update CPU state
-        self.cpu.ip = new_ip;
+        self.cpu.ip = new_ip as u32;
         self.cpu.cs = new_cs;
-        self.cpu.flags = new_flags;
+        self.cpu.flags = new_flags as u32;
     }
 
     /// Handle INT 13h BIOS disk services
@@ -1924,19 +1924,19 @@ impl PcCpu {
 
             let status = self.cpu.memory.disk_read(&request, &mut buffer);
             if status != 0x00 {
-                self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
                 self.set_carry_flag(true);
                 return 51;
             }
 
             // Write to memory with wrapping at 64KB boundary
             for (i, &byte) in buffer.iter().enumerate() {
-                let offset = buffer_offset.wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_seg, offset, byte);
+                let offset = (buffer_offset as u16).wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_seg, offset as u16, byte);
             }
 
             // Success - return sectors read in AL, AH=0
-            self.cpu.ax = count as u16; // AH=0, AL=count
+            self.cpu.ax = count as u32; // AH=0, AL=count
             self.set_carry_flag(false);
             return 51;
         }
@@ -1984,8 +1984,8 @@ impl PcCpu {
                 if should_log_progress && i % 128 == 0 {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
-                let offset = buffer_offset.wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_seg, offset, byte);
+                let offset = (buffer_offset as u16).wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_seg, offset as u16, byte);
             }
             if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
                 eprintln!(
@@ -2002,8 +2002,8 @@ impl PcCpu {
                     if i % 16 == 0 {
                         eprint!("\n  {:04X}:", i);
                     }
-                    let offset = buffer_offset.wrapping_add(i as u16);
-                    let byte = self.cpu.read_byte(buffer_seg, offset);
+                    let offset = (buffer_offset as u16).wrapping_add(i as u16);
+                    let byte = self.cpu.read_byte(buffer_seg, offset as u16);
                     eprint!(" {:02X}", byte);
                 }
                 eprintln!();
@@ -2011,14 +2011,14 @@ impl PcCpu {
         }
 
         // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
 
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
 
         // AL = number of sectors read (on success)
         if status == 0x00 {
-            self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u32);
 
             // Note: INT 13h AH=02h does NOT modify ES:BX
             // The buffer pointer remains unchanged after the read
@@ -2071,8 +2071,8 @@ impl PcCpu {
         let buffer_size = (count as usize) * 512;
         let mut buffer = vec![0u8; buffer_size];
         for (i, byte) in buffer.iter_mut().enumerate() {
-            let offset = buffer_offset.wrapping_add(i as u16);
-            *byte = self.cpu.read_byte(buffer_seg, offset);
+            let offset = (buffer_offset as u16).wrapping_add(i as u16);
+            *byte = self.cpu.read_byte(buffer_seg, offset as u16);
         }
 
         // Create disk request
@@ -2088,14 +2088,14 @@ impl PcCpu {
         let status = self.cpu.memory.disk_write(&request, &buffer);
 
         // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
 
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
 
         // AL = number of sectors written (on success)
         if status == 0x00 {
-            self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u32);
 
             // Note: INT 13h AH=03h does NOT modify ES:BX
             // The buffer pointer remains unchanged after the write
@@ -2159,15 +2159,15 @@ impl PcCpu {
             let cl_high = (((max_cylinder >> 8) & 0x03) << 6) as u8;
             let cl = cl_high | sectors_per_track;
 
-            self.cpu.cx = ((ch as u16) << 8) | (cl as u16);
+            self.cpu.cx = ((ch as u32) << 8) | (cl as u32);
 
             // DH = maximum head number (0-based)
             // DL = number of drives
-            self.cpu.dx = (((heads - 1) as u16) << 8) | 0x01;
+            self.cpu.dx = (((heads - 1) as u32) << 8) | 0x01;
 
             // ES:DI = pointer to disk parameter table (set to 0x0000:0x0000 for now)
             self.cpu.es = 0x0000;
-            self.cpu.di = 0x0000;
+            self.cpu.di = 0x0000u32;
 
             // AH = 0 (success)
             self.cpu.ax &= 0x00FF;
@@ -2192,7 +2192,7 @@ impl PcCpu {
         let status = self.cpu.memory.disk_controller().status();
 
         // AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
 
         // Clear carry flag if status is 0, set if error
         self.set_carry_flag(status != 0x00);
@@ -2220,7 +2220,7 @@ impl PcCpu {
         self.cpu.ax &= 0x00FF;
 
         // AL = number of sectors verified
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u16);
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (count as u32);
 
         // Clear carry flag (success)
         self.set_carry_flag(false);
@@ -2298,8 +2298,8 @@ impl PcCpu {
 
                 // CX:DX = number of sectors
                 let total_sectors = cylinders as u32 * sectors_per_track as u32 * heads as u32;
-                self.cpu.cx = ((total_sectors >> 16) & 0xFFFF) as u16;
-                self.cpu.dx = (total_sectors & 0xFFFF) as u16;
+                self.cpu.cx = ((total_sectors >> 16) & 0xFFFF) as u32;
+                self.cpu.dx = (total_sectors & 0xFFFF) as u32;
 
                 self.set_carry_flag(false);
             } else {
@@ -2343,7 +2343,7 @@ impl PcCpu {
         if bx == 0x55AA && drive >= 0x80 {
             // Extended INT 13h supported for hard drives
             // BX = 0xAA55 (signature)
-            self.cpu.bx = 0xAA55;
+            self.cpu.bx = 0xAA55u32;
 
             // AH = major version (01h = 1.x, 20h = 2.0, 21h = 2.1, 30h = 3.0)
             // Let's report version 3.0 (full EDD 3.0 support)
@@ -2429,13 +2429,13 @@ impl PcCpu {
         // Copy to memory at buffer_segment:buffer_offset
         if status == 0x00 {
             for (i, &byte) in buffer.iter().enumerate() {
-                let offset = buffer_offset.wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_segment, offset, byte);
+                let offset = (buffer_offset as u16).wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_segment, offset as u16, byte);
             }
         }
 
         // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
 
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
@@ -2490,8 +2490,8 @@ impl PcCpu {
         let buffer_size = (num_sectors as usize) * 512;
         let mut buffer = vec![0u8; buffer_size];
         for (i, byte) in buffer.iter_mut().enumerate() {
-            let offset = buffer_offset.wrapping_add(i as u16);
-            *byte = self.cpu.read_byte(buffer_segment, offset);
+            let offset = (buffer_offset as u16).wrapping_add(i as u16);
+            *byte = self.cpu.read_byte(buffer_segment, offset as u16);
         }
 
         // Perform LBA write
@@ -2501,7 +2501,7 @@ impl PcCpu {
             .disk_write_lba(drive, lba, num_sectors as u8, &buffer);
 
         // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u16) << 8);
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
         self.set_carry_flag(status != 0x00);
 
         51
@@ -2533,7 +2533,7 @@ impl PcCpu {
         // In a real system, this would read and verify sectors
 
         // AH = 0 (success), AL = number of sectors verified (low byte)
-        self.cpu.ax = num_sectors & 0xFF;
+        self.cpu.ax = (num_sectors & 0xFF) as u32;
         self.set_carry_flag(false);
 
         51
@@ -2628,7 +2628,7 @@ impl PcCpu {
 
     /// Set or clear the carry flag
     fn set_carry_flag(&mut self, value: bool) {
-        const FLAG_CF: u16 = 0x0001;
+        const FLAG_CF: u32 = 0x0001;
         if value {
             self.cpu.flags |= FLAG_CF;
         } else {
@@ -2639,13 +2639,13 @@ impl PcCpu {
     /// Get the carry flag value
     #[allow(dead_code)] // Used in tests
     fn get_carry_flag(&self) -> bool {
-        const FLAG_CF: u16 = 0x0001;
+        const FLAG_CF: u32 = 0x0001;
         (self.cpu.flags & FLAG_CF) != 0
     }
 
     /// Set or clear the zero flag
     fn set_zero_flag(&mut self, value: bool) {
-        const FLAG_ZF: u16 = 0x0040;
+        const FLAG_ZF: u32 = 0x0040;
         if value {
             self.cpu.flags |= FLAG_ZF;
         } else {
@@ -2703,8 +2703,8 @@ impl PcCpu {
         let ticks = (seconds_since_midnight as f64 * 18.2065) as u32;
 
         // CX:DX contains tick count
-        self.cpu.cx = ((ticks >> 16) & 0xFFFF) as u16;
-        self.cpu.dx = (ticks & 0xFFFF) as u16;
+        self.cpu.cx = ((ticks >> 16) & 0xFFFF) as u32;
+        self.cpu.dx = (ticks & 0xFFFF) as u32;
 
         // AL = midnight flag (0 = no midnight crossover since last read)
         self.cpu.ax &= 0xFF00;
@@ -2745,8 +2745,8 @@ impl PcCpu {
         let minutes_bcd = ((minutes / 10) << 4) | (minutes % 10);
         let seconds_bcd = ((seconds / 10) << 4) | (seconds % 10);
 
-        self.cpu.cx = ((hours_bcd as u16) << 8) | (minutes_bcd as u16);
-        self.cpu.dx = (seconds_bcd as u16) << 8;
+        self.cpu.cx = ((hours_bcd as u32) << 8) | (minutes_bcd as u32);
+        self.cpu.dx = (seconds_bcd as u32) << 8;
 
         // Clear carry flag (success)
         self.set_carry_flag(false);
@@ -2821,8 +2821,8 @@ impl PcCpu {
         let month_bcd = ((month / 10) << 4) | (month % 10);
         let day_bcd = ((day / 10) << 4) | (day % 10);
 
-        self.cpu.cx = ((century_bcd as u16) << 8) | (year_bcd as u16);
-        self.cpu.dx = ((month_bcd as u16) << 8) | (day_bcd as u16);
+        self.cpu.cx = ((century_bcd as u32) << 8) | (year_bcd as u32);
+        self.cpu.dx = ((month_bcd as u32) << 8) | (day_bcd as u32);
 
         // Clear carry flag (success)
         self.set_carry_flag(false);
@@ -2884,13 +2884,13 @@ impl PcCpu {
 
         // DX should contain "PCI " signature (lower 16 bits of EDX) if present
         // We return 0 to indicate no PCI BIOS
-        self.cpu.dx = 0x0000;
+        self.cpu.dx = 0x0000u32;
 
         // BX = PCI BIOS version (0x0000 = not present)
-        self.cpu.bx = 0x0000;
+        self.cpu.bx = 0x0000u32;
 
         // CX = last PCI bus number (0 = no PCI)
-        self.cpu.cx = 0x0000;
+        self.cpu.cx = 0x0000u32;
 
         51
     }
@@ -3007,8 +3007,8 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int33h
     fn int33h_reset(&mut self) -> u32 {
         let (ax, bx) = self.cpu.memory.mouse.reset();
-        self.cpu.ax = ax;
-        self.cpu.bx = bx;
+        self.cpu.ax = ax as u32;
+        self.cpu.bx = bx as u32;
         51
     }
 
@@ -3030,9 +3030,9 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int33h
     fn int33h_get_position_and_buttons(&mut self) -> u32 {
         let (buttons, x, y) = self.cpu.memory.mouse.get_position_and_buttons();
-        self.cpu.bx = buttons;
-        self.cpu.cx = x as u16;
-        self.cpu.dx = y as u16;
+        self.cpu.bx = buttons as u32;
+        self.cpu.cx = x as u32;
+        self.cpu.dx = y as u32;
         51
     }
 
@@ -3049,11 +3049,11 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int33h
     fn int33h_get_button_press_info(&mut self) -> u32 {
         let button = self.cpu.bx;
-        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_press_info(button);
-        self.cpu.ax = buttons;
-        self.cpu.bx = count;
-        self.cpu.cx = x as u16;
-        self.cpu.dx = y as u16;
+        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_press_info(button as u16);
+        self.cpu.ax = buttons as u32;
+        self.cpu.bx = count as u32;
+        self.cpu.cx = x as u32;
+        self.cpu.dx = y as u32;
         51
     }
 
@@ -3061,11 +3061,11 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int33h
     fn int33h_get_button_release_info(&mut self) -> u32 {
         let button = self.cpu.bx;
-        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_release_info(button);
-        self.cpu.ax = buttons;
-        self.cpu.bx = count;
-        self.cpu.cx = x as u16;
-        self.cpu.dx = y as u16;
+        let (buttons, count, x, y) = self.cpu.memory.mouse.get_button_release_info(button as u16);
+        self.cpu.ax = buttons as u32;
+        self.cpu.bx = count as u32;
+        self.cpu.cx = x as u32;
+        self.cpu.dx = y as u32;
         51
     }
 
@@ -3092,7 +3092,10 @@ impl PcCpu {
     fn int33h_set_mickey_ratio(&mut self) -> u32 {
         let horiz = self.cpu.cx;
         let vert = self.cpu.dx;
-        self.cpu.memory.mouse.set_mickey_ratio(horiz, vert);
+        self.cpu
+            .memory
+            .mouse
+            .set_mickey_ratio(horiz as u16, vert as u16);
         51
     }
 
@@ -3100,8 +3103,8 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int33h
     fn int33h_get_driver_version(&mut self) -> u32 {
         let (version, mtype, irq) = self.cpu.memory.mouse.get_driver_version();
-        self.cpu.bx = version;
-        self.cpu.cx = ((mtype as u16) << 8) | (irq as u16);
+        self.cpu.bx = version as u32;
+        self.cpu.cx = ((mtype as u32) << 8) | (irq as u32);
         51
     }
 
@@ -3255,7 +3258,7 @@ impl PcCpu {
             0x02 => {
                 // Get A20 gate status
                 // Return: AX = 0x0001 (A20 gate is enabled)
-                self.cpu.ax = 0x0001; // AH = 0x00 (success), AL = 0x01 (enabled)
+                self.cpu.ax = 0x0001u32; // AH = 0x00 (success), AL = 0x01 (enabled)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
                     "INT 15h AH=24h AL=02h: Get A20 status (returning enabled)".to_string()
@@ -3264,7 +3267,7 @@ impl PcCpu {
             0x03 => {
                 // Get A20 gate support
                 // Return: BX = 0x0001 (supported via keyboard controller or port 92h)
-                self.cpu.bx = 0x0001; // Supported
+                self.cpu.bx = 0x0001u32; // Supported
                 self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
@@ -3366,7 +3369,7 @@ impl PcCpu {
     fn int15h_get_extended_memory_size(&mut self) -> u32 {
         // Return extended memory size in KB (above 1MB)
         let extended_kb = self.cpu.memory.xms.total_extended_memory_kb();
-        self.cpu.ax = extended_kb.min(0xFFFF) as u16;
+        self.cpu.ax = extended_kb.min(0xFFFF) as u32;
         self.set_carry_flag(false);
         51
     }
@@ -3385,10 +3388,10 @@ impl PcCpu {
             0
         };
 
-        self.cpu.ax = mem_1_16mb as u16;
-        self.cpu.bx = mem_above_16mb as u16;
-        self.cpu.cx = mem_1_16mb as u16;
-        self.cpu.dx = mem_above_16mb as u16;
+        self.cpu.ax = mem_1_16mb as u32;
+        self.cpu.bx = mem_above_16mb as u32;
+        self.cpu.cx = mem_1_16mb as u32;
+        self.cpu.dx = mem_above_16mb as u32;
         self.set_carry_flag(false);
         51
     }
@@ -3531,7 +3534,7 @@ impl PcCpu {
 
         // Set return values (16-bit registers, caller manages 32-bit EAX/ECX)
         // EAX should be 0x534D4150 ('SMAP'), we set lower 16 bits
-        self.cpu.ax = 0x4150; // Lower 16 bits of 'SMAP' (0x534D4150)
+        self.cpu.ax = 0x4150u32; // Lower 16 bits of 'SMAP' (0x534D4150)
         self.cpu.cx = 20; // Bytes written (basic 20-byte format)
 
         // Set continuation value (0 if last entry, next index otherwise)
@@ -3571,7 +3574,7 @@ impl PcCpu {
                 // AL = port parameters (baud rate, parity, stop bits, word length)
                 // DX = port number (0-3)
                 // Returns: AH = line status, AL = modem status
-                self.cpu.ax = 0x0000; // Success
+                self.cpu.ax = 0x0000u32; // Success
                 51
             }
             0x01 => {
@@ -3585,14 +3588,14 @@ impl PcCpu {
                 // Receive character
                 // DX = port number
                 // Returns: AH = status, AL = received character
-                self.cpu.ax = 0x0000; // No data available
+                self.cpu.ax = 0x0000u32; // No data available
                 51
             }
             0x03 => {
                 // Get port status
                 // DX = port number
                 // Returns: AH = line status, AL = modem status
-                self.cpu.ax = 0x0000;
+                self.cpu.ax = 0x0000u32;
                 51
             }
             _ => {
@@ -3777,7 +3780,7 @@ impl PcCpu {
         let saved_ax = self.cpu.ax;
 
         // Set up AX for INT 10h AH=0Eh (teletype output), AL=character
-        self.cpu.ax = 0x0E00 | (character as u16);
+        self.cpu.ax = 0x0E00 | (character as u32);
         self.int10h_teletype_output();
 
         // Restore original AX value
@@ -3846,7 +3849,7 @@ impl PcCpu {
         // This is used by DOS to check for network redirector
         // We don't support networking, so return "not installed"
         // AL = 0xFF means "not installed"
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFF;
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFFu32;
         51
     }
 
@@ -3861,7 +3864,7 @@ impl PcCpu {
                 if self.cpu.memory.xms.is_installed() {
                     self.cpu.ax = 0x80 << 8; // AL = 0x80 = installed
                 } else {
-                    self.cpu.ax = 0x00; // Not installed
+                    self.cpu.ax = 0x00u32; // Not installed
                 }
                 51
             }
@@ -3870,7 +3873,7 @@ impl PcCpu {
                 // Return ES:BX pointing to XMS driver entry point in BIOS ROM
                 // The entry point is at F000:E010 in the BIOS ROM
                 self.cpu.es = 0xF000; // BIOS segment
-                self.cpu.bx = 0xE010; // Offset of XMS entry point
+                self.cpu.bx = 0xE010u32; // Offset of XMS entry point
                 51
             }
             _ => 51,
@@ -3887,16 +3890,16 @@ impl PcCpu {
                 // DPMI installation check
                 if self.cpu.memory.dpmi.is_installed() {
                     // DPMI is installed
-                    self.cpu.ax = 0x0000; // AX = 0 (supported)
-                    self.cpu.bx = 0x0001; // BX = flags (bit 0 = 32-bit support)
-                    self.cpu.cx = self.cpu.memory.dpmi.processor_type() as u16; // Processor type
-                    self.cpu.dx = self.cpu.memory.dpmi.version(); // DPMI version (BCD)
+                    self.cpu.ax = 0x0000u32; // AX = 0 (supported)
+                    self.cpu.bx = 0x0001u32; // BX = flags (bit 0 = 32-bit support)
+                    self.cpu.cx = self.cpu.memory.dpmi.processor_type() as u32; // Processor type
+                    self.cpu.dx = self.cpu.memory.dpmi.version() as u32; // DPMI version (BCD)
 
                     // Entry point in ES:DI
                     self.cpu.es = self.cpu.memory.dpmi.entry_segment();
-                    self.cpu.di = self.cpu.memory.dpmi.entry_offset();
+                    self.cpu.di = self.cpu.memory.dpmi.entry_offset() as u32;
                 } else {
-                    self.cpu.ax = 0x8001; // Not supported
+                    self.cpu.ax = 0x8001u32; // Not supported
                 }
                 51
             }
@@ -3926,7 +3929,7 @@ impl PcCpu {
             _ => {
                 // Unsupported function - set carry flag to indicate error
                 self.set_carry_flag(true);
-                self.cpu.ax = 0x8001; // Function not supported
+                self.cpu.ax = 0x8001u32; // Function not supported
                 51
             }
         }
@@ -3937,13 +3940,13 @@ impl PcCpu {
     fn int31h_allocate_descriptors(&mut self) -> u32 {
         let count = self.cpu.cx;
 
-        match self.cpu.memory.dpmi.allocate_descriptor(count) {
+        match self.cpu.memory.dpmi.allocate_descriptor(count as u16) {
             Ok(selector) => {
-                self.cpu.ax = selector; // Base selector
+                self.cpu.ax = selector as u32; // Base selector
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -3955,12 +3958,12 @@ impl PcCpu {
     fn int31h_free_descriptor(&mut self) -> u32 {
         let selector = self.cpu.bx;
 
-        match self.cpu.memory.dpmi.free_descriptor(selector) {
+        match self.cpu.memory.dpmi.free_descriptor(selector as u16) {
             Ok(()) => {
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -3972,14 +3975,14 @@ impl PcCpu {
     fn int31h_get_segment_base(&mut self) -> u32 {
         let selector = self.cpu.bx;
 
-        match self.cpu.memory.dpmi.get_segment_base(selector) {
+        match self.cpu.memory.dpmi.get_segment_base(selector as u16) {
             Ok(base) => {
-                self.cpu.cx = ((base >> 16) & 0xFFFF) as u16; // High word
-                self.cpu.dx = (base & 0xFFFF) as u16; // Low word
+                self.cpu.cx = ((base >> 16) & 0xFFFF) as u32; // High word
+                self.cpu.dx = (base & 0xFFFF) as u32; // Low word
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -3992,12 +3995,12 @@ impl PcCpu {
         let selector = self.cpu.bx;
         let base = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
 
-        match self.cpu.memory.dpmi.set_segment_base(selector, base) {
+        match self.cpu.memory.dpmi.set_segment_base(selector as u16, base) {
             Ok(()) => {
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -4009,14 +4012,14 @@ impl PcCpu {
     fn int31h_get_segment_limit(&mut self) -> u32 {
         let selector = self.cpu.bx;
 
-        match self.cpu.memory.dpmi.get_segment_limit(selector) {
+        match self.cpu.memory.dpmi.get_segment_limit(selector as u16) {
             Ok(limit) => {
-                self.cpu.cx = ((limit >> 16) & 0xFFFF) as u16; // High word
-                self.cpu.dx = (limit & 0xFFFF) as u16; // Low word
+                self.cpu.cx = ((limit >> 16) & 0xFFFF) as u32; // High word
+                self.cpu.dx = (limit & 0xFFFF) as u32; // Low word
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -4029,12 +4032,17 @@ impl PcCpu {
         let selector = self.cpu.bx;
         let limit = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
 
-        match self.cpu.memory.dpmi.set_segment_limit(selector, limit) {
+        match self
+            .cpu
+            .memory
+            .dpmi
+            .set_segment_limit(selector as u16, limit)
+        {
             Ok(()) => {
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -4048,9 +4056,9 @@ impl PcCpu {
 
         // ES:DI points to buffer that receives memory info structure
         // For simplicity, we'll just set registers
-        self.cpu.bx = (largest & 0xFFFF) as u16;
-        self.cpu.cx = ((largest >> 16) & 0xFFFF) as u16;
-        self.cpu.dx = (max_unlocked & 0xFFFF) as u16;
+        self.cpu.bx = (largest & 0xFFFF) as u32;
+        self.cpu.cx = ((largest >> 16) & 0xFFFF) as u32;
+        self.cpu.dx = (max_unlocked & 0xFFFF) as u32;
         self.set_carry_flag(false);
         51
     }
@@ -4062,14 +4070,14 @@ impl PcCpu {
 
         match self.cpu.memory.dpmi.allocate_memory(size) {
             Ok((linear_addr, handle)) => {
-                self.cpu.bx = ((linear_addr >> 16) & 0xFFFF) as u16; // Linear address high
-                self.cpu.cx = (linear_addr & 0xFFFF) as u16; // Linear address low
-                self.cpu.si = ((handle >> 16) & 0xFFFF) as u16; // Handle high
-                self.cpu.di = (handle & 0xFFFF) as u16; // Handle low
+                self.cpu.bx = ((linear_addr >> 16) & 0xFFFF) as u32; // Linear address high
+                self.cpu.cx = (linear_addr & 0xFFFF) as u32; // Linear address low
+                self.cpu.si = ((handle >> 16) & 0xFFFF) as u32; // Handle high
+                self.cpu.di = (handle & 0xFFFF) as u32; // Handle low
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -4086,7 +4094,7 @@ impl PcCpu {
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
-                self.cpu.ax = err_code;
+                self.cpu.ax = err_code as u32;
                 self.set_carry_flag(true);
             }
         }
@@ -4433,20 +4441,20 @@ fn scancode_to_ascii(scancode: u8) -> u8 {
 /// CPU register state for save/load
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CpuRegisters {
-    pub ax: u16,
-    pub bx: u16,
-    pub cx: u16,
-    pub dx: u16,
-    pub si: u16,
-    pub di: u16,
-    pub bp: u16,
-    pub sp: u16,
+    pub ax: u32,
+    pub bx: u32,
+    pub cx: u32,
+    pub dx: u32,
+    pub si: u32,
+    pub di: u32,
+    pub bp: u32,
+    pub sp: u32,
     pub cs: u16,
     pub ds: u16,
     pub es: u16,
     pub ss: u16,
-    pub ip: u16,
-    pub flags: u16,
+    pub ip: u32,
+    pub flags: u32,
     #[serde(default)]
     pub model: CpuModel,
 }
@@ -4462,9 +4470,9 @@ mod tests {
 
         // Check PC boot state
         assert_eq!(cpu.cpu.cs, 0xFFFF);
-        assert_eq!(cpu.cpu.ip, 0x0000);
+        assert_eq!(cpu.cpu.ip, 0x0000u32);
         assert_eq!(cpu.cpu.ss, 0x0000);
-        assert_eq!(cpu.cpu.sp, 0xFFFE);
+        assert_eq!(cpu.cpu.sp, 0xFFFEu32);
     }
 
     #[test]
@@ -4479,9 +4487,9 @@ mod tests {
         cpu.reset();
 
         // Should be back to boot state
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
         assert_eq!(cpu.cpu.cs, 0xFFFF);
-        assert_eq!(cpu.cpu.ip, 0x0000);
+        assert_eq!(cpu.cpu.ip, 0x0000u32);
     }
 
     #[test]
@@ -4499,11 +4507,11 @@ mod tests {
         assert_eq!(regs.cs, 0xABCD);
 
         cpu.reset();
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
 
         cpu.set_registers(&regs);
-        assert_eq!(cpu.cpu.ax, 0x1234);
-        assert_eq!(cpu.cpu.bx, 0x5678);
+        assert_eq!(cpu.cpu.ax, 0x1234u32);
+        assert_eq!(cpu.cpu.bx, 0x5678u32);
         assert_eq!(cpu.cpu.cs, 0xABCD);
     }
 
@@ -4889,8 +4897,8 @@ mod tests {
         cpu.step();
 
         // Should return scancode in AH, ASCII in AL
-        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_A as u16); // AH = scancode
-        assert_eq!(cpu.cpu.ax & 0xFF, b'a' as u16); // AL = ASCII 'a'
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_A as u32); // AH = scancode
+        assert_eq!(cpu.cpu.ax & 0xFF, b'a' as u32); // AL = ASCII 'a'
     }
 
     #[test]
@@ -4923,8 +4931,8 @@ mod tests {
         cpu.step();
 
         // Should return scancode in AH, ASCII in AL, and ZF=0
-        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_B as u16); // AH = scancode
-        assert_eq!(cpu.cpu.ax & 0xFF, b'b' as u16); // AL = ASCII 'b'
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, SCANCODE_B as u32); // AH = scancode
+        assert_eq!(cpu.cpu.ax & 0xFF, b'b' as u32); // AL = ASCII 'b'
         assert_eq!(cpu.cpu.flags & 0x0040, 0); // ZF = 0 (key available)
 
         // Key should still be in buffer (peek doesn't consume)
@@ -4955,7 +4963,7 @@ mod tests {
         cpu.step();
 
         // Should return 0 and ZF=1 (no key)
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
         assert_eq!(cpu.cpu.flags & 0x0040, 0x0040); // ZF = 1 (no key available)
     }
 
@@ -5003,8 +5011,8 @@ mod tests {
             cpu.step();
 
             // Verify scancode and ASCII
-            assert_eq!((cpu.cpu.ax >> 8) & 0xFF, expected_scan as u16);
-            assert_eq!(cpu.cpu.ax & 0xFF, expected_ascii as u16);
+            assert_eq!((cpu.cpu.ax >> 8) & 0xFF, expected_scan as u32);
+            assert_eq!(cpu.cpu.ax & 0xFF, expected_ascii as u32);
         }
 
         // Buffer should now be empty
@@ -5303,7 +5311,7 @@ mod tests {
 
         // Verify function supported (AL=1Ah) and VGA returned
         assert_eq!(cpu.cpu.ax & 0xFF, 0x1A);
-        assert_eq!(cpu.cpu.bx, 0x0008); // VGA with color display
+        assert_eq!(cpu.cpu.bx, 0x0008u32); // VGA with color display
     }
 
     #[test]
@@ -5402,7 +5410,7 @@ mod tests {
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
         // Verify error code (invalid handle)
-        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE as u32);
     }
 
     #[test]
@@ -5432,7 +5440,7 @@ mod tests {
         // Verify no error (CF clear) for stdin
         assert!(!cpu.get_carry_flag());
         // Verify 0 bytes read (EOF/no input available)
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
     }
 
     #[test]
@@ -5462,7 +5470,7 @@ mod tests {
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
         // Verify error code (invalid handle)
-        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE as u32);
     }
 
     #[test]
@@ -5492,7 +5500,7 @@ mod tests {
         // Verify no error (CF clear) for stdout
         assert!(!cpu.get_carry_flag());
         // Verify all bytes reported as written
-        assert_eq!(cpu.cpu.ax, 0x0020);
+        assert_eq!(cpu.cpu.ax, 0x0020u32);
     }
 
     #[test]
@@ -5519,7 +5527,7 @@ mod tests {
         // Verify error (CF set) since file handles >= 5 are not supported
         assert!(cpu.get_carry_flag());
         // Verify error code (invalid handle)
-        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE);
+        assert_eq!(cpu.cpu.ax, DOS_ERROR_INVALID_HANDLE as u32);
     }
 
     #[test]
@@ -5643,7 +5651,7 @@ mod tests {
         cpu.step();
 
         // Should succeed with AH=0, AL=0
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
 
         // Carry flag should be clear (success)
         assert!(!cpu.get_carry_flag());
@@ -5675,7 +5683,7 @@ mod tests {
         cpu.step();
 
         // Should succeed with AH=0, AL=0
-        assert_eq!(cpu.cpu.ax, 0x0000);
+        assert_eq!(cpu.cpu.ax, 0x0000u32);
 
         // Carry flag should be clear (success)
         assert!(!cpu.get_carry_flag());
@@ -5713,7 +5721,7 @@ mod tests {
 
         // ES:BX should point to configuration table (in BIOS ROM at F000:E000)
         assert_eq!(cpu.cpu.es, 0xF000);
-        assert_eq!(cpu.cpu.bx, 0xE000);
+        assert_eq!(cpu.cpu.bx, 0xE000u32);
 
         // Verify configuration table in memory
         let table_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.bx as u32);

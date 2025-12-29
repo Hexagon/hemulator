@@ -657,16 +657,16 @@ pub fn create_pc_debug_overlay(
     width: usize,
     height: usize,
     cs: u16,
-    ip: u16,
-    ax: u16,
-    bx: u16,
-    cx: u16,
-    dx: u16,
-    sp: u16,
-    bp: u16,
-    si: u16,
-    di: u16,
-    flags: u16,
+    ip: u32,
+    ax: u32,
+    bx: u32,
+    cx: u32,
+    dx: u32,
+    sp: u32,
+    bp: u32,
+    si: u32,
+    di: u32,
+    flags: u32,
     cycles: u64,
     fps: f64,
     video_backend: &str,
@@ -674,12 +674,12 @@ pub fn create_pc_debug_overlay(
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
 
-    let cs_ip_line = format!("CS:IP: {:04X}:{:04X}", cs, ip);
-    let ax_bx_line = format!("AX: {:04X}  BX: {:04X}", ax, bx);
-    let cx_dx_line = format!("CX: {:04X}  DX: {:04X}", cx, dx);
-    let sp_bp_line = format!("SP: {:04X}  BP: {:04X}", sp, bp);
-    let si_di_line = format!("SI: {:04X}  DI: {:04X}", si, di);
-    let flags_line = format!("FLAGS: {:04X}", flags);
+    let cs_ip_line = format!("CS:IP: {:04X}:{:08X}", cs, ip);
+    let ax_bx_line = format!("AX: {:08X}  BX: {:08X}", ax, bx);
+    let cx_dx_line = format!("CX: {:08X}  DX: {:08X}", cx, dx);
+    let sp_bp_line = format!("SP: {:08X}  BP: {:08X}", sp, bp);
+    let si_di_line = format!("SI: {:08X}  DI: {:08X}", si, di);
+    let flags_line = format!("FLAGS: {:08X}", flags);
     let cycles_line = format!("Cycles: {}", cycles);
     let fps_line = format!("FPS: {:.1}", fps);
     let video_line = format!("Video: {}", video_backend);
