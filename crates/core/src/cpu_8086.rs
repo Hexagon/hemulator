@@ -7829,7 +7829,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Compare AX with word at ES:DI
                 let val = self.read_u16(self.es, self.di as u16);
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
 
