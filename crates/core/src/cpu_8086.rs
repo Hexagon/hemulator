@@ -597,10 +597,10 @@ impl<M: Memory8086> Cpu8086<M> {
             reg
         );
         match reg {
-            0 => self.ax = (self.ax & 0xFFFF_FF00) | ((val as u32) << 8), // AH
-            1 => self.cx = (self.cx & 0xFFFF_FF00) | ((val as u32) << 8), // CH
-            2 => self.dx = (self.dx & 0xFFFF_FF00) | ((val as u32) << 8), // DH
-            3 => self.bx = (self.bx & 0xFFFF_FF00) | ((val as u32) << 8), // BH
+            0 => self.ax = (self.ax & 0xFFFF_00FF) | ((val as u32) << 8), // AH
+            1 => self.cx = (self.cx & 0xFFFF_00FF) | ((val as u32) << 8), // CH
+            2 => self.dx = (self.dx & 0xFFFF_00FF) | ((val as u32) << 8), // DH
+            3 => self.bx = (self.bx & 0xFFFF_00FF) | ((val as u32) << 8), // BH
             _ => unreachable!(),
         }
     }
@@ -1720,7 +1720,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Apply segment override to source (DS:SI)
                         let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            self.ax = self.read_u16(src_seg, self.si as u16) as u32;
+                            self.ax = (self.ax & 0xFFFF_0000) | (self.read_u16(src_seg, self.si as u16) as u32);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2u32);
                             } else {
@@ -2683,7 +2683,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_add_16(self.ax as u16, val);
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -3067,7 +3067,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -3129,7 +3129,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16) & val;
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -3156,7 +3156,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16) | val;
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -3869,9 +3869,9 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 2;
                             return 2;
                         }
-                        // ECX contains MSR index, value comes from EDX:EAX
+                        // ECX contains MSR index, value comes from EDX:EAX (full 32-bit)
                         let msr_index = self.cx as u32;
-                        let value = (self.ax as u64) | ((self.dx as u64) << 16);
+                        let value = (self.ax as u64) | ((self.dx as u64) << 32);
                         self.msrs.insert(msr_index, value);
                         self.cycles += 30;
                         30
@@ -3882,9 +3882,9 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 2;
                             return 2;
                         }
-                        // Return TSC in EDX:EAX (high:low)
-                        self.ax = ((self.tsc & 0xFFFF) as u16) as u32;
-                        self.dx = (((self.tsc >> 16) & 0xFFFF) as u16) as u32;
+                        // Return TSC in EDX:EAX (high:low) - Full 32-bit registers
+                        self.ax = (self.tsc & 0xFFFFFFFF) as u32;
+                        self.dx = ((self.tsc >> 32) & 0xFFFFFFFF) as u32;
                         self.cycles += 6;
                         6
                     }
@@ -3894,12 +3894,12 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.cycles += 2;
                             return 2;
                         }
-                        // ECX contains MSR index, result goes in EDX:EAX
+                        // ECX contains MSR index, result goes in EDX:EAX - Full 32-bit registers
                         let msr_index = self.cx as u32;
                         let value = self.msrs.get(&msr_index).copied().unwrap_or(0);
                         // Split 64-bit value into EDX:EAX (high:low)
-                        self.ax = ((value & 0xFFFF) as u16) as u32;
-                        self.dx = (((value >> 16) & 0xFFFF) as u16) as u32;
+                        self.ax = (value & 0xFFFFFFFF) as u32;
+                        self.dx = ((value >> 32) & 0xFFFFFFFF) as u32;
                         self.cycles += 20;
                         20
                     }
@@ -3910,16 +3910,16 @@ impl<M: Memory8086> Cpu8086<M> {
                             return 2;
                         }
                         // Input: EAX = function number
-                        // Output: EAX, EBX, ECX, EDX contain CPU information
+                        // Output: EAX, EBX, ECX, EDX contain CPU information (full 32-bit)
                         let function = self.ax;
                         match function {
                             0 => {
                                 // Maximum supported function and vendor ID
                                 self.ax = 1; // Supports function 0 and 1
                                              // "GenuineIntel" in EBX, EDX, ECX
-                                self.bx = 0x756E; // "un"
-                                self.dx = 0x4965; // "Ie"
-                                self.cx = 0x6C65; // "le"
+                                self.bx = 0x756E6547; // "Genu"
+                                self.dx = 0x49656E69; // "ineI"
+                                self.cx = 0x6C65746E; // "ntel"
                             }
                             1 => {
                                 // Processor info and feature bits
@@ -3927,7 +3927,7 @@ impl<M: Memory8086> Cpu8086<M> {
                                 self.ax = 0x0543; // Family:5, Model:4, Stepping:3
                                 self.bx = 0; // Brand index, CLFLUSH size, etc.
                                              // Feature flags in EDX
-                                self.dx = 0x0001; // FPU present
+                                self.dx = 0x00000001; // FPU present
                                 self.cx = 0; // Extended features
                             }
                             _ => {
@@ -4914,7 +4914,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let af =
                     ((((self.ax as u16) & 0x0F) + (val & 0x0F) + (carry_in as u16)) & 0x10) != 0;
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, carry);
                 self.set_flag(FLAG_OF, overflow);
@@ -5084,7 +5084,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
                 let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
@@ -5260,7 +5260,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16) ^ val;
 
-                self.ax = result as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
@@ -6242,7 +6242,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         let val = self.read_rm8(modbits, rm);
                         let al = (self.ax & 0xFF) as u8;
                         let result = (al as u16) * (val as u16);
-                        self.ax = result as u32;
+                        self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                         // CF and OF are set if AH is non-zero
                         let high_byte_set = (result & 0xFF00) != 0;
                         self.set_flag(FLAG_CF, high_byte_set);
@@ -6261,7 +6261,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         let val = self.read_rm8(modbits, rm) as i8;
                         let al = (self.ax & 0xFF) as i8;
                         let result = (al as i16) * (val as i16);
-                        self.ax = result as u32;
+                        self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                         // CF and OF are set if sign extension of AL != AH
                         let sign_extended = (al as i16) as u16;
                         let high_byte_set = (result as u16) != sign_extended;
@@ -6394,9 +6394,9 @@ impl<M: Memory8086> Cpu8086<M> {
                     // MUL r/m16 (unsigned multiply AX by r/m16, result in DX:AX)
                     0b100 => {
                         let val = self.read_rm16(modbits, rm);
-                        let result = self.ax * (val as u32);
-                        self.ax = ((result & 0xFFFF) as u16) as u32;
-                        self.dx = (((result >> 16) & 0xFFFF) as u16) as u32;
+                        let result = (self.ax as u16 as u32) * (val as u32);
+                        self.ax = (self.ax & 0xFFFF_0000) | ((result & 0xFFFF) as u32);
+                        self.dx = (self.dx & 0xFFFF_0000) | (((result >> 16) & 0xFFFF) as u32);
                         // CF and OF are set if DX is non-zero
                         let high_word_set = self.dx != 0;
                         self.set_flag(FLAG_CF, high_word_set);
@@ -6412,10 +6412,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     // IMUL r/m16 (signed multiply AX by r/m16, result in DX:AX)
                     0b101 => {
                         let val = self.read_rm16(modbits, rm) as i16;
-                        let ax_signed = self.ax as i16;
+                        let ax_signed = (self.ax as u16) as i16;
                         let result = (ax_signed as i32) * (val as i32);
-                        self.ax = ((result & 0xFFFF) as u16) as u32;
-                        self.dx = (((result >> 16) & 0xFFFF) as u16) as u32;
+                        self.ax = (self.ax & 0xFFFF_0000) | ((result & 0xFFFF) as u32);
+                        self.dx = (self.dx & 0xFFFF_0000) | (((result >> 16) & 0xFFFF) as u32);
                         // CF and OF are set if sign extension of AX != DX
                         let sign_extended = if (self.ax & 0x8000) != 0 {
                             0xFFFF
@@ -6760,7 +6760,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     return 10;
                 }
                 self.sp = self.bp;
-                self.bp = self.pop() as u32;
+                self.bp = (self.bp & 0xFFFF_0000) | (self.pop() as u32);
                 self.cycles += 8;
                 8
             }
@@ -7335,14 +7335,14 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                self.di = self.pop() as u32;
-                self.si = self.pop() as u32;
-                self.bp = self.pop() as u32;
+                self.di = (self.di & 0xFFFF_0000) | (self.pop() as u32);
+                self.si = (self.si & 0xFFFF_0000) | (self.pop() as u32);
+                self.bp = (self.bp & 0xFFFF_0000) | (self.pop() as u32);
                 let _temp_sp = self.pop(); // Discard SP value
-                self.bx = self.pop() as u32;
-                self.dx = self.pop() as u32;
-                self.cx = self.pop() as u32;
-                self.ax = self.pop() as u32;
+                self.bx = (self.bx & 0xFFFF_0000) | (self.pop() as u32);
+                self.dx = (self.dx & 0xFFFF_0000) | (self.pop() as u32);
+                self.cx = (self.cx & 0xFFFF_0000) | (self.pop() as u32);
+                self.ax = (self.ax & 0xFFFF_0000) | (self.pop() as u32);
                 self.cycles += 51;
                 51
             }
@@ -7786,7 +7786,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xAD => {
                 // Load word from DS:SI into AX (with segment override support)
                 let src_seg = self.get_segment_with_override(self.ds);
-                self.ax = self.read_u16(src_seg, self.si as u16) as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (self.read_u16(src_seg, self.si as u16) as u32);
 
                 // Update SI
                 if self.get_flag(FLAG_DF) {
