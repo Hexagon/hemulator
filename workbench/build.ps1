@@ -108,15 +108,21 @@ $com = [System.IO.File]::ReadAllBytes($OutputCom)
 
 # Parse FAT12 boot sector
 $bytesPerSector = [BitConverter]::ToUInt16($img, 0x0B)
+$sectorsPerCluster = $img[0x0D]
 $reservedSectors = [BitConverter]::ToUInt16($img, 0x0E)
 $numFATs = $img[0x10]
 $rootEntries = [BitConverter]::ToUInt16($img, 0x11)
+$totalSectors = [BitConverter]::ToUInt16($img, 0x13)
 $sectorsPerFAT = [BitConverter]::ToUInt16($img, 0x16)
 
 # Calculate offsets
 $fat1Offset = $reservedSectors * $bytesPerSector
 $rootDirOffset = $fat1Offset + ($numFATs * $sectorsPerFAT * $bytesPerSector)
 $dataOffset = $rootDirOffset + (($rootEntries * 32) / $bytesPerSector) * $bytesPerSector
+
+# Calculate maximum cluster number based on disk geometry
+$dataSectors = $totalSectors - ($dataOffset / $bytesPerSector)
+$maxCluster = [int]($dataSectors / $sectorsPerCluster) + 1
 
 # First, check if TEST.COM already exists and delete it
 $existingEntry = -1
@@ -146,7 +152,7 @@ for ($i = 0; $i -lt $rootEntries; $i++) {
         
         # Free the cluster chain in FAT
         $cluster = $existingCluster
-        while ($cluster -ge 2 -and $cluster -lt 0xFF0) {
+        while ($cluster -ge 2 -and $cluster -lt 0xFF8) {
             $fatOffset = $fat1Offset + [int]($cluster * 1.5)
             
             # Read next cluster in chain
@@ -197,7 +203,7 @@ if ($entryOffset -eq -1) {
 
 # Find free cluster in FAT
 $freeCluster = -1
-for ($cluster = 2; $cluster -lt 2880; $cluster++) {
+for ($cluster = 2; $cluster -lt $maxCluster; $cluster++) {
     $fatOffset = $fat1Offset + [int]($cluster * 1.5)
     $fatValue = 0
     
