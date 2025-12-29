@@ -6400,8 +6400,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         let result = (self.ax as u16 as u32) * (val as u32);
                         self.ax = (self.ax & 0xFFFF_0000) | ((result & 0xFFFF) as u32);
                         self.dx = (self.dx & 0xFFFF_0000) | (((result >> 16) & 0xFFFF) as u32);
-                        // CF and OF are set if DX is non-zero
-                        let high_word_set = self.dx != 0;
+                        // CF and OF are set if the high word (upper 16 bits) of result is non-zero
+                        let high_word_set = (self.dx & 0xFFFF) != 0;
                         self.set_flag(FLAG_CF, high_word_set);
                         self.set_flag(FLAG_OF, high_word_set);
                         self.update_flags_16(self.ax as u16);

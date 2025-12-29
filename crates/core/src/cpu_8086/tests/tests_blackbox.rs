@@ -1145,7 +1145,7 @@ fn test_blackbox_loop_conditional_modified_value() {
                 0x05, 0x07, 0x00, // ADD AX, 7            @ 0x0106
                 0x3D, 0x32, 0x00, // CMP AX, 50           @ 0x0109
                 0x7D, 0x02, // JGE +2 (to done)     @ 0x010C
-                0xE2, 0xF7, // LOOP -9              @ 0x010E (to 0x0106)
+                0xE2, 0xF6, // LOOP -10             @ 0x010E (to 0x0106)
                 // done:
                 0xF4, // HLT                  @ 0x0110
             ],
@@ -1160,40 +1160,18 @@ fn test_blackbox_loop_conditional_modified_value() {
             steps += 1;
         }
 
-        // BUG INVESTIGATION: Expected 8 iterations (7*8=56 >= 50)
-        // But if AX=7, it means only 1 iteration happened
-        // This suggests JGE is jumping when it shouldn't (7 < 50)
-        // OR there's an issue with the loop logic
-
-        // Document actual behavior instead of expected
-        // If this fails, it exposes a bug in either:
-        // 1. CMP flag setting for signed comparison
-        // 2. JGE condition evaluation
-        // 3. Our understanding of the instruction behavior
-
-        // For now, assert what we observe to be true
-        // TODO: Investigate if this is correct CPU behavior or a bug
-        if cpu.ax == 7 {
-            // Only looped once - JGE jumped when 7 < 50 (BUG!)
-            assert_eq!(
-                cpu.ax, 7,
-                "Model {:?}: DOCUMENTS BUG - AX is 7, meaning JGE jumped when 7 < 50",
-                model
-            );
-            assert_eq!(
-                cpu.cx, 99,
-                "Model {:?}: DOCUMENTS BUG - Only 1 iteration",
-                model
-            );
-        } else {
-            // Correct behavior
-            assert_eq!(
-                cpu.ax, 56,
-                "Model {:?}: AX should be 56 (8 iterations * 7)",
-                model
-            );
-            assert_eq!(cpu.cx, 92, "Model {:?}: CX should be 92 (100 - 8)", model);
-        }
+        // Should exit after 8 iterations (7*8=56 >= 50)
+        // Note: LOOP only executes 7 times because JGE jumps on the 8th iteration
+        assert_eq!(
+            cpu.ax, 56,
+            "Model {:?}: AX should be 56 (8 iterations * 7)",
+            model
+        );
+        assert_eq!(
+            cpu.cx, 93,
+            "Model {:?}: CX should be 93 (7 LOOPs: 100-7)",
+            model
+        );
     }
 }
 
@@ -1312,10 +1290,10 @@ fn test_blackbox_nested_loops_multiple_conditions() {
         let mut cpu = Cpu8086::with_model(mem, model);
 
         // Outer loop: runs while BX < 3
-        // Inner loop: runs while DX < 4 OR CX != 0
+        // Inner loop: accumulates in DX until threshold, resets each outer iteration
         // 1. MOV BX, 0           ; Outer counter
-        // 2. MOV DX, 0           ; Result accumulator
         // outer_loop:
+        // 2. MOV DX, 0           ; Reset accumulator for each outer loop
         // 3. MOV CX, 4           ; Inner counter
         // inner_loop:
         // 4. INC DX              ; Increment result
@@ -1333,8 +1311,8 @@ fn test_blackbox_nested_loops_multiple_conditions() {
             0x0100,
             &[
                 0xBB, 0x00, 0x00, // MOV BX, 0            @ 0x0100
-                0xBA, 0x00, 0x00, // MOV DX, 0            @ 0x0103
                 // outer_loop:
+                0xBA, 0x00, 0x00, // MOV DX, 0            @ 0x0103
                 0xB9, 0x04, 0x00, // MOV CX, 4            @ 0x0106
                 // inner_loop:
                 0x42, // INC DX               @ 0x0109
@@ -1346,7 +1324,7 @@ fn test_blackbox_nested_loops_multiple_conditions() {
                 // exit_inner:
                 0x43, // INC BX               @ 0x0113
                 0x83, 0xFB, 0x03, // CMP BX, 3            @ 0x0114
-                0x7C, 0xED, // JL -19               @ 0x0117 (to 0x0106)
+                0x7C, 0xEA, // JL -22               @ 0x0117 (to 0x0103)
                 0xF4, // HLT                  @ 0x0119
             ],
         );
@@ -1360,15 +1338,11 @@ fn test_blackbox_nested_loops_multiple_conditions() {
             steps += 1;
         }
 
-        // DOCUMENTING ACTUAL BEHAVIOR:
-        // Observed: DX=6, BX=3
-        // This suggests the inner loop runs more than expected
-        // First iteration: DX goes 0->1->2->3->4 (exits at 4)
-        // Second iteration: DX=4, INC DX->5, CMP 5,4 -> JL false, JMP to exit
-        // Third iteration: DX=5, INC DX->6, CMP 6,4 -> JL false, JMP to exit
-        // Result: DX=6, BX=3
-
-        assert_eq!(cpu.dx, 6, "Model {:?}: DX actual behavior is 6", model);
+        // First iteration: DX goes 0->1->2->3->4 (exits at 4), BX=1
+        // Second iteration: DX resets to 0, goes 0->1->2->3->4, BX=2
+        // Third iteration: DX resets to 0, goes 0->1->2->3->4, BX=3
+        // Result: DX = 4, BX = 3
+        assert_eq!(cpu.dx, 4, "Model {:?}: DX should be 4", model);
         assert_eq!(cpu.bx, 3, "Model {:?}: BX should be 3", model);
     }
 }
@@ -1420,14 +1394,11 @@ fn test_blackbox_loop_overflow_detection() {
             steps += 1;
         }
 
-        // DOCUMENTING ACTUAL BEHAVIOR:
+        // DOCUMENTING ACTUAL BEHAVIOR (NOW CORRECT):
         // Powers of 2: 1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536
-        // Observed: CX=5, which means 15 iterations (20-15=5)
-        // After 15 iterations: 2^15 = 32768 = 0x8000
-        // After 16 iterations: 2^16 = 65536 = 0x10000 (overflow, OF set)
-        //
-        // But we observe CX=5, meaning 15 iterations, suggesting overflow detected at 15th multiply
-        // This could indicate MUL sets OF differently than expected
+        // After 16 MUL operations: 2^16 = 65536 = 0x10000 (DX:AX = 0x0001:0x0000, OF set)
+        // The 16th MUL sets OF, so JO jumps BEFORE the LOOP instruction
+        // Therefore, LOOP only executes 15 times: CX = 20 - 15 = 5
 
         assert_eq!(
             cpu.ax, 0,
@@ -1437,7 +1408,7 @@ fn test_blackbox_loop_overflow_detection() {
         assert_eq!(cpu.dx, 1, "Model {:?}: DX should be 1 (high word)", model);
         assert_eq!(
             cpu.cx, 5,
-            "Model {:?}: CX actual behavior is 5 (15 iterations)",
+            "Model {:?}: CX should be 5 (16 MULs, but only 15 LOOPs)",
             model
         );
     }
