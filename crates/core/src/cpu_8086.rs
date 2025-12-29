@@ -415,7 +415,7 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     fn fetch_u8(&mut self) -> u8 {
         let val = self.read(self.cs, self.ip as u16);
-        self.ip = (self.ip.wrapping_add(1)) & 0xFFFF; // Keep in 16-bit range for now
+        self.ip = (self.ip.wrapping_add(1u32)) & 0xFFFF; // Keep in 16-bit range for now
         val
     }
 
@@ -433,7 +433,7 @@ impl<M: Memory8086> Cpu8086<M> {
     fn read_u16(&self, segment: u16, offset: u16) -> u16 {
         // 8086 is little-endian: read low byte at offset, then high byte at offset + 1
         let low_byte = self.read(segment, offset) as u16;
-        let high_byte = self.read(segment, offset.wrapping_add(1)) as u16;
+        let high_byte = self.read(segment, offset.wrapping_add(1u32)) as u16;
         (high_byte << 8) | low_byte
     }
 
@@ -443,7 +443,7 @@ impl<M: Memory8086> Cpu8086<M> {
         let lo = (val & 0xFF) as u8;
         let hi = ((val >> 8) & 0xFF) as u8;
         self.write(segment, offset, lo);
-        self.write(segment, offset.wrapping_add(1), hi);
+        self.write(segment, offset.wrapping_add(1u32), hi);
     }
 
     /// Push a word onto the stack
@@ -1288,7 +1288,7 @@ impl<M: Memory8086> Cpu8086<M> {
         if self.halted {
             // Even when halted, TSC continues to increment
             if self.model.supports_pentium_instructions() {
-                self.tsc = self.tsc.wrapping_add(1);
+                self.tsc = self.tsc.wrapping_add(1u32);
             }
             return 1;
         }
@@ -1554,7 +1554,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // According to x86 behavior, REP before non-string instructions is ignored
                         // We need to "un-fetch" the opcode and execute it normally
                         // Since we already fetched it, we decrement IP to put it back
-                        self.ip = self.ip.wrapping_sub(1);
+                        self.ip = self.ip.wrapping_sub(1u32);
                         // Now execute the instruction normally by recursing
                         let cycles = self.step();
                         self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
@@ -1682,7 +1682,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // REPNZ prefix with non-string instruction
                         // According to x86 behavior, REPNZ before non-string instructions is ignored
                         // We need to "un-fetch" the opcode and execute it normally
-                        self.ip = self.ip.wrapping_sub(1);
+                        self.ip = self.ip.wrapping_sub(1u32);
                         // Now execute the instruction normally by recursing
                         let cycles = self.step();
                         self.cycles = self.cycles.wrapping_sub(cycles as u64); // Remove the cycles we're about to re-add
@@ -1838,7 +1838,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         "Undefined 0x8F operation with op={} at CS:IP={:04X}:{:04X}",
                         op,
                         self.cs,
-                        self.ip.wrapping_sub(2)
+                        self.ip.wrapping_sub(2u32)
                     );
                     self.cycles += 1;
                     1
@@ -1971,7 +1971,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let (rm_val, seg, offset) = self.read_rmw8(modbits, rm);
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u16) < (reg_val as u16);
-                let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
                 let af = Self::calc_af_sub_8(rm_val, reg_val);
 
                 self.write_rmw8(modbits, rm, result, seg, offset);
@@ -2025,7 +2025,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm8(modbits, rm);
                 let result = reg_val.wrapping_sub(rm_val);
                 let borrow = (reg_val as u16) < (rm_val as u16);
-                let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
                 let af = Self::calc_af_sub_8(reg_val, rm_val);
 
                 if reg < 4 {
@@ -2081,7 +2081,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm8(modbits, rm);
                 let result = rm_val.wrapping_sub(reg_val);
                 let borrow = (rm_val as u16) < (reg_val as u16);
-                let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
                 let af = Self::calc_af_sub_8(rm_val, reg_val);
 
                 self.update_flags_8(result);
@@ -2131,7 +2131,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm8(modbits, rm);
                 let result = reg_val.wrapping_sub(rm_val);
                 let borrow = (reg_val as u16) < (rm_val as u16);
-                let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
                 let af = Self::calc_af_sub_8(reg_val, rm_val);
 
                 self.update_flags_8(result);
@@ -2175,7 +2175,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let al = (self.ax & 0xFF) as u8;
                 let result = al.wrapping_add(val);
                 let carry = (al as u16 + val as u16) > 0xFF;
-                let overflow = ((al ^ result) & (val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((al ^ result) & (val ^ result) & 0x80) != 0;
                 let af = Self::calc_af_add_8(al, val);
 
                 self.ax = (self.ax & 0xFFFF_FF00) | (result as u32);
@@ -2326,7 +2326,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let old_cf = self.get_flag(FLAG_CF);
 
                 if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
-                    al = al.wrapping_add(6);
+                    al = al.wrapping_add(6u32);
                     self.set_flag(FLAG_AF, true);
                 } else {
                     self.set_flag(FLAG_AF, false);
@@ -2359,7 +2359,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let old_cf = self.get_flag(FLAG_CF);
 
                 if (al & 0x0F) > 9 || self.get_flag(FLAG_AF) {
-                    al = al.wrapping_sub(6);
+                    al = al.wrapping_sub(6u32);
                     self.set_flag(FLAG_AF, true);
                 } else {
                     self.set_flag(FLAG_AF, false);
@@ -2623,21 +2623,21 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let base = self.protected_mode.gdtr.base;
 
                                 self.write(segment, offset, (limit & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
-                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1u32), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2u32), (base & 0xFF) as u8);
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(3),
+                                    offset.wrapping_add(3u32),
                                     ((base >> 8) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(4),
+                                    offset.wrapping_add(4u32),
                                     ((base >> 16) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(5),
+                                    offset.wrapping_add(5u32),
                                     ((base >> 24) & 0xFF) as u8,
                                 );
                                 self.cycles += 11;
@@ -2650,21 +2650,21 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let base = self.protected_mode.idtr.base;
 
                                 self.write(segment, offset, (limit & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
-                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1u32), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2u32), (base & 0xFF) as u8);
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(3),
+                                    offset.wrapping_add(3u32),
                                     ((base >> 8) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(4),
+                                    offset.wrapping_add(4u32),
                                     ((base >> 16) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(5),
+                                    offset.wrapping_add(5u32),
                                     ((base >> 24) & 0xFF) as u8,
                                 );
                                 self.cycles += 11;
@@ -2674,13 +2674,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // LGDT - Load Global Descriptor Table Register
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit_low = self.read(segment, offset) as u16;
-                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1u32)) as u16;
                                 let limit = limit_low | (limit_high << 8);
 
-                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
-                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
-                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
-                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
+                                let base_0 = self.read(segment, offset.wrapping_add(2u32)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3u32)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4u32)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5u32)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
 
                                 self.protected_mode.load_gdtr(base, limit);
@@ -2691,13 +2691,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // LIDT - Load Interrupt Descriptor Table Register
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit_low = self.read(segment, offset) as u16;
-                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1u32)) as u16;
                                 let limit = limit_low | (limit_high << 8);
 
-                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
-                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
-                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
-                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
+                                let base_0 = self.read(segment, offset.wrapping_add(2u32)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3u32)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4u32)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5u32)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
 
                                 self.protected_mode.load_idtr(base, limit);
@@ -3060,7 +3060,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                             self.set_reg16(reg, offset);
                             self.ss = segment;
                         }
@@ -3080,7 +3080,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                             self.set_reg16(reg, offset);
                             self.fs = segment;
                         }
@@ -3100,7 +3100,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         if modbits != 0b11 {
                             let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                             let offset = self.read_u16(seg, offset_ea);
-                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                            let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                             self.set_reg16(reg, offset);
                             self.gs = segment;
                         }
@@ -3567,7 +3567,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         // Read 32-bit value from memory (4 bytes)
                         let mem_low = self.read_u16(segment, offset);
-                        let mem_high = self.read_u16(segment, offset.wrapping_add(2));
+                        let mem_high = self.read_u16(segment, offset.wrapping_add(2u32));
                         let mem_val = (mem_low as u32) | ((mem_high as u32) << 16);
 
                         // Compare with DX:AX
@@ -3580,7 +3580,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.write_u16(segment, offset, (new_val & 0xFFFF) as u16);
                             self.write_u16(
                                 segment,
-                                offset.wrapping_add(2),
+                                offset.wrapping_add(2u32),
                                 ((new_val >> 16) & 0xFFFF) as u16,
                             );
                         } else {
@@ -3623,7 +3623,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             // From memory (read 32 bits)
                             let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                             let low = self.read_u16(segment, offset);
-                            let high = self.read_u16(segment, offset.wrapping_add(2));
+                            let high = self.read_u16(segment, offset.wrapping_add(2u32));
                             ((high as u64) << 16) | (low as u64)
                         };
 
@@ -3655,7 +3655,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.write_u16(segment, offset, (value & 0xFFFF) as u16);
                             self.write_u16(
                                 segment,
-                                offset.wrapping_add(2),
+                                offset.wrapping_add(2u32),
                                 ((value >> 16) & 0xFFFF) as u16,
                             );
                         }
@@ -4181,7 +4181,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             "Two-byte opcode 0x0F 0x{:02X} not implemented at CS:IP={:04X}:{:04X}",
                             next_opcode,
                             self.cs,
-                            self.ip.wrapping_sub(2)
+                            self.ip.wrapping_sub(2u32)
                         );
                         self.cycles += 2;
                         2
@@ -5206,7 +5206,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // 0x82 - Same as 0x80 (alias for 8086)
             0x82 => {
-                self.ip = self.ip.wrapping_sub(1); // Back up and execute as 0x80
+                self.ip = self.ip.wrapping_sub(1u32); // Back up and execute as 0x80
                 self.step()
             }
 
@@ -5691,7 +5691,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             "Unimplemented 0xF6 subopcode: {} at CS:IP={:04X}:{:04X}",
                             reg,
                             self.cs,
-                            self.ip.wrapping_sub(2)
+                            self.ip.wrapping_sub(2u32)
                         );
                         self.cycles += 1;
                         1
@@ -5849,7 +5849,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             "Unimplemented 0xF7 subopcode: {} at CS:IP={:04X}:{:04X}",
                             reg,
                             self.cs,
-                            self.ip.wrapping_sub(2)
+                            self.ip.wrapping_sub(2u32)
                         );
                         self.cycles += 1;
                         1
@@ -5865,7 +5865,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 if modbits != 0b11 {
                     let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                     let offset = self.read_u16(seg, offset_ea);
-                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                     self.set_reg16(reg, offset);
                     self.es = segment;
                 }
@@ -5881,7 +5881,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 if modbits != 0b11 {
                     let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                     let offset = self.read_u16(seg, offset_ea);
-                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                    let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                     self.set_reg16(reg, offset);
                     self.ds = segment;
                 }
@@ -5925,7 +5925,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         "Undefined 0xC6 operation with op={} at CS:IP={:04X}:{:04X}",
                         op,
                         self.cs,
-                        self.ip.wrapping_sub(2)
+                        self.ip.wrapping_sub(2u32)
                     );
                     self.cycles += 1;
                     1
@@ -5963,7 +5963,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             let imm_high = self.fetch_u16();
                             // Write 32 bits to memory (2 words)
                             self.write_u16(seg, offset, imm_low);
-                            self.write_u16(seg, offset.wrapping_add(2), imm_high);
+                            self.write_u16(seg, offset.wrapping_add(2u32), imm_high);
                             self.cycles += 10;
                             10
                         }
@@ -6003,7 +6003,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         "Undefined 0xC7 operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
                         op,
                         self.cs,
-                        self.ip.wrapping_sub(2)
+                        self.ip.wrapping_sub(2u32)
                     );
                     self.cycles += 1;
                     1
@@ -6073,8 +6073,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     let ip_before = self.ip;
                     let byte1 = self.read(self.cs, ip_before);
-                    let byte2 = self.read(self.cs, ip_before.wrapping_add(1));
-                    let byte3 = self.read(self.cs, ip_before.wrapping_add(2));
+                    let byte2 = self.read(self.cs, ip_before.wrapping_add(1u32));
+                    let byte3 = self.read(self.cs, ip_before.wrapping_add(2u32));
                     let phys_start = ((self.cs as u32) << 4) + (ip_before as u32);
                     eprintln!(
                         "[ENTER DEBUG] CS:IP={:04X}:{:04X}, physical=0x{:05X}",
@@ -6432,7 +6432,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xF0 => {
                 // LOCK prefix - for basic emulation, just execute next instruction
                 let _next_opcode = self.fetch_u8();
-                self.ip = self.ip.wrapping_sub(1);
+                self.ip = self.ip.wrapping_sub(1u32);
                 self.step()
             }
 
@@ -6459,7 +6459,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     0 => {
                         // INC r/m8 - use RMW helpers to avoid double-fetching displacement
                         let (val, seg, offset) = self.read_rmw8(modbits, rm);
-                        let result = val.wrapping_add(1);
+                        let result = val.wrapping_add(1u32);
                         let overflow = val == 0x7F;
                         // AF calculation for INC: check if carry from bit 3 to bit 4
                         let af = (val & 0x0F) == 0x0F;
@@ -6471,7 +6471,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     1 => {
                         // DEC r/m8 - use RMW helpers to avoid double-fetching displacement
                         let (val, seg, offset) = self.read_rmw8(modbits, rm);
-                        let result = val.wrapping_sub(1);
+                        let result = val.wrapping_sub(1u32);
                         let overflow = val == 0x80;
                         // AF calculation for DEC: check if borrow from bit 4 to bit 3
                         let af = (val & 0x0F) == 0x00;
@@ -6485,7 +6485,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             "Undefined 0xFE operation with op={} at CS:IP={:04X}:{:04X}",
                             op,
                             self.cs,
-                            self.ip.wrapping_sub(2)
+                            self.ip.wrapping_sub(2u32)
                         );
                         // For undefined operations, we'll just NOP and continue
                         // This prevents the system from crashing completely
@@ -6508,7 +6508,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     0 => {
                         // INC r/m16 - use RMW helpers to avoid double-fetching displacement
                         let (val, seg, offset) = self.read_rmw16(modbits, rm);
-                        let result = val.wrapping_add(1);
+                        let result = val.wrapping_add(1u32);
                         let overflow = val == 0x7FFF;
                         // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
                         let af = (val & 0x0F) == 0x0F;
@@ -6526,7 +6526,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     1 => {
                         // DEC r/m16 - use RMW helpers to avoid double-fetching displacement
                         let (val, seg, offset) = self.read_rmw16(modbits, rm);
-                        let result = val.wrapping_sub(1);
+                        let result = val.wrapping_sub(1u32);
                         let overflow = val == 0x8000;
                         // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
                         let af = (val & 0x0F) == 0x00;
@@ -6557,7 +6557,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // CALL m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
-                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                         self.push(self.cs);
                         self.push(self.ip as u16);
                         self.ip = offset as u32;
@@ -6580,7 +6580,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // JMP m16:16 (far)
                         let (seg, offset_ea, _) = self.calc_effective_address(modbits, rm);
                         let offset = self.read_u16(seg, offset_ea);
-                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2));
+                        let segment = self.read_u16(seg, offset_ea.wrapping_add(2u32));
                         self.ip = offset as u32;
                         self.cs = segment;
                         self.cycles += 24;
@@ -6608,7 +6608,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             "Undefined 0xFF operation with op={} at CS:IP={:04X}:{:04X} - treating as NOP",
                             op,
                             self.cs,
-                            self.ip.wrapping_sub(2)
+                            self.ip.wrapping_sub(2u32)
                         );
                         self.cycles += 1;
                         1
@@ -6621,7 +6621,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x40..=0x47 => {
                 let reg = opcode & 0x07;
                 let val = self.get_reg16(reg);
-                let result = val.wrapping_add(1);
+                let result = val.wrapping_add(1u32);
                 let overflow = val == 0x7FFF;
                 // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
                 let af = (val & 0x0F) == 0x0F;
@@ -6639,7 +6639,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x48..=0x4F => {
                 let reg = opcode & 0x07;
                 let val = self.get_reg16(reg);
-                let result = val.wrapping_sub(1);
+                let result = val.wrapping_sub(1u32);
                 let overflow = val == 0x8000;
                 // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
                 let af = (val & 0x0F) == 0x00;
@@ -6721,7 +6721,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let index = self.get_reg16(reg) as i16;
                 let (_seg, ea, _bytes) = self.calc_effective_address(modbits, rm);
                 let lower_bound = self.read_u16(self.ds, ea) as i16;
-                let upper_bound = self.read_u16(self.ds, ea.wrapping_add(2)) as i16;
+                let upper_bound = self.read_u16(self.ds, ea.wrapping_add(2u32)) as i16;
 
                 // If index is out of bounds, generate INT 5 as exception
                 if index < lower_bound || index > upper_bound {
@@ -7347,7 +7347,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     "Unknown 8086 opcode: 0x{:02X} at CS:IP={:04X}:{:04X}",
                     opcode,
                     self.cs,
-                    self.ip.wrapping_sub(1)
+                    self.ip.wrapping_sub(1u32)
                 );
                 self.cycles += 1;
                 1
