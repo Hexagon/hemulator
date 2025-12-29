@@ -2037,10 +2037,20 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // MOV r/m16, r16 (0x89)
             0x89 => {
+                // MOV r/m16/32, r16/32 - Move register to r/m
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let val = self.get_reg16(reg);
-                self.write_rm16(modbits, rm, val);
+                
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operand
+                    let val = self.get_reg32(reg);
+                    self.write_rm32(modbits, rm, val);
+                } else {
+                    // 16-bit operand (default)
+                    let val = self.get_reg16(reg);
+                    self.write_rm16(modbits, rm, val);
+                }
+                
                 self.cycles += if modbits == 0b11 { 2 } else { 9 };
                 if modbits == 0b11 {
                     2
@@ -2067,12 +2077,21 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // MOV r16, r/m16 (0x8B)
+            // MOV r16/32, r/m16/32 (0x8B)
             0x8B => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let val = self.read_rm16(modbits, rm);
-                self.set_reg16(reg, val);
+                
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operand
+                    let val = self.read_rm32(modbits, rm);
+                    self.set_reg32(reg, val);
+                } else {
+                    // 16-bit operand (default)
+                    let val = self.read_rm16(modbits, rm);
+                    self.set_reg16(reg, val);
+                }
+                
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
                 if modbits == 0b11 {
                     2
@@ -6251,23 +6270,21 @@ impl<M: Memory8086> Cpu8086<M> {
                     if self.operand_size_override && self.model.supports_80386_instructions() {
                         // 32-bit operand size: MOV r/m32, imm32
                         if modbits == 0b11 {
-                            // Register mode - fetch 32-bit immediate
-                            let imm_low = self.fetch_u16();
-                            let _imm_high = self.fetch_u16();
-                            // Store low 16 bits to destination register (partial 32-bit support)
-                            self.write_rm16(modbits, rm, imm_low);
-                            // Note: High 16 bits are discarded in 16-bit mode
-                            // This maintains instruction stream sync by consuming all bytes
+                            // Register mode - no displacement to fetch
+                            let imm32 = self.fetch_u32();
+                            self.write_rm32(modbits, rm, imm32);
                             self.cycles += 4;
                             4
                         } else {
-                            // Memory mode - get effective address first
-                            let (seg, offset, _) = self.calc_effective_address(modbits, rm);
-                            let imm_low = self.fetch_u16();
-                            let imm_high = self.fetch_u16();
-                            // Write 32 bits to memory (2 words)
-                            self.write_u16(seg, offset, imm_low);
-                            self.write_u16(seg, offset.wrapping_add(2), imm_high);
+                            // Memory mode - get effective address first to consume displacement bytes
+                            let (seg, offset, _) = if self.address_size_override {
+                                self.calc_effective_address_32(modbits, rm)
+                            } else {
+                                let (s, o, b) = self.calc_effective_address(modbits, rm);
+                                (s, o as u32, b)
+                            };
+                            let imm32 = self.fetch_u32(); // Fetch immediate after displacement
+                            self.write_u32(seg, offset, imm32);
                             self.cycles += 10;
                             10
                         }
@@ -6297,10 +6314,9 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // Consume immediate bytes based on operand size
                     if self.operand_size_override && self.model.supports_80386_instructions() {
-                        let _ = self.fetch_u16(); // Consume 4 bytes total
-                        let _ = self.fetch_u16();
+                        let _ = self.fetch_u32();
                     } else {
-                        let _ = self.fetch_u16(); // Consume 2 bytes
+                        let _ = self.fetch_u16();
                     }
                     // Note: This is likely invalid code; treat as NOP to continue execution
                     eprintln!(
@@ -12232,11 +12248,11 @@ mod tests {
         cpu.cs = 0x0000;
         cpu.ax = 0x0000;
 
-        // Execute 0x66 MOV AX, imm32
+        // Execute 0x66 MOV EAX, imm32
         cpu.step();
 
-        // In 16-bit mode, we only store the low 16 bits
-        assert_eq!(cpu.ax, 0x3412, "AX should contain low 16 bits of immediate");
+        // With full 32-bit support, we now store all 32 bits
+        assert_eq!(cpu.get_reg32(0), 0x78563412, "EAX should contain full 32-bit immediate");
         // Verify IP advanced correctly (consumed all 7 bytes)
         assert_eq!(cpu.ip, 0x0107, "IP should advance by 7 bytes");
     }
@@ -12265,10 +12281,8 @@ mod tests {
         cpu.step();
 
         // Verify 32-bit value was written to memory
-        let val_low = cpu.memory.read_u16(0x10200);
-        let val_high = cpu.memory.read_u16(0x10202);
-        assert_eq!(val_low, 0xBEEF, "Low word should be written");
-        assert_eq!(val_high, 0xDEAD, "High word should be written");
+        let val_32 = cpu.read_u32(0x1000, 0x0200);
+        assert_eq!(val_32, 0xDEADBEEF, "Full 32-bit value should be written");
         // Verify IP advanced correctly (consumed all 9 bytes)
         assert_eq!(cpu.ip, 0x0109, "IP should advance by 9 bytes");
     }
@@ -13660,5 +13674,106 @@ mod tests {
         cpu.update_flags_32(0x7FFFFFFF); // MSB not set = positive
         assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
         assert!(!cpu.get_flag(FLAG_SF), "SF should not be set for positive");
+    }
+
+    // ========================================================================
+    // Phase 3 Part 2: Instruction-Level 32-bit Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mov_r32_rm32_register_to_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set EBX to source value
+        cpu.set_reg32(3, 0xDEADBEEF);
+        
+        // MOV EAX, EBX: opcode 0x89, ModR/M = 0xD8 (mod=11, reg=011, rm=000)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x89); // MOV opcode
+        cpu.memory.write(addr + 2, 0xD8); // ModR/M
+        
+        // Execute the instruction
+        cpu.operand_size_override = false; // Will be set by prefix decoder
+        cpu.step();
+        
+        // Verify EAX was updated with full 32-bit value
+        assert_eq!(cpu.get_reg32(0), 0xDEADBEEF, "EAX should contain EBX value");
+    }
+
+    #[test]
+    fn test_mov_rm32_r32_register_to_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set ECX to source value  
+        cpu.set_reg32(1, 0x12345678);
+        
+        // MOV EDX, ECX: opcode 0x8B, ModR/M = 0xD1 (mod=11, reg=010, rm=001)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x8B); // MOV opcode
+        cpu.memory.write(addr + 2, 0xD1); // ModR/M
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify EDX was updated with full 32-bit value
+        assert_eq!(cpu.get_reg32(2), 0x12345678, "EDX should contain ECX value");
+    }
+
+    #[test]
+    fn test_mov_rm32_imm32() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // MOV EAX, 0xCAFEBABE: opcode 0xC7, ModR/M = 0xC0 (mod=11, op=0, rm=000)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0xC7); // MOV opcode
+        cpu.memory.write(addr + 2, 0xC0); // ModR/M
+        // Immediate value 0xCAFEBABE (little-endian)
+        cpu.memory.write(addr + 3, 0xBE);
+        cpu.memory.write(addr + 4, 0xBA);
+        cpu.memory.write(addr + 5, 0xFE);
+        cpu.memory.write(addr + 6, 0xCA);
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify EAX was set to immediate value
+        assert_eq!(cpu.get_reg32(0), 0xCAFEBABE, "EAX should contain immediate value");
+    }
+
+    #[test]
+    fn test_mov_preserves_16bit_operation_without_override() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set EBX to 32-bit value
+        cpu.set_reg32(3, 0xFFFFFFFF);
+        
+        // MOV BX, 0x1234 (16-bit, no override): opcode 0xC7, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0xC7); // MOV opcode (no 0x66 prefix)
+        cpu.memory.write(addr + 1, 0xC3); // ModR/M (mod=11, op=0, rm=011 for BX)
+        cpu.memory.write(addr + 2, 0x34); // Immediate low byte
+        cpu.memory.write(addr + 3, 0x12); // Immediate high byte
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify only low 16 bits were affected
+        assert_eq!(cpu.get_reg16(3), 0x1234, "BX should be 0x1234");
+        assert_eq!(cpu.get_reg32(3), 0xFFFF1234, "EBX high bits should be preserved");
     }
 }
