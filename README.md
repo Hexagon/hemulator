@@ -5,11 +5,11 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 ## Features
 
 - 🎮 **NES Emulation**: ✅ Fully working - ~90%+ of NES games via 14 mapper implementations
-- 🕹️ **Atari 2600 Emulation**: ✅ Fully working - Most cartridge formats (2K-32K) with multiple banking schemes
-- 🎲 **Game Boy Emulation**: ⚠️ Functional - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
-- 🏰 **SNES Emulation**: 🚧 Basic infrastructure - CPU working, minimal PPU, no APU/input yet
+- 💻 **PC Emulation**: ⚠️ Functional - COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS boots.
+- 🕹️ **Atari 2600 Emulation**: 🚧 In development - Support for most cartridge formats (2K-32K) with multiple banking schemes
+- 🎲 **Game Boy Emulation**: 🚧 In development - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
+- 🏰 **SNES Emulation**: 🚧 In development - CPU working, minimal PPU, no APU/input yet
 - 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
-- 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, CGA text and graphics modes
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
@@ -20,35 +20,20 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 
 ## System Implementation Status
 
-| System | Status | CPU | Graphics | Audio | Input | Save States | Coverage/Notes |
+| System | Status | CPU | Graphics | Audio | Input | Save States / Persistance | Coverage/Notes |
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
-| **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
-| **Game Boy** | ✅ Fully Working | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported |
-| **SNES** | 🚧 Basic | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
+| **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16 bit) complete, 32-bit in progrss | CGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; text + graphics modes |
+| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Game Boy** | 🚧 In Development | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported |
+| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
-| **PC (DOS)** | 🧪 Experimental | 8086 (Partial) | CGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ❌ | COM/EXE loading; text + graphics modes |
 
 **Legend:**
 - ✅ Fully Working - Production ready with comprehensive features
 - ⚠️ Functional - Core features work but missing some capabilities
 - 🚧 In Development - Active work in progress with partial functionality
-- 🧪 Experimental - Proof of concept or early stage
 - ❌ Not implemented - Component not yet available
-
-### Which System Should I Use?
-
-**Ready for gaming:**
-- ✅ **NES** - Best experience, ~90% game compatibility, full audio
-- ✅ **Atari 2600** - Complete implementation, all features working
-
-**Playable with full features:**
-- ✅ **Game Boy** - Complete implementation with graphics, sound, and timer support
-
-**Not ready for gaming:**
-- 🚧 **SNES** - Infrastructure only, very limited functionality
-- 🚧 **N64** - Development in progress, can render 3D graphics but few games work
-- 🧪 **PC/DOS** - CGA/EGA/VGA graphics modes work, but limited BIOS/DOS support
 
 ## For Users
 
