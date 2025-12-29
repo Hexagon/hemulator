@@ -2646,18 +2646,6 @@ impl<M: Memory8086> Cpu8086<M> {
                     let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
                     let af = Self::calc_af_sub_16(reg_val, rm_val);
 
-                    eprintln!(
-                        "[CMP r16,r/m16] CS:IP={:04X}:{:04X} reg{}=0x{:04X} r/m=0x{:04X} result=0x{:04X} CF={} ZF={}",
-                        self.cs,
-                        self.ip.wrapping_sub(2),
-                        reg,
-                        reg_val,
-                        rm_val,
-                        result,
-                        if borrow { 1 } else { 0 },
-                        if result == 0 { 1 } else { 0 }
-                    );
-
                     self.update_flags_16(result as u16);
                     self.set_flag(FLAG_CF, borrow);
                     self.set_flag(FLAG_OF, overflow);
@@ -3116,18 +3104,6 @@ impl<M: Memory8086> Cpu8086<M> {
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
-
-                eprintln!(
-                    "[CMP AX,imm16] CS:IP={:04X}:{:04X} AX=0x{:04X} (low16=0x{:04X}) val=0x{:04X} result=0x{:04X} CF={} ZF={}",
-                    self.cs,
-                    self.ip.wrapping_sub(3),
-                    self.ax,
-                    self.ax as u16,
-                    val,
-                    result,
-                    if borrow { 1 } else { 0 },
-                    if result == 0 { 1 } else { 0 }
-                );
 
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
@@ -5372,21 +5348,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // JB/JC/JNAE - Jump if Below/Carry (0x72)
             0x72 => {
                 let offset = self.fetch_u8() as i8;
-                let will_jump = self.get_flag(FLAG_CF);
-                let target = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                
-                eprintln!(
-                    "[JB] CS:IP={:04X}:{:04X} CF={} offset={:+} target={:04X} {}",
-                    self.cs,
-                    self.ip.wrapping_sub(2),
-                    if will_jump { 1 } else { 0 },
-                    offset,
-                    target,
-                    if will_jump { "TAKEN" } else { "NOT TAKEN" }
-                );
-                
-                if will_jump {
-                    self.ip = target;
+                if self.get_flag(FLAG_CF) {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5439,22 +5402,8 @@ impl<M: Memory8086> Cpu8086<M> {
             // JNBE/JA - Jump if Not Below or Equal/Above (0x77)
             0x77 => {
                 let offset = self.fetch_u8() as i8;
-                let will_jump = !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF);
-                let target = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                
-                eprintln!(
-                    "[JA] CS:IP={:04X}:{:04X} CF={} ZF={} offset={:+} target={:04X} {}",
-                    self.cs,
-                    self.ip.wrapping_sub(2),
-                    if self.get_flag(FLAG_CF) { 1 } else { 0 },
-                    if self.get_flag(FLAG_ZF) { 1 } else { 0 },
-                    offset,
-                    target,
-                    if will_jump { "TAKEN" } else { "NOT TAKEN" }
-                );
-                
-                if will_jump {
-                    self.ip = target;
+                if !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF) {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
