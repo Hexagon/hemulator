@@ -550,17 +550,19 @@ pub fn create_atari2600_debug_overlay(
 ) -> Vec<u32> {
     let mut buffer = vec![0xC0000000; width * height];
 
+    let system_line = "System: Atari 2600";
     let size_line = format!("ROM Size: {} bytes", rom_size);
-    let bank_line = format!("Banking: {} (cur {})", banking_scheme, current_bank);
+    let bank_line = format!("Banking: {}", banking_scheme);
+    let current_bank_line = format!("Current Bank: {}", current_bank);
     let scan_line = format!("Scanline: {}", scanline);
     let fps_line = format!("FPS: {:.1}", fps);
-    let video_line = format!("Video: {}", video_backend);
+    let video_line = format!("Video Backend: {}", video_backend);
 
     let debug_lines: Vec<&str> = vec![
-        "DEBUG INFO - Atari 2600",
-        "",
+        system_line,
         &size_line,
         &bank_line,
+        &current_bank_line,
         &scan_line,
         &fps_line,
         &video_line,
