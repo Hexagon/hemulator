@@ -177,7 +177,7 @@ fn default_emulation_speed() -> f64 {
 }
 
 fn default_video_backend() -> String {
-    "software".to_string()
+    "opengl".to_string()
 }
 
 impl Default for Settings {
@@ -190,7 +190,7 @@ impl Default for Settings {
             last_rom_path: None,
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
-            video_backend: "software".to_string(),
+            video_backend: "opengl".to_string(),
             extra: HashMap::new(),
         }
     }
@@ -437,8 +437,8 @@ fn test_settings_empty_json_deserialize() {
                 "window_height should default to 480"
             );
             assert_eq!(
-                settings.video_backend, "software",
-                "video_backend should default to 'software'"
+                settings.video_backend, "opengl",
+                "video_backend should default to 'opengl'"
             );
             assert_eq!(
                 settings.input.player1.a, "Z",
@@ -495,7 +495,7 @@ fn test_settings_roundtrip_with_saved_config() {
         settings2.window_height, 480,
         "Loaded window_height should match saved value"
     );
-    assert_eq!(settings2.video_backend, "software");
+    assert_eq!(settings2.video_backend, "opengl");
     assert_eq!(settings2.input.player1.a, "Z");
 
     // Step 4: Simulate an old or partial config.json (manually edit it)
