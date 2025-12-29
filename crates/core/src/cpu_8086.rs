@@ -7,6 +7,8 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_8086.md`
 
+#![allow(clippy::unnecessary_cast)] // Many casts are intentional for clarity
+
 use crate::cpu_8086_protected::ProtectedModeState;
 use crate::logging::{LogCategory, LogConfig, LogLevel};
 
@@ -1848,10 +1850,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // SCASW
                     0xAF => {
-                        while self.cx != 0 {
+                        while (self.cx as u16) != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
                             let result = (self.ax as u16).wrapping_sub(val);
-                            let borrow = self.ax < (val as u32);
+                            let borrow = (self.ax as u16) < val;
                             let overflow = (((self.ax as u16) ^ val)
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
@@ -1980,10 +1982,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     }
                     // SCASW
                     0xAF => {
-                        while self.cx != 0 {
+                        while (self.cx as u16) != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
                             let result = (self.ax as u16).wrapping_sub(val);
-                            let borrow = self.ax < (val as u32);
+                            let borrow = (self.ax as u16) < val;
                             let overflow = (((self.ax as u16) ^ val)
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
@@ -3065,7 +3067,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x2D => {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
@@ -3100,7 +3102,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x3D => {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
@@ -4082,8 +4084,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Update other flags based on comparison
                         let result = self.ax.wrapping_sub(rm_val as u32);
                         self.set_flag(FLAG_SF, (result & 0x8000) != 0);
-                        self.set_flag(FLAG_PF, (result & 0xFF).count_ones() % 2 == 0);
-                        let carry = self.ax < (rm_val as u32);
+                        self.set_flag(FLAG_PF, (result & 0xFF).count_ones().is_multiple_of(2));
+                        let carry = (self.ax as u16) < rm_val;
                         let overflow = (((self.ax as u16) ^ rm_val)
                             & ((self.ax as u16) ^ (result as u16))
                             & 0x8000)
@@ -5081,7 +5083,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.fetch_u16();
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
-                let borrow = self.ax < (val as u32 + carry as u32);
+                let borrow = (self.ax as u16) < (val + carry as u16);
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
@@ -6400,8 +6402,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         let result = (self.ax as u16 as u32) * (val as u32);
                         self.ax = (self.ax & 0xFFFF_0000) | ((result & 0xFFFF) as u32);
                         self.dx = (self.dx & 0xFFFF_0000) | (((result >> 16) & 0xFFFF) as u32);
-                        // CF and OF are set if DX is non-zero
-                        let high_word_set = self.dx != 0;
+                        // CF and OF are set if the high word (upper 16 bits) of result is non-zero
+                        let high_word_set = (self.dx & 0xFFFF) != 0;
                         self.set_flag(FLAG_CF, high_word_set);
                         self.set_flag(FLAG_OF, high_word_set);
                         self.update_flags_16(self.ax as u16);
@@ -6934,7 +6936,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE0 => {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 && !self.get_flag(FLAG_ZF) {
+                if (self.cx as u16) != 0 && !self.get_flag(FLAG_ZF) {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 19;
                     19
@@ -6948,7 +6950,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE1 => {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 && self.get_flag(FLAG_ZF) {
+                if (self.cx as u16) != 0 && self.get_flag(FLAG_ZF) {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
@@ -6962,7 +6964,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE2 => {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 {
+                if (self.cx as u16) != 0 {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 17;
                     17
@@ -6975,7 +6977,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // JCXZ - Jump if CX is Zero (0xE3)
             0xE3 => {
                 let offset = self.fetch_u8() as i8;
-                if self.cx == 0 {
+                if (self.cx as u16) == 0 {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
@@ -7829,7 +7831,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Compare AX with word at ES:DI
                 let val = self.read_u16(self.es, self.di as u16);
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
 
@@ -8070,21 +8072,21 @@ impl Memory8086 for ArrayMemory {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Include organized test modules
     mod tests_16bit;
     mod tests_32bit;
     mod tests_8bit;
     mod tests_addressing;
     mod tests_bcd;
+    mod tests_blackbox;
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
     mod tests_shifts;
 
     // Helper function for tests to calculate physical address
-    fn physical_address(segment: u16, offset: u16) -> u32 {
+    #[allow(dead_code)]
+    pub(crate) fn physical_address(segment: u16, offset: u16) -> u32 {
         ((segment as u32) << 4) + (offset as u32)
     }
 }

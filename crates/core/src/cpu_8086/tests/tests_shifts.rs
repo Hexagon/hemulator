@@ -6,7 +6,7 @@
 //! Tests for these instructions are omitted until implementation is complete.
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{Cpu8086, CpuModel, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
+use crate::cpu_8086::{Cpu8086, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
 
 #[test]
 fn test_inc_preserves_carry_flag() {
