@@ -2,6 +2,8 @@
 //!
 //! The Z80 extends the 8080 with additional registers and instructions.
 //! This module provides a reusable Z80 implementation.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_z80.md`
 
 /// Memory interface trait for the Z80 CPU
 pub trait MemoryZ80 {

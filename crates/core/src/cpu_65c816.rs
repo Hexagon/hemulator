@@ -8,6 +8,8 @@
 //! - 24-bit address space (16MB)
 //! - Additional addressing modes
 //! - New instructions for 16-bit operations
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_65c816.md`
 
 /// Memory interface trait for the 65C816 CPU
 ///

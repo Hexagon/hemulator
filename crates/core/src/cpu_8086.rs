@@ -4,6 +4,8 @@
 //! by any system (IBM PC, PC XT, etc.) by implementing the `Memory8086` trait.
 //!
 //! Supports multiple CPU models: 8086, 80186, 80286, and their variants.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_8086.md`
 
 use crate::cpu_8086_protected::ProtectedModeState;
 use crate::logging::{LogCategory, LogConfig, LogLevel};
