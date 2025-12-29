@@ -6933,8 +6933,11 @@ impl<M: Memory8086> Cpu8086<M> {
             // LOOPNE/LOOPNZ (0xE0)
             0xE0 => {
                 let offset = self.fetch_u8() as i8;
-                self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 && !self.get_flag(FLAG_ZF) {
+                // Decrement CX (only low 16 bits in 8086 mode)
+                let cx16 = (self.cx as u16).wrapping_sub(1);
+                self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
+                
+                if cx16 != 0 && !self.get_flag(FLAG_ZF) {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 19;
                     19
@@ -6947,8 +6950,11 @@ impl<M: Memory8086> Cpu8086<M> {
             // LOOPE/LOOPZ (0xE1)
             0xE1 => {
                 let offset = self.fetch_u8() as i8;
-                self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 && self.get_flag(FLAG_ZF) {
+                // Decrement CX (only low 16 bits in 8086 mode)
+                let cx16 = (self.cx as u16).wrapping_sub(1);
+                self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
+                
+                if cx16 != 0 && self.get_flag(FLAG_ZF) {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
@@ -6961,8 +6967,11 @@ impl<M: Memory8086> Cpu8086<M> {
             // LOOP (0xE2)
             0xE2 => {
                 let offset = self.fetch_u8() as i8;
-                self.cx = self.cx.wrapping_sub(1);
-                if self.cx != 0 {
+                // Decrement CX (only low 16 bits in 8086 mode)
+                let cx16 = (self.cx as u16).wrapping_sub(1);
+                self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
+                
+                if cx16 != 0 {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 17;
                     17
@@ -6975,7 +6984,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // JCXZ - Jump if CX is Zero (0xE3)
             0xE3 => {
                 let offset = self.fetch_u8() as i8;
-                if self.cx == 0 {
+                // Check only low 16 bits of CX in 8086 mode
+                let cx16 = self.cx as u16;
+                if cx16 == 0 {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
