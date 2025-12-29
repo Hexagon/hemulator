@@ -433,7 +433,7 @@ impl<M: Memory8086> Cpu8086<M> {
     fn read_u16(&self, segment: u16, offset: u16) -> u16 {
         // 8086 is little-endian: read low byte at offset, then high byte at offset + 1
         let low_byte = self.read(segment, offset) as u16;
-        let high_byte = self.read(segment, offset.wrapping_add(1u32)) as u16;
+        let high_byte = self.read(segment, offset.wrapping_add(1)) as u16;
         (high_byte << 8) | low_byte
     }
 
@@ -443,7 +443,7 @@ impl<M: Memory8086> Cpu8086<M> {
         let lo = (val & 0xFF) as u8;
         let hi = ((val >> 8) & 0xFF) as u8;
         self.write(segment, offset, lo);
-        self.write(segment, offset.wrapping_add(1u32), hi);
+        self.write(segment, offset.wrapping_add(1), hi);
     }
 
     /// Push a word onto the stack
@@ -1288,7 +1288,7 @@ impl<M: Memory8086> Cpu8086<M> {
         if self.halted {
             // Even when halted, TSC continues to increment
             if self.model.supports_pentium_instructions() {
-                self.tsc = self.tsc.wrapping_add(1u32);
+                self.tsc = self.tsc.wrapping_add(1u64);
             }
             return 1;
         }
@@ -1478,7 +1478,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u32) < (dst as u32);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
-                            self.update_flags_16(result);
+                            self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             if self.get_flag(FLAG_DF) {
@@ -1528,10 +1528,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     0xAF => {
                         while self.cx != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
-                            let result = self.ax.wrapping_sub(val as u32);
+                            let result = (self.ax as u16).wrapping_sub(val);
                             let borrow = (self.ax as u32) < (val as u32);
-                            let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
-                            self.update_flags_16(result);
+                            let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
+                            self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             if self.get_flag(FLAG_DF) {
@@ -1607,7 +1607,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u32) < (dst as u32);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
-                            self.update_flags_16(result);
+                            self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             if self.get_flag(FLAG_DF) {
@@ -1657,10 +1657,10 @@ impl<M: Memory8086> Cpu8086<M> {
                     0xAF => {
                         while self.cx != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
-                            let result = self.ax.wrapping_sub(val as u32);
+                            let result = (self.ax as u16).wrapping_sub(val);
                             let borrow = (self.ax as u32) < (val as u32);
-                            let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
-                            self.update_flags_16(result);
+                            let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
+                            self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             if self.get_flag(FLAG_DF) {
@@ -2107,7 +2107,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(rm_val, reg_val);
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.set_flag(FLAG_AF, af);
@@ -2157,7 +2157,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(reg_val, rm_val);
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.set_flag(FLAG_AF, af);
@@ -2190,9 +2190,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // ADD AX, imm16
             0x05 => {
                 let val = self.fetch_u16();
-                let result = self.ax.wrapping_add(val as u32);
+                let result = (self.ax as u16).wrapping_add(val);
                 let carry = (self.ax as u32 + val as u32) > 0xFFFF;
-                let overflow = (((self.ax as u16) ^ result) & (val ^ (result as u16)) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_add_16((self.ax as u16), val);
 
                 self.ax = result as u32;
@@ -2251,7 +2251,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val | reg_val;
 
                 self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
@@ -2299,7 +2299,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val | rm_val;
 
                 self.set_reg16(reg, result);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
@@ -2411,7 +2411,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val ^ reg_val;
 
                 self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
@@ -2459,7 +2459,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val ^ rm_val;
 
                 self.set_reg16(reg, result);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
@@ -2491,9 +2491,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // SUB AX, imm16
             0x2D => {
                 let val = self.fetch_u16();
-                let result = self.ax.wrapping_sub(val as u32);
+                let result = (self.ax as u16).wrapping_sub(val);
                 let borrow = (self.ax as u32) < (val as u32);
-                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16((self.ax as u16), val);
 
                 self.ax = result as u32;
@@ -2525,12 +2525,12 @@ impl<M: Memory8086> Cpu8086<M> {
             // CMP AX, imm16
             0x3D => {
                 let val = self.fetch_u16();
-                let result = self.ax.wrapping_sub(val as u32);
+                let result = (self.ax as u16).wrapping_sub(val);
                 let borrow = (self.ax as u32) < (val as u32);
-                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16((self.ax as u16), val);
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
                 self.set_flag(FLAG_AF, af);
@@ -2623,21 +2623,21 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let base = self.protected_mode.gdtr.base;
 
                                 self.write(segment, offset, (limit & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(1u32), (limit >> 8) as u8);
-                                self.write(segment, offset.wrapping_add(2u32), (base & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(3u32),
+                                    offset.wrapping_add(3),
                                     ((base >> 8) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(4u32),
+                                    offset.wrapping_add(4),
                                     ((base >> 16) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(5u32),
+                                    offset.wrapping_add(5),
                                     ((base >> 24) & 0xFF) as u8,
                                 );
                                 self.cycles += 11;
@@ -2650,21 +2650,21 @@ impl<M: Memory8086> Cpu8086<M> {
                                 let base = self.protected_mode.idtr.base;
 
                                 self.write(segment, offset, (limit & 0xFF) as u8);
-                                self.write(segment, offset.wrapping_add(1u32), (limit >> 8) as u8);
-                                self.write(segment, offset.wrapping_add(2u32), (base & 0xFF) as u8);
+                                self.write(segment, offset.wrapping_add(1), (limit >> 8) as u8);
+                                self.write(segment, offset.wrapping_add(2), (base & 0xFF) as u8);
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(3u32),
+                                    offset.wrapping_add(3),
                                     ((base >> 8) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(4u32),
+                                    offset.wrapping_add(4),
                                     ((base >> 16) & 0xFF) as u8,
                                 );
                                 self.write(
                                     segment,
-                                    offset.wrapping_add(5u32),
+                                    offset.wrapping_add(5),
                                     ((base >> 24) & 0xFF) as u8,
                                 );
                                 self.cycles += 11;
@@ -2674,13 +2674,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // LGDT - Load Global Descriptor Table Register
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit_low = self.read(segment, offset) as u16;
-                                let limit_high = self.read(segment, offset.wrapping_add(1u32)) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
                                 let limit = limit_low | (limit_high << 8);
 
-                                let base_0 = self.read(segment, offset.wrapping_add(2u32)) as u32;
-                                let base_1 = self.read(segment, offset.wrapping_add(3u32)) as u32;
-                                let base_2 = self.read(segment, offset.wrapping_add(4u32)) as u32;
-                                let base_3 = self.read(segment, offset.wrapping_add(5u32)) as u32;
+                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
 
                                 self.protected_mode.load_gdtr(base, limit);
@@ -2691,13 +2691,13 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // LIDT - Load Interrupt Descriptor Table Register
                                 let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                                 let limit_low = self.read(segment, offset) as u16;
-                                let limit_high = self.read(segment, offset.wrapping_add(1u32)) as u16;
+                                let limit_high = self.read(segment, offset.wrapping_add(1)) as u16;
                                 let limit = limit_low | (limit_high << 8);
 
-                                let base_0 = self.read(segment, offset.wrapping_add(2u32)) as u32;
-                                let base_1 = self.read(segment, offset.wrapping_add(3u32)) as u32;
-                                let base_2 = self.read(segment, offset.wrapping_add(4u32)) as u32;
-                                let base_3 = self.read(segment, offset.wrapping_add(5u32)) as u32;
+                                let base_0 = self.read(segment, offset.wrapping_add(2)) as u32;
+                                let base_1 = self.read(segment, offset.wrapping_add(3)) as u32;
+                                let base_2 = self.read(segment, offset.wrapping_add(4)) as u32;
+                                let base_3 = self.read(segment, offset.wrapping_add(5)) as u32;
                                 let base = base_0 | (base_1 << 8) | (base_2 << 16) | (base_3 << 24);
 
                                 self.protected_mode.load_idtr(base, limit);
@@ -3567,7 +3567,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
                         // Read 32-bit value from memory (4 bytes)
                         let mem_low = self.read_u16(segment, offset);
-                        let mem_high = self.read_u16(segment, offset.wrapping_add(2u32));
+                        let mem_high = self.read_u16(segment, offset.wrapping_add(2));
                         let mem_val = (mem_low as u32) | ((mem_high as u32) << 16);
 
                         // Compare with DX:AX
@@ -3580,7 +3580,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.write_u16(segment, offset, (new_val & 0xFFFF) as u16);
                             self.write_u16(
                                 segment,
-                                offset.wrapping_add(2u32),
+                                offset.wrapping_add(2),
                                 ((new_val >> 16) & 0xFFFF) as u16,
                             );
                         } else {
@@ -3623,7 +3623,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             // From memory (read 32 bits)
                             let (segment, offset, _) = self.calc_effective_address(modbits, rm);
                             let low = self.read_u16(segment, offset);
-                            let high = self.read_u16(segment, offset.wrapping_add(2u32));
+                            let high = self.read_u16(segment, offset.wrapping_add(2));
                             ((high as u64) << 16) | (low as u64)
                         };
 
@@ -3655,7 +3655,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             self.write_u16(segment, offset, (value & 0xFFFF) as u16);
                             self.write_u16(
                                 segment,
-                                offset.wrapping_add(2u32),
+                                offset.wrapping_add(2),
                                 ((value >> 16) & 0xFFFF) as u16,
                             );
                         }
@@ -4331,7 +4331,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = self.ax.wrapping_add(val as u32).wrapping_add(carry_in);
                 let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
-                let overflow = (((self.ax as u16) ^ result) & (val ^ (result as u16)) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
                 // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
                 let af = ((((self.ax as u16) & 0x0F) + (val & 0x0F) + carry_in) & 0x10) != 0;
 
@@ -4371,7 +4371,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
                 let borrow = (rm_val as u16) < (reg_val as u16 + carry as u16);
-                let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 including carry-in
                 let af = (rm_val & 0x0F) < ((reg_val & 0x0F) + carry);
 
@@ -4427,7 +4427,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
                 let borrow = (reg_val as u16) < (rm_val as u16 + carry as u16);
-                let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x80) != 0;
+                let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 including carry-in
                 let af = (reg_val & 0x0F) < ((rm_val & 0x0F) + carry);
 
@@ -4483,7 +4483,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let borrow = (al as u16) < (val as u16 + carry as u16);
                 let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 including carry-in
-                let af = (al & 0x0F) < ((val & 0x0F) + carry);
+                let af = (al & 0x0F) < ((val & 0x0F) + (carry as u16));
 
                 self.ax = (self.ax & 0xFFFF_FF00) | (result as u32);
                 self.update_flags_8(result);
@@ -4500,9 +4500,9 @@ impl<M: Memory8086> Cpu8086<M> {
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
                 let borrow = (self.ax as u32) < (val as u32 + carry as u32);
-                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
-                let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + carry);
+                let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
 
                 self.ax = result as u32;
                 self.update_flags_16(result);
@@ -4561,7 +4561,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = rm_val & reg_val;
 
                 self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 16 };
@@ -4609,7 +4609,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = reg_val & rm_val;
 
                 self.set_reg16(reg, result);
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
@@ -4699,7 +4699,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x70 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4712,7 +4712,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x71 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4725,7 +4725,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x72 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4738,7 +4738,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x73 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4753,7 +4753,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x75 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4766,7 +4766,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x76 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_CF) || self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4779,7 +4779,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x77 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4792,7 +4792,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x78 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4805,7 +4805,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x79 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_SF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4818,7 +4818,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7A => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_PF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4831,7 +4831,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7B => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_PF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4844,7 +4844,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7C => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4857,7 +4857,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7D => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4870,7 +4870,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7E => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) || (self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF)) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -4883,7 +4883,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7F => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_ZF) && (self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF)) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -5342,7 +5342,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let rm_val = self.read_rm16(modbits, rm);
                 let result = rm_val & reg_val;
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, false);
                 self.set_flag(FLAG_OF, false);
                 self.cycles += if modbits == 0b11 { 3 } else { 9 };
@@ -5416,8 +5416,8 @@ impl<M: Memory8086> Cpu8086<M> {
             0x91..=0x97 => {
                 let reg = opcode & 0x07;
                 let temp = self.ax;
-                self.ax = self.get_reg16(reg);
-                self.set_reg16(reg, temp);
+                self.ax = self.get_reg16(reg) as u32;
+                self.set_reg16(reg, temp as u16);
                 self.cycles += 3;
                 3
             }
@@ -5468,7 +5468,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // SAHF - Store AH into Flags (0x9E)
             0x9E => {
                 let ah = ((self.ax >> 8) & 0xFF) as u8;
-                self.flags = (self.flags & 0xFF00) | (ah as u16);
+                self.flags = (self.flags & 0xFFFF_FF00) | (ah as u32);
                 self.cycles += 4;
                 4
             }
@@ -5649,7 +5649,7 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = (remainder << 8) | quotient;
+                                self.ax = (remainder << 8) | quotient as u32;
                             }
                         }
                         self.cycles += if modbits == 0b11 { 80 } else { 86 };
@@ -5710,7 +5710,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         let val = self.read_rm16(modbits, rm);
                         let imm = self.fetch_u16();
                         let result = val & imm;
-                        self.update_flags_16(result);
+                        self.update_flags_16(result as u16);
                         self.set_flag(FLAG_CF, false);
                         self.set_flag(FLAG_OF, false);
                         self.cycles += if modbits == 0b11 { 5 } else { 11 };
@@ -5739,7 +5739,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // AF calculation for NEG: check if borrow from bit 4 to bit 3 in low byte
                         let af = (val & 0x0F) != 0;
                         self.write_rmw16(modbits, rm, result, seg, offset);
-                        self.update_flags_16(result);
+                        self.update_flags_16(result as u16);
                         self.set_flag(FLAG_CF, val != 0);
                         self.set_flag(FLAG_OF, val == 0x8000);
                         self.set_flag(FLAG_AF, af);
@@ -5807,8 +5807,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = quotient as u16;
-                                self.dx = remainder as u16;
+                                self.ax = quotient as u16 as u32;
+                                self.dx = remainder as u16 as u32;
                             }
                         }
                         self.cycles += if modbits == 0b11 { 144 } else { 150 };
@@ -5833,8 +5833,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = quotient as u16;
-                                self.dx = remainder as u16;
+                                self.ax = quotient as u16 as u32;
+                                self.dx = remainder as u16 as u32;
                             }
                         }
                         self.cycles += if modbits == 0b11 { 165 } else { 171 };
@@ -5963,7 +5963,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             let imm_high = self.fetch_u16();
                             // Write 32 bits to memory (2 words)
                             self.write_u16(seg, offset, imm_low);
-                            self.write_u16(seg, offset.wrapping_add(2u32), imm_high);
+                            self.write_u16(seg, offset.wrapping_add(2), imm_high);
                             self.cycles += 10;
                             10
                         }
@@ -6072,9 +6072,9 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Debug: check what bytes we're about to read
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     let ip_before = self.ip;
-                    let byte1 = self.read(self.cs, ip_before);
-                    let byte2 = self.read(self.cs, ip_before.wrapping_add(1u32));
-                    let byte3 = self.read(self.cs, ip_before.wrapping_add(2u32));
+                    let byte1 = self.read(self.cs, (ip_before) as u16);
+                    let byte2 = self.read(self.cs, (ip_before.wrapping_add(1u32)) as u16);
+                    let byte3 = self.read(self.cs, (ip_before.wrapping_add(2u32)) as u16);
                     let phys_start = ((self.cs as u32) << 4) + (ip_before as u32);
                     eprintln!(
                         "[ENTER DEBUG] CS:IP={:04X}:{:04X}, physical=0x{:05X}",
@@ -6294,7 +6294,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1u32);
                 if self.cx != 0 && !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 19;
                     19
                 } else {
@@ -6308,7 +6308,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1u32);
                 if self.cx != 0 && self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 18;
                     18
                 } else {
@@ -6322,7 +6322,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1u32);
                 if self.cx != 0 {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 17;
                     17
                 } else {
@@ -6335,7 +6335,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE3 => {
                 let offset = self.fetch_u8() as i8;
                 if self.cx == 0 {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 18;
                     18
                 } else {
@@ -6382,7 +6382,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // JMP near relative (0xE9)
             0xE9 => {
                 let offset = self.fetch_u16() as i16;
-                self.ip = self.ip.wrapping_add((offset as u16) as u32);
+                self.ip = self.ip.wrapping_add(((offset as u16) as u32) as u32);
                 self.cycles += 15;
                 15
             }
@@ -6513,7 +6513,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
                         let af = (val & 0x0F) == 0x0F;
                         self.write_rmw16(modbits, rm, result, seg, offset);
-                        self.update_flags_16(result);
+                        self.update_flags_16(result as u16);
                         self.set_flag(FLAG_OF, overflow);
                         self.set_flag(FLAG_AF, af);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -6531,7 +6531,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
                         let af = (val & 0x0F) == 0x00;
                         self.write_rmw16(modbits, rm, result, seg, offset);
-                        self.update_flags_16(result);
+                        self.update_flags_16(result as u16);
                         self.set_flag(FLAG_OF, overflow);
                         self.set_flag(FLAG_AF, af);
                         self.cycles += if modbits == 0b11 { 3 } else { 15 };
@@ -6988,7 +6988,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xEB => {
                 let offset = self.fetch_u8() as i8;
                 // Add signed offset to IP (wrapping_add_signed would be clearer but requires i16 cast)
-                self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                 self.cycles += 15;
                 15
             }
@@ -6997,7 +6997,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x74 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add(offset as i16 as u16);
+                    self.ip = self.ip.wrapping_add(((offset as i16 as u16) as u32) as u32);
                     self.cycles += 16;
                     16
                 } else {
@@ -7080,7 +7080,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let borrow = (src as u32) < (dst as u32);
                 let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
 
@@ -7187,11 +7187,11 @@ impl<M: Memory8086> Cpu8086<M> {
             0xAF => {
                 // Compare AX with word at ES:DI
                 let val = self.read_u16(self.es, self.di as u16);
-                let result = self.ax.wrapping_sub(val as u32);
+                let result = (self.ax as u16).wrapping_sub(val);
                 let borrow = (self.ax as u32) < (val as u32);
-                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ result) & 0x8000) != 0;
+                let overflow = (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
 
-                self.update_flags_16(result);
+                self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
 
@@ -7211,7 +7211,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Push return address (current IP after fetching the offset)
                 self.push(self.ip as u16);
                 // Jump to target (IP + offset)
-                self.ip = self.ip.wrapping_add((offset as u16) as u32);
+                self.ip = self.ip.wrapping_add(((offset as u16) as u32) as u32);
                 self.cycles += 19;
                 19
             }
