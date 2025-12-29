@@ -37,11 +37,25 @@ All adapters follow the modular `VideoAdapter` trait:
   - 64-color palette (6-bit RGB), 16 active colors
   
 - **VGA (Video Graphics Array)**:
-  - Text: 80x25 (720x400 pixels, 9x16 font)
+  - Text: 80x25 (720x400 pixels, 9x16 font using 8x16 font data)
   - Graphics: 320x200 256-color (Mode 13h), 640x480 16-color
+  - Graphics modes can use 8x8 font for character display
   - 256-color palette (18-bit RGB)
 
 Each adapter has software (CPU) and hardware (OpenGL stub) implementations.
+
+### Font Support
+
+The PC emulator includes authentic IBM PC ROM fonts:
+
+- **8x8 font**: VGA graphics modes, PS/2 systems (256 characters)
+- **8x14 font**: EGA text modes (256 characters)
+- **8x16 font**: CGA and VGA text modes (256 characters)
+
+All fonts include complete CP437 (Code Page 437) character set with:
+- Printable ASCII (0x20-0x7E)
+- Box-drawing characters (0xB0-0xDF) - properly implemented for DOS/QBasic GUIs
+- Extended ASCII, accented characters, mathematical symbols (0x80-0xFF)
 
 ### What's Missing
 

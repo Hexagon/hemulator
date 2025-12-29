@@ -38,9 +38,41 @@ mod boot_priority {
 ///
 /// NOTE: INT 21h (DOS API) is NOT provided by BIOS - DOS installs it during boot
 ///
+/// # Arguments
+/// * `cpu_model` - CPU model to determine system architecture (PC/XT/AT/PS2)
+///
 /// Size: 64KB (standard BIOS size)
-pub fn generate_minimal_bios() -> Vec<u8> {
+pub fn generate_minimal_bios(cpu_model: CpuModel) -> Vec<u8> {
     let mut bios = vec![0x00; 0x10000]; // 64KB of zeros
+
+    // Determine system model byte and feature byte based on CPU model
+    // Standard PC Architecture Models:
+    // 0xFF = Original PC (8088)
+    // 0xFE = PC/XT (8088)
+    // 0xFC = PC/AT (80286+)
+    // 0xF8 = PS/2 Model 80 (80386+)
+    let (model_byte, feature_byte_1) = match cpu_model {
+        CpuModel::Intel8086 | CpuModel::Intel8088 => {
+            // PC/XT: No RTC, no 2nd PIC, basic system
+            (0xFE, 0x00)
+        }
+        CpuModel::Intel80186 | CpuModel::Intel80188 => {
+            // XT-compatible: Same as PC/XT
+            (0xFE, 0x00)
+        }
+        CpuModel::Intel80286 => {
+            // AT: Has RTC, 2nd PIC, keyboard intercept
+            // Feature byte 1: 0x70
+            //   bit 6: 2nd 8259 installed (1)
+            //   bit 5: Real-time clock installed (1)
+            //   bit 4: INT 15h/AH=4Fh keyboard intercept (1)
+            (0xFC, 0x70)
+        }
+        _ => {
+            // 386+ (PS/2 Model 80 or AT-compatible): Same features as AT
+            (0xF8, 0x70)
+        }
+    };
 
     // Generic stub handler for interrupts (just IRET)
     let stub_offset = 0x40;
@@ -121,10 +153,11 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     let sysconf_offset = 0xE000;
     let system_configuration_table: Vec<u8> = vec![
         0x08, 0x00, // WORD: Number of bytes following (8 bytes)
-        0xFC, // BYTE: Model (0xFC = AT, 0xFD = PCjr, 0xFE = XT, 0xFF = PC)
+        model_byte, // BYTE: Model (adapts to CPU: 0xFE=XT, 0xFC=AT, 0xF8=PS/2)
         0x00, // BYTE: Submodel (00h)
         0x01, // BYTE: BIOS revision level (01h)
-        0x70, // BYTE: Feature byte 1
+        feature_byte_1, // BYTE: Feature byte 1 (0x00 for XT, 0x70 for AT+)
+        //   For AT+ (0x70):
         //   bit 7: DMA channel 3 used by hard disk BIOS (0)
         //   bit 6: 2nd 8259 installed (cascaded IRQ2) (1)
         //   bit 5: Real-time clock installed (1)
@@ -267,8 +300,8 @@ pub fn generate_minimal_bios() -> Vec<u8> {
     let date_str = b"12/15/25"; // December 15, 2025
     bios[date_offset..date_offset + date_str.len()].copy_from_slice(date_str);
 
-    // System model byte at 0xFFFE (PC XT)
-    bios[0xFFFE] = 0xFE;
+    // System model byte at 0xFFFE - matches CPU model and system config table
+    bios[0xFFFE] = model_byte;
 
     // Entry code at 0xFFF0 - must not overwrite date or model byte
     // We have space from 0xFFF0 to 0xFFF4 (5 bytes) before the date
@@ -594,7 +627,8 @@ mod tests {
 
     #[test]
     fn test_bios_generation() {
-        let bios = generate_minimal_bios();
+        // Test with default 8086 CPU (should be XT)
+        let bios = generate_minimal_bios(CpuModel::Intel8086);
 
         // Check size
         assert_eq!(bios.len(), 0x10000);
@@ -605,7 +639,7 @@ mod tests {
         // Check JMP FAR instruction at entry point (0xEA = JMP FAR)
         assert_eq!(bios[0xFFF0], 0xEA); // JMP FAR
 
-        // Check system model byte
+        // Check system model byte for XT
         assert_eq!(bios[0xFFFE], 0xFE); // PC XT
 
         // Check that main boot code exists at start
@@ -614,10 +648,39 @@ mod tests {
 
     #[test]
     fn test_bios_date_signature() {
-        let bios = generate_minimal_bios();
+        let bios = generate_minimal_bios(CpuModel::Intel8086);
 
         let date_offset = 0xFFF5;
         let date = &bios[date_offset..date_offset + 8];
         assert_eq!(date, b"12/15/25"); // December 15, 2025
+    }
+
+    #[test]
+    fn test_bios_model_byte_matches_cpu() {
+        // Test XT model (8086/8088)
+        let bios_8086 = generate_minimal_bios(CpuModel::Intel8086);
+        assert_eq!(bios_8086[0xFFFE], 0xFE); // PC XT
+        assert_eq!(bios_8086[0xE002], 0xFE); // System config table model byte
+        assert_eq!(bios_8086[0xE005], 0x00); // Feature byte 1 (no AT features)
+
+        let bios_8088 = generate_minimal_bios(CpuModel::Intel8088);
+        assert_eq!(bios_8088[0xFFFE], 0xFE); // PC XT
+        assert_eq!(bios_8088[0xE005], 0x00); // Feature byte 1 (no AT features)
+
+        // Test AT model (286)
+        let bios_286 = generate_minimal_bios(CpuModel::Intel80286);
+        assert_eq!(bios_286[0xFFFE], 0xFC); // PC AT
+        assert_eq!(bios_286[0xE002], 0xFC); // System config table model byte
+        assert_eq!(bios_286[0xE005], 0x70); // Feature byte 1 (AT features: RTC, 2nd PIC, kbd intercept)
+
+        // Test PS/2 model (386+)
+        let bios_386 = generate_minimal_bios(CpuModel::Intel80386);
+        assert_eq!(bios_386[0xFFFE], 0xF8); // PS/2 Model 80
+        assert_eq!(bios_386[0xE002], 0xF8); // System config table model byte
+        assert_eq!(bios_386[0xE005], 0x70); // Feature byte 1 (AT features)
+
+        let bios_486 = generate_minimal_bios(CpuModel::Intel80486);
+        assert_eq!(bios_486[0xFFFE], 0xF8); // PS/2 Model 80
+        assert_eq!(bios_486[0xE005], 0x70); // Feature byte 1 (AT features)
     }
 }

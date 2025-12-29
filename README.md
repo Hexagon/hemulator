@@ -62,6 +62,10 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow and contribu
 
 See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
 
+**Analysis Documents**:
+- [PC_INTERRUPT_ANALYSIS.md](PC_INTERRUPT_ANALYSIS.md) - PC BIOS interrupt handling evaluation
+- [CPU_ANALYSIS.md](CPU_ANALYSIS.md) - CPU implementation analysis
+
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
 - [Game Boy](crates/systems/gb/README.md) - PPU, APU, MBCs

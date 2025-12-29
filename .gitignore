@@ -28,4 +28,7 @@ temp.img
 *.out
 *err.txt
 *out.txt
-debug_log*
+debug_log*¨
+
+# Anti-ignores
+!workbench/workbench.hemu
