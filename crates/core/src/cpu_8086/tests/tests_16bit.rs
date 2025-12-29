@@ -1213,7 +1213,7 @@ fn test_leave_preserves_high_bits() {
     cpu.ss = 0x1000;
     cpu.sp = 0x1000;
     cpu.bp = 0xAABB2000; // BP=0x2000, high bits set
-    
+
     // Write value to stack at BP location [SS:BP] = [0x1000:0x2000] = 0x12000
     cpu.memory.write(0x12000, 0x34); // Low byte
     cpu.memory.write(0x12001, 0x12); // High byte (BP will be set to 0x1234)
@@ -1241,7 +1241,7 @@ fn test_popa_preserves_high_bits() {
     cpu.cs = 0xFFFF;
     cpu.ss = 0x1000;
     cpu.sp = 0x1000;
-    
+
     // Set high bits on all registers
     cpu.di = 0x11110001;
     cpu.si = 0x22220002;

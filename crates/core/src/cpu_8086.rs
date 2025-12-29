@@ -1722,7 +1722,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Apply segment override to source (DS:SI)
                         let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            self.ax = (self.ax & 0xFFFF_0000) | (self.read_u16(src_seg, self.si as u16) as u32);
+                            self.ax = (self.ax & 0xFFFF_0000)
+                                | (self.read_u16(src_seg, self.si as u16) as u32);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2u32);
                             } else {
