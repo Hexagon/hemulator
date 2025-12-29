@@ -829,6 +829,7 @@ pub fn create_mount_point_selector(
     width: usize,
     height: usize,
     mount_points: &[emu_core::MountPointInfo],
+    system_name: &str,
 ) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];
@@ -847,8 +848,11 @@ pub fn create_mount_point_selector(
         display_lines.push(line.as_str());
     }
     display_lines.push("");
-    display_lines.push("  9 - Create New Blank Disk");
-    display_lines.push("");
+    // Only show "Create New Blank Disk" option for PC systems
+    if system_name == "pc" {
+        display_lines.push("  9 - Create New Blank Disk");
+        display_lines.push("");
+    }
     display_lines.push("Press number to select, ESC to cancel");
 
     let start_x = (width.saturating_sub(30 * FONT_WIDTH)) / 2;

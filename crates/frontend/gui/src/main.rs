@@ -1929,9 +1929,11 @@ fn main() {
             } else if window.is_key_pressed(Key::Key8, false) {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
-                // Key 9: Show disk format selector for creating new blank disk
-                show_mount_selector = false;
-                show_disk_format_selector = true;
+                // Key 9: Show disk format selector for creating new blank disk (PC only)
+                if sys.system_name() == "pc" {
+                    show_mount_selector = false;
+                    show_disk_format_selector = true;
+                }
             }
 
             if let Some(idx) = selected_index {
@@ -1990,7 +1992,12 @@ fn main() {
             }
 
             // Render mount point selector
-            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+                sys.system_name(),
+            );
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
@@ -2601,7 +2608,12 @@ fn main() {
         } else if show_mount_selector {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
-            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+                sys.system_name(),
+            );
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
