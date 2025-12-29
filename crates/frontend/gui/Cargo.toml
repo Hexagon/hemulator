@@ -32,5 +32,9 @@ sdl2 = { version = "0.38", features = ["bundled"] }
 glow = "0.13"
 bytemuck = "1.14"
 
+# GUI framework for menus and tabs
+egui = "0.28"
+egui_glow = "0.28"
+
 [features]
 default = []
