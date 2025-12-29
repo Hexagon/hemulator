@@ -11,10 +11,12 @@ pub mod window_backend;
 
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
+use menu::MenuBar;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
+use status_bar::StatusBar;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -1507,6 +1509,14 @@ fn main() {
         GameSaves::default()
     };
 
+    // Initialize menu bar and status bar
+    let mut menu_bar = MenuBar::new();
+    let mut status_bar = StatusBar::new();
+    status_bar.system_name = sys.system_name().to_string();
+    status_bar.message = status_message.clone();
+    status_bar.paused = settings.emulation_speed == 0.0;
+    status_bar.speed = settings.emulation_speed as f32;
+
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
         let mut out = Vec::with_capacity(base.len());
@@ -1723,6 +1733,136 @@ fn main() {
             }
             println!("CRT Filter: {}", settings.display_filter.name());
         }
+
+        // New keyboard shortcuts (Ctrl+key combinations)
+        let ctrl_held = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
+        let shift_held = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
+
+        // Ctrl+O - Open ROM
+        if ctrl_held && !shift_held && window.is_key_pressed(Key::O, false) {
+            // Trigger F3 handler (mount points)
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("ROM Files", &["nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe"])
+                .add_filter("All Files", &["*"])
+                .pick_file()
+            {
+                // Load ROM logic would go here - for now, trigger same as F3
+                println!("Open ROM: {}", path.display());
+            }
+        }
+
+        // Ctrl+S - Save Project
+        if ctrl_held && !shift_held && window.is_key_pressed(Key::S, false) {
+            // Trigger F8 handler (save project)
+            save_project(&sys, &runtime_state, &settings, &mut status_message);
+        }
+
+        // Ctrl+R - Reset
+        if ctrl_held && !shift_held && window.is_key_pressed(Key::R, false) {
+            let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
+            if can_reset {
+                sys.reset();
+                println!("System reset");
+                status_message = "System reset".to_string();
+                status_bar.message = status_message.clone();
+            }
+        }
+
+        // Ctrl+P - Pause/Resume
+        if ctrl_held && !shift_held && window.is_key_pressed(Key::P, false) {
+            if settings.emulation_speed == 0.0 {
+                settings.emulation_speed = 1.0;
+                status_message = "Resumed".to_string();
+            } else {
+                settings.emulation_speed = 0.0;
+                status_message = "Paused".to_string();
+            }
+            status_bar.paused = settings.emulation_speed == 0.0;
+            status_bar.speed = settings.emulation_speed as f32;
+            status_bar.message = status_message.clone();
+            if let Err(e) = settings.save() {
+                eprintln!("Warning: Failed to save speed setting: {}", e);
+            }
+        }
+
+        // Ctrl+1-5 - Save state slots
+        if ctrl_held && !shift_held && rom_loaded && sys.supports_save_states() {
+            for i in 1..=5 {
+                let key = match i {
+                    1 => Key::Key1,
+                    2 => Key::Key2,
+                    3 => Key::Key3,
+                    4 => Key::Key4,
+                    5 => Key::Key5,
+                    _ => continue,
+                };
+                
+                if window.is_key_pressed(key, false) {
+                    let state_data = sys.save_state();
+                    // Serialize to bytes
+                    if let Ok(state_bytes) = serde_json::to_vec(&state_data) {
+                        if let Some(ref hash) = rom_hash {
+                            if let Err(e) = game_saves.save_slot(i, &state_bytes, hash) {
+                                eprintln!("Failed to save state: {}", e);
+                                status_message = format!("Failed to save state: {}", e);
+                            } else {
+                                println!("Saved state to slot {}", i);
+                                status_message = format!("State saved to slot {}", i);
+                            }
+                        } else {
+                            status_message = "Cannot save state: no ROM loaded".to_string();
+                        }
+                    } else {
+                        status_message = "Failed to serialize state".to_string();
+                    }
+                    status_bar.message = status_message.clone();
+                    break;
+                }
+            }
+        }
+
+        // Ctrl+Shift+1-5 - Load state slots
+        if ctrl_held && shift_held && rom_loaded && sys.supports_save_states() {
+            for i in 1..=5 {
+                let key = match i {
+                    1 => Key::Key1,
+                    2 => Key::Key2,
+                    3 => Key::Key3,
+                    4 => Key::Key4,
+                    5 => Key::Key5,
+                    _ => continue,
+                };
+                
+                if window.is_key_pressed(key, false) {
+                    if let Some(ref hash) = rom_hash {
+                        match game_saves.load_slot(i, hash) {
+                            Ok(state_bytes) => {
+                                // Deserialize from bytes
+                                if let Ok(state_data) = serde_json::from_slice::<serde_json::Value>(&state_bytes) {
+                                    if let Err(e) = sys.load_state(&state_data) {
+                                        eprintln!("Failed to load state: {}", e);
+                                        status_message = format!("Failed to load state: {}", e);
+                                    } else {
+                                        println!("Loaded state from slot {}", i);
+                                        status_message = format!("State loaded from slot {}", i);
+                                    }
+                                } else {
+                                    status_message = "Failed to deserialize state".to_string();
+                                }
+                            }
+                            Err(e) => {
+                                status_message = format!("No save state in slot {}: {}", i, e);
+                            }
+                        }
+                    } else {
+                        status_message = "Cannot load state: no ROM loaded".to_string();
+                    }
+                    status_bar.message = status_message.clone();
+                    break;
+                }
+            }
+        }
+
 
         // Handle speed selector
         if show_speed_selector {
@@ -2640,12 +2780,35 @@ fn main() {
             &buffer
         };
 
-        if !frame_to_present.is_empty() {
-            if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
+        // Update status bar state
+        status_bar.fps = current_fps as f32;
+        status_bar.paused = settings.emulation_speed == 0.0;
+        status_bar.speed = settings.emulation_speed as f32;
+
+        // Render menu bar and status bar on the frame
+        // Create a copy if we need to add menu/status bar
+        let mut frame_with_ui = if !frame_to_present.is_empty() && (menu_bar.is_visible() || true) {
+            // Always show status bar
+            let mut ui_buffer = frame_to_present.to_vec();
+            
+            // Render status bar at bottom
+            status_bar.render(&mut ui_buffer, width, height);
+            
+            // Render menu bar at top
+            menu_bar.render(&mut ui_buffer, width, height);
+            
+            ui_buffer
+        } else {
+            frame_to_present.to_vec()
+        };
+
+        if !frame_with_ui.is_empty() {
+            if let Err(e) = window.update_with_buffer(&frame_with_ui, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
             }
         }
+
 
         // Dynamic frame pacing based on timing mode (NTSC ~60.1 FPS, PAL ~50.0 FPS)
         let frame_dt = last_frame.elapsed();
