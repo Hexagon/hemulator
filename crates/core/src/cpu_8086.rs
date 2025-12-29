@@ -8051,6 +8051,7 @@ mod tests {
 
     // Include organized test modules
     mod tests_jumps;
+    mod tests_flags;
 
     // Helper function for tests to calculate physical address
     fn physical_address(segment: u16, offset: u16) -> u32 {
