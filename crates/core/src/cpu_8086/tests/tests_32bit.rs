@@ -471,14 +471,14 @@ fn test_80386_instructions_valid_on_80386() {
 fn test_sib_decode_scale_1() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    cpu.cs = 0;  // Set CS before calculating address
-    
+    cpu.cs = 0; // Set CS before calculating address
+
     // SIB byte: scale=00 (1x), index=001 (ECX), base=010 (EDX)
     // Binary: 00 001 010 = 0x0A
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x0A);
     cpu.ip = 0x1000;
-    
+
     let (scale, index, base, bytes) = cpu.decode_sib();
     assert_eq!(scale, 1, "Scale should be 1");
     assert_eq!(index, 1, "Index should be ECX (1)");
@@ -490,14 +490,14 @@ fn test_sib_decode_scale_1() {
 fn test_sib_decode_scale_2() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    cpu.cs = 0;  // Set CS before calculating address
-    
+    cpu.cs = 0; // Set CS before calculating address
+
     // SIB byte: scale=01 (2x), index=011 (EBX), base=000 (EAX)
     // Binary: 01 011 000 = 0x58
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x58);
     cpu.ip = 0x1000;
-    
+
     let (scale, index, base, bytes) = cpu.decode_sib();
     assert_eq!(scale, 2, "Scale should be 2");
     assert_eq!(index, 3, "Index should be EBX (3)");
@@ -509,14 +509,14 @@ fn test_sib_decode_scale_2() {
 fn test_sib_decode_scale_4() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    cpu.cs = 0;  // Set CS before calculating address
-    
+    cpu.cs = 0; // Set CS before calculating address
+
     // SIB byte: scale=10 (4x), index=110 (ESI), base=111 (EDI)
     // Binary: 10 110 111 = 0xB7
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0xB7);
     cpu.ip = 0x1000;
-    
+
     let (scale, index, base, bytes) = cpu.decode_sib();
     assert_eq!(scale, 4, "Scale should be 4");
     assert_eq!(index, 6, "Index should be ESI (6)");
@@ -528,14 +528,14 @@ fn test_sib_decode_scale_4() {
 fn test_sib_decode_scale_8() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    cpu.cs = 0;  // Set CS before calculating address
-    
+    cpu.cs = 0; // Set CS before calculating address
+
     // SIB byte: scale=11 (8x), index=010 (EDX), base=001 (ECX)
     // Binary: 11 010 001 = 0xD1
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0xD1);
     cpu.ip = 0x1000;
-    
+
     let (scale, index, base, bytes) = cpu.decode_sib();
     assert_eq!(scale, 8, "Scale should be 8");
     assert_eq!(index, 2, "Index should be EDX (2)");
@@ -547,14 +547,14 @@ fn test_sib_decode_scale_8() {
 fn test_sib_decode_no_index() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    cpu.cs = 0;  // Set CS before calculating address
-    
+    cpu.cs = 0; // Set CS before calculating address
+
     // SIB byte: scale=00 (1x), index=100 (none/ESP), base=000 (EAX)
     // Binary: 00 100 000 = 0x20
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x20);
     cpu.ip = 0x1000;
-    
+
     let (scale, index, base, bytes) = cpu.decode_sib();
     assert_eq!(scale, 1, "Scale should be 1");
     assert_eq!(index, 4, "Index should be 4 (ESP/none)");
@@ -566,12 +566,12 @@ fn test_sib_decode_no_index() {
 fn test_calc_effective_address_32_direct_register() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [EAX] with mod=00, rm=000
     cpu.ax = 0x12345678; // EAX = 0x12345678
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b000);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0x12345678, "Offset should be EAX value");
@@ -582,14 +582,14 @@ fn test_calc_effective_address_32_direct_register() {
 fn test_calc_effective_address_32_with_disp8() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [EBX+disp8] with mod=01, rm=011
     cpu.bx = 0x10000000; // EBX = 0x10000000
     cpu.cs = 0;
     cpu.ip = 0x1000;
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x50); // disp8 = 0x50 (positive)
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b01, 0b011);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0x10000050, "Offset should be EBX + disp8");
@@ -600,7 +600,7 @@ fn test_calc_effective_address_32_with_disp8() {
 fn test_calc_effective_address_32_with_disp32() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [ECX+disp32] with mod=10, rm=001
     cpu.cx = 0x20000000; // ECX = 0x20000000
     cpu.cs = 0;
@@ -611,7 +611,7 @@ fn test_calc_effective_address_32_with_disp32() {
     cpu.memory.write(addr + 1, 0x56);
     cpu.memory.write(addr + 2, 0x34);
     cpu.memory.write(addr + 3, 0x12);
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b10, 0b001);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0x32345678, "Offset should be ECX + disp32");
@@ -622,18 +622,18 @@ fn test_calc_effective_address_32_with_disp32() {
 fn test_calc_effective_address_32_sib_base_index() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [EAX + EBX*4] with mod=00, rm=100 (SIB)
     cpu.ax = 0x10000000; // EAX (base) = 0x10000000
     cpu.bx = 0x00000100; // EBX (index) = 0x00000100
     cpu.ip = 0x1000;
-    cpu.cs = 0;  // Set CS before address calculation
-    
+    cpu.cs = 0; // Set CS before address calculation
+
     // SIB byte: scale=10 (4x), index=011 (EBX), base=000 (EAX)
     // Binary: 10 011 000 = 0x98
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x98);
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0x10000400, "Offset should be EAX + EBX*4");
@@ -644,13 +644,13 @@ fn test_calc_effective_address_32_sib_base_index() {
 fn test_calc_effective_address_32_sib_no_base() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [EDX*8 + disp32] with mod=00, rm=100 (SIB), base=101 (special)
     cpu.dx = 0x00001000; // EDX (index) = 0x00001000
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    cpu.cs = 0;  // Set CS before address calculation
-    
+    cpu.cs = 0; // Set CS before address calculation
+
     // SIB byte: scale=11 (8x), index=010 (EDX), base=101 (disp32)
     // Binary: 11 010 101 = 0xD5
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
@@ -660,7 +660,7 @@ fn test_calc_effective_address_32_sib_no_base() {
     cpu.memory.write(addr + 2, 0x00);
     cpu.memory.write(addr + 3, 0x02);
     cpu.memory.write(addr + 4, 0x00);
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0x00028000, "Offset should be EDX*8 + disp32");
@@ -671,23 +671,26 @@ fn test_calc_effective_address_32_sib_no_base() {
 fn test_calc_effective_address_32_sib_no_index() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [EBP] with SIB, mod=00, rm=100, index=100 (none)
     cpu.bp = 0x30000000; // EBP = 0x30000000
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    cpu.cs = 0;  // Set CS before address calculation
-    
+    cpu.cs = 0; // Set CS before address calculation
+
     // SIB byte: scale=00 (1x), index=100 (none), base=101 (EBP, but with mod=00 means disp32)
     // This is actually [disp32] case when base=101 and mod=00
     // Let's use base=101 (EBP) with mod=01 instead
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x25); // SIB: scale=00, index=100, base=101 (EBP)
     cpu.memory.write(addr + 1, 0x10); // disp8 = 0x10
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b01, 0b100);
     assert_eq!(seg, cpu.ss, "Should use SS segment for EBP");
-    assert_eq!(offset, 0x30000010, "Offset should be EBP + disp8 (no index)");
+    assert_eq!(
+        offset, 0x30000010,
+        "Offset should be EBP + disp8 (no index)"
+    );
     assert_eq!(bytes, 2, "Should consume 1 byte for SIB + 1 for disp8");
 }
 
@@ -695,7 +698,7 @@ fn test_calc_effective_address_32_sib_no_index() {
 fn test_calc_effective_address_32_disp32_only() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [disp32] with mod=00, rm=101 (special case)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -705,7 +708,7 @@ fn test_calc_effective_address_32_disp32_only() {
     cpu.memory.write(addr + 1, 0xEF);
     cpu.memory.write(addr + 2, 0xCD);
     cpu.memory.write(addr + 3, 0xAB);
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b101);
     assert_eq!(seg, cpu.ds, "Should use DS segment");
     assert_eq!(offset, 0xABCDEF00, "Offset should be disp32");
@@ -716,18 +719,18 @@ fn test_calc_effective_address_32_disp32_only() {
 fn test_calc_effective_address_32_esp_uses_ss() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test [ESP] should use SS segment (mod=00, rm=100 with base=ESP)
     // ESP is register 4
     cpu.sp = 0x00001000; // ESP = 0x00001000
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    
+
     // SIB byte: scale=00, index=100 (none), base=100 (ESP)
     // Binary: 00 100 100 = 0x24
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x24);
-    
+
     let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
     assert_eq!(seg, cpu.ss, "Should use SS segment for ESP base");
     assert_eq!(offset, 0x00001000, "Offset should be ESP");
@@ -738,31 +741,35 @@ fn test_calc_effective_address_32_esp_uses_ss() {
 fn test_read_write_u32_memory() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Write 32-bit value to memory
     let test_value = 0x12345678u32;
     cpu.write_u32(0x1000, 0x0000, test_value);
-    
+
     // Read it back
     let read_value = cpu.read_u32(0x1000, 0x0000);
     assert_eq!(read_value, test_value, "32-bit read/write should match");
-    
+
     // Verify little-endian byte order
     let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0000);
     assert_eq!(cpu.memory.read(addr), 0x78, "Byte 0 should be low byte");
     assert_eq!(cpu.memory.read(addr + 1), 0x56, "Byte 1 should be byte 1");
     assert_eq!(cpu.memory.read(addr + 2), 0x34, "Byte 2 should be byte 2");
-    assert_eq!(cpu.memory.read(addr + 3), 0x12, "Byte 3 should be high byte");
+    assert_eq!(
+        cpu.memory.read(addr + 3),
+        0x12,
+        "Byte 3 should be high byte"
+    );
 }
 
 #[test]
 fn test_read_rm32_register_mode() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set EAX to test value
     cpu.set_reg32(0, 0xABCDEF01);
-    
+
     // Read from register mode (mod=11, rm=000 for EAX)
     let value = cpu.read_rm32(0b11, 0b000);
     assert_eq!(value, 0xABCDEF01, "Should read EAX value");
@@ -772,10 +779,10 @@ fn test_read_rm32_register_mode() {
 fn test_write_rm32_register_mode() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Write to register mode (mod=11, rm=011 for EBX)
     cpu.write_rm32(0b11, 0b011, 0x11223344);
-    
+
     // Verify BX was updated
     assert_eq!(cpu.get_reg32(3), 0x11223344, "EBX should be updated");
 }
@@ -784,16 +791,16 @@ fn test_write_rm32_register_mode() {
 fn test_read_rm32_memory_mode_16bit_addressing() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up memory with test value
     cpu.write_u32(0x1000, 0x0100, 0x87654321);
-    
+
     // Set BX to 0x0100 for [BX] addressing
     cpu.bx = 0x0100;
     cpu.ds = 0x1000;
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    
+
     // Read from memory mode (mod=00, rm=111 for [BX])
     let value = cpu.read_rm32(0b00, 0b111);
     assert_eq!(value, 0x87654321, "Should read from DS:BX");
@@ -803,16 +810,16 @@ fn test_read_rm32_memory_mode_16bit_addressing() {
 fn test_write_rm32_memory_mode_16bit_addressing() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set SI to 0x0200 for [SI] addressing
     cpu.si = 0x0200;
     cpu.ds = 0x1000;
     cpu.cs = 0;
     cpu.ip = 0x1000;
-    
+
     // Write to memory mode (mod=00, rm=100 for [SI])
     cpu.write_rm32(0b00, 0b100, 0xFEDCBA98);
-    
+
     // Verify memory was updated
     let value = cpu.read_u32(0x1000, 0x0200);
     assert_eq!(value, 0xFEDCBA98, "Memory at DS:SI should be updated");
@@ -822,10 +829,10 @@ fn test_write_rm32_memory_mode_16bit_addressing() {
 fn test_read_rmw32_register_mode() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set ECX to test value
     cpu.set_reg32(1, 0x99887766);
-    
+
     // Read for RMW (mod=11, rm=001 for ECX)
     let (value, seg, offset) = cpu.read_rmw32(0b11, 0b001);
     assert_eq!(value, 0x99887766, "Should read ECX value");
@@ -837,10 +844,10 @@ fn test_read_rmw32_register_mode() {
 fn test_write_rmw32_register_mode() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Write RMW result to register (mod=11, rm=010 for EDX)
     cpu.write_rmw32(0b11, 0b010, 0x55443322, 0, 0);
-    
+
     // Verify EDX was updated
     assert_eq!(cpu.get_reg32(2), 0x55443322, "EDX should be updated");
 }
@@ -849,10 +856,10 @@ fn test_write_rmw32_register_mode() {
 fn test_mov_r32_rm32_register_to_register() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set EBX to source value
     cpu.set_reg32(3, 0xDEADBEEF);
-    
+
     // MOV EAX, EBX: opcode 0x89, ModR/M = 0xD8 (mod=11, reg=011, rm=000)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -860,11 +867,11 @@ fn test_mov_r32_rm32_register_to_register() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x89); // MOV opcode
     cpu.memory.write(addr + 2, 0xD8); // ModR/M
-    
+
     // Execute the instruction
     cpu.operand_size_override = false; // Will be set by prefix decoder
     cpu.step();
-    
+
     // Verify EAX was updated with full 32-bit value
     assert_eq!(cpu.get_reg32(0), 0xDEADBEEF, "EAX should contain EBX value");
 }
@@ -873,10 +880,10 @@ fn test_mov_r32_rm32_register_to_register() {
 fn test_mov_rm32_r32_register_to_register() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
-    // Set ECX to source value  
+
+    // Set ECX to source value
     cpu.set_reg32(1, 0x12345678);
-    
+
     // MOV EDX, ECX: opcode 0x8B, ModR/M = 0xD1 (mod=11, reg=010, rm=001)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -884,10 +891,10 @@ fn test_mov_rm32_r32_register_to_register() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x8B); // MOV opcode
     cpu.memory.write(addr + 2, 0xD1); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify EDX was updated with full 32-bit value
     assert_eq!(cpu.get_reg32(2), 0x12345678, "EDX should contain ECX value");
 }
@@ -896,10 +903,10 @@ fn test_mov_rm32_r32_register_to_register() {
 fn test_mov_preserves_16bit_operation_without_override() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set EBX to 32-bit value
     cpu.set_reg32(3, 0xFFFFFFFF);
-    
+
     // MOV BX, 0x1234 (16-bit, no override): opcode 0xC7, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -908,24 +915,28 @@ fn test_mov_preserves_16bit_operation_without_override() {
     cpu.memory.write(addr + 1, 0xC3); // ModR/M (mod=11, op=0, rm=011 for BX)
     cpu.memory.write(addr + 2, 0x34); // Immediate low byte
     cpu.memory.write(addr + 3, 0x12); // Immediate high byte
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify only low 16 bits were affected
     assert_eq!(cpu.get_reg16(3), 0x1234, "BX should be 0x1234");
-    assert_eq!(cpu.get_reg32(3), 0xFFFF1234, "EBX high bits should be preserved");
+    assert_eq!(
+        cpu.get_reg32(3),
+        0xFFFF1234,
+        "EBX high bits should be preserved"
+    );
 }
 
 #[test]
 fn test_add_r32_rm32() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers
     cpu.set_reg32(0, 0x12345678); // EAX
     cpu.set_reg32(3, 0x87654321); // EBX
-    
+
     // ADD EAX, EBX: opcode 0x03, ModR/M = 0xC3 (mod=11, reg=000, rm=011)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -933,10 +944,10 @@ fn test_add_r32_rm32() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x03); // ADD opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result
     assert_eq!(cpu.get_reg32(0), 0x99999999, "EAX should contain sum");
     assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
@@ -949,11 +960,11 @@ fn test_add_r32_rm32() {
 fn test_add_rm32_r32() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers
     cpu.set_reg32(1, 0x00000001); // ECX
     cpu.set_reg32(2, 0xFFFFFFFF); // EDX
-    
+
     // ADD EDX, ECX: opcode 0x01, ModR/M = 0xCA (mod=11, reg=001, rm=010)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -961,10 +972,10 @@ fn test_add_rm32_r32() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x01); // ADD opcode
     cpu.memory.write(addr + 2, 0xCA); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result (overflow to 0)
     assert_eq!(cpu.get_reg32(2), 0x00000000, "EDX should wrap to 0");
     assert!(cpu.get_flag(FLAG_CF), "CF should be set (carry occurred)");
@@ -977,11 +988,11 @@ fn test_add_rm32_r32() {
 fn test_add_32bit_overflow() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers for signed overflow
     cpu.set_reg32(0, 0x7FFFFFFF); // EAX = largest positive i32
     cpu.set_reg32(3, 0x00000001); // EBX = 1
-    
+
     // ADD EAX, EBX: opcode 0x03, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -989,10 +1000,10 @@ fn test_add_32bit_overflow() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x03); // ADD opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result
     assert_eq!(cpu.get_reg32(0), 0x80000000, "EAX should be 0x80000000");
     assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
@@ -1005,35 +1016,39 @@ fn test_add_32bit_overflow() {
 fn test_add_preserves_16bit_without_override() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up 32-bit registers
     cpu.set_reg32(0, 0xFFFF0001); // EAX
     cpu.set_reg32(3, 0xFFFF0002); // EBX
-    
+
     // ADD AX, BX (16-bit, no override): opcode 0x03, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
     cpu.memory.write(addr, 0x03); // ADD opcode (no 0x66 prefix)
     cpu.memory.write(addr + 1, 0xC3); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify only low 16 bits were affected
     assert_eq!(cpu.get_reg16(0), 0x0003, "AX should be 0x0003");
-    assert_eq!(cpu.get_reg32(0), 0xFFFF0003, "EAX high bits should be preserved");
+    assert_eq!(
+        cpu.get_reg32(0),
+        0xFFFF0003,
+        "EAX high bits should be preserved"
+    );
 }
 
 #[test]
 fn test_sub_r32_rm32() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers
     cpu.set_reg32(0, 0x99999999); // EAX
     cpu.set_reg32(3, 0x11111111); // EBX
-    
+
     // SUB EAX, EBX: opcode 0x2B, ModR/M = 0xC3 (mod=11, reg=000, rm=011)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1041,12 +1056,16 @@ fn test_sub_r32_rm32() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x2B); // SUB opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result
-    assert_eq!(cpu.get_reg32(0), 0x88888888, "EAX should contain difference");
+    assert_eq!(
+        cpu.get_reg32(0),
+        0x88888888,
+        "EAX should contain difference"
+    );
     assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
     assert!(!cpu.get_flag(FLAG_OF), "OF should not be set");
     assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
@@ -1057,11 +1076,11 @@ fn test_sub_r32_rm32() {
 fn test_sub_rm32_r32() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers
     cpu.set_reg32(1, 0x00000001); // ECX
     cpu.set_reg32(2, 0x00000000); // EDX
-    
+
     // SUB EDX, ECX: opcode 0x29, ModR/M = 0xCA (mod=11, reg=001, rm=010)
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1069,12 +1088,16 @@ fn test_sub_rm32_r32() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x29); // SUB opcode
     cpu.memory.write(addr + 2, 0xCA); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result (underflow to 0xFFFFFFFF)
-    assert_eq!(cpu.get_reg32(2), 0xFFFFFFFF, "EDX should wrap to 0xFFFFFFFF");
+    assert_eq!(
+        cpu.get_reg32(2),
+        0xFFFFFFFF,
+        "EDX should wrap to 0xFFFFFFFF"
+    );
     assert!(cpu.get_flag(FLAG_CF), "CF should be set (borrow occurred)");
     assert!(!cpu.get_flag(FLAG_OF), "OF should not be set");
     assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
@@ -1085,11 +1108,11 @@ fn test_sub_rm32_r32() {
 fn test_sub_32bit_overflow() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Set up registers for signed overflow
     cpu.set_reg32(0, 0x80000000); // EAX = most negative i32
     cpu.set_reg32(3, 0x00000001); // EBX = 1
-    
+
     // SUB EAX, EBX: opcode 0x2B, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1097,86 +1120,97 @@ fn test_sub_32bit_overflow() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x2B); // SUB opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     // Execute the instruction
     cpu.step();
-    
+
     // Verify result
     assert_eq!(cpu.get_reg32(0), 0x7FFFFFFF, "EAX should be 0x7FFFFFFF");
     assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
     assert!(cpu.get_flag(FLAG_OF), "OF should be set (signed overflow)");
     assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
-    assert!(!cpu.get_flag(FLAG_SF), "SF should not be set (positive result)");
+    assert!(
+        !cpu.get_flag(FLAG_SF),
+        "SF should not be set (positive result)"
+    );
 }
 
 #[test]
 fn test_mixed_16_32bit_operations() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test mixing 16-bit and 32-bit operations
     cpu.set_reg32(0, 0x12345678); // EAX
     cpu.set_reg32(3, 0xABCDEF00); // EBX
-    
+
     // Set up a sequence: 16-bit MOV, 32-bit ADD, 16-bit SUB
     cpu.cs = 0;
     cpu.ip = 0x1000;
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
-    
+
     // MOV AX, BX (16-bit)
     cpu.memory.write(addr, 0x89); // MOV opcode
     cpu.memory.write(addr + 1, 0xD8); // ModR/M (BX to AX)
-    
+
     // ADD EAX, EBX (32-bit)
     cpu.memory.write(addr + 2, 0x66); // Operand size override
     cpu.memory.write(addr + 3, 0x03); // ADD opcode
     cpu.memory.write(addr + 4, 0xC3); // ModR/M (EAX + EBX)
-    
+
     // SUB AX, BX (16-bit)
     cpu.memory.write(addr + 5, 0x2B); // SUB opcode
     cpu.memory.write(addr + 6, 0xC3); // ModR/M (AX - BX)
-    
+
     // Execute MOV AX, BX
     cpu.step();
     assert_eq!(cpu.get_reg16(0), 0xEF00, "AX should be low 16 bits of BX");
     assert_eq!(cpu.get_reg32(0), 0x1234EF00, "EAX high bits preserved");
-    
+
     // Execute ADD EAX, EBX (32-bit)
     cpu.step();
-    assert_eq!(cpu.get_reg32(0), 0xBE02DE00, "EAX = 0x1234EF00 + 0xABCDEF00");
-    
+    assert_eq!(
+        cpu.get_reg32(0),
+        0xBE02DE00,
+        "EAX = 0x1234EF00 + 0xABCDEF00"
+    );
+
     // Execute SUB AX, BX (16-bit)
     cpu.step();
     assert_eq!(cpu.get_reg16(0), 0xEF00, "AX = 0xDE00 - 0xEF00");
-    assert_eq!(cpu.get_reg32(0), 0xBE02EF00, "EAX high bits preserved after 16-bit SUB");
+    assert_eq!(
+        cpu.get_reg32(0),
+        0xBE02EF00,
+        "EAX high bits preserved after 16-bit SUB"
+    );
 }
 
 #[test]
 fn test_operand_size_prefix_multiple_instructions() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     // Test that operand_size_override flag is properly reset between instructions
     cpu.set_reg32(0, 0x00000001);
     cpu.set_reg32(1, 0x00000002);
-    
+
     cpu.cs = 0;
     cpu.ip = 0x1000;
     let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
-    
+
     // 32-bit ADD with prefix
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x03); // ADD opcode
     cpu.memory.write(addr + 2, 0xC1); // ModR/M (EAX + ECX)
-    
+
     // 16-bit ADD without prefix (should work correctly after previous 32-bit)
     cpu.memory.write(addr + 3, 0x03); // ADD opcode
     cpu.memory.write(addr + 4, 0xC1); // ModR/M (AX + CX)
-    
+
     // Execute 32-bit ADD
     cpu.step();
     assert_eq!(cpu.get_reg32(0), 0x00000003, "EAX = 1 + 2 (32-bit)");
-    
+
     // Execute 16-bit ADD
     cpu.step();
     assert_eq!(cpu.get_reg16(0), 0x0005, "AX = 3 + 2 (16-bit)");
@@ -1187,10 +1221,10 @@ fn test_operand_size_prefix_multiple_instructions() {
 fn test_and_32bit() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     cpu.set_reg32(0, 0xFFFF0000); // EAX
     cpu.set_reg32(3, 0x0000FFFF); // EBX
-    
+
     // AND EAX, EBX: opcode 0x23, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1198,10 +1232,14 @@ fn test_and_32bit() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x23); // AND opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     cpu.step();
-    
-    assert_eq!(cpu.get_reg32(0), 0x00000000, "EAX should be 0 (no common bits)");
+
+    assert_eq!(
+        cpu.get_reg32(0),
+        0x00000000,
+        "EAX should be 0 (no common bits)"
+    );
     assert!(cpu.get_flag(FLAG_ZF), "ZF should be set");
     assert!(!cpu.get_flag(FLAG_SF), "SF should not be set");
     assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
@@ -1212,10 +1250,10 @@ fn test_and_32bit() {
 fn test_or_32bit() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     cpu.set_reg32(0, 0xAAAAAAAA); // EAX
     cpu.set_reg32(3, 0x55555555); // EBX
-    
+
     // OR EAX, EBX: opcode 0x0B, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1223,9 +1261,9 @@ fn test_or_32bit() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x0B); // OR opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     cpu.step();
-    
+
     assert_eq!(cpu.get_reg32(0), 0xFFFFFFFF, "EAX should be all 1s");
     assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
     assert!(cpu.get_flag(FLAG_SF), "SF should be set (bit 31)");
@@ -1237,10 +1275,10 @@ fn test_or_32bit() {
 fn test_xor_32bit() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     cpu.set_reg32(0, 0x12345678); // EAX
     cpu.set_reg32(3, 0x12345678); // EBX (same value)
-    
+
     // XOR EAX, EBX: opcode 0x33, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1248,9 +1286,9 @@ fn test_xor_32bit() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x33); // XOR opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     cpu.step();
-    
+
     assert_eq!(cpu.get_reg32(0), 0x00000000, "EAX XOR EBX should be 0");
     assert!(cpu.get_flag(FLAG_ZF), "ZF should be set");
     assert!(!cpu.get_flag(FLAG_SF), "SF should not be set");
@@ -1262,10 +1300,10 @@ fn test_xor_32bit() {
 fn test_cmp_32bit() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     cpu.set_reg32(0, 0x00000005); // EAX
     cpu.set_reg32(3, 0x00000003); // EBX
-    
+
     // CMP EAX, EBX: opcode 0x3B, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1273,9 +1311,9 @@ fn test_cmp_32bit() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x3B); // CMP opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     cpu.step();
-    
+
     // CMP doesn't modify registers, only flags
     assert_eq!(cpu.get_reg32(0), 0x00000005, "EAX should be unchanged");
     assert_eq!(cpu.get_reg32(3), 0x00000003, "EBX should be unchanged");
@@ -1287,10 +1325,10 @@ fn test_cmp_32bit() {
 fn test_test_32bit() {
     let mem = ArrayMemory::new();
     let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
-    
+
     cpu.set_reg32(0, 0x80000000); // EAX (bit 31 set)
     cpu.set_reg32(3, 0x80000000); // EBX (bit 31 set)
-    
+
     // TEST r/m32, r32: opcode 0x85, ModR/M = 0xC3
     cpu.cs = 0;
     cpu.ip = 0x1000;
@@ -1298,13 +1336,16 @@ fn test_test_32bit() {
     cpu.memory.write(addr, 0x66); // Operand size override
     cpu.memory.write(addr + 1, 0x85); // TEST opcode
     cpu.memory.write(addr + 2, 0xC3); // ModR/M
-    
+
     cpu.step();
-    
+
     // TEST doesn't modify registers, only flags
     assert_eq!(cpu.get_reg32(0), 0x80000000, "EAX should be unchanged");
     assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
-    assert!(cpu.get_flag(FLAG_SF), "SF should be set (result has bit 31)");
+    assert!(
+        cpu.get_flag(FLAG_SF),
+        "SF should be set (result has bit 31)"
+    );
     assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
     assert!(!cpu.get_flag(FLAG_OF), "OF should be cleared");
 }

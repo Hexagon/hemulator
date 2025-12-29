@@ -1283,7 +1283,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Scale values: 1, 2, 4, 8
     fn decode_sib(&mut self) -> (u32, u8, u8, u8) {
         let sib = self.fetch_u8();
-        
+
         // SIB byte format: [SS][III][BBB]
         // SS = scale (00=1, 01=2, 10=4, 11=8)
         // III = index register (0-7, where 4 = none/ESP)
@@ -1291,7 +1291,7 @@ impl<M: Memory8086> Cpu8086<M> {
         let scale_bits = (sib >> 6) & 0b11;
         let index = (sib >> 3) & 0b111;
         let base = sib & 0b111;
-        
+
         let scale = match scale_bits {
             0b00 => 1,
             0b01 => 2,
@@ -1299,7 +1299,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0b11 => 8,
             _ => unreachable!(),
         };
-        
+
         (scale, index, base, 1)
     }
 
@@ -1312,7 +1312,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 if rm == 0b100 {
                     // SIB byte follows
                     let (scale, index, base, sib_bytes) = self.decode_sib();
-                    
+
                     // Calculate index contribution
                     let index_val = if index == 4 {
                         // ESP as index means no index
@@ -1320,7 +1320,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     } else {
                         self.get_reg32(index).wrapping_mul(scale)
                     };
-                    
+
                     // Calculate base contribution
                     if base == 5 {
                         // Special case: [disp32] or [index*scale+disp32]
@@ -1328,7 +1328,11 @@ impl<M: Memory8086> Cpu8086<M> {
                         (self.ds, index_val.wrapping_add(disp), sib_bytes + 4)
                     } else {
                         let base_val = self.get_reg32(base);
-                        let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
+                        let default_seg = if base == 4 || base == 5 {
+                            self.ss
+                        } else {
+                            self.ds
+                        };
                         (default_seg, base_val.wrapping_add(index_val), sib_bytes)
                     }
                 } else if rm == 0b101 {
@@ -1348,16 +1352,24 @@ impl<M: Memory8086> Cpu8086<M> {
                     // SIB byte follows, then disp8
                     let (scale, index, base, sib_bytes) = self.decode_sib();
                     let disp = self.fetch_u8() as i8 as i32 as u32;
-                    
+
                     let index_val = if index == 4 {
                         0u32
                     } else {
                         self.get_reg32(index).wrapping_mul(scale)
                     };
-                    
+
                     let base_val = self.get_reg32(base);
-                    let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
-                    (default_seg, base_val.wrapping_add(index_val).wrapping_add(disp), sib_bytes + 1)
+                    let default_seg = if base == 4 || base == 5 {
+                        self.ss
+                    } else {
+                        self.ds
+                    };
+                    (
+                        default_seg,
+                        base_val.wrapping_add(index_val).wrapping_add(disp),
+                        sib_bytes + 1,
+                    )
                 } else {
                     // Direct register + disp8
                     let disp = self.fetch_u8() as i8 as i32 as u32;
@@ -1372,16 +1384,24 @@ impl<M: Memory8086> Cpu8086<M> {
                     // SIB byte follows, then disp32
                     let (scale, index, base, sib_bytes) = self.decode_sib();
                     let disp = self.fetch_u32();
-                    
+
                     let index_val = if index == 4 {
                         0u32
                     } else {
                         self.get_reg32(index).wrapping_mul(scale)
                     };
-                    
+
                     let base_val = self.get_reg32(base);
-                    let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
-                    (default_seg, base_val.wrapping_add(index_val).wrapping_add(disp), sib_bytes + 4)
+                    let default_seg = if base == 4 || base == 5 {
+                        self.ss
+                    } else {
+                        self.ds
+                    };
+                    (
+                        default_seg,
+                        base_val.wrapping_add(index_val).wrapping_add(disp),
+                        sib_bytes + 4,
+                    )
                 } else {
                     // Direct register + disp32
                     let disp = self.fetch_u32();
@@ -1393,7 +1413,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // mod = 11: Register mode (no memory access)
             _ => (0, 0, 0), // Not used for register mode
         };
-        
+
         // Apply segment override if present
         let seg = self.get_segment_with_override(default_seg);
         (seg, offset, bytes_read)
@@ -2054,7 +2074,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 // MOV r/m16/32, r16/32 - Move register to r/m
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                
+
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit operand
                     let val = self.get_reg32(reg);
@@ -2064,7 +2084,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     let val = self.get_reg16(reg);
                     self.write_rm16(modbits, rm, val);
                 }
-                
+
                 self.cycles += if modbits == 0b11 { 2 } else { 9 };
                 if modbits == 0b11 {
                     2
@@ -2095,7 +2115,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x8B => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                
+
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit operand
                     let val = self.read_rm32(modbits, rm);
@@ -2105,7 +2125,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     let val = self.read_rm16(modbits, rm);
                     self.set_reg16(reg, val);
                 }
-                
+
                 self.cycles += if modbits == 0b11 { 2 } else { 8 };
                 if modbits == 0b11 {
                     2
@@ -8050,11 +8070,11 @@ mod tests {
     use super::*;
 
     // Include organized test modules
-    mod tests_jumps;
-    mod tests_flags;
-    mod tests_8bit;
     mod tests_16bit;
     mod tests_32bit;
+    mod tests_8bit;
+    mod tests_flags;
+    mod tests_jumps;
     mod tests_misc;
 
     // Helper function for tests to calculate physical address
