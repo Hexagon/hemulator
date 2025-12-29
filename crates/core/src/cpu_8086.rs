@@ -8049,6 +8049,9 @@ impl Memory8086 for ArrayMemory {
 mod tests {
     use super::*;
 
+    // Include organized test modules
+    mod tests_jumps;
+
     // Helper function for tests to calculate physical address
     fn physical_address(segment: u16, offset: u16) -> u32 {
         ((segment as u32) << 4) + (offset as u32)
