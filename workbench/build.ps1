@@ -152,7 +152,7 @@ for ($i = 0; $i -lt $rootEntries; $i++) {
         
         # Free the cluster chain in FAT
         $cluster = $existingCluster
-        while ($cluster -ge 2 -and $cluster -lt 0xFF8) {
+        while ($cluster -ge 2 -and $cluster -lt $maxCluster) {
             $fatOffset = $fat1Offset + [int]($cluster * 1.5)
             
             # Read next cluster in chain
@@ -174,8 +174,8 @@ for ($i = 0; $i -lt $rootEntries; $i++) {
                 [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
             }
             
-            # Move to next cluster or exit if EOF
-            if ($nextCluster -ge 0xFF8) {
+            # Move to next cluster or exit if EOF (0xFF8-0xFFF)
+            if ($nextCluster -ge 0xFF8 -or $nextCluster -ge $maxCluster) {
                 break
             }
             $cluster = $nextCluster
