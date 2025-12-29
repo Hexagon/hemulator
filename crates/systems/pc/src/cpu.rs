@@ -3846,7 +3846,7 @@ impl PcCpu {
         // This is used by DOS to check for network redirector
         // We don't support networking, so return "not installed"
         // AL = 0xFF means "not installed"
-        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFF;
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | 0xFFu32;
         51
     }
 
