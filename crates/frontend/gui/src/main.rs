@@ -1,8 +1,10 @@
 pub mod display_filter;
 mod hemu_project;
+mod menu;
 mod rom_detect;
 mod save_state;
 mod settings;
+mod status_bar;
 mod ui_render;
 pub mod video_processor;
 pub mod window_backend;
