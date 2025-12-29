@@ -1,12 +1,12 @@
-# PC BIOS Interrupt Handling Analysis
+# PC BIOS Interrupt Reference
 
-**Date**: 2025-12-28  
-**Purpose**: Comprehensive evaluation of PC emulator interrupt handling against BIOS interrupt reference  
-**Status**: ✅ **HIGH priority issues implemented** - Critical functions for HIMEM.SYS and QBasic now working
+This document provides a comprehensive reference for PC BIOS interrupt handling in the Hemulator PC emulator. It covers the implementation status and requirements for various BIOS services.
 
-## Predicted Issues for Linux Kernel and Other Operating Systems
+## Operating System Boot Requirements
 
-### 🔴 CRITICAL: Linux Kernel Boot Requirements
+This section documents BIOS interrupt requirements for booting various operating systems.
+
+### Linux Kernel Boot Requirements
 
 Based on Linux kernel boot protocol analysis, the following issues are predicted:
 

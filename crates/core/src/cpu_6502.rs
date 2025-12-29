@@ -2,6 +2,8 @@
 //!
 //! This module provides a reusable, generic 6502 CPU implementation that can be used
 //! by any system (NES, Atari 2600, Apple II, etc.) by implementing the `Memory6502` trait.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_6502.md`
 
 use crate::logging::{LogCategory, LogConfig, LogLevel};
 

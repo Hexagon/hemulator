@@ -4,6 +4,8 @@
 //! by any system (Space Invaders, CP/M systems, etc.) by implementing the `Memory8080` trait.
 //!
 //! The 8080 is the foundation for the Z80 and Game Boy CPUs.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_8080.md`
 
 /// Memory interface trait for the 8080 CPU
 ///

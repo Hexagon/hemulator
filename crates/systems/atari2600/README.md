@@ -2,7 +2,7 @@
 
 This crate implements Atari 2600 emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -143,7 +143,7 @@ let frame = atari.step_frame()?;
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#atari-2600) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#atari-2600) for user-facing limitations.
 
 **Technical Limitations**:
 - Player/missile sizing (NUSIZ) stored but not applied
@@ -171,13 +171,13 @@ When adding Atari 2600 features:
 
 1. **Banking Schemes**: Add to `src/cartridge.rs`
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+3. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#atari-2600)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#atari-2600)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
 - **Stella Programmer's Guide**: Classic Atari 2600 documentation
 
 ## License

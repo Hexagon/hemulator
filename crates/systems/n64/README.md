@@ -31,7 +31,7 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 The N64 RDP uses a **pluggable renderer architecture** that allows switching between different rendering backends.
 
-For detailed architecture documentation, see the **[Renderer Implementation Guidelines](../../../AGENTS.md#renderer-implementation-guidelines)** section in AGENTS.md.
+For detailed architecture documentation, see the **[Renderer Implementation Guidelines](../../../AGENTS.md#renderer-implementation)** section in AGENTS.md.
 
 ### Software Renderer (Default)
 
@@ -68,7 +68,7 @@ For detailed architecture documentation, see the **[Renderer Implementation Guid
 - Hardware depth testing
 - Shader programs for flat/Gouraud shading
 
-See `rdp.rs` for RDP command implementation details. For overall renderer architecture, see [AGENTS.md](../../../AGENTS.md#renderer-implementation-guidelines).
+See `rdp.rs` for RDP command implementation details. For overall renderer architecture, see [AGENTS.md](../../../AGENTS.md#renderer-implementation).
 
 ## Building
 
@@ -173,7 +173,7 @@ N64System
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#n64-nintendo-64) for the complete list of user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Critical limitations**:
 1. No RSP - can't run real games (no geometry processing)
@@ -206,12 +206,12 @@ When adding features to the N64 emulator:
 
 1. **Follow the renderer pattern**: Keep renderers separate from RDP state
 2. **Write tests**: Add unit tests for new functionality
-3. **Document limitations**: Update `MANUAL.md` when fixing issues
+3. **Document limitations**: Update `docs/MANUAL.md` when fixing issues
 4. **Preserve accuracy**: Software renderer should be reference implementation
 
 ## References
 
-- **Project Documentation**: See [README.md](../../../README.md), [MANUAL.md](../../../MANUAL.md), and [AGENTS.md](../../../AGENTS.md)
+- **Project Documentation**: See [README.md](../../../README.md), [MANUAL.md](../../../docs/MANUAL.md), and [AGENTS.md](../../../AGENTS.md)
 - **RDP Commands**: Documented in `rdp.rs`
 - **Test ROMs**: See `../../../test_roms/README.md`
 

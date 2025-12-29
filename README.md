@@ -37,19 +37,19 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 
 ## For Users
 
-Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See **[MANUAL.md](MANUAL.md)** for complete usage instructions, controls, and system-specific information.
+Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See **[MANUAL.md](docs/MANUAL.md)** for complete usage instructions, controls, and system-specific information.
 
 ## For Developers
 
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for overall emulation system architecture and design patterns.
+See **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** for overall emulation system architecture and design patterns.
 
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for development workflow and contribution guidelines.
+See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for development workflow and contribution guidelines.
 
 See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
 
 **Analysis Documents**:
-- [PC_INTERRUPT_ANALYSIS.md](PC_INTERRUPT_ANALYSIS.md) - PC BIOS interrupt handling evaluation
-- [CPU_ANALYSIS.md](CPU_ANALYSIS.md) - CPU implementation analysis
+- [PC_INTERRUPT_ANALYSIS.md](docs/PC_INTERRUPT_ANALYSIS.md) - PC BIOS interrupt handling evaluation
+- [CPU_ANALYSIS.md](docs/CPU_ANALYSIS.md) - CPU implementation analysis
 
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
@@ -90,7 +90,7 @@ cargo run --release -p emu_gui
 
 ## Architecture
 
-Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 **Core Components** (`crates/core/`):
 - CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
@@ -104,7 +104,7 @@ Hemulator uses a modular architecture that separates reusable emulation componen
 
 ### Renderer Architecture
 
-The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](ARCHITECTURE.md#renderer-architecture) for implementation details.
+The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#renderer-architecture) for implementation details.
 
 ## NES Mapper Support
 
@@ -139,7 +139,7 @@ The NES emulator supports 14 mappers covering approximately **90%+ of all NES ga
 - CHR-RAM support for games without CHR-ROM
 - Comprehensive unit tests (61 tests total)
 
-See [MANUAL.md](MANUAL.md) for user-facing mapper information and game compatibility.
+See [MANUAL.md](docs/MANUAL.md) for user-facing mapper information and game compatibility.
 
 ## Supported ROM Formats
 
@@ -214,7 +214,6 @@ hemulator/
 │       └── gui/        # GUI frontend (SDL2 + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
 ├── saves/              # Save state directory (per-ROM)
-├── MANUAL.md           # User manual (included in releases)
 └── AGENTS.md           # Guidelines for automated agents
 ```
 
@@ -306,7 +305,7 @@ See existing mapper implementations for examples.
 
 ## Contributing
 
-Contributions are welcome! Please see **[CONTRIBUTING.md](CONTRIBUTING.md)** for:
+Contributions are welcome! Please see **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for:
 - Pre-commit check requirements (formatting, linting, building, testing)
 - Development workflow and coding standards
 - Debug environment variables
@@ -330,7 +329,7 @@ See [LICENSE](LICENSE) file for details.
 
 ### Debug Logging
 
-The emulator supports comprehensive debug logging via command-line flags. See [CONTRIBUTING.md](CONTRIBUTING.md#debug-logging) for detailed usage.
+The emulator supports comprehensive debug logging via command-line flags. See [CONTRIBUTING.md](docs/CONTRIBUTING.md#debug-logging) for detailed usage.
 
 Quick reference:
 ```bash
