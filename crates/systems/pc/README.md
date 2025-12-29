@@ -2,7 +2,7 @@
 
 This crate implements IBM PC/XT emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -203,7 +203,7 @@ Without modifier, function keys go to DOS program.
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
 - **No save states**: PC systems don't use save states like ROM-based consoles
@@ -251,13 +251,13 @@ When adding PC features:
 1. **Video Adapters**: Add to `src/video_adapter*.rs`
 2. **BIOS Interrupts**: Add to `src/bios.rs` (when created)
 3. **Tests**: Add unit tests for new functionality
-4. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+4. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
 - **OSDev Wiki**: https://wiki.osdev.org/
 
 ## License

@@ -2,7 +2,7 @@
 
 This crate implements Super Nintendo Entertainment System emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -171,7 +171,7 @@ controller::RIGHT   // 0x0100
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#snes-super-nintendo-entertainment-system) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system) for user-facing limitations.
 
 **Status**: Functional - can run games using Mode 0 or Mode 1 with sprites and controllers. Missing only audio and advanced PPU modes.
 
@@ -205,13 +205,13 @@ When adding SNES features:
 1. **PPU Modes**: Add to `src/ppu.rs`
 2. **APU**: Create `src/apu.rs` with SPC700 CPU
 3. **Tests**: Add unit tests for new functionality
-4. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+4. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#snes-super-nintendo-entertainment-system)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
 - **SNESdev Wiki**: https://www.snesdev.org/
 
 ## License

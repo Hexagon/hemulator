@@ -175,7 +175,7 @@ This document outlines the phased, backward-compatible approach to implementing 
   - Profile critical paths
   - Optimize hot instruction implementations
 - [ ] Documentation updates
-  - Update MANUAL.md with 386+ support status
+  - Update docs/MANUAL.md with 386+ support status
   - Update README.md
   - Document any known limitations
 

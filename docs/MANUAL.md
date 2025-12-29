@@ -2,7 +2,7 @@
 
 Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, SNES, N64, Atari 2600, Game Boy, and PC/DOS emulation.
 
-**For Developers**: See [README.md](README.md) for build instructions, [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details, and individual system READMEs for implementation specifics.
+**For Developers**: See [README.md](../README.md) for build instructions, [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details, and individual system READMEs for implementation specifics.
 
 ## Getting Started
 
@@ -788,7 +788,7 @@ For N64 games, the standard controller mappings apply with these button equivale
     - MOVSX/MOVZX, BSF/BSR, BT/BTS/BTR/BTC, SETcc (bit manipulation and conditional operations)
   - CPU model selection support for running software with different instruction set requirements
   - Maintains full backward compatibility - 16-bit operations work on low 16 bits of 32-bit registers
-  - See `AGENTS.md` for full instruction set details
+  - See `../AGENTS.md` for full instruction set details
 - **Memory bus** (configurable conventional + extended memory, 128KB VRAM, 256KB ROM)
   - **Conventional memory**: 256KB-640KB (PC/XT compatible, visible to all software)
   - **Extended memory**: Above 640KB (accessible via XMS, for protected mode or extended software)

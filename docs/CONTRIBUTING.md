@@ -6,7 +6,7 @@ Contributions are welcome! Please follow these guidelines.
 
 **For Architecture Details**: See [ARCHITECTURE.md](ARCHITECTURE.md) for overall emulation system architecture.
 
-**For Implementation Guidelines**: See [AGENTS.md](AGENTS.md) for detailed implementation patterns and CI requirements.
+**For Implementation Guidelines**: See [AGENTS.md](../AGENTS.md) for detailed implementation patterns and CI requirements.
 
 ## Pre-Commit Checks (REQUIRED)
 
@@ -34,8 +34,8 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 - **Documentation**: 
   - Update [MANUAL.md](MANUAL.md) for user-facing changes (controls, features, system limitations)
-  - Update [README.md](README.md) for developer setup info and project overview
-  - Update [AGENTS.md](AGENTS.md) for architecture changes and implementation guidelines
+  - Update [README.md](../README.md) for developer setup info and project overview
+  - Update [AGENTS.md](../AGENTS.md) for architecture changes and implementation guidelines
 - **Code Quality**: Write clean, well-documented code with meaningful variable names
 - **Commit Messages**: Use clear, descriptive commit messages
 
@@ -50,7 +50,7 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 The emulator supports debug logging through command-line arguments.
 
-**For comprehensive logging documentation and implementation guidelines**, see [AGENTS.md](AGENTS.md#logging-system).
+**For comprehensive logging documentation and implementation guidelines**, see [AGENTS.md](../AGENTS.md#logging-system).
 
 ### Command-Line Logging Options
 

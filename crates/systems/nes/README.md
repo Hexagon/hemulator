@@ -2,7 +2,7 @@
 
 This crate implements Nintendo Entertainment System emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -166,7 +166,7 @@ let samples = nes.audio_samples();
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#nes-nintendo-entertainment-system) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#nes-nintendo-entertainment-system) for user-facing limitations.
 
 **Technical Limitations**:
 - Frame-based timing (not cycle-accurate)
@@ -192,14 +192,14 @@ When adding NES features:
 
 1. **Mappers**: Add to `src/mappers/`, implement `Mapper` trait
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+3. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 4. **Known Limitations**: Update limitations when features are added
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#nes-nintendo-entertainment-system)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#nes-nintendo-entertainment-system)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
 - **NESDev Wiki**: https://www.nesdev.org/
 
 ## License
