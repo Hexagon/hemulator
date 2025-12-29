@@ -963,3 +963,70 @@ fn test_shift_immediate_valid_on_80186() {
     assert!(cycles > 10, "Shift by immediate should work on 80186");
     assert_eq!(cpu.ax & 0xFF, 0xF0, "SHL AL, 4 should shift left by 4");
 }
+
+#[test]
+fn test_mov_ax_preserves_high_16_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // MOV AX, 0x5678 (0xB8, 0x78, 0x56)
+    cpu.memory.load_program(0xFFFF0, &[0xB8, 0x78, 0x56]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x12345678; // Set all 32 bits initially
+
+    cpu.step();
+
+    assert_eq!(cpu.ax & 0xFFFF, 0x5678, "AX should be set to 0x5678");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x1234_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_add_ax_preserves_high_16_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // ADD AX, BX (0x01 with ModR/M 0b11_011_000 = register mode, BX to AX)
+    cpu.memory.load_program(0xFFFF0, &[0x01, 0b11_011_000]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0xAABB1234; // AX=0x1234
+    cpu.bx = 0xCCDD5678; // BX=0x5678
+
+    cpu.step();
+
+    // AX should be 0x1234 + 0x5678 = 0x68AC
+    assert_eq!(cpu.ax & 0xFFFF, 0x68AC, "AX should be 0x1234 + 0x5678");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0xAABB_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_sub_cx_preserves_high_16_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // SUB CX, DX (0x29 with ModR/M 0b11_010_001 = register mode, DX to CX)
+    cpu.memory.load_program(0xFFFF0, &[0x29, 0b11_010_001]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.cx = 0x11229999; // CX=0x9999
+    cpu.dx = 0x33441111; // DX=0x1111
+
+    cpu.step();
+
+    // CX should be 0x9999 - 0x1111 = 0x8888
+    assert_eq!(cpu.cx & 0xFFFF, 0x8888, "CX should be 0x9999 - 0x1111");
+    assert_eq!(
+        cpu.cx & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+}

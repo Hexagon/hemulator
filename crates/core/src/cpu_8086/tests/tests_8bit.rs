@@ -688,3 +688,51 @@ fn test_mov_bh_imm8_preserves_bl() {
         "High 16 bits should be preserved"
     );
 }
+
+#[test]
+fn test_add_ah_preserves_al_and_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // ADD AH, BH (0x00 with ModR/M 0b11_111_100 = register mode, BH to AH)
+    cpu.memory.load_program(0xFFFF0, &[0x00, 0b11_111_100]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x11223344; // AH=0x33, AL=0x44
+    cpu.bx = 0x55667788; // BH=0x77, BL=0x88
+
+    cpu.step();
+
+    // AH should be 0x33 + 0x77 = 0xAA
+    assert_eq!(cpu.ax & 0xFF, 0x44, "AL should be preserved");
+    assert_eq!((cpu.ax >> 8) & 0xFF, 0xAA, "AH should be 0x33 + 0x77");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_sub_ch_preserves_cl_and_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // SUB CH, DH (0x28 with ModR/M 0b11_110_101 = register mode, DH to CH)
+    cpu.memory.load_program(0xFFFF0, &[0x28, 0b11_110_101]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.cx = 0xAABBCCDD; // CH=0xCC, CL=0xDD
+    cpu.dx = 0x11223344; // DH=0x33, DL=0x44
+
+    cpu.step();
+
+    // CH should be 0xCC - 0x33 = 0x99
+    assert_eq!(cpu.cx & 0xFF, 0xDD, "CL should be preserved");
+    assert_eq!((cpu.cx >> 8) & 0xFF, 0x99, "CH should be 0xCC - 0x33");
+    assert_eq!(
+        cpu.cx & 0xFFFF_0000,
+        0xAABB_0000,
+        "High 16 bits should be preserved"
+    );
+}
