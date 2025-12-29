@@ -102,7 +102,22 @@ impl EguiGui {
         let mut action = GuiAction::None;
 
         if !self.show_gui {
+            static mut WARNED: bool = false;
+            unsafe {
+                if !WARNED {
+                    println!("DEBUG: show_gui is false, not rendering");
+                    WARNED = true;
+                }
+            }
             return action;
+        }
+
+        static mut FIRST_RENDER: bool = true;
+        unsafe {
+            if FIRST_RENDER {
+                println!("DEBUG: egui render_basic called, rendering UI");
+                FIRST_RENDER = false;
+            }
         }
 
         // Menu bar

@@ -2741,6 +2741,15 @@ fn main() {
                     if let (Some(gl_ctx), Some(sdl_window)) =
                         (sdl2_backend.get_gl_context(), sdl2_backend.get_sdl_window())
                     {
+                        // Debug: Check if we're reaching this code
+                        static mut FIRST_RENDER: bool = true;
+                        unsafe {
+                            if FIRST_RENDER {
+                                println!("DEBUG: egui rendering code reached");
+                                FIRST_RENDER = false;
+                            }
+                        }
+
                         // Begin egui frame
                         let ctx = integration.begin_frame(sdl_window);
 
@@ -2750,10 +2759,18 @@ fn main() {
                         // Render GUI and get action
                         let action = gui.render_basic(ctx);
 
-                        // Set viewport to full window size for egui rendering
+                        // Prepare OpenGL state for egui rendering
                         let (window_width, window_height) = sdl_window.size();
                         unsafe {
+                            // Set viewport to full window size
                             gl_ctx.viewport(0, 0, window_width as i32, window_height as i32);
+
+                            // Disable depth test for 2D GUI rendering
+                            gl_ctx.disable(glow::DEPTH_TEST);
+
+                            // Enable blending for transparency
+                            gl_ctx.enable(glow::BLEND);
+                            gl_ctx.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                         }
 
                         // End egui frame and render

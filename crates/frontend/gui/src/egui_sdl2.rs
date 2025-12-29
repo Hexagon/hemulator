@@ -77,11 +77,34 @@ impl EguiSdl2Integration {
             .egui_ctx
             .tessellate(output.shapes, output.pixels_per_point);
 
+        // Debug output
+        static mut FIRST_PAINT: bool = true;
+        unsafe {
+            if FIRST_PAINT {
+                println!(
+                    "DEBUG: Painting {} primitives at {}x{}",
+                    clipped_primitives.len(),
+                    width,
+                    height
+                );
+                FIRST_PAINT = false;
+            }
+        }
+
+        // Update textures and paint
+        for (id, image_delta) in &output.textures_delta.set {
+            self.egui_painter.set_texture(*id, image_delta);
+        }
+
         self.egui_painter.paint_primitives(
             [width, height],
             output.pixels_per_point,
             &clipped_primitives,
         );
+
+        for id in &output.textures_delta.free {
+            self.egui_painter.free_texture(*id);
+        }
     }
 
     /// Handle an SDL2 event and update egui state
