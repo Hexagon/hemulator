@@ -1896,6 +1896,11 @@ impl PcCpu {
         // DL = drive number
         let drive = (self.cpu.dx & 0xFF) as u8;
 
+        eprintln!(
+            "[INT 13h READ] drive=0x{:02X} C={} H={} S={} count={}",
+            drive, cylinder, head, sector, count
+        );
+
         // ES:BX = buffer address
         let buffer_seg = self.cpu.es;
         let buffer_offset = self.cpu.bx;
