@@ -54,8 +54,8 @@ impl TriangleChannel {
         let sample = if self.enabled && self.length_counter > 0 && self.linear_counter > 0 {
             self.triangle_output()
         } else {
-            // When silenced, continue outputting last value (not reset to 0)
-            self.triangle_output()
+            // When silenced, output 0 (like pulse and noise channels)
+            0
         };
 
         // Only advance the sequencer if linear counter and length counter are both non-zero
@@ -166,5 +166,47 @@ mod tests {
 
         tri.clock_linear_counter();
         assert_eq!(tri.linear_counter, 3);
+    }
+
+    #[test]
+    fn triangle_outputs_zero_when_disabled() {
+        let mut tri = TriangleChannel::new();
+        tri.enabled = false;
+        tri.length_counter = 10;
+        tri.linear_counter = 10;
+        tri.set_timer(0);
+
+        let sample = tri.clock();
+        assert_eq!(sample, 0, "Triangle channel should output 0 when disabled");
+    }
+
+    #[test]
+    fn triangle_outputs_zero_when_length_counter_zero() {
+        let mut tri = TriangleChannel::new();
+        tri.enabled = true;
+        tri.length_counter = 0;
+        tri.linear_counter = 10;
+        tri.set_timer(0);
+
+        let sample = tri.clock();
+        assert_eq!(
+            sample, 0,
+            "Triangle channel should output 0 when length counter is 0"
+        );
+    }
+
+    #[test]
+    fn triangle_outputs_zero_when_linear_counter_zero() {
+        let mut tri = TriangleChannel::new();
+        tri.enabled = true;
+        tri.length_counter = 10;
+        tri.linear_counter = 0;
+        tri.set_timer(0);
+
+        let sample = tri.clock();
+        assert_eq!(
+            sample, 0,
+            "Triangle channel should output 0 when linear counter is 0"
+        );
     }
 }

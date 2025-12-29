@@ -191,6 +191,7 @@ impl EmulatorSystem {
                 if port == 0 {
                     // Convert from standard mapping (A, B, Select, Start, Up, Down, Left, Right)
                     // to Game Boy mapping (Right, Left, Up, Down, A, B, Select, Start)
+                    // Note: Game Boy uses active-low logic (0 = pressed, 1 = released)
                     let gb_state = ((state & 0x80) >> 7)  // Right (bit 7 -> bit 0)
                         | ((state & 0x40) >> 5)           // Left (bit 6 -> bit 1)
                         | ((state & 0x10) >> 2)           // Up (bit 4 -> bit 2)
@@ -199,7 +200,8 @@ impl EmulatorSystem {
                         | ((state & 0x02) << 4)           // B (bit 1 -> bit 5)
                         | ((state & 0x04) << 4)           // Select (bit 2 -> bit 6)
                         | ((state & 0x08) << 4); // Start (bit 3 -> bit 7)
-                    sys.set_controller(gb_state);
+                                                 // Invert for Game Boy's active-low logic (0 = pressed)
+                    sys.set_controller(!gb_state);
                 }
             }
             EmulatorSystem::Atari2600(_) => {}
@@ -240,6 +242,13 @@ impl EmulatorSystem {
     fn get_debug_info_pc(&self) -> Option<emu_pc::DebugInfo> {
         match self {
             EmulatorSystem::PC(sys) => Some(sys.debug_info()),
+            _ => None,
+        }
+    }
+
+    fn get_debug_info_gb(&self) -> Option<emu_gb::DebugInfo> {
+        match self {
+            EmulatorSystem::GameBoy(sys) => Some(sys.debug_info()),
             _ => None,
         }
     }
@@ -1644,6 +1653,20 @@ fn main() {
                     println!("Current Bank: {}", debug_info.current_bank);
                     println!("Scanline: {}", debug_info.scanline);
                 }
+                // Try Game Boy debug info
+                else if let Some(debug_info) = sys.get_debug_info_gb() {
+                    println!("System: Game Boy");
+                    println!("PC: 0x{:04X}", debug_info.pc);
+                    println!("SP: 0x{:04X}", debug_info.sp);
+                    println!("AF: 0x{:04X}", debug_info.af);
+                    println!("BC: 0x{:04X}", debug_info.bc);
+                    println!("DE: 0x{:04X}", debug_info.de);
+                    println!("HL: 0x{:04X}", debug_info.hl);
+                    println!("IME: {}", if debug_info.ime { "ON" } else { "OFF" });
+                    println!("Halted: {}", if debug_info.halted { "YES" } else { "NO" });
+                    println!("LY: {} (scanline)", debug_info.ly);
+                    println!("LCDC: 0x{:02X}", debug_info.lcdc);
+                }
                 // Try N64 debug info
                 else if let Some(debug_info) = sys.get_debug_info_n64() {
                     println!("System: Nintendo 64");
@@ -1906,9 +1929,11 @@ fn main() {
             } else if window.is_key_pressed(Key::Key8, false) {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
-                // Key 9: Show disk format selector for creating new blank disk
-                show_mount_selector = false;
-                show_disk_format_selector = true;
+                // Key 9: Show disk format selector for creating new blank disk (PC only)
+                if sys.system_name() == "pc" {
+                    show_mount_selector = false;
+                    show_disk_format_selector = true;
+                }
             }
 
             if let Some(idx) = selected_index {
@@ -1967,7 +1992,12 @@ fn main() {
             }
 
             // Render mount point selector
-            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+                sys.system_name(),
+            );
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
@@ -2118,6 +2148,25 @@ fn main() {
                     &debug_info.banking_scheme,
                     debug_info.current_bank,
                     debug_info.scanline,
+                    current_fps,
+                    &settings.video_backend,
+                ));
+            }
+            // Try Game Boy debug info
+            else if let Some(debug_info) = sys.get_debug_info_gb() {
+                debug_overlay = Some(ui_render::create_gb_debug_overlay(
+                    width,
+                    height,
+                    debug_info.pc,
+                    debug_info.sp,
+                    debug_info.af,
+                    debug_info.bc,
+                    debug_info.de,
+                    debug_info.hl,
+                    debug_info.ime,
+                    debug_info.halted,
+                    debug_info.ly,
+                    debug_info.lcdc,
                     current_fps,
                     &settings.video_backend,
                 ));
@@ -2559,7 +2608,12 @@ fn main() {
         } else if show_mount_selector {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
-            let mount_buffer = ui_render::create_mount_point_selector(width, height, &mount_points);
+            let mount_buffer = ui_render::create_mount_point_selector(
+                width,
+                height,
+                &mount_points,
+                sys.system_name(),
+            );
             if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
                 eprintln!("Window update error: {}", e);
                 break;
