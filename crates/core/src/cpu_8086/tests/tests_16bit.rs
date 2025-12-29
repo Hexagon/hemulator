@@ -1030,3 +1030,140 @@ fn test_sub_cx_preserves_high_16_bits() {
         "High 16 bits should be preserved"
     );
 }
+
+#[test]
+fn test_add_ax_imm16_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // ADD AX, 0x1234 (0x05, 0x34, 0x12)
+    cpu.memory.load_program(0xFFFF0, &[0x05, 0x34, 0x12]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0xAABB5678; // AX=0x5678
+
+    cpu.step();
+
+    // AX should be 0x5678 + 0x1234 = 0x68AC
+    assert_eq!(cpu.ax & 0xFFFF, 0x68AC, "AX should be 0x5678 + 0x1234");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0xAABB_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_sub_ax_imm16_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // SUB AX, 0x1111 (0x2D, 0x11, 0x11)
+    cpu.memory.load_program(0xFFFF0, &[0x2D, 0x11, 0x11]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0xCCDD9999; // AX=0x9999
+
+    cpu.step();
+
+    // AX should be 0x9999 - 0x1111 = 0x8888
+    assert_eq!(cpu.ax & 0xFFFF, 0x8888, "AX should be 0x9999 - 0x1111");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0xCCDD_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_and_ax_imm16_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // AND AX, 0x0F0F (0x25, 0x0F, 0x0F)
+    cpu.memory.load_program(0xFFFF0, &[0x25, 0x0F, 0x0F]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x1122FFFF; // AX=0xFFFF
+
+    cpu.step();
+
+    // AX should be 0xFFFF & 0x0F0F = 0x0F0F
+    assert_eq!(cpu.ax & 0xFFFF, 0x0F0F, "AX should be 0xFFFF & 0x0F0F");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_or_ax_imm16_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // OR AX, 0xF0F0 (0x0D, 0xF0, 0xF0)
+    cpu.memory.load_program(0xFFFF0, &[0x0D, 0xF0, 0xF0]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x33440F0F; // AX=0x0F0F
+
+    cpu.step();
+
+    // AX should be 0x0F0F | 0xF0F0 = 0xFFFF
+    assert_eq!(cpu.ax & 0xFFFF, 0xFFFF, "AX should be 0x0F0F | 0xF0F0");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x3344_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_xor_ax_imm16_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // XOR AX, 0xAAAA (0x35, 0xAA, 0xAA)
+    cpu.memory.load_program(0xFFFF0, &[0x35, 0xAA, 0xAA]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ax = 0x5566FFFF; // AX=0xFFFF
+
+    cpu.step();
+
+    // AX should be 0xFFFF ^ 0xAAAA = 0x5555
+    assert_eq!(cpu.ax & 0xFFFF, 0x5555, "AX should be 0xFFFF ^ 0xAAAA");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x5566_0000,
+        "High 16 bits should be preserved"
+    );
+}
+
+#[test]
+fn test_lodsw_preserves_high_bits() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // LODSW (0xAD)
+    cpu.memory.load_program(0xFFFF0, &[0xAD]);
+    cpu.memory.write(0x10100, 0x78); // Low byte
+    cpu.memory.write(0x10101, 0x56); // High byte
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+    cpu.ds = 0x1010;
+    cpu.si = 0x0000;
+    cpu.ax = 0x11223344; // Set high 16 bits
+
+    cpu.step();
+
+    // AX should be loaded with 0x5678
+    assert_eq!(cpu.ax & 0xFFFF, 0x5678, "AX should be loaded with 0x5678");
+    assert_eq!(
+        cpu.ax & 0xFFFF_0000,
+        0x1122_0000,
+        "High 16 bits should be preserved"
+    );
+    assert_eq!(cpu.si & 0xFFFF, 0x0002, "SI should be incremented by 2");
+}
