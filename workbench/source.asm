@@ -1,6 +1,6 @@
 ; Test program to mimic FreeDOS 'type' command behavior
 ; Opens A:\FDAUTO.BAT, reads and prints it with debug output
-; This helps debug the infinite loop issue without full CPU tracing
+; This version avoids LOOP instruction to work identically in 8086 and 80386 modes
 
 BITS 16
 ORG 0x100
@@ -56,19 +56,24 @@ read_loop:
     cmp word [bytes_read], 0
     je eof_reached
     
-    ; Print the data we read
+    ; Print the data we read (avoid LOOP - use manual decrement/jump)
     mov cx, [bytes_read]
     mov si, buffer
 print_char_loop:
-    lodsb                   ; Load byte from DS:SI into AL, increment SI
+    ; Check if CX is zero
+    cmp cx, 0
+    je read_loop            ; If done with this chunk, read next
+    
+    ; Load and print character
+    mov al, [si]            ; Load byte from DS:SI
+    inc si                  ; Increment SI
     
     ; Print character using INT 29h (fast console output)
     int 0x29
     
-    loop print_char_loop
-    
-    ; Continue reading
-    jmp read_loop
+    ; Decrement counter and continue
+    dec cx
+    jmp print_char_loop
 
 eof_reached:
     ; Print EOF message
@@ -137,7 +142,7 @@ read_error:
     mov ax, 0x4C01
     int 0x21
 
-; Print AX as 4-digit hex number
+; Print AX as 4-digit hex number (avoid LOOP)
 print_hex_word:
     push ax
     push bx
@@ -147,6 +152,10 @@ print_hex_word:
     mov bx, ax
     mov cx, 4               ; 4 hex digits
 .digit_loop:
+    ; Check if done
+    cmp cx, 0
+    je .done
+    
     rol bx, 4               ; Rotate left 4 bits to get next digit
     mov al, bl
     and al, 0x0F            ; Mask to get low nibble
@@ -162,8 +171,10 @@ print_hex_word:
     ; Print using INT 29h
     int 0x29
     
-    loop .digit_loop
-    
+    dec cx
+    jmp .digit_loop
+
+.done:
     pop dx
     pop cx
     pop bx
