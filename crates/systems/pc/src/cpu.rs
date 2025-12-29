@@ -6281,4 +6281,86 @@ mod tests {
         
         assert_eq!(cpu.cpu.flags & FLAG_ZF, 0, "Zero Flag should be clear when AL!=0");
     }
+
+    #[test]
+    fn test_dec_loop_counter() {
+        // Test a common pattern: dec counter; jnz loop
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+        
+        // Set up a counter in memory with value 3
+        cpu.cpu.memory.write(0x1000, 3);
+        
+        // Set up code:
+        // loop_start:
+        //   DEC byte ptr [BX]    ; 0xFE 0x0F at 0x2000
+        //   JNZ loop_start       ; 0x75 0xFC at 0x2002 (jump back -4 bytes)
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x2000;
+        cpu.cpu.bx = 0x1000;
+        
+        cpu.cpu.memory.write(0x2000, 0xFE); // DEC
+        cpu.cpu.memory.write(0x2001, 0x0F); // ModR/M: mod=00, op=001 (DEC), rm=111 (BX)
+        cpu.cpu.memory.write(0x2002, 0x75); // JNZ
+        cpu.cpu.memory.write(0x2003, 0xFC); // offset -4 (jump back to 0x2000)
+        cpu.cpu.memory.write(0x2004, 0xF4); // HLT (to stop after loop exits)
+        
+        // Execute the loop - should iterate 3 times
+        cpu.step(); // DEC (3 -> 2)
+        assert_eq!(cpu.cpu.memory.read(0x1000), 2);
+        cpu.step(); // JNZ (taken, jumps back to 0x2000)
+        assert_eq!(cpu.cpu.ip, 0x2000);
+        
+        cpu.step(); // DEC (2 -> 1)
+        assert_eq!(cpu.cpu.memory.read(0x1000), 1);
+        cpu.step(); // JNZ (taken, jumps back to 0x2000)
+        assert_eq!(cpu.cpu.ip, 0x2000);
+        
+        cpu.step(); // DEC (1 -> 0)
+        assert_eq!(cpu.cpu.memory.read(0x1000), 0);
+        const FLAG_ZF: u32 = 0x0040;
+        assert_eq!(cpu.cpu.flags & FLAG_ZF, FLAG_ZF, "Zero Flag should be set when counter reaches 0");
+        
+        cpu.step(); // JNZ (NOT taken, falls through to 0x2004)
+        assert_eq!(cpu.cpu.ip, 0x2004, "JNZ should not be taken when ZF is set");
+    }
+
+    #[test]
+    fn test_cmp_jb_pattern() {
+        // Test CMP + JB pattern: compare two values and jump if first < second
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+        
+        // Test case 1: AX < BX should take jump
+        cpu.cpu.ax = 5;
+        cpu.cpu.bx = 10;
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x2000;
+        
+        // CMP AX, BX ; JB taken
+        cpu.cpu.memory.write(0x2000, 0x3B); // CMP r16, r/m16
+        cpu.cpu.memory.write(0x2001, 0xC3); // ModR/M: mod=11, reg=000 (AX), rm=011 (BX)
+        cpu.cpu.memory.write(0x2002, 0x72); // JB (jump if below/carry set)
+        cpu.cpu.memory.write(0x2003, 0x02); // offset +2 (jump to 0x2006)
+        cpu.cpu.memory.write(0x2004, 0xF4); // HLT (if jump not taken)
+        cpu.cpu.memory.write(0x2006, 0x90); // NOP (jump target)
+        
+        cpu.step(); // CMP AX, BX (5 < 10, so CF should be set)
+        const FLAG_CF: u32 = 0x0001;
+        assert_eq!(cpu.cpu.flags & FLAG_CF, FLAG_CF, "Carry Flag should be set when AX < BX");
+        
+        cpu.step(); // JB (should jump because CF is set)
+        assert_eq!(cpu.cpu.ip, 0x2006, "JB should be taken when CF is set");
+        
+        // Test case 2: AX >= BX should not take jump
+        cpu.cpu.ax = 10;
+        cpu.cpu.bx = 5;
+        cpu.cpu.ip = 0x2000;
+        
+        cpu.step(); // CMP AX, BX (10 >= 5, so CF should be clear)
+        assert_eq!(cpu.cpu.flags & FLAG_CF, 0, "Carry Flag should be clear when AX >= BX");
+        
+        cpu.step(); // JB (should NOT jump because CF is clear)
+        assert_eq!(cpu.cpu.ip, 0x2004, "JB should not be taken when CF is clear");
+    }
 }

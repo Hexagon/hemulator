@@ -1851,7 +1851,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         while self.cx != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
                             let result = (self.ax as u16).wrapping_sub(val);
-                            let borrow = self.ax < (val as u32);
+                            let borrow = (self.ax as u16) < val;
                             let overflow = (((self.ax as u16) ^ val)
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
@@ -1983,7 +1983,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         while self.cx != 0 {
                             let val = self.read_u16(self.es, self.di as u16);
                             let result = (self.ax as u16).wrapping_sub(val);
-                            let borrow = self.ax < (val as u32);
+                            let borrow = (self.ax as u16) < val;
                             let overflow = (((self.ax as u16) ^ val)
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
@@ -3065,7 +3065,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x2D => {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
@@ -3100,7 +3100,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x3D => {
                 let val = self.fetch_u16();
                 let result = (self.ax as u16).wrapping_sub(val);
-                let borrow = self.ax < (val as u32);
+                let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 let af = Self::calc_af_sub_16(self.ax as u16, val);
@@ -4083,7 +4083,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         let result = self.ax.wrapping_sub(rm_val as u32);
                         self.set_flag(FLAG_SF, (result & 0x8000) != 0);
                         self.set_flag(FLAG_PF, (result & 0xFF).count_ones() % 2 == 0);
-                        let carry = self.ax < (rm_val as u32);
+                        let carry = (self.ax as u16) < rm_val;
                         let overflow = (((self.ax as u16) ^ rm_val)
                             & ((self.ax as u16) ^ (result as u16))
                             & 0x8000)
@@ -5081,7 +5081,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let val = self.fetch_u16();
                 let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
                 let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
-                let borrow = self.ax < (val as u32 + carry as u32);
+                let borrow = (self.ax as u16) < (val + (carry as u16));
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
                 // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
