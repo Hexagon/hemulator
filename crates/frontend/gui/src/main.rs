@@ -2497,6 +2497,27 @@ fn main() {
             save_project(&sys, &runtime_state, &settings, &mut status_message);
         }
 
+        // F9 - Toggle full CPU and Interrupt tracing (trace <-> off)
+        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F9, false))
+            || (!needs_host_key && window.is_key_pressed(Key::F9, false))
+        {
+            let log_cfg = emu_core::logging::LogConfig::global();
+            use emu_core::logging::{LogCategory, LogLevel};
+
+            let cpu_level = log_cfg.get_level(LogCategory::CPU);
+            let int_level = log_cfg.get_level(LogCategory::Interrupts);
+
+            if cpu_level == LogLevel::Trace && int_level == LogLevel::Trace {
+                log_cfg.set_level(LogCategory::CPU, LogLevel::Off);
+                log_cfg.set_level(LogCategory::Interrupts, LogLevel::Off);
+                println!("CPU + interrupt tracing: OFF");
+            } else {
+                log_cfg.set_level(LogCategory::CPU, LogLevel::Trace);
+                log_cfg.set_level(LogCategory::Interrupts, LogLevel::Trace);
+                println!("CPU + interrupt tracing: TRACE");
+            }
+        }
+
         // Handle controller input / emulation step when ROM is loaded.
         // Debug overlay should NOT pause the game, but selectors should.
         // Speed selector and 0x speed also pause the game.
