@@ -734,6 +734,96 @@ pub fn create_pc_debug_overlay(
     buffer
 }
 
+/// Create a debug info overlay for Game Boy
+#[allow(clippy::too_many_arguments)]
+pub fn create_gb_debug_overlay(
+    width: usize,
+    height: usize,
+    pc: u16,
+    sp: u16,
+    af: u16,
+    bc: u16,
+    de: u16,
+    hl: u16,
+    ime: bool,
+    halted: bool,
+    ly: u8,
+    lcdc: u8,
+    fps: f64,
+    video_backend: &str,
+) -> Vec<u32> {
+    let mut buffer = vec![0xC0000000; width * height];
+
+    let pc_line = format!("PC: ${:04X}", pc);
+    let sp_line = format!("SP: ${:04X}", sp);
+    let af_line = format!("AF: ${:04X}", af);
+    let bc_line = format!("BC: ${:04X}", bc);
+    let de_line = format!("DE: ${:04X}", de);
+    let hl_line = format!("HL: ${:04X}", hl);
+
+    let flags_a = (af >> 8) as u8;
+    let flags_f = (af & 0xFF) as u8;
+    let flags_line = format!("A: ${:02X}  F: ${:02X}", flags_a, flags_f);
+
+    let z_flag = if flags_f & 0x80 != 0 { "Z" } else { "-" };
+    let n_flag = if flags_f & 0x40 != 0 { "N" } else { "-" };
+    let h_flag = if flags_f & 0x20 != 0 { "H" } else { "-" };
+    let c_flag = if flags_f & 0x10 != 0 { "C" } else { "-" };
+    let flags_decoded = format!("Flags: {}{}{}{}", z_flag, n_flag, h_flag, c_flag);
+
+    let ime_line = format!("IME: {}", if ime { "ON" } else { "OFF" });
+    let halt_line = format!("Halted: {}", if halted { "YES" } else { "NO" });
+    let ly_line = format!("LY: {} (scanline)", ly);
+    let lcdc_line = format!("LCDC: ${:02X}", lcdc);
+    let lcd_on = if lcdc & 0x80 != 0 { "ON" } else { "OFF" };
+    let lcd_status = format!("LCD: {}", lcd_on);
+    let fps_line = format!("FPS: {:.1}", fps);
+    let video_line = format!("Video: {}", video_backend);
+
+    let debug_lines: Vec<&str> = vec![
+        "DEBUG INFO - Game Boy",
+        "",
+        &pc_line,
+        &sp_line,
+        "",
+        &af_line,
+        &bc_line,
+        &de_line,
+        &hl_line,
+        "",
+        &flags_line,
+        &flags_decoded,
+        "",
+        &ime_line,
+        &halt_line,
+        "",
+        &ly_line,
+        &lcdc_line,
+        &lcd_status,
+        "",
+        &fps_line,
+        &video_line,
+        "",
+        "Press F10 to close",
+    ];
+
+    let start_x = 10;
+    let start_y = 10;
+
+    draw_text_lines(
+        &mut buffer,
+        width,
+        height,
+        &debug_lines,
+        start_x,
+        start_y,
+        FONT_HEIGHT + 1,
+        0xFFFFFFFF,
+    );
+
+    buffer
+}
+
 /// Create a mount point selection overlay
 pub fn create_mount_point_selector(
     width: usize,
