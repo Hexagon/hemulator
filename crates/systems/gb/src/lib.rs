@@ -218,6 +218,37 @@ impl GbSystem {
         result.truncate(count);
         result
     }
+
+    /// Get debug information about the Game Boy system
+    pub fn debug_info(&self) -> DebugInfo {
+        DebugInfo {
+            pc: self.cpu.pc,
+            sp: self.cpu.sp,
+            af: u16::from(self.cpu.a) << 8 | u16::from(self.cpu.f),
+            bc: u16::from(self.cpu.b) << 8 | u16::from(self.cpu.c),
+            de: u16::from(self.cpu.d) << 8 | u16::from(self.cpu.e),
+            hl: u16::from(self.cpu.h) << 8 | u16::from(self.cpu.l),
+            ime: self.cpu.ime,
+            halted: self.cpu.halted,
+            ly: self.cpu.memory.ppu.ly,
+            lcdc: self.cpu.memory.ppu.lcdc,
+        }
+    }
+}
+
+/// Debug information about the Game Boy system
+#[derive(Debug, Clone)]
+pub struct DebugInfo {
+    pub pc: u16,
+    pub sp: u16,
+    pub af: u16,
+    pub bc: u16,
+    pub de: u16,
+    pub hl: u16,
+    pub ime: bool,
+    pub halted: bool,
+    pub ly: u8,
+    pub lcdc: u8,
 }
 
 #[derive(thiserror::Error, Debug)]
