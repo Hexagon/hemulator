@@ -4,6 +4,8 @@
 //! by any system (IBM PC, PC XT, etc.) by implementing the `Memory8086` trait.
 //!
 //! Supports multiple CPU models: 8086, 80186, 80286, and their variants.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_8086.md`
 
 use crate::cpu_8086_protected::ProtectedModeState;
 use crate::logging::{LogCategory, LogConfig, LogLevel};
@@ -1720,7 +1722,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         // Apply segment override to source (DS:SI)
                         let src_seg = self.get_segment_with_override(self.ds);
                         while self.cx != 0 {
-                            self.ax = (self.ax & 0xFFFF_0000) | (self.read_u16(src_seg, self.si as u16) as u32);
+                            self.ax = (self.ax & 0xFFFF_0000)
+                                | (self.read_u16(src_seg, self.si as u16) as u32);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2u32);
                             } else {

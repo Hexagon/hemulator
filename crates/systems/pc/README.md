@@ -2,7 +2,7 @@
 
 This crate implements IBM PC/XT emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -203,7 +203,7 @@ Without modifier, function keys go to DOS program.
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
 - **No save states**: PC systems don't use save states like ROM-based consoles
@@ -224,6 +224,32 @@ See [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
 - **Target**: ~60 FPS
 - **Typical**: Runs at full speed on modern CPUs
 - **Single-threaded**: Uses one CPU core
+
+## 32-bit (80386+) Support Status
+
+The CPU core currently supports 16-bit operations (8086/80186/80286). Full 32-bit support for 80386+ processors is planned but not yet implemented.
+
+**Current State:**
+- ✅ CPU instruction set: 8086 through Pentium MMX (16-bit operations)
+- ✅ 16-bit registers: AX, BX, CX, DX, SI, DI, BP, SP
+- ✅ Segment registers: CS, DS, ES, SS, FS, GS
+- ✅ Prefix support: segment override, operand-size (0x66), address-size (0x67)
+- ❌ Prefixes recognized but 32-bit modes not fully implemented
+
+**Target State:**
+- 32-bit register extensions (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP)
+- Full 80386+ 32-bit addressing with SIB byte support
+- 32-bit operand support for all instructions
+- Backward compatible with all existing 16-bit code
+
+**Implementation Phases:**
+1. **Register Extension**: Extend registers from `u16` to `u32`, add 32-bit access methods
+2. **32-bit Addressing**: Implement SIB byte decoding, 32-bit effective address calculation
+3. **32-bit Operands**: Enable 32-bit operands for arithmetic/data movement
+4. **Extended Instructions**: 80386+ specific instructions (MOVZX, MOVSX, SHLD/SHRD, etc.)
+5. **Integration**: Testing and validation with real 386+ software
+
+For detailed implementation plans, see `docs/references/cpu_8086.md` for CPU architecture details.
 
 ## Future Improvements
 
@@ -251,13 +277,15 @@ When adding PC features:
 1. **Video Adapters**: Add to `src/video_adapter*.rs`
 2. **BIOS Interrupts**: Add to `src/bios.rs` (when created)
 3. **Tests**: Add unit tests for new functionality
-4. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+4. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#pcdos-ibm-pcxt)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
+- **CPU Reference**: [cpu_8086.md](../../../docs/references/cpu_8086.md)
+- **Interrupt Reference**: [pc_interrupts.md](../../../docs/references/pc_interrupts.md)
 - **OSDev Wiki**: https://wiki.osdev.org/
 
 ## License

@@ -8,6 +8,8 @@
 //! - 5-stage pipeline
 //! - 32-bit address space (4GB)
 //! - Runs at 93.75 MHz on N64
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_mips_r4300i.md`
 
 /// Memory interface trait for the MIPS R4300i CPU
 ///

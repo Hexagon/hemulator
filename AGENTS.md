@@ -4,9 +4,9 @@
 
 **Related Documentation**:
 - **[README.md](README.md)**: Developer quick start, build instructions, project overview
-- **[ARCHITECTURE.md](ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
-- **[MANUAL.md](MANUAL.md)**: End-user manual with controls, features, and system-specific information
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
+- **[MANUAL.md](docs/MANUAL.md)**: End-user manual with controls, features, and system-specific information
+- **[CONTRIBUTING.md](docs/CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
 
 **System-Specific Implementation Details**:
 - **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
@@ -20,7 +20,7 @@
 
 ## Agent Guidelines
 
-- **Keep track of known limitations**: Document known limitations and missing features in MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
+- **Keep track of known limitations**: Document known limitations and missing features in docs/MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
   - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
@@ -90,7 +90,7 @@
 
 ## Architecture Quick Reference
 
-For comprehensive architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+For comprehensive architecture documentation, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 For system-specific implementation details, see each system's README:
 - **[NES](crates/systems/nes/README.md)** - PPU, APU, mappers
@@ -117,7 +117,7 @@ When implementing new features for systems, follow these patterns:
 
 ### Audio Implementation
 
-For detailed audio implementation patterns, see **[ARCHITECTURE.md](ARCHITECTURE.md#audio-components)**.
+For detailed audio implementation patterns, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md#audio-components)**.
 
 **Quick Pattern**:
 1. Identify the audio hardware and select reusable components from `crates/core/src/apu/`:
@@ -130,7 +130,7 @@ For detailed audio implementation patterns, see **[ARCHITECTURE.md](ARCHITECTURE
 
 ### Renderer Implementation
 
-For detailed renderer patterns, see **[ARCHITECTURE.md](ARCHITECTURE.md#renderer-architecture)**.
+For detailed renderer patterns, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md#renderer-architecture)**.
 
 **Quick Pattern**:
 All systems with graphics follow this pattern:
@@ -154,15 +154,15 @@ For implementing system-specific components (PPU, mappers, etc.), see the corres
 ## Release Packaging
 
 When building release artifacts:
-- **Include**: Executable (`hemu` or `hemu.exe`), `LICENSE`, `MANUAL.md`
+- **Include**: Executable (`hemu` or `hemu.exe`), `LICENSE`, `docs/MANUAL.md`
 - **Exclude**: All other files (source code, build artifacts, config files, saves)
 - **Platforms**: Windows (.exe), Linux (binary + .deb package)
 - **Architectures**: Both 64-bit (x86_64/amd64) and 32-bit (i686/i386)
 - **Naming**: 
-  - Windows 64-bit: `hemu-{version}-windows-x86_64.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
-  - Windows 32-bit: `hemu-{version}-windows-i686.zip` containing `hemu.exe`, `LICENSE`, `MANUAL.md`
-  - Linux 64-bit binary: `hemu-{version}-linux-x86_64.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
-  - Linux 32-bit binary: `hemu-{version}-linux-i686.tar.gz` containing `hemu`, `LICENSE`, `MANUAL.md`
+  - Windows 64-bit: `hemu-{version}-windows-x86_64.zip` containing `hemu.exe`, `LICENSE`, `docs/MANUAL.md`
+  - Windows 32-bit: `hemu-{version}-windows-i686.zip` containing `hemu.exe`, `LICENSE`, `docs/MANUAL.md`
+  - Linux 64-bit binary: `hemu-{version}-linux-x86_64.tar.gz` containing `hemu`, `LICENSE`, `docs/MANUAL.md`
+  - Linux 32-bit binary: `hemu-{version}-linux-i686.tar.gz` containing `hemu`, `LICENSE`, `docs/MANUAL.md`
   - Debian package 64-bit: `hemu_{version}_amd64.deb` with proper packaging structure
   - Debian package 32-bit: `hemu_{version}_i386.deb` with proper packaging structure
 
@@ -209,7 +209,7 @@ Save states are stored in `/saves/<rom_hash>/states.json` relative to the execut
 
 The emulator uses a centralized logging system with command-line configuration.
 
-For comprehensive logging documentation, see **[CONTRIBUTING.md](CONTRIBUTING.md#debug-logging)**.
+For comprehensive logging documentation, see **[CONTRIBUTING.md](docs/CONTRIBUTING.md#debug-logging)**.
 
 **Quick Reference**:
 - Use `--log-level <LEVEL>` to set global log level
@@ -217,7 +217,7 @@ For comprehensive logging documentation, see **[CONTRIBUTING.md](CONTRIBUTING.md
 - Log levels: `off`, `error`, `warn`, `info`, `debug`, `trace`
 - Example: `cargo run --release -- --log-cpu debug game.nes`
 
-**For agents**: When adding logging to new code, use appropriate categories and levels. See CONTRIBUTING.md for implementation details.
+**For agents**: When adding logging to new code, use appropriate categories and levels. See docs/CONTRIBUTING.md for implementation details.
 ## PC/DOS Testing Workbench
 
 For rapid iteration when developing or debugging PC system code, use the workbench environment:

@@ -2,6 +2,8 @@
 //!
 //! This is a Z80-like CPU used in Game Boy and Game Boy Color.
 //! It's similar to Z80 but with some instructions removed and others modified.
+//!
+//! For detailed CPU reference documentation, see: `docs/references/cpu_lr35902.md`
 
 /// Memory interface trait for the LR35902 CPU
 pub trait MemoryLr35902 {

@@ -2,7 +2,7 @@
 
 This crate implements Game Boy and Game Boy Color (in DMG mode) emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
@@ -137,7 +137,7 @@ let frame = gb.step_frame()?;
 
 ## Known Limitations
 
-See [MANUAL.md](../../../MANUAL.md#game-boy--game-boy-color) for user-facing limitations.
+See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
 - DMG mode only (no Game Boy Color features)
@@ -166,13 +166,13 @@ When adding Game Boy features:
 
 1. **Mappers**: Add to `src/mappers/`, implement `Mapper` trait
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [MANUAL.md](../../../MANUAL.md)
+3. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../MANUAL.md#game-boy--game-boy-color)
-- **Contributing**: [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color)
+- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
 - **Pan Docs**: https://gbdev.io/pandocs/
 
 ## License
