@@ -292,14 +292,13 @@ impl PcCpu {
     /// Handle INT 10h - Video BIOS services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int10h(&mut self) -> u32 {
-        // Skip the INT 10h instruction (2 bytes: 0xCD 0x10)
-        // We intercept before CPU executes it, so just advance IP past it
-        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+        // Simulate INT instruction: push FLAGS, CS, IP and advance past INT opcode
+        self.simulate_int_call();
 
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
-        match ah {
+        let cycles = match ah {
             0x00 => self.int10h_set_video_mode(),
             0x01 => self.int10h_set_cursor_shape(),
             0x02 => self.int10h_set_cursor_position(),
@@ -328,7 +327,12 @@ impl PcCpu {
                 self.log_stub_interrupt(0x10, Some(ah), "Video BIOS (unsupported subfunction)");
                 51 // Approximate INT instruction timing
             }
-        }
+        };
+
+        // Simulate IRET to return from interrupt
+        self.simulate_iret();
+
+        cycles
     }
 
     /// INT 10h, AH=00h: Set video mode
@@ -1785,6 +1789,20 @@ impl PcCpu {
         self.cpu.flags = new_flags as u32;
     }
 
+    /// Update FLAGS value on stack (for BIOS interrupts that need to return modified flags)
+    /// This should be called after simulate_int_call() and before simulate_iret()
+    /// to ensure the modified flags are returned to the caller.
+    fn update_flags_on_stack(&mut self) {
+        // FLAGS are at SP+4 (after IP and CS which are 2 bytes each)
+        let ss = self.cpu.ss;
+        let sp = self.cpu.sp.wrapping_add(4);
+        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        
+        // Write current FLAGS to stack
+        self.cpu.memory.write(flags_addr, (self.cpu.flags & 0xFF) as u8);
+        self.cpu.memory.write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
+    }
+
     /// Handle INT 13h BIOS disk services
     fn handle_int13h(&mut self) -> u32 {
         // Simulate INT instruction: push FLAGS, CS, IP and advance past INT opcode
@@ -1836,6 +1854,10 @@ impl PcCpu {
                 51 // Approximate INT instruction timing
             }
         };
+
+        // Update FLAGS on stack to ensure modified flags are returned to caller
+        // (INT 13h functions modify the carry flag to indicate success/error)
+        self.update_flags_on_stack();
 
         // Simulate IRET to return from interrupt
         self.simulate_iret();
@@ -2165,9 +2187,10 @@ impl PcCpu {
             // DL = number of drives
             self.cpu.dx = (((heads - 1) as u32) << 8) | 0x01;
 
-            // ES:DI = pointer to disk parameter table (set to 0x0000:0x0000 for now)
-            self.cpu.es = 0x0000;
-            self.cpu.di = 0x0000u32;
+            // ES:DI = pointer to disk parameter table (DPT) in BIOS ROM
+            // The DPT is located at F000:0250 (see bios.rs DISK_PARAMETER_TABLE_OFFSET)
+            self.cpu.es = 0xF000;
+            self.cpu.di = 0x0250u32;
 
             // AH = 0 (success)
             self.cpu.ax &= 0x00FF;
