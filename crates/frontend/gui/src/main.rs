@@ -1,4 +1,6 @@
 pub mod display_filter;
+pub mod egui_gui;
+pub mod egui_sdl2;
 mod hemu_project;
 mod rom_detect;
 mod save_state;
@@ -1521,6 +1523,37 @@ fn main() {
         GameSaves::default()
     };
 
+    // Initialize egui integration (only in OpenGL mode when GUI is visible)
+    let mut egui_integration: Option<egui_sdl2::EguiSdl2Integration> = None;
+    let mut egui_gui: Option<egui_gui::EguiGui> = None;
+
+    if use_opengl && gui_visible {
+        // Downcast window to Sdl2Backend to get window reference
+        if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+            if let Some(sdl_window) = sdl2_backend.get_sdl_window() {
+                // Create a new glow context from the SDL GL context
+                // This shares the same underlying GL state
+                let gl_arc = unsafe {
+                    std::sync::Arc::new(glow::Context::from_loader_function(|s| {
+                        sdl_window.subsystem().gl_get_proc_address(s) as *const _
+                    }))
+                };
+
+                match egui_sdl2::EguiSdl2Integration::new(gl_arc, sdl_window) {
+                    Ok(integration) => {
+                        egui_integration = Some(integration);
+                        egui_gui = Some(egui_gui::EguiGui::new());
+                        println!("egui GUI initialized");
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to initialize egui: {}", e);
+                        eprintln!("Falling back to overlay-based GUI");
+                    }
+                }
+            }
+        }
+    }
+
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
         let mut out = Vec::with_capacity(base.len());
@@ -1558,7 +1591,12 @@ fn main() {
     // Without host key, all keys are passed to the emulated system
     while window.is_open() {
         // Poll events at the start of each frame
-        window.poll_events();
+        // Pass egui integration to handle mouse/keyboard events
+        if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+            sdl2_backend.poll_events_with_egui(egui_integration.as_mut());
+        } else {
+            window.poll_events();
+        }
 
         // Check if host key (from settings) is held
         let host_modifier_key =
@@ -2670,9 +2708,92 @@ fn main() {
         };
 
         if !frame_to_present.is_empty() {
-            if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
+            // When egui is active, render without swapping so we can render egui on top
+            if gui_visible && egui_integration.is_some() && use_opengl {
+                if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+                    if let Err(e) =
+                        sdl2_backend.update_buffer_no_swap(frame_to_present, width, height)
+                    {
+                        eprintln!("Window update error: {}", e);
+                        break;
+                    }
+                } else {
+                    if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
+                        eprintln!("Window update error: {}", e);
+                        break;
+                    }
+                }
+            } else {
+                if let Err(e) = window.update_with_buffer(frame_to_present, width, height) {
+                    eprintln!("Window update error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        // Render egui GUI on top (only in OpenGL mode when GUI is visible)
+        if gui_visible {
+            if let (Some(ref mut integration), Some(ref mut gui)) =
+                (&mut egui_integration, &mut egui_gui)
+            {
+                if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
+                    if let (Some(gl_ctx), Some(sdl_window)) =
+                        (sdl2_backend.get_gl_context(), sdl2_backend.get_sdl_window())
+                    {
+                        // Begin egui frame
+                        let ctx = integration.begin_frame(sdl_window);
+
+                        // Update GUI state
+                        gui.set_fps(current_fps);
+
+                        // Render GUI and get action
+                        let action = gui.render_basic(ctx);
+
+                        // End egui frame and render
+                        integration.end_frame(gl_ctx, sdl_window);
+
+                        // Now swap buffers after egui has rendered
+                        sdl2_backend.swap_buffers();
+
+                        // Process GUI actions
+                        use egui_gui::GuiAction;
+                        match action {
+                            GuiAction::Exit => break,
+                            GuiAction::SelectCrtFilter(filter) => {
+                                settings.display_filter = filter;
+                                sdl2_backend.set_filter(filter);
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save filter setting: {}", e);
+                                }
+                            }
+                            GuiAction::TakeScreenshot => {
+                                match save_screenshot(&buffer, width, height, sys.system_name()) {
+                                    Ok(path) => {
+                                        println!("Screenshot saved to: {}", path);
+                                        gui.set_status(format!("Screenshot saved: {}", path));
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to save screenshot: {}", e);
+                                        gui.set_status(format!("Screenshot failed: {}", e));
+                                    }
+                                }
+                            }
+                            GuiAction::Reset => {
+                                sys.reset();
+                                println!("System reset");
+                                gui.set_status("System reset".to_string());
+                            }
+                            GuiAction::ToggleGui => {
+                                gui_visible = !gui_visible;
+                                println!(
+                                    "Display mode: {}",
+                                    if gui_visible { "GUI" } else { "Monitor-only" }
+                                );
+                            }
+                            _ => {} // Other actions not yet implemented
+                        }
+                    }
+                }
             }
         }
 

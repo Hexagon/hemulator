@@ -178,6 +178,11 @@ impl OpenGLProcessor {
 
         Ok(())
     }
+
+    /// Get a reference to the GL context (for egui integration)
+    pub fn gl_context(&self) -> &glow::Context {
+        &self.gl
+    }
 }
 
 impl VideoProcessor for OpenGLProcessor {

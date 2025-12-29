@@ -285,6 +285,142 @@ impl Sdl2Backend {
     pub fn get_sdl2_scancodes_released(&self) -> &HashSet<u32> {
         &self.sdl2_scancodes_released
     }
+
+    /// Get the GL context (for egui integration) - only available in OpenGL mode
+    pub fn get_gl_context(&self) -> Option<&glow::Context> {
+        match &self.render_mode {
+            RenderMode::OpenGL { processor, .. } => Some(processor.gl_context()),
+            _ => None,
+        }
+    }
+
+    /// Get the SDL2 window reference - only available in OpenGL mode
+    pub fn get_sdl_window(&self) -> Option<&sdl2::video::Window> {
+        match &self.render_mode {
+            RenderMode::OpenGL { window, .. } => Some(window),
+            _ => None,
+        }
+    }
+
+    /// Update with buffer without swapping (for egui integration)
+    pub fn update_buffer_no_swap(
+        &mut self,
+        buffer: &[u32],
+        width: usize,
+        height: usize,
+    ) -> Result<(), Box<dyn Error>> {
+        match &mut self.render_mode {
+            RenderMode::OpenGL { processor, .. } => {
+                // Render using OpenGL processor but don't swap
+                let _processed =
+                    processor.process_frame(buffer, width, height, self.current_filter)?;
+                Ok(())
+            }
+            RenderMode::Software { .. } => {
+                // For software mode, just use regular update
+                self.update_with_buffer(buffer, width, height)
+            }
+        }
+    }
+
+    /// Swap GL buffers (for manual swap after egui render)
+    pub fn swap_buffers(&mut self) {
+        if let RenderMode::OpenGL { window, .. } = &self.render_mode {
+            window.gl_swap_window();
+        }
+    }
+
+    /// Get SDL2 event pump for egui integration
+    pub fn get_event_pump_mut(&mut self) -> &mut EventPump {
+        &mut self.event_pump
+    }
+
+    /// Poll events and pass them to egui integration
+    pub fn poll_events_with_egui(
+        &mut self,
+        mut egui_integration: Option<&mut crate::egui_sdl2::EguiSdl2Integration>,
+    ) {
+        // Clear one-time press flags at start of frame
+        self.key_pressed_once.clear();
+        self.sdl2_scancodes_pressed.clear();
+        self.sdl2_scancodes_released.clear();
+
+        // Poll all events
+        for event in self.event_pump.poll_iter() {
+            // Pass event to egui first if it exists
+            let egui_consumed = if let Some(ref mut integration) = egui_integration {
+                integration.handle_event(&event)
+            } else {
+                false
+            };
+
+            // Only process non-egui events for the emulator
+            if !egui_consumed {
+                match event {
+                    Event::Quit { .. } => {
+                        self.is_open = false;
+                    }
+                    Event::KeyDown {
+                        keycode,
+                        scancode,
+                        repeat: false,
+                        ..
+                    } => {
+                        // Track SDL2 scancode for direct PC mapping
+                        if let Some(sc) = scancode {
+                            self.sdl2_scancodes_pressed.insert(sc as u32);
+                        }
+
+                        // Try keycode first, fall back to scancode for international keyboards
+                        let key = keycode
+                            .and_then(Self::from_sdl2_key)
+                            .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                        if let Some(key) = key {
+                            self.pressed_keys.insert(key);
+                            self.key_pressed_once.insert(key);
+                        }
+                    }
+                    Event::KeyDown {
+                        keycode,
+                        scancode,
+                        repeat: true,
+                        ..
+                    } => {
+                        // Don't track repeated scancodes
+
+                        // Try keycode first, fall back to scancode for international keyboards
+                        let key = keycode
+                            .and_then(Self::from_sdl2_key)
+                            .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                        if let Some(key) = key {
+                            self.pressed_keys.insert(key);
+                            // Don't add to key_pressed_once for repeat events
+                        }
+                    }
+                    Event::KeyUp {
+                        keycode, scancode, ..
+                    } => {
+                        // Track SDL2 scancode for direct PC mapping
+                        if let Some(sc) = scancode {
+                            self.sdl2_scancodes_released.insert(sc as u32);
+                        }
+
+                        // Try keycode first, fall back to scancode for international keyboards
+                        let key = keycode
+                            .and_then(Self::from_sdl2_key)
+                            .or_else(|| scancode.and_then(Self::from_sdl2_scancode));
+
+                        if let Some(key) = key {
+                            self.pressed_keys.remove(&key);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 impl WindowBackend for Sdl2Backend {
