@@ -611,10 +611,8 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
 }
 
 /// Assemble an assembly file for the given system and return the assembled binary
-fn assemble_file(
-    asm_path: &str,
-    system: &str,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+/// Returns an error with installation instructions if the required assembler is not found
+fn assemble_file(asm_path: &str, system: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::process::Command;
 
     // Create a temporary directory for the output
@@ -647,10 +645,24 @@ fn assemble_file(
                 if nasm_path.exists() {
                     nasm_path
                 } else {
-                    return Err("NASM not found. Please install NASM or add it to PATH.".into());
+                    return Err(concat!(
+                        "NASM not found. To use --asm with PC, install NASM:\n",
+                        "  Windows: Download from https://www.nasm.us/\n",
+                        "  Linux: sudo apt-get install nasm\n",
+                        "  macOS: brew install nasm\n",
+                        "Alternatively, assemble manually and load the .com/.bin file directly."
+                    )
+                    .into());
                 }
             } else {
-                return Err("NASM not found. Please install NASM or add it to PATH.".into());
+                return Err(concat!(
+                    "NASM not found. To use --asm with PC, install NASM:\n",
+                    "  Windows: Download from https://www.nasm.us/\n",
+                    "  Linux: sudo apt-get install nasm\n",
+                    "  macOS: brew install nasm\n",
+                    "Alternatively, assemble manually and load the .com/.bin file directly."
+                )
+                .into());
             };
 
             println!("Using NASM: {}", nasm_cmd.display());
@@ -669,8 +681,15 @@ fn assemble_file(
         }
         "nes" => {
             // Use ca65/ld65 for NES
-            let ca65_cmd = which::which("ca65")
-                .map_err(|_| "ca65 not found. Please install cc65 toolchain.")?;
+            let ca65_cmd = which::which("ca65").map_err(|_| {
+                concat!(
+                    "ca65 not found. To use --asm with NES, install cc65:\n",
+                    "  Linux: sudo apt-get install cc65\n",
+                    "  macOS: brew install cc65\n",
+                    "  Windows: Download from https://cc65.github.io/\n",
+                    "Alternatively, assemble manually and load the .nes file directly."
+                )
+            })?;
             let ld65_cmd = which::which("ld65")
                 .map_err(|_| "ld65 not found. Please install cc65 toolchain.")?;
 
@@ -694,7 +713,11 @@ SEGMENTS {
             )?;
 
             // Assemble
-            let status = Command::new(&ca65_cmd).arg(&asm_file).arg("-o").arg(&obj_file).status()?;
+            let status = Command::new(&ca65_cmd)
+                .arg(&asm_file)
+                .arg("-o")
+                .arg(&obj_file)
+                .status()?;
 
             if !status.success() {
                 return Err("ca65 assembly failed".into());
@@ -716,8 +739,15 @@ SEGMENTS {
         }
         "atari2600" | "atari" => {
             // Use dasm for Atari 2600
-            let dasm_cmd = which::which("dasm")
-                .map_err(|_| "dasm not found. Please install dasm assembler.")?;
+            let dasm_cmd = which::which("dasm").map_err(|_| {
+                concat!(
+                    "dasm not found. To use --asm with Atari 2600, install dasm:\n",
+                    "  Linux: sudo apt-get install dasm\n",
+                    "  macOS: brew install dasm\n",
+                    "  Windows: Download from https://dasm-assembler.github.io/\n",
+                    "Alternatively, assemble manually and load the .a26/.bin file directly."
+                )
+            })?;
 
             let status = Command::new(&dasm_cmd)
                 .arg(&asm_file)
@@ -733,8 +763,15 @@ SEGMENTS {
         }
         "gb" | "gameboy" => {
             // Use rgbasm/rgblink for Game Boy
-            let rgbasm_cmd = which::which("rgbasm")
-                .map_err(|_| "rgbasm not found. Please install rgbds toolchain.")?;
+            let rgbasm_cmd = which::which("rgbasm").map_err(|_| {
+                concat!(
+                    "rgbasm not found. To use --asm with Game Boy, install rgbds:\n",
+                    "  Linux: sudo apt-get install rgbds (or build from source)\n",
+                    "  macOS: brew install rgbds\n",
+                    "  Windows: Download from https://github.com/gbdev/rgbds\n",
+                    "Alternatively, assemble manually and load the .gb file directly."
+                )
+            })?;
             let rgblink_cmd = which::which("rgblink")
                 .map_err(|_| "rgblink not found. Please install rgbds toolchain.")?;
             let rgbfix_cmd = which::which("rgbfix")
@@ -744,7 +781,11 @@ SEGMENTS {
             let gb_file = temp_dir.join("output.gb");
 
             // Assemble
-            let status = Command::new(&rgbasm_cmd).arg("-o").arg(&obj_file).arg(&asm_file).status()?;
+            let status = Command::new(&rgbasm_cmd)
+                .arg("-o")
+                .arg(&obj_file)
+                .arg(&asm_file)
+                .status()?;
 
             if !status.success() {
                 return Err("rgbasm assembly failed".into());
@@ -762,7 +803,12 @@ SEGMENTS {
             }
 
             // Fix header
-            let status = Command::new(&rgbfix_cmd).arg("-v").arg("-p").arg("0").arg(&gb_file).status()?;
+            let status = Command::new(&rgbfix_cmd)
+                .arg("-v")
+                .arg("-p")
+                .arg("0")
+                .arg(&gb_file)
+                .status()?;
 
             if !status.success() {
                 return Err("rgbfix failed".into());
@@ -960,7 +1006,9 @@ impl CliArgs {
         eprintln!("Usage: hemu [OPTIONS] [FILE]");
         eprintln!();
         eprintln!("Arguments:");
-        eprintln!("  [FILE]                   ROM file or .hemu project file to load");
+        eprintln!(
+            "  [FILE]                   ROM file (.nes, .gb, .a26, .com, .exe) or .hemu project"
+        );
         eprintln!();
         eprintln!("Options:");
         eprintln!("  -h, --help               Show this help message");
@@ -968,7 +1016,10 @@ impl CliArgs {
         eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
         );
-        eprintln!("  --asm <file>             Assemble and run an assembly file (.asm)");
+        eprintln!(
+            "  --asm <file>             Assemble and run .asm file (requires external assembler)"
+        );
+        eprintln!("                           PC: NASM, NES: cc65, Atari: dasm, GB: rgbds");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -993,9 +1044,10 @@ impl CliArgs {
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!("  hemu test.com                                  # Load DOS COM file");
         eprintln!("  hemu project.hemu                              # Load project file");
-        eprintln!("  hemu --asm test.asm --system pc                # Assemble and run PC code");
-        eprintln!("  hemu --asm game.asm --system nes               # Assemble and run NES code");
+        eprintln!("  hemu --asm test.asm --system pc                # Assemble and run PC code (requires NASM)");
+        eprintln!("  hemu --asm game.asm --system nes               # Assemble and run NES code (requires cc65)");
         eprintln!("  hemu --system pc                               # Start clean PC system");
         eprintln!("  hemu --system nes                              # Start clean NES system");
         eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
@@ -1223,7 +1275,9 @@ fn main() {
                 eprintln!("Warning: No --system specified, defaulting to PC for assembly");
                 "pc".to_string()
             } else {
-                eprintln!("Error: --asm requires --system to specify target (pc, nes, gb, atari2600)");
+                eprintln!(
+                    "Error: --asm requires --system to specify target (pc, nes, gb, atari2600)"
+                );
                 std::process::exit(1);
             }
         };
@@ -1306,7 +1360,7 @@ fn main() {
                 // For PC, we need to create a disk image with the COM file
                 // Use the same logic as workbench: create a temporary floppy with the executable
                 let _disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M);
-                
+
                 // Inject the assembled COM file into the disk
                 // This is a simplified version - for a full implementation,
                 // we'd need to properly format FAT12 and add directory entries
