@@ -1797,10 +1797,14 @@ impl PcCpu {
         let ss = self.cpu.ss;
         let sp = self.cpu.sp.wrapping_add(4);
         let flags_addr = ((ss as u32) << 4) + (sp as u32);
-        
+
         // Write current FLAGS to stack
-        self.cpu.memory.write(flags_addr, (self.cpu.flags & 0xFF) as u8);
-        self.cpu.memory.write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(flags_addr, (self.cpu.flags & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(flags_addr + 1, ((self.cpu.flags >> 8) & 0xFF) as u8);
     }
 
     /// Handle INT 13h BIOS disk services
