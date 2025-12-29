@@ -428,6 +428,15 @@ impl<M: Memory8086> Cpu8086<M> {
         (high_byte << 8) | low_byte
     }
 
+    /// Read a dword (32-bit) from code segment at IP
+    #[inline]
+    fn fetch_u32(&mut self) -> u32 {
+        // x86 is little-endian: fetch low word first, then high word
+        let low_word = self.fetch_u16() as u32;
+        let high_word = self.fetch_u16() as u32;
+        (high_word << 16) | low_word
+    }
+
     /// Read a word from memory at segment:offset
     #[inline]
     fn read_u16(&self, segment: u16, offset: u16) -> u16 {
@@ -1228,6 +1237,127 @@ impl<M: Memory8086> Cpu8086<M> {
             // mod = 11: Register mode (no memory access)
             _ => 0, // Not used for register mode
         }
+    }
+
+    /// Decode SIB (Scale-Index-Base) byte for 32-bit addressing
+    /// Returns: (scale, index_reg, base_reg, bytes_consumed)
+    /// Scale values: 1, 2, 4, 8
+    fn decode_sib(&mut self) -> (u32, u8, u8, u8) {
+        let sib = self.fetch_u8();
+        
+        // SIB byte format: [SS][III][BBB]
+        // SS = scale (00=1, 01=2, 10=4, 11=8)
+        // III = index register (0-7, where 4 = none/ESP)
+        // BBB = base register (0-7)
+        let scale_bits = (sib >> 6) & 0b11;
+        let index = (sib >> 3) & 0b111;
+        let base = sib & 0b111;
+        
+        let scale = match scale_bits {
+            0b00 => 1,
+            0b01 => 2,
+            0b10 => 4,
+            0b11 => 8,
+            _ => unreachable!(),
+        };
+        
+        (scale, index, base, 1)
+    }
+
+    /// Calculate 32-bit effective address from ModR/M byte and optional SIB byte
+    /// Returns: (segment, offset_32bit, bytes_consumed)
+    fn calc_effective_address_32(&mut self, modbits: u8, rm: u8) -> (u16, u32, u8) {
+        let (default_seg, offset, bytes_read) = match modbits {
+            // mod = 00: Memory mode with no displacement (except for special cases)
+            0b00 => {
+                if rm == 0b100 {
+                    // SIB byte follows
+                    let (scale, index, base, sib_bytes) = self.decode_sib();
+                    
+                    // Calculate index contribution
+                    let index_val = if index == 4 {
+                        // ESP as index means no index
+                        0u32
+                    } else {
+                        self.get_reg32(index).wrapping_mul(scale)
+                    };
+                    
+                    // Calculate base contribution
+                    if base == 5 {
+                        // Special case: [disp32] or [index*scale+disp32]
+                        let disp = self.fetch_u32();
+                        (self.ds, index_val.wrapping_add(disp), sib_bytes + 4)
+                    } else {
+                        let base_val = self.get_reg32(base);
+                        let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
+                        (default_seg, base_val.wrapping_add(index_val), sib_bytes)
+                    }
+                } else if rm == 0b101 {
+                    // Special case: [disp32]
+                    let disp = self.fetch_u32();
+                    (self.ds, disp, 4)
+                } else {
+                    // Direct register: [EAX], [ECX], [EDX], [EBX], [ESI], [EDI]
+                    let reg_val = self.get_reg32(rm);
+                    let default_seg = if rm == 4 || rm == 5 { self.ss } else { self.ds };
+                    (default_seg, reg_val, 0)
+                }
+            }
+            // mod = 01: Memory mode with 8-bit signed displacement
+            0b01 => {
+                if rm == 0b100 {
+                    // SIB byte follows, then disp8
+                    let (scale, index, base, sib_bytes) = self.decode_sib();
+                    let disp = self.fetch_u8() as i8 as i32 as u32;
+                    
+                    let index_val = if index == 4 {
+                        0u32
+                    } else {
+                        self.get_reg32(index).wrapping_mul(scale)
+                    };
+                    
+                    let base_val = self.get_reg32(base);
+                    let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
+                    (default_seg, base_val.wrapping_add(index_val).wrapping_add(disp), sib_bytes + 1)
+                } else {
+                    // Direct register + disp8
+                    let disp = self.fetch_u8() as i8 as i32 as u32;
+                    let reg_val = self.get_reg32(rm);
+                    let default_seg = if rm == 4 || rm == 5 { self.ss } else { self.ds };
+                    (default_seg, reg_val.wrapping_add(disp), 1)
+                }
+            }
+            // mod = 10: Memory mode with 32-bit displacement
+            0b10 => {
+                if rm == 0b100 {
+                    // SIB byte follows, then disp32
+                    let (scale, index, base, sib_bytes) = self.decode_sib();
+                    let disp = self.fetch_u32();
+                    
+                    let index_val = if index == 4 {
+                        0u32
+                    } else {
+                        self.get_reg32(index).wrapping_mul(scale)
+                    };
+                    
+                    let base_val = self.get_reg32(base);
+                    let default_seg = if base == 4 || base == 5 { self.ss } else { self.ds };
+                    (default_seg, base_val.wrapping_add(index_val).wrapping_add(disp), sib_bytes + 4)
+                } else {
+                    // Direct register + disp32
+                    let disp = self.fetch_u32();
+                    let reg_val = self.get_reg32(rm);
+                    let default_seg = if rm == 4 || rm == 5 { self.ss } else { self.ds };
+                    (default_seg, reg_val.wrapping_add(disp), 4)
+                }
+            }
+            // mod = 11: Register mode (no memory access)
+            _ => (0, 0, 0), // Not used for register mode
+        };
+        
+        // Apply segment override if present
+        let seg = self.get_segment_with_override(default_seg);
+        (seg, offset, bytes_read)
     }
 
     /// Read 8-bit value from ModR/M operand (either register or memory)
@@ -13009,5 +13139,276 @@ mod tests {
             0x99,
             "AL should be 0x99 from ES:0000, proving LEA didn't consume ES: override"
         );
+    }
+
+    // ========================================================================
+    // Phase 2: 32-bit Addressing Mode Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sib_decode_scale_1() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        cpu.cs = 0;  // Set CS before calculating address
+        
+        // SIB byte: scale=00 (1x), index=001 (ECX), base=010 (EDX)
+        // Binary: 00 001 010 = 0x0A
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x0A);
+        cpu.ip = 0x1000;
+        
+        let (scale, index, base, bytes) = cpu.decode_sib();
+        assert_eq!(scale, 1, "Scale should be 1");
+        assert_eq!(index, 1, "Index should be ECX (1)");
+        assert_eq!(base, 2, "Base should be EDX (2)");
+        assert_eq!(bytes, 1, "Should consume 1 byte");
+    }
+
+    #[test]
+    fn test_sib_decode_scale_2() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        cpu.cs = 0;  // Set CS before calculating address
+        
+        // SIB byte: scale=01 (2x), index=011 (EBX), base=000 (EAX)
+        // Binary: 01 011 000 = 0x58
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x58);
+        cpu.ip = 0x1000;
+        
+        let (scale, index, base, bytes) = cpu.decode_sib();
+        assert_eq!(scale, 2, "Scale should be 2");
+        assert_eq!(index, 3, "Index should be EBX (3)");
+        assert_eq!(base, 0, "Base should be EAX (0)");
+        assert_eq!(bytes, 1, "Should consume 1 byte");
+    }
+
+    #[test]
+    fn test_sib_decode_scale_4() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        cpu.cs = 0;  // Set CS before calculating address
+        
+        // SIB byte: scale=10 (4x), index=110 (ESI), base=111 (EDI)
+        // Binary: 10 110 111 = 0xB7
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0xB7);
+        cpu.ip = 0x1000;
+        
+        let (scale, index, base, bytes) = cpu.decode_sib();
+        assert_eq!(scale, 4, "Scale should be 4");
+        assert_eq!(index, 6, "Index should be ESI (6)");
+        assert_eq!(base, 7, "Base should be EDI (7)");
+        assert_eq!(bytes, 1, "Should consume 1 byte");
+    }
+
+    #[test]
+    fn test_sib_decode_scale_8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        cpu.cs = 0;  // Set CS before calculating address
+        
+        // SIB byte: scale=11 (8x), index=010 (EDX), base=001 (ECX)
+        // Binary: 11 010 001 = 0xD1
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0xD1);
+        cpu.ip = 0x1000;
+        
+        let (scale, index, base, bytes) = cpu.decode_sib();
+        assert_eq!(scale, 8, "Scale should be 8");
+        assert_eq!(index, 2, "Index should be EDX (2)");
+        assert_eq!(base, 1, "Base should be ECX (1)");
+        assert_eq!(bytes, 1, "Should consume 1 byte");
+    }
+
+    #[test]
+    fn test_sib_decode_no_index() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        cpu.cs = 0;  // Set CS before calculating address
+        
+        // SIB byte: scale=00 (1x), index=100 (none/ESP), base=000 (EAX)
+        // Binary: 00 100 000 = 0x20
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x20);
+        cpu.ip = 0x1000;
+        
+        let (scale, index, base, bytes) = cpu.decode_sib();
+        assert_eq!(scale, 1, "Scale should be 1");
+        assert_eq!(index, 4, "Index should be 4 (ESP/none)");
+        assert_eq!(base, 0, "Base should be EAX (0)");
+        assert_eq!(bytes, 1, "Should consume 1 byte");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_direct_register() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [EAX] with mod=00, rm=000
+        cpu.ax = 0x12345678; // EAX = 0x12345678
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b000);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0x12345678, "Offset should be EAX value");
+        assert_eq!(bytes, 0, "Should consume 0 additional bytes");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_with_disp8() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [EBX+disp8] with mod=01, rm=011
+        cpu.bx = 0x10000000; // EBX = 0x10000000
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x50); // disp8 = 0x50 (positive)
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b01, 0b011);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0x10000050, "Offset should be EBX + disp8");
+        assert_eq!(bytes, 1, "Should consume 1 byte for disp8");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_with_disp32() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [ECX+disp32] with mod=10, rm=001
+        cpu.cx = 0x20000000; // ECX = 0x20000000
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        // disp32 = 0x12345678 (little-endian)
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x78);
+        cpu.memory.write(addr + 1, 0x56);
+        cpu.memory.write(addr + 2, 0x34);
+        cpu.memory.write(addr + 3, 0x12);
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b10, 0b001);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0x32345678, "Offset should be ECX + disp32");
+        assert_eq!(bytes, 4, "Should consume 4 bytes for disp32");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_sib_base_index() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [EAX + EBX*4] with mod=00, rm=100 (SIB)
+        cpu.ax = 0x10000000; // EAX (base) = 0x10000000
+        cpu.bx = 0x00000100; // EBX (index) = 0x00000100
+        cpu.ip = 0x1000;
+        cpu.cs = 0;  // Set CS before address calculation
+        
+        // SIB byte: scale=10 (4x), index=011 (EBX), base=000 (EAX)
+        // Binary: 10 011 000 = 0x98
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x98);
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0x10000400, "Offset should be EAX + EBX*4");
+        assert_eq!(bytes, 1, "Should consume 1 byte for SIB");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_sib_no_base() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [EDX*8 + disp32] with mod=00, rm=100 (SIB), base=101 (special)
+        cpu.dx = 0x00001000; // EDX (index) = 0x00001000
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        cpu.cs = 0;  // Set CS before address calculation
+        
+        // SIB byte: scale=11 (8x), index=010 (EDX), base=101 (disp32)
+        // Binary: 11 010 101 = 0xD5
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0xD5);
+        // disp32 = 0x00020000
+        cpu.memory.write(addr + 1, 0x00);
+        cpu.memory.write(addr + 2, 0x00);
+        cpu.memory.write(addr + 3, 0x02);
+        cpu.memory.write(addr + 4, 0x00);
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0x00028000, "Offset should be EDX*8 + disp32");
+        assert_eq!(bytes, 5, "Should consume 1 byte for SIB + 4 for disp32");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_sib_no_index() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [EBP] with SIB, mod=00, rm=100, index=100 (none)
+        cpu.bp = 0x30000000; // EBP = 0x30000000
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        cpu.cs = 0;  // Set CS before address calculation
+        
+        // SIB byte: scale=00 (1x), index=100 (none), base=101 (EBP, but with mod=00 means disp32)
+        // This is actually [disp32] case when base=101 and mod=00
+        // Let's use base=101 (EBP) with mod=01 instead
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x25); // SIB: scale=00, index=100, base=101 (EBP)
+        cpu.memory.write(addr + 1, 0x10); // disp8 = 0x10
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b01, 0b100);
+        assert_eq!(seg, cpu.ss, "Should use SS segment for EBP");
+        assert_eq!(offset, 0x30000010, "Offset should be EBP + disp8 (no index)");
+        assert_eq!(bytes, 2, "Should consume 1 byte for SIB + 1 for disp8");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_disp32_only() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [disp32] with mod=00, rm=101 (special case)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        // disp32 = 0xABCDEF00
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x00);
+        cpu.memory.write(addr + 1, 0xEF);
+        cpu.memory.write(addr + 2, 0xCD);
+        cpu.memory.write(addr + 3, 0xAB);
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b101);
+        assert_eq!(seg, cpu.ds, "Should use DS segment");
+        assert_eq!(offset, 0xABCDEF00, "Offset should be disp32");
+        assert_eq!(bytes, 4, "Should consume 4 bytes for disp32");
+    }
+
+    #[test]
+    fn test_calc_effective_address_32_esp_uses_ss() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Test [ESP] should use SS segment (mod=00, rm=100 with base=ESP)
+        // ESP is register 4
+        cpu.sp = 0x00001000; // ESP = 0x00001000
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        
+        // SIB byte: scale=00, index=100 (none), base=100 (ESP)
+        // Binary: 00 100 100 = 0x24
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x24);
+        
+        let (seg, offset, bytes) = cpu.calc_effective_address_32(0b00, 0b100);
+        assert_eq!(seg, cpu.ss, "Should use SS segment for ESP base");
+        assert_eq!(offset, 0x00001000, "Offset should be ESP");
+        assert_eq!(bytes, 1, "Should consume 1 byte for SIB");
     }
 }
