@@ -8078,6 +8078,7 @@ mod tests {
     mod tests_8bit;
     mod tests_addressing;
     mod tests_bcd;
+    mod tests_blackbox;
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
