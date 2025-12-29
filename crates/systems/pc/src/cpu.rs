@@ -6222,4 +6222,63 @@ mod tests {
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_0), b'}');
         cpu.cpu.memory.keyboard.key_release(SCANCODE_RIGHT_ALT);
     }
+
+    #[test]
+    fn test_dec_byte_sets_zero_flag() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+        
+        // Set up a memory location with value 1
+        cpu.cpu.memory.write(0x1000, 1);
+        
+        // Set up DEC byte ptr [BX] instruction at CS:IP
+        // DEC byte ptr [BX] = 0xFE 0x0F (mod=00, op=001 (DEC), rm=111 (BX))
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x2000;
+        cpu.cpu.bx = 0x1000; // Point BX to our byte
+        cpu.cpu.memory.write(0x2000, 0xFE); // DEC opcode
+        cpu.cpu.memory.write(0x2001, 0x0F); // ModR/M: mod=00, reg=001 (DEC), rm=111 (BX)
+        
+        println!("Before DEC: memory[0x1000] = {}", cpu.cpu.memory.read(0x1000));
+        
+        // Execute the DEC instruction
+        cpu.step();
+        
+        println!("After DEC: memory[0x1000] = {}", cpu.cpu.memory.read(0x1000));
+        
+        // Check that the memory was decremented to 0
+        assert_eq!(cpu.cpu.memory.read(0x1000), 0, "Memory should be decremented to 0");
+        
+        // Check that Zero Flag is set
+        const FLAG_ZF: u32 = 0x0040;
+        assert_eq!(cpu.cpu.flags & FLAG_ZF, FLAG_ZF, "Zero Flag should be set");
+    }
+
+    #[test]
+    fn test_or_al_al_sets_zero_flag() {
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+        
+        // Test OR AL,AL when AL=0 should set ZF
+        cpu.cpu.ax = 0x0000; // AL = 0
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x2000;
+        
+        // OR AL,AL = 0x0A 0xC0 (mod=11, reg=000 (AL), rm=000 (AL))
+        cpu.cpu.memory.write(0x2000, 0x0A); // OR r8, r/m8
+        cpu.cpu.memory.write(0x2001, 0xC0); // ModR/M: AL, AL
+        
+        cpu.step();
+        
+        const FLAG_ZF: u32 = 0x0040;
+        assert_eq!(cpu.cpu.flags & FLAG_ZF, FLAG_ZF, "Zero Flag should be set when AL=0");
+        
+        // Test OR AL,AL when AL!=0 should clear ZF
+        cpu.cpu.ax = 0x0042; // AL = 0x42
+        cpu.cpu.ip = 0x2000; // Reset IP
+        
+        cpu.step();
+        
+        assert_eq!(cpu.cpu.flags & FLAG_ZF, 0, "Zero Flag should be clear when AL!=0");
+    }
 }
