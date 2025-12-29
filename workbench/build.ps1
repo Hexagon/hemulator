@@ -245,7 +245,7 @@ $date = ((($now.Year - 1980) -shl 9) -bor ($now.Month -shl 5) -bor $now.Day)
 [BitConverter]::GetBytes([uint32]$com.Length).CopyTo($img, $entryOffset + 0x1C)
 
 # Write file data
-$clusterOffset = $dataOffset + (($freeCluster - 2) * $bytesPerSector)
+$clusterOffset = $dataOffset + (($freeCluster - 2) * $sectorsPerCluster * $bytesPerSector)
 [Array]::Copy($com, 0, $img, $clusterOffset, $com.Length)
 
 # Mark cluster as EOF in FAT (0xFFF)
@@ -256,7 +256,7 @@ if ($freeCluster % 2 -eq 0) {
     [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
 } else {
     $existing = [BitConverter]::ToUInt16($img, $fatOffset)
-    $newValue = ($existing -band 0x000F) -bor 0xFFF0
+    $newValue = ($existing -band 0x000F) -bor (0x0FFF -shl 4)
     [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
 }
 
