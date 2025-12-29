@@ -455,6 +455,24 @@ impl<M: Memory8086> Cpu8086<M> {
         self.write(segment, offset.wrapping_add(1), hi);
     }
 
+    /// Read a dword (32-bit) from memory at segment:offset
+    #[inline]
+    fn read_u32(&self, segment: u16, offset: u32) -> u32 {
+        // x86 is little-endian: read low word first, then high word
+        let low_word = self.read_u16(segment, offset as u16) as u32;
+        let high_word = self.read_u16(segment, (offset as u16).wrapping_add(2)) as u32;
+        (high_word << 16) | low_word
+    }
+
+    /// Write a dword (32-bit) to memory at segment:offset
+    #[inline]
+    fn write_u32(&mut self, segment: u16, offset: u32, val: u32) {
+        let low_word = (val & 0xFFFF) as u16;
+        let high_word = ((val >> 16) & 0xFFFF) as u16;
+        self.write_u16(segment, offset as u16, low_word);
+        self.write_u16(segment, (offset as u16).wrapping_add(2), high_word);
+    }
+
     /// Push a word onto the stack
     #[inline]
     fn push(&mut self, val: u16) {
@@ -801,6 +819,13 @@ impl<M: Memory8086> Cpu8086<M> {
     fn update_flags_16(&mut self, result: u16) {
         self.set_flag(FLAG_ZF, result == 0);
         self.set_flag(FLAG_SF, (result & 0x8000) != 0);
+        self.set_flag(FLAG_PF, Self::calc_parity((result & 0xFF) as u8));
+    }
+
+    /// Update flags after 32-bit arithmetic/logic operation
+    fn update_flags_32(&mut self, result: u32) {
+        self.set_flag(FLAG_ZF, result == 0);
+        self.set_flag(FLAG_SF, (result & 0x80000000) != 0);
         self.set_flag(FLAG_PF, Self::calc_parity((result & 0xFF) as u8));
     }
 
@@ -1474,6 +1499,72 @@ impl<M: Memory8086> Cpu8086<M> {
         } else {
             // Memory mode - use cached seg/offset
             self.write(seg, offset, val);
+        }
+    }
+
+    /// Read 32-bit value from ModR/M operand (either register or memory)
+    fn read_rm32(&mut self, modbits: u8, rm: u8) -> u32 {
+        if modbits == 0b11 {
+            // Register mode
+            self.get_reg32(rm)
+        } else {
+            // Memory mode - use 32-bit addressing if override is set
+            if self.address_size_override && self.model.supports_80386_instructions() {
+                let (seg, offset, _) = self.calc_effective_address_32(modbits, rm);
+                self.read_u32(seg, offset)
+            } else {
+                let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                self.read_u32(seg, offset as u32)
+            }
+        }
+    }
+
+    /// Write 32-bit value to ModR/M operand (either register or memory)
+    fn write_rm32(&mut self, modbits: u8, rm: u8, val: u32) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg32(rm, val);
+        } else {
+            // Memory mode - use 32-bit addressing if override is set
+            if self.address_size_override && self.model.supports_80386_instructions() {
+                let (seg, offset, _) = self.calc_effective_address_32(modbits, rm);
+                self.write_u32(seg, offset, val);
+            } else {
+                let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                self.write_u32(seg, offset as u32, val);
+            }
+        }
+    }
+
+    /// Helper for Read-Modify-Write operations on 32-bit values
+    /// Returns (value_read, seg, offset_u32) to avoid double-fetching EA
+    fn read_rmw32(&mut self, modbits: u8, rm: u8) -> (u32, u16, u32) {
+        if modbits == 0b11 {
+            // Register mode - return dummy seg/offset
+            (self.get_reg32(rm), 0, 0)
+        } else {
+            // Memory mode - calculate EA once and return it
+            if self.address_size_override && self.model.supports_80386_instructions() {
+                let (seg, offset, _) = self.calc_effective_address_32(modbits, rm);
+                let val = self.read_u32(seg, offset);
+                (val, seg, offset)
+            } else {
+                let (seg, offset, _) = self.calc_effective_address(modbits, rm);
+                let val = self.read_u32(seg, offset as u32);
+                (val, seg, offset as u32)
+            }
+        }
+    }
+
+    /// Helper for writing result of Read-Modify-Write operations on 32-bit values
+    /// Uses cached seg/offset to avoid recalculating EA
+    fn write_rmw32(&mut self, modbits: u8, rm: u8, val: u32, seg: u16, offset: u32) {
+        if modbits == 0b11 {
+            // Register mode
+            self.set_reg32(rm, val);
+        } else {
+            // Memory mode - use cached seg/offset
+            self.write_u32(seg, offset, val);
         }
     }
 
@@ -13410,5 +13501,164 @@ mod tests {
         assert_eq!(seg, cpu.ss, "Should use SS segment for ESP base");
         assert_eq!(offset, 0x00001000, "Offset should be ESP");
         assert_eq!(bytes, 1, "Should consume 1 byte for SIB");
+    }
+
+    // ========================================================================
+    // Phase 3: 32-bit Operand Support Tests
+    // ========================================================================
+
+    #[test]
+    fn test_read_write_u32_memory() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Write 32-bit value to memory
+        let test_value = 0x12345678u32;
+        cpu.write_u32(0x1000, 0x0000, test_value);
+        
+        // Read it back
+        let read_value = cpu.read_u32(0x1000, 0x0000);
+        assert_eq!(read_value, test_value, "32-bit read/write should match");
+        
+        // Verify little-endian byte order
+        let addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0000);
+        assert_eq!(cpu.memory.read(addr), 0x78, "Byte 0 should be low byte");
+        assert_eq!(cpu.memory.read(addr + 1), 0x56, "Byte 1 should be byte 1");
+        assert_eq!(cpu.memory.read(addr + 2), 0x34, "Byte 2 should be byte 2");
+        assert_eq!(cpu.memory.read(addr + 3), 0x12, "Byte 3 should be high byte");
+    }
+
+    #[test]
+    fn test_read_rm32_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set EAX to test value
+        cpu.set_reg32(0, 0xABCDEF01);
+        
+        // Read from register mode (mod=11, rm=000 for EAX)
+        let value = cpu.read_rm32(0b11, 0b000);
+        assert_eq!(value, 0xABCDEF01, "Should read EAX value");
+    }
+
+    #[test]
+    fn test_write_rm32_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Write to register mode (mod=11, rm=011 for EBX)
+        cpu.write_rm32(0b11, 0b011, 0x11223344);
+        
+        // Verify BX was updated
+        assert_eq!(cpu.get_reg32(3), 0x11223344, "EBX should be updated");
+    }
+
+    #[test]
+    fn test_read_rm32_memory_mode_16bit_addressing() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set up memory with test value
+        cpu.write_u32(0x1000, 0x0100, 0x87654321);
+        
+        // Set BX to 0x0100 for [BX] addressing
+        cpu.bx = 0x0100;
+        cpu.ds = 0x1000;
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        
+        // Read from memory mode (mod=00, rm=111 for [BX])
+        let value = cpu.read_rm32(0b00, 0b111);
+        assert_eq!(value, 0x87654321, "Should read from DS:BX");
+    }
+
+    #[test]
+    fn test_write_rm32_memory_mode_16bit_addressing() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set SI to 0x0200 for [SI] addressing
+        cpu.si = 0x0200;
+        cpu.ds = 0x1000;
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        
+        // Write to memory mode (mod=00, rm=100 for [SI])
+        cpu.write_rm32(0b00, 0b100, 0xFEDCBA98);
+        
+        // Verify memory was updated
+        let value = cpu.read_u32(0x1000, 0x0200);
+        assert_eq!(value, 0xFEDCBA98, "Memory at DS:SI should be updated");
+    }
+
+    #[test]
+    fn test_read_rmw32_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set ECX to test value
+        cpu.set_reg32(1, 0x99887766);
+        
+        // Read for RMW (mod=11, rm=001 for ECX)
+        let (value, seg, offset) = cpu.read_rmw32(0b11, 0b001);
+        assert_eq!(value, 0x99887766, "Should read ECX value");
+        assert_eq!(seg, 0, "Seg should be dummy for register mode");
+        assert_eq!(offset, 0, "Offset should be dummy for register mode");
+    }
+
+    #[test]
+    fn test_write_rmw32_register_mode() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Write RMW result to register (mod=11, rm=010 for EDX)
+        cpu.write_rmw32(0b11, 0b010, 0x55443322, 0, 0);
+        
+        // Verify EDX was updated
+        assert_eq!(cpu.get_reg32(2), 0x55443322, "EDX should be updated");
+    }
+
+    #[test]
+    fn test_update_flags_32_zero() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.update_flags_32(0);
+        assert!(cpu.get_flag(FLAG_ZF), "ZF should be set for zero");
+        assert!(!cpu.get_flag(FLAG_SF), "SF should not be set for zero");
+    }
+
+    #[test]
+    fn test_update_flags_32_negative() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.update_flags_32(0x80000000); // MSB set = negative in signed interpretation
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(cpu.get_flag(FLAG_SF), "SF should be set for negative");
+    }
+
+    #[test]
+    fn test_update_flags_32_parity() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Value with even parity in low byte (0x03 = 2 bits set)
+        cpu.update_flags_32(0x12345603);
+        assert!(cpu.get_flag(FLAG_PF), "PF should be set for even parity");
+        
+        // Value with odd parity in low byte (0x07 = 3 bits set)
+        cpu.update_flags_32(0x12345607);
+        assert!(!cpu.get_flag(FLAG_PF), "PF should not be set for odd parity");
+    }
+
+    #[test]
+    fn test_update_flags_32_positive() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.update_flags_32(0x7FFFFFFF); // MSB not set = positive
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(!cpu.get_flag(FLAG_SF), "SF should not be set for positive");
     }
 }
