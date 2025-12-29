@@ -2518,24 +2518,48 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CMP r/m16, r16 (0x39)
             0x39 => {
+                // CMP r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = rm_val.wrapping_sub(reg_val);
-                let borrow = (rm_val as u32) < (reg_val as u32);
-                let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x8000) != 0;
-                let af = Self::calc_af_sub_16(rm_val, reg_val);
 
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, borrow);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = rm_val.wrapping_sub(reg_val);
+                    let borrow = (rm_val as u64) < (reg_val as u64);
+                    let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80000000) != 0;
+                    let af = Self::calc_af_sub_32(rm_val, reg_val);
+
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = rm_val.wrapping_sub(reg_val);
+                    let borrow = (rm_val as u32) < (reg_val as u32);
+                    let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x8000) != 0;
+                    let af = Self::calc_af_sub_16(rm_val, reg_val);
+
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -2566,26 +2590,49 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // CMP r16, r/m16 (0x3B)
+            // CMP r16/32, r/m16/32 (0x3B)
             0x3B => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = reg_val.wrapping_sub(rm_val);
-                let borrow = (reg_val as u32) < (rm_val as u32);
-                let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
-                let af = Self::calc_af_sub_16(reg_val, rm_val);
 
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, borrow);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = reg_val.wrapping_sub(rm_val);
+                    let borrow = (reg_val as u64) < (rm_val as u64);
+                    let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80000000) != 0;
+                    let af = Self::calc_af_sub_32(reg_val, rm_val);
+
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = reg_val.wrapping_sub(rm_val);
+                    let borrow = (reg_val as u32) < (rm_val as u32);
+                    let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
+                    let af = Self::calc_af_sub_16(reg_val, rm_val);
+
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -2665,21 +2712,42 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // OR r/m16, r16 (0x09)
             0x09 => {
+                // OR r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = rm_val | reg_val;
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = rm_val | reg_val;
+
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = rm_val | reg_val;
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -2711,23 +2779,43 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // OR r16, r/m16 (0x0B)
+            // OR r16/32, r/m16/32 (0x0B)
             0x0B => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = reg_val | rm_val;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = reg_val | rm_val;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = reg_val | rm_val;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -2825,21 +2913,42 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // XOR r/m16, r16 (0x31)
             0x31 => {
+                // XOR r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = rm_val ^ reg_val;
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = rm_val ^ reg_val;
+
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = rm_val ^ reg_val;
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -2871,23 +2980,43 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // XOR r16, r/m16 (0x33)
+            // XOR r16/32, r/m16/32 (0x33)
             0x33 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = reg_val ^ rm_val;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = reg_val ^ rm_val;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = reg_val ^ rm_val;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -4985,21 +5114,42 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // AND r/m16, r16 (0x21)
             0x21 => {
+                // AND r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = rm_val & reg_val;
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = rm_val & reg_val;
+
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = rm_val & reg_val;
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -5031,23 +5181,43 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // AND r16, r/m16 (0x23)
+            // AND r16/32, r/m16/32 (0x23)
             0x23 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = reg_val & rm_val;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = reg_val & rm_val;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = reg_val & rm_val;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -5767,20 +5937,40 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // TEST r/m16, r16 (0x85)
             0x85 => {
+                // TEST r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = rm_val & reg_val;
 
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, false);
-                self.set_flag(FLAG_OF, false);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = rm_val & reg_val;
+
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = rm_val & reg_val;
+
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, false);
+                    self.set_flag(FLAG_OF, false);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -14157,5 +14347,131 @@ mod tests {
         cpu.step();
         assert_eq!(cpu.get_reg16(0), 0x0005, "AX = 3 + 2 (16-bit)");
         assert_eq!(cpu.get_reg32(0), 0x00000005, "EAX full value");
+    }
+
+    #[test]
+    fn test_and_32bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.set_reg32(0, 0xFFFF0000); // EAX
+        cpu.set_reg32(3, 0x0000FFFF); // EBX
+        
+        // AND EAX, EBX: opcode 0x23, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x23); // AND opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        cpu.step();
+        
+        assert_eq!(cpu.get_reg32(0), 0x00000000, "EAX should be 0 (no common bits)");
+        assert!(cpu.get_flag(FLAG_ZF), "ZF should be set");
+        assert!(!cpu.get_flag(FLAG_SF), "SF should not be set");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should be cleared");
+    }
+
+    #[test]
+    fn test_or_32bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.set_reg32(0, 0xAAAAAAAA); // EAX
+        cpu.set_reg32(3, 0x55555555); // EBX
+        
+        // OR EAX, EBX: opcode 0x0B, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x0B); // OR opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        cpu.step();
+        
+        assert_eq!(cpu.get_reg32(0), 0xFFFFFFFF, "EAX should be all 1s");
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(cpu.get_flag(FLAG_SF), "SF should be set (bit 31)");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should be cleared");
+    }
+
+    #[test]
+    fn test_xor_32bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.set_reg32(0, 0x12345678); // EAX
+        cpu.set_reg32(3, 0x12345678); // EBX (same value)
+        
+        // XOR EAX, EBX: opcode 0x33, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x33); // XOR opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        cpu.step();
+        
+        assert_eq!(cpu.get_reg32(0), 0x00000000, "EAX XOR EBX should be 0");
+        assert!(cpu.get_flag(FLAG_ZF), "ZF should be set");
+        assert!(!cpu.get_flag(FLAG_SF), "SF should not be set");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should be cleared");
+    }
+
+    #[test]
+    fn test_cmp_32bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.set_reg32(0, 0x00000005); // EAX
+        cpu.set_reg32(3, 0x00000003); // EBX
+        
+        // CMP EAX, EBX: opcode 0x3B, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x3B); // CMP opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        cpu.step();
+        
+        // CMP doesn't modify registers, only flags
+        assert_eq!(cpu.get_reg32(0), 0x00000005, "EAX should be unchanged");
+        assert_eq!(cpu.get_reg32(3), 0x00000003, "EBX should be unchanged");
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set (5 != 3)");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should not be set (5 > 3)");
+    }
+
+    #[test]
+    fn test_test_32bit() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        cpu.set_reg32(0, 0x80000000); // EAX (bit 31 set)
+        cpu.set_reg32(3, 0x80000000); // EBX (bit 31 set)
+        
+        // TEST r/m32, r32: opcode 0x85, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x85); // TEST opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        cpu.step();
+        
+        // TEST doesn't modify registers, only flags
+        assert_eq!(cpu.get_reg32(0), 0x80000000, "EAX should be unchanged");
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(cpu.get_flag(FLAG_SF), "SF should be set (result has bit 31)");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should be cleared");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should be cleared");
     }
 }
