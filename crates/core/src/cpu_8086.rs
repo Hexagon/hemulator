@@ -8054,6 +8054,8 @@ mod tests {
     mod tests_flags;
     mod tests_8bit;
     mod tests_16bit;
+    mod tests_32bit;
+    mod tests_misc;
 
     // Helper function for tests to calculate physical address
     fn physical_address(segment: u16, offset: u16) -> u32 {
