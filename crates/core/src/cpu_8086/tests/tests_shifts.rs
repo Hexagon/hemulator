@@ -1,7 +1,7 @@
 //! Tests for shift and rotate instructions
 //!
 //! This module contains tests for shift/rotate edge cases
-//! 
+//!
 //! NOTE: SHLD/SHRD are currently not fully implemented (marked as stubs in cpu_8086.rs)
 //! Tests for these instructions are omitted until implementation is complete.
 

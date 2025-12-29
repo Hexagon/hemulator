@@ -1775,15 +1775,15 @@ fn test_cpuid() {
     cpu.ip = 0x0000;
     cpu.cs = 0xFFFF;
 
-    // Test function 0 (vendor ID)
+    // Test function 0 (vendor ID) - CPUID returns full 32-bit values
     cpu.ax = 0;
     cpu.memory.load_program(0xFFFF0, &[0x0F, 0xA2]);
     cpu.step();
 
     assert_eq!(cpu.ax, 1, "Should support functions 0 and 1");
-    assert_eq!(cpu.bx, 0x756E, "Vendor ID part 1");
-    assert_eq!(cpu.dx, 0x4965, "Vendor ID part 2");
-    assert_eq!(cpu.cx, 0x6C65, "Vendor ID part 3");
+    assert_eq!(cpu.bx, 0x756E6547, "Vendor ID part 1 (Genu)");
+    assert_eq!(cpu.dx, 0x49656E69, "Vendor ID part 2 (ineI)");
+    assert_eq!(cpu.cx, 0x6C65746E, "Vendor ID part 3 (ntel)");
 
     // Test function 1 (processor info)
     cpu.ip = 0x0000;
@@ -1857,13 +1857,12 @@ fn test_rdmsr_wrmsr() {
     cpu.ip = 0x0000;
     cpu.cs = 0xFFFF;
 
-    // Write to MSR
+    // Write to MSR - WRMSR uses full 32-bit registers
     cpu.cx = 0x0010; // MSR index
-    cpu.ax = 0x1234; // Low 16 bits
-    cpu.dx = 0x5678; // High 16 bits
+    cpu.ax = 0x12345678; // Low 32 bits
+    cpu.dx = 0xABCDEF00; // High 32 bits
 
-    // WRMSR (0x0F 0x30) - Wait, I have the opcodes swapped!
-    // Let me check: WRMSR is 0x30, RDMSR is 0x32
+    // WRMSR (0x0F 0x30)
     cpu.memory.load_program(0xFFFF0, &[0x0F, 0x30]);
     cpu.step();
 
@@ -1877,8 +1876,8 @@ fn test_rdmsr_wrmsr() {
     cpu.memory.load_program(0xFFFF0, &[0x0F, 0x32]);
     cpu.step();
 
-    assert_eq!(cpu.ax, 0x1234, "Low 16 bits should match");
-    assert_eq!(cpu.dx, 0x5678, "High 16 bits should match");
+    assert_eq!(cpu.ax, 0x12345678, "Low 32 bits should match");
+    assert_eq!(cpu.dx, 0xABCDEF00, "High 32 bits should match");
 }
 
 #[test]

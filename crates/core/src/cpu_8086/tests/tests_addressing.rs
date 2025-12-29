@@ -145,10 +145,13 @@ fn test_mov_immediate_to_memory() {
     cpu.ds = 0x1000;
 
     // MOV WORD PTR [0x0200], 0xABCD (0xC7 0x06 addr imm)
-    cpu.memory.load_program(0xFFFF0, &[
-        0xC7, 0x06, 0x00, 0x02, // MOV [0x0200], ...
-        0xCD, 0xAB,              // ... 0xABCD
-    ]);
+    cpu.memory.load_program(
+        0xFFFF0,
+        &[
+            0xC7, 0x06, 0x00, 0x02, // MOV [0x0200], ...
+            0xCD, 0xAB, // ... 0xABCD
+        ],
+    );
     cpu.ip = 0x0000;
     cpu.cs = 0xFFFF;
 
@@ -171,7 +174,7 @@ fn test_segment_wrap_around() {
 
     // Calculate physical address for DS:SI
     let addr = Cpu8086::<ArrayMemory>::physical_address(0xFFFF, 0xFFFF);
-    
+
     // This should wrap: (0xFFFF << 4) + 0xFFFF = 0xFFFF0 + 0xFFFF = 0x10FFEF
     assert_eq!(addr, 0x10FFEF);
 }
@@ -296,7 +299,7 @@ fn test_bswap_all_registers() {
     // Test each register
     for reg in 0..8 {
         cpu.set_reg32(reg, 0x12345678);
-        
+
         // BSWAP reg (0x0F 0xC8+reg)
         cpu.memory.load_program(0xFFFF0, &[0x0F, 0xC8 + reg as u8]);
         cpu.ip = 0x0000;
