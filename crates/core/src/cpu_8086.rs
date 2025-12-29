@@ -476,7 +476,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Push a word onto the stack
     #[inline]
     fn push(&mut self, val: u16) {
-        self.sp = (self.sp.wrapping_sub(2u32)) & 0xFFFF; // Keep in 16-bit range for now
+        self.sp = (self.sp.wrapping_sub(2)) & 0xFFFF; // Keep in 16-bit range for now
         self.write_u16(self.ss, self.sp as u16, val);
     }
 
@@ -484,7 +484,7 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     fn pop(&mut self) -> u16 {
         let val = self.read_u16(self.ss, self.sp as u16);
-        self.sp = (self.sp.wrapping_add(2u32)) & 0xFFFF; // Keep in 16-bit range for now
+        self.sp = (self.sp.wrapping_add(2)) & 0xFFFF; // Keep in 16-bit range for now
         val
     }
 
@@ -6081,7 +6081,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // POPF - Pop Flags (0x9D)
             0x9D => {
-                self.flags = self.pop() as u32;
+                self.flags = self.pop();
                 self.cycles += 8;
                 8
             }
@@ -6740,7 +6740,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     return 10;
                 }
                 self.sp = self.bp;
-                self.bp = self.pop() as u32;
+                self.bp = self.pop();
                 self.cycles += 8;
                 8
             }
@@ -7009,7 +7009,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xEA => {
                 let offset = self.fetch_u16();
                 let segment = self.fetch_u16();
-                self.ip = offset as u32;
+                self.ip = offset;
                 self.cs = segment;
                 self.cycles += 15;
                 15
@@ -7315,14 +7315,14 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                self.di = self.pop() as u32;
-                self.si = self.pop() as u32;
-                self.bp = self.pop() as u32;
+                self.di = self.pop();
+                self.si = self.pop();
+                self.bp = self.pop();
                 let _temp_sp = self.pop(); // Discard SP value
-                self.bx = self.pop() as u32;
-                self.dx = self.pop() as u32;
-                self.cx = self.pop() as u32;
-                self.ax = self.pop() as u32;
+                self.bx = self.pop();
+                self.dx = self.pop();
+                self.cx = self.pop();
+                self.ax = self.pop();
                 self.cycles += 51;
                 51
             }
@@ -7837,7 +7837,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // RET near (0xC3)
             0xC3 => {
-                self.ip = self.pop() as u32;
+                self.ip = self.pop();
                 self.cycles += 8;
                 8
             }
@@ -7845,7 +7845,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // RET near with immediate (0xC2) - pops return address and adds imm16 to SP
             0xC2 => {
                 let pop_bytes = self.fetch_u16();
-                self.ip = self.pop() as u32;
+                self.ip = self.pop();
                 self.sp = self.sp.wrapping_add(pop_bytes as u32);
                 self.cycles += 12;
                 12
@@ -7867,7 +7867,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // RET far (0xCB)
             0xCB => {
-                self.ip = self.pop() as u32;
+                self.ip = self.pop();
                 self.cs = self.pop();
                 self.cycles += 18;
                 18
@@ -7882,16 +7882,16 @@ impl<M: Memory8086> Cpu8086<M> {
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!(
                         "[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}",
-                        self.sp.wrapping_add(4u32),
+                        self.sp.wrapping_add(4),
                         pop_bytes,
                         ret_ip,
                         ret_cs
                     );
                 }
 
-                self.ip = ret_ip as u32;
+                self.ip = ret_ip;
                 self.cs = ret_cs;
-                self.sp = self.sp.wrapping_add(pop_bytes as u32);
+                self.sp = self.sp.wrapping_add(pop_bytes);
                 self.cycles += 17;
                 17
             }
@@ -7949,9 +7949,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // IRET - Return from Interrupt
             0xCF => {
                 // Pop IP, CS, FLAGS from stack (reverse order of INT)
-                self.ip = self.pop() as u32;
+                self.ip = self.pop();
                 self.cs = self.pop();
-                self.flags = self.pop() as u32;
+                self.flags = self.pop();
 
                 self.cycles += 32; // Approximate timing for IRET instruction
                 32
