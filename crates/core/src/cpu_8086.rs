@@ -12373,7 +12373,7 @@ mod tests {
             cpu.step();
             iterations += 1;
 
-            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if opcode == 0xF4 {
                 break;
             }
@@ -12457,7 +12457,7 @@ mod tests {
             cpu.step();
             iterations += 1;
 
-            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if opcode == 0xF4 {
                 break;
             }
@@ -12538,7 +12538,7 @@ mod tests {
         let mut iterations = 0;
         loop {
             let _ip_before = cpu.ip;
-            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
 
             // Debug: print state before execution
             if !(20..=95).contains(&iterations) {
@@ -12552,7 +12552,7 @@ mod tests {
             iterations += 1;
 
             // Check if we hit HLT (opcode 0xF4)
-            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if current_opcode == 0xF4 {
                 break;
             }
@@ -12628,7 +12628,7 @@ mod tests {
 
         let mut iterations = 0;
         loop {
-            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
 
             if iterations < 20 {
                 eprintln!(
@@ -12647,7 +12647,7 @@ mod tests {
             cpu.step();
             iterations += 1;
 
-            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if current_opcode == 0xF4 {
                 break;
             }
@@ -12701,7 +12701,7 @@ mod tests {
             cpu.step();
             iterations += 1;
 
-            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if current_opcode == 0xF4 {
                 break;
             }
@@ -12778,7 +12778,7 @@ mod tests {
             cpu.step();
             iterations += 1;
 
-            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip as u32);
+            let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
             if current_opcode == 0xF4 {
                 break;
             }

@@ -3092,7 +3092,10 @@ impl PcCpu {
     fn int33h_set_mickey_ratio(&mut self) -> u32 {
         let horiz = self.cpu.cx;
         let vert = self.cpu.dx;
-        self.cpu.memory.mouse.set_mickey_ratio(horiz as u16, vert as u16);
+        self.cpu
+            .memory
+            .mouse
+            .set_mickey_ratio(horiz as u16, vert as u16);
         51
     }
 
@@ -4029,7 +4032,12 @@ impl PcCpu {
         let selector = self.cpu.bx;
         let limit = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
 
-        match self.cpu.memory.dpmi.set_segment_limit(selector as u16, limit) {
+        match self
+            .cpu
+            .memory
+            .dpmi
+            .set_segment_limit(selector as u16, limit)
+        {
             Ok(()) => {
                 self.set_carry_flag(false);
             }
