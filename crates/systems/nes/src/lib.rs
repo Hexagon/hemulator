@@ -777,6 +777,39 @@ mod tests {
     }
 
     #[test]
+    fn test_nes_audio_no_dc_offset() {
+        // Test that audio doesn't have a DC offset when no sound is being played
+        // This was a bug where the triangle channel always output its current
+        // waveform value even when disabled, causing a DC offset
+        let mut sys = NesSystem::default();
+
+        // Load the test ROM
+        let test_rom = include_bytes!("../../../../test_roms/nes/test.nes");
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+
+        // Run a few frames to initialize
+        for _ in 0..5 {
+            let _ = sys.step_frame();
+        }
+
+        // Get audio samples
+        let audio_samples = sys.get_audio_samples(735);
+        assert_eq!(audio_samples.len(), 735);
+
+        // Calculate average to detect DC offset
+        let sum: i64 = audio_samples.iter().map(|&s| s as i64).sum();
+        let avg = sum / audio_samples.len() as i64;
+
+        // The average should be close to 0 (no DC offset)
+        // Allow small variation due to normal audio content, but not 2048 which was the bug
+        assert!(
+            avg.abs() < 500,
+            "Audio has DC offset of {}, expected close to 0",
+            avg
+        );
+    }
+
+    #[test]
     fn test_nes_smoke_test_rom() {
         // Load the test ROM
         let test_rom = include_bytes!("../../../../test_roms/nes/test.nes");
