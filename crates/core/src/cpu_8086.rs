@@ -808,6 +808,20 @@ impl<M: Memory8086> Cpu8086<M> {
         (a & 0x0F) < (b & 0x0F)
     }
 
+    /// Calculate Auxiliary Flag for 32-bit addition
+    /// AF is set when there's a carry from bit 3 to bit 4 (in the low byte)
+    #[inline]
+    fn calc_af_add_32(a: u32, b: u32) -> bool {
+        (((a & 0x0F) + (b & 0x0F)) & 0x10) != 0
+    }
+
+    /// Calculate Auxiliary Flag for 32-bit subtraction
+    /// AF is set when there's a borrow from bit 4 to bit 3 (in the low byte)
+    #[inline]
+    fn calc_af_sub_32(a: u32, b: u32) -> bool {
+        (a & 0x0F) < (b & 0x0F)
+    }
+
     /// Update flags after 8-bit arithmetic/logic operation
     fn update_flags_8(&mut self, result: u8) {
         self.set_flag(FLAG_ZF, result == 0);
@@ -2187,28 +2201,51 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // ADD r/m16, r16 (0x01)
             0x01 => {
+                // ADD r/m16/32, r16/32
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
 
-                // Use RMW helpers to avoid double-fetching EA
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = rm_val.wrapping_add(reg_val);
-                let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
-                let overflow =
-                    ((rm_val ^ (result as u16)) & (reg_val ^ (result as u16)) & 0x8000) != 0;
-                let af = Self::calc_af_add_16(rm_val, reg_val);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = rm_val.wrapping_add(reg_val);
+                    let carry = (rm_val as u64 + reg_val as u64) > 0xFFFFFFFF;
+                    let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80000000) != 0;
+                    let af = Self::calc_af_add_32(rm_val, reg_val);
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, carry);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = rm_val.wrapping_add(reg_val);
+                    let carry = (rm_val as u32 + reg_val as u32) > 0xFFFF;
+                    let overflow =
+                        ((rm_val ^ (result as u16)) & (reg_val ^ (result as u16)) & 0x8000) != 0;
+                    let af = Self::calc_af_add_16(rm_val, reg_val);
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -2244,28 +2281,52 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // ADD r16, r/m16 (0x03)
+            // ADD r16/32, r/m16/32 (0x03)
             0x03 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let result = reg_val.wrapping_add(rm_val);
-                let carry = (reg_val as u32 + rm_val as u32) > 0xFFFF;
-                let overflow =
-                    ((reg_val ^ (result as u16)) & (rm_val ^ (result as u16)) & 0x8000) != 0;
-                let af = Self::calc_af_add_16(reg_val, rm_val);
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, carry);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let result = reg_val.wrapping_add(rm_val);
+                    let carry = (reg_val as u64 + rm_val as u64) > 0xFFFFFFFF;
+                    let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80000000) != 0;
+                    let af = Self::calc_af_add_32(reg_val, rm_val);
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let result = reg_val.wrapping_add(rm_val);
+                    let carry = (reg_val as u32 + rm_val as u32) > 0xFFFF;
+                    let overflow =
+                        ((reg_val ^ (result as u16)) & (rm_val ^ (result as u16)) & 0x8000) != 0;
+                    let af = Self::calc_af_add_16(reg_val, rm_val);
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -13775,5 +13836,117 @@ mod tests {
         // Verify only low 16 bits were affected
         assert_eq!(cpu.get_reg16(3), 0x1234, "BX should be 0x1234");
         assert_eq!(cpu.get_reg32(3), 0xFFFF1234, "EBX high bits should be preserved");
+    }
+
+    // ========================================================================
+    // Phase 4: Arithmetic Instructions with 32-bit Support
+    // ========================================================================
+
+    #[test]
+    fn test_add_r32_rm32() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set up registers
+        cpu.set_reg32(0, 0x12345678); // EAX
+        cpu.set_reg32(3, 0x87654321); // EBX
+        
+        // ADD EAX, EBX: opcode 0x03, ModR/M = 0xC3 (mod=11, reg=000, rm=011)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x03); // ADD opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify result
+        assert_eq!(cpu.get_reg32(0), 0x99999999, "EAX should contain sum");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should not be set");
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(cpu.get_flag(FLAG_SF), "SF should be set (bit 31 set)");
+    }
+
+    #[test]
+    fn test_add_rm32_r32() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set up registers
+        cpu.set_reg32(1, 0x00000001); // ECX
+        cpu.set_reg32(2, 0xFFFFFFFF); // EDX
+        
+        // ADD EDX, ECX: opcode 0x01, ModR/M = 0xCA (mod=11, reg=001, rm=010)
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x01); // ADD opcode
+        cpu.memory.write(addr + 2, 0xCA); // ModR/M
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify result (overflow to 0)
+        assert_eq!(cpu.get_reg32(2), 0x00000000, "EDX should wrap to 0");
+        assert!(cpu.get_flag(FLAG_CF), "CF should be set (carry occurred)");
+        assert!(!cpu.get_flag(FLAG_OF), "OF should not be set");
+        assert!(cpu.get_flag(FLAG_ZF), "ZF should be set (result is zero)");
+        assert!(!cpu.get_flag(FLAG_SF), "SF should not be set");
+    }
+
+    #[test]
+    fn test_add_32bit_overflow() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set up registers for signed overflow
+        cpu.set_reg32(0, 0x7FFFFFFF); // EAX = largest positive i32
+        cpu.set_reg32(3, 0x00000001); // EBX = 1
+        
+        // ADD EAX, EBX: opcode 0x03, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x66); // Operand size override
+        cpu.memory.write(addr + 1, 0x03); // ADD opcode
+        cpu.memory.write(addr + 2, 0xC3); // ModR/M
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify result
+        assert_eq!(cpu.get_reg32(0), 0x80000000, "EAX should be 0x80000000");
+        assert!(!cpu.get_flag(FLAG_CF), "CF should not be set");
+        assert!(cpu.get_flag(FLAG_OF), "OF should be set (signed overflow)");
+        assert!(!cpu.get_flag(FLAG_ZF), "ZF should not be set");
+        assert!(cpu.get_flag(FLAG_SF), "SF should be set (negative result)");
+    }
+
+    #[test]
+    fn test_add_preserves_16bit_without_override() {
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu8086::with_model(mem, CpuModel::Intel80386);
+        
+        // Set up 32-bit registers
+        cpu.set_reg32(0, 0xFFFF0001); // EAX
+        cpu.set_reg32(3, 0xFFFF0002); // EBX
+        
+        // ADD AX, BX (16-bit, no override): opcode 0x03, ModR/M = 0xC3
+        cpu.cs = 0;
+        cpu.ip = 0x1000;
+        let addr = Cpu8086::<ArrayMemory>::physical_address(cpu.cs, 0x1000);
+        cpu.memory.write(addr, 0x03); // ADD opcode (no 0x66 prefix)
+        cpu.memory.write(addr + 1, 0xC3); // ModR/M
+        
+        // Execute the instruction
+        cpu.step();
+        
+        // Verify only low 16 bits were affected
+        assert_eq!(cpu.get_reg16(0), 0x0003, "AX should be 0x0003");
+        assert_eq!(cpu.get_reg32(0), 0xFFFF0003, "EAX high bits should be preserved");
     }
 }
