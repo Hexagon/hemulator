@@ -10,6 +10,7 @@ pub mod video_processor;
 pub mod window_backend;
 
 use emu_core::{types::Frame, System};
+use glow::HasContext;
 use hemu_project::HemuProject;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
@@ -2748,6 +2749,12 @@ fn main() {
 
                         // Render GUI and get action
                         let action = gui.render_basic(ctx);
+
+                        // Set viewport to full window size for egui rendering
+                        let (window_width, window_height) = sdl_window.size();
+                        unsafe {
+                            gl_ctx.viewport(0, 0, window_width as i32, window_height as i32);
+                        }
 
                         // End egui frame and render
                         integration.end_frame(gl_ctx, sdl_window);

@@ -3,6 +3,7 @@
 use super::{Key, WindowBackend};
 use crate::display_filter::DisplayFilter;
 use crate::video_processor::{OpenGLProcessor, SoftwareProcessor, VideoProcessor};
+use glow::HasContext;
 use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Scancode};
 use sdl2::pixels::PixelFormatEnum;
@@ -310,10 +311,23 @@ impl Sdl2Backend {
         height: usize,
     ) -> Result<(), Box<dyn Error>> {
         match &mut self.render_mode {
-            RenderMode::OpenGL { processor, .. } => {
+            RenderMode::OpenGL {
+                processor, window, ..
+            } => {
                 // Render using OpenGL processor but don't swap
                 let _processed =
                     processor.process_frame(buffer, width, height, self.current_filter)?;
+
+                // Unbind VAO and shader program to avoid interfering with egui
+                let gl = processor.gl_context();
+                unsafe {
+                    gl.bind_vertex_array(None);
+                    gl.use_program(None);
+
+                    // Reset viewport to full window size
+                    let (win_width, win_height) = window.size();
+                    gl.viewport(0, 0, win_width as i32, win_height as i32);
+                }
                 Ok(())
             }
             RenderMode::Software { .. } => {
