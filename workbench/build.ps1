@@ -16,19 +16,26 @@ $TempImage = Join-Path $ScriptDir $TempImage
 
 # Find NASM executable
 if ([string]::IsNullOrEmpty($NasmPath)) {
-    # Try global PATH first
-    $nasmCmd = Get-Command nasm.exe -ErrorAction SilentlyContinue
+    # Try global PATH first (cross-platform)
+    $nasmCmd = Get-Command nasm -ErrorAction SilentlyContinue
     if ($nasmCmd) {
         $NasmPath = $nasmCmd.Source
         Write-Host "Using NASM from PATH: $NasmPath" -ForegroundColor Gray
     } else {
-        # Fallback to user profile location
-        $NasmPath = "$env:USERPROFILE\AppData\Local\bin\NASM\nasm.exe"
-        if (-not (Test-Path $NasmPath)) {
-            Write-Error "NASM not found. Install NASM or specify -NasmPath parameter."
-            exit 1
+        # Try Windows-specific path
+        $nasmCmd = Get-Command nasm.exe -ErrorAction SilentlyContinue
+        if ($nasmCmd) {
+            $NasmPath = $nasmCmd.Source
+            Write-Host "Using NASM from PATH: $NasmPath" -ForegroundColor Gray
+        } else {
+            # Fallback to user profile location (Windows)
+            $NasmPath = "$env:USERPROFILE\AppData\Local\bin\NASM\nasm.exe"
+            if (-not (Test-Path $NasmPath)) {
+                Write-Error "NASM not found. Install NASM or specify -NasmPath parameter."
+                exit 1
+            }
+            Write-Host "Using NASM from user profile: $NasmPath" -ForegroundColor Gray
         }
-        Write-Host "Using NASM from user profile: $NasmPath" -ForegroundColor Gray
     }
 }
 
@@ -101,15 +108,82 @@ $com = [System.IO.File]::ReadAllBytes($OutputCom)
 
 # Parse FAT12 boot sector
 $bytesPerSector = [BitConverter]::ToUInt16($img, 0x0B)
+$sectorsPerCluster = $img[0x0D]
 $reservedSectors = [BitConverter]::ToUInt16($img, 0x0E)
 $numFATs = $img[0x10]
 $rootEntries = [BitConverter]::ToUInt16($img, 0x11)
+$totalSectors = [BitConverter]::ToUInt16($img, 0x13)
 $sectorsPerFAT = [BitConverter]::ToUInt16($img, 0x16)
 
 # Calculate offsets
 $fat1Offset = $reservedSectors * $bytesPerSector
 $rootDirOffset = $fat1Offset + ($numFATs * $sectorsPerFAT * $bytesPerSector)
 $dataOffset = $rootDirOffset + (($rootEntries * 32) / $bytesPerSector) * $bytesPerSector
+
+# Calculate maximum cluster number based on disk geometry
+$dataSectors = $totalSectors - ($dataOffset / $bytesPerSector)
+$maxCluster = [int]($dataSectors / $sectorsPerCluster) + 1
+
+# First, check if TEST.COM already exists and delete it
+$existingEntry = -1
+$existingCluster = -1
+for ($i = 0; $i -lt $rootEntries; $i++) {
+    $offset = $rootDirOffset + ($i * 32)
+    $firstByte = $img[$offset]
+    
+    # Skip free/deleted entries
+    if ($firstByte -eq 0x00 -or $firstByte -eq 0xE5) {
+        continue
+    }
+    
+    # Check if this is TEST.COM
+    $entryName = ""
+    for ($j = 0; $j -lt 11; $j++) {
+        $entryName += [char]$img[$offset + $j]
+    }
+    
+    if ($entryName -eq "TEST    COM") {
+        $existingEntry = $offset
+        $existingCluster = [BitConverter]::ToUInt16($img, $offset + 0x1A)
+        Write-Host "Found existing TEST.COM at cluster $existingCluster, removing..." -ForegroundColor Yellow
+        
+        # Mark entry as deleted
+        $img[$offset] = 0xE5
+        
+        # Free the cluster chain in FAT
+        $cluster = $existingCluster
+        while ($cluster -ge 2 -and $cluster -lt $maxCluster) {
+            $fatOffset = $fat1Offset + [int]($cluster * 1.5)
+            
+            # Read next cluster in chain
+            $nextCluster = 0
+            if ($cluster % 2 -eq 0) {
+                $nextCluster = [BitConverter]::ToUInt16($img, $fatOffset) -band 0xFFF
+            } else {
+                $nextCluster = ([BitConverter]::ToUInt16($img, $fatOffset) -shr 4) -band 0xFFF
+            }
+            
+            # Mark cluster as free
+            if ($cluster % 2 -eq 0) {
+                $existing = [BitConverter]::ToUInt16($img, $fatOffset)
+                $newValue = $existing -band 0xF000
+                [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
+            } else {
+                $existing = [BitConverter]::ToUInt16($img, $fatOffset)
+                $newValue = $existing -band 0x000F
+                [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
+            }
+            
+            # Move to next cluster or exit if EOF (0xFF8-0xFFF)
+            if ($nextCluster -ge 0xFF8 -or $nextCluster -ge $maxCluster) {
+                break
+            }
+            $cluster = $nextCluster
+        }
+        
+        break
+    }
+}
 
 # Find first free entry in root directory
 $entryOffset = -1
@@ -129,7 +203,7 @@ if ($entryOffset -eq -1) {
 
 # Find free cluster in FAT
 $freeCluster = -1
-for ($cluster = 2; $cluster -lt 2880; $cluster++) {
+for ($cluster = 2; $cluster -lt $maxCluster; $cluster++) {
     $fatOffset = $fat1Offset + [int]($cluster * 1.5)
     $fatValue = 0
     
@@ -171,7 +245,7 @@ $date = ((($now.Year - 1980) -shl 9) -bor ($now.Month -shl 5) -bor $now.Day)
 [BitConverter]::GetBytes([uint32]$com.Length).CopyTo($img, $entryOffset + 0x1C)
 
 # Write file data
-$clusterOffset = $dataOffset + (($freeCluster - 2) * $bytesPerSector)
+$clusterOffset = $dataOffset + (($freeCluster - 2) * $sectorsPerCluster * $bytesPerSector)
 [Array]::Copy($com, 0, $img, $clusterOffset, $com.Length)
 
 # Mark cluster as EOF in FAT (0xFFF)
@@ -182,7 +256,7 @@ if ($freeCluster % 2 -eq 0) {
     [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
 } else {
     $existing = [BitConverter]::ToUInt16($img, $fatOffset)
-    $newValue = ($existing -band 0x000F) -bor 0xFFF0
+    $newValue = ($existing -band 0x000F) -bor (0x0FFF -shl 4)
     [BitConverter]::GetBytes([uint16]$newValue).CopyTo($img, $fatOffset)
 }
 

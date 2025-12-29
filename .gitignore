@@ -19,7 +19,8 @@ roms/
 config.json
 *.hemu
 *.bin
-^.com
+*.com
+*.COM
 temp.img
 
 # Debugging files
