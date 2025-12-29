@@ -16,16 +16,16 @@ pub enum ActiveTab {
 pub struct EguiGui {
     /// Currently active tab
     pub active_tab: ActiveTab,
-    
+
     /// Whether to show the GUI (can be toggled off for fullscreen)
     pub show_gui: bool,
-    
+
     /// Status message to display in status bar
     pub status_message: String,
-    
+
     /// FPS counter for status bar
     pub fps: f64,
-    
+
     /// Log filter settings
     pub log_filter_cpu: bool,
     pub log_filter_bus: bool,
@@ -33,10 +33,10 @@ pub struct EguiGui {
     pub log_filter_apu: bool,
     pub log_filter_interrupts: bool,
     pub log_filter_stubs: bool,
-    
+
     /// Log level filter
     pub log_level: String,
-    
+
     /// Whether a file dialog is open (prevents input to emulator)
     pub dialog_open: bool,
 }
@@ -83,27 +83,27 @@ impl EguiGui {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Update GUI status message
     pub fn set_status(&mut self, message: String) {
         self.status_message = message;
     }
-    
+
     /// Update FPS counter
     pub fn set_fps(&mut self, fps: f64) {
         self.fps = fps;
     }
-    
+
     /// Render the GUI and return any action to perform
     /// This is a simplified version that just renders a basic menu
     /// The actual integration with EmulatorSystem will be done in main.rs
     pub fn render_basic(&mut self, ctx: &egui::Context) -> GuiAction {
         let mut action = GuiAction::None;
-        
+
         if !self.show_gui {
             return action;
         }
-        
+
         // Menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -127,7 +127,7 @@ impl EguiGui {
                         ui.close_menu();
                     }
                 });
-                
+
                 // Machine menu
                 ui.menu_button("Machine", |ui| {
                     if ui.button("Settings").clicked() {
@@ -144,7 +144,7 @@ impl EguiGui {
                         ui.close_menu();
                     }
                 });
-                
+
                 // Display menu
                 ui.menu_button("Display", |ui| {
                     ui.menu_button("Filters", |ui| {
@@ -179,12 +179,12 @@ impl EguiGui {
                         ui.close_menu();
                     }
                 });
-                
+
                 // Devices menu - simplified for now
                 ui.menu_button("Devices", |ui| {
                     ui.label("(Mount points will be shown here)");
                 });
-                
+
                 // Help/About
                 ui.menu_button("Help", |ui| {
                     if ui.button("About").clicked() {
@@ -193,7 +193,7 @@ impl EguiGui {
                 });
             });
         });
-        
+
         // Tab bar
         egui::TopBottomPanel::top("tab_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -202,7 +202,7 @@ impl EguiGui {
                 ui.selectable_value(&mut self.active_tab, ActiveTab::LogOutput, "Log Output");
             });
         });
-        
+
         // Status bar at bottom
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -213,7 +213,7 @@ impl EguiGui {
                 ui.label(&self.status_message);
             });
         });
-        
+
         // Tab content panels
         match self.active_tab {
             ActiveTab::Monitor => {
@@ -231,15 +231,15 @@ impl EguiGui {
                 });
             }
         }
-        
+
         action
     }
-    
+
     /// Render the log output tab content
     fn render_log_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Log Output");
         ui.separator();
-        
+
         ui.horizontal(|ui| {
             ui.label("Filter by category:");
             ui.checkbox(&mut self.log_filter_cpu, "CPU");
@@ -249,7 +249,7 @@ impl EguiGui {
             ui.checkbox(&mut self.log_filter_interrupts, "Interrupts");
             ui.checkbox(&mut self.log_filter_stubs, "Stubs");
         });
-        
+
         ui.horizontal(|ui| {
             ui.label("Log level:");
             egui::ComboBox::from_id_source("log_level")
@@ -263,9 +263,9 @@ impl EguiGui {
                     ui.selectable_value(&mut self.log_level, "trace".to_string(), "Trace");
                 });
         });
-        
+
         ui.separator();
-        
+
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {

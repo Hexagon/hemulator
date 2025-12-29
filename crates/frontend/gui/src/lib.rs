@@ -5,5 +5,6 @@
 
 pub mod display_filter;
 pub mod egui_gui;
+pub mod egui_sdl2;
 pub mod video_processor;
 pub mod window_backend;
