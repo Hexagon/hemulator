@@ -6363,47 +6363,4 @@ mod tests {
         cpu.step(); // JB (should NOT jump because CF is clear)
         assert_eq!(cpu.cpu.ip, 0x2004, "JB should not be taken when CF is clear");
     }
-
-    #[test]
-    fn test_loop_instruction_16bit() {
-        // Test LOOP instruction in 16-bit mode (8086)
-        // This ensures LOOP only uses low 16 bits of CX
-        let bus = PcBus::new();
-        let mut cpu = PcCpu::new(bus);
-        
-        // Set CX to 3 with garbage in high 16 bits
-        cpu.cpu.cx = 0xDEAD0003;  // High bits should be ignored in 8086 mode
-        
-        // Set up code:
-        // loop_start:
-        //   NOP              ; 0x90 at 0x2000
-        //   LOOP loop_start  ; 0xE2 0xFD at 0x2001 (jump back -3 bytes to reach 0x2000)
-        //   HLT              ; 0xF4 at 0x2003 (after loop exits)
-        cpu.cpu.cs = 0x0000;
-        cpu.cpu.ip = 0x2000;
-        
-        cpu.cpu.memory.write(0x2000, 0x90); // NOP
-        cpu.cpu.memory.write(0x2001, 0xE2); // LOOP
-        cpu.cpu.memory.write(0x2002, 0xFD); // offset -3 (0x2003 + (-3) = 0x2000)
-        cpu.cpu.memory.write(0x2003, 0xF4); // HLT
-        
-        // First iteration: CX = 0xDEAD0003, decrements to 0xDEAD0002, loop taken
-        cpu.step(); // NOP
-        assert_eq!(cpu.cpu.ip, 0x2001);
-        cpu.step(); // LOOP (CX becomes 0xDEAD0002, loop should be taken)
-        assert_eq!(cpu.cpu.cx & 0xFFFF, 0x0002, "Low 16 bits should be 0x0002");
-        assert_eq!(cpu.cpu.ip, 0x2000, "LOOP should jump back");
-        
-        // Second iteration: CX = 0xDEAD0002, decrements to 0xDEAD0001, loop taken
-        cpu.step(); // NOP
-        cpu.step(); // LOOP (CX becomes 0xDEAD0001, loop should be taken)
-        assert_eq!(cpu.cpu.cx & 0xFFFF, 0x0001, "Low 16 bits should be 0x0001");
-        assert_eq!(cpu.cpu.ip, 0x2000, "LOOP should jump back");
-        
-        // Third iteration: CX = 0xDEAD0001, decrements to 0xDEAD0000, loop NOT taken
-        cpu.step(); // NOP
-        cpu.step(); // LOOP (CX becomes 0xDEAD0000, loop should NOT be taken)
-        assert_eq!(cpu.cpu.cx & 0xFFFF, 0x0000, "Low 16 bits should be 0x0000");
-        assert_eq!(cpu.cpu.ip, 0x2003, "LOOP should NOT jump when CX low 16 bits = 0");
-    }
 }

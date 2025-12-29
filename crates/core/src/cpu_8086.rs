@@ -6933,100 +6933,49 @@ impl<M: Memory8086> Cpu8086<M> {
             // LOOPNE/LOOPNZ (0xE0)
             0xE0 => {
                 let offset = self.fetch_u8() as i8;
-                // Decrement CX (16-bit in 8086 mode, 32-bit in 386+ mode)
-                if self.model.supports_80386_instructions() {
-                    self.cx = self.cx.wrapping_sub(1);
-                    if self.cx != 0 && !self.get_flag(FLAG_ZF) {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 19;
-                        19
-                    } else {
-                        self.cycles += 5;
-                        5
-                    }
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && !self.get_flag(FLAG_ZF) {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                    self.cycles += 19;
+                    19
                 } else {
-                    // 8086/80286: Only use low 16 bits of CX
-                    let cx16 = (self.cx as u16).wrapping_sub(1);
-                    self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
-                    if cx16 != 0 && !self.get_flag(FLAG_ZF) {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 19;
-                        19
-                    } else {
-                        self.cycles += 5;
-                        5
-                    }
+                    self.cycles += 5;
+                    5
                 }
             }
 
             // LOOPE/LOOPZ (0xE1)
             0xE1 => {
                 let offset = self.fetch_u8() as i8;
-                // Decrement CX (16-bit in 8086 mode, 32-bit in 386+ mode)
-                if self.model.supports_80386_instructions() {
-                    self.cx = self.cx.wrapping_sub(1);
-                    if self.cx != 0 && self.get_flag(FLAG_ZF) {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 18;
-                        18
-                    } else {
-                        self.cycles += 6;
-                        6
-                    }
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && self.get_flag(FLAG_ZF) {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                    self.cycles += 18;
+                    18
                 } else {
-                    // 8086/80286: Only use low 16 bits of CX
-                    let cx16 = (self.cx as u16).wrapping_sub(1);
-                    self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
-                    if cx16 != 0 && self.get_flag(FLAG_ZF) {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 18;
-                        18
-                    } else {
-                        self.cycles += 6;
-                        6
-                    }
+                    self.cycles += 6;
+                    6
                 }
             }
 
             // LOOP (0xE2)
             0xE2 => {
                 let offset = self.fetch_u8() as i8;
-                // Decrement CX (16-bit in 8086 mode, 32-bit in 386+ mode)
-                if self.model.supports_80386_instructions() {
-                    self.cx = self.cx.wrapping_sub(1);
-                    if self.cx != 0 {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 17;
-                        17
-                    } else {
-                        self.cycles += 5;
-                        5
-                    }
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                    self.cycles += 17;
+                    17
                 } else {
-                    // 8086/80286: Only use low 16 bits of CX
-                    let cx16 = (self.cx as u16).wrapping_sub(1);
-                    self.cx = (self.cx & 0xFFFF_0000) | (cx16 as u32);
-                    if cx16 != 0 {
-                        self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                        self.cycles += 17;
-                        17
-                    } else {
-                        self.cycles += 5;
-                        5
-                    }
+                    self.cycles += 5;
+                    5
                 }
             }
 
             // JCXZ - Jump if CX is Zero (0xE3)
             0xE3 => {
                 let offset = self.fetch_u8() as i8;
-                // Check CX (16-bit in 8086 mode, 32-bit in 386+ mode)
-                let is_zero = if self.model.supports_80386_instructions() {
-                    self.cx == 0
-                } else {
-                    (self.cx as u16) == 0
-                };
-                if is_zero {
+                if self.cx == 0 {
                     self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
