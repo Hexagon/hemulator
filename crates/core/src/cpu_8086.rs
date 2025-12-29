@@ -476,7 +476,7 @@ impl<M: Memory8086> Cpu8086<M> {
     /// Push a word onto the stack
     #[inline]
     fn push(&mut self, val: u16) {
-        self.sp = (self.sp.wrapping_sub(2)) & 0xFFFF; // Keep in 16-bit range for now
+        self.sp = (self.sp.wrapping_sub(2u32)) & 0xFFFF; // Keep in 16-bit range for now
         self.write_u16(self.ss, self.sp as u16, val);
     }
 
@@ -484,7 +484,7 @@ impl<M: Memory8086> Cpu8086<M> {
     #[inline]
     fn pop(&mut self) -> u16 {
         let val = self.read_u16(self.ss, self.sp as u16);
-        self.sp = (self.sp.wrapping_add(2)) & 0xFFFF; // Keep in 16-bit range for now
+        self.sp = (self.sp.wrapping_add(2u32)) & 0xFFFF; // Keep in 16-bit range for now
         val
     }
 
@@ -5300,7 +5300,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x70 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5313,7 +5313,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x71 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5326,7 +5326,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x72 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5339,7 +5339,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x73 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_CF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5354,7 +5354,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x75 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5367,7 +5367,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x76 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_CF) || self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5380,7 +5380,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x77 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_CF) && !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5393,7 +5393,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x78 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5406,7 +5406,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x79 => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_SF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5419,7 +5419,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7A => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_PF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5432,7 +5432,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7B => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_PF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5445,7 +5445,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7C => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5458,7 +5458,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7D => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5471,7 +5471,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7E => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) || (self.get_flag(FLAG_SF) != self.get_flag(FLAG_OF)) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -5484,7 +5484,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x7F => {
                 let offset = self.fetch_u8() as i8;
                 if !self.get_flag(FLAG_ZF) && (self.get_flag(FLAG_SF) == self.get_flag(FLAG_OF)) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -6081,7 +6081,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // POPF - Pop Flags (0x9D)
             0x9D => {
-                self.flags = self.pop();
+                self.flags = self.pop() as u32;
                 self.cycles += 8;
                 8
             }
@@ -6740,7 +6740,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     return 10;
                 }
                 self.sp = self.bp;
-                self.bp = self.pop();
+                self.bp = self.pop() as u32;
                 self.cycles += 8;
                 8
             }
@@ -6912,7 +6912,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
                 if self.cx != 0 && !self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 19;
                     19
                 } else {
@@ -6926,7 +6926,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
                 if self.cx != 0 && self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
                 } else {
@@ -6940,7 +6940,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let offset = self.fetch_u8() as i8;
                 self.cx = self.cx.wrapping_sub(1);
                 if self.cx != 0 {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 17;
                     17
                 } else {
@@ -6953,7 +6953,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE3 => {
                 let offset = self.fetch_u8() as i8;
                 if self.cx == 0 {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 18;
                     18
                 } else {
@@ -7000,7 +7000,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // JMP near relative (0xE9)
             0xE9 => {
                 let offset = self.fetch_u16() as i16;
-                self.ip = self.ip.wrapping_add((offset as u16) as u32);
+                self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                 self.cycles += 15;
                 15
             }
@@ -7009,7 +7009,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xEA => {
                 let offset = self.fetch_u16();
                 let segment = self.fetch_u16();
-                self.ip = offset;
+                self.ip = offset as u32;
                 self.cs = segment;
                 self.cycles += 15;
                 15
@@ -7315,14 +7315,14 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                self.di = self.pop();
-                self.si = self.pop();
-                self.bp = self.pop();
+                self.di = self.pop() as u32;
+                self.si = self.pop() as u32;
+                self.bp = self.pop() as u32;
                 let _temp_sp = self.pop(); // Discard SP value
-                self.bx = self.pop();
-                self.dx = self.pop();
-                self.cx = self.pop();
-                self.ax = self.pop();
+                self.bx = self.pop() as u32;
+                self.dx = self.pop() as u32;
+                self.cx = self.pop() as u32;
+                self.ax = self.pop() as u32;
                 self.cycles += 51;
                 51
             }
@@ -7606,7 +7606,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xEB => {
                 let offset = self.fetch_u8() as i8;
                 // Add signed offset to IP (wrapping_add_signed would be clearer but requires i16 cast)
-                self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                 self.cycles += 15;
                 15
             }
@@ -7615,7 +7615,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x74 => {
                 let offset = self.fetch_u8() as i8;
                 if self.get_flag(FLAG_ZF) {
-                    self.ip = self.ip.wrapping_add((offset as i16 as u16) as u32);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                     self.cycles += 16;
                     16
                 } else {
@@ -7830,14 +7830,14 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Push return address (current IP after fetching the offset)
                 self.push(self.ip as u16);
                 // Jump to target (IP + offset)
-                self.ip = self.ip.wrapping_add((offset as u16) as u32);
+                self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                 self.cycles += 19;
                 19
             }
 
             // RET near (0xC3)
             0xC3 => {
-                self.ip = self.pop();
+                self.ip = self.pop() as u32;
                 self.cycles += 8;
                 8
             }
@@ -7845,7 +7845,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // RET near with immediate (0xC2) - pops return address and adds imm16 to SP
             0xC2 => {
                 let pop_bytes = self.fetch_u16();
-                self.ip = self.pop();
+                self.ip = self.pop() as u32;
                 self.sp = self.sp.wrapping_add(pop_bytes as u32);
                 self.cycles += 12;
                 12
@@ -7867,7 +7867,7 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // RET far (0xCB)
             0xCB => {
-                self.ip = self.pop();
+                self.ip = self.pop() as u32;
                 self.cs = self.pop();
                 self.cycles += 18;
                 18
@@ -7882,16 +7882,16 @@ impl<M: Memory8086> Cpu8086<M> {
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!(
                         "[RETF] SP before={:04X}, pop_bytes={:04X}, ret_ip={:04X}, ret_cs={:04X}",
-                        self.sp.wrapping_add(4),
+                        self.sp.wrapping_add(4u32),
                         pop_bytes,
                         ret_ip,
                         ret_cs
                     );
                 }
 
-                self.ip = ret_ip;
+                self.ip = ret_ip as u32;
                 self.cs = ret_cs;
-                self.sp = self.sp.wrapping_add(pop_bytes);
+                self.sp = self.sp.wrapping_add(pop_bytes as u32);
                 self.cycles += 17;
                 17
             }
@@ -7949,9 +7949,9 @@ impl<M: Memory8086> Cpu8086<M> {
             // IRET - Return from Interrupt
             0xCF => {
                 // Pop IP, CS, FLAGS from stack (reverse order of INT)
-                self.ip = self.pop();
+                self.ip = self.pop() as u32;
                 self.cs = self.pop();
-                self.flags = self.pop();
+                self.flags = self.pop() as u32;
 
                 self.cycles += 32; // Approximate timing for IRET instruction
                 32
