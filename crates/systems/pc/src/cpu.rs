@@ -97,7 +97,7 @@ impl PcCpu {
         // Opcode 0xCD (INT) followed by interrupt number
         let cs = self.cpu.cs;
         let ip = self.cpu.ip;
-        let physical_addr = ((cs as u32) << 4) + (ip as u32);
+        let physical_addr = ((cs as u32) << 4) + ip;
 
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
@@ -393,10 +393,10 @@ impl PcCpu {
         // CH,CL = row,col of upper left, DH,DL = row,col of lower right
         let lines = (self.cpu.ax & 0xFF) as u8;
         let attr = ((self.cpu.bx >> 8) & 0xFF) as u8;
-        let top = ((self.cpu.cx >> 8) & 0xFF) as u32;
-        let left = (self.cpu.cx & 0xFF) as u32;
-        let bottom = ((self.cpu.dx >> 8) & 0xFF) as u32;
-        let right = (self.cpu.dx & 0xFF) as u32;
+        let top = (self.cpu.cx >> 8) & 0xFF;
+        let left = self.cpu.cx & 0xFF;
+        let bottom = (self.cpu.dx >> 8) & 0xFF;
+        let right = self.cpu.dx & 0xFF;
 
         if lines == 0 {
             // Clear window
@@ -441,10 +441,10 @@ impl PcCpu {
         // CH,CL = row,col of upper left, DH,DL = row,col of lower right
         let lines = (self.cpu.ax & 0xFF) as u8;
         let attr = ((self.cpu.bx >> 8) & 0xFF) as u8;
-        let top = ((self.cpu.cx >> 8) & 0xFF) as u32;
-        let left = (self.cpu.cx & 0xFF) as u32;
-        let bottom = ((self.cpu.dx >> 8) & 0xFF) as u32;
-        let right = (self.cpu.dx & 0xFF) as u32;
+        let top = (self.cpu.cx >> 8) & 0xFF;
+        let left = self.cpu.cx & 0xFF;
+        let bottom = (self.cpu.dx >> 8) & 0xFF;
+        let right = self.cpu.dx & 0xFF;
 
         if lines == 0 {
             // Clear window
@@ -652,17 +652,17 @@ impl PcCpu {
         let page = ((self.cpu.bx >> 8) & 0xFF) as u8;
         let attr = (self.cpu.bx & 0xFF) as u8;
         let length = self.cpu.cx;
-        let row = ((self.cpu.dx >> 8) & 0xFF) as u32;
-        let mut col = (self.cpu.dx & 0xFF) as u32;
+        let row = (self.cpu.dx >> 8) & 0xFF;
+        let mut col = self.cpu.dx & 0xFF;
 
         // String address: ES:BP
         let string_seg = self.cpu.es as u32;
-        let string_off = self.cpu.bp as u32;
+        let string_off = self.cpu.bp;
         let string_addr = (string_seg << 4) + string_off;
 
         // Write string to video memory
         for i in 0..length {
-            let ch = self.cpu.memory.read(string_addr + i as u32);
+            let ch = self.cpu.memory.read(string_addr + i);
 
             let offset = (row * 80 + col) * 2;
             let video_addr = 0xB8000 + offset;
@@ -772,8 +772,8 @@ impl PcCpu {
         // AL = pixel color, CX = column, DX = row
         // BH = page number (graphics mode)
         let color = (self.cpu.ax & 0xFF) as u8;
-        let x = self.cpu.cx as u32;
-        let y = self.cpu.dx as u32;
+        let x = self.cpu.cx;
+        let y = self.cpu.dx;
         let _page = ((self.cpu.bx >> 8) & 0xFF) as u8;
 
         // Mode 13h (320x200 256-color): Linear addressing
@@ -793,8 +793,8 @@ impl PcCpu {
     fn int10h_read_pixel(&mut self) -> u32 {
         // CX = column, DX = row, BH = page number
         // Returns: AL = pixel color
-        let x = self.cpu.cx as u32;
-        let y = self.cpu.dx as u32;
+        let x = self.cpu.cx;
+        let y = self.cpu.dx;
         let _page = ((self.cpu.bx >> 8) & 0xFF) as u8;
 
         // Mode 13h (320x200 256-color): Linear addressing
@@ -1145,7 +1145,7 @@ impl PcCpu {
                 self.set_zero_flag(false);
             } else {
                 // No key available - return 0 and set ZF=1
-                self.cpu.ax = (saved_ax & 0xFF00) as u32;
+                self.cpu.ax = saved_ax & 0xFF00;
                 self.set_zero_flag(true);
             }
         } else {
@@ -1210,7 +1210,7 @@ impl PcCpu {
     fn int21h_write_string(&mut self) -> u32 {
         // DS:DX = pointer to string (terminated by '$')
         let ds = self.cpu.ds as u32;
-        let dx = self.cpu.dx as u32;
+        let dx = self.cpu.dx;
         let string_addr = (ds << 4) + dx;
 
         // Read and display characters until '$'
@@ -1244,7 +1244,7 @@ impl PcCpu {
         // Buffer format: [max_length, actual_length, ...characters...]
         // For now, just return empty input
         let ds = self.cpu.ds as u32;
-        let dx = self.cpu.dx as u32;
+        let dx = self.cpu.dx;
         let buffer_addr = (ds << 4) + dx;
 
         // Set actual length to 0
@@ -1273,7 +1273,7 @@ impl PcCpu {
         if key_available {
             self.cpu.ax = (saved_ax & 0xFF00) | 0xFF; // AL = 0xFF (character available)
         } else {
-            self.cpu.ax = (saved_ax & 0xFF00) as u32; // AL = 0x00 (no character)
+            self.cpu.ax = saved_ax & 0xFF00; // AL = 0x00 (no character)
         }
 
         51
@@ -1519,7 +1519,7 @@ impl PcCpu {
         } else {
             // Standard handles: report all bytes written (but don't actually write)
             // Real implementation would write to console/device
-            self.cpu.ax = cx as u32; // Report all bytes written
+            self.cpu.ax = cx; // Report all bytes written
             self.set_carry_flag(false);
         }
         51
@@ -1724,7 +1724,7 @@ impl PcCpu {
         // Push FLAGS
         let sp = self.cpu.sp.wrapping_sub(2);
         let ss = self.cpu.ss;
-        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        let flags_addr = ((ss as u32) << 4) + sp;
         self.cpu
             .memory
             .write(flags_addr, (self.cpu.flags & 0xFF) as u8);
@@ -1739,7 +1739,7 @@ impl PcCpu {
 
         // Push CS
         let sp = self.cpu.sp.wrapping_sub(2);
-        let cs_addr = ((ss as u32) << 4) + (sp as u32);
+        let cs_addr = ((ss as u32) << 4) + sp;
         self.cpu.memory.write(cs_addr, (self.cpu.cs & 0xFF) as u8);
         self.cpu
             .memory
@@ -1748,7 +1748,7 @@ impl PcCpu {
 
         // Push return IP
         let sp = self.cpu.sp.wrapping_sub(2);
-        let ip_addr = ((ss as u32) << 4) + (sp as u32);
+        let ip_addr = ((ss as u32) << 4) + sp;
         self.cpu.memory.write(ip_addr, (return_ip & 0xFF) as u8);
         self.cpu
             .memory
@@ -1764,21 +1764,21 @@ impl PcCpu {
         // Pop IP
         let sp = self.cpu.sp;
         let ss = self.cpu.ss;
-        let ip_addr = ((ss as u32) << 4) + (sp as u32);
+        let ip_addr = ((ss as u32) << 4) + sp;
         let new_ip = self.cpu.memory.read(ip_addr) as u16
             | ((self.cpu.memory.read(ip_addr + 1) as u16) << 8);
         self.cpu.sp = sp.wrapping_add(2);
 
         // Pop CS
         let sp = self.cpu.sp;
-        let cs_addr = ((ss as u32) << 4) + (sp as u32);
+        let cs_addr = ((ss as u32) << 4) + sp;
         let new_cs = self.cpu.memory.read(cs_addr) as u16
             | ((self.cpu.memory.read(cs_addr + 1) as u16) << 8);
         self.cpu.sp = sp.wrapping_add(2);
 
         // Pop FLAGS
         let sp = self.cpu.sp;
-        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        let flags_addr = ((ss as u32) << 4) + sp;
         let new_flags = self.cpu.memory.read(flags_addr) as u16
             | ((self.cpu.memory.read(flags_addr + 1) as u16) << 8);
         self.cpu.sp = sp.wrapping_add(2);
@@ -1796,7 +1796,7 @@ impl PcCpu {
         // FLAGS are at SP+4 (after IP and CS which are 2 bytes each)
         let ss = self.cpu.ss;
         let sp = self.cpu.sp.wrapping_add(4);
-        let flags_addr = ((ss as u32) << 4) + (sp as u32);
+        let flags_addr = ((ss as u32) << 4) + sp;
 
         // Write current FLAGS to stack
         self.cpu
@@ -1928,7 +1928,7 @@ impl PcCpu {
 
         // Check for 64KB boundary crossing and handle it by splitting the read
         let bytes_needed = (count as u32) * 512;
-        if (buffer_offset as u32) + bytes_needed > 0x10000 {
+        if buffer_offset + bytes_needed > 0x10000 {
             if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
                 eprintln!(
                     "INT 13h AH=02h: Handling 64KB boundary crossing at ES:BX={:04X}:{:04X}, count={}",
@@ -1958,7 +1958,7 @@ impl PcCpu {
             // Write to memory with wrapping at 64KB boundary
             for (i, &byte) in buffer.iter().enumerate() {
                 let offset = (buffer_offset as u16).wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_seg, offset as u16, byte);
+                self.cpu.write_byte(buffer_seg, offset, byte);
             }
 
             // Success - return sectors read in AL, AH=0
@@ -2011,7 +2011,7 @@ impl PcCpu {
                     eprintln!("  Written {} / {} bytes...", i, buffer.len());
                 }
                 let offset = (buffer_offset as u16).wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_seg, offset as u16, byte);
+                self.cpu.write_byte(buffer_seg, offset, byte);
             }
             if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
                 eprintln!(
@@ -2029,7 +2029,7 @@ impl PcCpu {
                         eprint!("\n  {:04X}:", i);
                     }
                     let offset = (buffer_offset as u16).wrapping_add(i as u16);
-                    let byte = self.cpu.read_byte(buffer_seg, offset as u16);
+                    let byte = self.cpu.read_byte(buffer_seg, offset);
                     eprint!(" {:02X}", byte);
                 }
                 eprintln!();
@@ -2098,7 +2098,7 @@ impl PcCpu {
         let mut buffer = vec![0u8; buffer_size];
         for (i, byte) in buffer.iter_mut().enumerate() {
             let offset = (buffer_offset as u16).wrapping_add(i as u16);
-            *byte = self.cpu.read_byte(buffer_seg, offset as u16);
+            *byte = self.cpu.read_byte(buffer_seg, offset);
         }
 
         // Create disk request
@@ -2325,8 +2325,8 @@ impl PcCpu {
 
                 // CX:DX = number of sectors
                 let total_sectors = cylinders as u32 * sectors_per_track as u32 * heads as u32;
-                self.cpu.cx = ((total_sectors >> 16) & 0xFFFF) as u32;
-                self.cpu.dx = (total_sectors & 0xFFFF) as u32;
+                self.cpu.cx = (total_sectors >> 16) & 0xFFFF;
+                self.cpu.dx = total_sectors & 0xFFFF;
 
                 self.set_carry_flag(false);
             } else {
@@ -2403,7 +2403,7 @@ impl PcCpu {
         let si = self.cpu.si;
 
         // Read DAP structure from memory
-        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        let dap_addr = ((ds as u32) << 4) + si;
 
         // DAP structure:
         // Offset 0: Size of DAP (10h or 18h)
@@ -2456,8 +2456,8 @@ impl PcCpu {
         // Copy to memory at buffer_segment:buffer_offset
         if status == 0x00 {
             for (i, &byte) in buffer.iter().enumerate() {
-                let offset = (buffer_offset as u16).wrapping_add(i as u16);
-                self.cpu.write_byte(buffer_segment, offset as u16, byte);
+                let offset = buffer_offset.wrapping_add(i as u16);
+                self.cpu.write_byte(buffer_segment, offset, byte);
             }
         }
 
@@ -2482,7 +2482,7 @@ impl PcCpu {
         let _verify = (self.cpu.ax & 0x01) != 0;
 
         // Read DAP structure
-        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        let dap_addr = ((ds as u32) << 4) + si;
 
         let dap_size = self.cpu.memory.read(dap_addr);
         if dap_size < 0x10 {
@@ -2517,8 +2517,8 @@ impl PcCpu {
         let buffer_size = (num_sectors as usize) * 512;
         let mut buffer = vec![0u8; buffer_size];
         for (i, byte) in buffer.iter_mut().enumerate() {
-            let offset = (buffer_offset as u16).wrapping_add(i as u16);
-            *byte = self.cpu.read_byte(buffer_segment, offset as u16);
+            let offset = buffer_offset.wrapping_add(i as u16);
+            *byte = self.cpu.read_byte(buffer_segment, offset);
         }
 
         // Perform LBA write
@@ -2542,7 +2542,7 @@ impl PcCpu {
         let ds = self.cpu.ds;
         let si = self.cpu.si;
 
-        let dap_addr = ((ds as u32) << 4) + (si as u32);
+        let dap_addr = ((ds as u32) << 4) + si;
 
         let dap_size = self.cpu.memory.read(dap_addr);
         if dap_size < 0x10 {
@@ -2580,7 +2580,7 @@ impl PcCpu {
         // Get drive parameters
         if let Some((cylinders, sectors_per_track, heads)) = DiskController::get_drive_params(drive)
         {
-            let buffer_addr = ((ds as u32) << 4) + (si as u32);
+            let buffer_addr = ((ds as u32) << 4) + si;
 
             // Read buffer size from first word
             let buffer_size = u16::from_le_bytes([
@@ -2730,8 +2730,8 @@ impl PcCpu {
         let ticks = (seconds_since_midnight as f64 * 18.2065) as u32;
 
         // CX:DX contains tick count
-        self.cpu.cx = ((ticks >> 16) & 0xFFFF) as u32;
-        self.cpu.dx = (ticks & 0xFFFF) as u32;
+        self.cpu.cx = (ticks >> 16) & 0xFFFF;
+        self.cpu.dx = ticks & 0xFFFF;
 
         // AL = midnight flag (0 = no midnight crossover since last read)
         self.cpu.ax &= 0xFF00;
@@ -2849,7 +2849,7 @@ impl PcCpu {
         let day_bcd = ((day / 10) << 4) | (day % 10);
 
         self.cpu.cx = ((century_bcd as u32) << 8) | (year_bcd as u32);
-        self.cpu.dx = ((month_bcd as u32) << 8) | (day_bcd as u32);
+        self.cpu.dx = ((month_bcd as u32) << 8) | day_bcd;
 
         // Clear carry flag (success)
         self.set_carry_flag(false);
@@ -3205,7 +3205,7 @@ impl PcCpu {
 
         let cx = self.cpu.cx;
         let es = self.cpu.es as u32;
-        let si = self.cpu.si as u32;
+        let si = self.cpu.si;
         let gdt_addr = (es << 4) + si;
 
         // Read source descriptor (offset 0x18)
@@ -3221,7 +3221,7 @@ impl PcCpu {
         let dst_addr = (dst_base_high << 16) | dst_base_low;
 
         // Copy CX words (CX * 2 bytes)
-        let byte_count = (cx as u32) * 2;
+        let byte_count = cx * 2;
 
         if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
             eprintln!(
@@ -3266,7 +3266,7 @@ impl PcCpu {
                 // Disable A20 gate
                 // In an emulator, A20 is always enabled (we have full 32-bit addressing)
                 // Return success
-                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.cpu.ax &= 0xFF00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
                     "INT 15h AH=24h AL=00h: Disable A20 gate (acknowledged)".to_string()
@@ -3276,7 +3276,7 @@ impl PcCpu {
                 // Enable A20 gate
                 // In an emulator, A20 is always enabled (we have full 32-bit addressing)
                 // Return success
-                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.cpu.ax &= 0xFF00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
                     "INT 15h AH=24h AL=01h: Enable A20 gate (acknowledged)".to_string()
@@ -3295,7 +3295,7 @@ impl PcCpu {
                 // Get A20 gate support
                 // Return: BX = 0x0001 (supported via keyboard controller or port 92h)
                 self.cpu.bx = 0x0001u32; // Supported
-                self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
+                self.cpu.ax &= 0xFF00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
                     "INT 15h AH=24h AL=03h: Get A20 support (returning supported)".to_string()
@@ -3348,7 +3348,7 @@ impl PcCpu {
 
         if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
             // Read and display the actual table contents
-            let table_addr = ((table_seg as u32) << 4) + (table_offset as u32);
+            let table_addr = ((table_seg as u32) << 4) + table_offset;
             let byte_count = self.cpu.memory.read(table_addr) as u16
                 | ((self.cpu.memory.read(table_addr + 1) as u16) << 8);
             eprintln!(
@@ -3396,7 +3396,7 @@ impl PcCpu {
     fn int15h_get_extended_memory_size(&mut self) -> u32 {
         // Return extended memory size in KB (above 1MB)
         let extended_kb = self.cpu.memory.xms.total_extended_memory_kb();
-        self.cpu.ax = extended_kb.min(0xFFFF) as u32;
+        self.cpu.ax = extended_kb.min(0xFFFF);
         self.set_carry_flag(false);
         51
     }
@@ -3415,10 +3415,10 @@ impl PcCpu {
             0
         };
 
-        self.cpu.ax = mem_1_16mb as u32;
-        self.cpu.bx = mem_above_16mb as u32;
-        self.cpu.cx = mem_1_16mb as u32;
-        self.cpu.dx = mem_above_16mb as u32;
+        self.cpu.ax = mem_1_16mb;
+        self.cpu.bx = mem_above_16mb;
+        self.cpu.cx = mem_1_16mb;
+        self.cpu.dx = mem_above_16mb;
         self.set_carry_flag(false);
         51
     }
@@ -3493,10 +3493,10 @@ impl PcCpu {
         let (base, length, entry_type) = entries[valid_entry_index as usize];
 
         // Write entry to ES:DI
-        let buffer_addr = ((self.cpu.es as u32) << 4) + (self.cpu.di as u32);
+        let buffer_addr = ((self.cpu.es as u32) << 4) + self.cpu.di;
 
         // Write base address (64-bit, little-endian)
-        self.cpu.memory.write(buffer_addr + 0, (base & 0xFF) as u8);
+        self.cpu.memory.write(buffer_addr, (base & 0xFF) as u8);
         self.cpu
             .memory
             .write(buffer_addr + 1, ((base >> 8) & 0xFF) as u8);
@@ -4004,8 +4004,8 @@ impl PcCpu {
 
         match self.cpu.memory.dpmi.get_segment_base(selector as u16) {
             Ok(base) => {
-                self.cpu.cx = ((base >> 16) & 0xFFFF) as u32; // High word
-                self.cpu.dx = (base & 0xFFFF) as u32; // Low word
+                self.cpu.cx = (base >> 16) & 0xFFFF; // High word
+                self.cpu.dx = base & 0xFFFF; // Low word
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
@@ -4020,7 +4020,7 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int31h
     fn int31h_set_segment_base(&mut self) -> u32 {
         let selector = self.cpu.bx;
-        let base = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
+        let base = (self.cpu.cx << 16) | self.cpu.dx;
 
         match self.cpu.memory.dpmi.set_segment_base(selector as u16, base) {
             Ok(()) => {
@@ -4041,8 +4041,8 @@ impl PcCpu {
 
         match self.cpu.memory.dpmi.get_segment_limit(selector as u16) {
             Ok(limit) => {
-                self.cpu.cx = ((limit >> 16) & 0xFFFF) as u32; // High word
-                self.cpu.dx = (limit & 0xFFFF) as u32; // Low word
+                self.cpu.cx = (limit >> 16) & 0xFFFF; // High word
+                self.cpu.dx = limit & 0xFFFF; // Low word
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
@@ -4057,7 +4057,7 @@ impl PcCpu {
     #[allow(dead_code)] // Called from handle_int31h
     fn int31h_set_segment_limit(&mut self) -> u32 {
         let selector = self.cpu.bx;
-        let limit = ((self.cpu.cx as u32) << 16) | (self.cpu.dx as u32);
+        let limit = (self.cpu.cx << 16) | self.cpu.dx;
 
         match self
             .cpu
@@ -4083,9 +4083,9 @@ impl PcCpu {
 
         // ES:DI points to buffer that receives memory info structure
         // For simplicity, we'll just set registers
-        self.cpu.bx = (largest & 0xFFFF) as u32;
-        self.cpu.cx = ((largest >> 16) & 0xFFFF) as u32;
-        self.cpu.dx = (max_unlocked & 0xFFFF) as u32;
+        self.cpu.bx = largest & 0xFFFF;
+        self.cpu.cx = (largest >> 16) & 0xFFFF;
+        self.cpu.dx = max_unlocked & 0xFFFF;
         self.set_carry_flag(false);
         51
     }
@@ -4093,14 +4093,14 @@ impl PcCpu {
     /// INT 31h, AX=0501h - Allocate Memory Block
     #[allow(dead_code)] // Called from handle_int31h
     fn int31h_allocate_memory(&mut self) -> u32 {
-        let size = ((self.cpu.bx as u32) << 16) | (self.cpu.cx as u32);
+        let size = (self.cpu.bx << 16) | self.cpu.cx;
 
         match self.cpu.memory.dpmi.allocate_memory(size) {
             Ok((linear_addr, handle)) => {
-                self.cpu.bx = ((linear_addr >> 16) & 0xFFFF) as u32; // Linear address high
-                self.cpu.cx = (linear_addr & 0xFFFF) as u32; // Linear address low
-                self.cpu.si = ((handle >> 16) & 0xFFFF) as u32; // Handle high
-                self.cpu.di = (handle & 0xFFFF) as u32; // Handle low
+                self.cpu.bx = (linear_addr >> 16) & 0xFFFF; // Linear address high
+                self.cpu.cx = linear_addr & 0xFFFF; // Linear address low
+                self.cpu.si = (handle >> 16) & 0xFFFF; // Handle high
+                self.cpu.di = handle & 0xFFFF; // Handle low
                 self.set_carry_flag(false);
             }
             Err(err_code) => {
@@ -4114,7 +4114,7 @@ impl PcCpu {
     /// INT 31h, AX=0502h - Free Memory Block
     #[allow(dead_code)] // Called from handle_int31h
     fn int31h_free_memory(&mut self) -> u32 {
-        let handle = ((self.cpu.si as u32) << 16) | (self.cpu.di as u32);
+        let handle = (self.cpu.si << 16) | self.cpu.di;
 
         match self.cpu.memory.dpmi.free_memory(handle) {
             Ok(()) => {
@@ -4554,7 +4554,7 @@ mod tests {
         // Setup: Write INT 13h instruction at current IP
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4591,7 +4591,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4636,7 +4636,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4688,7 +4688,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4731,7 +4731,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4781,7 +4781,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4825,7 +4825,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4868,7 +4868,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -4912,7 +4912,7 @@ mod tests {
         // Setup: Write INT 16h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x16); // 16h
@@ -4946,7 +4946,7 @@ mod tests {
         // Setup: Write INT 16h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x16); // 16h
@@ -4978,7 +4978,7 @@ mod tests {
         // Setup: Write INT 16h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x16); // 16h
@@ -5026,7 +5026,7 @@ mod tests {
             // Setup: Write INT 16h instruction
             let cs = cpu.cpu.cs;
             let ip = cpu.cpu.ip;
-            let addr = ((cs as u32) << 4) + (ip as u32);
+            let addr = ((cs as u32) << 4) + ip;
 
             cpu.cpu.memory.write(addr, 0xCD); // INT
             cpu.cpu.memory.write(addr + 1, 0x16); // 16h
@@ -5056,7 +5056,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5080,7 +5080,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5125,7 +5125,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5158,7 +5158,7 @@ mod tests {
         cpu.cpu.memory.write(pixel_addr, 42); // Write color 42
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5194,7 +5194,7 @@ mod tests {
         }
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5238,7 +5238,7 @@ mod tests {
         }
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5287,7 +5287,7 @@ mod tests {
         }
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5326,7 +5326,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 10h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x10); // 10h
 
@@ -5351,7 +5351,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5386,7 +5386,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5420,7 +5420,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5450,7 +5450,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5480,7 +5480,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5510,7 +5510,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5540,7 +5540,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5567,7 +5567,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 21h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x21); // 21h
 
@@ -5595,7 +5595,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 11h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x11); // 11h
 
@@ -5618,7 +5618,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 11h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x11); // 11h
 
@@ -5640,7 +5640,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 11h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x11); // 11h
 
@@ -5663,7 +5663,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 13h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
 
@@ -5695,7 +5695,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 13h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
 
@@ -5732,7 +5732,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 15h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x15); // 15h
 
@@ -5751,7 +5751,7 @@ mod tests {
         assert_eq!(cpu.cpu.bx, 0xE000u32);
 
         // Verify configuration table in memory
-        let table_addr = ((cpu.cpu.es as u32) << 4) + (cpu.cpu.bx as u32);
+        let table_addr = ((cpu.cpu.es as u32) << 4) + cpu.cpu.bx;
 
         // First word should be 8 (number of bytes following)
         let size = cpu.cpu.memory.read(table_addr) as u16
@@ -5774,7 +5774,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 15h instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x15); // 15h
 
@@ -5800,7 +5800,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Write INT 2Fh instruction
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x2F); // 2Fh
 
@@ -5841,7 +5841,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -5889,7 +5889,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -5932,7 +5932,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -5983,7 +5983,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
@@ -6039,7 +6039,7 @@ mod tests {
         cpu.cpu.ip = 0x1000;
 
         // Test 1: Read first sector of the "file" (CHS sector 10 = LBA 9)
-        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        let addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
 
@@ -6134,7 +6134,7 @@ mod tests {
         // Setup: Write INT 13h instruction
         let cs = cpu.cpu.cs;
         let ip = cpu.cpu.ip;
-        let addr = ((cs as u32) << 4) + (ip as u32);
+        let addr = ((cs as u32) << 4) + ip;
 
         cpu.cpu.memory.write(addr, 0xCD); // INT
         cpu.cpu.memory.write(addr + 1, 0x13); // 13h
