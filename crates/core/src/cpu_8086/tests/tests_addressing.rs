@@ -245,8 +245,8 @@ fn test_string_operations_with_address_wrap() {
 
     cpu.step();
 
-    // SI should wrap to 0x10000 (stored as 32-bit but used as 16-bit in real mode)
-    // In 16-bit mode, this represents offset 0x0000 in the segment
+    // SI internally increments to 0x10000 but only the lower 16 bits are used
+    // So effectively it wraps to 0x0000 in 16-bit addressing mode
     assert_eq!(cpu.si & 0xFFFF, 0x0000, "SI should wrap at 16-bit boundary");
     assert_eq!(cpu.di & 0xFFFF, 0x0101);
 
