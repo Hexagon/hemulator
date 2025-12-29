@@ -610,11 +610,194 @@ fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog
     dialog
 }
 
+/// Assemble an assembly file for the given system and return the assembled binary
+fn assemble_file(
+    asm_path: &str,
+    system: &str,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::process::Command;
+
+    // Create a temporary directory for the output
+    let temp_dir = std::env::temp_dir().join(format!("hemu_asm_{}", std::process::id()));
+    fs::create_dir_all(&temp_dir)?;
+
+    let asm_file = PathBuf::from(asm_path);
+    if !asm_file.exists() {
+        return Err(format!("Assembly file not found: {}", asm_path).into());
+    }
+
+    let output_file = temp_dir.join("output.bin");
+
+    // Determine which assembler to use based on the system
+    let result: Result<(), Box<dyn std::error::Error>> = match system.to_lowercase().as_str() {
+        "pc" => {
+            // Use NASM for PC/DOS
+            // Try to find NASM in PATH first, then check common locations
+            let nasm_cmd = if let Ok(cmd) = which::which("nasm") {
+                cmd
+            } else if cfg!(windows) {
+                // Try Windows-specific locations
+                let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
+                let nasm_path = PathBuf::from(user_profile)
+                    .join("AppData")
+                    .join("Local")
+                    .join("bin")
+                    .join("NASM")
+                    .join("nasm.exe");
+                if nasm_path.exists() {
+                    nasm_path
+                } else {
+                    return Err("NASM not found. Please install NASM or add it to PATH.".into());
+                }
+            } else {
+                return Err("NASM not found. Please install NASM or add it to PATH.".into());
+            };
+
+            println!("Using NASM: {}", nasm_cmd.display());
+            let status = Command::new(&nasm_cmd)
+                .arg("-f")
+                .arg("bin")
+                .arg(&asm_file)
+                .arg("-o")
+                .arg(&output_file)
+                .status()?;
+
+            if !status.success() {
+                return Err("NASM assembly failed".into());
+            }
+            Ok(())
+        }
+        "nes" => {
+            // Use ca65/ld65 for NES
+            let ca65_cmd = which::which("ca65")
+                .map_err(|_| "ca65 not found. Please install cc65 toolchain.")?;
+            let ld65_cmd = which::which("ld65")
+                .map_err(|_| "ld65 not found. Please install cc65 toolchain.")?;
+
+            let obj_file = temp_dir.join("output.o");
+            let cfg_file = temp_dir.join("nes.cfg");
+
+            // Create a simple NES linker config
+            fs::write(
+                &cfg_file,
+                r#"MEMORY {
+    HEADER: start = $0, size = $10, fill = yes;
+    ROM: start = $8000, size = $8000, fill = yes;
+}
+SEGMENTS {
+    HEADER: load = HEADER, type = ro;
+    CODE: load = ROM, type = ro;
+    RODATA: load = ROM, type = ro;
+    VECTORS: load = ROM, start = $FFFA, type = ro;
+}
+"#,
+            )?;
+
+            // Assemble
+            let status = Command::new(&ca65_cmd).arg(&asm_file).arg("-o").arg(&obj_file).status()?;
+
+            if !status.success() {
+                return Err("ca65 assembly failed".into());
+            }
+
+            // Link
+            let status = Command::new(&ld65_cmd)
+                .arg("-C")
+                .arg(&cfg_file)
+                .arg(&obj_file)
+                .arg("-o")
+                .arg(&output_file)
+                .status()?;
+
+            if !status.success() {
+                return Err("ld65 linking failed".into());
+            }
+            Ok(())
+        }
+        "atari2600" | "atari" => {
+            // Use dasm for Atari 2600
+            let dasm_cmd = which::which("dasm")
+                .map_err(|_| "dasm not found. Please install dasm assembler.")?;
+
+            let status = Command::new(&dasm_cmd)
+                .arg(&asm_file)
+                .arg("-o")
+                .arg(&output_file)
+                .arg("-f3") // Binary format
+                .status()?;
+
+            if !status.success() {
+                return Err("dasm assembly failed".into());
+            }
+            Ok(())
+        }
+        "gb" | "gameboy" => {
+            // Use rgbasm/rgblink for Game Boy
+            let rgbasm_cmd = which::which("rgbasm")
+                .map_err(|_| "rgbasm not found. Please install rgbds toolchain.")?;
+            let rgblink_cmd = which::which("rgblink")
+                .map_err(|_| "rgblink not found. Please install rgbds toolchain.")?;
+            let rgbfix_cmd = which::which("rgbfix")
+                .map_err(|_| "rgbfix not found. Please install rgbds toolchain.")?;
+
+            let obj_file = temp_dir.join("output.o");
+            let gb_file = temp_dir.join("output.gb");
+
+            // Assemble
+            let status = Command::new(&rgbasm_cmd).arg("-o").arg(&obj_file).arg(&asm_file).status()?;
+
+            if !status.success() {
+                return Err("rgbasm assembly failed".into());
+            }
+
+            // Link
+            let status = Command::new(&rgblink_cmd)
+                .arg("-o")
+                .arg(&gb_file)
+                .arg(&obj_file)
+                .status()?;
+
+            if !status.success() {
+                return Err("rgblink linking failed".into());
+            }
+
+            // Fix header
+            let status = Command::new(&rgbfix_cmd).arg("-v").arg("-p").arg("0").arg(&gb_file).status()?;
+
+            if !status.success() {
+                return Err("rgbfix failed".into());
+            }
+
+            // Copy fixed file to output
+            fs::copy(&gb_file, &output_file)?;
+            Ok(())
+        }
+        _ => Err(format!(
+            "Assembly not supported for system: {}. Supported: pc, nes, atari2600, gb",
+            system
+        )
+        .into()),
+    };
+
+    // Check if assembly succeeded
+    result?;
+
+    // Read the assembled binary
+    let binary = fs::read(&output_file)?;
+
+    // Clean up temporary directory
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    println!("Successfully assembled {} bytes", binary.len());
+    Ok(binary)
+}
+
 /// Command-line arguments for the emulator
 #[derive(Debug, Default)]
 struct CliArgs {
     rom_path: Option<String>,
     system: Option<String>, // System to start (pc, nes, gb, atari2600, snes, n64)
+    asm_path: Option<String>, // Assembly file to assemble and run
     slot1: Option<String>,  // BIOS or primary file
     slot2: Option<String>,  // FloppyA
     slot3: Option<String>,  // FloppyB
@@ -655,6 +838,14 @@ impl CliArgs {
                         eprintln!(
                             "Error: --system requires a value (pc, nes, gb, atari2600, snes, n64)."
                         );
+                        std::process::exit(1);
+                    }
+                }
+                "--asm" => {
+                    if let Some(asm_file) = arg_iter.next() {
+                        args.asm_path = Some(asm_file);
+                    } else {
+                        eprintln!("Error: --asm requires a file path.");
                         std::process::exit(1);
                     }
                 }
@@ -777,6 +968,7 @@ impl CliArgs {
         eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
         );
+        eprintln!("  --asm <file>             Assemble and run an assembly file (.asm)");
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
         eprintln!("  --slot2 <file>           Load file into slot 2 (Floppy A for PC)");
         eprintln!("  --slot3 <file>           Load file into slot 3 (Floppy B for PC)");
@@ -802,6 +994,8 @@ impl CliArgs {
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM");
         eprintln!("  hemu project.hemu                              # Load project file");
+        eprintln!("  hemu --asm test.asm --system pc                # Assemble and run PC code");
+        eprintln!("  hemu --asm game.asm --system nes               # Assemble and run NES code");
         eprintln!("  hemu --system pc                               # Start clean PC system");
         eprintln!("  hemu --system nes                              # Start clean NES system");
         eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
@@ -1018,9 +1212,39 @@ fn main() {
     // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
 
+    // Handle --asm flag: assemble the file and treat it as a ROM
+    let assembled_data: Option<Vec<u8>> = if let Some(ref asm_path) = cli_args.asm_path {
+        // Determine target system
+        let target_system = if let Some(ref sys) = cli_args.system {
+            sys.clone()
+        } else {
+            // Try to infer from file extension or default to PC
+            if asm_path.to_lowercase().ends_with(".asm") {
+                eprintln!("Warning: No --system specified, defaulting to PC for assembly");
+                "pc".to_string()
+            } else {
+                eprintln!("Error: --asm requires --system to specify target (pc, nes, gb, atari2600)");
+                std::process::exit(1);
+            }
+        };
+
+        match assemble_file(asm_path, &target_system) {
+            Ok(data) => {
+                println!("Successfully assembled {}", asm_path);
+                Some(data)
+            }
+            Err(e) => {
+                eprintln!("Failed to assemble {}: {}", asm_path, e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Validate that we have something to load or a system to start
-    if cli_args.system.is_none() && rom_path.is_none() {
-        eprintln!("Error: Must specify either a system (--system) or a file to load.");
+    if cli_args.system.is_none() && rom_path.is_none() && assembled_data.is_none() {
+        eprintln!("Error: Must specify either a system (--system), a file to load, or an assembly file (--asm).");
         eprintln!();
         CliArgs::print_usage();
         std::process::exit(1);
@@ -1073,6 +1297,68 @@ fn main() {
     } else {
         // No --system specified, default to NES for now (will be replaced by file loading below)
         sys = EmulatorSystem::NES(Box::default());
+    }
+
+    // If we have assembled data, load it into the system now
+    if let Some(ref data) = assembled_data {
+        match &mut sys {
+            EmulatorSystem::PC(pc_sys) => {
+                // For PC, we need to create a disk image with the COM file
+                // Use the same logic as workbench: create a temporary floppy with the executable
+                let _disk = emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M);
+                
+                // Inject the assembled COM file into the disk
+                // This is a simplified version - for a full implementation,
+                // we'd need to properly format FAT12 and add directory entries
+                // For now, we'll just mount it directly as a COM file to FloppyB
+                if let Err(e) = pc_sys.mount("FloppyB", data) {
+                    eprintln!("Failed to mount assembled program: {}", e);
+                } else {
+                    rom_loaded = true;
+                    status_message = "Assembled program loaded to FloppyB".to_string();
+                    println!("Assembled program loaded to FloppyB");
+                }
+            }
+            EmulatorSystem::NES(nes_sys) => {
+                rom_hash = Some(GameSaves::rom_hash(data));
+                if let Err(e) = nes_sys.mount("Cartridge", data) {
+                    eprintln!("Failed to load assembled NES ROM: {}", e);
+                    status_message = format!("Error: {}", e);
+                    rom_hash = None;
+                } else {
+                    rom_loaded = true;
+                    status_message = "Assembled NES ROM loaded".to_string();
+                    println!("Assembled NES ROM loaded");
+                }
+            }
+            EmulatorSystem::GameBoy(gb_sys) => {
+                rom_hash = Some(GameSaves::rom_hash(data));
+                if let Err(e) = gb_sys.mount("Cartridge", data) {
+                    eprintln!("Failed to load assembled Game Boy ROM: {}", e);
+                    status_message = format!("Error: {}", e);
+                    rom_hash = None;
+                } else {
+                    rom_loaded = true;
+                    status_message = "Assembled Game Boy ROM loaded".to_string();
+                    println!("Assembled Game Boy ROM loaded");
+                }
+            }
+            EmulatorSystem::Atari2600(atari_sys) => {
+                rom_hash = Some(GameSaves::rom_hash(data));
+                if let Err(e) = atari_sys.mount("Cartridge", data) {
+                    eprintln!("Failed to load assembled Atari 2600 ROM: {}", e);
+                    status_message = format!("Error: {}", e);
+                    rom_hash = None;
+                } else {
+                    rom_loaded = true;
+                    status_message = "Assembled Atari 2600 ROM loaded".to_string();
+                    println!("Assembled Atari 2600 ROM loaded");
+                }
+            }
+            _ => {
+                eprintln!("Assembly not supported for this system");
+            }
+        }
     }
 
     // Try to load ROM/project file if path is available
