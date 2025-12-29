@@ -152,10 +152,11 @@ pub fn generate_minimal_bios(cpu_model: CpuModel) -> Vec<u8> {
     // This table describes the system capabilities and is returned by INT 15h AH=C0h
     let sysconf_offset = 0xE000;
     let system_configuration_table: Vec<u8> = vec![
-        0x08, 0x00, // WORD: Number of bytes following (8 bytes)
-        model_byte, // BYTE: Model (adapts to CPU: 0xFE=XT, 0xFC=AT, 0xF8=PS/2)
-        0x00, // BYTE: Submodel (00h)
-        0x01, // BYTE: BIOS revision level (01h)
+        0x08,
+        0x00,           // WORD: Number of bytes following (8 bytes)
+        model_byte,     // BYTE: Model (adapts to CPU: 0xFE=XT, 0xFC=AT, 0xF8=PS/2)
+        0x00,           // BYTE: Submodel (00h)
+        0x01,           // BYTE: BIOS revision level (01h)
         feature_byte_1, // BYTE: Feature byte 1 (0x00 for XT, 0x70 for AT+)
         //   For AT+ (0x70):
         //   bit 7: DMA channel 3 used by hard disk BIOS (0)

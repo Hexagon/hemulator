@@ -748,19 +748,13 @@ impl PcCpu {
                 // BL = palette ID (0 or 1 for CGA 4-color modes)
                 // We acknowledge but don't implement actual palette switching
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    format!(
-                        "INT 10h AH=0Bh BH=01h: Set CGA palette to 0x{:02X}",
-                        bl
-                    )
+                    format!("INT 10h AH=0Bh BH=01h: Set CGA palette to 0x{:02X}", bl)
                 });
             }
             _ => {
                 // Unknown subfunction
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    format!(
-                        "INT 10h AH=0Bh: Unknown BH=0x{:02X}, BL=0x{:02X}",
-                        bh, bl
-                    )
+                    format!("INT 10h AH=0Bh: Unknown BH=0x{:02X}, BL=0x{:02X}", bh, bl)
                 });
             }
         }
@@ -899,15 +893,15 @@ impl PcCpu {
         // ES:DI = pointer to video state table
         // The table should contain video state information
         // For simplicity, we return a stub table with basic info
-        
+
         // Return AL = 0x1B (function supported)
         self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x1B;
-        
+
         // Set ES:DI to point to a placeholder in BIOS data area
         // We'll use a location in conventional RAM that won't interfere
         self.cpu.es = 0x0040; // BIOS data area
         self.cpu.di = 0x0100; // Offset within BIOS data area
-        
+
         emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
             "INT 10h AH=1Bh: Get video state (returning stub table)".to_string()
         });
@@ -921,10 +915,7 @@ impl PcCpu {
     fn int10h_stub_vga_function(&mut self, ah: u8) -> u32 {
         // Just acknowledge and return
         emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-            format!(
-                "INT 10h AH=0x{:02X}: Undocumented VGA function (stub)",
-                ah
-            )
+            format!("INT 10h AH=0x{:02X}: Undocumented VGA function (stub)", ah)
         });
 
         51
@@ -3415,34 +3406,32 @@ impl PcCpu {
         //         ECX = bytes written (20 or 24)
         //         ES:DI = filled with entry
         //         CF = clear on success, set on error
-        
+
         // Note: In 16-bit real mode BIOS, we can't verify the full 32-bit EDX signature (0x534D4150)
         // The caller (boot loader) is responsible for setting up the full 32-bit registers
         // We'll trust that if they called E820h, they set EDX correctly
 
         // Get continuation index from BX (lower 16 bits of EBX)
         let entry_index = self.cpu.bx;
-        
+
         // Get memory sizes from bus
         let conventional_kb = self.cpu.memory.conventional_memory_kb();
         let extended_kb = self.cpu.memory.extended_memory_kb();
-        
+
         // Define memory map entries
         // Entry format: base_low (4), base_high (4), length_low (4), length_high (4), type (4) = 20 bytes
         // Type 1 = Available RAM, Type 2 = Reserved/In use
-        
+
         let entries: Vec<(u64, u64, u32)> = vec![
             // Entry 0: Conventional memory (0x00000000 - 0x0009FFFF) - 640KB max
             (0x00000000, (conventional_kb as u64) * 1024, 1), // Type 1 (available)
-            
             // Entry 1: VGA/BIOS reserved (0x000A0000 - 0x000FFFFF) - 384KB
             (0x000A0000, 0x00060000, 2), // Type 2 (reserved)
-            
             // Entry 2: Extended memory (1MB+)
             // Only include if we have extended memory
             (0x00100000, (extended_kb as u64) * 1024, 1), // Type 1 (available)
         ];
-        
+
         // Filter out entries with zero length (if no extended memory)
         let valid_entry_index = if entry_index == 0 {
             0
@@ -3456,73 +3445,111 @@ impl PcCpu {
             self.set_carry_flag(true);
             return 51;
         };
-        
+
         // Check if this is the last valid entry
         let is_last = if extended_kb > 0 {
             valid_entry_index >= 2
         } else {
             valid_entry_index >= 1
         };
-        
+
         if valid_entry_index >= entries.len() as u32 {
             // No more entries
             self.cpu.bx = 0;
             self.set_carry_flag(true);
             return 51;
         }
-        
+
         let (base, length, entry_type) = entries[valid_entry_index as usize];
-        
+
         // Write entry to ES:DI
         let buffer_addr = ((self.cpu.es as u32) << 4) + (self.cpu.di as u32);
-        
+
         // Write base address (64-bit, little-endian)
         self.cpu.memory.write(buffer_addr + 0, (base & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 1, ((base >> 8) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 2, ((base >> 16) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 3, ((base >> 24) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 4, ((base >> 32) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 5, ((base >> 40) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 6, ((base >> 48) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 7, ((base >> 56) & 0xFF) as u8);
-        
+        self.cpu
+            .memory
+            .write(buffer_addr + 1, ((base >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 2, ((base >> 16) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 3, ((base >> 24) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 4, ((base >> 32) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 5, ((base >> 40) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 6, ((base >> 48) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 7, ((base >> 56) & 0xFF) as u8);
+
         // Write length (64-bit, little-endian)
-        self.cpu.memory.write(buffer_addr + 8, (length & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 9, ((length >> 8) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 10, ((length >> 16) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 11, ((length >> 24) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 12, ((length >> 32) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 13, ((length >> 40) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 14, ((length >> 48) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 15, ((length >> 56) & 0xFF) as u8);
-        
+        self.cpu
+            .memory
+            .write(buffer_addr + 8, (length & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 9, ((length >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 10, ((length >> 16) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 11, ((length >> 24) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 12, ((length >> 32) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 13, ((length >> 40) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 14, ((length >> 48) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 15, ((length >> 56) & 0xFF) as u8);
+
         // Write type (32-bit, little-endian)
-        self.cpu.memory.write(buffer_addr + 16, (entry_type & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 17, ((entry_type >> 8) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 18, ((entry_type >> 16) & 0xFF) as u8);
-        self.cpu.memory.write(buffer_addr + 19, ((entry_type >> 24) & 0xFF) as u8);
-        
+        self.cpu
+            .memory
+            .write(buffer_addr + 16, (entry_type & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 17, ((entry_type >> 8) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 18, ((entry_type >> 16) & 0xFF) as u8);
+        self.cpu
+            .memory
+            .write(buffer_addr + 19, ((entry_type >> 24) & 0xFF) as u8);
+
         // Set return values (16-bit registers, caller manages 32-bit EAX/ECX)
         // EAX should be 0x534D4150 ('SMAP'), we set lower 16 bits
         self.cpu.ax = 0x4150; // Lower 16 bits of 'SMAP' (0x534D4150)
         self.cpu.cx = 20; // Bytes written (basic 20-byte format)
-        
+
         // Set continuation value (0 if last entry, next index otherwise)
         if is_last {
             self.cpu.bx = 0; // No more entries
         } else {
             self.cpu.bx = entry_index + 1; // Next entry index
         }
-        
+
         self.set_carry_flag(false); // Success
-        
+
         emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
             format!(
                 "INT 15h E820h: Entry {} - base=0x{:016X} len=0x{:016X} type={}",
                 valid_entry_index, base, length, entry_type
             )
         });
-        
+
         51
     }
 
@@ -5658,11 +5685,11 @@ mod tests {
     fn test_int15h_get_system_configuration() {
         // Test INT 15h AH=C0h (Get System Configuration)
         let mut bus = PcBus::new();
-        
+
         // Load BIOS so the configuration table exists at F000:E000
         let bios = crate::bios::generate_minimal_bios(CpuModel::Intel8086);
         bus.load_bios(&bios);
-        
+
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
