@@ -188,6 +188,11 @@ pub struct Tia {
     hmm1: i8,
     hmbl: i8,
 
+    // Input ports (fire buttons and paddles)
+    // INPT4/INPT5: Joystick fire buttons (bit 7: 0=pressed, 1=not pressed)
+    inpt4: u8, // Player 0 fire button
+    inpt5: u8, // Player 1 fire button
+
     // Current scanline and pixel position
     scanline: u16,
     pixel: u16,
@@ -294,6 +299,8 @@ impl Tia {
             hmm0: 0,
             hmm1: 0,
             hmbl: 0,
+            inpt4: 0x80, // Not pressed (bit 7 = 1)
+            inpt5: 0x80, // Not pressed (bit 7 = 1)
             scanline: 0,
             pixel: 0,
 
@@ -353,6 +360,20 @@ impl Tia {
             self.writes_grp1_nonzero,
             self.writes_colors_nonzero,
         )
+    }
+
+    /// Set fire button state for a player (0 or 1)
+    ///
+    /// Fire button state in TIA uses active-low logic for bit 7:
+    /// - pressed = true -> INPT bit 7 = 0
+    /// - pressed = false -> INPT bit 7 = 1
+    pub fn set_fire_button(&mut self, player: u8, pressed: bool) {
+        let value = if pressed { 0x00 } else { 0x80 };
+        match player {
+            0 => self.inpt4 = value,
+            1 => self.inpt5 = value,
+            _ => {}
+        }
     }
 
     /// Get a monotonically increasing scanline counter (increments once per scanline)
@@ -588,13 +609,14 @@ impl Tia {
         self.latch_scanline_state(self.scanline);
     }
 
-    /// Read from TIA register (collision detection)
+    /// Read from TIA register (collision detection and input)
     pub fn read(&self, addr: u8) -> u8 {
-        // TIA read registers are for collision detection
-        // Simplified implementation - return 0 for now
+        // TIA read registers are for collision detection and input
         match addr & 0x0F {
-            0x00..=0x07 => 0, // Collision registers
-            0x08..=0x0D => 0, // Input ports (handled by RIOT)
+            0x00..=0x07 => 0,   // Collision registers (not implemented)
+            0x08..=0x0B => 0,   // Input ports 0-3 (paddles, not implemented)
+            0x0C => self.inpt4, // Input port 4 (Player 0 fire button)
+            0x0D => self.inpt5, // Input port 5 (Player 1 fire button)
             _ => 0,
         }
     }
