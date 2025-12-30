@@ -1525,6 +1525,9 @@ fn main() {
     status_bar.paused = settings.emulation_speed == 0.0;
     status_bar.speed = settings.emulation_speed as f32;
 
+    // Track logging state
+    let mut logging_active = false;
+
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
         let mut out = Vec::with_capacity(base.len());
@@ -1740,6 +1743,54 @@ fn main() {
                     MenuAction::About => {
                         // TODO: Show about dialog
                         println!("Hemulator - Multi-System Emulator");
+                    }
+                    MenuAction::NewProject => {
+                        // Show system selector
+                        show_slot_selector = false;
+                        show_help = false;
+                        show_mount_selector = false;
+                        show_speed_selector = false;
+                        show_disk_format_selector = false;
+                        show_debug = false;
+                        // Set a flag to show system selector
+                        // This will be handled in the rendering section
+                        println!("New Project - Select System Type");
+                    }
+                    MenuAction::Resume => {
+                        settings.emulation_speed = 1.0;
+                        status_message = "Resumed".to_string();
+                        status_bar.paused = false;
+                        status_bar.speed = 1.0;
+                        status_bar.message = status_message.clone();
+                        if let Err(e) = settings.save() {
+                            eprintln!("Warning: Failed to save speed setting: {}", e);
+                        }
+                    }
+                    MenuAction::StartLogging => {
+                        // Start logging to file
+                        use std::path::PathBuf;
+                        let log_path = PathBuf::from("log.txt");
+                        match emu_core::logging::LogConfig::global().set_log_file(log_path) {
+                            Ok(()) => {
+                                logging_active = true;
+                                status_message = "Logging started (log.txt)".to_string();
+                                status_bar.message = status_message.clone();
+                                println!("Logging enabled - writing to log.txt");
+                            }
+                            Err(e) => {
+                                status_message = format!("Failed to start logging: {}", e);
+                                status_bar.message = status_message.clone();
+                                eprintln!("Failed to start logging: {}", e);
+                            }
+                        }
+                    }
+                    MenuAction::StopLogging => {
+                        // Stop logging
+                        emu_core::logging::LogConfig::global().clear_log_file();
+                        logging_active = false;
+                        status_message = "Logging stopped".to_string();
+                        status_bar.message = status_message.clone();
+                        println!("Logging disabled");
                     }
                 }
             }
@@ -2709,6 +2760,14 @@ fn main() {
         let stats = sys.get_runtime_stats();
         status_bar.ip = Some(stats.pc as u32);
         status_bar.cycles = Some(stats.cpu_cycles as u64);
+
+        // Update menu state based on current emulator state
+        menu_bar.update_menu_state(
+            rom_loaded,
+            settings.emulation_speed == 0.0,
+            sys.supports_save_states(),
+            logging_active,
+        );
 
         // Update window title with project filename if available
         let title = if let Some(project_name) = runtime_state.get_project_filename() {

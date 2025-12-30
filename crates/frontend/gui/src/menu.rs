@@ -9,6 +9,7 @@ const MENU_ITEM_WIDTH: usize = 80;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
     // File menu
+    NewProject,
     OpenRom,
     OpenProject,
     SaveProject,
@@ -18,6 +19,7 @@ pub enum MenuAction {
     // Emulation menu
     Reset,
     Pause,
+    Resume,
     Speed(SpeedSetting),
 
     // State menu
@@ -28,6 +30,8 @@ pub enum MenuAction {
     Screenshot,
     DebugInfo,
     CrtFilterToggle,
+    StartLogging,
+    StopLogging,
 
     // Help menu
     Help,
@@ -61,6 +65,7 @@ pub struct MenuItem {
     pub label: String,
     pub action: MenuAction,
     pub shortcut: Option<String>,
+    pub enabled: bool,
 }
 
 /// Submenu definition
@@ -85,29 +90,40 @@ impl MenuBar {
             label: "File".to_string(),
             items: vec![
                 MenuItem {
+                    label: "New Project...".to_string(),
+                    action: MenuAction::NewProject,
+                    shortcut: Some("Ctrl+N".to_string()),
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Open ROM...".to_string(),
                     action: MenuAction::OpenRom,
                     shortcut: Some("Ctrl+O".to_string()),
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Open Project...".to_string(),
                     action: MenuAction::OpenProject,
                     shortcut: Some("Ctrl+Shift+O".to_string()),
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Save Project...".to_string(),
                     action: MenuAction::SaveProject,
                     shortcut: Some("Ctrl+S".to_string()),
+                    enabled: false, // Disabled until project loaded
                 },
                 MenuItem {
                     label: "Mount Points...".to_string(),
                     action: MenuAction::MountPoints,
                     shortcut: None,
+                    enabled: false, // Disabled until system loaded
                 },
                 MenuItem {
                     label: "Exit".to_string(),
                     action: MenuAction::Exit,
                     shortcut: Some("Esc".to_string()),
+                    enabled: true,
                 },
             ],
         });
@@ -120,36 +136,49 @@ impl MenuBar {
                     label: "Reset".to_string(),
                     action: MenuAction::Reset,
                     shortcut: Some("Ctrl+R".to_string()),
+                    enabled: false, // Disabled until system loaded
                 },
                 MenuItem {
-                    label: "Pause/Resume".to_string(),
+                    label: "Pause".to_string(),
                     action: MenuAction::Pause,
                     shortcut: Some("Ctrl+P".to_string()),
+                    enabled: false, // Disabled until running
+                },
+                MenuItem {
+                    label: "Resume".to_string(),
+                    action: MenuAction::Resume,
+                    shortcut: Some("Ctrl+P".to_string()),
+                    enabled: false, // Disabled until paused
                 },
                 MenuItem {
                     label: "Speed: 25%".to_string(),
                     action: MenuAction::Speed(SpeedSetting::Percent25),
                     shortcut: None,
+                    enabled: false,
                 },
                 MenuItem {
                     label: "Speed: 50%".to_string(),
                     action: MenuAction::Speed(SpeedSetting::Percent50),
                     shortcut: None,
+                    enabled: false,
                 },
                 MenuItem {
                     label: "Speed: 100%".to_string(),
                     action: MenuAction::Speed(SpeedSetting::Percent100),
                     shortcut: None,
+                    enabled: false,
                 },
                 MenuItem {
                     label: "Speed: 200%".to_string(),
                     action: MenuAction::Speed(SpeedSetting::Percent200),
                     shortcut: None,
+                    enabled: false,
                 },
                 MenuItem {
                     label: "Speed: 400%".to_string(),
                     action: MenuAction::Speed(SpeedSetting::Percent400),
                     shortcut: None,
+                    enabled: false,
                 },
             ],
         });
@@ -161,6 +190,7 @@ impl MenuBar {
                 label: format!("Save State Slot {}", i),
                 action: MenuAction::SaveState(i),
                 shortcut: Some(format!("Ctrl+{}", i)),
+                enabled: false, // Disabled until system with save state support loaded
             });
         }
         for i in 1..=5 {
@@ -168,6 +198,7 @@ impl MenuBar {
                 label: format!("Load State Slot {}", i),
                 action: MenuAction::LoadState(i),
                 shortcut: Some(format!("Ctrl+Shift+{}", i)),
+                enabled: false, // Disabled until system with save state support loaded
             });
         }
         menus.push(Submenu {
@@ -183,16 +214,31 @@ impl MenuBar {
                     label: "Take Screenshot".to_string(),
                     action: MenuAction::Screenshot,
                     shortcut: Some("F4".to_string()),
+                    enabled: false, // Disabled until system loaded
                 },
                 MenuItem {
                     label: "Debug Info".to_string(),
                     action: MenuAction::DebugInfo,
                     shortcut: Some("F10".to_string()),
+                    enabled: true,
                 },
                 MenuItem {
                     label: "CRT Filter".to_string(),
                     action: MenuAction::CrtFilterToggle,
                     shortcut: Some("F11".to_string()),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Start Logging".to_string(),
+                    action: MenuAction::StartLogging,
+                    shortcut: None,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Stop Logging".to_string(),
+                    action: MenuAction::StopLogging,
+                    shortcut: None,
+                    enabled: false, // Disabled until logging started
                 },
             ],
         });
@@ -205,11 +251,13 @@ impl MenuBar {
                     label: "Help".to_string(),
                     action: MenuAction::Help,
                     shortcut: Some("F1".to_string()),
+                    enabled: true,
                 },
                 MenuItem {
                     label: "About".to_string(),
                     action: MenuAction::About,
                     shortcut: None,
+                    enabled: true,
                 },
             ],
         });
@@ -293,6 +341,13 @@ impl MenuBar {
                 break; // Don't render items that don't fit
             }
 
+            // Color based on enabled state
+            let text_color = if item.enabled {
+                0xFFFFFFFF // White text for enabled
+            } else {
+                0xFF666666 // Dark gray for disabled
+            };
+
             // Draw item text
             ui_render::draw_text(
                 buffer,
@@ -301,12 +356,17 @@ impl MenuBar {
                 &item.label,
                 dropdown_x + 8,
                 y + 6,
-                0xFFFFFFFF, // White text
+                text_color,
             );
 
             // Draw shortcut hint (if any)
             if let Some(ref shortcut) = item.shortcut {
                 let shortcut_x = dropdown_x + dropdown_width - shortcut.len() * 8 - 8;
+                let shortcut_color = if item.enabled {
+                    0xFF888888 // Gray for enabled
+                } else {
+                    0xFF444444 // Darker gray for disabled
+                };
                 ui_render::draw_text(
                     buffer,
                     width,
@@ -314,7 +374,7 @@ impl MenuBar {
                     shortcut,
                     shortcut_x.min(dropdown_x + 180), // Ensure it doesn't overflow
                     y + 6,
-                    0xFF888888, // Gray text for shortcuts
+                    shortcut_color,
                 );
             }
         }
@@ -372,9 +432,13 @@ impl MenuBar {
                 if x >= dropdown_x && x < dropdown_x + dropdown_width && y >= dropdown_y {
                     let item_idx = (y - dropdown_y) / item_height;
                     if item_idx < menu.items.len() {
-                        let action = menu.items[item_idx].action.clone();
-                        self.active_menu = None; // Close menu after selection
-                        return Some(action);
+                        let item = &menu.items[item_idx];
+                        // Only return action if item is enabled
+                        if item.enabled {
+                            let action = item.action.clone();
+                            self.active_menu = None; // Close menu after selection
+                            return Some(action);
+                        }
                     }
                 }
             }
@@ -383,6 +447,63 @@ impl MenuBar {
         // Click outside menu - close any open dropdown
         self.active_menu = None;
         None
+    }
+
+    /// Update menu state based on system status
+    pub fn update_menu_state(
+        &mut self,
+        rom_loaded: bool,
+        paused: bool,
+        supports_save_states: bool,
+        logging_active: bool,
+    ) {
+        // File menu
+        if let Some(file_menu) = self.menus.get_mut(0) {
+            for item in &mut file_menu.items {
+                match item.action {
+                    MenuAction::SaveProject => item.enabled = rom_loaded,
+                    MenuAction::MountPoints => item.enabled = rom_loaded,
+                    _ => {}
+                }
+            }
+        }
+
+        // Emulation menu
+        if let Some(emu_menu) = self.menus.get_mut(1) {
+            for item in &mut emu_menu.items {
+                match item.action {
+                    MenuAction::Reset => item.enabled = rom_loaded,
+                    MenuAction::Pause => item.enabled = rom_loaded && !paused,
+                    MenuAction::Resume => item.enabled = rom_loaded && paused,
+                    MenuAction::Speed(_) => item.enabled = rom_loaded,
+                    _ => {}
+                }
+            }
+        }
+
+        // State menu
+        if let Some(state_menu) = self.menus.get_mut(2) {
+            for item in &mut state_menu.items {
+                match item.action {
+                    MenuAction::SaveState(_) | MenuAction::LoadState(_) => {
+                        item.enabled = rom_loaded && supports_save_states;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // View menu
+        if let Some(view_menu) = self.menus.get_mut(3) {
+            for item in &mut view_menu.items {
+                match item.action {
+                    MenuAction::Screenshot => item.enabled = rom_loaded,
+                    MenuAction::StartLogging => item.enabled = !logging_active,
+                    MenuAction::StopLogging => item.enabled = logging_active,
+                    _ => {}
+                }
+            }
+        }
     }
 }
 
