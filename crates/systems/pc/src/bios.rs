@@ -269,6 +269,12 @@ pub fn generate_minimal_bios(cpu_model: CpuModel) -> Vec<u8> {
         0xA3, 0x70, 0x00, // MOV [0x0070], AX (INT 1Ch vector = 0x0070)
         0xB8, 0x00, 0xF0, // MOV AX, 0xF000
         0xA3, 0x72, 0x00, // MOV [0x0072], AX
+        // INT 0x1E (Disk Parameter Table Pointer) - CRITICAL for floppy boot
+        // This must point to the DPT in BIOS ROM at F000:0250
+        0xB8, 0x50, 0x02, // MOV AX, 0x0250 (offset of DPT in BIOS ROM)
+        0xA3, 0x78, 0x00, // MOV [0x0078], AX (INT 1Eh vector = 0x0078)
+        0xB8, 0x00, 0xF0, // MOV AX, 0xF000 (segment)
+        0xA3, 0x7A, 0x00, // MOV [0x007A], AX
         // NOTE: INT 0x21 vector is NOT set up by BIOS - DOS will install it
         // INT 0x2A (Network Installation API) - stub
         0xB8, 0x40, 0x00, // MOV AX, 0x0040
@@ -683,5 +689,48 @@ mod tests {
         let bios_486 = generate_minimal_bios(CpuModel::Intel80486);
         assert_eq!(bios_486[0xFFFE], 0xF8); // PS/2 Model 80
         assert_eq!(bios_486[0xE005], 0x70); // Feature byte 1 (AT features)
+    }
+
+    #[test]
+    fn test_bios_sets_up_int1eh_vector() {
+        // Test that BIOS initialization code sets up INT 1Eh vector
+        // INT 1Eh should point to the Disk Parameter Table (DPT) at F000:0250
+        let bios = generate_minimal_bios(CpuModel::Intel8086);
+
+        // The BIOS initialization code should write to memory addresses 0x78-0x7B
+        // to set up the INT 1Eh vector. Let's verify the instruction sequence exists.
+
+        // Look for the instruction sequence that sets INT 1Eh:
+        // MOV AX, 0x0250 (B8 50 02)
+        // MOV [0x0078], AX (A3 78 00)
+        // MOV AX, 0xF000 (B8 00 F0)
+        // MOV [0x007A], AX (A3 7A 00)
+
+        let init_code = &bios[0..300]; // Search in first 300 bytes of init code
+
+        // Find the sequence: B8 50 02 A3 78 00
+        let pattern1 = [0xB8, 0x50, 0x02, 0xA3, 0x78, 0x00];
+        let found1 = init_code
+            .windows(pattern1.len())
+            .any(|window| window == pattern1);
+        assert!(
+            found1,
+            "BIOS should set INT 1Eh offset (0x0250) at address 0x0078"
+        );
+
+        // Find the sequence: B8 00 F0 A3 7A 00
+        let pattern2 = [0xB8, 0x00, 0xF0, 0xA3, 0x7A, 0x00];
+        let found2 = init_code
+            .windows(pattern2.len())
+            .any(|window| window == pattern2);
+        assert!(
+            found2,
+            "BIOS should set INT 1Eh segment (0xF000) at address 0x007A"
+        );
+
+        // Verify DPT exists at offset 0x250
+        assert_eq!(bios[0x250], 0xDF); // Step rate & head unload time
+        assert_eq!(bios[0x251], 0x02); // Head load time & DMA mode
+        assert_eq!(bios[0x254], 0x12); // Sectors per track (18 for 1.44MB)
     }
 }
