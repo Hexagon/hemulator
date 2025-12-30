@@ -3165,15 +3165,17 @@ fn main() {
             }
         }
 
+        // Prepare frame to present (with overlays if any)
+        let speed_selector_buffer;
+        let slot_selector_buffer;
+        let mount_selector_buffer;
+        let debug_composed_buffer;
+
         let frame_to_present: &[u32] = if show_speed_selector {
             // Render speed selector overlay
-            let speed_buffer =
+            speed_selector_buffer =
                 ui_render::create_speed_selector_overlay(width, height, settings.emulation_speed);
-            if let Err(e) = window.update_with_buffer(&speed_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            &[]
+            &speed_selector_buffer
         } else if show_slot_selector {
             // Render slot selector overlay
             // For PC system in SAVE mode, show disk persist menu
@@ -3183,12 +3185,9 @@ fn main() {
                     .iter()
                     .map(|mp| sys.get_disk_image(&mp.id).is_some())
                     .collect();
-                let slot_buffer =
+                slot_selector_buffer =
                     ui_render::create_pc_save_selector(width, height, &mount_points, &mounted);
-                if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
-                    eprintln!("Window update error: {}", e);
-                    break;
-                }
+                &slot_selector_buffer
             } else {
                 let has_saves = [
                     game_saves.slots.contains_key(&1),
@@ -3197,45 +3196,28 @@ fn main() {
                     game_saves.slots.contains_key(&4),
                     game_saves.slots.contains_key(&5),
                 ];
-                let slot_buffer = ui_render::create_slot_selector_overlay(
+                slot_selector_buffer = ui_render::create_slot_selector_overlay(
                     width,
                     height,
                     slot_selector_mode,
                     &has_saves,
                 );
-                if let Err(e) = window.update_with_buffer(&slot_buffer, width, height) {
-                    eprintln!("Window update error: {}", e);
-                    break;
-                }
+                &slot_selector_buffer
             }
-            &[]
         } else if show_mount_selector {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
-            let mount_buffer = ui_render::create_mount_point_selector(
+            mount_selector_buffer = ui_render::create_mount_point_selector(
                 width,
                 height,
                 &mount_points,
                 sys.system_name(),
             );
-            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            &[]
+            &mount_selector_buffer
         } else if let Some(ref overlay) = debug_overlay {
-            let composed = blend_over(&buffer, overlay);
-            // Keep the composed buffer alive for the duration of update_with_buffer.
-            if let Err(e) = window.update_with_buffer(composed.as_slice(), width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            // Timing and window-size persistence still run below.
-            // Skip the normal update path since we've already presented.
-            // NOTE: This keeps debug overlay transparent without pausing emulation.
-            //
-            // Return a dummy slice; it won't be used.
-            &[]
+            // Blend debug overlay with game buffer
+            debug_composed_buffer = blend_over(&buffer, overlay);
+            &debug_composed_buffer
         } else if let Some(ref overlay) = help_overlay {
             overlay.as_slice()
         } else {
@@ -3270,25 +3252,72 @@ fn main() {
             let _ = sdl2_backend.set_title(&title);
         }
 
-        // Render menu bar and status bar on the frame
-        // Create a copy if we need to add menu/status bar
-        let mut frame_with_ui = if !frame_to_present.is_empty() {
-            // Always show status bar and menu bar
-            let mut ui_buffer = frame_to_present.to_vec();
+        // Render frame with UI elements at window resolution
+        // UI elements (menu bar, status bar) are always fixed pixel size regardless of game resolution
+        if !frame_to_present.is_empty() {
+            let (window_width, window_height) = window.get_size();
 
-            // Render status bar at bottom
-            status_bar.render(&mut ui_buffer, width, height);
+            const MENU_HEIGHT: usize = 24;
+            const STATUS_HEIGHT: usize = 20;
 
-            // Render menu bar at top
-            menu_bar.render(&mut ui_buffer, width, height);
+            // Create a buffer at window resolution
+            let mut window_buffer = vec![0xFF000000; window_width * window_height];
 
-            ui_buffer
-        } else {
-            frame_to_present.to_vec()
-        };
+            // Calculate game display area (middle section between menu and status bar)
+            let game_display_y = MENU_HEIGHT;
+            let game_display_height = window_height.saturating_sub(MENU_HEIGHT + STATUS_HEIGHT);
 
-        if !frame_with_ui.is_empty() {
-            if let Err(e) = window.update_with_buffer(&frame_with_ui, width, height) {
+            // Scale and blit game content to the middle section
+            if game_display_height > 0 {
+                // Calculate scaling to fit game in available space while maintaining aspect ratio
+                let scale_x = window_width as f32 / width as f32;
+                let scale_y = game_display_height as f32 / height as f32;
+                let scale = scale_x.min(scale_y);
+
+                let scaled_width = (width as f32 * scale) as usize;
+                let scaled_height = (height as f32 * scale) as usize;
+
+                // Center the game horizontally
+                let offset_x = (window_width.saturating_sub(scaled_width)) / 2;
+                let offset_y =
+                    game_display_y + (game_display_height.saturating_sub(scaled_height)) / 2;
+
+                // Nearest-neighbor scaling for pixel-perfect look
+                for sy in 0..scaled_height {
+                    let src_y = (sy as f32 / scale) as usize;
+                    if src_y >= height {
+                        continue;
+                    }
+
+                    for sx in 0..scaled_width {
+                        let src_x = (sx as f32 / scale) as usize;
+                        if src_x >= width {
+                            continue;
+                        }
+
+                        let dst_x = offset_x + sx;
+                        let dst_y = offset_y + sy;
+
+                        if dst_x < window_width && dst_y < window_height {
+                            let src_idx = src_y * width + src_x;
+                            let dst_idx = dst_y * window_width + dst_x;
+
+                            if src_idx < frame_to_present.len() && dst_idx < window_buffer.len() {
+                                window_buffer[dst_idx] = frame_to_present[src_idx];
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Render menu bar at top (fixed 24px height at window resolution)
+            menu_bar.render(&mut window_buffer, window_width, window_height);
+
+            // Render status bar at bottom (fixed 20px height at window resolution)
+            status_bar.render(&mut window_buffer, window_width, window_height);
+
+            // Update window with the composite buffer
+            if let Err(e) = window.update_with_buffer(&window_buffer, window_width, window_height) {
                 eprintln!("Window update error: {}", e);
                 break;
             }
