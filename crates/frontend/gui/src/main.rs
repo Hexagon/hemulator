@@ -430,18 +430,18 @@ fn get_snes_controller_state(window: &dyn WindowBackend, mapping: &settings::Key
             // SNES layout: B(15), Y(14), Select(13), Start(12), Up(11), Down(10), Left(9), Right(8), A(7), X(6), L(5), R(4)
             if let Some(button_id) = key_mapping_to_button(*k, mapping) {
                 let snes_bit = match button_id {
-                    0 => 7,   // A -> bit 7
-                    1 => 15,  // B -> bit 15
-                    2 => 13,  // Select -> bit 13
-                    3 => 12,  // Start -> bit 12
-                    4 => 11,  // Up -> bit 11
-                    5 => 10,  // Down -> bit 10
-                    6 => 9,   // Left -> bit 9
-                    7 => 8,   // Right -> bit 8
-                    8 => 6,   // X -> bit 6
-                    9 => 14,  // Y -> bit 14
-                    10 => 5,  // L -> bit 5
-                    11 => 4,  // R -> bit 4
+                    0 => 7,  // A -> bit 7
+                    1 => 15, // B -> bit 15
+                    2 => 13, // Select -> bit 13
+                    3 => 12, // Start -> bit 12
+                    4 => 11, // Up -> bit 11
+                    5 => 10, // Down -> bit 10
+                    6 => 9,  // Left -> bit 9
+                    7 => 8,  // Right -> bit 8
+                    8 => 6,  // X -> bit 6
+                    9 => 14, // Y -> bit 14
+                    10 => 5, // L -> bit 5
+                    11 => 4, // R -> bit 4
                     _ => continue,
                 };
                 state |= 1u16 << snes_bit;

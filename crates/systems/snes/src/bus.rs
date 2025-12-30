@@ -132,7 +132,11 @@ impl Memory65c816 for SnesBus {
                     0x4200 => {
                         // Bit 7: NMI enable
                         // Other bits: H/V timer interrupt enable, auto-joypad read enable
-                        if self.ppu.nmi_enable { 0x80 } else { 0x00 }
+                        if self.ppu.nmi_enable {
+                            0x80
+                        } else {
+                            0x00
+                        }
                     }
                     // $4016 - JOYSER0 - Controller 1 Serial Data
                     0x4016 => {

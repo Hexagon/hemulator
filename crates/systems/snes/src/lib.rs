@@ -148,7 +148,7 @@ impl System for SnesSystem {
 
         // Enter VBlank and trigger NMI if enabled
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
-        
+
         // Check for NMI
         if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
             // Trigger NMI on the 65C816
@@ -163,7 +163,7 @@ impl System for SnesSystem {
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
             self.cpu.bus_mut().tick_cycles(cycles);
-            
+
             // Check for NMI during VBlank too
             if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
                 // TODO: Trigger NMI
@@ -294,8 +294,13 @@ mod tests {
         assert!(sys.mount("Cartridge", test_rom).is_ok());
         assert!(sys.is_mounted("Cartridge"));
 
-        // Run one frame - the emulator will show a checkerboard pattern
-        let frame = sys.step_frame().unwrap();
+        // Run multiple frames to allow the ROM to initialize
+        // The test ROM initializes graphics during RESET and then enters a WAI loop
+        // We need to give it time to set up VRAM, CGRAM, and the tilemap
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
 
         // Verify frame dimensions
         assert_eq!(frame.width, 256);

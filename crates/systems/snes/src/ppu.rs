@@ -627,7 +627,7 @@ impl Ppu {
         if vblank {
             self.nmi_flag = true;
             self.hvbjoy |= 0x80; // Set V-blank bit
-            // Trigger NMI if enabled
+                                 // Trigger NMI if enabled
             if self.nmi_enable {
                 self.nmi_pending = true;
             }
