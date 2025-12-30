@@ -84,6 +84,10 @@ pub struct PcBus {
     vga_status: Cell<u8>,
     /// Cycle counter for VGA status timing (Cell for interior mutability)
     vga_status_cycles: Cell<u64>,
+    /// CRTC (CRT Controller) index register - selects which CRTC register to access
+    crtc_index: Cell<u8>,
+    /// CRTC data registers (25 registers total for VGA)
+    crtc_data: [Cell<u8>; 25],
 }
 
 impl PcBus {
@@ -146,6 +150,8 @@ impl PcBus {
             kb_last_was_command: Cell::new(false), // No command yet
             vga_status: Cell::new(0x00),     // Start with display active (not in retrace)
             vga_status_cycles: Cell::new(0),
+            crtc_index: Cell::new(0),
+            crtc_data: std::array::from_fn(|_| Cell::new(0)),
         };
 
         // Initialize Interrupt Vector Table (IVT) in low RAM
@@ -252,6 +258,11 @@ impl PcBus {
         // Reset VGA status
         self.vga_status.set(0x00);
         self.vga_status_cycles.set(0);
+        // Reset CRTC registers
+        self.crtc_index.set(0);
+        for reg in &self.crtc_data {
+            reg.set(0);
+        }
     }
 
     /// Set boot priority
@@ -642,6 +653,28 @@ impl PcBus {
                 // flip-flop (port 0x3C0), but we don't implement that yet
                 self.vga_status.get()
             }
+            // Port 0x3C2 - Input Status Register 0 (read only)
+            // Bit 4: Switch sense (0/1 based on adapter type)
+            // Bit 5: Reserved
+            // Bit 6: Reserved
+            // Bit 7: CRT interrupt (0 = not pending, 1 = pending)
+            // Most programs don't poll this, but return a reasonable value
+            0x3C2 => {
+                // Return 0x10 (bit 4 set) to indicate CGA/EGA mode
+                // Bits 5-7 clear (no special conditions)
+                0x10
+            }
+            // Port 0x3D4/0x3B4 - CRTC Index Register (read returns current index)
+            0x3D4 | 0x3B4 => self.crtc_index.get(),
+            // Port 0x3D5/0x3B5 - CRTC Data Register (read returns data at current index)
+            0x3D5 | 0x3B5 => {
+                let index = self.crtc_index.get() as usize;
+                if index < self.crtc_data.len() {
+                    self.crtc_data[index].get()
+                } else {
+                    0xFF
+                }
+            }
             _ => 0xFF, // Default for unimplemented ports
         };
 
@@ -767,6 +800,17 @@ impl PcBus {
                 // Bit 1: A20 gate control
                 let a20_enabled = (val & 0x02) != 0;
                 self.xms.set_a20_enabled(a20_enabled);
+            }
+            // Port 0x3D4/0x3B4 - CRTC Index Register (selects which CRTC register)
+            0x3D4 | 0x3B4 => {
+                self.crtc_index.set(val);
+            }
+            // Port 0x3D5/0x3B5 - CRTC Data Register (writes to selected register)
+            0x3D5 | 0x3B5 => {
+                let index = self.crtc_index.get() as usize;
+                if index < self.crtc_data.len() {
+                    self.crtc_data[index].set(val);
+                }
             }
             _ => {} // Ignore writes to unimplemented ports
         }
@@ -1042,5 +1086,41 @@ mod tests {
         // Advance past retrace in the new frame
         bus.update_vga_status(5000);
         assert_eq!(bus.io_read(0x03DA), 0x00); // Back to display
+    }
+
+    #[test]
+    fn test_crtc_registers() {
+        let mut bus = PcBus::new();
+
+        // Test CGA CRTC ports (0x3D4/0x3D5)
+        // Write index
+        bus.io_write(0x3D4, 0x0E); // Cursor Location High register
+        assert_eq!(bus.io_read(0x3D4), 0x0E); // Read back index
+
+        // Write data
+        bus.io_write(0x3D5, 0x12);
+        assert_eq!(bus.io_read(0x3D5), 0x12); // Read back data
+
+        // Write different index and data
+        bus.io_write(0x3D4, 0x0F); // Cursor Location Low register
+        bus.io_write(0x3D5, 0x34);
+        assert_eq!(bus.io_read(0x3D5), 0x34);
+
+        // Verify previous register is unchanged
+        bus.io_write(0x3D4, 0x0E);
+        assert_eq!(bus.io_read(0x3D5), 0x12); // Still has old value
+
+        // Test MDA CRTC ports (0x3B4/0x3B5) - should work identically
+        bus.io_write(0x3B4, 0x0A); // Cursor Start register
+        bus.io_write(0x3B5, 0x56);
+        assert_eq!(bus.io_read(0x3B5), 0x56);
+    }
+
+    #[test]
+    fn test_input_status_register_0() {
+        let bus = PcBus::new();
+
+        // Port 0x3C2 should return 0x10 (bit 4 set for CGA/EGA mode)
+        assert_eq!(bus.io_read(0x3C2), 0x10);
     }
 }
