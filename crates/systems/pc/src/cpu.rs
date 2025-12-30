@@ -37,6 +37,9 @@ const INT33H_VECTOR_SEGMENT: u32 = 0xCE;
 /// DOS error code: invalid file handle
 const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
 
+/// BIOS Data Area: Hard drive count at 0x0040:0x0075
+const BDA_HARD_DRIVE_COUNT: u32 = 0x475;
+
 /// PC CPU wrapper
 pub struct PcCpu {
     cpu: Cpu8086<PcBus>,
@@ -2250,8 +2253,30 @@ impl PcCpu {
             self.cpu.cx = ((ch as u32) << 8) | (cl as u32);
 
             // DH = maximum head number (0-based)
-            // DL = number of drives
-            self.cpu.dx = (((heads - 1) as u32) << 8) | 0x01;
+            // DL = number of drives of this type
+            let num_drives = if drive < 0x80 {
+                // Floppy drives: count floppy A and floppy B
+                let mut count = 0u8;
+                if self.cpu.memory.has_floppy(0x00) {
+                    count += 1;
+                }
+                if self.cpu.memory.has_floppy(0x01) {
+                    count += 1;
+                }
+                count
+            } else {
+                // Hard drives: read from BIOS Data Area at 0x0040:0x0075
+                // If BDA is not initialized (0), count directly
+                let bda_count = self.cpu.memory.read(BDA_HARD_DRIVE_COUNT);
+                if bda_count > 0 {
+                    bda_count
+                } else if self.cpu.memory.has_hard_drive() {
+                    1u8
+                } else {
+                    0u8
+                }
+            };
+            self.cpu.dx = (((heads - 1) as u32) << 8) | (num_drives as u32);
 
             // ES:DI = pointer to disk parameter table (DPT) in BIOS ROM
             // The DPT is located at F000:0250 (see bios.rs DISK_PARAMETER_TABLE_OFFSET)
@@ -4991,6 +5016,73 @@ mod tests {
 
         let dh = (cpu.cpu.dx >> 8) & 0xFF;
         assert_eq!(dh, 3); // Max head (0-based, so 4 heads = 0-3)
+
+        // Check DL = number of hard drives (should be 1)
+        let dl = cpu.cpu.dx & 0xFF;
+        assert_eq!(dl, 1); // 1 hard drive installed
+    }
+
+    #[test]
+    fn test_int13h_get_drive_params_returns_correct_drive_count() {
+        // Test that INT 13h AH=08h returns correct drive count in DL
+        let mut bus = PcBus::new();
+
+        // Mount a hard drive
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]);
+
+        // Manually set the hard drive count in BDA
+        // The system should read this value
+        bus.write(BDA_HARD_DRIVE_COUNT, 1); // 1 hard drive
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params), DL=80h (hard drive)
+        cpu.cpu.ax = 0x0800;
+        cpu.cpu.dx = 0x0080;
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Check that DL contains the number of hard drives
+        let dl = cpu.cpu.dx & 0xFF;
+        assert_eq!(dl, 1, "DL should contain number of hard drives (1)");
+
+        // Test with floppy drives
+        let mut bus2 = PcBus::new();
+        bus2.mount_floppy_a(vec![0u8; 1474560]); // Mount floppy A
+        let mut cpu2 = PcCpu::new(bus2);
+
+        // Move CPU to RAM
+        cpu2.cpu.cs = 0x0000;
+        cpu2.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr2 = 0x1000;
+        cpu2.cpu.memory.write(addr2, 0xCD); // INT
+        cpu2.cpu.memory.write(addr2 + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params), DL=00h (floppy A)
+        cpu2.cpu.ax = 0x0800;
+        cpu2.cpu.dx = 0x0000;
+
+        // Execute INT 13h
+        cpu2.step();
+
+        // Check that DL contains the number of floppy drives (should be 1)
+        let dl_floppy = cpu2.cpu.dx & 0xFF;
+        assert_eq!(
+            dl_floppy, 1,
+            "DL should contain number of floppy drives (1)"
+        );
     }
 
     #[test]
