@@ -37,6 +37,9 @@ const INT33H_VECTOR_SEGMENT: u32 = 0xCE;
 /// DOS error code: invalid file handle
 const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
 
+/// BIOS Data Area: Hard drive count at 0x0040:0x0075
+const BDA_HARD_DRIVE_COUNT: u32 = 0x475;
+
 /// PC CPU wrapper
 pub struct PcCpu {
     cpu: Cpu8086<PcBus>,
@@ -2264,7 +2267,7 @@ impl PcCpu {
             } else {
                 // Hard drives: read from BIOS Data Area at 0x0040:0x0075
                 // If BDA is not initialized (0), count directly
-                let bda_count = self.cpu.memory.read(0x475);
+                let bda_count = self.cpu.memory.read(BDA_HARD_DRIVE_COUNT);
                 if bda_count > 0 {
                     bda_count
                 } else if self.cpu.memory.has_hard_drive() {
@@ -5029,7 +5032,7 @@ mod tests {
 
         // Manually set the hard drive count in BDA
         // The system should read this value
-        bus.write(0x475, 1); // 1 hard drive
+        bus.write(BDA_HARD_DRIVE_COUNT, 1); // 1 hard drive
 
         let mut cpu = PcCpu::new(bus);
 
@@ -5063,8 +5066,9 @@ mod tests {
         cpu2.cpu.ip = 0x1000;
 
         // Setup: Write INT 13h instruction
-        cpu2.cpu.memory.write(addr, 0xCD); // INT
-        cpu2.cpu.memory.write(addr + 1, 0x13); // 13h
+        let addr2 = 0x1000;
+        cpu2.cpu.memory.write(addr2, 0xCD); // INT
+        cpu2.cpu.memory.write(addr2 + 1, 0x13); // 13h
 
         // Setup registers for AH=08h (get drive params), DL=00h (floppy A)
         cpu2.cpu.ax = 0x0800;
