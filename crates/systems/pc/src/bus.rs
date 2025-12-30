@@ -15,6 +15,7 @@ use crate::mouse::Mouse;
 use crate::pit::Pit;
 use crate::xms::XmsDriver;
 use emu_core::cpu_8086::Memory8086;
+use std::cell::Cell;
 
 /// Video adapter type for equipment configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,8 @@ pub enum VideoAdapterType {
 pub struct PcBus {
     /// Main RAM (640KB)
     ram: Vec<u8>,
+    /// Extended RAM (above 1MB) - for systems with >640KB total memory
+    extended_ram: Vec<u8>,
     /// Video RAM (128KB)
     vram: Vec<u8>,
     /// ROM area (256KB) - includes BIOS
@@ -67,6 +70,14 @@ pub struct PcBus {
     pub dpmi: DpmiDriver,
     /// Video adapter type for equipment configuration
     video_adapter_type: VideoAdapterType,
+    /// Keyboard controller command register (for A20 gate control)
+    kb_controller_command: u8,
+    /// Keyboard controller output port (bit 1 = A20 gate)
+    kb_controller_output_port: u8,
+    /// Keyboard controller input buffer full flag (Cell for interior mutability)
+    kb_input_buffer_full: Cell<bool>,
+    /// Keyboard controller last write was command (true) or data (false)
+    kb_last_was_command: Cell<bool>,
 }
 
 impl PcBus {
@@ -90,6 +101,7 @@ impl PcBus {
         // Extended memory is any memory beyond 640KB
         // Real PCs have extended memory starting at 1MB, but we calculate it from the total
         let extended_kb = kb.saturating_sub(640);
+        let extended_ram_size = (extended_kb as usize) * 1024;
 
         let mut pit = Pit::new();
         pit.reset(); // Initialize with default system timer
@@ -105,8 +117,9 @@ impl PcBus {
 
         let mut bus = Self {
             ram: vec![0; ram_size],
-            vram: vec![0; 0x20000], // 128KB
-            rom: vec![0; 0x40000],  // 256KB
+            extended_ram: vec![0xFF; extended_ram_size], // Initialize with 0xFF to distinguish from low RAM
+            vram: vec![0; 0x20000],                      // 128KB
+            rom: vec![0; 0x40000],                       // 256KB
             executable: None,
             keyboard: Keyboard::new(),
             floppy_a: None,
@@ -121,6 +134,10 @@ impl PcBus {
             xms,
             dpmi,
             video_adapter_type: VideoAdapterType::Cga, // Default to CGA
+            kb_controller_command: 0,
+            kb_controller_output_port: 0x02, // A20 enabled by default (bit 1 set)
+            kb_input_buffer_full: Cell::new(false), // Input buffer starts empty
+            kb_last_was_command: Cell::new(false), // No command yet
         };
 
         // Initialize Interrupt Vector Table (IVT) in low RAM
@@ -508,6 +525,74 @@ impl PcBus {
                 }
                 value
             }
+            // Port 0x60 - Keyboard controller data port
+            0x60 => {
+                // When command is 0xD0 (Read Output Port), return output port value
+                if self.kb_controller_command == 0xD0 {
+                    use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                        eprintln!(
+                            "KB controller read output port: 0x{:02X}",
+                            self.kb_controller_output_port
+                        );
+                    }
+                    self.kb_controller_output_port
+                } else {
+                    // Normal keyboard data - return last scancode or 0
+                    self.keyboard.peek_scancode()
+                }
+            }
+            // Port 0x64 - Keyboard controller status port
+            0x64 => {
+                // Bit 0: Output buffer full (0 = empty, 1 = full)
+                // Bit 1: Input buffer full (0 = empty, 1 = full)
+                // Bit 2: System flag (0 = POST, 1 = warm boot)
+                // Bit 3: Command/Data (0 = data last written to 60h, 1 = command to 64h)
+                // Bit 4: Keyboard unlocked (1 = keyboard enabled)
+                // Bit 5: Transmit timeout
+                // Bit 6: Receive timeout
+                // Bit 7: Parity error
+                // Return system flag set (warm boot) + keyboard enabled + input buffer status
+                let mut status = 0x14; // Bits 2 (warm boot) and 4 (enabled) set
+                if self.kb_input_buffer_full.get() {
+                    status |= 0x02; // Set bit 1 if input buffer full
+                }
+                if self.kb_last_was_command.get() {
+                    status |= 0x08; // Set bit 3 if last write was command
+                }
+
+                // Debug: Log status reads during HIMEM execution
+                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
+                    eprintln!(
+                        "KB status read: 0x{:02X} (input_buffer_full={}, last_was_cmd={})",
+                        status,
+                        self.kb_input_buffer_full.get(),
+                        self.kb_last_was_command.get()
+                    );
+                }
+
+                // Simulate controller processing: clear buffer after one status read
+                // This allows software to see buffer full briefly after write
+                if self.kb_input_buffer_full.get() {
+                    self.kb_input_buffer_full.set(false);
+                }
+
+                status
+            }
+            // Port 0x92 - System Control Port A (PS/2)
+            // Bit 0: Alternate hot reset (0 = normal, 1 = reset)
+            // Bit 1: A20 gate (0 = disabled, 1 = enabled)
+            // Bits 2-3: Reserved
+            // Bits 4-7: Manufacturer specific
+            0x92 => {
+                // Return current A20 state from XMS driver
+                if self.xms.is_a20_enabled() {
+                    0x02
+                } else {
+                    0x00
+                }
+            }
             _ => 0xFF, // Default for unimplemented ports
         };
 
@@ -545,6 +630,95 @@ impl PcBus {
                 // Bit 1: speaker data (directly drives speaker)
                 // We'll use this in combination with PIT channel 2
             }
+            // Port 0x60 - Keyboard controller data port
+            0x60 => {
+                // Log data writes for debugging
+                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                    eprintln!(
+                        "KB controller data write: 0x{:02X} (command was 0x{:02X})",
+                        val, self.kb_controller_command
+                    );
+                }
+
+                self.kb_last_was_command.set(false); // Data write to port 60h
+                self.kb_input_buffer_full.set(true); // Buffer becomes full when data written
+
+                // When command is 0xD1 (Write Output Port), update output port
+                if self.kb_controller_command == 0xD1 {
+                    self.kb_controller_output_port = val;
+                    // Bit 1 controls A20 gate
+                    let a20_enabled = (val & 0x02) != 0;
+                    self.xms.set_a20_enabled(a20_enabled);
+                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                        eprintln!(
+                            "A20 gate set to: {}",
+                            if a20_enabled { "enabled" } else { "disabled" }
+                        );
+                    }
+                    self.kb_controller_command = 0; // Clear command
+                }
+            }
+            // Port 0x64 - Keyboard controller command port
+            0x64 => {
+                // Store command for next data port access
+                self.kb_controller_command = val;
+                self.kb_input_buffer_full.set(true); // Input buffer now full
+                self.kb_last_was_command.set(true); // Command write to port 64h
+
+                // Log keyboard controller commands for debugging HIMEM.SYS
+                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+                    eprintln!("KB controller command: 0x{:02X}", val);
+                }
+
+                // Handle immediate commands that don't need data port access
+                match val {
+                    0xFF => {
+                        // Reset keyboard controller
+                        // Preserve A20 state during reset (don't force it to a specific value)
+                        // Only reset the command register
+                        self.kb_controller_command = 0;
+                        self.kb_input_buffer_full.set(false); // Reset clears buffer
+                        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug)
+                        {
+                            let a20_state = if self.xms.is_a20_enabled() {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            };
+                            eprintln!("KB controller reset - A20 state preserved ({})", a20_state);
+                        }
+                    }
+                    0xD0 => {
+                        // Read Output Port - next read from 0x60 returns output port
+                        // Command stored, will be handled on port 0x60 read
+                        // Input buffer clears immediately after accepting command
+                        self.kb_input_buffer_full.set(false);
+                    }
+                    0xD1 => {
+                        // Write Output Port - next write to 0x60 sets output port
+                        // Command stored, will be handled on port 0x60 write
+                        // Input buffer clears immediately (real hardware clears in microseconds)
+                        self.kb_input_buffer_full.set(false);
+                    }
+                    _ => {
+                        // Other commands stored but mostly ignored
+                        self.kb_input_buffer_full.set(false);
+                    }
+                }
+            }
+            // Port 0x92 - System Control Port A (PS/2)
+            // HIMEM.SYS writes to this port to enable/disable A20
+            0x92 => {
+                // Bit 0: Alternate hot reset
+                if val & 0x01 != 0 {
+                    // Reset request - ignore in emulator
+                }
+                // Bit 1: A20 gate control
+                let a20_enabled = (val & 0x02) != 0;
+                self.xms.set_a20_enabled(a20_enabled);
+            }
             _ => {} // Ignore writes to unimplemented ports
         }
     }
@@ -558,10 +732,19 @@ impl Default for PcBus {
 
 impl Memory8086 for PcBus {
     fn read(&self, addr: u32) -> u8 {
-        match addr {
+        // Apply A20 gate masking if A20 is disabled
+        // When A20 is disabled, bit 20 of address is forced to 0
+        // This causes addresses 0x100000-0x10FFFF to wrap to 0x000000-0x00FFFF
+        let effective_addr = if !self.xms.is_a20_enabled() {
+            addr & !0x100000 // Mask off bit 20 when A20 disabled
+        } else {
+            addr
+        };
+
+        match effective_addr {
             // Conventional memory (640KB)
             0x00000..=0x9FFFF => {
-                let offset = addr as usize;
+                let offset = effective_addr as usize;
                 if offset < self.ram.len() {
                     self.ram[offset]
                 } else {
@@ -570,7 +753,7 @@ impl Memory8086 for PcBus {
             }
             // Video memory (128KB)
             0xA0000..=0xBFFFF => {
-                let offset = (addr - 0xA0000) as usize;
+                let offset = (effective_addr - 0xA0000) as usize;
                 if offset < self.vram.len() {
                     self.vram[offset]
                 } else {
@@ -579,26 +762,39 @@ impl Memory8086 for PcBus {
             }
             // ROM area (256KB) - includes BIOS
             0xC0000..=0xFFFFF => {
-                let offset = (addr - 0xC0000) as usize;
+                let offset = (effective_addr - 0xC0000) as usize;
                 if offset < self.rom.len() {
                     self.rom[offset]
                 } else {
                     0xFF
                 }
             }
-            // Wrap around for addresses beyond 1MB (8086 behavior)
-            _ => {
-                let wrapped = addr & 0xFFFFF;
-                self.read(wrapped)
+            // Extended memory (starts at 1MB = 0x100000)
+            0x100000..=0xFFFFFFFF => {
+                let offset = (effective_addr - 0x100000) as usize;
+                if offset < self.extended_ram.len() {
+                    self.extended_ram[offset]
+                } else {
+                    // Beyond allocated extended memory, wrap to low memory
+                    let wrapped = effective_addr & 0xFFFFF;
+                    self.read(wrapped)
+                }
             }
         }
     }
 
     fn write(&mut self, addr: u32, val: u8) {
-        match addr {
+        // Apply A20 gate masking if A20 is disabled
+        let effective_addr = if !self.xms.is_a20_enabled() {
+            addr & !0x100000 // Mask off bit 20 when A20 disabled
+        } else {
+            addr
+        };
+
+        match effective_addr {
             // Conventional memory (640KB) - writable
             0x00000..=0x9FFFF => {
-                let offset = addr as usize;
+                let offset = effective_addr as usize;
                 if offset < self.ram.len() {
                     self.ram[offset] = val;
                 } else {
@@ -616,7 +812,7 @@ impl Memory8086 for PcBus {
             }
             // Video memory (128KB) - writable
             0xA0000..=0xBFFFF => {
-                let offset = (addr - 0xA0000) as usize;
+                let offset = (effective_addr - 0xA0000) as usize;
                 if offset < self.vram.len() {
                     self.vram[offset] = val;
                 }
@@ -625,10 +821,16 @@ impl Memory8086 for PcBus {
             0xC0000..=0xFFFFF => {
                 // ROM writes are ignored
             }
-            // Wrap around for addresses beyond 1MB
-            _ => {
-                let wrapped = addr & 0xFFFFF;
-                self.write(wrapped, val);
+            // Extended memory (starts at 1MB = 0x100000)
+            0x100000..=0xFFFFFFFF => {
+                let offset = (effective_addr - 0x100000) as usize;
+                if offset < self.extended_ram.len() {
+                    self.extended_ram[offset] = val;
+                } else {
+                    // Beyond allocated extended memory, wrap to low memory
+                    let wrapped = effective_addr & 0xFFFFF;
+                    self.write(wrapped, val);
+                }
             }
         }
     }
