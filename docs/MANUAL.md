@@ -600,14 +600,36 @@ The emulator supports the following cartridge banking schemes:
 - Save states (F5/F6)
 
 **Known Limitations**:
-- **Graphics**: Modes 2-7 not implemented
+- **Graphics**: 
+  - Modes 2-7 not implemented (only Mode 0 and Mode 1 supported)
+  - No priority bit handling for backgrounds and sprites
+  - No sprite-per-scanline limits (hardware has 32 sprite/34 8x8 tile limit)
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
+  - No sub-screen support
   - Only 32x32 tilemap size (other sizes not implemented)
-- **Audio**: APU not implemented - silent gameplay
-- **Cartridge**: Only basic LoROM mapping - no HiROM, ExHiROM, or enhancement chips (SuperFX, DSP, etc.)
-- **Timing**: Frame-based - not cycle-accurate
-- **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio).
+  - BG3 priority toggle (Mode 1, $2105 bit 3) not implemented
+- **Audio**: SPC700 APU not implemented - silent gameplay
+- **Cartridge**: 
+  - Only basic LoROM mapping - no HiROM, ExHiROM, or special chips
+  - No enhancement chips: SuperFX, SA1, DSP-1/2/3/4, S-DD1, Cx4, etc.
+  - Games requiring these chips will not work
+- **Timing**: 
+  - Frame-based rendering - not cycle-accurate
+  - NTSC timing only (no PAL support)
+  - No mid-scanline effects
+  - VRAM access not restricted (hardware only allows during VBlank/force blank)
+- **Input**:
+  - Standard controllers only (no mouse, multitap, or special peripherals)
+  - No auto-joypad read ($4200 bit 0) - manual serial read only
+- **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio). Games requiring enhancement chips or advanced PPU features will not work.
+
+**Recommended Test Games**:
+- ✅ Super Mario World (works - Mode 1, sprites, scrolling)
+- ❌ F-Zero (requires Mode 7)
+- ⚠️ Donkey Kong Country (needs better priority handling for full graphics)
+- ❌ Super Mario RPG (requires SA1 enhancement chip)
+- ❌ Star Fox (requires SuperFX chip)
 
 ### N64 (Nintendo 64)
 
