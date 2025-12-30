@@ -928,10 +928,16 @@ impl CliArgs {
         eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
         eprintln!();
         eprintln!("Examples:");
-        eprintln!("  hemu game.nes                                  # Load NES ROM");
+        eprintln!("  hemu game.nes                                  # Load NES ROM (auto-detect)");
+        eprintln!(
+            "  hemu test.com                                  # Load DOS COM file (auto-detect)"
+        );
+        eprintln!("  hemu --system pc test.bin                      # Load binary to PC FloppyB");
+        eprintln!(
+            "  hemu --system nes game.bin                     # Load binary as NES cartridge"
+        );
         eprintln!("  hemu project.hemu                              # Load project file");
         eprintln!("  hemu --system pc                               # Start clean PC system");
-        eprintln!("  hemu --system nes                              # Start clean NES system");
         eprintln!("  hemu --log-cpu debug game.nes                  # Load with CPU debug logging");
         eprintln!(
             "  hemu --log-level info game.nes                 # Load with global info logging"
@@ -1166,31 +1172,209 @@ fn main() {
                 sys = EmulatorSystem::NES(Box::default());
                 status_message = "Clean NES system started".to_string();
                 println!("Started clean NES system");
+
+                // If a file is provided with --system nes, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::NES(nes_sys) = &mut sys {
+                                    if let Err(e) = nes_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load NES ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "NES ROM loaded".to_string();
+                                        println!("Loaded NES ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             "gb" | "gameboy" => {
                 sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
                 status_message = "Clean Game Boy system started".to_string();
                 println!("Started clean Game Boy system");
+
+                // If a file is provided with --system gb, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::GameBoy(gb_sys) = &mut sys {
+                                    if let Err(e) = gb_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load Game Boy ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "Game Boy ROM loaded".to_string();
+                                        println!("Loaded Game Boy ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             "atari2600" | "atari" => {
                 sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
                 status_message = "Clean Atari 2600 system started".to_string();
                 println!("Started clean Atari 2600 system");
+
+                // If a file is provided with --system atari2600, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::Atari2600(atari_sys) = &mut sys {
+                                    if let Err(e) = atari_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "Atari 2600 ROM loaded".to_string();
+                                        println!("Loaded Atari 2600 ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             "pc" => {
                 sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
                 status_message = "Clean PC system started".to_string();
                 println!("Started clean PC system");
+
+                // If a file is provided with --system pc, mount it to FloppyB
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                                    if let Err(e) = pc_sys.mount("FloppyB", &data) {
+                                        eprintln!("Failed to mount file to FloppyB: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("FloppyB".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = format!("File loaded to FloppyB: {}", p);
+                                        println!("Mounted file to FloppyB: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             "snes" => {
                 sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
                 status_message = "Clean SNES system started".to_string();
                 println!("Started clean SNES system");
+
+                // If a file is provided with --system snes, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::SNES(snes_sys) = &mut sys {
+                                    if let Err(e) = snes_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load SNES ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "SNES ROM loaded".to_string();
+                                        println!("Loaded SNES ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             "n64" => {
                 sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
                 status_message = "Clean N64 system started".to_string();
                 println!("Started clean N64 system");
+
+                // If a file is provided with --system n64, load it directly
+                if let Some(ref p) = rom_path {
+                    if !p.to_lowercase().ends_with(".hemu") {
+                        match std::fs::read(p) {
+                            Ok(data) => {
+                                rom_hash = Some(GameSaves::rom_hash(&data));
+                                if let EmulatorSystem::N64(n64_sys) = &mut sys {
+                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load N64 ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "N64 ROM loaded".to_string();
+                                        println!("Loaded N64 ROM: {}", p);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to read file: {}", e);
+                            }
+                        }
+                    }
+                }
             }
             _ => {
                 eprintln!("Error: Unknown system '{}'", system_name);
@@ -1205,8 +1389,11 @@ fn main() {
 
     // Try to load ROM/project file if path is available
     // Check if it's a .hemu project file first (before reading as ROM)
+    // Skip if already loaded via --system
     if let Some(p) = &rom_path {
-        if p.to_lowercase().ends_with(".hemu") {
+        if rom_loaded {
+            // Already loaded via --system, skip auto-detection
+        } else if p.to_lowercase().ends_with(".hemu") {
             println!("Detected .hemu project file: {}", p);
             match HemuProject::load(p) {
                 Ok(project) => {
