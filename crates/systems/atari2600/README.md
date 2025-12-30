@@ -171,12 +171,15 @@ HMxx registers store signed 4-bit values for fine-tuning position after RESP. Th
 - Clears motion values when HMCLR (0x2B) is written
 
 ```rust
-// Apply horizontal motion (HMOVE at 0x2A)
-self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
-self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
-self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
-self.missile1_x = self.apply_motion(self.missile1_x, self.hmm1);
-self.ball_x = self.apply_motion(self.ball_x, self.hmbl);
+// From TIA implementation (src/tia.rs)
+// Apply horizontal motion when HMOVE (0x2A) is written
+0x2A => {
+    self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
+    self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
+    self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
+    self.missile1_x = self.apply_motion(self.missile1_x, self.hmm1);
+    self.ball_x = self.apply_motion(self.ball_x, self.hmbl);
+}
 
 // Helper function in TIA implementation
 fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
@@ -246,7 +249,7 @@ Writing to TIM1T, TIM8T, TIM64T, T1024T sets timer AND changes interval. Interva
 TIMINT flag auto-clears on read - critical for synchronization loops:
 
 ```rust
-// From TIA implementation - reading TIMINT clears the flag
+// From RIOT implementation (src/riot.rs) - reading TIMINT clears the flag
 0x0285 => {
     let val = if self.timer_underflow.get() { 0x80 } else { 0x00 };
     self.timer_underflow.set(false); // Clear on read
@@ -349,7 +352,7 @@ These features are not yet implemented but would improve game compatibility:
 
 ❌ **Not Implemented**
 
-NUSIZ registers (0x04, 0x05) control sprite width and duplication but are currently ignored:
+NUSIZ registers (0x04, 0x05) control sprite width and duplication but are currently not implemented:
 - **Size modes**: 1x (8 pixels), 2x (16 pixels), 4x (32 pixels)
 - **Duplication modes**: None, Close (16px apart), Medium (32px), Wide (64px)  
 - **Missile sizes**: 1px, 2px, 4px, 8px widths
