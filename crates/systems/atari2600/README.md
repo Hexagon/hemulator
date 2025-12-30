@@ -141,16 +141,289 @@ atari.mount("Cartridge", &rom_data)?;
 let frame = atari.step_frame()?;
 ```
 
+## Implementation Details
+
+### TIA Edge Cases and Special Behaviors
+
+This section documents important implementation details and edge cases in the TIA emulation.
+
+#### Horizontal Positioning (RESPx/RESMx/RESBL)
+
+✅ **Correctly Implemented**
+
+Horizontal position is set by **strobing** registers at a specific time, not by writing a value. When RESP0/RESP1/RESM0/RESM1/RESBL is written, the position is set based on the current beam position.
+
+```rust
+// Position is set based on current beam position when register is written
+0x10 => self.player0_x = self.current_visible_x(),
+0x11 => self.player1_x = self.current_visible_x(),
+```
+
+This is the correct "racing the beam" technique used by Atari 2600 games.
+
+#### Horizontal Motion (HMxx Registers)
+
+✅ **Fully Implemented**
+
+HMxx registers store signed 4-bit values for fine-tuning position after RESP. The implementation:
+- Stores HMxx values when written to registers 0x20-0x24
+- Applies motion when HMOVE (0x2A) is triggered
+- Clears motion values when HMCLR (0x2B) is written
+
+```rust
+// From TIA implementation (src/tia.rs)
+// Apply horizontal motion when HMOVE (0x2A) is written
+0x2A => {
+    self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
+    self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
+    self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
+    self.missile1_x = self.apply_motion(self.missile1_x, self.hmm1);
+    self.ball_x = self.apply_motion(self.ball_x, self.hmbl);
+}
+
+// Helper function in TIA implementation
+fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
+    let p = pos as i16;
+    let m = motion as i16;
+    (p + m).clamp(0, 159) as u8
+}
+```
+
+#### Playfield Bit Ordering
+
+✅ **Correctly Implemented**
+
+Playfield registers have unusual bit ordering - PF0 is reversed!
+- PF0 bits are reversed: bit 4 is leftmost, bit 7 is rightmost
+- PF1 and PF2 use normal bit ordering
+
+#### Playfield Reflection vs. Repeat Mode
+
+✅ **Correctly Implemented**
+
+CTRLPF bit 0 controls whether right half mirrors or repeats left half:
+- **Reflection mode** (bit 0 = 1): Right half is mirror of left (bit reversed)
+- **Repeat mode** (bit 0 = 0): Right half is exact copy of left
+
+#### Playfield Priority Mode
+
+✅ **Correctly Implemented**
+
+CTRLPF bit 2 changes rendering order:
+- **Default priority**: Players → Missiles → Ball → Playfield → Background
+- **Playfield priority**: Playfield/Ball → Players → Missiles → Background
+
+#### WSYNC (Wait for Horizontal Sync)
+
+✅ **Correctly Implemented**
+
+WSYNC must halt the CPU until the **current scanline completes**, not the next scanline. The implementation correctly waits for remaining cycles in current scanline:
+
+```rust
+if bus.take_wsync_request() {
+    let extra = bus.tia.cpu_cycles_until_scanline_end();
+    bus.clock(extra);
+}
+```
+
+This is critical for games that use racing the beam techniques.
+
+#### Color Clock Precision
+
+✅ **Correctly Implemented**
+
+Each pixel is 4 color clocks wide, not 1. Playfield bits control 4-pixel blocks. Tests validate correct 4-pixel scaling.
+
+### RIOT Edge Cases and Special Behaviors
+
+#### Timer Interval Switching
+
+✅ **Correctly Implemented**
+
+Writing to TIM1T, TIM8T, TIM64T, T1024T sets timer AND changes interval. Intervals: 1, 8, 64, or 1024 CPU cycles per decrement.
+
+#### Timer Underflow Flag (TIMINT)
+
+✅ **Correctly Implemented**
+
+TIMINT flag auto-clears on read - critical for synchronization loops:
+
+```rust
+// From RIOT implementation (src/riot.rs) - reading TIMINT clears the flag
+0x0285 => {
+    let val = if self.timer_underflow.get() { 0x80 } else { 0x00 };
+    self.timer_underflow.set(false); // Clear on read
+    val | (self.timer & 0x7F)
+}
+```
+
+#### Timer Continues After Zero
+
+✅ **Correctly Implemented**
+
+After reaching 0, timer continues decrementing at 1 cycle/decrement (ignoring interval), wrapping to 0xFF.
+
+#### RAM Mirroring
+
+✅ **Correctly Implemented**
+
+128 bytes of RAM are mirrored multiple times in address space:
+- RAM accessible at $80-$FF, $00-$7F, $100-$17F
+- Mirroring handled by address masking
+
+#### Console Switches (SWCHB)
+
+✅ **Correctly Implemented**
+
+SWCHB uses active-low logic:
+- Reset, Select: 0 = pressed
+- Color/BW: 0 = BW, 1 = Color
+- Difficulty switches: 0 = A/Pro, 1 = B/Amateur
+
+### Input Handling
+
+#### Fire Button Logic (INPT4/INPT5)
+
+✅ **Correctly Implemented**
+
+Fire buttons use active-low bit 7 - 0 = pressed, 1 = released.
+
+```rust
+pub fn set_fire_button(&mut self, player: u8, pressed: bool) {
+    let value = if pressed { 0x00 } else { 0x80 };
+    match player {
+        0 => self.inpt4 = value,
+        1 => self.inpt5 = value,
+        _ => {}
+    }
+}
+```
+
+#### Joystick Direction Logic (SWCHA)
+
+✅ **Correctly Implemented**
+
+Joystick directions use active-low - 0 = pressed, 1 = released.
+- Player 0: bits 0-3 (Up, Down, Left, Right)
+- Player 1: bits 4-7 (Up, Down, Left, Right)
+
+Tests validate active-low logic.
+
+#### Joystick Direction Conflicts
+
+✅ **Hardware-Accurate**
+
+Opposite directions pressed simultaneously (Up+Down or Left+Right) are allowed - both can be active. Hardware allows simultaneous opposite directions, though some games may have undefined behavior.
+
+### Cartridge and Banking
+
+#### Bank Switching Hotspots
+
+✅ **Correctly Implemented**
+
+Reading from specific addresses (not writing!) triggers bank switches:
+- F8 (8K): Switch at $1FF8-$1FF9
+- F6 (16K): Switch at $1FF6-$1FF9
+- F4 (32K): Switch at $1FF4-$1FFB
+- FA (12K): Switch at $1FF8-$1FFA
+
+#### Simultaneous TIA/RAM Write
+
+✅ **Correctly Implemented**
+
+Addresses $40-$7F write to BOTH TIA and RAM simultaneously on real hardware:
+
+```rust
+0x0040..=0x007F => {
+    self.tia.write((addr & 0x3F) as u8, val);
+    self.riot.write(addr, val);
+}
+```
+
 ## Known Limitations
 
 See [MANUAL.md](../../../docs/MANUAL.md#atari-2600) for user-facing limitations.
 
-**Technical Limitations**:
-- Player/missile sizing (NUSIZ) stored but not applied
-- Horizontal motion (HMxx) stored but not applied
-- Collision detection registers return 0
-- Frame-based rendering (not cycle-accurate)
-- Some exotic banking schemes not implemented (DPC, FE, 3F, E0)
+### Not Implemented Features
+
+These features are not yet implemented but would improve game compatibility:
+
+#### Player/Missile Sizing (NUSIZ)
+
+❌ **Not Implemented**
+
+NUSIZ registers (0x04, 0x05) control sprite width and duplication but are currently not implemented:
+- **Size modes**: 1x (8 pixels), 2x (16 pixels), 4x (32 pixels)
+- **Duplication modes**: None, Close (16px apart), Medium (32px), Wide (64px)  
+- **Missile sizes**: 1px, 2px, 4px, 8px widths
+- **Impact**: High - many games use sprite sizing and duplication (e.g., Space Invaders for duplicated invaders)
+
+#### Collision Detection
+
+❌ **Not Implemented**
+
+TIA has 15 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that should set bits when sprites overlap. Currently, all collision registers return 0.
+
+- **Impact**: High - affects many games (Asteroids, Breakout, Combat)
+- **Needed**: Pixel-perfect overlap tracking during rendering and CXCLR to clear registers
+
+#### Delayed Graphics Registers (VDELPx)
+
+❌ **Not Implemented**
+
+VDELP0/VDELP1 delay player graphics update by one scanline for smoother animation.
+
+- **Impact**: Medium - affects games using delayed graphics for flicker reduction
+- **Use case**: Some multi-sprite games rely on this for smooth animation
+
+#### Paddle Controllers
+
+❌ **Not Implemented**
+
+INPT0-INPT3 are used for paddle/driving controller analog input but always return 0. Paddle timing circuits not emulated.
+
+- **Impact**: High for paddle games (Breakout, Kaboom!, Warlords)
+- **Games affected**: All paddle-based games are unplayable
+
+#### Exotic Banking Schemes
+
+❌ **Not Implemented**
+
+Only standard schemes supported: 2K, 4K, F8, FA, F6, F4. Missing formats:
+- **DPC** (Pitfall II) - Display Processor Chip with additional graphics capabilities
+- **FE** (Decathlon) - Write-based bank switching
+- **3F** (Espial) - RAM-based banking with 2K banks
+- **E0** (Parker Bros) - Multiple simultaneous banks
+
+- **Impact**: Medium - affects specific commercial games
+- **Games affected**: Pitfall II, Decathlon, Espial, Parker Bros titles
+
+### Timing and Rendering
+
+#### Frame-Based Rendering
+
+⚠️ **Simplified Implementation**
+
+Implementation uses frame-based rendering rather than cycle-accurate scanline generation:
+- State is latched per-scanline after writes
+- Suitable for most games but may not handle rapid mid-scanline updates perfectly
+- Some visual effects may not render exactly like hardware
+
+#### Non-Standard Frame Timing
+
+⚠️ **May Not Work**
+
+Implementation assumes 262 scanlines per frame (NTSC standard). Some homebrew games use non-standard scanline counts (e.g., 250 or 280 lines).
+
+- **Impact**: Low - affects only exotic homebrew ROMs
+
+#### Input DDR Enforcement
+
+⚠️ **Stored But Not Enforced**
+
+SWACNT/SWBCNT Data Direction Registers are stored but not used to filter reads. Input always returns joystick state regardless of DDR.
+
+- **Impact**: Low - most games set DDR correctly
 
 ## Performance
 
@@ -160,10 +433,14 @@ See [MANUAL.md](../../../docs/MANUAL.md#atari-2600) for user-facing limitations.
 
 ## Future Improvements
 
-- Player/missile sizing and horizontal motion
-- Collision detection
-- Additional banking schemes (DPC, FE, 3F, E0)
-- Cycle-accurate TIA rendering
+Priority improvements for better game compatibility:
+
+1. **Collision Detection** - Required for many popular games (Asteroids, Breakout, Combat)
+2. **Player/Missile Sizing (NUSIZ)** - Common feature used by many games (Space Invaders)
+3. **Paddle Controller Support** - Essential for paddle games (Breakout, Kaboom!, Warlords)
+4. **Delayed Graphics (VDELPx)** - Affects multi-sprite games
+5. **Additional Banking Schemes** (DPC, FE, 3F, E0) - Needed for specific commercial games
+6. **Cycle-Accurate TIA Rendering** - Better accuracy for racing-the-beam techniques
 
 ## Contributing
 

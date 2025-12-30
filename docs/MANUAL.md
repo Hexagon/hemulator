@@ -524,11 +524,12 @@ The emulator supports the following cartridge banking schemes:
 - 160x192 resolution
 
 **Known Limitations**:
-- **Player/Missile Sizing**: NUSIZ registers stored but size/duplication modes not applied
-- **Horizontal Motion**: HMxx registers stored but fine positioning not applied
-- **Collision Detection**: Registers exist but always return 0
-- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Banking**: Most common schemes supported; some exotic formats (DPC, FE, 3F, E0) not yet implemented
+- **Player/Missile Sizing**: NUSIZ registers not implemented - sprites always render at 1x size without duplication
+- **Collision Detection**: Collision registers exist but always return 0 - games relying on collision won't work correctly
+- **Delayed Graphics**: VDELP0/VDELP1 not implemented - affects some multi-sprite animation techniques
+- **Paddle Controllers**: INPT0-INPT3 always return 0 - paddle games (Breakout, Kaboom!, Warlords) are unplayable
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but some visual effects may differ
+- **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
 
 **Controls**: The Atari 2600 joystick is mapped to the same keyboard layout as NES:
 - Arrow keys = Joystick directions

@@ -103,10 +103,9 @@
 //!
 //! ## Known Limitations
 //!
-//! 1. **Player/Missile Sizing**: NUSIZ registers are stored but not used for sizing/duplication
-//! 2. **Horizontal Motion**: HMxx registers are stored but motion is not applied
-//! 3. **Collision Detection**: Registers exist but always return 0
-//! 4. **Delayed Graphics**: Old/new graphics registers not implemented
+//! 1. **Player/Missile Sizing**: NUSIZ registers not implemented (sprites always render at 1x size)
+//! 2. **Collision Detection**: Registers exist but always return 0
+//! 3. **Delayed Graphics**: VDELP0/VDELP1 registers not implemented
 //!
 //! These limitations represent acceptable trade-offs for a functional emulator. Most games
 //! will display correctly with the current implementation.
