@@ -94,32 +94,29 @@ The new UI consists of three layers:
 - **F11** - CRT Filter
 - **F1** - Help
 
-### Legacy (Still Functional)
-- **F3** - Mount Points
-- **F7** - Load Project
-- **F8** - Save Project
-
 ## Migration from F1-F12
 
-Old shortcuts remain functional for backwards compatibility, but new shortcuts are preferred:
+The following F-key shortcuts have been replaced with new shortcuts:
 
 | Old Shortcut | New Shortcut | Action |
 |--------------|--------------|--------|
-| F1 | F1 | Help |
 | F2 | Emulation menu | Speed selector |
-| F3 | Ctrl+O or File menu | Mount points/Open ROM |
-| F4 | F4 | Screenshot |
+| F3 | Ctrl+O or File menu | Open ROM |
 | F5-F9 | Ctrl+1-5 | Save state slots 1-5 |
 | Shift+F5-F9 | Ctrl+Shift+1-5 | Load state slots 1-5 |
-| F7 | Ctrl+Shift+O | Load project |
+| F7 | Ctrl+Shift+O | Open project |
 | F8 | Ctrl+S | Save project |
-| F10 | F10 | Debug info |
-| F11 | F11 | CRT filter |
 | F12 | Ctrl+R | Reset |
+
+**Retained F-keys (for convenience):**
+- **F1** - Help
+- **F4** - Screenshot
+- **F10** - Debug info
+- **F11** - CRT filter
 
 ## Notes
 - The menu bar is always visible and rendered on top of the game display
 - The status bar is always visible and rendered at the bottom
-- Menu dropdowns appear when clicking on menu items (not yet implemented in current version)
+- Menu dropdowns appear when clicking on menu items
 - Keyboard shortcuts work immediately and don't require menu interaction
 - All overlays (help, debug, slot selector, etc.) are rendered on top of everything

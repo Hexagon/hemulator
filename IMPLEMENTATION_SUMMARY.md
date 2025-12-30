@@ -43,16 +43,24 @@ Modern, intuitive keyboard shortcuts have been added:
 | **F11** | CRT Filter |
 | **Esc** | Exit/Close |
 
-## 🔄 Backward Compatibility
+## 🔄 F-Key Changes
 
-**All original F1-F12 shortcuts remain functional!**
+**The following F-keys have been removed and replaced with new shortcuts:**
 
-- F5-F9 still save states to slots 1-5
-- Shift+F5-F9 still load states from slots 1-5
-- F12 still resets the system
-- F3, F7, F8 still work for their original functions
+- F2 (Speed selector) → Emulation menu or Ctrl+P (pause)
+- F3 (Open ROM) → Ctrl+O or File menu
+- F5-F9 (Save states) → Ctrl+1-5
+- Shift+F5-F9 (Load states) → Ctrl+Shift+1-5
+- F7 (Load project) → Ctrl+Shift+O or File menu
+- F8 (Save project) → Ctrl+S or File menu
+- F12 (Reset) → Ctrl+R or Emulation menu
 
-This provides a smooth migration path for existing users.
+**The following F-keys are retained for convenience:**
+
+- F1 (Help)
+- F4 (Screenshot)
+- F10 (Debug info)
+- F11 (CRT filter)
 
 ## 📁 Files Added/Modified
 
@@ -150,11 +158,10 @@ Since this is a GUI application, visual testing requires a display:
 
 While the core functionality is complete, these enhancements could be added:
 
-1. **Mouse Click Handling**: Menu interaction via mouse (implementation ready, just needs connection)
-2. **Menu Item States**: Enabled/disabled states, checkmarks for toggles
-3. **Submenu Indicators**: Visual arrows for nested menus
-4. **Theme Support**: Customizable colors and appearance
-5. **Menu Animations**: Smooth transitions for dropdowns
+1. **Checkmarks for Toggles**: Visual checkmarks for toggle items (enabled/disabled states already implemented)
+2. **Submenu Indicators**: Visual arrows for nested menus
+3. **Theme Support**: Customizable colors and appearance
+4. **Menu Animations**: Smooth transitions for dropdowns
 
 ## 📚 Documentation
 
@@ -168,14 +175,15 @@ Complete documentation is available in:
 ## 🎉 Success Criteria
 
 ✅ **All goals achieved:**
-- ✅ Menu bar implemented and integrated
-- ✅ Status bar implemented and integrated
-- ✅ New keyboard shortcuts working
-- ✅ Backward compatibility maintained
-- ✅ Cross-platform solution
+- ✅ Menu bar implemented and integrated with mouse click support
+- ✅ Status bar implemented and integrated with runtime stats (IP, cycles)
+- ✅ New keyboard shortcuts working (Ctrl+O, Ctrl+S, Ctrl+R, Ctrl+P, Ctrl+1-5, Ctrl+Shift+1-5)
+- ✅ F2, F3, F5-F9, F7, F8, F12 removed and replaced with new menu/keyboard shortcuts
+- ✅ F1, F4, F10, F11 retained for convenience
+- ✅ Cross-platform solution using in-app rendering
 - ✅ No additional dependencies
 - ✅ All tests passing
-- ✅ Code quality maintained
+- ✅ Code quality maintained (clippy, fmt)
 - ✅ Documentation complete
 
 ## 💡 Usage Examples
@@ -211,11 +219,11 @@ The implementation follows the project's coding standards:
 
 ## 📝 Notes for Maintainers
 
-- The menu bar and status bar are always rendered (no toggle option currently)
-- Mouse click handling for menus is implemented but not connected (needs testing)
+- The menu bar and status bar are always rendered
+- Mouse click handling for menus is fully implemented and functional
 - All keyboard shortcuts work immediately
-- F-key shortcuts still work for backward compatibility
-- The implementation is minimal and focused on the required functionality
+- F2, F3, F5-F9, F7, F8, F12 have been removed; only F1, F4, F10, F11 remain
+- The implementation is focused on providing a clean, modern menu-driven interface
 
 ---
 

@@ -180,8 +180,6 @@ About
 
 ## Future Enhancements
 
-- [ ] Mouse click handling for menu interaction (currently keyboard-only)
-- [ ] Menu item enabled/disabled states (gray out unavailable options)
 - [ ] Checkmarks for toggleable options (CRT filter, pause state)
 - [ ] Submenu indicators (arrows for nested menus)
 - [ ] Theme customization options

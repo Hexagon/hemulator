@@ -41,7 +41,9 @@ impl StatusBar {
         for y in bar_y..height {
             for x in 0..width {
                 let idx = y * width + x;
-                buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                if idx < buffer.len() {
+                    buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                }
             }
         }
 

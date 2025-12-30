@@ -279,7 +279,9 @@ impl MenuBar {
         for y in 0..MENU_BAR_HEIGHT {
             for x in 0..width {
                 let idx = y * width + x;
-                buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                if idx < buffer.len() {
+                    buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                }
             }
         }
 
@@ -329,7 +331,9 @@ impl MenuBar {
                 let x = dropdown_x + dx;
                 if x < width && y < height {
                     let idx = y * width + x;
-                    buffer[idx] = 0xFF1A1A2E; // Darker background for dropdown
+                    if idx < buffer.len() {
+                        buffer[idx] = 0xFF1A1A2E; // Darker background for dropdown
+                    }
                 }
             }
         }
