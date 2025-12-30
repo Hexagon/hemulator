@@ -815,3 +815,80 @@ fn test_dec_and_loop_pattern() {
     assert_eq!(cpu.cx, 0, "CX should be 0 after loop");
     assert_eq!(cpu.bx, 5, "Should have accumulated 5");
 }
+
+#[test]
+fn test_tight_loop_in_test_jz_pattern() {
+    // Reproduces a tight loop scenario with IN/TEST/JZ/JMP sequence
+    // This tests the specific issue where the emulator gets stuck:
+    // - IN AL, imm8 (0xE4) - reads from port, always returns 0xFF in basic implementation
+    // - TEST AL, imm8 (0xA8) - tests AL with immediate value
+    // - JZ rel8 (0x74) - jumps if zero flag is set
+    // - JMP short (0xEB) - unconditional short jump back
+    //
+    // This test demonstrates that the current implementation will indeed get stuck
+    // in an infinite loop if the I/O port always returns 0xFF, since:
+    // - IN AL, 0x60 sets AL = 0xFF
+    // - TEST AL, 0x01 performs 0xFF & 0x01 = 0x01 (non-zero, so ZF = 0)
+    // - JZ does NOT jump (because ZF = 0)
+    // - JMP unconditionally jumps back to IN
+    //
+    // This is expected behavior given the simplistic I/O implementation.
+    // In a real system, the I/O port would eventually return a value that
+    // makes the test succeed.
+
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Program that creates an infinite loop due to I/O always returning 0xFF:
+    // 0x0100: IN AL, 0x60      (0xE4 0x60) - Read from port 0x60, AL = 0xFF
+    // 0x0102: TEST AL, 0x01    (0xA8 0x01) - Test AL & 0x01, sets ZF if result == 0
+    // 0x0104: JZ +2            (0x74 0x02) - Jump to 0x0108 if ZF is set
+    // 0x0106: JMP -8           (0xEB 0xF8) - Jump back to 0x0100
+    // 0x0108: HLT              (0xF4) - Halt
+    cpu.memory.load_program(
+        0x0100,
+        &[
+            0xE4, 0x60, // IN AL, 0x60      @ 0x0100
+            0xA8, 0x01, // TEST AL, 0x01    @ 0x0102
+            0x74, 0x02, // JZ +2            @ 0x0104
+            0xEB, 0xF8, // JMP -8           @ 0x0106 (to 0x0100)
+            0xF4, // HLT              @ 0x0108
+        ],
+    );
+
+    cpu.ip = 0x0100;
+    cpu.cs = 0x0000;
+
+    let mut iterations = 0;
+    let max_iterations = 100; // Reduced to fail faster
+
+    // Execute and verify that we DO get stuck in the infinite loop
+    loop {
+        cpu.step();
+        iterations += 1;
+
+        let current_opcode = cpu.memory.read(((cpu.cs as u32) << 4) + cpu.ip);
+        if current_opcode == 0xF4 {
+            // If we reach HLT, something changed in the I/O implementation
+            panic!(
+                "Expected infinite loop but reached HLT! This means I/O behavior changed. \
+                Iterations: {}, AL: 0x{:02X}",
+                iterations,
+                cpu.ax & 0xFF
+            );
+        }
+
+        if iterations >= max_iterations {
+            // Expected: we get stuck because IN always returns 0xFF
+            // Verify AL is 0xFF and ZF is not set
+            let al = (cpu.ax & 0xFF) as u8;
+            assert_eq!(al, 0xFF, "IN AL should always return 0xFF");
+            assert_eq!(
+                cpu.ip, 0x0100,
+                "Should be stuck at the beginning of the loop"
+            );
+            // Success: we've confirmed the tight loop exists
+            return;
+        }
+    }
+}
