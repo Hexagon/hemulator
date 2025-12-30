@@ -45,8 +45,9 @@ impl std::ops::Deref for SendContext {
 #[cfg(feature = "opengl")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ShaderProgram {
-    Flat,    // Solid color triangles
-    Gouraud, // Per-vertex color interpolation
+    Flat,     // Solid color triangles
+    Gouraud,  // Per-vertex color interpolation
+    Textured, // Textured triangles
 }
 
 /// OpenGL-based RDP renderer
@@ -65,11 +66,17 @@ pub struct OpenGLRdpRenderer {
     // Shader programs
     flat_program: glow::Program,
     gouraud_program: glow::Program,
+    textured_program: glow::Program,
     current_program: ShaderProgram,
 
     // Vertex data
     vao: glow::VertexArray,
     vbo: glow::Buffer,
+
+    // Dynamic texture for CPU-sampled textures
+    dynamic_texture: glow::Texture,
+    dynamic_texture_width: u32,
+    dynamic_texture_height: u32,
 
     // Z-buffer state
     zbuffer_enabled: bool,
@@ -148,6 +155,7 @@ impl OpenGLRdpRenderer {
             // Create shader programs
             let flat_program = create_flat_program(&gl)?;
             let gouraud_program = create_gouraud_program(&gl)?;
+            let textured_program = create_textured_program(&gl)?;
 
             // Create VAO and VBO
             let vao = gl
@@ -156,6 +164,32 @@ impl OpenGLRdpRenderer {
             let vbo = gl
                 .create_buffer()
                 .map_err(|e| format!("Failed to create VBO: {}", e))?;
+
+            // Create dynamic texture for CPU-sampled textures
+            let dynamic_texture = gl
+                .create_texture()
+                .map_err(|e| format!("Failed to create dynamic texture: {}", e))?;
+            gl.bind_texture(glow::TEXTURE_2D, Some(dynamic_texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
 
             // Set viewport
             gl.viewport(0, 0, width as i32, height as i32);
@@ -173,9 +207,13 @@ impl OpenGLRdpRenderer {
                 depth_renderbuffer,
                 flat_program,
                 gouraud_program,
+                textured_program,
                 current_program: ShaderProgram::Flat,
                 vao,
                 vbo,
+                dynamic_texture,
+                dynamic_texture_width: 0,
+                dynamic_texture_height: 0,
                 zbuffer_enabled: false,
             })
         }
@@ -235,6 +273,56 @@ impl OpenGLRdpRenderer {
     /// Convert Z-buffer depth (0-65535) to OpenGL depth (0.0-1.0)
     fn zbuffer_to_depth(z: u16) -> f32 {
         z as f32 / 65535.0
+    }
+
+    /// Upload texture data from CPU-sampled texture function
+    /// This samples the texture function and uploads it to GPU
+    unsafe fn upload_dynamic_texture(
+        &mut self,
+        width: u32,
+        height: u32,
+        texture_fn: &dyn Fn(f32, f32) -> u32,
+    ) {
+        // Only recreate if size changed
+        if width != self.dynamic_texture_width || height != self.dynamic_texture_height {
+            self.dynamic_texture_width = width;
+            self.dynamic_texture_height = height;
+        }
+
+        // Sample the texture function into a buffer
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let color = texture_fn(x as f32, y as f32);
+                let idx = ((y * width + x) * 4) as usize;
+
+                // Convert ARGB to RGBA
+                let a = ((color >> 24) & 0xFF) as u8;
+                let r = ((color >> 16) & 0xFF) as u8;
+                let g = ((color >> 8) & 0xFF) as u8;
+                let b = (color & 0xFF) as u8;
+
+                pixels[idx] = r;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = b;
+                pixels[idx + 3] = a;
+            }
+        }
+
+        // Upload to GPU
+        self.gl
+            .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+        self.gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA as i32,
+            width as i32,
+            height as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            Some(&pixels),
+        );
     }
 }
 
@@ -717,47 +805,239 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
     fn draw_triangle_textured(
         &mut self,
-        _x0: i32,
-        _y0: i32,
-        _s0: f32,
-        _t0: f32,
-        _x1: i32,
-        _y1: i32,
-        _s1: f32,
-        _t1: f32,
-        _x2: i32,
-        _y2: i32,
-        _s2: f32,
-        _t2: f32,
-        _texture: &dyn Fn(f32, f32) -> u32,
-        _scissor: &ScissorBox,
+        x0: i32,
+        y0: i32,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
     ) {
-        // TODO: Implement OpenGL textured triangle rendering
-        // For now, this is a stub - textured rendering not yet supported in OpenGL backend
+        unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+
+            // Enable scissor test
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                scissor.x_min as i32,
+                (self.height - scissor.y_max) as i32,
+                (scissor.x_max - scissor.x_min) as i32,
+                (scissor.y_max - scissor.y_min) as i32,
+            );
+
+            // Determine texture size based on texture coordinates
+            // Use max coordinate as a heuristic for texture size
+            let max_s = s0.max(s1).max(s2).ceil() as u32;
+            let max_t = t0.max(t1).max(t2).ceil() as u32;
+            let tex_width = max_s.max(1);
+            let tex_height = max_t.max(1);
+
+            // Upload texture data
+            self.upload_dynamic_texture(tex_width, tex_height, texture);
+
+            // Use textured shader
+            self.gl.use_program(Some(self.textured_program));
+            self.current_program = ShaderProgram::Textured;
+
+            // Bind dynamic texture
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+            let u_texture = self
+                .gl
+                .get_uniform_location(self.textured_program, "uTexture");
+            if let Some(loc) = u_texture {
+                self.gl.uniform_1_i32(Some(&loc), 0);
+            }
+
+            // Convert to NDC and normalize texture coordinates
+            let (nx0, ny0) = self.screen_to_ndc(x0, y0);
+            let (nx1, ny1) = self.screen_to_ndc(x1, y1);
+            let (nx2, ny2) = self.screen_to_ndc(x2, y2);
+
+            // Normalize texture coordinates to [0, 1] range
+            let ns0 = s0 / tex_width as f32;
+            let nt0 = t0 / tex_height as f32;
+            let ns1 = s1 / tex_width as f32;
+            let nt1 = t1 / tex_height as f32;
+            let ns2 = s2 / tex_width as f32;
+            let nt2 = t2 / tex_height as f32;
+
+            #[rustfmt::skip]
+            let vertices: [f32; 12] = [
+                nx0, ny0, ns0, nt0,
+                nx1, ny1, ns1, nt1,
+                nx2, ny2, ns2, nt2,
+            ];
+
+            self.gl.bind_vertex_array(Some(self.vao));
+            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            self.gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&vertices),
+                glow::STREAM_DRAW,
+            );
+
+            let stride = 4 * std::mem::size_of::<f32>() as i32;
+
+            // Position attribute
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+            self.gl.enable_vertex_attrib_array(0);
+
+            // Texture coordinate attribute
+            self.gl.vertex_attrib_pointer_f32(
+                1,
+                2,
+                glow::FLOAT,
+                false,
+                stride,
+                2 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(1);
+
+            self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+            self.gl.disable(glow::SCISSOR_TEST);
+            self.read_pixels();
+        }
     }
 
     fn draw_triangle_textured_zbuffer(
         &mut self,
-        _x0: i32,
-        _y0: i32,
-        _z0: u16,
-        _s0: f32,
-        _t0: f32,
-        _x1: i32,
-        _y1: i32,
-        _z1: u16,
-        _s1: f32,
-        _t1: f32,
-        _x2: i32,
-        _y2: i32,
-        _z2: u16,
-        _s2: f32,
-        _t2: f32,
-        _texture: &dyn Fn(f32, f32) -> u32,
-        _scissor: &ScissorBox,
+        x0: i32,
+        y0: i32,
+        z0: u16,
+        s0: f32,
+        t0: f32,
+        x1: i32,
+        y1: i32,
+        z1: u16,
+        s1: f32,
+        t1: f32,
+        x2: i32,
+        y2: i32,
+        z2: u16,
+        s2: f32,
+        t2: f32,
+        texture: &dyn Fn(f32, f32) -> u32,
+        scissor: &ScissorBox,
     ) {
-        // TODO: Implement OpenGL textured triangle rendering with Z-buffer
-        // For now, this is a stub - textured rendering not yet supported in OpenGL backend
+        unsafe {
+            self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+
+            // Enable depth testing
+            if self.zbuffer_enabled {
+                self.gl.enable(glow::DEPTH_TEST);
+                self.gl.depth_func(glow::LESS);
+            }
+
+            // Enable scissor test
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                scissor.x_min as i32,
+                (self.height - scissor.y_max) as i32,
+                (scissor.x_max - scissor.x_min) as i32,
+                (scissor.y_max - scissor.y_min) as i32,
+            );
+
+            // Determine texture size based on texture coordinates
+            let max_s = s0.max(s1).max(s2).ceil() as u32;
+            let max_t = t0.max(t1).max(t2).ceil() as u32;
+            let tex_width = max_s.max(1);
+            let tex_height = max_t.max(1);
+
+            // Upload texture data
+            self.upload_dynamic_texture(tex_width, tex_height, texture);
+
+            // Use textured shader
+            self.gl.use_program(Some(self.textured_program));
+            self.current_program = ShaderProgram::Textured;
+
+            // Bind dynamic texture
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.dynamic_texture));
+            let u_texture = self
+                .gl
+                .get_uniform_location(self.textured_program, "uTexture");
+            if let Some(loc) = u_texture {
+                self.gl.uniform_1_i32(Some(&loc), 0);
+            }
+
+            // Convert to NDC, depth, and normalize texture coordinates
+            let (nx0, ny0) = self.screen_to_ndc(x0, y0);
+            let (nx1, ny1) = self.screen_to_ndc(x1, y1);
+            let (nx2, ny2) = self.screen_to_ndc(x2, y2);
+            let d0 = Self::zbuffer_to_depth(z0);
+            let d1 = Self::zbuffer_to_depth(z1);
+            let d2 = Self::zbuffer_to_depth(z2);
+
+            // Normalize texture coordinates to [0, 1] range
+            let ns0 = s0 / tex_width as f32;
+            let nt0 = t0 / tex_height as f32;
+            let ns1 = s1 / tex_width as f32;
+            let nt1 = t1 / tex_height as f32;
+            let ns2 = s2 / tex_width as f32;
+            let nt2 = t2 / tex_height as f32;
+
+            #[rustfmt::skip]
+            let vertices: [f32; 15] = [
+                nx0, ny0, ns0, nt0, d0,
+                nx1, ny1, ns1, nt1, d1,
+                nx2, ny2, ns2, nt2, d2,
+            ];
+
+            self.gl.bind_vertex_array(Some(self.vao));
+            self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            self.gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                bytemuck::cast_slice(&vertices),
+                glow::STREAM_DRAW,
+            );
+
+            let stride = 5 * std::mem::size_of::<f32>() as i32;
+
+            // Position attribute
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+            self.gl.enable_vertex_attrib_array(0);
+
+            // Texture coordinate attribute
+            self.gl.vertex_attrib_pointer_f32(
+                1,
+                2,
+                glow::FLOAT,
+                false,
+                stride,
+                2 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(1);
+
+            // Depth attribute
+            self.gl.vertex_attrib_pointer_f32(
+                2,
+                1,
+                glow::FLOAT,
+                false,
+                stride,
+                4 * std::mem::size_of::<f32>() as i32,
+            );
+            self.gl.enable_vertex_attrib_array(2);
+
+            self.gl.draw_arrays(glow::TRIANGLES, 0, 3);
+
+            self.gl.disable(glow::DEPTH_TEST);
+            self.gl.disable(glow::SCISSOR_TEST);
+            self.read_pixels();
+        }
     }
 
     fn clear_zbuffer(&mut self) {
@@ -880,6 +1160,43 @@ fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
     }
 }
 
+/// Create textured shading program
+#[cfg(feature = "opengl")]
+fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
+    unsafe {
+        let vertex_shader = compile_shader(
+            gl,
+            glow::VERTEX_SHADER,
+            include_str!("shaders/vertex_textured.glsl"),
+        )?;
+
+        let fragment_shader = compile_shader(
+            gl,
+            glow::FRAGMENT_SHADER,
+            include_str!("shaders/fragment_textured.glsl"),
+        )?;
+
+        let program = gl
+            .create_program()
+            .map_err(|e| format!("Failed to create program: {}", e))?;
+
+        gl.attach_shader(program, vertex_shader);
+        gl.attach_shader(program, fragment_shader);
+        gl.link_program(program);
+
+        if !gl.get_program_link_status(program) {
+            let log = gl.get_program_info_log(program);
+            gl.delete_program(program);
+            return Err(format!("Program linking failed: {}", log));
+        }
+
+        gl.delete_shader(vertex_shader);
+        gl.delete_shader(fragment_shader);
+
+        Ok(program)
+    }
+}
+
 /// Implement Drop to clean up OpenGL resources
 #[cfg(feature = "opengl")]
 impl Drop for OpenGLRdpRenderer {
@@ -890,8 +1207,10 @@ impl Drop for OpenGLRdpRenderer {
             self.gl.delete_renderbuffer(self.depth_renderbuffer);
             self.gl.delete_program(self.flat_program);
             self.gl.delete_program(self.gouraud_program);
+            self.gl.delete_program(self.textured_program);
             self.gl.delete_vertex_array(self.vao);
             self.gl.delete_buffer(self.vbo);
+            self.gl.delete_texture(self.dynamic_texture);
         }
     }
 }
@@ -899,6 +1218,7 @@ impl Drop for OpenGLRdpRenderer {
 #[cfg(test)]
 #[cfg(feature = "opengl")]
 mod tests {
+    #[allow(unused_imports)] // Test module for documentation purposes
     use super::*;
 
     #[test]
