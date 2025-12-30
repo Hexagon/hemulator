@@ -96,8 +96,7 @@
 //!
 //! 1. **Audio**: Audio synthesis is simplified (registers stored but not fully synthesized)
 //! 2. **Collision Detection**: Simplified implementation (registers exist but always return 0)
-//! 3. **Player/Missile Sizing**: Only default 1x size supported (NUSIZ register stored but not used)
-//! 4. **Horizontal Motion**: Motion registers are stored but not applied during rendering
+//! 3. **Player/Missile Sizing**: Only default 1x size supported (NUSIZ register not implemented)
 //!
 //! # Usage Example
 //!
