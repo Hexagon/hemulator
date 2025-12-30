@@ -11,6 +11,8 @@ pub struct StatusBar {
     pub system_name: String,
     pub paused: bool,
     pub speed: f32,
+    pub ip: Option<u32>,     // Instruction pointer
+    pub cycles: Option<u64>, // Cycle count
 }
 
 impl StatusBar {
@@ -21,6 +23,8 @@ impl StatusBar {
             system_name: String::new(),
             paused: false,
             speed: 1.0,
+            ip: None,
+            cycles: None,
         }
     }
 
@@ -74,16 +78,34 @@ impl StatusBar {
             );
         }
 
-        // Right side: FPS
-        let fps_text = format!("{:.1} FPS", self.fps);
-        let fps_width = fps_text.len() * 8;
-        let fps_x = width.saturating_sub(fps_width + 4);
+        // Right side: FPS, IP, and Cycles
+        let mut right_parts = vec![format!("{:.1} FPS", self.fps)];
+
+        if let Some(ip) = self.ip {
+            right_parts.push(format!("IP:{:04X}", ip));
+        }
+
+        if let Some(cycles) = self.cycles {
+            // Format cycles with commas for readability
+            let cycles_str = if cycles >= 1_000_000 {
+                format!("{}M", cycles / 1_000_000)
+            } else if cycles >= 1_000 {
+                format!("{}K", cycles / 1_000)
+            } else {
+                format!("{}", cycles)
+            };
+            right_parts.push(format!("Cyc:{}", cycles_str));
+        }
+
+        let right_text = right_parts.join(" | ");
+        let right_width = right_text.len() * 8;
+        let right_x = width.saturating_sub(right_width + 4);
         ui_render::draw_text(
             buffer,
             width,
             height,
-            &fps_text,
-            fps_x,
+            &right_text,
+            right_x,
             bar_y + 6,
             0xFFFFFFFF, // White text
         );

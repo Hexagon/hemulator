@@ -37,6 +37,8 @@ pub struct Sdl2Backend {
     sdl2_scancodes_released: HashSet<u32>,
     is_open: bool,
     current_filter: DisplayFilter,
+    /// Mouse button clicks this frame (x, y) coordinates
+    mouse_clicks: Vec<(i32, i32)>,
 }
 
 impl Sdl2Backend {
@@ -105,6 +107,7 @@ impl Sdl2Backend {
             sdl2_scancodes_released: HashSet::new(),
             is_open: true,
             current_filter: DisplayFilter::None,
+            mouse_clicks: Vec::new(),
         })
     }
 
@@ -285,6 +288,24 @@ impl Sdl2Backend {
     pub fn get_sdl2_scancodes_released(&self) -> &HashSet<u32> {
         &self.sdl2_scancodes_released
     }
+
+    /// Get mouse clicks this frame
+    pub fn get_mouse_clicks(&self) -> &[(i32, i32)] {
+        &self.mouse_clicks
+    }
+
+    /// Set window title
+    pub fn set_title(&mut self, title: &str) -> Result<(), Box<dyn Error>> {
+        match &mut self.render_mode {
+            RenderMode::OpenGL { window, .. } => {
+                window.set_title(title)?;
+            }
+            RenderMode::Software { canvas, .. } => {
+                canvas.window_mut().set_title(title)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl WindowBackend for Sdl2Backend {
@@ -361,12 +382,16 @@ impl WindowBackend for Sdl2Backend {
         self.key_pressed_once.clear();
         self.sdl2_scancodes_pressed.clear();
         self.sdl2_scancodes_released.clear();
+        self.mouse_clicks.clear();
 
         // Poll all events
         for event in self.event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => {
                     self.is_open = false;
+                }
+                Event::MouseButtonDown { x, y, .. } => {
+                    self.mouse_clicks.push((x, y));
                 }
                 Event::KeyDown {
                     keycode,
