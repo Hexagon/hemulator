@@ -4,15 +4,7 @@
 //! string operations, BCD arithmetic, and other special instructions
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{
-    Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_DF, FLAG_IF, FLAG_OF, FLAG_PF, FLAG_SF,
-    FLAG_ZF,
-};
-
-// Helper function for tests to calculate physical address
-fn physical_address(segment: u16, offset: u16) -> u32 {
-    ((segment as u32) << 4) + (offset as u32)
-}
+use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_CF, FLAG_DF, FLAG_IF, FLAG_ZF};
 
 #[test]
 fn test_cpu_initialization() {

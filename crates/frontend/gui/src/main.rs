@@ -204,10 +204,46 @@ impl EmulatorSystem {
                     sys.set_controller(!gb_state);
                 }
             }
-            EmulatorSystem::Atari2600(_) => {}
+            EmulatorSystem::Atari2600(sys) => sys.set_controller(port, state),
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
-            EmulatorSystem::N64(_) => {} // N64 controller support stub
+            EmulatorSystem::N64(sys) => {
+                // N64 controller mapping
+                // GUI state bits: 0=A, 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left, 7=Right
+                // Map to N64 controller with proper button mapping
+                // Note: N64 uses active-high logic (1 = pressed, bit set means button pressed)
+                let mut n64_state = emu_n64::ControllerState::default();
+
+                // Map standard buttons (A, B, Start)
+                n64_state.buttons.a = (state & 0x01) != 0; // Bit 0
+                n64_state.buttons.b = (state & 0x02) != 0; // Bit 1
+                n64_state.buttons.start = (state & 0x08) != 0; // Bit 3
+
+                // Map D-pad
+                n64_state.buttons.d_up = (state & 0x10) != 0; // Bit 4
+                n64_state.buttons.d_down = (state & 0x20) != 0; // Bit 5
+                n64_state.buttons.d_left = (state & 0x40) != 0; // Bit 6
+                n64_state.buttons.d_right = (state & 0x80) != 0; // Bit 7
+
+                // Note: Select button (bit 2) is not used on N64
+                // Z, L, R, and C-buttons would need additional key mappings
+
+                // Set controller state based on port
+                match port {
+                    0 => sys.set_controller1(n64_state),
+                    1 => sys.set_controller2(n64_state),
+                    2 => sys.set_controller3(n64_state),
+                    3 => sys.set_controller4(n64_state),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn set_controller_16(&mut self, port: usize, state: u16) {
+        match self {
+            EmulatorSystem::SNES(sys) => sys.set_controller(port, state),
+            _ => {} // Other systems use 8-bit set_controller
         }
     }
 
@@ -354,12 +390,20 @@ fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8>
         Some(6)
     } else if Some(key) == string_to_key(&mapping.right) {
         Some(7)
+    } else if Some(key) == string_to_key(&mapping.x) {
+        Some(8)
+    } else if Some(key) == string_to_key(&mapping.y) {
+        Some(9)
+    } else if Some(key) == string_to_key(&mapping.l) {
+        Some(10)
+    } else if Some(key) == string_to_key(&mapping.r) {
+        Some(11)
     } else {
         None
     }
 }
 
-/// Get controller state for a player from current keyboard state
+/// Get controller state for a player from current keyboard state (8-bit for NES/GB/Atari)
 fn get_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMapping) -> u8 {
     let keys_to_check: Vec<Key> = vec![
         string_to_key(&mapping.a),
@@ -380,6 +424,90 @@ fn get_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMappi
         if window.is_key_down(*k) {
             if let Some(bit) = key_mapping_to_button(*k, mapping) {
                 state |= 1u8 << bit;
+            }
+        }
+    }
+    state
+}
+
+/// Get SNES controller state from current keyboard state (16-bit)
+///
+/// SNES controllers have 12 buttons laid out as a 16-bit value:
+/// Bit positions: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+///
+/// This function maps the common button IDs (0-11) used by the frontend to the
+/// SNES hardware bit positions according to the official SNES controller specification.
+///
+/// Button ID mapping (from frontend):
+/// - 0: A button
+/// - 1: B button  
+/// - 2: Select
+/// - 3: Start
+/// - 4: Up (D-pad)
+/// - 5: Down (D-pad)
+/// - 6: Left (D-pad)
+/// - 7: Right (D-pad)
+/// - 8: X button
+/// - 9: Y button
+/// - 10: L shoulder
+/// - 11: R shoulder
+///
+/// SNES hardware bit positions (MSB to LSB):
+/// - Bit 15: B button
+/// - Bit 14: Y button
+/// - Bit 13: Select
+/// - Bit 12: Start
+/// - Bit 11: Up
+/// - Bit 10: Down
+/// - Bit 9: Left
+/// - Bit 8: Right
+/// - Bit 7: A button
+/// - Bit 6: X button
+/// - Bit 5: L shoulder
+/// - Bit 4: R shoulder
+/// - Bits 3-0: Unused (always 0)
+fn get_snes_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMapping) -> u16 {
+    let keys_to_check: Vec<Key> = vec![
+        string_to_key(&mapping.a),
+        string_to_key(&mapping.b),
+        string_to_key(&mapping.select),
+        string_to_key(&mapping.start),
+        string_to_key(&mapping.up),
+        string_to_key(&mapping.down),
+        string_to_key(&mapping.left),
+        string_to_key(&mapping.right),
+        string_to_key(&mapping.x),
+        string_to_key(&mapping.y),
+        string_to_key(&mapping.l),
+        string_to_key(&mapping.r),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let mut state: u16 = 0;
+    for k in keys_to_check.iter() {
+        if window.is_key_down(*k) {
+            // Map button IDs (0-11) to SNES button positions
+            // NES/common layout: A(0), B(1), Select(2), Start(3), Up(4), Down(5), Left(6), Right(7), X(8), Y(9), L(10), R(11)
+            // SNES layout: B(15), Y(14), Select(13), Start(12), Up(11), Down(10), Left(9), Right(8), A(7), X(6), L(5), R(4)
+            if let Some(button_id) = key_mapping_to_button(*k, mapping) {
+                let snes_bit = match button_id {
+                    0 => 7,  // A -> bit 7
+                    1 => 15, // B -> bit 15
+                    2 => 13, // Select -> bit 13
+                    3 => 12, // Start -> bit 12
+                    4 => 11, // Up -> bit 11
+                    5 => 10, // Down -> bit 10
+                    6 => 9,  // Left -> bit 9
+                    7 => 8,  // Right -> bit 8
+                    8 => 6,  // X -> bit 6
+                    9 => 14, // Y -> bit 14
+                    10 => 5, // L -> bit 5
+                    11 => 4, // R -> bit 4
+                    _ => continue,
+                };
+                state |= 1u16 << snes_bit;
             }
         }
     }
@@ -2714,14 +2842,21 @@ fn main() {
                     }
                 }
             } else {
-                // Controller-based systems (NES, GB, Atari, etc.)
-                // Get controller state for each player
-                let ctrl0 = get_controller_state(window.as_ref(), &settings.input.player1);
-                let ctrl1 = get_controller_state(window.as_ref(), &settings.input.player2);
-                // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
-
-                sys.set_controller(0, ctrl0);
-                sys.set_controller(1, ctrl1);
+                // Controller-based systems (NES, GB, Atari, SNES, etc.)
+                if matches!(&sys, EmulatorSystem::SNES(_)) {
+                    // SNES uses 16-bit controller state
+                    let ctrl0 = get_snes_controller_state(window.as_ref(), &settings.input.player1);
+                    let ctrl1 = get_snes_controller_state(window.as_ref(), &settings.input.player2);
+                    sys.set_controller_16(0, ctrl0);
+                    sys.set_controller_16(1, ctrl1);
+                } else {
+                    // Other systems use 8-bit controller state
+                    let ctrl0 = get_controller_state(window.as_ref(), &settings.input.player1);
+                    let ctrl1 = get_controller_state(window.as_ref(), &settings.input.player2);
+                    // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
+                    sys.set_controller(0, ctrl0);
+                    sys.set_controller(1, ctrl1);
+                }
             }
 
             // Step one frame and display

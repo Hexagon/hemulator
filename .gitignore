@@ -19,7 +19,8 @@ roms/
 config.json
 *.hemu
 *.bin
-^.com
+*.com
+*.COM
 temp.img
 
 # Debugging files
@@ -29,6 +30,12 @@ temp.img
 *err.txt
 *out.txt
 debug_log*¨
+debug_run.txt
+
+# Backup files
+*.backup
+*~
+.*.swp
 
 # Anti-ignores
 !workbench/workbench.hemu

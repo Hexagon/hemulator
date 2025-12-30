@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "system": "pc",
+  "mounts": {
+    "FloppyA": "images/x86boot.img",
+    "FloppyB": "images/temp.img"
+  },
+  "boot_priority": "FloppyFirst",
+  "cpu_model": "Intel8086",
+  "memory_kb": 640,
+  "video_mode": "CGA"
+}

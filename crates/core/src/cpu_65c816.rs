@@ -52,6 +52,8 @@ pub struct Cpu65c816<M: Memory65c816> {
     pub cycles: u64,
     /// Memory interface
     pub memory: M,
+    /// NMI in progress flag
+    in_nmi: bool,
 }
 
 // Status register flags
@@ -85,6 +87,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             emulation: true, // Start in emulation mode (6502 compatibility)
             cycles: 0,
             memory,
+            in_nmi: false,
         }
     }
 
@@ -100,11 +103,101 @@ impl<M: Memory65c816> Cpu65c816<M> {
         self.status = 0x34;
         self.emulation = true;
         self.cycles = 0;
+        self.in_nmi = false;
 
         // Load reset vector from $00FFFC-$00FFFD
         let lo = self.memory.read(0xFFFC) as u16;
         let hi = self.memory.read(0xFFFD) as u16;
         self.pc = (hi << 8) | lo;
+    }
+
+    /// Check if currently executing an NMI handler
+    #[allow(dead_code)]
+    pub fn is_in_nmi(&self) -> bool {
+        self.in_nmi
+    }
+
+    /// Trigger a non-maskable interrupt (NMI)
+    ///
+    /// NMI vectors:
+    /// - Emulation mode: $FFFA-$FFFB
+    /// - Native mode: $FFEA-$FFEB
+    ///
+    /// The NMI sequence:
+    /// 1. Push PC (and PBR in native mode)
+    /// 2. Push status register
+    /// 3. Set I flag
+    /// 4. Clear D flag (in native mode)
+    /// 5. Load PC from NMI vector
+    /// 6. Set PBR to 0 (in native mode)
+    pub fn trigger_nmi(&mut self) {
+        // Avoid nested NMIs
+        if self.in_nmi {
+            return;
+        }
+        self.in_nmi = true;
+
+        // Save current state
+        if self.emulation {
+            // Emulation mode: 6502-compatible behavior
+            self.push_word(self.pc);
+            self.push_byte(self.status);
+            self.status |= FLAG_IRQ_DISABLE;
+
+            // Load NMI vector from $FFFA-$FFFB
+            self.pc = self.read_word(0xFFFA);
+            self.cycles += 7;
+        } else {
+            // Native mode: full 24-bit context save
+            self.push_byte(self.pbr);
+            self.push_word(self.pc);
+            self.push_byte(self.status);
+            self.status |= FLAG_IRQ_DISABLE;
+            self.status &= !FLAG_DECIMAL;
+
+            // Load NMI vector from $FFEA-$FFEB
+            self.pc = self.read_word(0xFFEA);
+            self.pbr = 0;
+            self.cycles += 8;
+        }
+    }
+
+    /// Trigger a maskable interrupt request (IRQ)
+    ///
+    /// IRQ vectors:
+    /// - Emulation mode: $FFFE-$FFFF
+    /// - Native mode: $FFEE-$FFEF
+    ///
+    /// IRQ is ignored if the I flag is set in the status register.
+    pub fn trigger_irq(&mut self) {
+        // Respect the I flag: if set, ignore maskable IRQs
+        if (self.status & FLAG_IRQ_DISABLE) != 0 {
+            return;
+        }
+
+        // Save current state
+        if self.emulation {
+            // Emulation mode: 6502-compatible behavior
+            self.push_word(self.pc);
+            self.push_byte(self.status);
+            self.status |= FLAG_IRQ_DISABLE;
+
+            // Load IRQ vector from $FFFE-$FFFF
+            self.pc = self.read_word(0xFFFE);
+            self.cycles += 7;
+        } else {
+            // Native mode: full 24-bit context save
+            self.push_byte(self.pbr);
+            self.push_word(self.pc);
+            self.push_byte(self.status);
+            self.status |= FLAG_IRQ_DISABLE;
+            self.status &= !FLAG_DECIMAL;
+
+            // Load IRQ vector from $FFEE-$FFEF
+            self.pc = self.read_word(0xFFEE);
+            self.pbr = 0;
+            self.cycles += 8;
+        }
     }
 
     /// Execute a single instruction and return cycles consumed
@@ -989,6 +1082,8 @@ impl<M: Memory65c816> Cpu65c816<M> {
                     self.pbr = self.pop_byte();
                     self.cycles += 7;
                 }
+                // Clear NMI flag when returning from interrupt
+                self.in_nmi = false;
             }
 
             // EOR - Exclusive OR with Accumulator
@@ -5012,5 +5107,165 @@ mod tests {
 
         cpu.step(); // INX
         assert_eq!(cpu.x, 0x8001);
+    }
+
+    #[test]
+    fn test_nmi_emulation_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up NMI vector at $FFFA-$FFFB to point to $9000
+        mem.write(0xFFFA, 0x00);
+        mem.write(0xFFFB, 0x90);
+
+        // Set up RTI at $9000
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.status = 0x24; // Clear I flag to verify it gets set
+        cpu.emulation = true;
+
+        let initial_status = cpu.status;
+
+        // Trigger NMI
+        cpu.trigger_nmi();
+
+        // Verify NMI was triggered
+        assert!(cpu.is_in_nmi());
+        assert_eq!(cpu.pc, 0x9000); // Should jump to NMI handler
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+
+        // Execute RTI to return from NMI
+        cpu.step();
+
+        // Verify we returned from NMI
+        assert!(!cpu.is_in_nmi());
+        assert_eq!(cpu.pc, 0x8000); // Should return to original PC
+        assert_eq!(cpu.status, initial_status); // Status should be restored
+    }
+
+    #[test]
+    fn test_nmi_native_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up NMI vector at $FFEA-$FFEB to point to $9000
+        mem.write(0xFFEA, 0x00);
+        mem.write(0xFFEB, 0x90);
+
+        // Set up RTI at $9000
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0x01; // Set non-zero PBR to test it gets saved/restored
+        cpu.status = 0x24; // Clear I flag and D flag
+        cpu.emulation = false;
+
+        let initial_status = cpu.status;
+        let initial_pbr = cpu.pbr;
+
+        // Trigger NMI
+        cpu.trigger_nmi();
+
+        // Verify NMI was triggered
+        assert!(cpu.is_in_nmi());
+        assert_eq!(cpu.pc, 0x9000); // Should jump to NMI handler
+        assert_eq!(cpu.pbr, 0); // PBR should be cleared in native mode
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+        assert_eq!(cpu.status & FLAG_DECIMAL, 0); // D flag should be cleared
+
+        // Execute RTI to return from NMI
+        cpu.step();
+
+        // Verify we returned from NMI
+        assert!(!cpu.is_in_nmi());
+        assert_eq!(cpu.pc, 0x8000); // Should return to original PC
+        assert_eq!(cpu.pbr, initial_pbr); // PBR should be restored
+        assert_eq!(cpu.status, initial_status); // Status should be restored
+    }
+
+    #[test]
+    fn test_nmi_nested_prevention() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up NMI vector at $FFFA-$FFFB to point to $9000
+        mem.write(0xFFFA, 0x00);
+        mem.write(0xFFFB, 0x90);
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.emulation = true;
+
+        // Trigger first NMI
+        cpu.trigger_nmi();
+        assert!(cpu.is_in_nmi());
+        assert_eq!(cpu.pc, 0x9000);
+
+        let saved_pc = cpu.pc;
+
+        // Try to trigger NMI again while in NMI handler (should be ignored)
+        cpu.trigger_nmi();
+
+        // Verify nested NMI was prevented
+        assert_eq!(cpu.pc, saved_pc); // PC should not change
+    }
+
+    #[test]
+    fn test_irq_emulation_mode() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up IRQ vector at $FFFE-$FFFF to point to $9000
+        mem.write(0xFFFE, 0x00);
+        mem.write(0xFFFF, 0x90);
+
+        // Set up RTI at $9000
+        mem.write(0x9000, 0x40); // RTI
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.status = 0x20; // Clear I flag to allow IRQ
+        cpu.emulation = true;
+
+        let initial_status = cpu.status;
+
+        // Trigger IRQ
+        cpu.trigger_irq();
+
+        // Verify IRQ was triggered
+        assert_eq!(cpu.pc, 0x9000); // Should jump to IRQ handler
+        assert_ne!(cpu.status & FLAG_IRQ_DISABLE, 0); // I flag should be set
+
+        // Execute RTI to return from IRQ
+        cpu.step();
+
+        // Verify we returned from IRQ
+        assert_eq!(cpu.pc, 0x8000); // Should return to original PC
+        assert_eq!(cpu.status, initial_status); // Status should be restored
+    }
+
+    #[test]
+    fn test_irq_masked_by_i_flag() {
+        let mut mem = ArrayMemory::new();
+
+        // Set up IRQ vector at $FFFE-$FFFF to point to $9000
+        mem.write(0xFFFE, 0x00);
+        mem.write(0xFFFF, 0x90);
+
+        let mut cpu = Cpu65c816::new(mem);
+        cpu.pc = 0x8000;
+        cpu.pbr = 0;
+        cpu.status = FLAG_IRQ_DISABLE; // Set I flag to mask IRQs
+        cpu.emulation = true;
+
+        let initial_pc = cpu.pc;
+
+        // Try to trigger IRQ (should be ignored due to I flag)
+        cpu.trigger_irq();
+
+        // Verify IRQ was masked
+        assert_eq!(cpu.pc, initial_pc); // PC should not change
     }
 }

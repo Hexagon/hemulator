@@ -415,6 +415,11 @@ impl XmsDriver {
         self.a20_enabled
     }
 
+    /// Set A20 enabled state (called by port 0x92 or keyboard controller)
+    pub fn set_a20_enabled(&mut self, enabled: bool) {
+        self.a20_enabled = enabled;
+    }
+
     /// Get total extended memory in KB
     pub fn total_extended_memory_kb(&self) -> u32 {
         self.total_extended_kb

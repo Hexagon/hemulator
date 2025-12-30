@@ -60,6 +60,10 @@ impl SnesBus {
         &self.ppu
     }
 
+    pub fn ppu_mut(&mut self) -> &mut Ppu {
+        &mut self.ppu
+    }
+
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
         self.frame_cycle = 0; // Reset cycle counter at frame start
@@ -124,6 +128,16 @@ impl Memory65c816 for SnesBus {
                     0x0000..=0x1FFF => self.wram[offset as usize],
                     // Hardware registers (PPU: $2100-$213F)
                     0x2100..=0x213F => self.ppu.read_register(offset),
+                    // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
+                    0x4200 => {
+                        // Bit 7: NMI enable
+                        // Other bits: H/V timer interrupt enable, auto-joypad read enable
+                        if self.ppu.nmi_enable {
+                            0x80
+                        } else {
+                            0x00
+                        }
+                    }
                     // $4016 - JOYSER0 - Controller 1 Serial Data
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
@@ -218,8 +232,15 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
-                    // Hardware registers (PPU: $2100-$213F)
+                    // $2100-$213F - PPU registers
                     0x2100..=0x213F => self.ppu.write_register(offset, val),
+                    // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
+                    0x4200 => {
+                        // Bit 7: NMI enable
+                        // Bit 4: Joypad auto-read enable (not implemented)
+                        // Other bits: H/V timer interrupt enable (not implemented)
+                        self.ppu.nmi_enable = (val & 0x80) != 0;
+                    }
                     // $4016 - JOYWR - Controller Strobe
                     0x4016 => {
                         // Bit 0: Controller strobe (1 = latch, 0 = shift)
