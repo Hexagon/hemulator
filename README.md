@@ -10,7 +10,8 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - 🎲 **Game Boy Emulation**: 🚧 In development - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
 - 🏰 **SNES Emulation**: 🚧 In development - CPU working, minimal PPU, no APU/input yet
 - 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
-- 💾 **Save States**: 5 slots per game with instant save/load
+- 🖱️ **Modern GUI**: Menu bar and status bar with mouse and keyboard support - no more cryptic F-keys!
+- 💾 **Save States**: 5 slots per game with instant save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
 - 🖥️ **Cross-Platform GUI**: Built with SDL2 for Windows, Linux, and macOS
 - 🎨 **Video Processing**: Modular architecture supporting both software and OpenGL-accelerated rendering
