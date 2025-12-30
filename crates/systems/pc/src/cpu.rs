@@ -5023,14 +5023,14 @@ mod tests {
     fn test_int13h_get_drive_params_returns_correct_drive_count() {
         // Test that INT 13h AH=08h returns correct drive count in DL
         let mut bus = PcBus::new();
-        
+
         // Mount a hard drive
         bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]);
-        
+
         // Manually set the hard drive count in BDA
         // The system should read this value
         bus.write(0x475, 1); // 1 hard drive
-        
+
         let mut cpu = PcCpu::new(bus);
 
         // Move CPU to RAM
@@ -5075,7 +5075,10 @@ mod tests {
 
         // Check that DL contains the number of floppy drives (should be 1)
         let dl_floppy = cpu2.cpu.dx & 0xFF;
-        assert_eq!(dl_floppy, 1, "DL should contain number of floppy drives (1)");
+        assert_eq!(
+            dl_floppy, 1,
+            "DL should contain number of floppy drives (1)"
+        );
     }
 
     #[test]
