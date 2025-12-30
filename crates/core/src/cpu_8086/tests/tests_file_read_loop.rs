@@ -252,3 +252,102 @@ fn test_dos_file_read_simulation() {
     cpu.step(); // JZ (should jump to done)
     assert_eq!(cpu.ip, 0x1012, "Should jump to done on EOF");
 }
+
+#[test]
+fn test_mov_ax_preserves_upper_bits() {
+    // Test that MOV AX, moffs16 preserves upper 16 bits of EAX
+    // This was the bug causing file read issues
+    
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+    
+    // Set up test data
+    cpu.memory.write(0x2000, 0x42);
+    cpu.memory.write(0x2001, 0x00);
+    
+    // Set EAX to have upper bits set
+    cpu.ax = 0x12340000;
+    
+    // Load MOV AX, [0x2000] instruction
+    cpu.memory.load_program(
+        0x1000,
+        &[
+            0xA1, 0x00, 0x20,  // MOV AX, [0x2000]  @ 0x1000
+            0xF4,               // HLT                @ 0x1003
+        ],
+    );
+    
+    cpu.ip = 0x1000;
+    cpu.cs = 0x0000;
+    
+    // Execute MOV AX
+    cpu.step();
+    
+    // Check that AX was loaded but upper 16 bits were preserved
+    assert_eq!(cpu.ax & 0xFFFF, 0x0042, "Lower 16 bits should be 0x0042");
+    assert_eq!(cpu.ax & 0xFFFF_0000, 0x1234_0000, "Upper 16 bits should be preserved");
+}
+
+#[test]
+fn test_xchg_ax_preserves_upper_bits() {
+    // Test that XCHG AX, reg16 preserves upper 16 bits of EAX
+    
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+    
+    // Set EAX and EBX with upper bits
+    cpu.ax = 0x12340042;
+    cpu.bx = 0x56780099;
+    
+    // Load XCHG AX, BX instruction
+    cpu.memory.load_program(
+        0x1000,
+        &[
+            0x93,  // XCHG AX, BX  @ 0x1000
+            0xF4,  // HLT          @ 0x1001
+        ],
+    );
+    
+    cpu.ip = 0x1000;
+    cpu.cs = 0x0000;
+    
+    // Execute XCHG
+    cpu.step();
+    
+    // Check that values were exchanged but upper bits preserved
+    assert_eq!(cpu.ax & 0xFFFF, 0x0099, "AX should have BX's lower 16 bits");
+    assert_eq!(cpu.ax & 0xFFFF_0000, 0x1234_0000, "EAX upper bits should be preserved");
+    assert_eq!(cpu.bx & 0xFFFF, 0x0042, "BX should have AX's lower 16 bits");
+    assert_eq!(cpu.bx & 0xFFFF_0000, 0x5678_0000, "EBX upper bits should be preserved");
+}
+
+#[test]
+fn test_cwd_preserves_upper_bits() {
+    // Test that CWD preserves upper bits of EDX
+    
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+    
+    // Set EAX and EDX with upper bits
+    cpu.ax = 0x12348000; // Negative number (bit 15 set)
+    cpu.dx = 0x56780000; // EDX with upper bits set
+    
+    cpu.memory.load_program(
+        0x1000,
+        &[
+            0x99,  // CWD  @ 0x1000
+            0xF4,  // HLT  @ 0x1001
+        ],
+    );
+    
+    cpu.ip = 0x1000;
+    cpu.cs = 0x0000;
+    
+    // Execute CWD
+    cpu.step();
+    
+    // CWD should sign-extend AX into DX
+    // AX = 0x8000 (negative), so DX should be 0xFFFF
+    assert_eq!(cpu.dx & 0xFFFF, 0xFFFF, "DX should be 0xFFFF (sign extension)");
+    assert_eq!(cpu.dx & 0xFFFF_0000, 0x5678_0000, "EDX upper bits should be preserved");
+}
