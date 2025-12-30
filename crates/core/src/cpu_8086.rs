@@ -4112,7 +4112,7 @@ impl<M: Memory8086> Cpu8086<M> {
                         } else {
                             // If not equal, ZF=0 and AX = r/m16
                             self.set_flag(FLAG_ZF, false);
-                            self.ax = rm_val as u32;
+                            self.ax = (self.ax & 0xFFFF_0000) | (rm_val as u32); // Preserve upper 16 bits
                         }
 
                         // Update other flags based on comparison
@@ -4200,8 +4200,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         } else {
                             // Not equal: ZF=0, load memory into DX:AX
                             self.set_flag(FLAG_ZF, false);
-                            self.ax = mem_low as u32;
-                            self.dx = mem_high as u32;
+                            self.ax = (self.ax & 0xFFFF_0000) | (mem_low as u32); // Preserve upper bits
+                            self.dx = (self.dx & 0xFFFF_0000) | (mem_high as u32); // Preserve upper bits
                         }
 
                         self.cycles += 10;
@@ -6137,7 +6137,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x91..=0x97 => {
                 let reg = opcode & 0x07;
                 let temp = self.ax;
-                self.ax = self.get_reg16(reg) as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (self.get_reg16(reg) as u32); // Preserve upper bits
                 self.set_reg16(reg, temp as u16);
                 self.cycles += 3;
                 3
@@ -6147,7 +6147,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x98 => {
                 let al = (self.ax & 0xFF) as u8;
                 let sign_extend = if al & 0x80 != 0 { 0xFF00 } else { 0x0000 };
-                self.ax = (self.ax & 0x00FF) | sign_extend;
+                self.ax = (self.ax & 0xFFFF_00FF) | sign_extend; // Preserve upper 16 bits and AL
                 self.cycles += 2;
                 2
             }
@@ -6159,7 +6159,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     0x0000
                 };
-                self.dx = sign_extend as u32;
+                self.dx = (self.dx & 0xFFFF_0000) | (sign_extend as u32); // Preserve upper bits
                 self.cycles += 5;
                 5
             }
@@ -6231,7 +6231,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let addr = self.fetch_u16();
                 let seg = self.get_segment_with_override(self.ds);
                 let val = self.read_u16(seg, addr);
-                self.ax = val as u32;
+                self.ax = (self.ax & 0xFFFF_0000) | (val as u32); // Preserve upper 16 bits
                 self.cycles += 10;
                 10
             }
@@ -6384,7 +6384,7 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = ((remainder as u32) << 8) | (quotient as u32);
+                                self.ax = (self.ax & 0xFFFF_0000) | ((remainder as u32) << 8) | (quotient as u32); // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 80 } else { 86 };
@@ -6411,7 +6411,7 @@ impl<M: Memory8086> Cpu8086<M> {
                             } else {
                                 let quot_u8 = quotient as u8;
                                 let rem_u8 = remainder as u8;
-                                self.ax = (((rem_u8 as u16) << 8) | (quot_u8 as u16)) as u32;
+                                self.ax = (self.ax & 0xFFFF_0000) | (((rem_u8 as u16) << 8) | (quot_u8 as u16)) as u32; // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 101 } else { 107 };
@@ -6542,8 +6542,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = quotient as u16 as u32;
-                                self.dx = remainder as u16 as u32;
+                                self.ax = (self.ax & 0xFFFF_0000) | (quotient as u16 as u32); // Preserve upper bits
+                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32); // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 144 } else { 150 };
@@ -6568,8 +6568,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = quotient as u16 as u32;
-                                self.dx = remainder as u16 as u32;
+                                self.ax = (self.ax & 0xFFFF_0000) | (quotient as u16 as u32); // Preserve upper bits
+                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32); // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 165 } else { 171 };
@@ -6966,7 +6966,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     let ah = al / base;
                     let al_new = al % base;
-                    self.ax = (((ah as u16) << 8) | (al_new as u16)) as u32;
+                    self.ax = (self.ax & 0xFFFF_0000) | (((ah as u16) << 8) | (al_new as u16)) as u32; // Preserve upper bits
                     self.update_flags_8(al_new);
                     self.cycles += 83;
                     83
@@ -7086,7 +7086,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE4 => {
                 let _port = self.fetch_u8();
                 // For basic emulation, return 0xFF
-                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.ax = (self.ax & 0xFFFF_FF00) | 0xFF; // Preserve upper bits
                 self.cycles += 10;
                 10
             }
@@ -7095,7 +7095,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE5 => {
                 let _port = self.fetch_u8();
                 // For basic emulation, return 0xFFFF
-                self.ax = 0xFFFF;
+                self.ax = (self.ax & 0xFFFF_0000) | 0xFFFF; // Preserve upper 16 bits
                 self.cycles += 10;
                 10
             }
@@ -7154,7 +7154,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // IN AL, DX (0xEC)
             0xEC => {
                 // For basic emulation, return 0xFF
-                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.ax = (self.ax & 0xFFFF_FF00) | 0xFF; // Preserve upper bits
                 self.cycles += 8;
                 8
             }
@@ -7162,7 +7162,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // IN AX, DX (0xED)
             0xED => {
                 // For basic emulation, return 0xFFFF
-                self.ax = 0xFFFF;
+                self.ax = (self.ax & 0xFFFF_0000) | 0xFFFF; // Preserve upper 16 bits
                 self.cycles += 8;
                 8
             }
@@ -8314,6 +8314,7 @@ mod tests {
     mod tests_addressing;
     mod tests_bcd;
     mod tests_blackbox;
+    mod tests_file_read_loop; // Comprehensive tests for file reading loops
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
