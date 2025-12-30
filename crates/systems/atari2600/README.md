@@ -174,8 +174,11 @@ HMxx registers store signed 4-bit values for fine-tuning position after RESP. Th
 // Apply horizontal motion (HMOVE at 0x2A)
 self.player0_x = self.apply_motion(self.player0_x, self.hmp0);
 self.player1_x = self.apply_motion(self.player1_x, self.hmp1);
-// ...
+self.missile0_x = self.apply_motion(self.missile0_x, self.hmm0);
+self.missile1_x = self.apply_motion(self.missile1_x, self.hmm1);
+self.ball_x = self.apply_motion(self.ball_x, self.hmbl);
 
+// Helper function in TIA implementation
 fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
     let p = pos as i16;
     let m = motion as i16;
@@ -243,7 +246,7 @@ Writing to TIM1T, TIM8T, TIM64T, T1024T sets timer AND changes interval. Interva
 TIMINT flag auto-clears on read - critical for synchronization loops:
 
 ```rust
-// Reading TIMINT clears the flag
+// From TIA implementation - reading TIMINT clears the flag
 0x0285 => {
     let val = if self.timer_underflow.get() { 0x80 } else { 0x00 };
     self.timer_underflow.set(false); // Clear on read
