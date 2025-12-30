@@ -8317,6 +8317,7 @@ mod tests {
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
+    mod tests_pr192_fixes; // Tests for PR #192 bug fixes
     mod tests_shifts;
 
     // Helper function for tests to calculate physical address
