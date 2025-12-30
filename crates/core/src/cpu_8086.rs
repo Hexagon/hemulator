@@ -8314,6 +8314,7 @@ mod tests {
     mod tests_addressing;
     mod tests_bcd;
     mod tests_blackbox;
+    mod tests_file_read_loop; // Comprehensive tests for file reading loops
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
