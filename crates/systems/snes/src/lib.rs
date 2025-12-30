@@ -148,12 +148,9 @@ impl System for SnesSystem {
         // Enter VBlank and trigger NMI if enabled
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
 
-        // Check for NMI
-        // TODO: Trigger NMI on the 65C816 core when NMI support is implemented
-        // For now, we just consume the pending flag to prevent it from accumulating
+        // Check for NMI and trigger it on the 65C816
         if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
-            // The 65C816 core needs NMI support similar to the 6502
-            // This is tracked as a future enhancement
+            self.cpu.cpu.trigger_nmi();
         }
 
         // Execute remaining VBlank cycles
@@ -162,10 +159,9 @@ impl System for SnesSystem {
             self.current_cycles += cycles;
             self.cpu.bus_mut().tick_cycles(cycles);
 
-            // Consume any additional NMI pending flags
-            // TODO: Trigger NMI when 65C816 core supports it
+            // Check for additional NMI requests during VBlank
             if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
-                // NMI triggering will be implemented when 65C816 core has NMI support
+                self.cpu.cpu.trigger_nmi();
             }
         }
 
