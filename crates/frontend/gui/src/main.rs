@@ -402,7 +402,41 @@ fn get_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMappi
 }
 
 /// Get SNES controller state from current keyboard state (16-bit)
-/// SNES button layout: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+///
+/// SNES controllers have 12 buttons laid out as a 16-bit value:
+/// Bit positions: B Y Select Start Up Down Left Right A X L R 0 0 0 0
+///
+/// This function maps the common button IDs (0-11) used by the frontend to the
+/// SNES hardware bit positions according to the official SNES controller specification.
+///
+/// Button ID mapping (from frontend):
+/// - 0: A button
+/// - 1: B button  
+/// - 2: Select
+/// - 3: Start
+/// - 4: Up (D-pad)
+/// - 5: Down (D-pad)
+/// - 6: Left (D-pad)
+/// - 7: Right (D-pad)
+/// - 8: X button
+/// - 9: Y button
+/// - 10: L shoulder
+/// - 11: R shoulder
+///
+/// SNES hardware bit positions (MSB to LSB):
+/// - Bit 15: B button
+/// - Bit 14: Y button
+/// - Bit 13: Select
+/// - Bit 12: Start
+/// - Bit 11: Up
+/// - Bit 10: Down
+/// - Bit 9: Left
+/// - Bit 8: Right
+/// - Bit 7: A button
+/// - Bit 6: X button
+/// - Bit 5: L shoulder
+/// - Bit 4: R shoulder
+/// - Bits 3-0: Unused (always 0)
 fn get_snes_controller_state(window: &dyn WindowBackend, mapping: &settings::KeyMapping) -> u16 {
     let keys_to_check: Vec<Key> = vec![
         string_to_key(&mapping.a),
