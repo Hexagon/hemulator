@@ -6147,7 +6147,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0x98 => {
                 let al = (self.ax & 0xFF) as u8;
                 let sign_extend = if al & 0x80 != 0 { 0xFF00 } else { 0x0000 };
-                self.ax = (self.ax & 0x00FF) | sign_extend;
+                self.ax = (self.ax & 0xFFFF_00FF) | sign_extend; // Preserve upper 16 bits and AL
                 self.cycles += 2;
                 2
             }
@@ -7086,7 +7086,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE4 => {
                 let _port = self.fetch_u8();
                 // For basic emulation, return 0xFF
-                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.ax = (self.ax & 0xFFFF_FF00) | 0xFF; // Preserve upper bits
                 self.cycles += 10;
                 10
             }
@@ -7095,7 +7095,7 @@ impl<M: Memory8086> Cpu8086<M> {
             0xE5 => {
                 let _port = self.fetch_u8();
                 // For basic emulation, return 0xFFFF
-                self.ax = 0xFFFF;
+                self.ax = (self.ax & 0xFFFF_0000) | 0xFFFF; // Preserve upper 16 bits
                 self.cycles += 10;
                 10
             }
@@ -7154,7 +7154,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // IN AL, DX (0xEC)
             0xEC => {
                 // For basic emulation, return 0xFF
-                self.ax = (self.ax & 0xFF00) | 0xFF;
+                self.ax = (self.ax & 0xFFFF_FF00) | 0xFF; // Preserve upper bits
                 self.cycles += 8;
                 8
             }
@@ -7162,7 +7162,7 @@ impl<M: Memory8086> Cpu8086<M> {
             // IN AX, DX (0xED)
             0xED => {
                 // For basic emulation, return 0xFFFF
-                self.ax = 0xFFFF;
+                self.ax = (self.ax & 0xFFFF_0000) | 0xFFFF; // Preserve upper 16 bits
                 self.cycles += 8;
                 8
             }
