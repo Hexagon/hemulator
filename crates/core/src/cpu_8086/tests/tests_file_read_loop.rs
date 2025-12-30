@@ -265,8 +265,8 @@ fn test_mov_ax_preserves_upper_bits() {
     cpu.memory.write(0x2000, 0x42);
     cpu.memory.write(0x2001, 0x00);
     
-    // Set EAX to have upper bits set
-    cpu.ax = 0x12340000;
+    // Set EAX to have upper bits set and meaningful lower bits
+    cpu.ax = 0x12340099;
     
     // Load MOV AX, [0x2000] instruction
     cpu.memory.load_program(
