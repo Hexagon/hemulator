@@ -88,6 +88,34 @@ pub struct PcBus {
     crtc_index: Cell<u8>,
     /// CRTC data registers (25 registers total for VGA)
     crtc_data: [Cell<u8>; 25],
+    /// Sequencer index register (selects which sequencer register to access)
+    sequencer_index: Cell<u8>,
+    /// Sequencer data registers (5 registers: reset, clocking, map mask, char map, memory mode)
+    sequencer_data: [Cell<u8>; 5],
+    /// Graphics Controller index register
+    graphics_index: Cell<u8>,
+    /// Graphics Controller data registers (9 registers: set/reset, enable, color compare, etc.)
+    graphics_data: [Cell<u8>; 9],
+    /// Attribute Controller index register (also used as data for some operations)
+    attribute_index: Cell<u8>,
+    /// Attribute Controller flip-flop state (false = index mode, true = data mode)
+    attribute_flipflop: Cell<bool>,
+    /// Attribute Controller data registers (21 registers: palette + mode control)
+    attribute_data: [Cell<u8>; 21],
+    /// DAC (Digital-to-Analog Converter) pixel mask
+    dac_mask: Cell<u8>,
+    /// DAC read index
+    dac_read_index: Cell<u8>,
+    /// DAC write index
+    dac_write_index: Cell<u8>,
+    /// DAC color data (3 bytes per color: R, G, B for 256 colors = 768 bytes)
+    dac_data: [Cell<u8>; 768],
+    /// DAC state (0 = ready for red, 1 = ready for green, 2 = ready for blue)
+    dac_state: Cell<u8>,
+    /// CGA Mode Control Register (port 0x3D8)
+    cga_mode_control: Cell<u8>,
+    /// CGA Color Select Register (port 0x3D9)
+    cga_color_select: Cell<u8>,
 }
 
 impl PcBus {
@@ -152,6 +180,20 @@ impl PcBus {
             vga_status_cycles: Cell::new(0),
             crtc_index: Cell::new(0),
             crtc_data: std::array::from_fn(|_| Cell::new(0)),
+            sequencer_index: Cell::new(0),
+            sequencer_data: std::array::from_fn(|_| Cell::new(0)),
+            graphics_index: Cell::new(0),
+            graphics_data: std::array::from_fn(|_| Cell::new(0)),
+            attribute_index: Cell::new(0),
+            attribute_flipflop: Cell::new(false),
+            attribute_data: std::array::from_fn(|_| Cell::new(0)),
+            dac_mask: Cell::new(0xFF), // All bits enabled by default
+            dac_read_index: Cell::new(0),
+            dac_write_index: Cell::new(0),
+            dac_data: std::array::from_fn(|_| Cell::new(0)),
+            dac_state: Cell::new(0),
+            cga_mode_control: Cell::new(0),
+            cga_color_select: Cell::new(0),
         };
 
         // Initialize Interrupt Vector Table (IVT) in low RAM
@@ -263,6 +305,33 @@ impl PcBus {
         for reg in &self.crtc_data {
             reg.set(0);
         }
+        // Reset Sequencer registers
+        self.sequencer_index.set(0);
+        for reg in &self.sequencer_data {
+            reg.set(0);
+        }
+        // Reset Graphics Controller registers
+        self.graphics_index.set(0);
+        for reg in &self.graphics_data {
+            reg.set(0);
+        }
+        // Reset Attribute Controller registers
+        self.attribute_index.set(0);
+        self.attribute_flipflop.set(false);
+        for reg in &self.attribute_data {
+            reg.set(0);
+        }
+        // Reset DAC registers
+        self.dac_mask.set(0xFF);
+        self.dac_read_index.set(0);
+        self.dac_write_index.set(0);
+        for reg in &self.dac_data {
+            reg.set(0);
+        }
+        self.dac_state.set(0);
+        // Reset CGA registers
+        self.cga_mode_control.set(0);
+        self.cga_color_select.set(0);
     }
 
     /// Set boot priority
@@ -648,10 +717,20 @@ impl PcBus {
             // Bit 3: Vertical retrace (0 = no retrace, 1 = vertical retrace active)
             // Reading this port resets the 3C0h index flip-flop to address mode
             0x03BA | 0x03DA => {
-                // Return current VGA status
-                // Note: Reading this port should also reset the attribute controller
-                // flip-flop (port 0x3C0), but we don't implement that yet
+                // Return current VGA status and reset attribute controller flip-flop
+                self.attribute_flipflop.set(false);
                 self.vga_status.get()
+            }
+            // Port 0x3C0 - Attribute Controller Index/Data (write only, but allow reads for debugging)
+            0x3C0 => self.attribute_index.get(),
+            // Port 0x3C1 - Attribute Controller Data Read
+            0x3C1 => {
+                let index = self.attribute_index.get() as usize;
+                if index < self.attribute_data.len() {
+                    self.attribute_data[index].get()
+                } else {
+                    0xFF
+                }
             }
             // Port 0x3C2 - Input Status Register 0 (read only)
             // Bit 4: Switch sense (0/1 based on adapter type)
@@ -664,6 +743,70 @@ impl PcBus {
                 // Bits 5-7 clear (no special conditions)
                 0x10
             }
+            // Port 0x3C4 - Sequencer Index Register
+            0x3C4 => self.sequencer_index.get(),
+            // Port 0x3C5 - Sequencer Data Register
+            0x3C5 => {
+                let index = self.sequencer_index.get() as usize;
+                if index < self.sequencer_data.len() {
+                    self.sequencer_data[index].get()
+                } else {
+                    0xFF
+                }
+            }
+            // Port 0x3C6 - DAC Pixel Mask
+            0x3C6 => self.dac_mask.get(),
+            // Port 0x3C7 - DAC State Register (read only)
+            // Bit 0-1: DAC state (0 = write mode, 3 = read mode)
+            0x3C7 => {
+                if self.dac_state.get() == 0 {
+                    0x00 // Write mode
+                } else {
+                    0x03 // Read mode
+                }
+            }
+            // Port 0x3C8 - DAC Write Index (write only, return current write index on read)
+            0x3C8 => self.dac_write_index.get(),
+            // Port 0x3C9 - DAC Data Register (read returns RGB data sequentially)
+            0x3C9 => {
+                let base_index = (self.dac_read_index.get() as usize) * 3;
+                let state = self.dac_state.get() as usize;
+                let data_index = base_index + state;
+
+                let value = if data_index < self.dac_data.len() {
+                    self.dac_data[data_index].get()
+                } else {
+                    0xFF
+                };
+
+                // Advance to next component (R -> G -> B)
+                let next_state = (state + 1) % 3;
+                self.dac_state.set(next_state as u8);
+
+                // If we completed a color (back to R), advance to next color
+                if next_state == 0 {
+                    let next_index = self.dac_read_index.get().wrapping_add(1);
+                    self.dac_read_index.set(next_index);
+                }
+
+                value
+            }
+            // Port 0x3CC - Miscellaneous Output Register (read only, write is at 0x3C2)
+            0x3CC => {
+                // Return typical VGA value: I/O address select, enable RAM, clock select
+                0x23 // Bit 0: I/O select (color), Bit 1: enable RAM, Bit 5: page select
+            }
+            // Port 0x3CE - Graphics Controller Index Register
+            0x3CE => self.graphics_index.get(),
+            // Port 0x3CF - Graphics Controller Data Register
+            0x3CF => {
+                let index = self.graphics_index.get() as usize;
+                if index < self.graphics_data.len() {
+                    self.graphics_data[index].get()
+                } else {
+                    0xFF
+                }
+            }
             // Port 0x3D4/0x3B4 - CRTC Index Register (read returns current index)
             0x3D4 | 0x3B4 => self.crtc_index.get(),
             // Port 0x3D5/0x3B5 - CRTC Data Register (read returns data at current index)
@@ -675,6 +818,10 @@ impl PcBus {
                     0xFF
                 }
             }
+            // Port 0x3D8 - CGA Mode Control Register
+            0x3D8 => self.cga_mode_control.get(),
+            // Port 0x3D9 - CGA Color Select Register
+            0x3D9 => self.cga_color_select.get(),
             _ => 0xFF, // Default for unimplemented ports
         };
 
@@ -801,6 +948,83 @@ impl PcBus {
                 let a20_enabled = (val & 0x02) != 0;
                 self.xms.set_a20_enabled(a20_enabled);
             }
+            // Port 0x3C0 - Attribute Controller Index/Data (flip-flop controlled)
+            0x3C0 => {
+                if !self.attribute_flipflop.get() {
+                    // First write: set index
+                    self.attribute_index.set(val & 0x1F); // Only low 5 bits are index
+                    self.attribute_flipflop.set(true);
+                } else {
+                    // Second write: set data
+                    let index = self.attribute_index.get() as usize;
+                    if index < self.attribute_data.len() {
+                        self.attribute_data[index].set(val);
+                    }
+                    self.attribute_flipflop.set(false);
+                }
+            }
+            // Port 0x3C2 - Miscellaneous Output Register (write only)
+            0x3C2 => {
+                // Store for later reads via 0x3CC
+                // This controls clock select, I/O address select, etc.
+                // We don't need to implement the logic, just store it
+            }
+            // Port 0x3C4 - Sequencer Index Register
+            0x3C4 => {
+                self.sequencer_index.set(val);
+            }
+            // Port 0x3C5 - Sequencer Data Register
+            0x3C5 => {
+                let index = self.sequencer_index.get() as usize;
+                if index < self.sequencer_data.len() {
+                    self.sequencer_data[index].set(val);
+                }
+            }
+            // Port 0x3C6 - DAC Pixel Mask
+            0x3C6 => {
+                self.dac_mask.set(val);
+            }
+            // Port 0x3C7 - DAC Read Index (write sets read mode and index)
+            0x3C7 => {
+                self.dac_read_index.set(val);
+                self.dac_state.set(0); // Reset to read red component first
+            }
+            // Port 0x3C8 - DAC Write Index (write sets write mode and index)
+            0x3C8 => {
+                self.dac_write_index.set(val);
+                self.dac_state.set(0); // Reset to write red component first
+            }
+            // Port 0x3C9 - DAC Data Register (write RGB data sequentially)
+            0x3C9 => {
+                let base_index = (self.dac_write_index.get() as usize) * 3;
+                let state = self.dac_state.get() as usize;
+                let data_index = base_index + state;
+
+                if data_index < self.dac_data.len() {
+                    self.dac_data[data_index].set(val);
+                }
+
+                // Advance to next component (R -> G -> B)
+                let next_state = (state + 1) % 3;
+                self.dac_state.set(next_state as u8);
+
+                // If we completed a color (back to R), advance to next color
+                if next_state == 0 {
+                    let next_index = self.dac_write_index.get().wrapping_add(1);
+                    self.dac_write_index.set(next_index);
+                }
+            }
+            // Port 0x3CE - Graphics Controller Index Register
+            0x3CE => {
+                self.graphics_index.set(val);
+            }
+            // Port 0x3CF - Graphics Controller Data Register
+            0x3CF => {
+                let index = self.graphics_index.get() as usize;
+                if index < self.graphics_data.len() {
+                    self.graphics_data[index].set(val);
+                }
+            }
             // Port 0x3D4/0x3B4 - CRTC Index Register (selects which CRTC register)
             0x3D4 | 0x3B4 => {
                 self.crtc_index.set(val);
@@ -811,6 +1035,14 @@ impl PcBus {
                 if index < self.crtc_data.len() {
                     self.crtc_data[index].set(val);
                 }
+            }
+            // Port 0x3D8 - CGA Mode Control Register
+            0x3D8 => {
+                self.cga_mode_control.set(val);
+            }
+            // Port 0x3D9 - CGA Color Select Register
+            0x3D9 => {
+                self.cga_color_select.set(val);
             }
             _ => {} // Ignore writes to unimplemented ports
         }
@@ -1122,5 +1354,124 @@ mod tests {
 
         // Port 0x3C2 should return 0x10 (bit 4 set for CGA/EGA mode)
         assert_eq!(bus.io_read(0x3C2), 0x10);
+    }
+
+    #[test]
+    fn test_sequencer_registers() {
+        let mut bus = PcBus::new();
+
+        // Write index
+        bus.io_write(0x3C4, 0x02); // Map Mask register
+        assert_eq!(bus.io_read(0x3C4), 0x02);
+
+        // Write data
+        bus.io_write(0x3C5, 0x0F);
+        assert_eq!(bus.io_read(0x3C5), 0x0F);
+
+        // Write different register
+        bus.io_write(0x3C4, 0x04); // Memory Mode register
+        bus.io_write(0x3C5, 0x06);
+        assert_eq!(bus.io_read(0x3C5), 0x06);
+
+        // Verify previous register unchanged
+        bus.io_write(0x3C4, 0x02);
+        assert_eq!(bus.io_read(0x3C5), 0x0F);
+    }
+
+    #[test]
+    fn test_graphics_controller_registers() {
+        let mut bus = PcBus::new();
+
+        // Write index
+        bus.io_write(0x3CE, 0x05); // Graphics Mode register
+        assert_eq!(bus.io_read(0x3CE), 0x05);
+
+        // Write data
+        bus.io_write(0x3CF, 0x40);
+        assert_eq!(bus.io_read(0x3CF), 0x40);
+
+        // Write different register
+        bus.io_write(0x3CE, 0x08); // Bit Mask register
+        bus.io_write(0x3CF, 0xFF);
+        assert_eq!(bus.io_read(0x3CF), 0xFF);
+    }
+
+    #[test]
+    fn test_attribute_controller_registers() {
+        let mut bus = PcBus::new();
+
+        // Reset flip-flop by reading status register
+        bus.io_read(0x03DA);
+
+        // Write index (first write after flip-flop reset)
+        bus.io_write(0x3C0, 0x00); // Palette register 0
+                                   // Write data (second write)
+        bus.io_write(0x3C0, 0x3F);
+
+        // Read back via 0x3C1
+        assert_eq!(bus.io_read(0x3C1), 0x3F);
+
+        // Reset flip-flop again
+        bus.io_read(0x03DA);
+        assert!(!bus.attribute_flipflop.get());
+
+        // Write another register
+        bus.io_write(0x3C0, 0x10); // Mode Control register
+        bus.io_write(0x3C0, 0x01);
+        assert_eq!(bus.attribute_data[0x10].get(), 0x01);
+    }
+
+    #[test]
+    fn test_dac_registers() {
+        let mut bus = PcBus::new();
+
+        // Test pixel mask
+        bus.io_write(0x3C6, 0xAA);
+        assert_eq!(bus.io_read(0x3C6), 0xAA);
+
+        // Test DAC write sequence (write RGB for color index 0)
+        bus.io_write(0x3C8, 0x00); // Set write index to 0
+        bus.io_write(0x3C9, 0x3F); // Red
+        bus.io_write(0x3C9, 0x20); // Green
+        bus.io_write(0x3C9, 0x10); // Blue
+
+        // Read back via DAC read
+        bus.io_write(0x3C7, 0x00); // Set read index to 0
+        assert_eq!(bus.io_read(0x3C9), 0x3F); // Red
+        assert_eq!(bus.io_read(0x3C9), 0x20); // Green
+        assert_eq!(bus.io_read(0x3C9), 0x10); // Blue
+
+        // Verify auto-increment to next color
+        assert_eq!(bus.dac_read_index.get(), 0x01);
+    }
+
+    #[test]
+    fn test_cga_mode_registers() {
+        let mut bus = PcBus::new();
+
+        // Test CGA Mode Control Register
+        bus.io_write(0x3D8, 0x29); // Typical text mode value
+        assert_eq!(bus.io_read(0x3D8), 0x29);
+
+        // Test CGA Color Select Register
+        bus.io_write(0x3D9, 0x30); // Background/foreground color
+        assert_eq!(bus.io_read(0x3D9), 0x30);
+    }
+
+    #[test]
+    fn test_vga_status_resets_attribute_flipflop() {
+        let mut bus = PcBus::new();
+
+        // Set flip-flop to data mode
+        bus.attribute_flipflop.set(true);
+
+        // Reading VGA status should reset it
+        bus.io_read(0x03DA);
+        assert!(!bus.attribute_flipflop.get());
+
+        // Test with MDA port too
+        bus.attribute_flipflop.set(true);
+        bus.io_read(0x03BA);
+        assert!(!bus.attribute_flipflop.get());
     }
 }
