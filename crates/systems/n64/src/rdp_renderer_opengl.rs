@@ -27,6 +27,7 @@ use glow::HasContext;
 /// they're not actively being used on multiple threads simultaneously. The RDP
 /// renderer is only used from the emulation thread, so this is safe.
 #[cfg(feature = "opengl")]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 struct SendContext(glow::Context);
 
 #[cfg(feature = "opengl")]
@@ -44,6 +45,7 @@ impl std::ops::Deref for SendContext {
 /// Shader program type for different rendering modes
 #[cfg(feature = "opengl")]
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 enum ShaderProgram {
     Flat,    // Solid color triangles
     Gouraud, // Per-vertex color interpolation
@@ -51,6 +53,7 @@ enum ShaderProgram {
 
 /// OpenGL-based RDP renderer
 #[cfg(feature = "opengl")]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 pub struct OpenGLRdpRenderer {
     gl: SendContext,
     width: u32,
@@ -78,6 +81,7 @@ pub struct OpenGLRdpRenderer {
 #[cfg(feature = "opengl")]
 impl OpenGLRdpRenderer {
     /// Create a new OpenGL renderer with the given GL context
+    #[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
     pub fn new(gl: glow::Context, width: u32, height: u32) -> Result<Self, String> {
         let gl = SendContext(gl);
         unsafe {
@@ -182,6 +186,7 @@ impl OpenGLRdpRenderer {
     }
 
     /// Read pixels from framebuffer to CPU memory
+    #[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
     unsafe fn read_pixels(&mut self) {
         self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
 
@@ -217,6 +222,7 @@ impl OpenGLRdpRenderer {
     }
 
     /// Convert screen coordinates to normalized device coordinates
+    #[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
     fn screen_to_ndc(&self, x: i32, y: i32) -> (f32, f32) {
         let nx = (x as f32 / self.width as f32) * 2.0 - 1.0;
         let ny = 1.0 - (y as f32 / self.height as f32) * 2.0;
@@ -224,6 +230,7 @@ impl OpenGLRdpRenderer {
     }
 
     /// Convert ARGB color to RGBA vec4
+    #[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
     fn argb_to_rgba(color: u32) -> [f32; 4] {
         let a = ((color >> 24) & 0xFF) as f32 / 255.0;
         let r = ((color >> 16) & 0xFF) as f32 / 255.0;
@@ -233,6 +240,7 @@ impl OpenGLRdpRenderer {
     }
 
     /// Convert Z-buffer depth (0-65535) to OpenGL depth (0.0-1.0)
+    #[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
     fn zbuffer_to_depth(z: u16) -> f32 {
         z as f32 / 65535.0
     }
@@ -791,6 +799,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 
 /// Helper function to compile a shader
 #[cfg(feature = "opengl")]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 unsafe fn compile_shader(
     gl: &SendContext,
     shader_type: u32,
@@ -814,6 +823,7 @@ unsafe fn compile_shader(
 
 /// Create flat shading program
 #[cfg(feature = "opengl")]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -848,6 +858,7 @@ fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
 
 /// Create Gouraud shading program
 #[cfg(feature = "opengl")]
+#[allow(dead_code)] // Stub implementation - will be used when OpenGL renderer is fully integrated
 fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -899,6 +910,7 @@ impl Drop for OpenGLRdpRenderer {
 #[cfg(test)]
 #[cfg(feature = "opengl")]
 mod tests {
+    #[allow(unused_imports)] // Test module for documentation purposes
     use super::*;
 
     #[test]
