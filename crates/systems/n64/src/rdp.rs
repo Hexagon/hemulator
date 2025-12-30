@@ -49,6 +49,30 @@
 //! - Registers for configuration (color, resolution, etc.)
 //! - Not cycle-accurate; focuses on correct visual output
 //!
+//! ## Rendering Backends
+//!
+//! The RDP supports two rendering backends via the `RdpRenderer` trait:
+//!
+//! ### Software Renderer (Default)
+//! - **CPU-based rasterization**: All rendering done on CPU
+//! - **Maximum accuracy**: Guaranteed consistent results
+//! - **Cross-platform**: Works on all platforms
+//! - **Z-buffer**: Full 16-bit depth buffer
+//! - **Performance**: Suitable for most N64 games
+//! - **Implementation**: `SoftwareRdpRenderer` in `rdp_renderer_software.rs`
+//!
+//! ### OpenGL Renderer (Optional)
+//! - **GPU-accelerated**: Uses OpenGL 3.3 Core Profile
+//! - **Hardware depth testing**: Leverages GPU Z-buffer
+//! - **Feature parity**: Implements all RdpRenderer methods
+//! - **Coordinate conversion**: Handles Y-axis flip (OpenGL bottom-up → framebuffer top-down)
+//! - **Color format conversion**: ARGB ↔ RGBA conversion for OpenGL compatibility
+//! - **Performance**: Better for complex 3D scenes
+//! - **Implementation**: `OpenGLRdpRenderer` in `rdp_renderer_opengl.rs`
+//! - **Enabled**: Feature-gated behind `opengl` feature flag
+//!
+//! Both renderers produce identical output and pass the same test suite.
+//!
 //! Full RDP emulation would require:
 //! - Complete display list command execution
 //! - Texture cache and TMEM (texture memory) sampling

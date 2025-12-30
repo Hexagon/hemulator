@@ -711,4 +711,87 @@ mod tests {
             "EPC should contain return address"
         );
     }
+
+    #[test]
+    fn test_controller_input_integration() {
+        // Test that controller input flows from system to PIF correctly
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+
+        let mut sys = N64System::new();
+
+        // Create a controller state with some buttons pressed
+        let mut controller_state = crate::pif::ControllerState::default();
+        controller_state.buttons.a = true;
+        controller_state.buttons.start = true;
+        controller_state.buttons.d_up = true;
+        controller_state.stick_x = 64;
+        controller_state.stick_y = -32;
+
+        // Set controller 1 state
+        sys.set_controller1(controller_state);
+
+        // Simulate game reading controller via PIF RAM (at 0x1FC007C0)
+        let bus = sys.cpu.bus_mut();
+
+        // Write controller read command
+        bus.write_byte(0x1FC007C0, 0x01); // T=1 byte
+        bus.write_byte(0x1FC007C1, 0x04); // R=4 bytes
+        bus.write_byte(0x1FC007C2, 0x01); // Command 0x01 (read controller)
+
+        // Read response
+        let buttons_hi = bus.read_byte(0x1FC007C3);
+        let buttons_lo = bus.read_byte(0x1FC007C4);
+        let stick_x = bus.read_byte(0x1FC007C5) as i8;
+        let stick_y = bus.read_byte(0x1FC007C6) as i8;
+
+        // Verify button bits (A=bit 15, Start=bit 12, D-Up=bit 11)
+        let buttons = u16::from_be_bytes([buttons_hi, buttons_lo]);
+        assert_ne!(buttons & (1 << 15), 0, "A button should be pressed");
+        assert_ne!(buttons & (1 << 12), 0, "Start button should be pressed");
+        assert_ne!(buttons & (1 << 11), 0, "D-Up should be pressed");
+        assert_eq!(buttons & (1 << 14), 0, "B button should not be pressed");
+
+        // Verify analog stick
+        assert_eq!(stick_x, 64);
+        assert_eq!(stick_y, -32);
+    }
+
+    #[test]
+    fn test_controller_multi_player() {
+        // Test that multiple controllers work independently
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+
+        let mut sys = N64System::new();
+
+        // Set different states for controllers 1 and 2
+        let mut state1 = crate::pif::ControllerState::default();
+        state1.buttons.a = true;
+        sys.set_controller1(state1);
+
+        let mut state2 = crate::pif::ControllerState::default();
+        state2.buttons.b = true;
+        sys.set_controller2(state2);
+
+        let bus = sys.cpu.bus_mut();
+
+        // Read controller 1 (at 0x1FC007C0)
+        bus.write_byte(0x1FC007C0, 0x01);
+        bus.write_byte(0x1FC007C1, 0x04);
+        bus.write_byte(0x1FC007C2, 0x01);
+        let buttons1 = u16::from_be_bytes([bus.read_byte(0x1FC007C3), bus.read_byte(0x1FC007C4)]);
+
+        // Read controller 2 (at 0x1FC007C8)
+        bus.write_byte(0x1FC007C8, 0x01);
+        bus.write_byte(0x1FC007C9, 0x04);
+        bus.write_byte(0x1FC007CA, 0x01);
+        let buttons2 = u16::from_be_bytes([bus.read_byte(0x1FC007CB), bus.read_byte(0x1FC007CC)]);
+
+        // Verify controller 1 has A pressed
+        assert_ne!(buttons1 & (1 << 15), 0);
+        assert_eq!(buttons1 & (1 << 14), 0);
+
+        // Verify controller 2 has B pressed
+        assert_eq!(buttons2 & (1 << 15), 0);
+        assert_ne!(buttons2 & (1 << 14), 0);
+    }
 }
