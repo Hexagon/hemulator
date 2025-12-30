@@ -204,7 +204,7 @@ impl EmulatorSystem {
                     sys.set_controller(!gb_state);
                 }
             }
-            EmulatorSystem::Atari2600(_) => {}
+            EmulatorSystem::Atari2600(sys) => sys.set_controller(port, state),
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
             EmulatorSystem::N64(sys) => {

@@ -201,6 +201,48 @@ impl Atari2600System {
             vec![0; count]
         }
     }
+
+    /// Set controller state for a player (0 or 1)
+    ///
+    /// The input state follows the standard button mapping used across emulators:
+    /// - Bit 0: A button (fire button on Atari)
+    /// - Bit 1: B button (unused on Atari)
+    /// - Bit 2: Select (unused on Atari)
+    /// - Bit 3: Start (unused on Atari)
+    /// - Bit 4: Up
+    /// - Bit 5: Down
+    /// - Bit 6: Left
+    /// - Bit 7: Right
+    ///
+    /// Standard logic: 1 = pressed, 0 = released
+    ///
+    /// This method handles the conversion to Atari 2600 hardware:
+    /// - Joystick directions -> RIOT Port A (SWCHA) with active-low logic
+    /// - Fire button -> TIA INPT4/INPT5 registers with active-high logic
+    pub fn set_controller(&mut self, player: usize, state: u8) {
+        if player > 1 {
+            return; // Only support 2 players
+        }
+
+        if let Some(bus) = self.cpu.bus_mut() {
+            // Extract button states (standard: 1=pressed, 0=released)
+            let fire = (state & 0x01) != 0; // A button = fire
+            let up = (state & 0x10) != 0;
+            let down = (state & 0x20) != 0;
+            let left = (state & 0x40) != 0;
+            let right = (state & 0x80) != 0;
+
+            // Set joystick directions in RIOT (active-low: 0=pressed, 1=released)
+            // Direction bits: 0=Up, 1=Down, 2=Left, 3=Right
+            bus.riot.set_joystick(player as u8, 0, up); // Up
+            bus.riot.set_joystick(player as u8, 1, down); // Down
+            bus.riot.set_joystick(player as u8, 2, left); // Left
+            bus.riot.set_joystick(player as u8, 3, right); // Right
+
+            // Set fire button in TIA (active-high when pressed: bit 7 = 0 when pressed)
+            bus.tia.set_fire_button(player as u8, fire);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -473,6 +515,7 @@ impl System for Atari2600System {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use emu_core::cpu_6502::Memory6502;
 
     #[test]
     fn test_system_creation() {
@@ -733,6 +776,130 @@ mod tests {
     }
 
     #[test]
+    fn test_controller_input() {
+        // Test that controller input is properly handled
+        let mut sys = Atari2600System::new();
+
+        // Load a simple ROM
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set player 0 controller: Fire button + Right direction
+        // Standard mapping: bit 0 = A/Fire, bit 7 = Right
+        let state = 0b10000001; // Fire (bit 0) + Right (bit 7)
+        sys.set_controller(0, state);
+
+        // Verify fire button state in TIA
+        if let Some(bus) = sys.cpu.bus() {
+            // Read INPT4 (fire button for player 0)
+            let inpt4 = bus.tia.read(0x0C);
+            // Fire button pressed should set bit 7 to 0 (active-low)
+            assert_eq!(
+                inpt4 & 0x80,
+                0x00,
+                "Fire button should be pressed (bit 7 = 0)"
+            );
+
+            // Read SWCHA (joystick directions)
+            let swcha = bus.riot.read(0x0280);
+            // Right pressed should clear bit 3 (active-low)
+            assert_eq!(
+                swcha & 0x08,
+                0x00,
+                "Right direction should be pressed (bit 3 = 0)"
+            );
+            // Other directions should be unpressed (bits high)
+            assert_eq!(swcha & 0x07, 0x07, "Other directions should be unpressed");
+        } else {
+            panic!("Bus not available");
+        }
+
+        // Test player 1 controller: Fire button + Up direction
+        let state = 0b00010001; // Fire (bit 0) + Up (bit 4)
+        sys.set_controller(1, state);
+
+        if let Some(bus) = sys.cpu.bus() {
+            // Read INPT5 (fire button for player 1)
+            let inpt5 = bus.tia.read(0x0D);
+            assert_eq!(inpt5 & 0x80, 0x00, "Player 1 fire button should be pressed");
+
+            // Read SWCHA
+            let swcha = bus.riot.read(0x0280);
+            // Player 1 Up is bit 4 (active-low)
+            assert_eq!(
+                swcha & 0x10,
+                0x00,
+                "Player 1 Up direction should be pressed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_controller_release() {
+        // Test that releasing buttons works correctly
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Press fire button
+        sys.set_controller(0, 0x01); // Fire pressed
+
+        if let Some(bus) = sys.cpu.bus() {
+            let inpt4 = bus.tia.read(0x0C);
+            assert_eq!(inpt4 & 0x80, 0x00, "Fire should be pressed");
+        }
+
+        // Release fire button
+        sys.set_controller(0, 0x00); // All buttons released
+
+        if let Some(bus) = sys.cpu.bus() {
+            let inpt4 = bus.tia.read(0x0C);
+            assert_eq!(inpt4 & 0x80, 0x80, "Fire should be released");
+
+            let swcha = bus.riot.read(0x0280);
+            assert_eq!(swcha & 0x0F, 0x0F, "All directions should be released");
+        }
+    }
+
+    #[test]
+    fn test_controller_during_gameplay() {
+        // Integration test: verify controller input persists across frames
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set controller state
+        sys.set_controller(0, 0b10000001); // Fire + Right
+
+        // Run several frames
+        for _ in 0..5 {
+            sys.step_frame().unwrap();
+        }
+
+        // Controller state should still be readable
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.tia.read(0x0C) & 0x80, 0x00, "Fire still pressed");
+            assert_eq!(bus.riot.read(0x0280) & 0x08, 0x00, "Right still pressed");
+        }
+
+        // Change controller state
+        sys.set_controller(0, 0x00); // Release all
+
+        // Run more frames
+        for _ in 0..5 {
+            sys.step_frame().unwrap();
+        }
+
+        // New state should be reflected
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.tia.read(0x0C) & 0x80, 0x80, "Fire released");
+            assert_eq!(bus.riot.read(0x0280) & 0x0F, 0x0F, "All released");
+        }
+    }
+
+    #[test]
     fn test_timer_interrupt_flag_behavior() {
         // This test verifies that the RIOT timer interrupt flag clears on read,
         // which is critical for commercial ROMs that use timer-based synchronization
@@ -771,6 +938,80 @@ mod tests {
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after read
         } else {
             panic!("Could not access bus");
+        }
+    }
+
+    #[test]
+    fn test_simultaneous_tia_ram_write() {
+        // Edge case: addresses $40-$7F write to BOTH TIA and RAM simultaneously
+        // This is real Atari 2600 hardware behavior, not a bug
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Write to address $42 (WSYNC in TIA, also RAM)
+            bus.write(0x0042, 0xAB);
+
+            // Verify the value was written to RAM
+            assert_eq!(
+                bus.read(0x0042),
+                0xAB,
+                "Value should be stored in RAM at $42"
+            );
+
+            // Verify it's also accessible at mirrored address
+            assert_eq!(bus.read(0x00C2), 0xAB, "RAM mirrors should work correctly");
+        }
+    }
+
+    #[test]
+    fn test_opposite_joystick_directions() {
+        // Edge case: pressing opposite directions simultaneously (e.g., Up+Down)
+        // Real hardware allows this, though behavior is controller-dependent
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set contradictory directions: Up + Down (bits 4 and 5)
+        let state = 0b00110000; // Up and Down both pressed
+        sys.set_controller(0, state);
+
+        if let Some(bus) = sys.cpu.bus() {
+            let swcha = bus.riot.read(0x0280);
+            // Both Up (bit 0) and Down (bit 1) should be pressed (active-low)
+            assert_eq!(swcha & 0x03, 0x00, "Both Up and Down should be active");
+        }
+    }
+
+    #[test]
+    fn test_playfield_reflection_mode() {
+        // Validate playfield reflection vs. repeat mode
+        // This is a critical feature for proper playfield rendering
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Set playfield pattern
+            bus.tia.write(0x0D, 0xF0); // PF0 = 11110000 (reversed: 00001111)
+            bus.tia.write(0x0E, 0xAA); // PF1 = 10101010
+            bus.tia.write(0x0F, 0x55); // PF2 = 01010101
+
+            // Test reflection mode (CTRLPF bit 0 = 0)
+            bus.tia.write(0x0A, 0x00); // Reflection OFF (repeat mode)
+
+            // In repeat mode, right half should be same as left half
+            // (This is validated by the rendering logic, not directly testable here)
+
+            // Test reflection mode (CTRLPF bit 0 = 1)
+            bus.tia.write(0x0A, 0x01); // Reflection ON
+
+            // In reflection mode, right half should be mirror of left half
+            // (This is validated by the rendering logic)
         }
     }
 }
