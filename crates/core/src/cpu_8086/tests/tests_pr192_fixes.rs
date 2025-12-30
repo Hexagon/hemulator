@@ -39,10 +39,14 @@ fn test_rep_movsb_preserves_ecx_upper_bits() {
     assert_eq!(cpu.memory.read(dst_addr), 0x11);
     assert_eq!(cpu.memory.read(dst_addr + 1), 0x22);
     assert_eq!(cpu.memory.read(dst_addr + 2), 0x33);
-    
+
     // CRITICAL: Check that upper 16 bits of ECX were preserved
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 after REP");
-    assert_eq!(cpu.cx >> 16, 0xDEAD, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0xDEAD,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0xDEAD0000, "ECX should be 0xDEAD0000");
 }
 
@@ -55,7 +59,7 @@ fn test_rep_stosb_preserves_ecx_upper_bits() {
     cpu.es = 0x2000;
     cpu.di = 0x0100;
     cpu.ax = 0x00AA; // AL = 0xAA
-    // Set ECX with upper bits set: 0x12340005 means 5 iterations
+                     // Set ECX with upper bits set: 0x12340005 means 5 iterations
     cpu.cx = 0x12340005;
 
     // REP STOSB (0xF3 0xAA)
@@ -70,10 +74,14 @@ fn test_rep_stosb_preserves_ecx_upper_bits() {
     for i in 0..5 {
         assert_eq!(cpu.memory.read(addr + i), 0xAA);
     }
-    
+
     // CRITICAL: Check that upper 16 bits of ECX were preserved
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 after REP");
-    assert_eq!(cpu.cx >> 16, 0x1234, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0x1234,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0x12340000, "ECX should be 0x12340000");
 }
 
@@ -101,10 +109,14 @@ fn test_rep_stosw_preserves_ecx_upper_bits() {
     for i in 0..3 {
         assert_eq!(cpu.memory.read_u16(addr + i * 2), 0xBEEF);
     }
-    
+
     // CRITICAL: Check that upper 16 bits of ECX were preserved
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 after REP");
-    assert_eq!(cpu.cx >> 16, 0xABCD, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0xABCD,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0xABCD0000, "ECX should be 0xABCD0000");
 }
 
@@ -126,9 +138,9 @@ fn test_loop_preserves_ecx_upper_bits() {
     cpu.memory.load_program(
         0x0100,
         &[
-            0x43,       // INC BX
+            0x43, // INC BX
             0xE2, 0xFD, // LOOP -3 (back to 0x0100)
-            0xF4,       // HLT
+            0xF4, // HLT
         ],
     );
 
@@ -144,7 +156,11 @@ fn test_loop_preserves_ecx_upper_bits() {
 
     // Verify results
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 after loop completes");
-    assert_eq!(cpu.cx >> 16, 0x5678, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0x5678,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0x56780000, "ECX should be 0x56780000");
     assert_eq!(cpu.bx, 10, "BX should be incremented 10 times");
 }
@@ -164,7 +180,7 @@ fn test_loopz_preserves_ecx_upper_bits() {
         0x0100,
         &[
             0xE1, 0xFE, // LOOPZ -2 (loop to self, infinite if ZF && CX)
-            0xF4,       // HLT
+            0xF4, // HLT
         ],
     );
 
@@ -176,18 +192,22 @@ fn test_loopz_preserves_ecx_upper_bits() {
     cpu.step(); // CX: 3 -> 2, ZF=1, continues
     assert_eq!(cpu.cx & 0xFFFF, 2);
     assert_eq!(cpu.cx >> 16, 0xFFFF);
-    
+
     cpu.flags = FLAG_ZF; // Keep ZF set
     cpu.step(); // CX: 2 -> 1, ZF=1, continues
     assert_eq!(cpu.cx & 0xFFFF, 1);
     assert_eq!(cpu.cx >> 16, 0xFFFF);
-    
+
     cpu.flags = FLAG_ZF; // Keep ZF set
     cpu.step(); // CX: 1 -> 0, ZF=1, exits (CX=0)
-    
+
     // Verify results - should exit because CX reached 0
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 when loop exits");
-    assert_eq!(cpu.cx >> 16, 0xFFFF, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0xFFFF,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0xFFFF0000, "ECX should be 0xFFFF0000");
     assert_eq!(cpu.ip, 0x0102, "Should exit loop and be at HLT");
 }
@@ -210,10 +230,10 @@ fn test_loopnz_preserves_ecx_upper_bits() {
     cpu.memory.load_program(
         0x0100,
         &[
-            0x43,                   // INC BX
-            0x39, 0xDB,            // CMP BX, BX (always ZF=1)
-            0xE0, 0xFA,            // LOOPNZ -6 (back to 0x0100)
-            0xF4,                   // HLT
+            0x43, // INC BX
+            0x39, 0xDB, // CMP BX, BX (always ZF=1)
+            0xE0, 0xFA, // LOOPNZ -6 (back to 0x0100)
+            0xF4, // HLT
         ],
     );
 
@@ -230,7 +250,11 @@ fn test_loopnz_preserves_ecx_upper_bits() {
     // LOOPNZ should stop on first iteration when ZF is set
     // 1st iteration: INC BX (BX=1), CMP BX,BX (ZF=1), LOOPNZ (CX=2, ZF=1, exit)
     assert_eq!(cpu.cx & 0xFFFF, 2, "CX should be 2 when ZF sets");
-    assert_eq!(cpu.cx >> 16, 0x9876, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0x9876,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0x98760002, "ECX should be 0x98760002");
     assert_eq!(cpu.bx, 1, "BX should be 1");
 }
@@ -244,12 +268,12 @@ fn test_rep_scasb_preserves_ecx_upper_bits() {
     cpu.es = 0x2000;
     cpu.di = 0x0100;
     cpu.ax = 0x00FF; // AL = 0xFF (search for this)
-    // Set ECX with upper bits set: 0x11110005 means search 5 bytes max
+                     // Set ECX with upper bits set: 0x11110005 means search 5 bytes max
     cpu.cx = 0x11110005;
 
     // Write data to search - match on 3rd byte
     let addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0100);
-    cpu.memory.write(addr, 0xAA);     // Different
+    cpu.memory.write(addr, 0xAA); // Different
     cpu.memory.write(addr + 1, 0xBB); // Different
     cpu.memory.write(addr + 2, 0xFF); // Match! (REPNE stops here)
     cpu.memory.write(addr + 3, 0xCC); // Won't be scanned
@@ -264,8 +288,16 @@ fn test_rep_scasb_preserves_ecx_upper_bits() {
 
     // Should scan 3 bytes, then stop on match
     // CX starts at 5, decrements to 2 when match is found
-    assert_eq!(cpu.cx & 0xFFFF, 2, "CX should be 2 when match found on 3rd byte");
-    assert_eq!(cpu.cx >> 16, 0x1111, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx & 0xFFFF,
+        2,
+        "CX should be 2 when match found on 3rd byte"
+    );
+    assert_eq!(
+        cpu.cx >> 16,
+        0x1111,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0x11110002, "ECX should be 0x11110002");
 }
 
@@ -300,7 +332,11 @@ fn test_rep_cmpsb_preserves_ecx_upper_bits() {
 
     // Verify CX is decremented but upper bits preserved
     assert_eq!(cpu.cx & 0xFFFF, 0, "CX should be 0 after REPE CMPSB");
-    assert_eq!(cpu.cx >> 16, 0xBEEF, "Upper 16 bits of ECX should be preserved");
+    assert_eq!(
+        cpu.cx >> 16,
+        0xBEEF,
+        "Upper 16 bits of ECX should be preserved"
+    );
     assert_eq!(cpu.cx, 0xBEEF0000, "ECX should be 0xBEEF0000");
 }
 
@@ -428,16 +464,17 @@ fn test_call_32bit_with_override() {
 
     // 0x66 0xE8 offset32 = CALL near with 32-bit offset
     // offset = 0x12345678 (little-endian: 78 56 34 12)
-    cpu.memory.load_program(
-        0x0200,
-        &[0x66, 0xE8, 0x78, 0x56, 0x34, 0x12],
-    );
+    cpu.memory
+        .load_program(0x0200, &[0x66, 0xE8, 0x78, 0x56, 0x34, 0x12]);
 
     cpu.step();
 
     // Verify return address (IP after instruction) was pushed as 32-bit
     let ret_addr = cpu.read_u32(0x1000, 0x00FC);
-    assert_eq!(ret_addr, 0x00000206, "32-bit return address should be pushed");
+    assert_eq!(
+        ret_addr, 0x00000206,
+        "32-bit return address should be pushed"
+    );
     assert_eq!(cpu.sp, 0x00FC, "SP should be decremented by 4");
 
     // Verify IP was updated
@@ -469,5 +506,8 @@ fn test_ret_32bit_with_override() {
     assert_eq!(cpu.sp, 0x0100, "SP should be incremented by 4");
 
     // Verify IP was loaded from stack
-    assert_eq!(cpu.ip, 0x00001234, "IP should be loaded from stack as 32-bit");
+    assert_eq!(
+        cpu.ip, 0x00001234,
+        "IP should be loaded from stack as 32-bit"
+    );
 }
