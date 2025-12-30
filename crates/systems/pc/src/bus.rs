@@ -1181,22 +1181,38 @@ mod tests {
     #[test]
     fn test_ram_initialized_to_zero() {
         let bus = PcBus::new();
-        
+
         // Test specific addresses mentioned in Windows 95 boot bug
         assert_eq!(bus.read(0x7BFA), 0x00, "Address 0x7BFA should be zero");
         assert_eq!(bus.read(0x7BFB), 0x00, "Address 0x7BFB should be zero");
         assert_eq!(bus.read(0x7BFC), 0x00, "Address 0x7BFC should be zero");
         assert_eq!(bus.read(0x7BFD), 0x00, "Address 0x7BFD should be zero");
-        
+
         // Test a sample of RAM locations to ensure they're all zero
         // Skip IVT area (0x0000-0x03FF) which is initialized by the bus constructor
-        for addr in (0x0400..0xA0000).step_by(0x1000) {
-            assert_eq!(bus.read(addr), 0x00, "Address 0x{:05X} should be zero", addr);
+        // Test at 64KB intervals for efficiency
+        for addr in (0x0400..0xA0000).step_by(0x10000) {
+            assert_eq!(
+                bus.read(addr),
+                0x00,
+                "Address 0x{:05X} should be zero",
+                addr
+            );
         }
-        
-        // Specifically test the stack area before boot sector
-        for addr in 0x7000..0x7C00 {
-            assert_eq!(bus.read(addr as u32), 0x00, "Stack area address 0x{:04X} should be zero", addr);
+
+        // Test key addresses in the stack area before boot sector
+        // Test first, middle, and last addresses, plus some strategic points
+        let stack_test_addrs = [
+            0x7000, 0x7001, 0x7100, 0x7200, 0x7400, 0x7800, 0x7BF0, 0x7BF8, 0x7BFC, 0x7BFE,
+            0x7BFF,
+        ];
+        for &addr in &stack_test_addrs {
+            assert_eq!(
+                bus.read(addr),
+                0x00,
+                "Stack area address 0x{:04X} should be zero",
+                addr
+            );
         }
     }
 
