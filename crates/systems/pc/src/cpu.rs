@@ -16,6 +16,24 @@ const INT21H_VECTOR_OFFSET: u32 = 0x84;
 /// INT 21h vector table segment (high word) in memory
 const INT21H_VECTOR_SEGMENT: u32 = 0x86;
 
+/// INT 2Fh vector table offset (low word) in memory
+const INT2FH_VECTOR_OFFSET: u32 = 0xBC;
+
+/// INT 2Fh vector table segment (high word) in memory
+const INT2FH_VECTOR_SEGMENT: u32 = 0xBE;
+
+/// INT 31h vector table offset (low word) in memory
+const INT31H_VECTOR_OFFSET: u32 = 0xC4;
+
+/// INT 31h vector table segment (high word) in memory
+const INT31H_VECTOR_SEGMENT: u32 = 0xC6;
+
+/// INT 33h vector table offset (low word) in memory
+const INT33H_VECTOR_OFFSET: u32 = 0xCC;
+
+/// INT 33h vector table segment (high word) in memory
+const INT33H_VECTOR_SEGMENT: u32 = 0xCE;
+
 /// DOS error code: invalid file handle
 const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
 
@@ -275,11 +293,55 @@ impl PcCpu {
                 0x28 => return self.handle_int28h(), // DOS idle callout
                 0x29 => return self.handle_int29h(), // Fast console output
                 0x2A => return self.handle_int2ah(), // Network Installation API (stub)
-                // NOTE: INT 2Fh, 31h, 33h are provided by DOS/drivers, not BIOS
-                // HIMEM.SYS will hook INT 2Fh AH=43h for XMS support
-                // 0x2F => return self.handle_int2fh(), // Multiplex interrupt (DOS provides this)
-                // 0x31 => return self.handle_int31h(), // DPMI services (DPMI host provides this)
-                // 0x33 => return self.handle_int33h(), // Mouse services (mouse driver provides this)
+                0x2F => {
+                    // Check if DOS/drivers have installed an INT 2Fh handler (vector != 0x0000:0x0000)
+                    // HIMEM.SYS, EMM386, network redirectors, etc. install INT 2Fh handlers
+                    let int2f_offset = self.cpu.memory.read(INT2FH_VECTOR_OFFSET) as u16
+                        | ((self.cpu.memory.read(INT2FH_VECTOR_OFFSET + 1) as u16) << 8);
+                    let int2f_segment = self.cpu.memory.read(INT2FH_VECTOR_SEGMENT) as u16
+                        | ((self.cpu.memory.read(INT2FH_VECTOR_SEGMENT + 1) as u16) << 8);
+
+                    // If a handler exists, let the CPU execute it
+                    if int2f_segment != 0 || int2f_offset != 0 {
+                        // Handler exists (DOS/driver installed), let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No handler installed, use our BIOS-level handler for XMS/DPMI checks
+                        return self.handle_int2fh();
+                    }
+                }
+                0x31 => {
+                    // Check if DPMI host has installed an INT 31h handler
+                    let int31_offset = self.cpu.memory.read(INT31H_VECTOR_OFFSET) as u16
+                        | ((self.cpu.memory.read(INT31H_VECTOR_OFFSET + 1) as u16) << 8);
+                    let int31_segment = self.cpu.memory.read(INT31H_VECTOR_SEGMENT) as u16
+                        | ((self.cpu.memory.read(INT31H_VECTOR_SEGMENT + 1) as u16) << 8);
+
+                    // If a DPMI host handler exists, let the CPU execute it
+                    if int31_segment != 0 || int31_offset != 0 {
+                        // DPMI host handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No DPMI host, use our basic DPMI handler
+                        return self.handle_int31h();
+                    }
+                }
+                0x33 => {
+                    // Check if mouse driver has installed an INT 33h handler
+                    let int33_offset = self.cpu.memory.read(INT33H_VECTOR_OFFSET) as u16
+                        | ((self.cpu.memory.read(INT33H_VECTOR_OFFSET + 1) as u16) << 8);
+                    let int33_segment = self.cpu.memory.read(INT33H_VECTOR_SEGMENT) as u16
+                        | ((self.cpu.memory.read(INT33H_VECTOR_SEGMENT + 1) as u16) << 8);
+
+                    // If a mouse driver handler exists, let the CPU execute it
+                    if int33_segment != 0 || int33_offset != 0 {
+                        // Mouse driver handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No mouse driver, use our basic mouse handler
+                        return self.handle_int33h();
+                    }
+                }
                 0x4A => return self.handle_int4ah(), // RTC Alarm
                 _ => {}                              // Let CPU handle other interrupts normally
             }
@@ -2365,10 +2427,11 @@ impl PcCpu {
         // DL = drive number
 
         let bx = self.cpu.bx;
-        let drive = (self.cpu.dx & 0xFF) as u8;
+        let _drive = (self.cpu.dx & 0xFF) as u8;
 
-        if bx == 0x55AA && drive >= 0x80 {
-            // Extended INT 13h supported for hard drives
+        if bx == 0x55AA {
+            // Extended INT 13h supported for all drives (floppy and hard disk)
+            // Modern BIOS implementations support extensions for both drive types
             // BX = 0xAA55 (signature)
             self.cpu.bx = 0xAA55u32;
 
@@ -2385,7 +2448,7 @@ impl PcCpu {
 
             self.set_carry_flag(false);
         } else {
-            // Extensions not supported or invalid parameters
+            // Extensions not supported or invalid parameters (invalid BX signature)
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
             self.set_carry_flag(true);
         }
@@ -2453,6 +2516,13 @@ impl PcCpu {
             .memory
             .disk_read_lba(drive, lba, num_sectors as u8, &mut buffer);
 
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!(
+                "INT 13h AH=0x42: drive=0x{:02X}, LBA={}, count={}, buffer={:04X}:{:04X}, status=0x{:02X}, AL will be set to={}",
+                drive, lba, num_sectors, buffer_segment, buffer_offset, status, num_sectors & 0xFF
+            );
+        }
+
         // Copy to memory at buffer_segment:buffer_offset
         if status == 0x00 {
             for (i, &byte) in buffer.iter().enumerate() {
@@ -2461,8 +2531,16 @@ impl PcCpu {
             }
         }
 
-        // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
+        // Set return values
+        // AH = status
+        // AL = number of sectors transferred (on success, should match num_sectors from DAP)
+        if status == 0x00 {
+            // Success: AL = sectors transferred, AH = 0
+            self.cpu.ax = (num_sectors & 0xFF) as u32;
+        } else {
+            // Error: AH = status code, AL preserved
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
+        }
 
         // Set carry flag based on status
         self.set_carry_flag(status != 0x00);
@@ -2527,8 +2605,15 @@ impl PcCpu {
             .memory
             .disk_write_lba(drive, lba, num_sectors as u8, &buffer);
 
-        // Set AH = status
-        self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
+        // Set return values
+        // AH = status, AL = sectors transferred
+        if status == 0x00 {
+            // Success: AL = sectors transferred, AH = 0
+            self.cpu.ax = (num_sectors & 0xFF) as u32;
+        } else {
+            // Error: AH = status code, AL preserved
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
+        }
         self.set_carry_flag(status != 0x00);
 
         51
@@ -3264,8 +3349,7 @@ impl PcCpu {
         match al {
             0x00 => {
                 // Disable A20 gate
-                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
-                // Return success
+                self.cpu.memory.xms.set_a20_enabled(false);
                 self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
@@ -3274,8 +3358,7 @@ impl PcCpu {
             }
             0x01 => {
                 // Enable A20 gate
-                // In an emulator, A20 is always enabled (we have full 32-bit addressing)
-                // Return success
+                self.cpu.memory.xms.set_a20_enabled(true);
                 self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00; // AH = 0x00 (success)
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
@@ -3284,11 +3367,23 @@ impl PcCpu {
             }
             0x02 => {
                 // Get A20 gate status
-                // Return: AX = 0x0001 (A20 gate is enabled)
-                self.cpu.ax = 0x0001u32; // AH = 0x00 (success), AL = 0x01 (enabled)
+                // Return current A20 state from XMS driver
+                let a20_enabled = if self.cpu.memory.xms.is_a20_enabled() {
+                    1
+                } else {
+                    0
+                };
+                self.cpu.ax = (0x00 << 8) | a20_enabled; // AH = 0x00 (success), AL = status
                 self.set_carry_flag(false);
                 emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
-                    "INT 15h AH=24h AL=02h: Get A20 status (returning enabled)".to_string()
+                    format!(
+                        "INT 15h AH=24h AL=02h: Get A20 status (returning {})",
+                        if a20_enabled == 1 {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    )
                 });
             }
             0x03 => {
@@ -3398,6 +3493,16 @@ impl PcCpu {
         let extended_kb = self.cpu.memory.xms.total_extended_memory_kb();
         self.cpu.ax = extended_kb.min(0xFFFF) as u32;
         self.set_carry_flag(false);
+        emu_core::logging::log(
+            emu_core::logging::LogCategory::Interrupts,
+            emu_core::logging::LogLevel::Trace,
+            || {
+                format!(
+                    "INT 15h AH=88h: Returning extended memory size = {}KB",
+                    extended_kb
+                )
+            },
+        );
         51
     }
 
