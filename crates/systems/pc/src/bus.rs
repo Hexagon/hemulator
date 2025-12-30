@@ -1190,7 +1190,8 @@ mod tests {
 
         // Test a sample of RAM locations to ensure they're all zero
         // Skip IVT area (0x0000-0x03FF) which is initialized by the bus constructor
-        // Test at 64KB intervals for efficiency
+        // Test at 64KB intervals for efficiency (vec![0; n] should initialize all memory
+        // uniformly, so sampling is sufficient to detect initialization bugs)
         for addr in (0x0400..0xA0000).step_by(0x10000) {
             assert_eq!(
                 bus.read(addr),
