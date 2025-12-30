@@ -1004,4 +1004,43 @@ mod tests {
         assert!(bus.hard_drive().is_some());
         assert_eq!(bus.hard_drive().unwrap().len(), 10 * 1024 * 1024);
     }
+
+    #[test]
+    fn test_vga_status_register() {
+        let bus = PcBus::new();
+
+        // Initial state should be 0x00 (not in retrace)
+        assert_eq!(bus.io_read(0x03DA), 0x00);
+
+        // Simulate ~2000 cycles (should be in retrace - first 4000 cycles)
+        bus.update_vga_status(2000);
+        assert_eq!(bus.io_read(0x03DA), 0x09); // Bits 0 and 3 set (in retrace)
+
+        // Simulate more cycles to exit retrace period
+        // Frame is ~80,000 cycles, retrace is first 4,000 cycles
+        bus.update_vga_status(3000); // Total: 5000 cycles (past retrace)
+        assert_eq!(bus.io_read(0x03DA), 0x00); // Back to display time
+
+        // Continue well into display time
+        bus.update_vga_status(10000); // Total: 15000 cycles
+        assert_eq!(bus.io_read(0x03DA), 0x00); // Still in display
+
+        // Test MDA port (0x03BA) - should behave identically
+        let bus2 = PcBus::new();
+        bus2.update_vga_status(2000);
+        assert_eq!(bus2.io_read(0x03BA), 0x09); // In retrace
+    }
+
+    #[test]
+    fn test_vga_status_wraps_around() {
+        let bus = PcBus::new();
+
+        // Simulate a full frame and then some
+        bus.update_vga_status(80000); // One full frame
+        assert_eq!(bus.io_read(0x03DA), 0x09); // Should wrap to retrace again
+
+        // Advance past retrace in the new frame
+        bus.update_vga_status(5000);
+        assert_eq!(bus.io_read(0x03DA), 0x00); // Back to display
+    }
 }
