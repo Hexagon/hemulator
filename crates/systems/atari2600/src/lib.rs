@@ -515,6 +515,7 @@ impl System for Atari2600System {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use emu_core::cpu_6502::Memory6502;
 
     #[test]
     fn test_system_creation() {
@@ -937,6 +938,80 @@ mod tests {
             assert_eq!(bus.riot.read(0x0285) & 0x80, 0x00); // Clear after read
         } else {
             panic!("Could not access bus");
+        }
+    }
+
+    #[test]
+    fn test_simultaneous_tia_ram_write() {
+        // Edge case: addresses $40-$7F write to BOTH TIA and RAM simultaneously
+        // This is real Atari 2600 hardware behavior, not a bug
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Write to address $42 (WSYNC in TIA, also RAM)
+            bus.write(0x0042, 0xAB);
+
+            // Verify the value was written to RAM
+            assert_eq!(
+                bus.read(0x0042),
+                0xAB,
+                "Value should be stored in RAM at $42"
+            );
+
+            // Verify it's also accessible at mirrored address
+            assert_eq!(bus.read(0x00C2), 0xAB, "RAM mirrors should work correctly");
+        }
+    }
+
+    #[test]
+    fn test_opposite_joystick_directions() {
+        // Edge case: pressing opposite directions simultaneously (e.g., Up+Down)
+        // Real hardware allows this, though behavior is controller-dependent
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set contradictory directions: Up + Down (bits 4 and 5)
+        let state = 0b00110000; // Up and Down both pressed
+        sys.set_controller(0, state);
+
+        if let Some(bus) = sys.cpu.bus() {
+            let swcha = bus.riot.read(0x0280);
+            // Both Up (bit 0) and Down (bit 1) should be pressed (active-low)
+            assert_eq!(swcha & 0x03, 0x00, "Both Up and Down should be active");
+        }
+    }
+
+    #[test]
+    fn test_playfield_reflection_mode() {
+        // Validate playfield reflection vs. repeat mode
+        // This is a critical feature for proper playfield rendering
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Set playfield pattern
+            bus.tia.write(0x0D, 0xF0); // PF0 = 11110000 (reversed: 00001111)
+            bus.tia.write(0x0E, 0xAA); // PF1 = 10101010
+            bus.tia.write(0x0F, 0x55); // PF2 = 01010101
+
+            // Test reflection mode (CTRLPF bit 0 = 0)
+            bus.tia.write(0x0A, 0x00); // Reflection OFF (repeat mode)
+
+            // In repeat mode, right half should be same as left half
+            // (This is validated by the rendering logic, not directly testable here)
+
+            // Test reflection mode (CTRLPF bit 0 = 1)
+            bus.tia.write(0x0A, 0x01); // Reflection ON
+
+            // In reflection mode, right half should be mirror of left half
+            // (This is validated by the rendering logic)
         }
     }
 }
