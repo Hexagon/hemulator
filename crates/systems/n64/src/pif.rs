@@ -382,4 +382,63 @@ mod tests {
         let buttons2 = u16::from_be_bytes([pif.read_ram(0x7CB), pif.read_ram(0x7CC)]);
         assert_eq!(buttons2 & (1 << 14), 1 << 14); // B button
     }
+
+    #[test]
+    fn test_button_state_active_high() {
+        // Verify that N64 uses active-high logic (1 = pressed)
+        let mut buttons = ControllerButtons::default();
+        
+        // No buttons pressed = all zeros
+        assert_eq!(buttons.to_u16(), 0x0000);
+        
+        // Press A button (bit 15)
+        buttons.a = true;
+        assert_eq!(buttons.to_u16(), 0x8000);
+        
+        // Press multiple buttons
+        buttons.b = true; // bit 14
+        buttons.start = true; // bit 12
+        buttons.d_up = true; // bit 11
+        assert_eq!(buttons.to_u16(), 0xD800); // 1101 1000 0000 0000
+        
+        // Press all D-pad buttons
+        buttons.d_down = true; // bit 10
+        buttons.d_left = true; // bit 9
+        buttons.d_right = true; // bit 8
+        assert_eq!(buttons.to_u16() & 0x0F00, 0x0F00);
+        
+        // Press L and R triggers
+        buttons.l = true; // bit 5
+        buttons.r = true; // bit 4
+        assert_eq!(buttons.to_u16() & 0x0030, 0x0030);
+        
+        // Press all C buttons
+        buttons.c_up = true; // bit 3
+        buttons.c_down = true; // bit 2
+        buttons.c_left = true; // bit 1
+        buttons.c_right = true; // bit 0
+        assert_eq!(buttons.to_u16() & 0x000F, 0x000F);
+    }
+
+    #[test]
+    fn test_analog_stick_range() {
+        // Verify analog stick uses signed 8-bit range
+        let mut state = ControllerState::default();
+        
+        // Center position
+        assert_eq!(state.stick_x, 0);
+        assert_eq!(state.stick_y, 0);
+        
+        // Full right/up
+        state.stick_x = 127;
+        state.stick_y = 127;
+        assert_eq!(state.stick_x, 127);
+        assert_eq!(state.stick_y, 127);
+        
+        // Full left/down
+        state.stick_x = -128;
+        state.stick_y = -128;
+        assert_eq!(state.stick_x, -128);
+        assert_eq!(state.stick_y, -128);
+    }
 }

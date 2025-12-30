@@ -207,7 +207,36 @@ impl EmulatorSystem {
             EmulatorSystem::Atari2600(_) => {}
             EmulatorSystem::PC(_) => {} // PC doesn't use controller input
             EmulatorSystem::SNES(_) => {} // SNES controller support stub
-            EmulatorSystem::N64(_) => {} // N64 controller support stub
+            EmulatorSystem::N64(sys) => {
+                // N64 controller mapping
+                // GUI state bits: 0=A, 1=B, 2=Select, 3=Start, 4=Up, 5=Down, 6=Left, 7=Right
+                // Map to N64 controller with proper button mapping
+                // Note: N64 uses active-high logic (1 = pressed, bit set means button pressed)
+                let mut n64_state = emu_n64::ControllerState::default();
+                
+                // Map standard buttons (A, B, Start)
+                n64_state.buttons.a = (state & 0x01) != 0; // Bit 0
+                n64_state.buttons.b = (state & 0x02) != 0; // Bit 1
+                n64_state.buttons.start = (state & 0x08) != 0; // Bit 3
+                
+                // Map D-pad
+                n64_state.buttons.d_up = (state & 0x10) != 0; // Bit 4
+                n64_state.buttons.d_down = (state & 0x20) != 0; // Bit 5
+                n64_state.buttons.d_left = (state & 0x40) != 0; // Bit 6
+                n64_state.buttons.d_right = (state & 0x80) != 0; // Bit 7
+                
+                // Note: Select button (bit 2) is not used on N64
+                // Z, L, R, and C-buttons would need additional key mappings
+                
+                // Set controller state based on port
+                match port {
+                    0 => sys.set_controller1(n64_state),
+                    1 => sys.set_controller2(n64_state),
+                    2 => sys.set_controller3(n64_state),
+                    3 => sys.set_controller4(n64_state),
+                    _ => {}
+                }
+            }
         }
     }
 
