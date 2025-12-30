@@ -2522,10 +2522,14 @@ impl PcCpu {
                 let offset = (buffer_offset as u16).wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_segment, offset as u16, byte);
             }
-            
+
             // Update DAP with actual number of sectors transferred
-            self.cpu.memory.write(dap_addr + 2, (num_sectors & 0xFF) as u8);
-            self.cpu.memory.write(dap_addr + 3, ((num_sectors >> 8) & 0xFF) as u8);
+            self.cpu
+                .memory
+                .write(dap_addr + 2, (num_sectors & 0xFF) as u8);
+            self.cpu
+                .memory
+                .write(dap_addr + 3, ((num_sectors >> 8) & 0xFF) as u8);
         }
 
         // Set return values according to INT 13h Extensions specification

@@ -7450,14 +7450,22 @@ impl<M: Memory8086> Cpu8086<M> {
                 let temp_sp = self.sp;
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit: PUSHAD - push all 32-bit registers
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.ax);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.cx);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.dx);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.bx);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, temp_sp);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.bp);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.si);
-                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.di);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.ax);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.cx);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.dx);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.bx);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, temp_sp);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.bp);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.si);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.di);
                 } else {
                     // 16-bit: PUSHA - push all 16-bit registers
                     self.push(self.ax as u16);
@@ -7482,14 +7490,22 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit: POPAD - pop all 32-bit registers
-                    self.di = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.si = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.bp = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    let _temp_sp = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.bx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.dx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.cx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
-                    self.ax = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.di = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.si = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.bp = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    let _temp_sp = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.bx = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.dx = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.cx = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.ax = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
                 } else {
                     // 16-bit: POPA - pop all 16-bit registers
                     self.di = (self.di & 0xFFFF_0000) | (self.pop() as u32);
@@ -7656,7 +7672,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                
+
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit operand size: push 32-bit sign-extended value
                     let val = self.fetch_u8() as i8 as i32 as u32;
@@ -8100,7 +8116,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 let pop_bytes = self.fetch_u16();
                 let ret_ip: u32;
                 let ret_cs: u16;
-                
+
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit far return with immediate
                     ret_ip = self.read_u32(self.ss, self.sp);
@@ -8301,6 +8317,7 @@ mod tests {
     mod tests_flags;
     mod tests_jumps;
     mod tests_misc;
+    mod tests_pr192_fixes; // Tests for PR #192 bug fixes
     mod tests_shifts;
 
     // Helper function for tests to calculate physical address
