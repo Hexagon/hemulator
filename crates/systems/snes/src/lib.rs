@@ -68,13 +68,17 @@ pub struct SnesSystem {
     renderer: Box<dyn SnesPpuRenderer>,
 }
 
+// SNES timing constants (NTSC)
+const SNES_FRAME_CYCLES: u32 = 89342; // ~3.58MHz / 60Hz
+const SNES_VISIBLE_CYCLES: u32 = 76400; // ~85.5% of frame before VBlank
+
 impl SnesSystem {
     /// Create a new SNES system
     pub fn new() -> Self {
         let bus = SnesBus::new();
         Self {
             cpu: SnesCpu::new(bus),
-            frame_cycles: 89342, // ~3.58MHz / 60Hz (NTSC)
+            frame_cycles: SNES_FRAME_CYCLES,
             current_cycles: 0,
             renderer: Box::new(SoftwareSnesPpuRenderer::new()),
         }
@@ -127,16 +131,43 @@ impl System for SnesSystem {
         // Tick the frame counter for VBlank emulation
         self.cpu.cpu.memory.tick_frame();
 
-        // Execute CPU cycles for one frame
-        while self.current_cycles < self.frame_cycles {
+        // Clear VBlank at start of frame
+        self.cpu.bus_mut().ppu_mut().set_vblank(false);
+
+        // Execute CPU cycles for visible portion
+        while self.current_cycles < SNES_VISIBLE_CYCLES {
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
             // Update cycle counter in bus for VBlank timing
             self.cpu.bus_mut().tick_cycles(cycles);
         }
 
-        // Render frame using the renderer
+        // Render frame at end of visible scanlines
         self.renderer.render_frame(self.cpu.bus().ppu());
+
+        // Enter VBlank and trigger NMI if enabled
+        self.cpu.bus_mut().ppu_mut().set_vblank(true);
+
+        // Check for NMI and trigger it on the 65C816
+        if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+            self.cpu.cpu.trigger_nmi();
+        }
+
+        // Execute remaining VBlank cycles
+        while self.current_cycles < self.frame_cycles {
+            let cycles = self.cpu.step();
+            self.current_cycles += cycles;
+            self.cpu.bus_mut().tick_cycles(cycles);
+
+            // Check for additional NMI requests during VBlank
+            if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+                self.cpu.cpu.trigger_nmi();
+            }
+        }
+
+        // Clear VBlank at end of frame
+        self.cpu.bus_mut().ppu_mut().set_vblank(false);
+
         Ok(self.renderer.get_frame().clone())
     }
 
@@ -258,8 +289,13 @@ mod tests {
         assert!(sys.mount("Cartridge", test_rom).is_ok());
         assert!(sys.is_mounted("Cartridge"));
 
-        // Run one frame - the emulator will show a checkerboard pattern
-        let frame = sys.step_frame().unwrap();
+        // Run multiple frames to allow the ROM to initialize
+        // The test ROM initializes graphics during RESET and then enters a WAI loop
+        // We need to give it time to set up VRAM, CGRAM, and the tilemap
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
 
         // Verify frame dimensions
         assert_eq!(frame.width, 256);
