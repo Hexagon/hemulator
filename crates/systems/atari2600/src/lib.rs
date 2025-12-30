@@ -862,6 +862,43 @@ mod tests {
     }
 
     #[test]
+    fn test_controller_during_gameplay() {
+        // Integration test: verify controller input persists across frames
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set controller state
+        sys.set_controller(0, 0b10000001); // Fire + Right
+
+        // Run several frames
+        for _ in 0..5 {
+            sys.step_frame().unwrap();
+        }
+
+        // Controller state should still be readable
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.tia.read(0x0C) & 0x80, 0x00, "Fire still pressed");
+            assert_eq!(bus.riot.read(0x0280) & 0x08, 0x00, "Right still pressed");
+        }
+
+        // Change controller state
+        sys.set_controller(0, 0x00); // Release all
+
+        // Run more frames
+        for _ in 0..5 {
+            sys.step_frame().unwrap();
+        }
+
+        // New state should be reflected
+        if let Some(bus) = sys.cpu.bus() {
+            assert_eq!(bus.tia.read(0x0C) & 0x80, 0x80, "Fire released");
+            assert_eq!(bus.riot.read(0x0280) & 0x0F, 0x0F, "All released");
+        }
+    }
+
+    #[test]
     fn test_timer_interrupt_flag_behavior() {
         // This test verifies that the RIOT timer interrupt flag clears on read,
         // which is critical for commercial ROMs that use timer-based synchronization
