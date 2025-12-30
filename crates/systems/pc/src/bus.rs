@@ -78,6 +78,12 @@ pub struct PcBus {
     kb_input_buffer_full: Cell<bool>,
     /// Keyboard controller last write was command (true) or data (false)
     kb_last_was_command: Cell<bool>,
+    /// VGA status register state (Cell for interior mutability during io_read)
+    /// Bit 0: Display enable (0 = display, 1 = retrace/blanking)
+    /// Bit 3: Vertical retrace (0 = no retrace, 1 = vertical retrace)
+    vga_status: Cell<u8>,
+    /// Cycle counter for VGA status timing (Cell for interior mutability)
+    vga_status_cycles: Cell<u64>,
 }
 
 impl PcBus {
@@ -138,6 +144,8 @@ impl PcBus {
             kb_controller_output_port: 0x02, // A20 enabled by default (bit 1 set)
             kb_input_buffer_full: Cell::new(false), // Input buffer starts empty
             kb_last_was_command: Cell::new(false), // No command yet
+            vga_status: Cell::new(0x00),     // Start with display active (not in retrace)
+            vga_status_cycles: Cell::new(0),
         };
 
         // Initialize Interrupt Vector Table (IVT) in low RAM
@@ -184,6 +192,33 @@ impl PcBus {
         self.video_adapter_type
     }
 
+    /// Update VGA status register based on elapsed cycles
+    ///
+    /// This simulates the vertical retrace timing. At 60 Hz, a frame is ~16.67ms.
+    /// Assuming 4.77 MHz (original PC), that's about 79,583 cycles per frame.
+    /// We'll simulate vertical retrace for about 5% of the frame time.
+    pub fn update_vga_status(&self, cycles: u64) {
+        let current_cycles = self.vga_status_cycles.get() + cycles;
+        self.vga_status_cycles.set(current_cycles);
+
+        // Cycles per frame at various speeds (at 60 Hz):
+        // 4.77 MHz (PC/XT): 79,583 cycles/frame
+        // We'll use a generic approach: retrace happens for ~5% of frame
+        // Frame period: ~80,000 cycles (approximate for 4.77 MHz)
+        const CYCLES_PER_FRAME: u64 = 80000;
+        const RETRACE_CYCLES: u64 = CYCLES_PER_FRAME / 20; // 5% of frame
+
+        let frame_position = current_cycles % CYCLES_PER_FRAME;
+
+        if frame_position < RETRACE_CYCLES {
+            // In vertical retrace (bit 3 set, bit 0 set for blanking)
+            self.vga_status.set(0x09); // Bits 0 and 3 set
+        } else {
+            // Not in retrace (bits clear for active display)
+            self.vga_status.set(0x00);
+        }
+    }
+
     /// Get the number of floppy drives installed
     pub fn floppy_count(&self) -> u8 {
         let mut count = 0;
@@ -214,6 +249,9 @@ impl PcBus {
         self.mouse = Mouse::new(); // Reset mouse state
                                    // XMS driver state is preserved across resets (like hardware)
         self.boot_sector_loaded = false;
+        // Reset VGA status
+        self.vga_status.set(0x00);
+        self.vga_status_cycles.set(0);
     }
 
     /// Set boot priority
@@ -592,6 +630,17 @@ impl PcBus {
                 } else {
                     0x00
                 }
+            }
+            // Port 0x03BA - MDA/EGA Input Status Register 1 (monochrome)
+            // Port 0x03DA - CGA/VGA Input Status Register 1 (color)
+            // Bit 0: Display enable (0 = display time, 1 = retrace/blanking)
+            // Bit 3: Vertical retrace (0 = no retrace, 1 = vertical retrace active)
+            // Reading this port resets the 3C0h index flip-flop to address mode
+            0x03BA | 0x03DA => {
+                // Return current VGA status
+                // Note: Reading this port should also reset the attribute controller
+                // flip-flop (port 0x3C0), but we don't implement that yet
+                self.vga_status.get()
             }
             _ => 0xFF, // Default for unimplemented ports
         };
