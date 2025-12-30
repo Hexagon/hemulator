@@ -3234,9 +3234,14 @@ impl PcCpu {
         match ah {
             0x24 => self.int15h_a20_gate_control(),
             0x41 => self.int15h_wait_on_external_event(),
+            0x4F => self.int15h_keyboard_intercept(),
+            0x86 => self.int15h_wait(),
             0x87 => self.int15h_extended_memory_block_move(),
             0x88 => self.int15h_get_extended_memory_size(),
             0xC0 => self.int15h_get_system_configuration(),
+            0xC1 => self.int15h_get_extended_bios_data_area(),
+            0xC2 => self.int15h_pointing_device(),
+            0xD8 => self.int15h_eisa_functions(),
             0xE8 => {
                 // Get Extended Memory Size (32-bit)
                 let al = (self.cpu.ax & 0xFF) as u8;
@@ -3687,6 +3692,74 @@ impl PcCpu {
             )
         });
 
+        51
+    }
+
+    /// INT 15h, AH=4Fh - Keyboard Intercept
+    /// Called by INT 09h to allow programs to intercept keystrokes
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_keyboard_intercept(&mut self) -> u32 {
+        // AL = scan code
+        // Programs can hook this to intercept keystrokes before they reach the keyboard buffer
+        // If CF is set on return, the keystroke is discarded
+        // If CF is clear, AL contains the (possibly modified) scan code to process
+
+        // Default behavior: pass the scan code through unchanged
+        self.set_carry_flag(false); // CF=0 means process the keystroke
+        51
+    }
+
+    /// INT 15h, AH=86h - Wait (Delay)
+    /// Used by programs to create precise delays
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_wait(&mut self) -> u32 {
+        // CX:DX = interval in microseconds
+        // This should delay for the specified time
+        // For now, we just return success immediately
+        // A proper implementation would track cycles or use a timer
+
+        self.set_carry_flag(false); // CF=0 means success
+        51
+    }
+
+    /// INT 15h, AH=C1h - Get Extended BIOS Data Area Segment
+    /// Returns the segment address of the Extended BIOS Data Area (EBDA)
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_get_extended_bios_data_area(&mut self) -> u32 {
+        // Returns: ES = segment of EBDA
+        // The EBDA is typically located at the top of conventional memory
+        // For compatibility, we return "not supported"
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
+        51
+    }
+
+    /// INT 15h, AH=C2h - Pointing Device (PS/2 Mouse) Functions
+    /// Provides access to PS/2 mouse operations
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_pointing_device(&mut self) -> u32 {
+        // AL = subfunction
+        // Various subfunctions for mouse initialization, status, etc.
+        // For compatibility, we return "not supported"
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
+        51
+    }
+
+    /// INT 15h, AH=D8h - EISA System Functions
+    /// EISA (Extended Industry Standard Architecture) specific functions
+    /// These are hardware-specific and not applicable to most systems
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_eisa_functions(&mut self) -> u32 {
+        // AL = subfunction
+        // EISA-specific operations for system configuration
+        // These functions are only present on EISA systems
+        // Return "not supported" without logging spam
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
         51
     }
 
@@ -5894,6 +5967,85 @@ mod tests {
         // Should fail (CF set, AH=86h = function not supported)
         assert!(cpu.get_carry_flag());
         assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x86);
+    }
+
+    #[test]
+    fn test_int15h_eisa_functions() {
+        // Test INT 15h AH=D8h (EISA Functions) - should return not supported
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=D8h (EISA functions)
+        cpu.cpu.ax = 0xD800; // AH=D8h, AL=00
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should fail gracefully (CF set, AH=86h = function not supported)
+        assert!(cpu.get_carry_flag());
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x86);
+    }
+
+    #[test]
+    fn test_int15h_keyboard_intercept() {
+        // Test INT 15h AH=4Fh (Keyboard Intercept) - should return success
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=4Fh (keyboard intercept)
+        cpu.cpu.ax = 0x4F1C; // AH=4Fh, AL=1Ch (scan code)
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should succeed (CF clear, AL unchanged)
+        assert!(!cpu.get_carry_flag());
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x1C); // AL should be unchanged
+    }
+
+    #[test]
+    fn test_int15h_wait() {
+        // Test INT 15h AH=86h (Wait) - should return success
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=86h (wait)
+        cpu.cpu.ax = 0x8600; // AH=86h
+        cpu.cpu.cx = 0x0001; // CX:DX = microseconds to wait
+        cpu.cpu.dx = 0x0000;
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should succeed (CF clear)
+        assert!(!cpu.get_carry_flag());
     }
 
     #[test]

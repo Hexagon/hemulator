@@ -4112,7 +4112,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         } else {
                             // If not equal, ZF=0 and AX = r/m16
                             self.set_flag(FLAG_ZF, false);
-                            self.ax = (self.ax & 0xFFFF_0000) | (rm_val as u32); // Preserve upper 16 bits
+                            self.ax = (self.ax & 0xFFFF_0000) | (rm_val as u32);
+                            // Preserve upper 16 bits
                         }
 
                         // Update other flags based on comparison
@@ -4201,7 +4202,8 @@ impl<M: Memory8086> Cpu8086<M> {
                             // Not equal: ZF=0, load memory into DX:AX
                             self.set_flag(FLAG_ZF, false);
                             self.ax = (self.ax & 0xFFFF_0000) | (mem_low as u32); // Preserve upper bits
-                            self.dx = (self.dx & 0xFFFF_0000) | (mem_high as u32); // Preserve upper bits
+                            self.dx = (self.dx & 0xFFFF_0000) | (mem_high as u32);
+                            // Preserve upper bits
                         }
 
                         self.cycles += 10;
@@ -6384,7 +6386,9 @@ impl<M: Memory8086> Cpu8086<M> {
                                 // Division overflow - trigger INT 0 as exception
                                 self.trigger_interrupt(0, true);
                             } else {
-                                self.ax = (self.ax & 0xFFFF_0000) | ((remainder as u32) << 8) | (quotient as u32); // Preserve upper bits
+                                self.ax = (self.ax & 0xFFFF_0000)
+                                    | ((remainder as u32) << 8)
+                                    | (quotient as u32); // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 80 } else { 86 };
@@ -6411,7 +6415,9 @@ impl<M: Memory8086> Cpu8086<M> {
                             } else {
                                 let quot_u8 = quotient as u8;
                                 let rem_u8 = remainder as u8;
-                                self.ax = (self.ax & 0xFFFF_0000) | (((rem_u8 as u16) << 8) | (quot_u8 as u16)) as u32; // Preserve upper bits
+                                self.ax = (self.ax & 0xFFFF_0000)
+                                    | (((rem_u8 as u16) << 8) | (quot_u8 as u16)) as u32;
+                                // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 101 } else { 107 };
@@ -6543,7 +6549,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 self.trigger_interrupt(0, true);
                             } else {
                                 self.ax = (self.ax & 0xFFFF_0000) | (quotient as u16 as u32); // Preserve upper bits
-                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32); // Preserve upper bits
+                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32);
+                                // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 144 } else { 150 };
@@ -6569,7 +6576,8 @@ impl<M: Memory8086> Cpu8086<M> {
                                 self.trigger_interrupt(0, true);
                             } else {
                                 self.ax = (self.ax & 0xFFFF_0000) | (quotient as u16 as u32); // Preserve upper bits
-                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32); // Preserve upper bits
+                                self.dx = (self.dx & 0xFFFF_0000) | (remainder as u16 as u32);
+                                // Preserve upper bits
                             }
                         }
                         self.cycles += if modbits == 0b11 { 165 } else { 171 };
@@ -6966,7 +6974,8 @@ impl<M: Memory8086> Cpu8086<M> {
                 } else {
                     let ah = al / base;
                     let al_new = al % base;
-                    self.ax = (self.ax & 0xFFFF_0000) | (((ah as u16) << 8) | (al_new as u16)) as u32; // Preserve upper bits
+                    self.ax =
+                        (self.ax & 0xFFFF_0000) | (((ah as u16) << 8) | (al_new as u16)) as u32; // Preserve upper bits
                     self.update_flags_8(al_new);
                     self.cycles += 83;
                     83
