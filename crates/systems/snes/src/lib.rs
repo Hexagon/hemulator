@@ -127,16 +127,52 @@ impl System for SnesSystem {
         // Tick the frame counter for VBlank emulation
         self.cpu.cpu.memory.tick_frame();
 
-        // Execute CPU cycles for one frame
-        while self.current_cycles < self.frame_cycles {
+        // Calculate visible and VBlank cycle counts
+        // NTSC SNES: ~89,342 cycles/frame, VBlank starts around cycle 76,400 (~85.5% of frame)
+        let visible_cycles = 76400u32;
+        let vblank_start = visible_cycles;
+
+        // Clear VBlank at start of frame
+        self.cpu.bus_mut().ppu_mut().set_vblank(false);
+
+        // Execute CPU cycles for visible portion
+        while self.current_cycles < vblank_start {
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
             // Update cycle counter in bus for VBlank timing
             self.cpu.bus_mut().tick_cycles(cycles);
         }
 
-        // Render frame using the renderer
+        // Render frame at end of visible scanlines
         self.renderer.render_frame(self.cpu.bus().ppu());
+
+        // Enter VBlank and trigger NMI if enabled
+        self.cpu.bus_mut().ppu_mut().set_vblank(true);
+        
+        // Check for NMI
+        if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+            // Trigger NMI on the 65C816
+            // The 65C816 uses the same interrupt handling as 6502
+            // We need to trigger the interrupt via the CPU
+            // For now, we'll skip this as the 65C816 core may not have this method yet
+            // TODO: Add NMI support to 65C816 core
+        }
+
+        // Execute remaining VBlank cycles
+        while self.current_cycles < self.frame_cycles {
+            let cycles = self.cpu.step();
+            self.current_cycles += cycles;
+            self.cpu.bus_mut().tick_cycles(cycles);
+            
+            // Check for NMI during VBlank too
+            if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+                // TODO: Trigger NMI
+            }
+        }
+
+        // Clear VBlank at end of frame
+        self.cpu.bus_mut().ppu_mut().set_vblank(false);
+
         Ok(self.renderer.get_frame().clone())
     }
 

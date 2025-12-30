@@ -72,6 +72,10 @@ pub struct Ppu {
 
     /// V-blank NMI flag (cleared on read of $213F)
     nmi_flag: bool,
+    /// NMI pending flag (consumed by take_nmi_pending)
+    nmi_pending: bool,
+    /// NMI enable register ($4200 bit 7)
+    pub nmi_enable: bool,
     /// H/V-blank flag and joypad status ($4212)
     hvbjoy: u8,
 
@@ -156,6 +160,8 @@ impl Ppu {
             ppu1_open_bus: 0,
             ppu2_open_bus: 0,
             nmi_flag: false,
+            nmi_pending: false,
+            nmi_enable: false,
             hvbjoy: 0,
             screen_display: 0x80, // Start with screen blanked
             bgmode: 0,
@@ -621,6 +627,10 @@ impl Ppu {
         if vblank {
             self.nmi_flag = true;
             self.hvbjoy |= 0x80; // Set V-blank bit
+            // Trigger NMI if enabled
+            if self.nmi_enable {
+                self.nmi_pending = true;
+            }
         } else {
             self.hvbjoy &= !0x80; // Clear V-blank bit
         }
@@ -633,6 +643,13 @@ impl Ppu {
         } else {
             self.hvbjoy &= !0x40; // Clear H-blank bit
         }
+    }
+
+    /// Check if NMI is pending and consume the flag
+    pub fn take_nmi_pending(&mut self) -> bool {
+        let pending = self.nmi_pending;
+        self.nmi_pending = false;
+        pending
     }
 
     /// Clear NMI flag (called when $213F is read)
