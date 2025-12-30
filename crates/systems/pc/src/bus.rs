@@ -1204,8 +1204,7 @@ mod tests {
         // Test key addresses in the stack area before boot sector
         // Test first, middle, and last addresses, plus some strategic points
         let stack_test_addrs = [
-            0x7000, 0x7001, 0x7100, 0x7200, 0x7400, 0x7800, 0x7BF0, 0x7BF8, 0x7BFC, 0x7BFE,
-            0x7BFF,
+            0x7000, 0x7001, 0x7100, 0x7200, 0x7400, 0x7800, 0x7BF0, 0x7BF8, 0x7BFC, 0x7BFE, 0x7BFF,
         ];
         for &addr in &stack_test_addrs {
             assert_eq!(
