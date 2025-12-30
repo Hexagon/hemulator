@@ -3198,7 +3198,14 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH CS (0x0E)
             0x0E => {
-                self.push(self.cs);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // Push 32-bit (zero-extend segment)
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.cs as u32);
+                } else {
+                    // Push 16-bit
+                    self.push(self.cs);
+                }
                 self.cycles += 10;
                 10
             }
@@ -4957,14 +4964,29 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH SS (0x16)
             0x16 => {
-                self.push(self.ss);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // Push 32-bit (zero-extend segment)
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.ss as u32);
+                } else {
+                    // Push 16-bit
+                    self.push(self.ss);
+                }
                 self.cycles += 10;
                 10
             }
 
             // POP SS (0x17)
             0x17 => {
-                self.ss = self.pop();
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // Pop 32-bit (discard upper 16 bits)
+                    self.sp = self.sp.wrapping_add(4);
+                    let value = self.read_u32(self.ss, self.sp.wrapping_sub(4));
+                    self.ss = (value & 0xFFFF) as u16;
+                } else {
+                    // Pop 16-bit
+                    self.ss = self.pop();
+                }
                 self.cycles += 8;
                 8
             }
@@ -5127,15 +5149,30 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH DS (0x1E)
             0x1E => {
-                self.push(self.ds);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // Push 32-bit (zero-extend segment)
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.ds as u32);
+                } else {
+                    // Push 16-bit
+                    self.push(self.ds);
+                }
                 self.cycles += 10;
                 10
             }
 
             // POP DS (0x1F)
             0x1F => {
-                let val = self.pop();
-                self.ds = val;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // Pop 32-bit (discard upper 16 bits)
+                    self.sp = self.sp.wrapping_add(4);
+                    let value = self.read_u32(self.ss, self.sp.wrapping_sub(4));
+                    self.ds = (value & 0xFFFF) as u16;
+                } else {
+                    // Pop 16-bit
+                    let val = self.pop();
+                    self.ds = val;
+                }
                 self.cycles += 8;
                 8
             }
@@ -6137,14 +6174,28 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSHF - Push Flags (0x9C)
             0x9C => {
-                self.push(self.flags as u16);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit: PUSHFD - push 32-bit EFLAGS
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.flags);
+                } else {
+                    // 16-bit: PUSHF - push 16-bit FLAGS
+                    self.push(self.flags as u16);
+                }
                 self.cycles += 10;
                 10
             }
 
             // POPF - Pop Flags (0x9D)
             0x9D => {
-                self.flags = self.pop() as u32;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit: POPFD - pop 32-bit EFLAGS
+                    self.flags = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                } else {
+                    // 16-bit: POPF - pop 16-bit FLAGS
+                    self.flags = self.pop() as u32;
+                }
                 self.cycles += 8;
                 8
             }
@@ -7068,18 +7119,34 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // JMP near relative (0xE9)
             0xE9 => {
-                let offset = self.fetch_u16() as i16;
-                self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit near jump
+                    let offset = self.fetch_u32() as i32;
+                    self.ip = self.ip.wrapping_add(offset as u32);
+                } else {
+                    // 16-bit near jump
+                    let offset = self.fetch_u16() as i16;
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                }
                 self.cycles += 15;
                 15
             }
 
             // JMP far absolute (0xEA)
             0xEA => {
-                let offset = self.fetch_u16();
-                let segment = self.fetch_u16();
-                self.ip = offset as u32;
-                self.cs = segment;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit far jump
+                    let offset = self.fetch_u32();
+                    let segment = self.fetch_u16();
+                    self.ip = offset;
+                    self.cs = segment;
+                } else {
+                    // 16-bit far jump
+                    let offset = self.fetch_u16();
+                    let segment = self.fetch_u16();
+                    self.ip = offset as u32;
+                    self.cs = segment;
+                }
                 self.cycles += 15;
                 15
             }
@@ -7381,14 +7448,27 @@ impl<M: Memory8086> Cpu8086<M> {
                     return 10;
                 }
                 let temp_sp = self.sp;
-                self.push(self.ax as u16);
-                self.push(self.cx as u16);
-                self.push(self.dx as u16);
-                self.push(self.bx as u16);
-                self.push(temp_sp as u16); // Push original SP value
-                self.push(self.bp as u16);
-                self.push(self.si as u16);
-                self.push(self.di as u16);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit: PUSHAD - push all 32-bit registers
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.ax);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.cx);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.dx);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.bx);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, temp_sp);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.bp);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.si);
+                    self.sp = self.sp.wrapping_sub(4); self.write_u32(self.ss, self.sp, self.di);
+                } else {
+                    // 16-bit: PUSHA - push all 16-bit registers
+                    self.push(self.ax as u16);
+                    self.push(self.cx as u16);
+                    self.push(self.dx as u16);
+                    self.push(self.bx as u16);
+                    self.push(temp_sp as u16); // Push original SP value
+                    self.push(self.bp as u16);
+                    self.push(self.si as u16);
+                    self.push(self.di as u16);
+                }
                 self.cycles += 36;
                 36
             }
@@ -7400,14 +7480,27 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                self.di = (self.di & 0xFFFF_0000) | (self.pop() as u32);
-                self.si = (self.si & 0xFFFF_0000) | (self.pop() as u32);
-                self.bp = (self.bp & 0xFFFF_0000) | (self.pop() as u32);
-                let _temp_sp = self.pop(); // Discard SP value
-                self.bx = (self.bx & 0xFFFF_0000) | (self.pop() as u32);
-                self.dx = (self.dx & 0xFFFF_0000) | (self.pop() as u32);
-                self.cx = (self.cx & 0xFFFF_0000) | (self.pop() as u32);
-                self.ax = (self.ax & 0xFFFF_0000) | (self.pop() as u32);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit: POPAD - pop all 32-bit registers
+                    self.di = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.si = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.bp = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    let _temp_sp = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.bx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.dx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.cx = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                    self.ax = self.read_u32(self.ss, self.sp); self.sp = self.sp.wrapping_add(4);
+                } else {
+                    // 16-bit: POPA - pop all 16-bit registers
+                    self.di = (self.di & 0xFFFF_0000) | (self.pop() as u32);
+                    self.si = (self.si & 0xFFFF_0000) | (self.pop() as u32);
+                    self.bp = (self.bp & 0xFFFF_0000) | (self.pop() as u32);
+                    let _temp_sp = self.pop(); // Discard SP value
+                    self.bx = (self.bx & 0xFFFF_0000) | (self.pop() as u32);
+                    self.dx = (self.dx & 0xFFFF_0000) | (self.pop() as u32);
+                    self.cx = (self.cx & 0xFFFF_0000) | (self.pop() as u32);
+                    self.ax = (self.ax & 0xFFFF_0000) | (self.pop() as u32);
+                }
                 self.cycles += 51;
                 51
             }
@@ -7907,18 +8000,33 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CALL near relative (0xE8)
             0xE8 => {
-                let offset = self.fetch_u16() as i16;
-                // Push return address (current IP after fetching the offset)
-                self.push(self.ip as u16);
-                // Jump to target (IP + offset)
-                self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit call: fetch 32-bit offset, push 32-bit return address
+                    let offset = self.fetch_u32() as i32;
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.ip);
+                    self.ip = self.ip.wrapping_add(offset as u32);
+                } else {
+                    // 16-bit call: fetch 16-bit offset, push 16-bit return address
+                    let offset = self.fetch_u16() as i16;
+                    self.push(self.ip as u16);
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                }
                 self.cycles += 19;
                 19
             }
 
             // RET near (0xC3)
             0xC3 => {
-                self.ip = self.pop() as u32;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit return: pop 32-bit address
+                    let ret_addr = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.ip = ret_addr;
+                } else {
+                    // 16-bit return: pop 16-bit address
+                    self.ip = self.pop() as u32;
+                }
                 self.cycles += 8;
                 8
             }
@@ -7926,7 +8034,15 @@ impl<M: Memory8086> Cpu8086<M> {
             // RET near with immediate (0xC2) - pops return address and adds imm16 to SP
             0xC2 => {
                 let pop_bytes = self.fetch_u16();
-                self.ip = self.pop() as u32;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit return
+                    let ret_addr = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.ip = ret_addr;
+                } else {
+                    // 16-bit return
+                    self.ip = self.pop() as u32;
+                }
                 self.sp = self.sp.wrapping_add(pop_bytes as u32);
                 self.cycles += 12;
                 12
@@ -7934,22 +8050,47 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // CALL far absolute (0x9A)
             0x9A => {
-                let new_ip = self.fetch_u16();
-                let new_cs = self.fetch_u16();
-                // Push current CS and IP
-                self.push(self.cs);
-                self.push(self.ip as u16);
-                // Jump to far address
-                self.cs = new_cs;
-                self.ip = new_ip as u32;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit far call: fetch 32-bit offset + 16-bit segment
+                    let new_ip = self.fetch_u32();
+                    let new_cs = self.fetch_u16();
+                    // Push current CS and EIP (32-bit)
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.cs as u32);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.ip);
+                    // Jump to far address
+                    self.cs = new_cs;
+                    self.ip = new_ip;
+                } else {
+                    // 16-bit far call
+                    let new_ip = self.fetch_u16();
+                    let new_cs = self.fetch_u16();
+                    // Push current CS and IP
+                    self.push(self.cs);
+                    self.push(self.ip as u16);
+                    // Jump to far address
+                    self.cs = new_cs;
+                    self.ip = new_ip as u32;
+                }
                 self.cycles += 28;
                 28
             }
 
             // RET far (0xCB)
             0xCB => {
-                self.ip = self.pop() as u32;
-                self.cs = self.pop();
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit far return: pop 32-bit EIP and 16-bit CS (actually 32-bit but use lower 16)
+                    self.ip = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    let cs_val = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.cs = cs_val as u16;
+                } else {
+                    // 16-bit far return
+                    self.ip = self.pop() as u32;
+                    self.cs = self.pop();
+                }
                 self.cycles += 18;
                 18
             }
@@ -7957,8 +8098,21 @@ impl<M: Memory8086> Cpu8086<M> {
             // RET far with immediate (0xCA) - pops return address and adds imm16 to SP
             0xCA => {
                 let pop_bytes = self.fetch_u16();
-                let ret_ip = self.pop();
-                let ret_cs = self.pop();
+                let ret_ip: u32;
+                let ret_cs: u16;
+                
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit far return with immediate
+                    ret_ip = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    let cs_val = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    ret_cs = cs_val as u16;
+                } else {
+                    // 16-bit far return with immediate
+                    ret_ip = self.pop() as u32;
+                    ret_cs = self.pop();
+                }
 
                 if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
                     eprintln!(
@@ -8029,11 +8183,20 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // IRET - Return from Interrupt
             0xCF => {
-                // Pop IP, CS, FLAGS from stack (reverse order of INT)
-                self.ip = self.pop() as u32;
-                self.cs = self.pop();
-                self.flags = self.pop() as u32;
-
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit: IRETD - pop 32-bit EIP, CS, EFLAGS
+                    self.ip = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.cs = self.read_u32(self.ss, self.sp) as u16;
+                    self.sp = self.sp.wrapping_add(4);
+                    self.flags = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                } else {
+                    // 16-bit: IRET - pop 16-bit IP, CS, FLAGS
+                    self.ip = self.pop() as u32;
+                    self.cs = self.pop();
+                    self.flags = self.pop() as u32;
+                }
                 self.cycles += 32; // Approximate timing for IRET instruction
                 32
             }
