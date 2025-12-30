@@ -2713,14 +2713,27 @@ impl<M: Memory8086> Cpu8086<M> {
 
             // PUSH ES (0x06)
             0x06 => {
-                self.push(self.es);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit push: push 32-bit zero-extended segment value
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, self.es as u32);
+                } else {
+                    self.push(self.es);
+                }
                 self.cycles += 10;
                 10
             }
 
             // POP ES (0x07)
             0x07 => {
-                self.es = self.pop();
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit pop: pop 32-bit value but only use lower 16 bits for segment
+                    let val = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.es = val as u16;
+                } else {
+                    self.es = self.pop();
+                }
                 self.cycles += 8;
                 8
             }
@@ -5387,7 +5400,18 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // JE/JZ - Jump if Equal/Zero (0x74) - already implemented
+            // JE/JZ - Jump if Equal/Zero (0x74)
+            0x74 => {
+                let offset = self.fetch_u8() as i8;
+                if self.get_flag(FLAG_ZF) {
+                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
+                    self.cycles += 16;
+                    16
+                } else {
+                    self.cycles += 4;
+                    4
+                }
+            }
 
             // JNE/JNZ - Jump if Not Equal/Not Zero (0x75)
             0x75 => {
@@ -7318,8 +7342,16 @@ impl<M: Memory8086> Cpu8086<M> {
             // PUSH reg16 (50-57)
             0x50..=0x57 => {
                 let reg = opcode & 0x07;
-                let val = self.get_reg16(reg);
-                self.push(val);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit push: push 32-bit register value
+                    let val = self.get_reg32(reg);
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, val);
+                } else {
+                    // 16-bit push
+                    let val = self.get_reg16(reg);
+                    self.push(val);
+                }
                 self.cycles += 11;
                 11
             }
@@ -7327,8 +7359,16 @@ impl<M: Memory8086> Cpu8086<M> {
             // POP reg16 (58-5F)
             0x58..=0x5F => {
                 let reg = opcode & 0x07;
-                let val = self.pop();
-                self.set_reg16(reg, val);
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit pop
+                    let val = self.read_u32(self.ss, self.sp);
+                    self.sp = self.sp.wrapping_add(4);
+                    self.set_reg32(reg, val);
+                } else {
+                    // 16-bit pop
+                    let val = self.pop();
+                    self.set_reg16(reg, val);
+                }
                 self.cycles += 8;
                 8
             }
@@ -7523,8 +7563,17 @@ impl<M: Memory8086> Cpu8086<M> {
                     self.cycles += 10;
                     return 10;
                 }
-                let val = self.fetch_u8() as i8 as i16 as u16; // Sign extend
-                self.push(val);
+                
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operand size: push 32-bit sign-extended value
+                    let val = self.fetch_u8() as i8 as i32 as u32;
+                    self.sp = self.sp.wrapping_sub(4);
+                    self.write_u32(self.ss, self.sp, val);
+                } else {
+                    // 16-bit operand size: push 16-bit sign-extended value
+                    let val = self.fetch_u8() as i8 as i16 as u16;
+                    self.push(val);
+                }
                 self.cycles += 3;
                 3
             }
@@ -7654,19 +7703,6 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
                 self.cycles += 15;
                 15
-            }
-
-            // JZ/JE (74) - Jump if Zero
-            0x74 => {
-                let offset = self.fetch_u8() as i8;
-                if self.get_flag(FLAG_ZF) {
-                    self.ip = (self.ip.wrapping_add((offset as i16) as u32)) & 0xFFFF;
-                    self.cycles += 16;
-                    16
-                } else {
-                    self.cycles += 4;
-                    4
-                }
             }
 
             // MOVSB - Move String Byte (0xA4)

@@ -2516,34 +2516,32 @@ impl PcCpu {
             .memory
             .disk_read_lba(drive, lba, num_sectors as u8, &mut buffer);
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
-                "INT 13h AH=0x42: drive=0x{:02X}, LBA={}, count={}, buffer={:04X}:{:04X}, status=0x{:02X}, AL will be set to={}",
-                drive, lba, num_sectors, buffer_segment, buffer_offset, status, num_sectors & 0xFF
-            );
-        }
-
         // Copy to memory at buffer_segment:buffer_offset
         if status == 0x00 {
             for (i, &byte) in buffer.iter().enumerate() {
                 let offset = (buffer_offset as u16).wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_segment, offset as u16, byte);
             }
+            
+            // Update DAP with actual number of sectors transferred
+            self.cpu.memory.write(dap_addr + 2, (num_sectors & 0xFF) as u8);
+            self.cpu.memory.write(dap_addr + 3, ((num_sectors >> 8) & 0xFF) as u8);
         }
 
-        // Set return values
-        // AH = status
-        // AL = number of sectors transferred (on success, should match num_sectors from DAP)
+        // Set return values according to INT 13h Extensions specification
+        // On success: AH = 0x00, AL = number of sectors transferred, CF = 0
+        // On error: AH = error code, AL = undefined, CF = 1
         if status == 0x00 {
-            // Success: AL = sectors transferred, AH = 0
-            self.cpu.ax = (num_sectors & 0xFF) as u32;
+            // Success: Set AX = (AH=0x00, AL=sectors_transferred)
+            // Clear high bits and set only the low 16 bits
+            self.cpu.ax = (self.cpu.ax & 0xFFFF0000) | (num_sectors as u32 & 0xFFFF);
+            self.set_carry_flag(false);
         } else {
-            // Error: AH = status code, AL preserved
+            // Error: AH = status code, preserve AL, set CF
+            eprintln!("INT 13h AH=0x42: ERROR status=0x{:02X}", status);
             self.cpu.ax = (self.cpu.ax & 0x00FF) | ((status as u32) << 8);
+            self.set_carry_flag(true);
         }
-
-        // Set carry flag based on status
-        self.set_carry_flag(status != 0x00);
 
         51
     }
