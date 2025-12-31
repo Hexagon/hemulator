@@ -230,102 +230,39 @@ impl PcCpu {
                 }
             }
 
-            match int_num {
-                0x05 => return self.handle_int05h(), // Print Screen / BOUND
-                0x08 => return self.handle_int08h(), // Timer tick
-                0x09 => return self.handle_int09h(), // Keyboard hardware interrupt
-                0x10 => return self.handle_int10h(), // Video BIOS
-                0x11 => return self.handle_int11h(), // Equipment list
-                0x12 => return self.handle_int12h(), // Get memory size
-                0x13 => return self.handle_int13h(), // Disk services
-                0x14 => return self.handle_int14h(), // Serial port services
-                0x15 => return self.handle_int15h(), // Extended services
-                0x16 => return self.handle_int16h(), // Keyboard services
-                0x17 => return self.handle_int17h(), // Printer services
-                0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
-                0x19 => return self.handle_int19h(), // Bootstrap loader
-                0x1A => return self.handle_int1ah(), // Time/Date services
-                // NOTE: INT 1Bh and 1Ch are meant to be hooked by DOS/programs, not intercepted by BIOS
-                // 0x1B => return self.handle_int1bh(), // Ctrl-Break handler (DOS/programs hook this)
-                // 0x1C => return self.handle_int1ch(), // Timer tick handler (programs hook this)
-                // NOTE: INT 20h and INT 21h are DOS API functions, not BIOS functions
-                // DOS (FreeDOS, MS-DOS, etc.) installs its own handlers for these interrupts during boot.
-                // For standalone programs (COM/EXE without DOS), we provide basic INT 21h support.
-                // If DOS has installed its own handler, we let the CPU execute it normally.
-                // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
-                0x21 => {
-                    // Check if DOS has installed an INT 21h handler
-                    if self.is_interrupt_overridden(0x21) {
-                        // DOS handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No DOS handler, use our fallback handler for standalone programs
-                        return self.handle_int21h();
-                    }
+            // Generic interrupt override check: if the OS/DOS has installed a custom
+            // handler for this interrupt, let the CPU execute it normally instead of
+            // intercepting it with our BIOS/emulator handler
+            if self.is_interrupt_overridden(int_num) {
+                // OS has installed a custom handler, let CPU execute it
+                // Fall through to normal execution
+            } else {
+                // No OS handler installed, check if we have a BIOS/emulator handler
+                match int_num {
+                    0x05 => return self.handle_int05h(), // Print Screen / BOUND
+                    0x08 => return self.handle_int08h(), // Timer tick
+                    0x09 => return self.handle_int09h(), // Keyboard hardware interrupt
+                    0x10 => return self.handle_int10h(), // Video BIOS
+                    0x11 => return self.handle_int11h(), // Equipment list
+                    0x12 => return self.handle_int12h(), // Get memory size
+                    0x13 => return self.handle_int13h(), // Disk services
+                    0x14 => return self.handle_int14h(), // Serial port services
+                    0x15 => return self.handle_int15h(), // Extended services
+                    0x16 => return self.handle_int16h(), // Keyboard services
+                    0x17 => return self.handle_int17h(), // Printer services
+                    0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
+                    0x19 => return self.handle_int19h(), // Bootstrap loader
+                    0x1A => return self.handle_int1ah(), // Time/Date services
+                    0x21 => return self.handle_int21h(), // DOS API (fallback for standalone programs)
+                    0x28 => return self.handle_int28h(), // DOS idle
+                    0x29 => return self.handle_int29h(), // Fast console output
+                    0x2A => return self.handle_int2ah(), // Network Installation API
+                    0x2F => return self.handle_int2fh(), // Multiplex
+                    0x31 => return self.handle_int31h(), // DPMI
+                    0x33 => return self.handle_int33h(), // Mouse driver
+                    0x4A => return self.handle_int4ah(), // RTC Alarm
+                    _ => {} // No BIOS handler, let CPU handle it normally
                 }
-                0x28 => {
-                    // Check if DOS/TSRs have installed an INT 28h handler
-                    if self.is_interrupt_overridden(0x28) {
-                        // OS handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No OS handler, use our stub
-                        return self.handle_int28h();
-                    }
-                }
-                0x29 => {
-                    // Check if DOS has installed an INT 29h handler
-                    if self.is_interrupt_overridden(0x29) {
-                        // OS handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No OS handler, use our stub
-                        return self.handle_int29h();
-                    }
-                }
-                0x2A => {
-                    // Check if DOS/network software has installed an INT 2Ah handler
-                    if self.is_interrupt_overridden(0x2A) {
-                        // OS handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No OS handler, use our BIOS stub
-                        return self.handle_int2ah();
-                    }
-                }
-                0x2F => {
-                    // Check if DOS/drivers have installed an INT 2Fh handler
-                    // HIMEM.SYS, EMM386, network redirectors, etc. install INT 2Fh handlers
-                    if self.is_interrupt_overridden(0x2F) {
-                        // Handler exists (DOS/driver installed), let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No handler installed, use our BIOS-level handler for XMS/DPMI checks
-                        return self.handle_int2fh();
-                    }
-                }
-                0x31 => {
-                    // Check if DPMI host has installed an INT 31h handler
-                    if self.is_interrupt_overridden(0x31) {
-                        // DPMI host handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No DPMI host, use our basic DPMI handler
-                        return self.handle_int31h();
-                    }
-                }
-                0x33 => {
-                    // Check if mouse driver has installed an INT 33h handler
-                    if self.is_interrupt_overridden(0x33) {
-                        // Mouse driver handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No mouse driver, use our basic mouse handler
-                        return self.handle_int33h();
-                    }
-                }
-                0x4A => return self.handle_int4ah(), // RTC Alarm
-                _ => {}                              // Let CPU handle other interrupts normally
             }
         }
 
