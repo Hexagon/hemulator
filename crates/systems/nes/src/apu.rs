@@ -916,4 +916,140 @@ mod tests {
             "Length counter should not change when disabled"
         );
     }
+
+    #[test]
+    fn test_envelope_basic_functionality() {
+        // Test the Envelope component directly to ensure we understand its behavior
+        let mut env = Envelope::new();
+
+        // Initially should be at 0
+        assert_eq!(env.level(), 0);
+
+        // Set params: initial_volume=15, add_mode=false (decay), period=0
+        env.set_params(15, false, 0);
+
+        // Still at 0 until restart and clock
+        assert_eq!(env.level(), 0);
+
+        // Restart the envelope
+        env.restart();
+
+        // Still at 0 until clocked
+        assert_eq!(env.level(), 0);
+
+        // Clock to process the start flag
+        env.clock();
+
+        // Now should be at initial_volume = 15
+        assert_eq!(
+            env.level(),
+            15,
+            "Envelope should start at 15 after restart and clock"
+        );
+
+        // Clock again with period=0 should decay immediately
+        env.clock();
+        assert_eq!(env.level(), 14, "Envelope should decay to 14");
+    }
+
+    #[test]
+    fn test_envelope_decay() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure pulse 1 with envelope mode (constant_volume=0) and period=0 (fastest decay)
+        // Binary: DDLC VVVV = 00000000 = duty 0, no loop, envelope mode, period 0
+        apu.write_register(0x4000, 0b00000000);
+
+        // Trigger a note
+        apu.write_register(0x4003, 0b00001000); // Length counter + trigger
+
+        // Generate enough samples to hit the first quarter frame boundary (~184 samples)
+        // This will clock the envelope and process the start flag
+        let _samples = apu.generate_samples(200);
+
+        // Verify envelope starts at 15 after being clocked
+        assert_eq!(apu.envelope1.level(), 15, "Envelope should start at 15");
+
+        // Generate samples for several more quarter frames
+        // With period=0, envelope decays by 1 every quarter frame
+        let _samples = apu.generate_samples(1000);
+
+        // After multiple quarter frames, envelope should have decayed from 15
+        let final_level = apu.envelope1.level();
+        assert!(
+            final_level < 15,
+            "Envelope should decay from 15, got {}",
+            final_level
+        );
+    }
+
+    #[test]
+    fn test_envelope_constant_volume() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure pulse 1 with constant volume mode (bit 4 = 1) and volume = 8
+        // Binary: DDLC VVVV = 00011000 = duty 0, no loop, constant volume, volume 8
+        apu.write_register(0x4000, 0b00011000);
+
+        // Trigger a note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate many samples
+        let _samples = apu.generate_samples(5000);
+
+        // In constant volume mode, the volume should remain at 8 (not decay)
+        // We can't directly check this, but we can verify the channel is still playing
+        // by checking that pulse1.envelope still equals 8
+        assert_eq!(
+            apu.pulse1.envelope, 8,
+            "Constant volume should remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_envelope_restart_on_retrigger() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure with envelope mode and period=0
+        apu.write_register(0x4000, 0b00000000);
+
+        // Trigger first note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate enough samples to hit first quarter frame and start envelope
+        let _samples = apu.generate_samples(200);
+
+        // Should start at 15
+        assert_eq!(apu.envelope1.level(), 15, "Envelope should start at 15");
+
+        // Generate samples to let envelope decay (several quarter frames)
+        let _samples = apu.generate_samples(1000);
+
+        // Envelope should have decayed
+        let decayed_level = apu.envelope1.level();
+        assert!(decayed_level < 15, "Envelope should have decayed from 15");
+
+        // Retrigger the note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate enough samples to process the restart (hit next quarter frame)
+        let _samples = apu.generate_samples(200);
+
+        // After restart, envelope should be back at 15
+        let restarted_level = apu.envelope1.level();
+        assert_eq!(
+            restarted_level, 15,
+            "Envelope should restart at 15 after retrigger, got {}",
+            restarted_level
+        );
+    }
 }
