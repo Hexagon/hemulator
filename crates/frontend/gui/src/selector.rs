@@ -7,6 +7,7 @@ use crate::ui_render;
 
 /// Selector window type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum SelectorType {
     SaveSlot,
     LoadSlot,
@@ -15,6 +16,7 @@ pub enum SelectorType {
 }
 
 /// Generic selector window for choosing from a list of options
+#[allow(dead_code)]
 pub struct SelectorWindow {
     pub selector_type: SelectorType,
     pub selected_index: Option<usize>,
@@ -41,7 +43,7 @@ impl SelectorWindow {
     pub fn handle_key(&mut self, key: char) -> Option<Option<usize>> {
         match self.selector_type {
             SelectorType::SaveSlot | SelectorType::LoadSlot => {
-                if key >= '1' && key <= '5' {
+                if ('1'..='5').contains(&key) {
                     let index = (key as u8 - b'1') as usize;
                     Some(Some(index))
                 } else {
@@ -49,7 +51,7 @@ impl SelectorWindow {
                 }
             }
             SelectorType::Speed => {
-                if key >= '0' && key <= '5' {
+                if ('0'..='5').contains(&key) {
                     let index = (key as u8 - b'0') as usize;
                     Some(Some(index))
                 } else {
@@ -57,7 +59,7 @@ impl SelectorWindow {
                 }
             }
             SelectorType::DiskFormat => {
-                if key >= '1' && key <= '9' {
+                if ('1'..='9').contains(&key) {
                     let index = (key as u8 - b'1') as usize;
                     Some(Some(index))
                 } else {
@@ -261,18 +263,22 @@ impl SelectorManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn show_save_slot_selector(&mut self) {
         self.active_selector = Some(SelectorWindow::new(SelectorType::SaveSlot));
     }
 
+    #[allow(dead_code)]
     pub fn show_load_slot_selector(&mut self) {
         self.active_selector = Some(SelectorWindow::new(SelectorType::LoadSlot));
     }
 
+    #[allow(dead_code)]
     pub fn show_speed_selector(&mut self) {
         self.active_selector = Some(SelectorWindow::new(SelectorType::Speed));
     }
 
+    #[allow(dead_code)]
     pub fn show_disk_format_selector(&mut self) {
         self.active_selector = Some(SelectorWindow::new(SelectorType::DiskFormat));
     }
@@ -287,6 +293,7 @@ impl SelectorManager {
 
     /// Handle keyboard input - returns Some(Some(index)) if selection made,
     /// Some(None) if cancelled, None if key not handled
+    #[allow(dead_code)]
     pub fn handle_key(&mut self, key: char) -> Option<Option<usize>> {
         if let Some(ref mut selector) = self.active_selector {
             selector.handle_key(key)
@@ -296,12 +303,9 @@ impl SelectorManager {
     }
 
     /// Render the active selector if any
+    #[allow(dead_code)]
     pub fn render(&mut self, width: usize, height: usize, current_speed: f64) -> Option<Vec<u32>> {
-        if let Some(ref mut selector) = self.active_selector {
-            Some(selector.render(width, height, current_speed))
-        } else {
-            None
-        }
+        self.active_selector.as_mut().map(|selector| selector.render(width, height, current_speed))
     }
 }
 

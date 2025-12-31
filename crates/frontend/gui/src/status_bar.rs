@@ -126,6 +126,7 @@ impl StatusBar {
     }
 
     /// Get the height of the status bar
+    #[allow(dead_code)]
     pub fn height() -> usize {
         STATUS_BAR_HEIGHT
     }

@@ -1503,7 +1503,7 @@ mod tests {
 
     #[test]
     fn test_vga_status_resets_attribute_flipflop() {
-        let mut bus = PcBus::new();
+        let bus = PcBus::new();
 
         // Set flip-flop to data mode
         bus.attribute_flipflop.set(true);

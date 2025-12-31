@@ -7,6 +7,7 @@ const MENU_ITEM_WIDTH: usize = 80;
 
 /// Menu actions that can be triggered
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum MenuAction {
     // File menu
     NewProject,
@@ -340,6 +341,7 @@ impl MenuBar {
     }
 
     /// Enable/disable mount menu based on system state
+    #[allow(dead_code)]
     pub fn set_mounts_enabled(&mut self, enabled: bool) {
         if let Some(mounts_menu) = self.menus.iter_mut().find(|m| m.label == "Mounts") {
             for item in &mut mounts_menu.items {
@@ -484,16 +486,19 @@ impl MenuBar {
     }
 
     /// Toggle menu visibility
+    #[allow(dead_code)]
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
     }
 
     /// Check if menu bar is visible
+    #[allow(dead_code)]
     pub fn is_visible(&self) -> bool {
         self.visible
     }
 
     /// Get the height of the menu bar when visible
+    #[allow(dead_code)]
     pub fn height(&self) -> usize {
         if self.visible {
             MENU_BAR_HEIGHT

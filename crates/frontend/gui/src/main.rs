@@ -56,10 +56,12 @@ impl RuntimeState {
         self.current_mounts.get(mount_id)
     }
 
+    #[allow(dead_code)]
     fn clear_mounts(&mut self) {
         self.current_mounts.clear();
     }
 
+    #[allow(dead_code)]
     fn set_project_path(&mut self, path: PathBuf) {
         self.current_project_path = Some(path);
     }
@@ -186,6 +188,7 @@ impl EmulatorSystem {
         }
     }
 
+    #[allow(dead_code)]
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         match self {
             EmulatorSystem::NES(sys) => sys.is_mounted(mount_point_id),
@@ -291,10 +294,10 @@ impl EmulatorSystem {
     }
 
     fn set_controller_16(&mut self, port: usize, state: u16) {
-        match self {
-            EmulatorSystem::SNES(sys) => sys.set_controller(port, state),
-            _ => {} // Other systems use 8-bit set_controller
+        if let EmulatorSystem::SNES(sys) = self {
+            sys.set_controller(port, state)
         }
+        // Other systems use 8-bit set_controller
     }
 
     fn get_debug_info_nes(&self) -> Option<emu_nes::DebugInfo> {
@@ -2252,7 +2255,7 @@ fn main() {
                         match save_screenshot(&buffer, width, height, sys.system_name()) {
                             Ok(path) => {
                                 println!("Screenshot saved to: {}", path);
-                                status_message = format!("Screenshot saved");
+                                status_message = "Screenshot saved".to_string();
                                 status_bar.message = status_message.clone();
                             }
                             Err(e) => eprintln!("Failed to save screenshot: {}", e),
@@ -2406,9 +2409,6 @@ fn main() {
         {
             // Close overlays first, only exit if no overlay is open
             if selector_manager.is_open()
-                || false
-                || false
-                || false
                 || popup_manager.has_open_popup()
             {
                 selector_manager.close();
@@ -2424,7 +2424,7 @@ fn main() {
         {
             popup_manager.toggle_help();
             selector_manager.close(); // Close selector if open
-            ; // Close disk format selector if open
+            // Close disk format selector if open
         }
 
         // Toggle debug overlay (F10)
@@ -3228,8 +3228,6 @@ fn main() {
         let should_step = (rom_loaded || matches!(&sys, EmulatorSystem::PC(_)))
             && !popup_manager.is_help_open()
             && !selector_manager.is_open()
-            && !false
-            && !false
             && settings.emulation_speed > 0.0;
 
         if should_step {
@@ -3293,17 +3291,10 @@ fn main() {
         }
 
         // Prepare frame to present (with overlays if any)
-        let speed_selector_buffer;
         let slot_selector_buffer;
-        let mount_selector_buffer;
         let debug_composed_buffer;
 
-        let frame_to_present: &[u32] = if false {
-            // Render speed selector overlay
-            speed_selector_buffer =
-                ui_render::create_speed_selector_overlay(width, height, settings.emulation_speed);
-            &speed_selector_buffer
-        } else if selector_manager.is_open() {
+        let frame_to_present: &[u32] = if selector_manager.is_open() {
             // Render slot selector overlay
             // For PC system in SAVE mode, show disk persist menu
             if matches!(&sys, EmulatorSystem::PC(_))
@@ -3343,16 +3334,6 @@ fn main() {
                     ui_render::create_slot_selector_overlay(width, height, mode_str, &has_saves);
                 &slot_selector_buffer
             }
-        } else if false {
-            // Render mount point selector overlay
-            let mount_points = sys.mount_points();
-            mount_selector_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-                sys.system_name(),
-            );
-            &mount_selector_buffer
         } else if let Some(ref overlay) = debug_overlay {
             // Blend debug overlay with game buffer
             debug_composed_buffer = blend_over(&buffer, overlay);

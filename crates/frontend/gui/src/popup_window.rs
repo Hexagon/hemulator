@@ -7,6 +7,7 @@ use crate::ui_render;
 
 /// Popup window identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum PopupWindowId {
     Debug,
     Help,
@@ -50,6 +51,7 @@ pub struct DebugWindow {
     pub log_level: String,
     pub log_scope: String,
     pub memory_address: usize,
+    #[allow(dead_code)]
     pub scroll_offset: usize,
     /// Window position and size for hit detection
     pub x: usize,
@@ -243,6 +245,7 @@ impl DebugWindow {
         buffer
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_cpu_tab(
         &self,
         buffer: &mut [u32],
@@ -278,6 +281,7 @@ impl DebugWindow {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_memory_tab(
         &self,
         buffer: &mut [u32],
@@ -300,6 +304,7 @@ impl DebugWindow {
         // TODO: Implement memory dump viewer
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_graphics_tab(
         &self,
         buffer: &mut [u32],
@@ -360,6 +365,7 @@ impl DebugWindow {
         // TODO: Implement log viewer with filtering
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_bus_tab(
         &self,
         buffer: &mut [u32],
