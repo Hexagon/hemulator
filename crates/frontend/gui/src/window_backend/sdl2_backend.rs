@@ -127,7 +127,7 @@ impl Sdl2Backend {
         let mut joystick_buttons = HashMap::new();
         let mut joystick_axes = HashMap::new();
         let mut joystick_hats = HashMap::new();
-        
+
         let num_joysticks = joystick_subsystem.num_joysticks()?;
 
         for id in 0..num_joysticks {

@@ -180,16 +180,28 @@ mod tests {
         // SNES hardware bit positions (from the match statement):
         // A=7, B=15, Select=13, Start=12, Up=11, Down=10, Left=9, Right=8
         // X=6, Y=14, L=5, R=4
-        
+
         // Create a dummy profile that maps all buttons to keyboard keys
         let mut profile = ControllerProfile::new("Test SNES Profile");
-        profile.mappings.insert(VirtualButton::A, InputSource::KeyboardKey("A".to_string()));
-        profile.mappings.insert(VirtualButton::B, InputSource::KeyboardKey("B".to_string()));
-        profile.mappings.insert(VirtualButton::X, InputSource::KeyboardKey("X".to_string()));
-        profile.mappings.insert(VirtualButton::Y, InputSource::KeyboardKey("Y".to_string()));
-        profile.mappings.insert(VirtualButton::L, InputSource::KeyboardKey("L".to_string()));
-        profile.mappings.insert(VirtualButton::R, InputSource::KeyboardKey("R".to_string()));
-        
+        profile
+            .mappings
+            .insert(VirtualButton::A, InputSource::KeyboardKey("A".to_string()));
+        profile
+            .mappings
+            .insert(VirtualButton::B, InputSource::KeyboardKey("B".to_string()));
+        profile
+            .mappings
+            .insert(VirtualButton::X, InputSource::KeyboardKey("X".to_string()));
+        profile
+            .mappings
+            .insert(VirtualButton::Y, InputSource::KeyboardKey("Y".to_string()));
+        profile
+            .mappings
+            .insert(VirtualButton::L, InputSource::KeyboardKey("L".to_string()));
+        profile
+            .mappings
+            .insert(VirtualButton::R, InputSource::KeyboardKey("R".to_string()));
+
         // Verify that virtual_button_to_bit returns the generic button IDs (0-11)
         // which are then mapped to SNES-specific bit positions in get_snes_controller_state_from_profile
         assert_eq!(virtual_button_to_bit(VirtualButton::A), Some(0)); // Generic ID 0 -> SNES bit 7
