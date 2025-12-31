@@ -110,6 +110,7 @@ impl HemuProject {
     }
 
     /// Get boot priority
+    #[allow(dead_code)]
     pub fn get_boot_priority(&self) -> Option<&String> {
         self.boot_priority.as_ref()
     }
