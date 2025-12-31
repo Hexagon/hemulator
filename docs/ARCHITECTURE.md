@@ -96,6 +96,7 @@ Hemulator implements several CPU architectures as generic components:
 - **`cpu_8086`**: Intel 8086 (IBM PC, PC XT)
   - Segment-based memory addressing
   - Complete instruction set with ModR/M addressing
+  - Range-based interrupt priority system (hardware, BIOS, OS handlers)
   
 - **`cpu_8080`**: Intel 8080 (Space Invaders, CP/M systems)
   - Foundation for Z80
