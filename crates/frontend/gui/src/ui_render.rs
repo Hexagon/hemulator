@@ -187,13 +187,13 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
     // Instructions - center each line individually
     let inst_y = height * 2 / 3;
 
-    // "Press F3 to open a ROM" (22 characters)
-    let inst1_x = (width - 22 * FONT_WIDTH) / 2;
+    // "Press Ctrl+O to open a ROM" (26 characters)
+    let inst1_x = (width - 26 * FONT_WIDTH) / 2;
     draw_text(
         &mut buffer,
         width,
         height,
-        "Press F3 to open a ROM",
+        "Press Ctrl+O to open a ROM",
         inst1_x,
         inst_y,
         0xFFF0F0F0,
@@ -269,26 +269,25 @@ pub fn create_help_overlay(
 
     help_lines.extend_from_slice(&[
         "",
-        "HOST KEY: Hold Right Alt for emulator controls",
+        "MENU: Use File/Emulation/State/View/Help menus at top",
         "",
-        "Function Keys (with Right Alt):",
-        "  F1  - Help",
-        "  F2  - Speed",
-        "  F3  - Mount points",
-        "  F4  - Screenshot",
-        "  F5  - Save state",
-        "  F6  - Load state",
-        "  F7  - Load project",
-        "  F8  - Save project",
-        "  F10 - Debug info",
-        "  F11 - CRT filter",
-        "  F12 - Reset",
-        "  ESC - Exit emulator",
+        "Keyboard Shortcuts:",
+        "  Ctrl+O     - Open ROM",
+        "  Ctrl+S     - Save project",
+        "  Ctrl+R     - Reset system",
+        "  Ctrl+P     - Pause/Resume",
+        "  Ctrl+1-5   - Save state (slots 1-5)",
+        "  Ctrl+Shift+1-5 - Load state (slots 1-5)",
+        "  F1         - Help (this screen)",
+        "  F4         - Screenshot",
+        "  F10        - Debug info",
+        "  F11        - CRT filter",
+        "  ESC        - Exit emulator",
         "",
-        "Without Right Ctrl: All keys pass to DOS",
-        "(ESC works in DOS, BIOS, etc.)",
+        "For PC systems: Hold Right Alt to access shortcuts",
+        "(Without Right Alt: All keys pass to emulated system)",
         "",
-        "Press F1 to close",
+        "Press F1 or ESC to close",
     ]);
 
     let start_x = 10;
@@ -1063,25 +1062,25 @@ pub fn create_splash_screen_with_status(
     // Instructions - center each line individually
     let inst_y = height * 2 / 3;
 
-    // "Press F3 to open a ROM" (22 characters)
-    let inst1_x = (width - 22 * FONT_WIDTH) / 2;
+    // "Press Ctrl+O to open a ROM" (26 characters)
+    let inst1_x = (width - 26 * FONT_WIDTH) / 2;
     draw_text(
         &mut buffer,
         width,
         height,
-        "Press F3 to open a ROM",
+        "Press Ctrl+O to open a ROM",
         inst1_x,
         inst_y,
         0xFFF0F0F0,
     );
 
-    // "Press F7 to load project" (24 characters)
-    let inst2_x = (width - 24 * FONT_WIDTH) / 2;
+    // "Press Ctrl+Shift+O to load project" (35 characters)
+    let inst2_x = (width - 35 * FONT_WIDTH) / 2;
     draw_text(
         &mut buffer,
         width,
         height,
-        "Press F7 to load project",
+        "Press Ctrl+Shift+O to load project",
         inst2_x,
         inst_y + FONT_HEIGHT + 4,
         0xFFF0F0F0,

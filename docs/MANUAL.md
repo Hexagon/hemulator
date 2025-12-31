@@ -10,7 +10,7 @@ Welcome to Hemulator, a cross-platform multi-system console emulator supporting 
 
 1. **Launch the emulator**: Double-click `hemu` (or `hemu.exe` on Windows)
 2. **The splash screen appears** with instructions
-3. **Load a ROM**: Press `F3` to open the file browser
+3. **Load a ROM**: Click **File > Open ROM** or press **Ctrl+O** to open the file browser
 4. **Select your game file**:
    - `.nes` for NES
    - `.smc`/`.sfc` for SNES
@@ -110,11 +110,13 @@ When running PC/DOS programs, the emulator provides full keyboard passthrough by
 
 #### Host Modifier Key (PC System Only)
 
-To access function keys (F1-F12) for emulator controls while running a PC program, hold the **Right Ctrl** key (the host modifier) while pressing the function key. For example:
-- **Right Ctrl + F3**: Open mount point selector
+To access emulator controls while running a PC program, hold the **Right Ctrl** key (the host modifier) while pressing function keys or using shortcuts. For example:
 - **Right Ctrl + F4**: Take screenshot
-- **Right Ctrl + F7**: Load project file
-- **Right Ctrl + F8**: Save project file
+- **Right Ctrl + F10**: Toggle debug info
+- **Right Ctrl + Ctrl+P**: Pause/Resume
+- **Right Ctrl + Esc**: Exit the emulator
+
+You can also click on the menu bar to access all emulator functions without using the host key.
 
 The host modifier key can be customized in `config.json` by changing the `host_modifier` field (default: `RightCtrl`).
 
@@ -130,37 +132,75 @@ The host modifier key can be customized in `config.json` by changing the `host_m
 - Or choose a different modifier key in `config.json` (e.g., `RightAlt`)
 - Some OS-level keyboard shortcuts cannot be overridden by applications
 
-### Function Keys
+### User Interface
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| F1 | Help Overlay | Show/hide all controls and key mappings |
-| F2 | Speed Selector | Open speed selector menu (pause, 0.25x, 0.5x, 1x, 2x, 10x) - **runtime only, not saved** |
-| F3 | Select Mount Points | Open mount point selector (always shows submenu, even for single-mount systems) |
-| F4 | Screenshot | Save screenshot to `screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png` |
-| F5 | Save State | Save state (consoles only, opens slot selector 1-5) |
-| F6 | Load State | Load state (consoles only, opens slot selector 1-5) |
-| F7 | Load Project | Load `.hemu` project file (display settings, mounts, system config) |
-| F8 | Save Project | Save current configuration to `.hemu` project file (all systems) |
-| F10 | Debug Info | Show/hide debug information overlay |
-| F11 | CRT Filter | Cycle through CRT display filters |
-| F12 | Reset System | Restart the current game |
+The emulator features a menu bar at the top and a status bar at the bottom of the window:
+
+- **Menu Bar** (top, 24px): Access all emulator functions via clickable menus (File, Emulation, State, View, Help)
+- **Status Bar** (bottom, 20px): Displays system name, pause/speed state, status messages, FPS, instruction pointer (IP), and CPU cycles
+
+#### Menus
+
+**File Menu:**
+- Open ROM... (Ctrl+O) - Load a ROM file
+- Open Project... (Ctrl+Shift+O) - Load a .hemu project file
+- Save Project... (Ctrl+S) - Save current configuration as .hemu project
+- Mount Points... - Manage disk/cartridge mounts (PC system)
+- Exit (Esc) - Exit the emulator
+
+**Emulation Menu:**
+- Reset (Ctrl+R) - Reset the emulated system
+- Pause (Ctrl+P) - Pause emulation
+- Resume (Ctrl+P) - Resume emulation
+- Speed options: 25%, 50%, 100%, 200%, 400%
+
+**State Menu:**
+- Save State Slot 1-5 (Ctrl+1-5) - Save state to slots
+- Load State Slot 1-5 (Ctrl+Shift+1-5) - Load state from slots
+
+**View Menu:**
+- Take Screenshot (F4) - Capture current frame to PNG
+- Debug Info (F10) - Toggle debug overlay
+- CRT Filter (F11) - Cycle through CRT filter options
+- Start/Stop Logging - Enable/disable debug logging to log.txt
+
+**Help Menu:**
+- Help (F1) - Show help overlay
+- About - Display version info
+
+#### Keyboard Shortcuts
+
+Modern keyboard shortcuts for common actions:
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+O | Open ROM |
+| Ctrl+Shift+O | Open Project |
+| Ctrl+S | Save Project |
+| Ctrl+R | Reset System |
+| Ctrl+P | Pause/Resume (toggle) |
+| Ctrl+1-5 | Save State (slots 1-5) |
+| Ctrl+Shift+1-5 | Load State (slots 1-5) |
+| F1 | Help Overlay |
+| F4 | Screenshot |
+| F10 | Debug Info |
+| F11 | CRT Filter |
+| Esc | Exit/Close |
 
 **Note on Host Key (PC System Only)**: When running PC/DOS programs, you must hold **Right Ctrl** (or your configured host modifier key) while pressing function keys. This allows function keys to pass through to the DOS program when the host key is not held. Other systems (NES, Game Boy, etc.) do not require the host key for function keys.
 
-### Emulation Speed Control (F2)
+### Emulation Speed Control
 
-Press **F2** to open the speed selector menu. The game will pause while the menu is visible.
+Access speed control through the **Emulation** menu or press **Ctrl+P** to pause/resume.
 
-Available speed options:
-- **0 - Pause (0x)**: Completely pause emulation (useful for studying frame-by-frame)
-- **1 - Slow Motion (0.25x)**: Quarter speed for analyzing difficult sections
-- **2 - Half Speed (0.5x)**: Half speed for practicing tricky maneuvers
-- **3 - Normal (1x)**: Default speed (typically ~60 FPS for NTSC, ~50 FPS for PAL)
-- **4 - Fast Forward (2x)**: Double speed for skipping slow parts
-- **5 - Turbo (10x)**: Ultra fast for grinding or replaying sections quickly
+Available speed options in the Emulation menu:
+- **25%**: Quarter speed for analyzing difficult sections
+- **50%**: Half speed for practicing tricky maneuvers
+- **100%**: Default speed (typically ~60 FPS for NTSC, ~50 FPS for PAL)
+- **200%**: Double speed for skipping slow parts
+- **400%**: Ultra fast for grinding or replaying sections quickly
 
-The selected speed is automatically saved and restored when you restart the emulator. Press **0-5** to select a speed, or **ESC** to cancel.
+The selected speed is automatically saved and restored when you restart the emulator.
 
 ### CRT Filters (F11)
 

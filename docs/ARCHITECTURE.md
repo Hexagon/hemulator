@@ -326,6 +326,50 @@ Test ROMs are located in `test_roms/<system>/` and built from assembly source.
 - **Features**: Optional features for OpenGL support (`--features opengl`)
 - **Pre-commit Checks**: fmt, clippy, build, test (required before commits)
 
+## GUI Frontend
+
+The GUI frontend (`crates/frontend/gui/`) provides a cross-platform interface using SDL2 with an in-app menu system and status bar:
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Window (SDL2)                                          │
+│  ├─ Menu Bar (24px, top)                               │
+│  │   └─ File | Emulation | State | View | Help         │
+│  ├─ Game Display (middle, scales with window)          │
+│  │   └─ Emulated system framebuffer                    │
+│  └─ Status Bar (20px, bottom)                          │
+│      └─ System | State | Messages | FPS | IP | Cycles  │
+└────────────────────────────────────────────────────────┘
+```
+
+### Components
+
+- **Menu Bar** (`src/menu.rs`): In-app rendered menu system with mouse and keyboard support
+  - Dropdown menus on click
+  - Dynamic enable/disable based on emulator state
+  - Fixed 24px height, 8x8 pixel font
+  
+- **Status Bar** (`src/status_bar.rs`): Real-time status display
+  - System name, pause/speed state, messages
+  - FPS counter, instruction pointer (IP), CPU cycles
+  - Fixed 20px height, 8x8 pixel font
+
+- **Window Backend** (`src/window_backend/`): SDL2 abstraction
+  - Event handling (keyboard, mouse)
+  - Frame presentation
+  - Window management
+
+### Design Decisions
+
+- **In-app rendering**: No native OS menu dependencies (no GTK/Win32/Cocoa required)
+- **Fixed pixel sizes**: Menu bar and status bar use fixed heights for consistency
+- **Framebuffer rendering**: All UI elements rendered as overlays on game buffer
+- **Cross-platform**: Works identically on Windows, macOS, and Linux
+
+For user-facing controls and features, see [MANUAL.md](MANUAL.md).
+
 ## Design Principles
 
 1. **Modularity**: Reusable components over monolithic implementations
