@@ -1,4 +1,5 @@
 use crate::display_filter::DisplayFilter;
+use crate::input::ControllerProfile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -120,10 +121,27 @@ pub struct InputConfig {
     /// Default: RightCtrl
     #[serde(default = "default_host_modifier")]
     pub host_modifier: String,
+
+    /// Optional controller profiles for advanced input configuration
+    /// If present, these override the simple KeyMapping configs above
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profiles: Option<Vec<ControllerProfile>>,
+
+    /// Mouse sensitivity multiplier (default: 1.0)
+    #[serde(default = "default_mouse_sensitivity")]
+    pub mouse_sensitivity: f32,
+
+    /// Enable mouse input for systems that support it
+    #[serde(default)]
+    pub mouse_enabled: bool,
 }
 
 fn default_host_modifier() -> String {
     "RightCtrl".to_string()
+}
+
+fn default_mouse_sensitivity() -> f32 {
+    1.0
 }
 
 impl Default for InputConfig {
@@ -134,6 +152,9 @@ impl Default for InputConfig {
             player3: KeyMapping::player3_default(),
             player4: KeyMapping::player4_default(),
             host_modifier: default_host_modifier(),
+            profiles: None,
+            mouse_sensitivity: default_mouse_sensitivity(),
+            mouse_enabled: false,
         }
     }
 }
