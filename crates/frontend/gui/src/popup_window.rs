@@ -632,15 +632,18 @@ impl PopupWindowManager {
         // This prevents clicking through the semi-transparent overlay
         if self.has_open_popup() {
             // Try to handle the click with the debug window if it's open
+            // Note: Help window has no interactive elements, so any click will close it
             let (click_handled, should_close) =
                 if let Some(ref mut debug_window) = self.debug_window {
                     debug_window.handle_click(mouse_x, mouse_y)
                 } else {
+                    // No debug window, so click wasn't handled (applies to help window)
                     (false, false)
                 };
 
             // Close if requested by the window (e.g., close button clicked)
             // or if click was outside the window (not handled)
+            // For help window, this means any click closes it
             if should_close || !click_handled {
                 self.close_all();
             }
