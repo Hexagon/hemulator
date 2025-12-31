@@ -215,6 +215,7 @@ pub fn create_default_screen(width: usize, height: usize) -> Vec<u32> {
 }
 
 /// Create a help overlay
+#[allow(dead_code)]
 pub fn create_help_overlay(
     width: usize,
     height: usize,
@@ -874,6 +875,7 @@ pub fn create_mount_point_selector(
 }
 
 /// Create a speed selector overlay
+#[allow(dead_code)]
 pub fn create_speed_selector_overlay(width: usize, height: usize, current_speed: f64) -> Vec<u32> {
     // Semi-transparent dark background
     let mut buffer = vec![0xC0000000; width * height];

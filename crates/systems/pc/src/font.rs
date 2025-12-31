@@ -214,7 +214,7 @@ mod tests {
         // 0xB3: │ (single vertical line)
         let glyph_8x16 = get_font_8x16(0xB3);
         // Should have vertical line in the middle
-        assert!(glyph_8x16.iter().any(|&b| b == 0x18));
+        assert!(glyph_8x16.contains(&0x18));
     }
 
     #[test]
@@ -222,7 +222,7 @@ mod tests {
         // 0xC4: ─ (single horizontal line)
         let glyph_8x16 = get_font_8x16(0xC4);
         // Should have horizontal line
-        assert!(glyph_8x16.iter().any(|&b| b == 0xFF));
+        assert!(glyph_8x16.contains(&0xFF));
     }
 
     #[test]
@@ -245,7 +245,7 @@ mod tests {
         // 0xBA: ║ (double vertical line)
         let glyph_8x16 = get_font_8x16(0xBA);
         // Should have double vertical line
-        assert!(glyph_8x16.iter().any(|&b| b == 0x36));
+        assert!(glyph_8x16.contains(&0x36));
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
         // 0xCD: ═ (double horizontal line)
         let glyph_8x16 = get_font_8x16(0xCD);
         // Should have double horizontal line
-        assert!(glyph_8x16.iter().any(|&b| b == 0xFF));
+        assert!(glyph_8x16.contains(&0xFF));
     }
 
     #[test]
