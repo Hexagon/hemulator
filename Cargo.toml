@@ -10,3 +10,23 @@ members = [
   "crates/systems/n64",
   "crates/frontend/gui",
 ]
+
+# Performance optimizations for release builds
+[profile.release]
+# Maximum optimization level for best runtime performance
+opt-level = 3
+# Enable Link Time Optimization for cross-crate inlining and optimization
+# This significantly improves performance of hot paths across crate boundaries
+lto = "fat"
+# Single codegen unit for maximum optimization (slower compile, faster runtime)
+codegen-units = 1
+# Strip debug symbols to reduce binary size
+strip = true
+# Panic behavior: abort instead of unwind for smaller binary and faster panics
+panic = "abort"
+
+# Improved debug performance - debug builds run at ~30fps without this
+[profile.dev]
+# Use optimization level 1 for dev builds to improve performance
+# This makes debug builds usable (~60fps) while keeping compile times fast
+opt-level = 1
