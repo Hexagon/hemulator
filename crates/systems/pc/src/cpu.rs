@@ -23,11 +23,11 @@ enum InterruptPriority {
     /// These are CPU exceptions and hardware IRQs that must be handled by the emulator
     HardwareFirst,
 
-    /// BIOS service - use emulated handler unless OS has overridden it
-    /// These are BIOS services that DOS/OS can optionally replace
+    /// BIOS service - always use emulated handler, cannot be overridden
+    /// These are BIOS services that must be handled by the emulator for proper operation
     BiosFirst,
 
-    /// OS service - check for OS handler first, use fallback if not present
+    /// OS service - check for OS handler first, use emulated fallback if not present
     /// These are typically DOS/Windows services with minimal BIOS fallback
     OsFirst,
 }
@@ -312,8 +312,8 @@ impl PcCpu {
                 // Hardware interrupts always use emulated handler
                 InterruptPriority::HardwareFirst => true,
 
-                // BIOS services use emulated handler unless OS has overridden it
-                InterruptPriority::BiosFirst => !self.is_interrupt_overridden(int_num),
+                // BIOS services always use emulated handler (cannot be overridden)
+                InterruptPriority::BiosFirst => true,
 
                 // OS services prefer OS handler, fall back to emulated handler if not present
                 InterruptPriority::OsFirst => !self.is_interrupt_overridden(int_num),
@@ -6874,12 +6874,12 @@ mod tests {
     }
 
     #[test]
-    fn test_interrupt_priority_bios_first_with_override() {
-        // Test that BIOS services can be overridden by OS
+    fn test_interrupt_priority_bios_first_cannot_override() {
+        // Test that BIOS services CANNOT be overridden by OS (always use emulated handler)
         let bus = PcBus::new();
         let mut cpu = PcCpu::new(bus);
 
-        // Install custom handler for INT 1Ah (Time/Date service) - BIOS service that can be overridden
+        // Try to install custom handler for INT 1Ah (Time/Date service) - BIOS service
         let handler_segment = 0x2000u16;
         let handler_offset = 0x0100u16;
         let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
@@ -6905,7 +6905,7 @@ mod tests {
             .memory
             .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
 
-        // Set up code to call INT 1Ah
+        // Set up code to call INT 1Ah, AH=00h (read system clock)
         cpu.cpu.cs = 0x0000;
         cpu.cpu.ip = 0x1000;
         cpu.cpu.ss = 0x0000;
@@ -6914,17 +6914,16 @@ mod tests {
         cpu.cpu.memory.write(call_addr, 0xCD); // INT
         cpu.cpu.memory.write(call_addr + 1, 0x1A); // 1Ah
 
-        cpu.cpu.ax = 0x0000;
+        cpu.cpu.ax = 0x0000; // AH=00h (read system clock)
 
-        // Execute INT 1Ah - should call custom handler (BiosFirst but overridden)
-        cpu.step(); // Execute INT (jumps to handler)
-        cpu.step(); // Execute MOV AX, 0xBEEF
-        cpu.step(); // Execute IRET
+        // Execute INT 1Ah - should use emulated handler, NOT the custom handler
+        cpu.step();
 
-        // AX should be 0xBEEF from custom handler
-        assert_eq!(
+        // AX should NOT be 0xBEEF (custom handler was not called)
+        // The emulated handler should have been used instead
+        assert_ne!(
             cpu.cpu.ax, 0xBEEF,
-            "BIOS service INT 1Ah should use custom handler when overridden"
+            "BIOS service INT 1Ah should use emulated handler, not custom handler"
         );
     }
 

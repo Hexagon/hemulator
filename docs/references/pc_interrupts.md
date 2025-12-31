@@ -20,19 +20,19 @@ These are CPU exceptions and hardware IRQs that **must** be handled by the emula
 
 **Reason**: Hardware interrupts must be processed by the emulator to update internal state (e.g., timer tick counter, keyboard buffer, disk controller status). Allowing DOS to completely override these would break emulation.
 
-#### 2. **BiosFirst** (Can be overridden)
-These are BIOS services that the emulator provides by default, but DOS/OS can optionally replace with their own implementations.
+#### 2. **BiosFirst** (Cannot be overridden)
+These are BIOS services that **must** be handled by the emulator to ensure proper operation. DOS/OS cannot override these handlers.
 
 **Ranges**:
 - `INT 10h-1Fh`: Core BIOS services (video, equipment, memory, disk, keyboard, time/date)
 - `INT 40h-5Fh`: Extended BIOS services (disk parameter tables, RTC alarm, NetBIOS)
 - `INT 78h-FFh`: Manufacturer-specific and extended BIOS services
 
-**Reason**: BIOS services are provided by the emulator for standalone programs and basic functionality, but DOS may enhance or replace them (e.g., DOS can provide its own time/date handling via INT 1Ah).
+**Reason**: BIOS services must be handled by the emulator to maintain proper hardware abstraction and ensure consistent behavior. While conceptually different from hardware interrupts, they are equally critical for system operation.
 
 **Behavior**: 
-- If OS has installed a custom handler (vector points outside BIOS ROM at F000:xxxx), use the OS handler
-- Otherwise, use the emulated BIOS handler
+- Always use the emulated BIOS handler
+- OS cannot override these interrupts
 
 #### 3. **OsFirst** (Prefers OS handler)
 These are DOS/OS services where the emulator only provides minimal fallback functionality for standalone programs.
@@ -78,9 +78,9 @@ fn get_interrupt_priority(int_num: u8) -> InterruptPriority {
 
 **Example 2: BIOS Service (INT 10h - Video)**
 - Priority: `BiosFirst`
-- By default, the emulator provides video services
-- If a DOS extender or graphics library installs a custom INT 10h handler, it will be used instead
-- This allows enhanced graphics modes beyond what the emulator provides
+- The emulator always provides video services
+- DOS cannot override INT 10h - the emulator's handler is always used
+- This ensures consistent video operation across all programs
 
 **Example 3: DOS Service (INT 21h - DOS API)**
 - Priority: `OsFirst`
@@ -90,9 +90,9 @@ fn get_interrupt_priority(int_num: u8) -> InterruptPriority {
 
 ### Benefits
 
-1. **Clear Separation of Concerns**: Hardware, BIOS, and OS responsibilities are clearly defined
+1. **Clear Separation of Concerns**: Hardware and BIOS interrupts always use emulator, OS interrupts check for OS handler first
 2. **Maintainable**: Adding new interrupt handlers requires understanding which range they belong to
-3. **Flexible**: DOS/OS can enhance BIOS services while hardware state remains accurate
+3. **Backwards Compatible**: Preserves the original behavior from PR #206
 4. **Documented**: The range-based system is self-documenting and easy to understand
 5. **Tested**: Comprehensive test suite validates all three priority levels
 
