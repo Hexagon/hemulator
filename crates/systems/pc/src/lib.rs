@@ -1065,8 +1065,14 @@ mod tests {
 
         // For large formats, just verify the size calculation without allocating
         // to avoid memory allocation failures in test environments
-        assert_eq!(crate::HardDriveFormat::HardDrive1G.size_bytes(), 1_073_741_824); // 1GB
-        assert_eq!(crate::HardDriveFormat::HardDrive20G.size_bytes(), 21_474_836_480); // 20GB
+        assert_eq!(
+            crate::HardDriveFormat::HardDrive1G.size_bytes(),
+            1_073_741_824
+        ); // 1GB
+        assert_eq!(
+            crate::HardDriveFormat::HardDrive20G.size_bytes(),
+            21_474_836_480
+        ); // 20GB
     }
 
     #[test]

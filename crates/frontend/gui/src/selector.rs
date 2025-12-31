@@ -305,7 +305,9 @@ impl SelectorManager {
     /// Render the active selector if any
     #[allow(dead_code)]
     pub fn render(&mut self, width: usize, height: usize, current_speed: f64) -> Option<Vec<u32>> {
-        self.active_selector.as_mut().map(|selector| selector.render(width, height, current_speed))
+        self.active_selector
+            .as_mut()
+            .map(|selector| selector.render(width, height, current_speed))
     }
 }
 

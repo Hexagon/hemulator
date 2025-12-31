@@ -2408,9 +2408,7 @@ fn main() {
             || (!needs_host_key && window.is_key_down(Key::Escape))
         {
             // Close overlays first, only exit if no overlay is open
-            if selector_manager.is_open()
-                || popup_manager.has_open_popup()
-            {
+            if selector_manager.is_open() || popup_manager.has_open_popup() {
                 selector_manager.close();
                 popup_manager.close_all();
             } else {
@@ -2424,7 +2422,7 @@ fn main() {
         {
             popup_manager.toggle_help();
             selector_manager.close(); // Close selector if open
-            // Close disk format selector if open
+                                      // Close disk format selector if open
         }
 
         // Toggle debug overlay (F10)

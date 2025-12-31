@@ -7041,32 +7041,14 @@ mod tests {
         // Test the interrupt priority classification for various ranges
 
         // CPU Exceptions (00h-07h) - HardwareFirst
-        assert_eq!(
-            get_interrupt_priority(0x00),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x05),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x07),
-            InterruptPriority::Hardware
-        );
+        assert_eq!(get_interrupt_priority(0x00), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x05), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x07), InterruptPriority::Hardware);
 
         // Hardware IRQs master PIC (08h-0Fh) - HardwareFirst
-        assert_eq!(
-            get_interrupt_priority(0x08),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x09),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x0F),
-            InterruptPriority::Hardware
-        );
+        assert_eq!(get_interrupt_priority(0x08), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x09), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x0F), InterruptPriority::Hardware);
 
         // BIOS Services (10h-1Fh) - BiosFirst
         assert_eq!(get_interrupt_priority(0x10), InterruptPriority::Bios);
@@ -7093,18 +7075,9 @@ mod tests {
         assert_eq!(get_interrupt_priority(0x6F), InterruptPriority::Os);
 
         // Hardware IRQs slave PIC (70h-77h) - HardwareFirst
-        assert_eq!(
-            get_interrupt_priority(0x70),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x74),
-            InterruptPriority::Hardware
-        );
-        assert_eq!(
-            get_interrupt_priority(0x77),
-            InterruptPriority::Hardware
-        );
+        assert_eq!(get_interrupt_priority(0x70), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x74), InterruptPriority::Hardware);
+        assert_eq!(get_interrupt_priority(0x77), InterruptPriority::Hardware);
 
         // Extended BIOS (78h-FFh) - BiosFirst
         assert_eq!(get_interrupt_priority(0x78), InterruptPriority::Bios);
