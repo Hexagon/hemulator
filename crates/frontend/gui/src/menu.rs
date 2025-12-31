@@ -14,7 +14,6 @@ pub enum MenuAction {
     OpenRom,
     OpenProject,
     SaveProject,
-    MountPoints,
     Exit,
 
     // Mounts menu
@@ -36,7 +35,7 @@ pub enum MenuAction {
     // View menu
     Screenshot,
     DebugInfo,
-    CrtFilterToggle,
+    CrtFilter(DisplayFilter),
     StartLogging,
     StopLogging,
 
@@ -44,6 +43,8 @@ pub enum MenuAction {
     Help,
     About,
 }
+
+use crate::display_filter::DisplayFilter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpeedSetting {
@@ -121,12 +122,6 @@ impl MenuBar {
                     action: MenuAction::SaveProject,
                     shortcut: Some("Ctrl+S".to_string()),
                     enabled: false, // Disabled until project loaded
-                },
-                MenuItem {
-                    label: "Mount Points...".to_string(),
-                    action: MenuAction::MountPoints,
-                    shortcut: None,
-                    enabled: false, // Disabled until system loaded
                 },
                 MenuItem {
                     label: "Exit".to_string(),
@@ -215,6 +210,46 @@ impl MenuBar {
             items: state_items,
         });
 
+        // View menu - CRT Filter submenu
+        let crt_submenu_items = vec![
+            MenuItem {
+                label: "None".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::None),
+                shortcut: None,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Sony Trinitron".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::SonyTrinitron),
+                shortcut: None,
+                enabled: true,
+            },
+            MenuItem {
+                label: "IBM 5151".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::Ibm5151),
+                shortcut: None,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Commodore 1702".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::Commodore1702),
+                shortcut: None,
+                enabled: true,
+            },
+            MenuItem {
+                label: "Sharp LCD".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::SharpLcd),
+                shortcut: None,
+                enabled: true,
+            },
+            MenuItem {
+                label: "RCA Victor".to_string(),
+                action: MenuAction::CrtFilter(DisplayFilter::RcaVictor),
+                shortcut: None,
+                enabled: true,
+            },
+        ];
+
         // View menu
         menus.push(Submenu {
             label: "View".to_string(),
@@ -232,12 +267,6 @@ impl MenuBar {
                     enabled: true,
                 },
                 MenuItem {
-                    label: "CRT Filter".to_string(),
-                    action: MenuAction::CrtFilterToggle,
-                    shortcut: Some("F11".to_string()),
-                    enabled: true,
-                },
-                MenuItem {
                     label: "Start Logging".to_string(),
                     action: MenuAction::StartLogging,
                     shortcut: None,
@@ -250,6 +279,12 @@ impl MenuBar {
                     enabled: false, // Disabled until logging started
                 },
             ],
+        });
+
+        // CRT Filter submenu (inserted after View)
+        menus.push(Submenu {
+            label: "CRT Filter".to_string(),
+            items: crt_submenu_items,
         });
 
         // Help menu
@@ -610,51 +645,50 @@ impl MenuBar {
         supports_save_states: bool,
         logging_active: bool,
     ) {
-        // File menu
-        if let Some(file_menu) = self.menus.get_mut(0) {
-            for item in &mut file_menu.items {
-                match item.action {
-                    MenuAction::SaveProject => item.enabled = rom_loaded,
-                    MenuAction::MountPoints => item.enabled = rom_loaded,
-                    _ => {}
-                }
-            }
-        }
-
-        // Emulation menu
-        if let Some(emu_menu) = self.menus.get_mut(1) {
-            for item in &mut emu_menu.items {
-                match item.action {
-                    MenuAction::Reset => item.enabled = rom_loaded,
-                    MenuAction::Pause => item.enabled = rom_loaded && !paused,
-                    MenuAction::Resume => item.enabled = rom_loaded && paused,
-                    MenuAction::Speed(_) => item.enabled = rom_loaded,
-                    _ => {}
-                }
-            }
-        }
-
-        // State menu
-        if let Some(state_menu) = self.menus.get_mut(2) {
-            for item in &mut state_menu.items {
-                match item.action {
-                    MenuAction::SaveState(_) | MenuAction::LoadState(_) => {
-                        item.enabled = rom_loaded && supports_save_states;
+        // Update menus by finding them by label instead of fixed indices
+        // This is necessary because the Mounts menu is dynamically inserted
+        
+        for menu in &mut self.menus {
+            match menu.label.as_str() {
+                "File" => {
+                    for item in &mut menu.items {
+                        if matches!(item.action, MenuAction::SaveProject) {
+                            item.enabled = rom_loaded;
+                        }
                     }
-                    _ => {}
                 }
-            }
-        }
-
-        // View menu
-        if let Some(view_menu) = self.menus.get_mut(3) {
-            for item in &mut view_menu.items {
-                match item.action {
-                    MenuAction::Screenshot => item.enabled = rom_loaded,
-                    MenuAction::StartLogging => item.enabled = !logging_active,
-                    MenuAction::StopLogging => item.enabled = logging_active,
-                    _ => {}
+                "Emulation" => {
+                    for item in &mut menu.items {
+                        match item.action {
+                            MenuAction::Reset => item.enabled = rom_loaded,
+                            MenuAction::Pause => item.enabled = rom_loaded && !paused,
+                            MenuAction::Resume => item.enabled = rom_loaded && paused,
+                            MenuAction::Speed(_) => item.enabled = rom_loaded,
+                            _ => {}
+                        }
+                    }
                 }
+                "State" => {
+                    for item in &mut menu.items {
+                        match item.action {
+                            MenuAction::SaveState(_) | MenuAction::LoadState(_) => {
+                                item.enabled = rom_loaded && supports_save_states;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "View" => {
+                    for item in &mut menu.items {
+                        match item.action {
+                            MenuAction::Screenshot => item.enabled = rom_loaded,
+                            MenuAction::StartLogging => item.enabled = !logging_active,
+                            MenuAction::StopLogging => item.enabled = logging_active,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
