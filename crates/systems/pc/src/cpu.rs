@@ -162,6 +162,45 @@ impl PcCpu {
         self.cpu.is_halted()
     }
 
+    /// Trigger a hardware interrupt (e.g., from PIT, keyboard controller, etc.)
+    ///
+    /// For emulated hardware interrupts (INT 0x08 timer, INT 0x09 keyboard),
+    /// this calls our emulated handler directly instead of using the IVT.
+    ///
+    /// # Arguments
+    /// * `int_num` - The interrupt vector number (0x08 for timer, 0x09 for keyboard, etc.)
+    ///
+    /// # Returns
+    /// * `true` if the interrupt was triggered (IF flag is set)
+    /// * `false` if interrupts are disabled (IF flag is clear)
+    pub fn trigger_hardware_interrupt(&mut self, int_num: u8) -> bool {
+        // Check if interrupts are enabled (IF flag)
+        const FLAG_IF: u32 = 0x0200;
+        if (self.cpu.flags & FLAG_IF) == 0 {
+            return false;
+        }
+
+        // For emulated hardware interrupts, call our handler directly
+        // This ensures the emulated behavior (e.g., timer tick counter increment) occurs
+        match int_num {
+            0x08 => {
+                // Timer interrupt - call hardware timer handler (doesn't skip instruction bytes)
+                self.handle_hardware_timer_interrupt();
+                true
+            }
+            0x09 => {
+                // Keyboard interrupt - call our emulated handler
+                // TODO: Create handle_hardware_keyboard_interrupt for consistency
+                self.handle_int09h();
+                true
+            }
+            _ => {
+                // For other interrupts, use the normal hardware interrupt mechanism
+                self.cpu.trigger_hardware_interrupt(int_num)
+            }
+        }
+    }
+
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
         // Check if the next instruction is a BIOS/DOS interrupt we need to handle
@@ -1605,17 +1644,9 @@ impl PcCpu {
         51
     }
 
-    /// Handle INT 08h - Timer Tick (System Timer)
-    /// Called by hardware timer 18.2065 times per second
-    #[allow(dead_code)] // Called dynamically based on interrupt number
-    fn handle_int08h(&mut self) -> u32 {
-        // Skip the INT 08h instruction (2 bytes: 0xCD 0x08)
-        self.cpu.ip = self.cpu.ip.wrapping_add(2);
-
-        // Real hardware timer interrupt handler
-        // This interrupt fires 18.2065 times per second (every 54.9254 ms)
-        // BIOS uses this to maintain time-of-day counter at 0040:006Ch
-
+    /// Perform timer tick logic (increment BIOS timer counter)
+    /// This is called by both software INT 08h and hardware timer interrupts
+    fn do_timer_tick(&mut self) {
         // Increment the timer tick counter in BIOS data area
         // Timer ticks stored at 0x0040:0x006C (4 bytes, little-endian)
         let tick_addr = 0x046C;
@@ -1645,6 +1676,17 @@ impl PcCpu {
         self.cpu
             .memory
             .write(tick_addr + 3, ((ticks >> 24) & 0xFF) as u8);
+    }
+
+    /// Handle INT 08h - Timer Tick (System Timer) - SOFTWARE interrupt version
+    /// Called when CPU executes INT 08h instruction
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int08h(&mut self) -> u32 {
+        // Skip the INT 08h instruction (2 bytes: 0xCD 0x08)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Perform timer tick logic
+        self.do_timer_tick();
 
         // Call INT 1Ch (user timer tick handler)
         // This is the standard PC/AT BIOS behavior - INT 08h chains to INT 1Ch
@@ -1654,6 +1696,18 @@ impl PcCpu {
         // The BIOS default INT 1Ch handler is just an IRET at F000:0040
 
         51
+    }
+
+    /// Handle hardware timer interrupt from PIT
+    /// Called when PIT generates IRQ 0, does NOT skip instruction bytes
+    fn handle_hardware_timer_interrupt(&mut self) {
+        // For hardware interrupts, we DON'T skip instruction bytes
+        // (there's no INT instruction to skip)
+
+        // Perform timer tick logic
+        self.do_timer_tick();
+
+        // Hardware interrupts don't return cycle counts
     }
 
     /// Handle INT 09h - Keyboard Hardware Interrupt
