@@ -51,6 +51,11 @@ pub struct DebugWindow {
     pub log_scope: String,
     pub memory_address: usize,
     pub scroll_offset: usize,
+    /// Window position and size for hit detection
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 impl DebugWindow {
@@ -61,22 +66,65 @@ impl DebugWindow {
             log_scope: "all".to_string(),
             memory_address: 0,
             scroll_offset: 0,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
         }
+    }
+
+    /// Handle mouse click on the debug window
+    /// Returns true if the click was handled
+    pub fn handle_click(&mut self, mouse_x: i32, mouse_y: i32) -> bool {
+        let mouse_x = mouse_x as usize;
+        let mouse_y = mouse_y as usize;
+
+        // Check if click is within window bounds
+        if mouse_x < self.x
+            || mouse_x >= self.x + self.width
+            || mouse_y < self.y
+            || mouse_y >= self.y + self.height
+        {
+            return false;
+        }
+
+        // Check if click is on tabs
+        let title_height = 30;
+        let tab_y = self.y + title_height;
+        let tab_height = 25;
+
+        if mouse_y >= tab_y && mouse_y < tab_y + tab_height {
+            let tab_width = self.width / DebugTab::all().len();
+            let clicked_tab = (mouse_x - self.x) / tab_width;
+
+            if let Some(tab) = DebugTab::all().get(clicked_tab) {
+                self.active_tab = *tab;
+                return true;
+            }
+        }
+
+        true // Click was within window but not on any interactive element
     }
 
     /// Render the debug window content
     pub fn render(
-        &self,
+        &mut self,
         width: usize,
         height: usize,
         debug_info: Option<&dyn DebugInfo>,
-        fps: f64,
-        video_backend: &str,
+        _fps: f64,
+        _video_backend: &str,
     ) -> Vec<u32> {
         let win_width = width.min(800);
         let win_height = height.min(600);
         let x_offset = (width - win_width) / 2;
         let y_offset = (height - win_height) / 2;
+
+        // Store dimensions for hit detection
+        self.x = x_offset;
+        self.y = y_offset;
+        self.width = win_width;
+        self.height = win_height;
 
         // Create window background
         let mut buffer = vec![0x00000000; width * height];
@@ -530,6 +578,17 @@ impl PopupWindowManager {
     /// Returns true if any popup is open
     pub fn has_open_popup(&self) -> bool {
         self.debug_window.is_some() || self.help_window.is_some()
+    }
+
+    /// Handle mouse click - returns true if click was consumed by a popup
+    pub fn handle_click(&mut self, mouse_x: i32, mouse_y: i32) -> bool {
+        if let Some(ref mut debug_window) = self.debug_window {
+            if debug_window.handle_click(mouse_x, mouse_y) {
+                return true;
+            }
+        }
+        // Help window doesn't handle clicks for now
+        self.help_window.is_some()
     }
 }
 

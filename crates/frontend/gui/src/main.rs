@@ -1922,6 +1922,12 @@ fn main() {
             if x < 0 || y < 0 {
                 continue;
             }
+
+            // Check if popup window consumed the click first
+            if popup_manager.handle_click(x, y) {
+                continue; // Popup consumed the click, don't process menu
+            }
+
             if let Some(action) = menu_bar.handle_click(x as usize, y as usize) {
                 // Process menu action
                 match action {
@@ -3007,7 +3013,7 @@ fn main() {
 
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
-        if let Some(ref debug_window) = popup_manager.debug_window {
+        if let Some(ref mut debug_window) = popup_manager.debug_window {
             // For now, use simple debug window rendering
             // TODO: Properly extract and pass debug info from different systems
             debug_overlay = Some(debug_window.render(
