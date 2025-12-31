@@ -2284,7 +2284,9 @@ fn main() {
                     MenuAction::NewProject => {
                         // Create a new project by prompting for system type
                         // For now, show an info message - full implementation would show a system selector dialog
-                        status_message = "New Project: Please use File -> Open ROM to load a ROM file".to_string();
+                        status_message =
+                            "New Project: Please use File -> Open ROM to load a ROM file"
+                                .to_string();
                         status_bar.message = status_message.clone();
                         println!("New Project - Use File -> Open ROM to load a ROM");
                     }

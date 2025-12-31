@@ -647,7 +647,7 @@ impl MenuBar {
     ) {
         // Update menus by finding them by label instead of fixed indices
         // This is necessary because the Mounts menu is dynamically inserted
-        
+
         for menu in &mut self.menus {
             match menu.label.as_str() {
                 "File" => {
