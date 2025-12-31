@@ -102,7 +102,29 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 
 ### Future Enhancements
 
-**Joystick/Gamepad Support**: Physical USB joysticks and gamepads are planned for future releases. When implemented, joysticks will be automatically mapped to D-pad and button controls, with the ability to customize mappings in `config.json`. Until then, keyboard controls provide full functionality for all supported systems.
+**Gamepad/Joystick Support**: ✅ **Now Available!** Physical USB gamepads and joysticks are automatically detected and can be used to control games. The emulator supports:
+- **Game Controllers**: Xbox, PlayStation, and other controllers using the SDL2 GameController API
+- **Generic Joysticks**: Any USB joystick with buttons, axes, and hat switches
+- **Automatic Detection**: Controllers are detected when plugged in
+- **Customizable Mappings**: Button mappings can be customized in `config.json` using controller profiles
+
+To use a gamepad:
+1. Plug in your USB controller before starting the emulator
+2. The emulator will automatically detect it and print a message like "Opened game controller: Xbox Controller"
+3. Use the default button mappings or customize them in `config.json` (see Configuration section below)
+
+**Default Gamepad Mapping**:
+- **A/Cross** → A button
+- **B/Circle** → B button  
+- **X/Square** → X button (SNES)
+- **Y/Triangle** → Y button (SNES)
+- **L1/LB** → L shoulder (SNES)
+- **R1/RB** → R shoulder (SNES)
+- **Back/Select** → Select
+- **Start** → Start
+- **Left Stick/D-Pad** → Directional controls
+
+**Mouse Support**: Mouse input is available for systems that support it. Enable mouse input in `config.json` with `"mouse_enabled": true` and adjust sensitivity with `"mouse_sensitivity": 1.0` (default).
 
 ### PC/DOS Keyboard Input
 
@@ -390,7 +412,7 @@ Located in the same directory as the executable, this file stores your preferenc
     },
     "player2": {
       "a": "U",
-      "b": "I",
+      "b": "O",
       "x": "",
       "y": "",
       "l": "",
@@ -412,20 +434,78 @@ Located in the same directory as the executable, this file stores your preferenc
       "b": "",
       ...
     },
-    "host_modifier": "RightCtrl"
+    "host_modifier": "RightCtrl",
+    "mouse_enabled": false,
+    "mouse_sensitivity": 1.0
   },
   "window_width": 512,
   "window_height": 480,
-  "mount_points": {
-    "Cartridge": "/path/to/last/rom.nes"
-  },
-  "crt_filter": "None",
-  "emulation_speed": 1.0
+  "display_filter": "None",
+  "video_backend": "software"
 }
 ```
 
 **Customization**: 
 - Edit this file to change key bindings for any player
+- Set `mouse_enabled` to `true` to enable mouse input (for compatible systems)
+- Adjust `mouse_sensitivity` to control mouse movement speed (default: 1.0)
+- Change `video_backend` to `"opengl"` for hardware-accelerated rendering
+- Set `display_filter` to `"Scanlines"`, `"Phosphor"`, or `"CRTMonitor"` for visual effects
+
+**Advanced Input Configuration with Controller Profiles**:
+
+For advanced users, you can define reusable controller profiles that map physical gamepad/joystick inputs to virtual buttons. This allows sharing button mappings between systems and per-game customization.
+
+Example with gamepad profile:
+
+```json
+{
+  "input": {
+    "player1": { /* keyboard mappings as above */ },
+    "player2": { /* keyboard mappings as above */ },
+    "player3": { "a": "", "b": "", ... },
+    "player4": { "a": "", "b": "", ... },
+    "host_modifier": "RightCtrl",
+    "mouse_enabled": false,
+    "mouse_sensitivity": 1.0,
+    "profiles": [
+      {
+        "name": "My Xbox Controller",
+        "device_type": "Gamepad",
+        "mappings": {
+          "A": { "GamepadButton": 0 },
+          "B": { "GamepadButton": 1 },
+          "X": { "GamepadButton": 2 },
+          "Y": { "GamepadButton": 3 },
+          "L": { "GamepadButton": 4 },
+          "R": { "GamepadButton": 5 },
+          "Select": { "GamepadButton": 6 },
+          "Start": { "GamepadButton": 7 },
+          "Up": { "GamepadAxis": { "axis": 1, "direction": -1 } },
+          "Down": { "GamepadAxis": { "axis": 1, "direction": 1 } },
+          "Left": { "GamepadAxis": { "axis": 0, "direction": -1 } },
+          "Right": { "GamepadAxis": { "axis": 0, "direction": 1 } }
+        }
+      }
+    ]
+  },
+  "window_width": 512,
+  "window_height": 480,
+  "display_filter": "None",
+  "video_backend": "software"
+}
+```
+
+**Input Source Types**:
+- `KeyboardKey`: String name of a keyboard key (e.g., `"Z"`, `"Enter"`, `"LeftShift"`)
+- `MouseButton`: Mouse button number (0 = left, 1 = middle, 2 = right)
+- `GamepadButton`: SDL2 GameController button ID (0-15)
+- `GamepadAxis`: Gamepad axis with direction (`"axis": 0-5`, `"direction": -1 or 1`)
+- `JoystickButton`: Joystick button ID
+- `JoystickAxis`: Joystick axis with direction
+- `JoystickHat`: Joystick hat switch with direction (1=up, 2=right, 4=down, 8=left)
+
+**When profiles are defined**, they take precedence over the simple keyboard mappings for the corresponding device type.
 - Empty strings ("") mean that button is unmapped
 - The `x`, `y`, `l`, and `r` buttons are for future SNES support and other systems
 - The `host_modifier` key (default: "RightCtrl") controls when function keys are passed to the emulator vs the PC system

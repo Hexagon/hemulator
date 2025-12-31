@@ -1,6 +1,7 @@
 pub mod display_filter;
 mod hemu_project;
 pub mod input;
+pub mod input_mapper;
 mod menu;
 mod popup_window;
 mod rom_detect;
