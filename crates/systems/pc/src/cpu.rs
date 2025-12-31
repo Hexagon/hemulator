@@ -112,6 +112,44 @@ impl PcCpu {
         self.cpu.is_halted()
     }
 
+    /// Trigger a hardware interrupt (e.g., from PIT, keyboard controller, etc.)
+    ///
+    /// For emulated hardware interrupts (INT 0x08 timer, INT 0x09 keyboard),
+    /// this calls our emulated handler directly instead of using the IVT.
+    ///
+    /// # Arguments
+    /// * `int_num` - The interrupt vector number (0x08 for timer, 0x09 for keyboard, etc.)
+    ///
+    /// # Returns
+    /// * `true` if the interrupt was triggered (IF flag is set)
+    /// * `false` if interrupts are disabled (IF flag is clear)
+    pub fn trigger_hardware_interrupt(&mut self, int_num: u8) -> bool {
+        // Check if interrupts are enabled (IF flag)
+        const FLAG_IF: u32 = 0x0200;
+        if (self.cpu.flags & FLAG_IF) == 0 {
+            return false;
+        }
+
+        // For emulated hardware interrupts, call our handler directly
+        // This ensures the emulated behavior (e.g., timer tick counter increment) occurs
+        match int_num {
+            0x08 => {
+                // Timer interrupt - call our emulated handler
+                self.handle_int08h();
+                true
+            }
+            0x09 => {
+                // Keyboard interrupt - call our emulated handler
+                self.handle_int09h();
+                true
+            }
+            _ => {
+                // For other interrupts, use the normal hardware interrupt mechanism
+                self.cpu.trigger_hardware_interrupt(int_num)
+            }
+        }
+    }
+
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
         // Check if the next instruction is a BIOS/DOS interrupt we need to handle

@@ -688,8 +688,8 @@ impl System for PcSystem {
             // Clock the PIT with the cycles executed
             let timer_interrupt = self.cpu.bus_mut().pit.clock(cycles);
             if timer_interrupt {
-                // Timer interrupt should trigger INT 08h
-                // For now, just clear the flag
+                // Timer interrupt - trigger INT 08h (IRQ 0)
+                self.cpu.trigger_hardware_interrupt(0x08);
                 self.cpu.bus_mut().pit.clear_timer_interrupt();
             }
 
@@ -2285,5 +2285,61 @@ mod boot_output_tests {
         );
 
         println!("Comprehensive boot test completed successfully!");
+    }
+
+    #[test]
+    fn test_timer_interrupt_triggers() {
+        // This test verifies that timer interrupts (INT 0x08) are actually triggered
+        // when the PIT generates timer events, fixing the DOS 6.21 boot hang issue.
+        let mut sys = PcSystem::new();
+
+        // We'll use the BIOS data area (BDA) at 0x0040:0x006C which contains the
+        // timer tick counter. The real INT 0x08 handler (handle_int08h) increments this.
+        // We just need to verify that the counter increases over time.
+
+        // Skip boot delay to start CPU execution immediately
+        sys.boot_delay_frames = 0;
+        sys.boot_started = true;
+
+        // Read initial timer tick count from BIOS Data Area
+        // Timer ticks are stored at 0x0040:0x006C (4 bytes, little-endian)
+        let tick_addr = 0x0400 + 0x006C;
+        let initial_ticks = {
+            let b0 = sys.cpu.bus().read(tick_addr) as u32;
+            let b1 = sys.cpu.bus().read(tick_addr + 1) as u32;
+            let b2 = sys.cpu.bus().read(tick_addr + 2) as u32;
+            let b3 = sys.cpu.bus().read(tick_addr + 3) as u32;
+            b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+        };
+
+        // Execute several frames to allow timer interrupts to occur
+        // At ~18.2 Hz, we should see at least a few ticks across multiple frames
+        for _ in 0..20 {
+            let _ = sys.step_frame();
+        }
+
+        // Read final timer tick count
+        let final_ticks = {
+            let b0 = sys.cpu.bus().read(tick_addr) as u32;
+            let b1 = sys.cpu.bus().read(tick_addr + 1) as u32;
+            let b2 = sys.cpu.bus().read(tick_addr + 2) as u32;
+            let b3 = sys.cpu.bus().read(tick_addr + 3) as u32;
+            b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+        };
+
+        // Verify that timer ticks increased
+        assert!(
+            final_ticks > initial_ticks,
+            "Timer tick counter should have increased (initial: {}, final: {}). \
+             This means INT 0x08 interrupts are being triggered correctly.",
+            initial_ticks,
+            final_ticks
+        );
+
+        let tick_delta = final_ticks.wrapping_sub(initial_ticks);
+        println!(
+            "Timer interrupt test passed! Tick counter increased by {} (from {} to {})",
+            tick_delta, initial_ticks, final_ticks
+        );
     }
 }
