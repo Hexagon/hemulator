@@ -1963,6 +1963,7 @@ impl PcCpu {
             0x08 => self.int13h_get_drive_params(),
             0x15 => self.int13h_get_disk_type(),
             0x16 => self.int13h_get_disk_change_status(),
+            0x17 => self.int13h_set_disk_type(),
             0x18 => self.int13h_set_media_type(),
             0x41 => self.int13h_check_extensions(),
             0x42 => self.int13h_extended_read(),
@@ -2495,6 +2496,64 @@ impl PcCpu {
             // Function not valid for hard drives
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
             self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=17h: Set Disk Type (PS/2)
+    /// This function sets the disk type for a floppy drive
+    fn int13h_set_disk_type(&mut self) -> u32 {
+        // DL = drive number (00h-7Fh for floppies)
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // AL = disk type:
+        //   00h = no disk in drive
+        //   01h = floppy disk, no change detection
+        //   02h = floppy disk, change detection supported
+        //   03h = high-capacity floppy (2.88MB)
+        let al = (self.cpu.ax & 0xFF) as u8;
+
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!(
+                "INT 13h AH=17h: Set disk type for drive 0x{:02X}, type=0x{:02X}",
+                drive, al
+            );
+        }
+
+        // Only valid for floppy drives (0x00-0x7F)
+        if drive >= 0x80 {
+            // Not valid for hard drives
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Check if floppy drive exists
+        if !self.cpu.memory.has_floppy(drive) {
+            // Drive not ready
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x80 << 8); // Timeout/not ready
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Validate disk type
+        if al > 0x03 {
+            // Invalid disk type
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x0C << 8); // Media type not found
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Success - disk type set (we don't actually change anything internally)
+        // AH = 0 (success)
+        self.cpu.ax &= 0x00FF;
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!("INT 13h AH=17h: Success - disk type set");
         }
 
         51
@@ -5365,6 +5424,103 @@ mod tests {
         // Setup registers for AH=18h with hard drive (should fail)
         cpu.cpu.ax = 0x1800; // AH=18h
         cpu.cpu.cx = 0x5012; // CH=80, CL=18
+        cpu.cpu.dx = 0x0080; // DL=80h (hard drive C:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should fail with "invalid function" error (not valid for hard drives)
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x01, "AH should be 0x01 (invalid function)");
+
+        // Carry flag should be set (error)
+        assert_eq!(cpu.cpu.flags & 0x0001, 1, "Carry flag should be set");
+    }
+
+    #[test]
+    fn test_int13h_set_disk_type() {
+        let mut bus = PcBus::new();
+
+        // Mount a floppy drive
+        bus.mount_floppy_a(vec![0u8; 1474560]); // 1.44MB floppy
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=17h (set disk type)
+        // AL = 02h (floppy with change detection)
+        cpu.cpu.ax = 0x1702; // AH=17h, AL=02h
+        cpu.cpu.dx = 0x0000; // DL=00h (drive A:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Check success
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x00, "AH should be 0 (success)");
+
+        // Carry flag should be clear (success)
+        assert_eq!(cpu.cpu.flags & 0x0001, 0, "Carry flag should be clear");
+    }
+
+    #[test]
+    fn test_int13h_set_disk_type_invalid_drive() {
+        let bus = PcBus::new(); // No floppy mounted
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=17h with no drive mounted
+        cpu.cpu.ax = 0x1702; // AH=17h, AL=02h
+        cpu.cpu.dx = 0x0000; // DL=00h (drive A:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should fail with "drive not ready" error
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x80, "AH should be 0x80 (drive not ready)");
+
+        // Carry flag should be set (error)
+        assert_eq!(cpu.cpu.flags & 0x0001, 1, "Carry flag should be set");
+    }
+
+    #[test]
+    fn test_int13h_set_disk_type_hard_drive() {
+        let mut bus = PcBus::new();
+
+        // Mount a hard drive
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=17h with hard drive (should fail)
+        cpu.cpu.ax = 0x1702; // AH=17h, AL=02h
         cpu.cpu.dx = 0x0080; // DL=80h (hard drive C:)
 
         // Execute INT 13h
