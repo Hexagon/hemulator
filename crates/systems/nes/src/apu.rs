@@ -747,7 +747,7 @@ mod tests {
 
         // Pulse 1: write to $4003 with channel disabled
         apu.write_register(0x4015, 0x00); // Disable all channels
-        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+                                          // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
         apu.write_register(0x4003, 0b11111000);
         assert_eq!(
             apu.pulse1.length_counter, 0,
