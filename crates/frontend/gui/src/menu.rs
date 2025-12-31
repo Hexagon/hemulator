@@ -16,11 +16,17 @@ pub enum MenuAction {
     MountPoints,
     Exit,
 
+    // Mounts menu  
+    MountFile(String), // mount_point_id
+    EjectMount(String), // mount_point_id
+
     // Emulation menu
     Reset,
     Pause,
     Resume,
     Speed(SpeedSetting),
+    StartMachine,
+    StopMachine,
 
     // State menu
     SaveState(u8), // 1-5
@@ -269,6 +275,76 @@ impl MenuBar {
             active_menu: None,
             visible: true, // Always visible by default
             hovered_item: None,
+        }
+    }
+
+    /// Update mounts menu dynamically based on system mount points
+    pub fn update_mount_points(
+        &mut self,
+        mount_points: &[emu_core::MountPointInfo],
+        mounted_files: &std::collections::HashMap<String, String>,
+    ) {
+        // Find the "Mounts" menu index or create it
+        let mounts_menu_idx = self
+            .menus
+            .iter()
+            .position(|m| m.label == "Mounts")
+            .unwrap_or_else(|| {
+                // Insert Mounts menu after File menu (index 0)
+                self.menus.insert(
+                    1,
+                    Submenu {
+                        label: "Mounts".to_string(),
+                        items: vec![],
+                    },
+                );
+                1
+            });
+
+        // Rebuild mount menu items
+        let mut items = Vec::new();
+        for mp in mount_points {
+            let label = if let Some(path) = mounted_files.get(&mp.id) {
+                // Extract filename (first 20 chars)
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(path);
+                let display_name = if filename.len() > 20 {
+                    format!("{}...", &filename[..20])
+                } else {
+                    filename.to_string()
+                };
+                format!("{} - Eject {}", mp.name, display_name)
+            } else {
+                format!("{} - Select File...", mp.name)
+            };
+
+            let action = if mounted_files.contains_key(&mp.id) {
+                MenuAction::EjectMount(mp.id.clone())
+            } else {
+                MenuAction::MountFile(mp.id.clone())
+            };
+
+            items.push(MenuItem {
+                label,
+                action,
+                shortcut: None,
+                enabled: true,
+            });
+        }
+
+        if let Some(menu) = self.menus.get_mut(mounts_menu_idx) {
+            menu.items = items;
+        }
+    }
+
+    /// Enable/disable mount menu based on system state
+    pub fn set_mounts_enabled(&mut self, enabled: bool) {
+        if let Some(mounts_menu) = self.menus.iter_mut().find(|m| m.label == "Mounts") {
+            for item in &mut mounts_menu.items {
+                item.enabled = enabled;
+            }
         }
     }
 

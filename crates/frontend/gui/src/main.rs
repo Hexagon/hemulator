@@ -161,6 +161,40 @@ impl EmulatorSystem {
         }
     }
 
+    fn unmount(&mut self, mount_point_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            EmulatorSystem::NES(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PC(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SNES(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::N64(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+        }
+    }
+
+    fn is_mounted(&self, mount_point_id: &str) -> bool {
+        match self {
+            EmulatorSystem::NES(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::GameBoy(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::Atari2600(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::PC(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::SNES(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
+        }
+    }
+
     fn supports_save_states(&self) -> bool {
         match self {
             EmulatorSystem::NES(sys) => sys.supports_save_states(),
@@ -1858,6 +1892,9 @@ fn main() {
     status_bar.paused = settings.emulation_speed == 0.0;
     status_bar.speed = settings.emulation_speed as f32;
 
+    // Initialize mount points menu
+    menu_bar.update_mount_points(&sys.mount_points(), &runtime_state.current_mounts);
+
     // Track logging state
     let mut logging_active = false;
 
@@ -2304,6 +2341,58 @@ fn main() {
                         status_message = "Logging stopped".to_string();
                         status_bar.message = status_message.clone();
                         println!("Logging disabled");
+                    }
+                    MenuAction::MountFile(mount_id) => {
+                        // Find the mount point info
+                        let mount_points = sys.mount_points();
+                        if let Some(mp) = mount_points.iter().find(|m| m.id == mount_id) {
+                            if let Some(path) = create_file_dialog(mp).pick_file() {
+                                match std::fs::read(&path) {
+                                    Ok(data) => {
+                                        if let Err(e) = sys.mount(&mount_id, &data) {
+                                            eprintln!("Failed to mount {}: {}", mount_id, e);
+                                            status_message = format!("Mount failed: {}", e);
+                                        } else {
+                                            runtime_state.set_mount(mount_id.clone(), path.to_string_lossy().to_string());
+                                            status_message = format!("Mounted {}", mp.name);
+                                            // Update menu to reflect new mount state
+                                            menu_bar.update_mount_points(&sys.mount_points(), &runtime_state.current_mounts);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to read file: {}", e);
+                                        status_message = format!("Read error: {}", e);
+                                    }
+                                }
+                                status_bar.message = status_message.clone();
+                            }
+                        }
+                    }
+                    MenuAction::EjectMount(mount_id) => {
+                        if let Err(e) = sys.unmount(&mount_id) {
+                            eprintln!("Failed to eject {}: {}", mount_id, e);
+                            status_message = format!("Eject failed: {}", e);
+                        } else {
+                            runtime_state.current_mounts.remove(&mount_id);
+                            status_message = format!("Ejected {}", mount_id);
+                            // Update menu to reflect new mount state
+                            menu_bar.update_mount_points(&sys.mount_points(), &runtime_state.current_mounts);
+                        }
+                        status_bar.message = status_message.clone();
+                    }
+                    MenuAction::StartMachine => {
+                        // Start/resume machine
+                        if settings.emulation_speed == 0.0 {
+                            settings.emulation_speed = 1.0;
+                            status_bar.paused = false;
+                            status_bar.speed = 1.0;
+                        }
+                    }
+                    MenuAction::StopMachine => {
+                        // Stop/pause machine
+                        settings.emulation_speed = 0.0;
+                        status_bar.paused = true;
+                        status_bar.speed = 0.0;
                     }
                 }
             }
