@@ -609,13 +609,16 @@ void main() {
         int spriteAttr = int(spriteAttrF * 255.0 + 0.5);
         int spriteX = int(spriteXF * 255.0 + 0.5);
         
-        // Sprite attributes: PPpppppp
-        // P = priority (0 = in front of bg, 1 = behind bg)
-        // p = palette (0-3)
+        // Sprite attributes: VHppppPP
+        // V = vertical flip (bit 7)
+        // H = horizontal flip (bit 6)
+        // p = unused (bits 5-2)
+        // Priority = bit 5 (0 = front, 1 = behind background)
+        // P = palette index (bits 1-0)
         int palette = spriteAttr & 3;
+        int priority = (spriteAttr >> 5) & 1;
         int flipH = (spriteAttr >> 6) & 1;
         int flipV = (spriteAttr >> 7) & 1;
-        // Priority is bit 5, but we render sprites in priority order anyway
         
         int spriteHeight = (uSprite8x16 != 0) ? 16 : 8;
         
@@ -629,28 +632,34 @@ void main() {
         // For 8x16 sprites, determine which tile to use
         int actualTile = spriteTile;
         int actualPatternBase = uSpritePatternBase;
+        int actualFineY = fineY;
         
         if (uSprite8x16 != 0) {
             // In 8x16 mode, bit 0 of tile index determines pattern table
             actualPatternBase = (spriteTile & 1) * 0x1000;
             actualTile = spriteTile & 0xFE; // Use even tile
             
-            int localFineY = fineY;
-            
-            // Handle vertical flip for 8x16 sprites (swap top/bottom tiles)
+            // For 8x16 sprites with vertical flip, swap top and bottom tiles
+            // and flip the fineY coordinate for tile selection
+            int tileSelectY = fineY;
             if (flipV != 0) {
-                localFineY = 15 - fineY;
+                tileSelectY = 15 - fineY;
             }
             
-            if (localFineY >= 8) {
+            // Select top or bottom tile based on Y coordinate
+            if (tileSelectY >= 8) {
                 actualTile++; // Bottom half uses next tile
+                actualFineY = tileSelectY - 8;
+            } else {
+                actualFineY = tileSelectY;
             }
             
-            // fineY stays 0-7 for the individual tile (flip is handled in fetchSpritePixel)
-            fineY = fineY % 8;
+            // For 8x16 sprites, we've already handled vertical flip for tile selection,
+            // so disable it for the individual 8x8 tile rendering
+            flipV = 0;
         }
         
-        int colorInTile = fetchSpritePixel(actualTile, fineX, fineY, flipH, flipV, actualPatternBase);
+        int colorInTile = fetchSpritePixel(actualTile, fineX, actualFineY, flipH, flipV, actualPatternBase);
         
         if (colorInTile == 0) {
             continue; // Transparent
