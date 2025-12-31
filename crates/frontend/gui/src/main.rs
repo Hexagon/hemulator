@@ -1,8 +1,10 @@
 pub mod display_filter;
 mod hemu_project;
 mod menu;
+mod popup_window;
 mod rom_detect;
 mod save_state;
+mod selector;
 mod settings;
 mod status_bar;
 mod ui_render;
@@ -12,9 +14,11 @@ pub mod window_backend;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use menu::{MenuAction, MenuBar};
+use popup_window::PopupWindowManager;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
+use selector::SelectorManager;
 use settings::Settings;
 use status_bar::StatusBar;
 use std::collections::HashMap;
@@ -156,6 +160,40 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.mount_points(),
             EmulatorSystem::SNES(sys) => sys.mount_points(),
             EmulatorSystem::N64(sys) => sys.mount_points(),
+        }
+    }
+
+    fn unmount(&mut self, mount_point_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            EmulatorSystem::NES(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::GameBoy(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Atari2600(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::PC(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SNES(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::N64(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+        }
+    }
+
+    fn is_mounted(&self, mount_point_id: &str) -> bool {
+        match self {
+            EmulatorSystem::NES(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::GameBoy(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::Atari2600(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::PC(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::SNES(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -1815,24 +1853,11 @@ fn main() {
         ui_render::create_splash_screen_with_status(width, height, &status_message)
     };
 
-    // Help overlay state
-    let mut show_help = false;
+    // Popup window manager (replaces old overlay system)
+    let mut popup_manager = PopupWindowManager::new();
 
-    // Debug overlay state
-    let mut show_debug = false;
-
-    // Slot selector state
-    let mut show_slot_selector = false;
-    let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
-
-    // Mount point selector state
-    let mut show_mount_selector = false;
-
-    // Disk format selector state (for creating blank disks)
-    let mut show_disk_format_selector = false;
-
-    // Speed selector state
-    let mut show_speed_selector = false;
+    // Selector manager (for slot/speed/disk format selection)
+    let mut selector_manager = SelectorManager::new();
 
     // Timing trackers
     let mut last_frame = Instant::now();
@@ -1858,6 +1883,9 @@ fn main() {
     status_bar.message = status_message.clone();
     status_bar.paused = settings.emulation_speed == 0.0;
     status_bar.speed = settings.emulation_speed as f32;
+
+    // Initialize mount points menu
+    menu_bar.update_mount_points(&sys.mount_points(), &runtime_state.current_mounts);
 
     // Track logging state
     let mut logging_active = false;
@@ -1923,6 +1951,12 @@ fn main() {
             if x < 0 || y < 0 {
                 continue;
             }
+
+            // Check if popup window consumed the click first
+            if popup_manager.handle_click(x, y) {
+                continue; // Popup consumed the click, don't process menu
+            }
+
             if let Some(action) = menu_bar.handle_click(x as usize, y as usize) {
                 // Process menu action
                 match action {
@@ -2120,12 +2154,10 @@ fn main() {
                         save_project(&sys, &runtime_state, &settings, &mut status_message);
                     }
                     MenuAction::MountPoints => {
-                        show_mount_selector = true;
-                        show_help = false;
-                        show_slot_selector = false;
-                        show_disk_format_selector = false;
-                        show_speed_selector = false;
-                        show_debug = false;
+                        // Mount points are now handled via the Mounts menu
+                        // This legacy action just closes selectors
+                        selector_manager.close();
+                        popup_manager.close_all();
                     }
                     MenuAction::Exit => {
                         break;
@@ -2227,10 +2259,8 @@ fn main() {
                         }
                     }
                     MenuAction::DebugInfo => {
-                        show_debug = !show_debug;
-                        show_slot_selector = false;
-                        show_speed_selector = false;
-                        show_help = false;
+                        popup_manager.toggle_debug();
+                        selector_manager.close();
                     }
                     MenuAction::CrtFilterToggle => {
                         settings.display_filter = settings.display_filter.next();
@@ -2245,12 +2275,8 @@ fn main() {
                         println!("CRT Filter: {}", settings.display_filter.name());
                     }
                     MenuAction::Help => {
-                        show_help = !show_help;
-                        show_slot_selector = false;
-                        show_mount_selector = false;
-                        show_disk_format_selector = false;
-                        show_speed_selector = false;
-                        show_debug = false;
+                        popup_manager.toggle_help();
+                        selector_manager.close();
                     }
                     MenuAction::About => {
                         // TODO: Show about dialog
@@ -2258,12 +2284,8 @@ fn main() {
                     }
                     MenuAction::NewProject => {
                         // Show system selector
-                        show_slot_selector = false;
-                        show_help = false;
-                        show_mount_selector = false;
-                        show_speed_selector = false;
-                        show_disk_format_selector = false;
-                        show_debug = false;
+                        selector_manager.close();
+                        popup_manager.close_all();
                         // Set a flag to show system selector
                         // This will be handled in the rendering section
                         println!("New Project - Select System Type");
@@ -2304,6 +2326,67 @@ fn main() {
                         status_bar.message = status_message.clone();
                         println!("Logging disabled");
                     }
+                    MenuAction::MountFile(mount_id) => {
+                        // Find the mount point info
+                        let mount_points = sys.mount_points();
+                        if let Some(mp) = mount_points.iter().find(|m| m.id == mount_id) {
+                            if let Some(path) = create_file_dialog(mp).pick_file() {
+                                match std::fs::read(&path) {
+                                    Ok(data) => {
+                                        if let Err(e) = sys.mount(&mount_id, &data) {
+                                            eprintln!("Failed to mount {}: {}", mount_id, e);
+                                            status_message = format!("Mount failed: {}", e);
+                                        } else {
+                                            runtime_state.set_mount(
+                                                mount_id.clone(),
+                                                path.to_string_lossy().to_string(),
+                                            );
+                                            status_message = format!("Mounted {}", mp.name);
+                                            // Update menu to reflect new mount state
+                                            menu_bar.update_mount_points(
+                                                &sys.mount_points(),
+                                                &runtime_state.current_mounts,
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to read file: {}", e);
+                                        status_message = format!("Read error: {}", e);
+                                    }
+                                }
+                                status_bar.message = status_message.clone();
+                            }
+                        }
+                    }
+                    MenuAction::EjectMount(mount_id) => {
+                        if let Err(e) = sys.unmount(&mount_id) {
+                            eprintln!("Failed to eject {}: {}", mount_id, e);
+                            status_message = format!("Eject failed: {}", e);
+                        } else {
+                            runtime_state.current_mounts.remove(&mount_id);
+                            status_message = format!("Ejected {}", mount_id);
+                            // Update menu to reflect new mount state
+                            menu_bar.update_mount_points(
+                                &sys.mount_points(),
+                                &runtime_state.current_mounts,
+                            );
+                        }
+                        status_bar.message = status_message.clone();
+                    }
+                    MenuAction::StartMachine => {
+                        // Start/resume machine
+                        if settings.emulation_speed == 0.0 {
+                            settings.emulation_speed = 1.0;
+                            status_bar.paused = false;
+                            status_bar.speed = 1.0;
+                        }
+                    }
+                    MenuAction::StopMachine => {
+                        // Stop/pause machine
+                        settings.emulation_speed = 0.0;
+                        status_bar.paused = true;
+                        status_bar.speed = 0.0;
+                    }
                 }
             }
         }
@@ -2322,19 +2405,14 @@ fn main() {
             || (!needs_host_key && window.is_key_down(Key::Escape))
         {
             // Close overlays first, only exit if no overlay is open
-            if show_help
-                || show_slot_selector
-                || show_mount_selector
-                || show_speed_selector
-                || show_disk_format_selector
-                || show_debug
+            if selector_manager.is_open()
+                || false
+                || false
+                || false
+                || popup_manager.has_open_popup()
             {
-                show_help = false;
-                show_slot_selector = false;
-                show_mount_selector = false;
-                show_speed_selector = false;
-                show_disk_format_selector = false;
-                show_debug = false;
+                selector_manager.close();
+                popup_manager.close_all();
             } else {
                 break;
             }
@@ -2344,12 +2422,9 @@ fn main() {
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F1, false))
             || (!needs_host_key && window.is_key_pressed(Key::F1, false))
         {
-            show_help = !show_help;
-            show_slot_selector = false; // Close slot selector if open
-            show_mount_selector = false; // Close mount selector if open
-            show_disk_format_selector = false; // Close disk format selector if open
-            show_speed_selector = false; // Close speed selector if open
-            show_debug = false; // Close debug if open
+            popup_manager.toggle_help();
+            selector_manager.close(); // Close selector if open
+            ; // Close disk format selector if open
         }
 
         // Toggle debug overlay (F10)
@@ -2358,13 +2433,11 @@ fn main() {
             || (!needs_host_key && window.is_key_pressed(Key::F10, false)))
             && can_debug
         {
-            show_debug = !show_debug;
-            show_slot_selector = false; // Close slot selector if open
-            show_speed_selector = false; // Close speed selector if open
-            show_help = false; // Close help if open
+            popup_manager.toggle_debug();
+            selector_manager.close(); // Close selector if open
 
             // Dump debug info to console when opening debug overlay
-            if show_debug {
+            if popup_manager.is_debug_open() {
                 println!("\n=== Debug Info Dump ===");
 
                 // Try NES debug info first
@@ -2611,7 +2684,7 @@ fn main() {
         }
 
         // Handle speed selector
-        if show_speed_selector {
+        if false {
             // Check for speed selection (0-5) or cancel (ESC)
             let mut selected_speed: Option<f64> = None;
 
@@ -2630,7 +2703,6 @@ fn main() {
             }
 
             if let Some(speed) = selected_speed {
-                show_speed_selector = false;
                 settings.emulation_speed = speed;
                 if let Err(e) = settings.save() {
                     eprintln!("Warning: Failed to save speed setting: {}", e);
@@ -2640,9 +2712,15 @@ fn main() {
         }
 
         // Handle slot selector
-        if show_slot_selector {
+        if selector_manager.is_open() {
             // For PC system in SAVE mode, show disk persist menu instead of save state slots
-            if matches!(&sys, EmulatorSystem::PC(_)) && slot_selector_mode == "SAVE" {
+            if matches!(&sys, EmulatorSystem::PC(_))
+                && selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+            {
                 // PC disk persist menu
                 let mount_points = sys.mount_points();
                 let mounted: Vec<bool> = mount_points
@@ -2668,7 +2746,7 @@ fn main() {
                 }
 
                 if let Some(option) = selected_option {
-                    show_slot_selector = false;
+                    selector_manager.close();
 
                     if option == 0 {
                         // Persist all images
@@ -2741,10 +2819,15 @@ fn main() {
                 }
 
                 if let Some(slot) = selected_slot {
-                    show_slot_selector = false;
+                    selector_manager.close();
 
                     if let Some(ref hash) = rom_hash {
-                        if slot_selector_mode == "SAVE" {
+                        if selector_manager
+                            .active_selector
+                            .as_ref()
+                            .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                            .unwrap_or(false)
+                        {
                             // Check if system supports save states
                             if !sys.supports_save_states() {
                                 eprintln!("Save states are not supported for this system");
@@ -2794,7 +2877,7 @@ fn main() {
         }
 
         // Handle mount point selector
-        if show_mount_selector {
+        if false {
             let mount_points = sys.mount_points();
 
             // Check for mount point selection
@@ -2818,16 +2901,11 @@ fn main() {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
                 // Key 9: Show disk format selector for creating new blank disk (PC only)
-                if sys.system_name() == "pc" {
-                    show_mount_selector = false;
-                    show_disk_format_selector = true;
-                }
+                if sys.system_name() == "pc" {}
             }
 
             if let Some(idx) = selected_index {
                 if idx < mount_points.len() {
-                    show_mount_selector = false;
-
                     // Now show file dialog for the selected mount point
                     let mp_info = &mount_points[idx];
 
@@ -2905,7 +2983,7 @@ fn main() {
         }
 
         // Handle disk format selector
-        if show_disk_format_selector {
+        if false {
             // Check for format selection (1-7)
             let mut selected_format: Option<usize> = None;
 
@@ -2928,8 +3006,6 @@ fn main() {
             }
 
             if let Some(fmt_idx) = selected_format {
-                show_disk_format_selector = false;
-
                 // Create the blank disk based on selected format
                 let (disk_data, default_name, description) = match fmt_idx {
                     0 => (
@@ -3008,16 +3084,29 @@ fn main() {
             continue;
         }
 
-        // Prepare help overlay buffer when requested; keep processing input so other
-        // keys still work while the overlay is visible.
+        // Prepare popup window overlays
         let mut help_overlay: Option<Vec<u32>> = None;
-        if show_help {
-            help_overlay = Some(ui_render::create_help_overlay(width, height, &settings));
+        if let Some(ref help_window) = popup_manager.help_window {
+            help_overlay = Some(help_window.render(width, height, &settings));
         }
 
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
-        if show_debug && rom_loaded {
+        if let Some(ref mut debug_window) = popup_manager.debug_window {
+            // For now, use simple debug window rendering
+            // TODO: Properly extract and pass debug info from different systems
+            debug_overlay = Some(debug_window.render(
+                width,
+                height,
+                None,
+                current_fps,
+                &settings.video_backend,
+            ));
+        }
+
+        // Legacy debug overlay for systems not yet migrated to popup window
+        // This will be removed once all systems are migrated
+        if debug_overlay.is_none() && rom_loaded && popup_manager.is_debug_open() {
             // Try NES debug info first
             if let Some(debug_info) = sys.get_debug_info_nes() {
                 let timing_str = match debug_info.timing_mode {
@@ -3137,10 +3226,10 @@ fn main() {
         // Speed selector and 0x speed also pause the game.
         // For PC systems, always render frames (to show POST screen even when no disk is loaded)
         let should_step = (rom_loaded || matches!(&sys, EmulatorSystem::PC(_)))
-            && !show_help
-            && !show_slot_selector
-            && !show_mount_selector
-            && !show_speed_selector
+            && !popup_manager.is_help_open()
+            && !selector_manager.is_open()
+            && !false
+            && !false
             && settings.emulation_speed > 0.0;
 
         if should_step {
@@ -3185,7 +3274,7 @@ fn main() {
                     buffer = f.pixels; // Move instead of clone
 
                     // Apply CRT filter if not showing overlays
-                    if !show_help && !show_slot_selector {
+                    if !popup_manager.is_help_open() && !selector_manager.is_open() {
                         settings.display_filter.apply(&mut buffer, width, height);
                     }
 
@@ -3209,15 +3298,21 @@ fn main() {
         let mount_selector_buffer;
         let debug_composed_buffer;
 
-        let frame_to_present: &[u32] = if show_speed_selector {
+        let frame_to_present: &[u32] = if false {
             // Render speed selector overlay
             speed_selector_buffer =
                 ui_render::create_speed_selector_overlay(width, height, settings.emulation_speed);
             &speed_selector_buffer
-        } else if show_slot_selector {
+        } else if selector_manager.is_open() {
             // Render slot selector overlay
             // For PC system in SAVE mode, show disk persist menu
-            if matches!(&sys, EmulatorSystem::PC(_)) && slot_selector_mode == "SAVE" {
+            if matches!(&sys, EmulatorSystem::PC(_))
+                && selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+            {
                 let mount_points = sys.mount_points();
                 let mounted: Vec<bool> = mount_points
                     .iter()
@@ -3234,15 +3329,21 @@ fn main() {
                     game_saves.slots.contains_key(&4),
                     game_saves.slots.contains_key(&5),
                 ];
-                slot_selector_buffer = ui_render::create_slot_selector_overlay(
-                    width,
-                    height,
-                    slot_selector_mode,
-                    &has_saves,
-                );
+                let mode_str = if selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+                {
+                    "SAVE"
+                } else {
+                    "LOAD"
+                };
+                slot_selector_buffer =
+                    ui_render::create_slot_selector_overlay(width, height, mode_str, &has_saves);
                 &slot_selector_buffer
             }
-        } else if show_mount_selector {
+        } else if false {
             // Render mount point selector overlay
             let mount_points = sys.mount_points();
             mount_selector_buffer = ui_render::create_mount_point_selector(
