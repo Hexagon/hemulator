@@ -1963,6 +1963,7 @@ impl PcCpu {
             0x08 => self.int13h_get_drive_params(),
             0x15 => self.int13h_get_disk_type(),
             0x16 => self.int13h_get_disk_change_status(),
+            0x18 => self.int13h_set_media_type(),
             0x41 => self.int13h_check_extensions(),
             0x42 => self.int13h_extended_read(),
             0x43 => self.int13h_extended_write(),
@@ -2494,6 +2495,83 @@ impl PcCpu {
             // Function not valid for hard drives
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
             self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=18h: Set Media Type for Format (PS/2 and later)
+    /// This function is used by DOS FORMAT to prepare a floppy drive for formatting
+    fn int13h_set_media_type(&mut self) -> u32 {
+        use crate::bios::DISK_PARAMETER_TABLE_OFFSET;
+
+        // DL = drive number (00h-7Fh for floppies)
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // CH = lower 8 bits of track number (usually number of tracks)
+        let ch = ((self.cpu.cx >> 8) & 0xFF) as u8;
+
+        // CL = sectors per track
+        let cl = (self.cpu.cx & 0xFF) as u8;
+
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!(
+                "INT 13h AH=18h: Set media type for drive 0x{:02X}, tracks={}, sectors={}",
+                drive, ch, cl
+            );
+        }
+
+        // Only valid for floppy drives (0x00-0x7F)
+        if drive >= 0x80 {
+            // Not valid for hard drives
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Check if floppy drive exists
+        if !self.cpu.memory.has_floppy(drive) {
+            // Drive not ready
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x80 << 8); // Timeout/not ready
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Validate media type based on tracks and sectors
+        // Common formats:
+        // - 40 tracks, 9 sectors = 360K (5.25" DD)
+        // - 80 tracks, 9 sectors = 720K (3.5" DD)
+        // - 80 tracks, 15 sectors = 1.2M (5.25" HD)
+        // - 80 tracks, 18 sectors = 1.44M (3.5" HD)
+        let is_valid_format =
+            matches!((ch, cl), (40, 9) | (80, 9) | (80, 15) | (80, 18) | (80, 36));
+
+        if !is_valid_format {
+            // Media type not supported
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x0C << 8); // Media type not found
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Success - return pointer to Disk Base Table (DBT) in ES:DI
+        // The DBT is the same as the Disk Parameter Table (DPT) in BIOS ROM at F000:0250
+        // This table contains format parameters (step rate, head settle time, etc.)
+
+        // Set ES:DI to point to the DPT in BIOS ROM
+        self.cpu.es = 0xF000; // BIOS segment
+        self.cpu.di = DISK_PARAMETER_TABLE_OFFSET as u32; // DPT offset (0x0250)
+
+        // Clear AH (status = success)
+        self.cpu.ax &= 0x00FF;
+
+        // Clear carry flag (success)
+        self.set_carry_flag(false);
+
+        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
+            eprintln!(
+                "INT 13h AH=18h: Success - returning DBT pointer ES:DI = {:04X}:{:04X}",
+                self.cpu.es, self.cpu.di
+            );
         }
 
         51
@@ -5189,6 +5267,115 @@ mod tests {
 
         // Carry flag should be set (error)
         assert_eq!(cpu.cpu.flags & 0x0001, 1);
+    }
+
+    #[test]
+    fn test_int13h_set_media_type() {
+        use crate::bios::DISK_PARAMETER_TABLE_OFFSET;
+
+        let mut bus = PcBus::new();
+
+        // Mount a floppy drive
+        bus.mount_floppy_a(vec![0u8; 1474560]); // 1.44MB floppy
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=18h (set media type)
+        // CH = 80 tracks, CL = 18 sectors (1.44MB format)
+        cpu.cpu.ax = 0x1800; // AH=18h
+        cpu.cpu.cx = 0x5012; // CH=80, CL=18
+        cpu.cpu.dx = 0x0000; // DL=00h (drive A:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Check success
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x00, "AH should be 0 (success)");
+
+        // Carry flag should be clear (success)
+        assert_eq!(cpu.cpu.flags & 0x0001, 0, "Carry flag should be clear");
+
+        // ES:DI should point to the Disk Base Table in BIOS ROM (F000:0250)
+        assert_eq!(cpu.cpu.es, 0xF000, "ES should be 0xF000 (BIOS segment)");
+        assert_eq!(
+            cpu.cpu.di, DISK_PARAMETER_TABLE_OFFSET as u32,
+            "DI should point to DPT offset"
+        );
+    }
+
+    #[test]
+    fn test_int13h_set_media_type_invalid_drive() {
+        let bus = PcBus::new(); // No floppy mounted
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=18h with no drive mounted
+        cpu.cpu.ax = 0x1800; // AH=18h
+        cpu.cpu.cx = 0x5012; // CH=80, CL=18
+        cpu.cpu.dx = 0x0000; // DL=00h (drive A:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should fail with "drive not ready" error
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x80, "AH should be 0x80 (drive not ready)");
+
+        // Carry flag should be set (error)
+        assert_eq!(cpu.cpu.flags & 0x0001, 1, "Carry flag should be set");
+    }
+
+    #[test]
+    fn test_int13h_set_media_type_hard_drive() {
+        let mut bus = PcBus::new();
+
+        // Mount a hard drive
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]);
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=18h with hard drive (should fail)
+        cpu.cpu.ax = 0x1800; // AH=18h
+        cpu.cpu.cx = 0x5012; // CH=80, CL=18
+        cpu.cpu.dx = 0x0080; // DL=80h (hard drive C:)
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Should fail with "invalid function" error (not valid for hard drives)
+        let ah = (cpu.cpu.ax >> 8) & 0xFF;
+        assert_eq!(ah, 0x01, "AH should be 0x01 (invalid function)");
+
+        // Carry flag should be set (error)
+        assert_eq!(cpu.cpu.flags & 0x0001, 1, "Carry flag should be set");
     }
 
     #[test]
