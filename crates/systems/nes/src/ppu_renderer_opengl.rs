@@ -568,10 +568,7 @@ impl std::fmt::Debug for OpenGLNesPpuRenderer {
 mod bytemuck {
     pub fn cast_slice<T: Copy>(slice: &[T]) -> &[u8] {
         unsafe {
-            std::slice::from_raw_parts(
-                slice.as_ptr() as *const u8,
-                std::mem::size_of_val(slice),
-            )
+            std::slice::from_raw_parts(slice.as_ptr() as *const u8, std::mem::size_of_val(slice))
         }
     }
 
