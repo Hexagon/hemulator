@@ -110,9 +110,7 @@ pub fn get_controller_state_from_profile(
 
     for (virtual_button, input_source) in &profile.mappings {
         if let Some(bit) = virtual_button_to_bit(*virtual_button) {
-            if bit < 8
-                && is_input_source_active(input_source, window, sdl2_backend, gamepad_id)
-            {
+            if bit < 8 && is_input_source_active(input_source, window, sdl2_backend, gamepad_id) {
                 state |= 1 << bit;
             }
         }
@@ -136,18 +134,18 @@ pub fn get_snes_controller_state_from_profile(
             if is_input_source_active(input_source, window, sdl2_backend, gamepad_id) {
                 // Map button IDs to SNES button positions
                 let snes_bit = match button_id {
-                    0 => 7,   // A -> bit 7
-                    1 => 15,  // B -> bit 15
-                    2 => 13,  // Select -> bit 13
-                    3 => 12,  // Start -> bit 12
-                    4 => 11,  // Up -> bit 11
-                    5 => 10,  // Down -> bit 10
-                    6 => 9,   // Left -> bit 9
-                    7 => 8,   // Right -> bit 8
-                    8 => 6,   // X -> bit 6
-                    9 => 14,  // Y -> bit 14
-                    10 => 5,  // L -> bit 5
-                    11 => 4,  // R -> bit 4
+                    0 => 7,  // A -> bit 7
+                    1 => 15, // B -> bit 15
+                    2 => 13, // Select -> bit 13
+                    3 => 12, // Start -> bit 12
+                    4 => 11, // Up -> bit 11
+                    5 => 10, // Down -> bit 10
+                    6 => 9,  // Left -> bit 9
+                    7 => 8,  // Right -> bit 8
+                    8 => 6,  // X -> bit 6
+                    9 => 14, // Y -> bit 14
+                    10 => 5, // L -> bit 5
+                    11 => 4, // R -> bit 4
                     _ => continue,
                 };
                 state |= 1u16 << snes_bit;

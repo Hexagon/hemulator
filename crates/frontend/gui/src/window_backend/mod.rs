@@ -130,7 +130,7 @@ pub trait WindowBackend {
 
     /// Downcast to Any for accessing backend-specific methods
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    
+
     /// Downcast to Any (immutable) for accessing backend-specific methods
     fn as_any(&self) -> &dyn std::any::Any;
 }
