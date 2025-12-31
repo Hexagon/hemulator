@@ -604,8 +604,9 @@ impl System for NesSystem {
             );
         }
 
-        // Return the rendered frame from the renderer
-        Ok(self.renderer.get_frame().clone())
+        // Return the rendered frame from the renderer by taking ownership
+        // This avoids cloning 61,440 pixels (245KB) every frame (60 times/second)
+        Ok(self.renderer.take_frame())
     }
 
     fn save_state(&self) -> serde_json::Value {
