@@ -110,12 +110,13 @@ impl PcCpu {
         // This ensures the emulated behavior (e.g., timer tick counter increment) occurs
         match int_num {
             0x08 => {
-                // Timer interrupt - call our emulated handler
-                self.handle_int08h();
+                // Timer interrupt - call hardware timer handler (doesn't skip instruction bytes)
+                self.handle_hardware_timer_interrupt();
                 true
             }
             0x09 => {
                 // Keyboard interrupt - call our emulated handler
+                // TODO: Create handle_hardware_keyboard_interrupt for consistency
                 self.handle_int09h();
                 true
             }
@@ -279,7 +280,7 @@ impl PcCpu {
                 0x2F | // Multiplex
                 0x31 | // DPMI
                 0x33 | // Mouse driver
-                0x4A   // RTC Alarm
+                0x4A // RTC Alarm
             );
 
             // Generic interrupt override check for software/DOS interrupts
@@ -1572,17 +1573,9 @@ impl PcCpu {
         51
     }
 
-    /// Handle INT 08h - Timer Tick (System Timer)
-    /// Called by hardware timer 18.2065 times per second
-    #[allow(dead_code)] // Called dynamically based on interrupt number
-    fn handle_int08h(&mut self) -> u32 {
-        // Skip the INT 08h instruction (2 bytes: 0xCD 0x08)
-        self.cpu.ip = self.cpu.ip.wrapping_add(2);
-
-        // Real hardware timer interrupt handler
-        // This interrupt fires 18.2065 times per second (every 54.9254 ms)
-        // BIOS uses this to maintain time-of-day counter at 0040:006Ch
-
+    /// Perform timer tick logic (increment BIOS timer counter)
+    /// This is called by both software INT 08h and hardware timer interrupts
+    fn do_timer_tick(&mut self) {
         // Increment the timer tick counter in BIOS data area
         // Timer ticks stored at 0x0040:0x006C (4 bytes, little-endian)
         let tick_addr = 0x046C;
@@ -1612,6 +1605,17 @@ impl PcCpu {
         self.cpu
             .memory
             .write(tick_addr + 3, ((ticks >> 24) & 0xFF) as u8);
+    }
+
+    /// Handle INT 08h - Timer Tick (System Timer) - SOFTWARE interrupt version
+    /// Called when CPU executes INT 08h instruction
+    #[allow(dead_code)] // Called dynamically based on interrupt number
+    fn handle_int08h(&mut self) -> u32 {
+        // Skip the INT 08h instruction (2 bytes: 0xCD 0x08)
+        self.cpu.ip = self.cpu.ip.wrapping_add(2);
+
+        // Perform timer tick logic
+        self.do_timer_tick();
 
         // Call INT 1Ch (user timer tick handler)
         // This is the standard PC/AT BIOS behavior - INT 08h chains to INT 1Ch
@@ -1621,6 +1625,18 @@ impl PcCpu {
         // The BIOS default INT 1Ch handler is just an IRET at F000:0040
 
         51
+    }
+
+    /// Handle hardware timer interrupt from PIT
+    /// Called when PIT generates IRQ 0, does NOT skip instruction bytes
+    fn handle_hardware_timer_interrupt(&mut self) {
+        // For hardware interrupts, we DON'T skip instruction bytes
+        // (there's no INT instruction to skip)
+
+        // Perform timer tick logic
+        self.do_timer_tick();
+
+        // Hardware interrupts don't return cycle counts
     }
 
     /// Handle INT 09h - Keyboard Hardware Interrupt
@@ -6170,17 +6186,21 @@ mod tests {
         // Write custom handler code:
         // INC AX (40)
         cpu.cpu.memory.write(handler_addr, 0x40); // INC AX
-        // IRET (CF)
+                                                  // IRET (CF)
         cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
 
         // Install custom handler for INT 2Ah (vector at 0x00A8)
         // NOTE: We manually install this vector since we're not running BIOS init
         let vector_addr = 0x2A * 4;
-        cpu.cpu.memory.write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
         cpu.cpu
             .memory
             .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
-        cpu.cpu.memory.write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
         cpu.cpu
             .memory
             .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
@@ -6229,7 +6249,7 @@ mod tests {
             cpu.cpu.ax, 0x1235,
             "Custom INT 2Ah handler should have been called and incremented AX"
         );
-        
+
         // Should have returned to the instruction after INT
         assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
         assert_eq!(cpu.cpu.ip, 0x1002, "Should return to instruction after INT");
@@ -6258,7 +6278,10 @@ mod tests {
 
         // BIOS stub returns AL=0 (not installed) and sets CF
         assert_eq!(cpu.cpu.ax & 0xFF, 0x00, "AL should be 0 (not installed)");
-        assert!(cpu.get_carry_flag(), "CF should be set (error/not installed)");
+        assert!(
+            cpu.get_carry_flag(),
+            "CF should be set (error/not installed)"
+        );
     }
 
     #[test]
@@ -6266,45 +6289,48 @@ mod tests {
         // Test that the core CPU correctly executes custom interrupt handlers
         // This bypasses the PC wrapper to isolate the issue
         use emu_core::cpu_8086::Cpu8086;
-        
+
         let bus = PcBus::new();
         let mut cpu = Cpu8086::new(bus);
-        
+
         // Set up stack
         cpu.ss = 0x0000;
         cpu.sp = 0xFFFE;
-        
+
         // Create custom handler at 0x2000:0x0100
-        let handler_addr = 0x20100u32;  // Physical address
+        let handler_addr = 0x20100u32; // Physical address
         cpu.memory.write(handler_addr, 0x40); // INC AX
         cpu.memory.write(handler_addr + 1, 0xCF); // IRET
-        
+
         // Install vector for INT 2Ah
         let vector_addr = 0x2A * 4;
         cpu.memory.write(vector_addr, 0x00); // Offset low: 0x0100
         cpu.memory.write(vector_addr + 1, 0x01); // Offset high
         cpu.memory.write(vector_addr + 2, 0x00); // Segment low: 0x2000
         cpu.memory.write(vector_addr + 3, 0x20); // Segment high
-        
+
         // Write INT 2Ah at 0x0000:0x1000
         cpu.cs = 0x0000;
         cpu.ip = 0x1000;
         cpu.memory.write(0x1000, 0xCD); // INT
         cpu.memory.write(0x1001, 0x2A); // 2Ah
-        
+
         cpu.ax = 0x1234;
-        
+
         // Execute INT (this will jump to the handler)
         cpu.step();
-        
+
         // Now we're at the handler - execute INC AX
         cpu.step();
-        
+
         // Execute IRET to return
         cpu.step();
-        
+
         // Now we should be back and AX should be incremented
-        assert_eq!(cpu.ax, 0x1235, "Core CPU should execute custom handler and increment AX");
+        assert_eq!(
+            cpu.ax, 0x1235,
+            "Core CPU should execute custom handler and increment AX"
+        );
         assert_eq!(cpu.cs, 0x0000, "Should return to original CS");
         assert_eq!(cpu.ip, 0x1002, "Should return to instruction after INT");
     }
