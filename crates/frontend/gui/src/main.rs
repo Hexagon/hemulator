@@ -2714,7 +2714,13 @@ fn main() {
         // Handle slot selector
         if selector_manager.is_open() {
             // For PC system in SAVE mode, show disk persist menu instead of save state slots
-            if matches!(&sys, EmulatorSystem::PC(_)) && selector_manager.active_selector.as_ref().map(|s| s.selector_type == selector::SelectorType::SaveSlot).unwrap_or(false) {
+            if matches!(&sys, EmulatorSystem::PC(_))
+                && selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+            {
                 // PC disk persist menu
                 let mount_points = sys.mount_points();
                 let mounted: Vec<bool> = mount_points
@@ -2816,7 +2822,12 @@ fn main() {
                     selector_manager.close();
 
                     if let Some(ref hash) = rom_hash {
-                        if selector_manager.active_selector.as_ref().map(|s| s.selector_type == selector::SelectorType::SaveSlot).unwrap_or(false) {
+                        if selector_manager
+                            .active_selector
+                            .as_ref()
+                            .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                            .unwrap_or(false)
+                        {
                             // Check if system supports save states
                             if !sys.supports_save_states() {
                                 eprintln!("Save states are not supported for this system");
@@ -2890,14 +2901,11 @@ fn main() {
                 selected_index = Some(7);
             } else if window.is_key_pressed(Key::Key9, false) {
                 // Key 9: Show disk format selector for creating new blank disk (PC only)
-                if sys.system_name() == "pc" {
-                    ;
-                }
+                if sys.system_name() == "pc" {}
             }
 
             if let Some(idx) = selected_index {
                 if idx < mount_points.len() {
-
                     // Now show file dialog for the selected mount point
                     let mp_info = &mount_points[idx];
 
@@ -2998,7 +3006,6 @@ fn main() {
             }
 
             if let Some(fmt_idx) = selected_format {
-
                 // Create the blank disk based on selected format
                 let (disk_data, default_name, description) = match fmt_idx {
                     0 => (
@@ -3299,7 +3306,13 @@ fn main() {
         } else if selector_manager.is_open() {
             // Render slot selector overlay
             // For PC system in SAVE mode, show disk persist menu
-            if matches!(&sys, EmulatorSystem::PC(_)) && selector_manager.active_selector.as_ref().map(|s| s.selector_type == selector::SelectorType::SaveSlot).unwrap_or(false) {
+            if matches!(&sys, EmulatorSystem::PC(_))
+                && selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+            {
                 let mount_points = sys.mount_points();
                 let mounted: Vec<bool> = mount_points
                     .iter()
@@ -3316,17 +3329,18 @@ fn main() {
                     game_saves.slots.contains_key(&4),
                     game_saves.slots.contains_key(&5),
                 ];
-                let mode_str = if selector_manager.active_selector.as_ref().map(|s| s.selector_type == selector::SelectorType::SaveSlot).unwrap_or(false) {
+                let mode_str = if selector_manager
+                    .active_selector
+                    .as_ref()
+                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
+                    .unwrap_or(false)
+                {
                     "SAVE"
                 } else {
                     "LOAD"
                 };
-                slot_selector_buffer = ui_render::create_slot_selector_overlay(
-                    width,
-                    height,
-                    mode_str,
-                    &has_saves,
-                );
+                slot_selector_buffer =
+                    ui_render::create_slot_selector_overlay(width, height, mode_str, &has_saves);
                 &slot_selector_buffer
             }
         } else if false {

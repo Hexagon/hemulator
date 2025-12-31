@@ -108,7 +108,14 @@ impl SelectorWindow {
                 self.render_slot_selector(&mut buffer, width, height, x_offset, y_offset, "LOAD");
             }
             SelectorType::Speed => {
-                self.render_speed_selector(&mut buffer, width, height, x_offset, y_offset, current_speed);
+                self.render_speed_selector(
+                    &mut buffer,
+                    width,
+                    height,
+                    x_offset,
+                    y_offset,
+                    current_speed,
+                );
             }
             SelectorType::DiskFormat => {
                 self.render_disk_format_selector(&mut buffer, width, height, x_offset, y_offset);
