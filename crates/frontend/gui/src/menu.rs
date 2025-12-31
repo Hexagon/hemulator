@@ -79,6 +79,8 @@ pub struct MenuBar {
     pub menus: Vec<Submenu>,
     pub active_menu: Option<usize>,
     pub visible: bool,
+    /// Track which menu item is currently hovered (menu_idx, item_idx)
+    pub hovered_item: Option<(usize, usize)>,
 }
 
 impl MenuBar {
@@ -266,6 +268,7 @@ impl MenuBar {
             menus,
             active_menu: None,
             visible: true, // Always visible by default
+            hovered_item: None,
         }
     }
 
@@ -346,6 +349,25 @@ impl MenuBar {
                 break; // Don't render items that don't fit
             }
 
+            // Check if this item is hovered
+            let is_hovered = self.hovered_item == Some((menu_idx, i));
+
+            // Draw hover highlight background
+            if is_hovered && item.enabled {
+                for dy in 0..item_height {
+                    let highlight_y = y + dy;
+                    for dx in 0..dropdown_width.min(width.saturating_sub(dropdown_x)) {
+                        let highlight_x = dropdown_x + dx;
+                        if highlight_x < width && highlight_y < height {
+                            let idx = highlight_y * width + highlight_x;
+                            if idx < buffer.len() {
+                                buffer[idx] = 0xFF4A4A5E; // Subtle highlight color
+                            }
+                        }
+                    }
+                }
+            }
+
             // Modern color scheme based on enabled state
             let text_color = if item.enabled {
                 0xFFEBDBB2 // Warm off-white for enabled
@@ -418,9 +440,11 @@ impl MenuBar {
                 if Some(menu_idx) == self.active_menu {
                     // Clicking the same menu closes it
                     self.active_menu = None;
+                    self.hovered_item = None;
                 } else {
                     // Open the clicked menu
                     self.active_menu = Some(menu_idx);
+                    self.hovered_item = None;
                 }
             }
             return None;
@@ -429,9 +453,9 @@ impl MenuBar {
         // Check if click is in dropdown
         if let Some(menu_idx) = self.active_menu {
             if let Some(menu) = self.menus.get(menu_idx) {
-                let dropdown_x = 8 + menu_idx * MENU_ITEM_WIDTH;
+                let dropdown_x = 12 + menu_idx * MENU_ITEM_WIDTH;
                 let dropdown_y = MENU_BAR_HEIGHT;
-                let dropdown_width = 250;
+                let dropdown_width = 240;
                 let item_height = 20;
 
                 if x >= dropdown_x && x < dropdown_x + dropdown_width && y >= dropdown_y {
@@ -442,6 +466,7 @@ impl MenuBar {
                         if item.enabled {
                             let action = item.action.clone();
                             self.active_menu = None; // Close menu after selection
+                            self.hovered_item = None;
                             return Some(action);
                         }
                     }
@@ -451,7 +476,49 @@ impl MenuBar {
 
         // Click outside menu - close any open dropdown
         self.active_menu = None;
+        self.hovered_item = None;
         None
+    }
+
+    /// Handle mouse hover - updates hover state and implements auto-menu-switching
+    pub fn handle_hover(&mut self, x: usize, y: usize) {
+        if !self.visible {
+            return;
+        }
+
+        // Check if hovering over menu bar
+        if y < MENU_BAR_HEIGHT {
+            let menu_idx = x / MENU_ITEM_WIDTH;
+            if menu_idx < self.menus.len() {
+                // If a menu is already open, auto-switch to the hovered menu
+                if self.active_menu.is_some() && Some(menu_idx) != self.active_menu {
+                    self.active_menu = Some(menu_idx);
+                    self.hovered_item = None;
+                }
+            }
+            return;
+        }
+
+        // Check if hovering over dropdown item
+        if let Some(menu_idx) = self.active_menu {
+            if let Some(menu) = self.menus.get(menu_idx) {
+                let dropdown_x = 12 + menu_idx * MENU_ITEM_WIDTH;
+                let dropdown_y = MENU_BAR_HEIGHT;
+                let dropdown_width = 240;
+                let item_height = 20;
+
+                if x >= dropdown_x && x < dropdown_x + dropdown_width && y >= dropdown_y {
+                    let item_idx = (y - dropdown_y) / item_height;
+                    if item_idx < menu.items.len() {
+                        self.hovered_item = Some((menu_idx, item_idx));
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Not hovering over any menu item
+        self.hovered_item = None;
     }
 
     /// Update menu state based on system status

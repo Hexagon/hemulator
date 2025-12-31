@@ -11,7 +11,7 @@ pub mod window_backend;
 
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
-use menu::{MenuAction, MenuBar, SpeedSetting};
+use menu::{MenuAction, MenuBar};
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -1901,13 +1901,22 @@ fn main() {
         // Poll events at the start of each frame
         window.poll_events();
 
-        // Handle menu clicks - collect clicks first to avoid borrow issues
-        let mouse_clicks: Vec<(i32, i32)> =
+        // Handle menu clicks and hover - collect data first to avoid borrow issues
+        let (mouse_clicks, mouse_position): (Vec<(i32, i32)>, (i32, i32)) =
             if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                sdl2_backend.get_mouse_clicks().to_vec()
+                (
+                    sdl2_backend.get_mouse_clicks().to_vec(),
+                    sdl2_backend.get_mouse_position(),
+                )
             } else {
-                Vec::new()
+                (Vec::new(), (0, 0))
             };
+
+        // Handle menu hover for visual feedback and auto-menu-switching
+        let (mx, my) = mouse_position;
+        if mx >= 0 && my >= 0 {
+            menu_bar.handle_hover(mx as usize, my as usize);
+        }
 
         for (x, y) in mouse_clicks {
             // Ignore clicks with negative coordinates to avoid wrapping when casting to usize
@@ -3301,15 +3310,19 @@ fn main() {
                 let offset_y =
                     game_display_y + (game_display_height.saturating_sub(scaled_height)) / 2;
 
-                // Nearest-neighbor scaling for pixel-perfect look
+                // Optimized nearest-neighbor scaling using integer arithmetic
+                // Pre-compute inverse scale as fixed-point (16.16) to avoid per-pixel division
+                let scale_inv = (65536.0 / scale) as usize;
+
                 for sy in 0..scaled_height {
-                    let src_y = (sy as f32 / scale) as usize;
+                    // Use fixed-point arithmetic instead of float division
+                    let src_y = (sy * scale_inv) >> 16;
                     if src_y >= height {
                         continue;
                     }
 
                     for sx in 0..scaled_width {
-                        let src_x = (sx as f32 / scale) as usize;
+                        let src_x = (sx * scale_inv) >> 16;
                         if src_x >= width {
                             continue;
                         }

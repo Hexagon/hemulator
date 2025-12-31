@@ -39,6 +39,8 @@ pub struct Sdl2Backend {
     current_filter: DisplayFilter,
     /// Mouse button clicks this frame (x, y) coordinates
     mouse_clicks: Vec<(i32, i32)>,
+    /// Current mouse position
+    mouse_position: (i32, i32),
 }
 
 impl Sdl2Backend {
@@ -108,6 +110,7 @@ impl Sdl2Backend {
             is_open: true,
             current_filter: DisplayFilter::None,
             mouse_clicks: Vec::new(),
+            mouse_position: (0, 0),
         })
     }
 
@@ -294,6 +297,11 @@ impl Sdl2Backend {
         &self.mouse_clicks
     }
 
+    /// Get current mouse position
+    pub fn get_mouse_position(&self) -> (i32, i32) {
+        self.mouse_position
+    }
+
     /// Set window title
     pub fn set_title(&mut self, title: &str) -> Result<(), Box<dyn Error>> {
         match &mut self.render_mode {
@@ -392,6 +400,10 @@ impl WindowBackend for Sdl2Backend {
                 }
                 Event::MouseButtonDown { x, y, .. } => {
                     self.mouse_clicks.push((x, y));
+                    self.mouse_position = (x, y);
+                }
+                Event::MouseMotion { x, y, .. } => {
+                    self.mouse_position = (x, y);
                 }
                 Event::KeyDown {
                     keycode,
