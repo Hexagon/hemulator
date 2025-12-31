@@ -5,6 +5,14 @@
 
 use crate::ui_render;
 
+// Debug window layout constants
+const DEBUG_TITLE_HEIGHT: usize = 30;
+const DEBUG_TAB_HEIGHT: usize = 25;
+const DEBUG_CLOSE_BTN_SIZE: usize = 20;
+const DEBUG_CLOSE_BTN_PADDING: usize = 5;
+const DEBUG_CLOSE_X_OFFSET: usize = 7;
+const DEBUG_CLOSE_Y_OFFSET: usize = 5;
+
 /// Popup window identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
@@ -91,24 +99,21 @@ impl DebugWindow {
         }
 
         // Check if click is on close button
-        let title_height = 30;
-        let close_btn_size = 20;
-        let close_btn_x = self.x + self.width - close_btn_size - 5;
-        let close_btn_y = self.y + 5;
+        let close_btn_x = self.x + self.width - DEBUG_CLOSE_BTN_SIZE - DEBUG_CLOSE_BTN_PADDING;
+        let close_btn_y = self.y + DEBUG_CLOSE_BTN_PADDING;
 
         if mouse_x >= close_btn_x
-            && mouse_x < close_btn_x + close_btn_size
+            && mouse_x < close_btn_x + DEBUG_CLOSE_BTN_SIZE
             && mouse_y >= close_btn_y
-            && mouse_y < close_btn_y + close_btn_size
+            && mouse_y < close_btn_y + DEBUG_CLOSE_BTN_SIZE
         {
             return (true, true); // Click handled, should close
         }
 
         // Check if click is on tabs
-        let tab_y = self.y + title_height;
-        let tab_height = 25;
+        let tab_y = self.y + DEBUG_TITLE_HEIGHT;
 
-        if mouse_y >= tab_y && mouse_y < tab_y + tab_height {
+        if mouse_y >= tab_y && mouse_y < tab_y + DEBUG_TAB_HEIGHT {
             let tab_width = self.width / DebugTab::all().len();
             let clicked_tab = (mouse_x - self.x) / tab_width;
 
@@ -161,8 +166,7 @@ impl DebugWindow {
         }
 
         // Draw window title bar
-        let title_height = 30;
-        for y in y_offset..y_offset + title_height {
+        for y in y_offset..y_offset + DEBUG_TITLE_HEIGHT {
             for x in x_offset..x_offset + win_width {
                 if y < height && x < width {
                     buffer[y * width + x] = 0xFF282828;
@@ -182,13 +186,12 @@ impl DebugWindow {
         );
 
         // Draw close button (X) in top-right corner of title bar
-        let close_btn_size = 20;
-        let close_btn_x = x_offset + win_width - close_btn_size - 5;
-        let close_btn_y = y_offset + 5;
+        let close_btn_x = x_offset + win_width - DEBUG_CLOSE_BTN_SIZE - DEBUG_CLOSE_BTN_PADDING;
+        let close_btn_y = y_offset + DEBUG_CLOSE_BTN_PADDING;
 
         // Draw close button background
-        for y in close_btn_y..close_btn_y + close_btn_size {
-            for x in close_btn_x..close_btn_x + close_btn_size {
+        for y in close_btn_y..close_btn_y + DEBUG_CLOSE_BTN_SIZE {
+            for x in close_btn_x..close_btn_x + DEBUG_CLOSE_BTN_SIZE {
                 if y < height && x < width {
                     buffer[y * width + x] = 0xFF3C3836;
                 }
@@ -201,14 +204,13 @@ impl DebugWindow {
             width,
             height,
             "X",
-            close_btn_x + 7,
-            close_btn_y + 5,
+            close_btn_x + DEBUG_CLOSE_X_OFFSET,
+            close_btn_y + DEBUG_CLOSE_Y_OFFSET,
             0xFFEBDBB2,
         );
 
         // Draw tabs
-        let tab_y = y_offset + title_height;
-        let tab_height = 25;
+        let tab_y = y_offset + DEBUG_TITLE_HEIGHT;
         let tab_width = win_width / DebugTab::all().len();
 
         for (i, tab) in DebugTab::all().iter().enumerate() {
@@ -216,7 +218,7 @@ impl DebugWindow {
             let is_active = *tab == self.active_tab;
             let tab_color = if is_active { 0xFF3C3836 } else { 0xFF282828 };
 
-            for y in tab_y..tab_y + tab_height {
+            for y in tab_y..tab_y + DEBUG_TAB_HEIGHT {
                 for x in tab_x..tab_x + tab_width {
                     if y < height && x < width {
                         buffer[y * width + x] = tab_color;
@@ -237,7 +239,7 @@ impl DebugWindow {
         }
 
         // Draw tab content based on active tab
-        let content_y = tab_y + tab_height + 10;
+        let content_y = tab_y + DEBUG_TAB_HEIGHT + 10;
         match self.active_tab {
             DebugTab::Cpu => {
                 self.render_cpu_tab(
