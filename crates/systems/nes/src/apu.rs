@@ -747,28 +747,32 @@ mod tests {
 
         // Pulse 1: write to $4003 with channel disabled
         apu.write_register(0x4015, 0x00); // Disable all channels
-        apu.write_register(0x4003, 0b11111000); // Length index = 31 (max length = 30)
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
         assert_eq!(
             apu.pulse1.length_counter, 0,
             "Pulse 1 length counter should remain 0 when disabled"
         );
 
         // Pulse 2: write to $4007 with channel disabled
-        apu.write_register(0x4007, 0b11111000); // Length index = 31
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4007, 0b11111000);
         assert_eq!(
             apu.pulse2.length_counter, 0,
             "Pulse 2 length counter should remain 0 when disabled"
         );
 
         // Triangle: write to $400B with channel disabled
-        apu.write_register(0x400B, 0b11111000); // Length index = 31
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x400B, 0b11111000);
         assert_eq!(
             apu.triangle.length_counter, 0,
             "Triangle length counter should remain 0 when disabled"
         );
 
         // Noise: write to $400F with channel disabled
-        apu.write_register(0x400F, 0b11111000); // Length index = 31
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x400F, 0b11111000);
         assert_eq!(
             apu.noise.length_counter, 0,
             "Noise length counter should remain 0 when disabled"
@@ -783,28 +787,32 @@ mod tests {
         apu.write_register(0x4015, 0x0F); // Enable pulse1, pulse2, triangle, noise
 
         // Pulse 1: write to $4003 with channel enabled
-        apu.write_register(0x4003, 0b00001000); // Length index = 1 (length = 254)
+        // Binary 0b00001000 = bits 7-3 = 00001 = index 1, which gives LENGTH_TABLE[1] = 254
+        apu.write_register(0x4003, 0b00001000);
         assert_eq!(
             apu.pulse1.length_counter, 254,
             "Pulse 1 length counter should be loaded when enabled"
         );
 
         // Pulse 2: write to $4007 with channel enabled
-        apu.write_register(0x4007, 0b00010000); // Length index = 2 (length = 20)
+        // Binary 0b00010000 = bits 7-3 = 00010 = index 2, which gives LENGTH_TABLE[2] = 20
+        apu.write_register(0x4007, 0b00010000);
         assert_eq!(
             apu.pulse2.length_counter, 20,
             "Pulse 2 length counter should be loaded when enabled"
         );
 
         // Triangle: write to $400B with channel enabled
-        apu.write_register(0x400B, 0b00000000); // Length index = 0 (length = 10)
+        // Binary 0b00000000 = bits 7-3 = 00000 = index 0, which gives LENGTH_TABLE[0] = 10
+        apu.write_register(0x400B, 0b00000000);
         assert_eq!(
             apu.triangle.length_counter, 10,
             "Triangle length counter should be loaded when enabled"
         );
 
         // Noise: write to $400F with channel enabled
-        apu.write_register(0x400F, 0b00011000); // Length index = 3 (length = 2)
+        // Binary 0b00011000 = bits 7-3 = 00011 = index 3, which gives LENGTH_TABLE[3] = 2
+        apu.write_register(0x400F, 0b00011000);
         assert_eq!(
             apu.noise.length_counter, 2,
             "Noise length counter should be loaded when enabled"
@@ -819,21 +827,24 @@ mod tests {
         apu.write_register(0x4015, 0x00);
 
         // Write length counter while disabled - should not load
-        apu.write_register(0x4003, 0b11111000); // Length index = 31 (length = 30)
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
         assert_eq!(apu.pulse1.length_counter, 0);
 
         // Enable the channel
         apu.write_register(0x4015, 0x01);
 
         // Write length counter while enabled - should load
-        apu.write_register(0x4003, 0b11111000); // Length index = 31 (length = 30)
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
         assert_eq!(apu.pulse1.length_counter, 30);
 
         // Disable again
         apu.write_register(0x4015, 0x00);
 
         // Write length counter while disabled again - should not load
-        apu.write_register(0x4003, 0b00001000); // Length index = 1 (length = 254)
+        // Binary 0b00001000 = bits 7-3 = 00001 = index 1, which gives LENGTH_TABLE[1] = 254
+        apu.write_register(0x4003, 0b00001000);
         assert_eq!(
             apu.pulse1.length_counter, 30,
             "Length counter should not change when disabled"
