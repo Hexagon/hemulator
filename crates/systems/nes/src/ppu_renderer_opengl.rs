@@ -375,6 +375,11 @@ int fetchTilePixel(int tileIndex, int fineX, int fineY, int patternBase) {
     int loAddr = tileAddr + fineY;
     int hiAddr = tileAddr + fineY + 8;
     
+    // Bounds check: CHR is 8KB (0-8191), texture is 128x64
+    if (hiAddr >= 8192) {
+        return 0; // Return transparent/background for out-of-bounds
+    }
+    
     // Convert byte addresses to texture coordinates (CHR is 8KB = 128x64 bytes)
     int loX = loAddr % 128;
     int loY = loAddr / 128;
@@ -550,6 +555,11 @@ int fetchSpritePixel(int tileIndex, int fineX, int fineY, int flipH, int flipV, 
     int loAddr = tileAddr + actualFineY;
     int hiAddr = tileAddr + actualFineY + 8;
     
+    // Bounds check: CHR is 8KB (0-8191)
+    if (hiAddr >= 8192) {
+        return 0; // Return transparent for out-of-bounds
+    }
+    
     int loX = loAddr % 128;
     int loY = loAddr / 128;
     int hiX = hiAddr % 128;
@@ -625,10 +635,19 @@ void main() {
             actualPatternBase = (spriteTile & 1) * 0x1000;
             actualTile = spriteTile & 0xFE; // Use even tile
             
-            if (fineY >= 8) {
-                actualTile++; // Bottom half uses next tile
-                fineY -= 8;
+            int localFineY = fineY;
+            
+            // Handle vertical flip for 8x16 sprites (swap top/bottom tiles)
+            if (flipV != 0) {
+                localFineY = 15 - fineY;
             }
+            
+            if (localFineY >= 8) {
+                actualTile++; // Bottom half uses next tile
+            }
+            
+            // fineY stays 0-7 for the individual tile (flip is handled in fetchSpritePixel)
+            fineY = fineY % 8;
         }
         
         int colorInTile = fetchSpritePixel(actualTile, fineX, fineY, flipH, flipV, actualPatternBase);
@@ -859,17 +878,13 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
     fn render_frame(&mut self, ppu: &Ppu) {
         unsafe {
             // Upload palette data (64 colors, RGBA)
+            // NES has 32 bytes of palette RAM:
+            // - $3F00-$3F0F: Background palettes (4 palettes × 4 colors)
+            // - $3F10-$3F1F: Sprite palettes (4 palettes × 4 colors)
+            // Note: Palette mirroring is already handled in ppu.palette[]
             let mut palette_data = [0u8; 64 * 4];
             for i in 0..32 {
-                // Map palette index through mirroring
-                let pal_idx = match i & 0x1F {
-                    0x10 => 0x00,
-                    0x14 => 0x04,
-                    0x18 => 0x08,
-                    0x1C => 0x0C,
-                    v => v,
-                };
-                let palette_byte = ppu.palette[pal_idx];
+                let palette_byte = ppu.palette[i];
                 let color = Self::nes_palette_rgb(palette_byte & 0x3F);
                 let offset = i * 4;
                 palette_data[offset] = ((color >> 16) & 0xFF) as u8; // R
@@ -877,7 +892,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
                 palette_data[offset + 2] = (color & 0xFF) as u8; // B
                 palette_data[offset + 3] = 0xFF; // A
             }
-            // Fill rest with backdrop color for safety
+            // Fill remaining slots (32-63) with backdrop color for safety
             let backdrop_color = Self::nes_palette_rgb(ppu.palette[0] & 0x3F);
             for i in 32..64 {
                 let offset = i * 4;
@@ -901,6 +916,11 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             );
 
             // Upload CHR data (8KB as 128x64 R8 texture)
+            // Ensure we have exactly 8KB of CHR data (pad with zeros if needed)
+            let mut chr_data = vec![0u8; 8192];
+            let chr_len = ppu.chr.len().min(8192);
+            chr_data[0..chr_len].copy_from_slice(&ppu.chr[0..chr_len]);
+
             self.gl
                 .bind_texture(glow::TEXTURE_2D, Some(self.chr_texture));
             self.gl.tex_image_2d(
@@ -912,7 +932,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
                 0,
                 glow::RED,
                 glow::UNSIGNED_BYTE,
-                Some(&ppu.chr[0..8192.min(ppu.chr.len())]),
+                Some(&chr_data),
             );
 
             // Upload nametable data (2KB VRAM as 64x32 R8 texture)
