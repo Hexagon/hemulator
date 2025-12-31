@@ -2,6 +2,8 @@
 
 This document provides a comprehensive reference for PC BIOS interrupt handling in the Hemulator PC emulator. It covers the implementation status and requirements for various BIOS services.
 
+**For interrupt handler priority system details**, see the [PC System README](../../crates/systems/pc/README.md#interrupt-handler-priority-system).
+
 ## Operating System Boot Requirements
 
 This section documents BIOS interrupt requirements for booting various operating systems.

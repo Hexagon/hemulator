@@ -68,6 +68,31 @@ All fonts include complete CP437 (Code Page 437) character set with:
 
 ## Architecture
 
+### Interrupt Handler Priority System
+
+The PC emulator uses a **range-based interrupt priority system** to determine whether interrupts are handled by the emulator's BIOS or by the guest OS (DOS/Windows).
+
+**Three Priority Levels**:
+
+1. **HardwareFirst** (INT 00h-07h, 08h-0Fh, 70h-77h) - Cannot be overridden
+   - CPU exceptions and hardware IRQs (timer, keyboard, etc.)
+   - Must be handled by emulator to maintain hardware state
+
+2. **BiosFirst** (INT 10h-1Fh, 40h-5Fh, 78h-FFh) - Cannot be overridden
+   - BIOS services (video, disk, equipment, etc.)
+   - Always handled by emulator for consistent behavior
+
+3. **OsFirst** (INT 20h-2Fh, 30h-3Fh, 60h-6Fh) - Prefers OS handler
+   - DOS/OS services (DOS API, DPMI, mouse driver, etc.)
+   - Uses OS handler if present, fallback to emulator if not
+
+**Examples**:
+- `INT 08h` (Timer): Always emulated - updates tick counter at 0040:006Ch
+- `INT 10h` (Video): Always emulated - ensures consistent video operation
+- `INT 21h` (DOS API): Uses DOS if loaded, minimal console I/O fallback if standalone
+
+**Benefits**: Clear separation of hardware/BIOS vs OS responsibilities, self-documenting ranges, backwards compatible with previous behavior.
+
 ### Component Structure
 
 ```

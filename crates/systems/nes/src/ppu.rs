@@ -209,7 +209,7 @@ impl Ppu {
     pub fn set_mirroring(&mut self, mirroring: Mirroring) {
         self.mirroring = mirroring;
     }
-    #[cfg(test)]
+
     pub fn get_mirroring(&self) -> Mirroring {
         self.mirroring
     }
@@ -224,6 +224,14 @@ impl Ppu {
 
     pub fn mask(&self) -> u8 {
         self.mask
+    }
+
+    pub fn scroll_x(&self) -> u8 {
+        self.scroll_x
+    }
+
+    pub fn scroll_y(&self) -> u8 {
+        self.scroll_y
     }
 
     /// Set/clear the VBlank flag (PPUSTATUS bit 7).

@@ -2850,6 +2850,16 @@ fn main() {
                                         } else {
                                             GameSaves::default()
                                         };
+
+                                        // Update resolution to match the system's native resolution
+                                        // This is critical when loading a ROM into a system with different
+                                        // resolution than the initial system (e.g., loading Atari ROM after
+                                        // starting with NES system)
+                                        let (new_width, new_height) = sys.resolution();
+                                        width = new_width;
+                                        height = new_height;
+                                        buffer = vec![0; width * height];
+
                                         println!(
                                             "Loaded media into {}: {}",
                                             mp_info.name, path_str

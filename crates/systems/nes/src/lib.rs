@@ -75,6 +75,8 @@ mod cpu;
 mod mappers;
 mod ppu;
 pub mod ppu_renderer;
+#[cfg(feature = "opengl")]
+pub mod ppu_renderer_opengl;
 
 use crate::bus::Bus;
 use crate::cartridge::Mirroring;
