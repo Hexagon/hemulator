@@ -588,13 +588,25 @@ impl PopupWindowManager {
 
     /// Handle mouse click - returns true if click was consumed by a popup
     pub fn handle_click(&mut self, mouse_x: i32, mouse_y: i32) -> bool {
-        if let Some(ref mut debug_window) = self.debug_window {
-            if debug_window.handle_click(mouse_x, mouse_y) {
-                return true;
+        // If any popup is open, consume all clicks (even those outside the window)
+        // This prevents clicking through the semi-transparent overlay
+        if self.has_open_popup() {
+            // Try to handle the click with the debug window if it's open
+            let click_handled = if let Some(ref mut debug_window) = self.debug_window {
+                debug_window.handle_click(mouse_x, mouse_y)
+            } else {
+                false
+            };
+            
+            // If click was outside the window (not handled), close all popups
+            if !click_handled {
+                self.close_all();
             }
+            
+            // Always consume the click when a popup is open
+            return true;
         }
-        // Help window doesn't handle clicks for now
-        self.help_window.is_some()
+        false
     }
 }
 
