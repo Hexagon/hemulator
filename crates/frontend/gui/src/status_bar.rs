@@ -37,33 +37,37 @@ impl StatusBar {
 
         let bar_y = height - STATUS_BAR_HEIGHT;
 
-        // Draw background for status bar (dark gray)
+        // Draw modern flat background (darker, more subtle)
         for y in bar_y..height {
             for x in 0..width {
                 let idx = y * width + x;
                 if idx < buffer.len() {
-                    buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                    buffer[idx] = 0xFF1E1E2E; // Darker flat background
                 }
             }
         }
 
-        // Left side: System name and state
-        let mut left_text = self.system_name.clone();
+        // Left side: State indicators (compact)
+        let mut left_parts = Vec::new();
+
         if self.paused {
-            left_text.push_str(" [PAUSED]");
+            left_parts.push("⏸ PAUSED".to_string());
         } else if self.speed != 1.0 {
-            left_text.push_str(&format!(" [{}%]", (self.speed * 100.0) as u32));
+            left_parts.push(format!("⏩ {}%", (self.speed * 100.0) as u32));
         }
 
-        ui_render::draw_text(
-            buffer,
-            width,
-            height,
-            &left_text,
-            4,
-            bar_y + 6,
-            0xFFFFFFFF, // White text
-        );
+        if !left_parts.is_empty() {
+            let left_text = left_parts.join(" ");
+            ui_render::draw_text(
+                buffer,
+                width,
+                height,
+                &left_text,
+                8,
+                bar_y + 6,
+                0xFFFABD2F, // Warm yellow for status
+            );
+        }
 
         // Center: Status message (if any)
         if !self.message.is_empty() {
@@ -76,19 +80,23 @@ impl StatusBar {
                 &self.message,
                 msg_x,
                 bar_y + 6,
-                0xFF16F2B3, // Cyan/green text for messages
+                0xFF8EC07C, // Softer green for messages
             );
         }
 
-        // Right side: FPS, IP, and Cycles
-        let mut right_parts = vec![format!("{:.1} FPS", self.fps)];
+        // Right side: Compact runtime stats
+        let mut right_parts = Vec::new();
+
+        // Only show FPS if it's meaningful
+        if self.fps > 0.1 {
+            right_parts.push(format!("{:.0}fps", self.fps));
+        }
 
         if let Some(ip) = self.ip {
-            right_parts.push(format!("IP:{:04X}", ip));
+            right_parts.push(format!("${:04X}", ip));
         }
 
         if let Some(cycles) = self.cycles {
-            // Format cycles with commas for readability
             let cycles_str = if cycles >= 1_000_000 {
                 format!("{}M", cycles / 1_000_000)
             } else if cycles >= 1_000 {
@@ -96,21 +104,23 @@ impl StatusBar {
             } else {
                 format!("{}", cycles)
             };
-            right_parts.push(format!("Cyc:{}", cycles_str));
+            right_parts.push(cycles_str);
         }
 
-        let right_text = right_parts.join(" | ");
-        let right_width = right_text.len() * 8;
-        let right_x = width.saturating_sub(right_width + 4);
-        ui_render::draw_text(
-            buffer,
-            width,
-            height,
-            &right_text,
-            right_x,
-            bar_y + 6,
-            0xFFFFFFFF, // White text
-        );
+        if !right_parts.is_empty() {
+            let right_text = right_parts.join(" · ");
+            let right_width = right_text.len() * 8;
+            let right_x = width.saturating_sub(right_width + 8);
+            ui_render::draw_text(
+                buffer,
+                width,
+                height,
+                &right_text,
+                right_x,
+                bar_y + 6,
+                0xFFABABAB, // Muted gray for stats
+            );
+        }
 
         STATUS_BAR_HEIGHT
     }

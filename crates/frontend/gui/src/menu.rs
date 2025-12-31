@@ -275,23 +275,23 @@ impl MenuBar {
             return;
         }
 
-        // Draw menu bar background (dark gray)
+        // Draw modern flat menu bar background
         for y in 0..MENU_BAR_HEIGHT {
             for x in 0..width {
                 let idx = y * width + x;
                 if idx < buffer.len() {
-                    buffer[idx] = 0xFF2A2A3E; // Dark gray/purple background
+                    buffer[idx] = 0xFF1E1E2E; // Darker flat background
                 }
             }
         }
 
-        // Draw menu labels
-        let mut x_offset = 8;
+        // Draw menu labels with modern styling
+        let mut x_offset = 12;
         for (i, menu) in self.menus.iter().enumerate() {
             let color = if Some(i) == self.active_menu {
-                0xFF16F2B3 // Highlighted (cyan/green)
+                0xFF8EC07C // Softer green for active menu
             } else {
-                0xFFFFFFFF // White
+                0xFFEBDBB2 // Warm off-white for inactive
             };
 
             ui_render::draw_text(buffer, width, height, &menu.label, x_offset, 8, color);
@@ -315,16 +315,16 @@ impl MenuBar {
         menu_idx: usize,
         menu: &Submenu,
     ) {
-        let dropdown_x = 8 + menu_idx * MENU_ITEM_WIDTH;
+        let dropdown_x = 12 + menu_idx * MENU_ITEM_WIDTH;
         let dropdown_y = MENU_BAR_HEIGHT;
-        let dropdown_width = 250; // Fixed width for dropdown
+        let dropdown_width = 240; // Slightly narrower for modern look
         let item_height = 20;
         let dropdown_height = menu.items.len() * item_height;
 
         // Ensure dropdown fits in window
         let dropdown_height = dropdown_height.min(height - dropdown_y);
 
-        // Draw dropdown background
+        // Draw modern dropdown background with subtle border
         for dy in 0..dropdown_height {
             let y = dropdown_y + dy;
             for dx in 0..dropdown_width.min(width.saturating_sub(dropdown_x)) {
@@ -332,7 +332,8 @@ impl MenuBar {
                 if x < width && y < height {
                     let idx = y * width + x;
                     if idx < buffer.len() {
-                        buffer[idx] = 0xFF1A1A2E; // Darker background for dropdown
+                        // Slightly lighter than menu bar for depth
+                        buffer[idx] = 0xFF282828; // Modern flat dropdown background
                     }
                 }
             }
@@ -345,11 +346,11 @@ impl MenuBar {
                 break; // Don't render items that don't fit
             }
 
-            // Color based on enabled state
+            // Modern color scheme based on enabled state
             let text_color = if item.enabled {
-                0xFFFFFFFF // White text for enabled
+                0xFFEBDBB2 // Warm off-white for enabled
             } else {
-                0xFF666666 // Dark gray for disabled
+                0xFF665C54 // Muted brown-gray for disabled
             };
 
             // Draw item text
@@ -358,25 +359,25 @@ impl MenuBar {
                 width,
                 height,
                 &item.label,
-                dropdown_x + 8,
+                dropdown_x + 12,
                 y + 6,
                 text_color,
             );
 
-            // Draw shortcut hint (if any)
+            // Draw shortcut hint with modern styling
             if let Some(ref shortcut) = item.shortcut {
-                let shortcut_x = dropdown_x + dropdown_width - shortcut.len() * 8 - 8;
+                let shortcut_x = dropdown_x + dropdown_width - shortcut.len() * 8 - 12;
                 let shortcut_color = if item.enabled {
-                    0xFF888888 // Gray for enabled
+                    0xFF928374 // Muted gray for enabled shortcuts
                 } else {
-                    0xFF444444 // Darker gray for disabled
+                    0xFF504945 // Very muted for disabled
                 };
                 ui_render::draw_text(
                     buffer,
                     width,
                     height,
                     shortcut,
-                    shortcut_x.min(dropdown_x + 180), // Ensure it doesn't overflow
+                    shortcut_x.min(dropdown_x + 170), // Ensure it doesn't overflow
                     y + 6,
                     shortcut_color,
                 );
