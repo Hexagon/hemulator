@@ -63,7 +63,7 @@ NesSystem
 
 ### PPU Implementation
 
-**Location**: `src/ppu.rs`
+**Location**: `src/ppu.rs`, `src/ppu_renderer.rs`, `src/ppu_renderer_opengl.rs`
 
 The 2C02 PPU implements:
 
@@ -74,6 +74,8 @@ The 2C02 PPU implements:
   - Sprite 0 hit detection
   - Sprite overflow detection
   - Horizontal and vertical scrolling
+  - **Software Renderer**: CPU-based tile/sprite rendering (default)
+  - **OpenGL Renderer**: GPU-accelerated rendering (optional, via `opengl` feature)
   
 - **Memory**:
   - 2KB internal VRAM for nametables
@@ -118,11 +120,17 @@ Each mapper handles:
 ## Building
 
 ```bash
-# Build NES crate
+# Build NES crate (software renderer only)
 cargo build --package emu_nes
+
+# Build NES crate with OpenGL renderer support
+cargo build --package emu_nes --features opengl
 
 # Run tests
 cargo test --package emu_nes
+
+# Run tests with OpenGL feature
+cargo test --package emu_nes --features opengl
 
 # Run with specific ROM
 cargo run --release -p emu_gui -- path/to/game.nes
