@@ -16,8 +16,8 @@ pub enum MenuAction {
     MountPoints,
     Exit,
 
-    // Mounts menu  
-    MountFile(String), // mount_point_id
+    // Mounts menu
+    MountFile(String),  // mount_point_id
     EjectMount(String), // mount_point_id
 
     // Emulation menu
