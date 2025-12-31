@@ -401,24 +401,22 @@ impl WindowBackend for Sdl2Backend {
                 Event::Window { win_event, .. } => {
                     use sdl2::event::WindowEvent;
                     match win_event {
+                        // Handle both Resized and SizeChanged for cross-platform compatibility
+                        // Resized: fires during resize; SizeChanged: fires after resize completes
                         WindowEvent::Resized(width, height)
                         | WindowEvent::SizeChanged(width, height) => {
-                            // Handle window resize - update video processor viewport
-                            match &mut self.render_mode {
+                            // Update video processor viewport for the new window size
+                            let result = match &mut self.render_mode {
                                 RenderMode::OpenGL { processor, .. } => {
-                                    if let Err(e) =
-                                        processor.resize(width as usize, height as usize)
-                                    {
-                                        eprintln!("Failed to resize OpenGL processor: {}", e);
-                                    }
+                                    processor.resize(width as usize, height as usize)
                                 }
                                 RenderMode::Software { processor, .. } => {
-                                    if let Err(e) =
-                                        processor.resize(width as usize, height as usize)
-                                    {
-                                        eprintln!("Failed to resize software processor: {}", e);
-                                    }
+                                    processor.resize(width as usize, height as usize)
                                 }
+                            };
+
+                            if let Err(e) = result {
+                                eprintln!("Failed to resize video processor: {}", e);
                             }
                         }
                         _ => {}
