@@ -1,6 +1,7 @@
 pub mod display_filter;
 mod hemu_project;
 mod menu;
+mod popup_window;
 mod rom_detect;
 mod save_state;
 mod settings;
@@ -12,6 +13,7 @@ pub mod window_backend;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use menu::{MenuAction, MenuBar};
+use popup_window::PopupWindowManager;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
@@ -1815,15 +1817,12 @@ fn main() {
         ui_render::create_splash_screen_with_status(width, height, &status_message)
     };
 
-    // Help overlay state
-    let mut show_help = false;
-
-    // Debug overlay state
-    let mut show_debug = false;
+    // Popup window manager (replaces old overlay system)
+    let mut popup_manager = PopupWindowManager::new();
 
     // Slot selector state
     let mut show_slot_selector = false;
-    let mut slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
+    let slot_selector_mode = "SAVE"; // "SAVE" or "LOAD"
 
     // Mount point selector state
     let mut show_mount_selector = false;
@@ -2121,11 +2120,10 @@ fn main() {
                     }
                     MenuAction::MountPoints => {
                         show_mount_selector = true;
-                        show_help = false;
                         show_slot_selector = false;
                         show_disk_format_selector = false;
                         show_speed_selector = false;
-                        show_debug = false;
+                        popup_manager.close_all();
                     }
                     MenuAction::Exit => {
                         break;
@@ -2227,10 +2225,9 @@ fn main() {
                         }
                     }
                     MenuAction::DebugInfo => {
-                        show_debug = !show_debug;
+                        popup_manager.toggle_debug();
                         show_slot_selector = false;
                         show_speed_selector = false;
-                        show_help = false;
                     }
                     MenuAction::CrtFilterToggle => {
                         settings.display_filter = settings.display_filter.next();
@@ -2245,12 +2242,11 @@ fn main() {
                         println!("CRT Filter: {}", settings.display_filter.name());
                     }
                     MenuAction::Help => {
-                        show_help = !show_help;
+                        popup_manager.toggle_help();
                         show_slot_selector = false;
                         show_mount_selector = false;
                         show_disk_format_selector = false;
                         show_speed_selector = false;
-                        show_debug = false;
                     }
                     MenuAction::About => {
                         // TODO: Show about dialog
@@ -2259,11 +2255,10 @@ fn main() {
                     MenuAction::NewProject => {
                         // Show system selector
                         show_slot_selector = false;
-                        show_help = false;
                         show_mount_selector = false;
                         show_speed_selector = false;
                         show_disk_format_selector = false;
-                        show_debug = false;
+                        popup_manager.close_all();
                         // Set a flag to show system selector
                         // This will be handled in the rendering section
                         println!("New Project - Select System Type");
@@ -2322,19 +2317,17 @@ fn main() {
             || (!needs_host_key && window.is_key_down(Key::Escape))
         {
             // Close overlays first, only exit if no overlay is open
-            if show_help
-                || show_slot_selector
+            if show_slot_selector
                 || show_mount_selector
                 || show_speed_selector
                 || show_disk_format_selector
-                || show_debug
+                || popup_manager.has_open_popup()
             {
-                show_help = false;
                 show_slot_selector = false;
                 show_mount_selector = false;
                 show_speed_selector = false;
                 show_disk_format_selector = false;
-                show_debug = false;
+                popup_manager.close_all();
             } else {
                 break;
             }
@@ -2344,12 +2337,11 @@ fn main() {
         if (needs_host_key && host_key_held && window.is_key_pressed(Key::F1, false))
             || (!needs_host_key && window.is_key_pressed(Key::F1, false))
         {
-            show_help = !show_help;
+            popup_manager.toggle_help();
             show_slot_selector = false; // Close slot selector if open
             show_mount_selector = false; // Close mount selector if open
             show_disk_format_selector = false; // Close disk format selector if open
             show_speed_selector = false; // Close speed selector if open
-            show_debug = false; // Close debug if open
         }
 
         // Toggle debug overlay (F10)
@@ -2358,13 +2350,12 @@ fn main() {
             || (!needs_host_key && window.is_key_pressed(Key::F10, false)))
             && can_debug
         {
-            show_debug = !show_debug;
+            popup_manager.toggle_debug();
             show_slot_selector = false; // Close slot selector if open
             show_speed_selector = false; // Close speed selector if open
-            show_help = false; // Close help if open
 
             // Dump debug info to console when opening debug overlay
-            if show_debug {
+            if popup_manager.is_debug_open() {
                 println!("\n=== Debug Info Dump ===");
 
                 // Try NES debug info first
@@ -3008,16 +2999,29 @@ fn main() {
             continue;
         }
 
-        // Prepare help overlay buffer when requested; keep processing input so other
-        // keys still work while the overlay is visible.
+        // Prepare popup window overlays
         let mut help_overlay: Option<Vec<u32>> = None;
-        if show_help {
-            help_overlay = Some(ui_render::create_help_overlay(width, height, &settings));
+        if let Some(ref help_window) = popup_manager.help_window {
+            help_overlay = Some(help_window.render(width, height, &settings));
         }
 
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
-        if show_debug && rom_loaded {
+        if let Some(ref debug_window) = popup_manager.debug_window {
+            // For now, use simple debug window rendering
+            // TODO: Properly extract and pass debug info from different systems
+            debug_overlay = Some(debug_window.render(
+                width,
+                height,
+                None,
+                current_fps,
+                &settings.video_backend,
+            ));
+        }
+
+        // Legacy debug overlay for systems not yet migrated to popup window
+        // This will be removed once all systems are migrated
+        if debug_overlay.is_none() && rom_loaded && popup_manager.is_debug_open() {
             // Try NES debug info first
             if let Some(debug_info) = sys.get_debug_info_nes() {
                 let timing_str = match debug_info.timing_mode {
@@ -3137,7 +3141,7 @@ fn main() {
         // Speed selector and 0x speed also pause the game.
         // For PC systems, always render frames (to show POST screen even when no disk is loaded)
         let should_step = (rom_loaded || matches!(&sys, EmulatorSystem::PC(_)))
-            && !show_help
+            && !popup_manager.is_help_open()
             && !show_slot_selector
             && !show_mount_selector
             && !show_speed_selector
@@ -3185,7 +3189,7 @@ fn main() {
                     buffer = f.pixels; // Move instead of clone
 
                     // Apply CRT filter if not showing overlays
-                    if !show_help && !show_slot_selector {
+                    if !popup_manager.is_help_open() && !show_slot_selector {
                         settings.display_filter.apply(&mut buffer, width, height);
                     }
 
