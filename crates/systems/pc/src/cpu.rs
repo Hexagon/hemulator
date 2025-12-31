@@ -10,30 +10,6 @@ use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 #[allow(dead_code)]
 const VIDEO_INTERRUPT: u8 = 0x10;
 
-/// INT 21h vector table offset (low word) in memory
-const INT21H_VECTOR_OFFSET: u32 = 0x84;
-
-/// INT 21h vector table segment (high word) in memory
-const INT21H_VECTOR_SEGMENT: u32 = 0x86;
-
-/// INT 2Fh vector table offset (low word) in memory
-const INT2FH_VECTOR_OFFSET: u32 = 0xBC;
-
-/// INT 2Fh vector table segment (high word) in memory
-const INT2FH_VECTOR_SEGMENT: u32 = 0xBE;
-
-/// INT 31h vector table offset (low word) in memory
-const INT31H_VECTOR_OFFSET: u32 = 0xC4;
-
-/// INT 31h vector table segment (high word) in memory
-const INT31H_VECTOR_SEGMENT: u32 = 0xC6;
-
-/// INT 33h vector table offset (low word) in memory
-const INT33H_VECTOR_OFFSET: u32 = 0xCC;
-
-/// INT 33h vector table segment (high word) in memory
-const INT33H_VECTOR_SEGMENT: u32 = 0xCE;
-
 /// DOS error code: invalid file handle
 const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
 
@@ -278,14 +254,8 @@ impl PcCpu {
                 // If DOS has installed its own handler, we let the CPU execute it normally.
                 // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
                 0x21 => {
-                    // Check if DOS has installed an INT 21h handler (vector != 0x0000:0x0000)
-                    let int21_offset = self.cpu.memory.read(INT21H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT21H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int21_segment = self.cpu.memory.read(INT21H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT21H_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If DOS has installed a handler, let the CPU execute it
-                    if int21_segment != 0 || int21_offset != 0 {
+                    // Check if DOS has installed an INT 21h handler
+                    if self.is_interrupt_overridden(0x21) {
                         // DOS handler exists, let CPU execute it normally
                         // Fall through to normal execution
                     } else {
@@ -293,19 +263,40 @@ impl PcCpu {
                         return self.handle_int21h();
                     }
                 }
-                0x28 => return self.handle_int28h(), // DOS idle callout
-                0x29 => return self.handle_int29h(), // Fast console output
-                0x2A => return self.handle_int2ah(), // Network Installation API (stub)
+                0x28 => {
+                    // Check if DOS/TSRs have installed an INT 28h handler
+                    if self.is_interrupt_overridden(0x28) {
+                        // OS handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No OS handler, use our stub
+                        return self.handle_int28h();
+                    }
+                }
+                0x29 => {
+                    // Check if DOS has installed an INT 29h handler
+                    if self.is_interrupt_overridden(0x29) {
+                        // OS handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No OS handler, use our stub
+                        return self.handle_int29h();
+                    }
+                }
+                0x2A => {
+                    // Check if DOS/network software has installed an INT 2Ah handler
+                    if self.is_interrupt_overridden(0x2A) {
+                        // OS handler exists, let CPU execute it normally
+                        // Fall through to normal execution
+                    } else {
+                        // No OS handler, use our BIOS stub
+                        return self.handle_int2ah();
+                    }
+                }
                 0x2F => {
-                    // Check if DOS/drivers have installed an INT 2Fh handler (vector != 0x0000:0x0000)
+                    // Check if DOS/drivers have installed an INT 2Fh handler
                     // HIMEM.SYS, EMM386, network redirectors, etc. install INT 2Fh handlers
-                    let int2f_offset = self.cpu.memory.read(INT2FH_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT2FH_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int2f_segment = self.cpu.memory.read(INT2FH_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT2FH_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a handler exists, let the CPU execute it
-                    if int2f_segment != 0 || int2f_offset != 0 {
+                    if self.is_interrupt_overridden(0x2F) {
                         // Handler exists (DOS/driver installed), let CPU execute it normally
                         // Fall through to normal execution
                     } else {
@@ -315,13 +306,7 @@ impl PcCpu {
                 }
                 0x31 => {
                     // Check if DPMI host has installed an INT 31h handler
-                    let int31_offset = self.cpu.memory.read(INT31H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT31H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int31_segment = self.cpu.memory.read(INT31H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT31H_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a DPMI host handler exists, let the CPU execute it
-                    if int31_segment != 0 || int31_offset != 0 {
+                    if self.is_interrupt_overridden(0x31) {
                         // DPMI host handler exists, let CPU execute it normally
                         // Fall through to normal execution
                     } else {
@@ -331,13 +316,7 @@ impl PcCpu {
                 }
                 0x33 => {
                     // Check if mouse driver has installed an INT 33h handler
-                    let int33_offset = self.cpu.memory.read(INT33H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT33H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int33_segment = self.cpu.memory.read(INT33H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT33H_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a mouse driver handler exists, let the CPU execute it
-                    if int33_segment != 0 || int33_offset != 0 {
+                    if self.is_interrupt_overridden(0x33) {
                         // Mouse driver handler exists, let CPU execute it normally
                         // Fall through to normal execution
                     } else {
@@ -2790,6 +2769,29 @@ impl PcCpu {
         } else {
             self.cpu.flags &= !FLAG_ZF;
         }
+    }
+
+    /// Check if an interrupt vector has been overridden by DOS/OS
+    ///
+    /// Returns true if the OS has installed its own handler (vector doesn't point to BIOS ROM).
+    /// Returns false if the vector still points to BIOS ROM (F000:xxxx) or is uninitialized (0000:0000).
+    ///
+    /// # Arguments
+    /// * `int_num` - The interrupt number (0x00-0xFF)
+    fn is_interrupt_overridden(&self, int_num: u8) -> bool {
+        // Calculate vector table offset (int_num * 4)
+        let vector_offset = (int_num as u32) * 4;
+
+        // Read offset (low word) and segment (high word) from interrupt vector table
+        let offset = self.cpu.memory.read(vector_offset) as u16
+            | ((self.cpu.memory.read(vector_offset + 1) as u16) << 8);
+        let segment = self.cpu.memory.read(vector_offset + 2) as u16
+            | ((self.cpu.memory.read(vector_offset + 3) as u16) << 8);
+
+        // Vector is overridden if:
+        // 1. It's not null (0000:0000) AND
+        // 2. It doesn't point to BIOS ROM (F000:xxxx)
+        (segment != 0 || offset != 0) && segment != 0xF000
     }
 
     /// Handle INT 1Ah - Time and Date services
@@ -6163,6 +6165,161 @@ mod tests {
 
         // AL should be 0xFF (not installed)
         assert_eq!(cpu.cpu.ax & 0xFF, 0xFF);
+    }
+
+    #[test]
+    fn test_interrupt_override() {
+        // Test that OS-installed interrupt handlers are respected
+        // This tests INT 2Ah, but the same logic applies to INT 21h, 28h, 29h, 2Fh, 31h, 33h
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Create a custom handler in RAM at 0x2000:0x0100
+        // Handler will increment AX and return
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler code:
+        // INC AX (40)
+        cpu.cpu.memory.write(handler_addr, 0x40); // INC AX
+        // IRET (CF)
+        cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+
+        // Install custom handler for INT 2Ah (vector at 0x00A8)
+        // NOTE: We manually install this vector since we're not running BIOS init
+        let vector_addr = 0x2A * 4;
+        cpu.cpu.memory.write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu.memory.write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Verify the vector was set correctly
+        let read_offset = cpu.cpu.memory.read(vector_addr) as u16
+            | ((cpu.cpu.memory.read(vector_addr + 1) as u16) << 8);
+        let read_segment = cpu.cpu.memory.read(vector_addr + 2) as u16
+            | ((cpu.cpu.memory.read(vector_addr + 3) as u16) << 8);
+        assert_eq!(
+            read_offset, handler_offset,
+            "Vector offset should be correctly set"
+        );
+        assert_eq!(
+            read_segment, handler_segment,
+            "Vector segment should be correctly set"
+        );
+
+        // Verify is_interrupt_overridden returns true
+        assert!(
+            cpu.is_interrupt_overridden(0x2A),
+            "INT 2Ah should be detected as overridden"
+        );
+
+        // Set up code to call INT 2Ah
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+
+        // Write INT 2Ah instruction
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x2A); // 2Ah
+
+        // Set AX to 0x1234 before calling
+        cpu.cpu.ax = 0x1234;
+
+        // Execute INT 2Ah - should call our custom handler, not the BIOS stub
+        cpu.step(); // Execute INT (jumps to handler)
+        cpu.step(); // Execute INC AX in handler
+        cpu.step(); // Execute IRET (return from handler)
+
+        // Our custom handler should have incremented AX to 0x1235
+        assert_eq!(
+            cpu.cpu.ax, 0x1235,
+            "Custom INT 2Ah handler should have been called and incremented AX"
+        );
+        
+        // Should have returned to the instruction after INT
+        assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(cpu.cpu.ip, 0x1002, "Should return to instruction after INT");
+    }
+
+    #[test]
+    fn test_interrupt_override_bios_default() {
+        // Test that BIOS handlers are used when no OS handler is installed
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 2Ah instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x2A); // 2Ah
+
+        // Setup registers for a network API call
+        cpu.cpu.ax = 0x0100; // AH=01h (some function)
+
+        // Execute INT 2Ah - should use BIOS stub (since vector points to F000:0040)
+        cpu.step();
+
+        // BIOS stub returns AL=0 (not installed) and sets CF
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x00, "AL should be 0 (not installed)");
+        assert!(cpu.get_carry_flag(), "CF should be set (error/not installed)");
+    }
+
+    #[test]
+    fn test_core_cpu_interrupt_vector() {
+        // Test that the core CPU correctly executes custom interrupt handlers
+        // This bypasses the PC wrapper to isolate the issue
+        use emu_core::cpu_8086::Cpu8086;
+        
+        let bus = PcBus::new();
+        let mut cpu = Cpu8086::new(bus);
+        
+        // Set up stack
+        cpu.ss = 0x0000;
+        cpu.sp = 0xFFFE;
+        
+        // Create custom handler at 0x2000:0x0100
+        let handler_addr = 0x20100u32;  // Physical address
+        cpu.memory.write(handler_addr, 0x40); // INC AX
+        cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+        
+        // Install vector for INT 2Ah
+        let vector_addr = 0x2A * 4;
+        cpu.memory.write(vector_addr, 0x00); // Offset low: 0x0100
+        cpu.memory.write(vector_addr + 1, 0x01); // Offset high
+        cpu.memory.write(vector_addr + 2, 0x00); // Segment low: 0x2000
+        cpu.memory.write(vector_addr + 3, 0x20); // Segment high
+        
+        // Write INT 2Ah at 0x0000:0x1000
+        cpu.cs = 0x0000;
+        cpu.ip = 0x1000;
+        cpu.memory.write(0x1000, 0xCD); // INT
+        cpu.memory.write(0x1001, 0x2A); // 2Ah
+        
+        cpu.ax = 0x1234;
+        
+        // Execute INT (this will jump to the handler)
+        cpu.step();
+        
+        // Now we're at the handler - execute INC AX
+        cpu.step();
+        
+        // Execute IRET to return
+        cpu.step();
+        
+        // Now we should be back and AX should be incremented
+        assert_eq!(cpu.ax, 0x1235, "Core CPU should execute custom handler and increment AX");
+        assert_eq!(cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(cpu.ip, 0x1002, "Should return to instruction after INT");
     }
 
     #[test]
