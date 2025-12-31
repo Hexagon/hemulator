@@ -272,8 +272,11 @@ impl APU {
                 self.sweep1.trigger();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.pulse1.enabled {
+                    self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Pulse 2 registers
@@ -309,8 +312,11 @@ impl APU {
                 // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
                 self.sweep2.trigger();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4007
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.pulse2.enabled {
+                    self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Triangle registers
@@ -336,8 +342,11 @@ impl APU {
                 // Set reload flag to reload linear counter
                 self.triangle.linear_counter_reload_flag = true;
                 // Length counter index in upper 5 bits
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.triangle.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.triangle.enabled {
+                    self.triangle.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Noise registers
@@ -357,8 +366,11 @@ impl APU {
             }
             0x400F => {
                 // Length counter index
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.noise.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.noise.enabled {
+                    self.noise.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // APU Enable register
@@ -727,5 +739,104 @@ mod tests {
         // Note: This is a basic integration test - actual frequency change
         // depends on timing and may not happen in the first 5000 samples
         assert!(samples.len() == 5000);
+    }
+
+    #[test]
+    fn test_length_counter_not_loaded_when_disabled() {
+        let mut apu = APU::new();
+
+        // Pulse 1: write to $4003 with channel disabled
+        apu.write_register(0x4015, 0x00); // Disable all channels
+        apu.write_register(0x4003, 0b11111000); // Length index = 31 (max length = 30)
+        assert_eq!(
+            apu.pulse1.length_counter, 0,
+            "Pulse 1 length counter should remain 0 when disabled"
+        );
+
+        // Pulse 2: write to $4007 with channel disabled
+        apu.write_register(0x4007, 0b11111000); // Length index = 31
+        assert_eq!(
+            apu.pulse2.length_counter, 0,
+            "Pulse 2 length counter should remain 0 when disabled"
+        );
+
+        // Triangle: write to $400B with channel disabled
+        apu.write_register(0x400B, 0b11111000); // Length index = 31
+        assert_eq!(
+            apu.triangle.length_counter, 0,
+            "Triangle length counter should remain 0 when disabled"
+        );
+
+        // Noise: write to $400F with channel disabled
+        apu.write_register(0x400F, 0b11111000); // Length index = 31
+        assert_eq!(
+            apu.noise.length_counter, 0,
+            "Noise length counter should remain 0 when disabled"
+        );
+    }
+
+    #[test]
+    fn test_length_counter_loaded_when_enabled() {
+        let mut apu = APU::new();
+
+        // Enable all channels
+        apu.write_register(0x4015, 0x0F); // Enable pulse1, pulse2, triangle, noise
+
+        // Pulse 1: write to $4003 with channel enabled
+        apu.write_register(0x4003, 0b00001000); // Length index = 1 (length = 254)
+        assert_eq!(
+            apu.pulse1.length_counter, 254,
+            "Pulse 1 length counter should be loaded when enabled"
+        );
+
+        // Pulse 2: write to $4007 with channel enabled
+        apu.write_register(0x4007, 0b00010000); // Length index = 2 (length = 20)
+        assert_eq!(
+            apu.pulse2.length_counter, 20,
+            "Pulse 2 length counter should be loaded when enabled"
+        );
+
+        // Triangle: write to $400B with channel enabled
+        apu.write_register(0x400B, 0b00000000); // Length index = 0 (length = 10)
+        assert_eq!(
+            apu.triangle.length_counter, 10,
+            "Triangle length counter should be loaded when enabled"
+        );
+
+        // Noise: write to $400F with channel enabled
+        apu.write_register(0x400F, 0b00011000); // Length index = 3 (length = 2)
+        assert_eq!(
+            apu.noise.length_counter, 2,
+            "Noise length counter should be loaded when enabled"
+        );
+    }
+
+    #[test]
+    fn test_length_counter_toggle_enable() {
+        let mut apu = APU::new();
+
+        // Start with channel disabled
+        apu.write_register(0x4015, 0x00);
+
+        // Write length counter while disabled - should not load
+        apu.write_register(0x4003, 0b11111000); // Length index = 31 (length = 30)
+        assert_eq!(apu.pulse1.length_counter, 0);
+
+        // Enable the channel
+        apu.write_register(0x4015, 0x01);
+
+        // Write length counter while enabled - should load
+        apu.write_register(0x4003, 0b11111000); // Length index = 31 (length = 30)
+        assert_eq!(apu.pulse1.length_counter, 30);
+
+        // Disable again
+        apu.write_register(0x4015, 0x00);
+
+        // Write length counter while disabled again - should not load
+        apu.write_register(0x4003, 0b00001000); // Length index = 1 (length = 254)
+        assert_eq!(
+            apu.pulse1.length_counter, 30,
+            "Length counter should not change when disabled"
+        );
     }
 }
