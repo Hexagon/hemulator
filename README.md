@@ -246,6 +246,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 # Format code
 cargo fmt --all
+
+# Run benchmarks
+cd crates/core
+cargo bench
 ```
 
 ### Testing
@@ -261,6 +265,25 @@ cargo test -p emu_core
 # Run tests with output
 cargo test --workspace -- --nocapture
 ```
+
+### Benchmarking
+
+Performance benchmarks are available using [Criterion.rs](https://github.com/bheisler/criterion.rs):
+
+```bash
+# Run all benchmarks in core crate
+cd crates/core
+cargo bench
+
+# Run specific benchmark
+cargo bench cpu_6502
+
+# Save baseline and compare
+cargo bench -- --save-baseline my-baseline
+cargo bench -- --baseline my-baseline
+```
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md#benchmarking) for detailed benchmarking guidelines.
 
 ### Architecture
 

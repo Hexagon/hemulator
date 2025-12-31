@@ -317,8 +317,16 @@ impl NesSystem {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("NES error")]
-pub struct NesError;
+pub enum NesError {
+    #[error("Invalid ROM format")]
+    InvalidRom,
+    #[error("Unsupported mapper: {0}")]
+    UnsupportedMapper(u8),
+    #[error("Invalid mount point: {0}")]
+    InvalidMountPoint(String),
+    #[error("ROM too small: expected at least {expected} bytes, got {actual}")]
+    RomTooSmall { expected: usize, actual: usize },
+}
 
 impl System for NesSystem {
     type Error = NesError;
@@ -657,14 +665,14 @@ impl System for NesSystem {
 
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            return Err(NesError);
+            return Err(NesError::InvalidMountPoint(mount_point_id.to_string()));
         }
-        self.load_rom(data).map_err(|_| NesError)
+        self.load_rom(data).map_err(|_| NesError::InvalidRom)
     }
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            return Err(NesError);
+            return Err(NesError::InvalidMountPoint(mount_point_id.to_string()));
         }
         // Reset to default state (no cartridge)
         *self = Self::default();

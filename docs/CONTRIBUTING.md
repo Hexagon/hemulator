@@ -46,6 +46,94 @@ Before committing any code, run these checks in order and ensure they all pass:
 - Additional platform support
 - UI/UX improvements
 
+## Benchmarking
+
+The project uses [Criterion.rs](https://github.com/bheisler/criterion.rs) for performance benchmarking.
+
+### Running Benchmarks
+
+```bash
+# Run all benchmarks in a specific crate
+cd crates/core
+cargo bench
+
+# Run a specific benchmark
+cargo bench cpu_6502
+
+# Save baseline for comparison
+cargo bench --bench cpu_6502 -- --save-baseline my-baseline
+
+# Compare against baseline
+cargo bench --bench cpu_6502 -- --baseline my-baseline
+```
+
+### Available Benchmarks
+
+- **`cpu_6502`**: CPU instruction execution performance
+  - Single instruction execution
+  - Multiple step execution (10, 100, 1000 instructions)
+  - Addressing mode performance
+  - Reset operation
+
+### Adding New Benchmarks
+
+1. Create a new file in `crates/*/benches/`
+2. Use criterion's benchmark harness
+3. Focus on hot paths (instruction execution, rendering, memory access)
+4. Document baseline expectations in benchmark comments
+
+Example benchmark structure:
+```rust
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn bench_something(c: &mut Criterion) {
+    c.bench_function("test_name", |b| {
+        b.iter(|| {
+            // Code to benchmark
+            black_box(result);
+        });
+    });
+}
+
+criterion_group!(benches, bench_something);
+criterion_main!(benches);
+```
+
+## Security
+
+### Dependency Auditing
+
+The project uses `cargo-audit` to check for known security vulnerabilities in dependencies.
+
+```bash
+# Install cargo-audit
+cargo install cargo-audit
+
+# Run security audit
+cargo audit
+
+# Update audit database
+cargo audit fetch
+```
+
+Security audits run automatically in CI on every push and pull request. If vulnerabilities are found:
+
+1. Check the advisory details with `cargo audit`
+2. Update affected dependencies if patches are available
+3. If no patch exists, evaluate risk and document the decision
+4. Consider using `cargo audit fix` to automatically update vulnerable dependencies
+
+### Reporting Security Issues
+
+If you discover a security vulnerability, please report it privately to the maintainers rather than opening a public issue.
+
+## Areas for Contribution
+- Additional mapper implementations (MMC5, VRC6, etc.)
+- Game Boy emulation completion
+- Performance optimizations
+- Additional platform support
+- UI/UX improvements
+
 ## Performance Optimization
 
 ### Build Profiles
