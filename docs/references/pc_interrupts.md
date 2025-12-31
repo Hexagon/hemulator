@@ -2,6 +2,100 @@
 
 This document provides a comprehensive reference for PC BIOS interrupt handling in the Hemulator PC emulator. It covers the implementation status and requirements for various BIOS services.
 
+## Interrupt Handler Priority System
+
+The PC emulator implements a **range-based interrupt priority system** that determines whether the emulated BIOS handler or an OS-installed handler should be called for each interrupt. This system allows for proper separation of hardware, BIOS, and OS responsibilities.
+
+### Priority Levels
+
+There are three priority levels that determine interrupt handling behavior:
+
+#### 1. **HardwareFirst** (Cannot be overridden)
+These are CPU exceptions and hardware IRQs that **must** be handled by the emulator to maintain proper hardware state. DOS/OS cannot override these handlers.
+
+**Ranges**:
+- `INT 00h-07h`: CPU Exceptions (divide by zero, NMI, breakpoint, etc.)
+- `INT 08h-0Fh`: Hardware IRQs 0-7 (timer, keyboard, serial, parallel, floppy)
+- `INT 70h-77h`: Hardware IRQs 8-15 (RTC, mouse, math coprocessor, HDD)
+
+**Reason**: Hardware interrupts must be processed by the emulator to update internal state (e.g., timer tick counter, keyboard buffer, disk controller status). Allowing DOS to completely override these would break emulation.
+
+#### 2. **BiosFirst** (Can be overridden)
+These are BIOS services that the emulator provides by default, but DOS/OS can optionally replace with their own implementations.
+
+**Ranges**:
+- `INT 10h-1Fh`: Core BIOS services (video, equipment, memory, disk, keyboard, time/date)
+- `INT 40h-5Fh`: Extended BIOS services (disk parameter tables, RTC alarm, NetBIOS)
+- `INT 78h-FFh`: Manufacturer-specific and extended BIOS services
+
+**Reason**: BIOS services are provided by the emulator for standalone programs and basic functionality, but DOS may enhance or replace them (e.g., DOS can provide its own time/date handling via INT 1Ah).
+
+**Behavior**: 
+- If OS has installed a custom handler (vector points outside BIOS ROM at F000:xxxx), use the OS handler
+- Otherwise, use the emulated BIOS handler
+
+#### 3. **OsFirst** (Prefers OS handler)
+These are DOS/OS services where the emulator only provides minimal fallback functionality for standalone programs.
+
+**Ranges**:
+- `INT 20h-2Fh`: DOS/OS core services (DOS API, program terminate, idle, console, network, multiplex)
+- `INT 30h-3Fh`: Extended DOS/OS services (DPMI, mouse driver, Windows services)
+- `INT 60h-6Fh`: Reserved/user interrupts and DOS extenders
+
+**Reason**: These interrupts are the OS's responsibility. The emulator provides minimal fallback implementations to allow simple standalone COM/EXE files to run without DOS, but prefers the OS handler when available.
+
+**Behavior**: 
+- If OS has installed a custom handler, use the OS handler
+- Otherwise, use the emulated fallback handler (if available)
+
+### Implementation
+
+The interrupt priority system is implemented in `crates/systems/pc/src/cpu.rs`:
+
+```rust
+fn get_interrupt_priority(int_num: u8) -> InterruptPriority {
+    match int_num {
+        0x00..=0x07 => InterruptPriority::HardwareFirst,  // CPU exceptions
+        0x08..=0x0F => InterruptPriority::HardwareFirst,  // IRQ 0-7
+        0x10..=0x1F => InterruptPriority::BiosFirst,      // BIOS services
+        0x20..=0x2F => InterruptPriority::OsFirst,        // DOS/OS services
+        0x30..=0x3F => InterruptPriority::OsFirst,        // Extended services
+        0x40..=0x5F => InterruptPriority::BiosFirst,      // Extended BIOS
+        0x60..=0x6F => InterruptPriority::OsFirst,        // User/DOS extenders
+        0x70..=0x77 => InterruptPriority::HardwareFirst,  // IRQ 8-15
+        0x78..=0xFF => InterruptPriority::BiosFirst,      // Extended BIOS
+    }
+}
+```
+
+### Examples
+
+**Example 1: Hardware Interrupt (INT 08h - Timer)**
+- Priority: `HardwareFirst`
+- Even if DOS installs a custom handler for INT 08h, the emulator's handler is **always** called
+- Reason: The emulator must update the timer tick counter at `0040:006Ch` and handle midnight rollover
+- DOS can hook the user timer (INT 1Ch) which is called by INT 08h
+
+**Example 2: BIOS Service (INT 10h - Video)**
+- Priority: `BiosFirst`
+- By default, the emulator provides video services
+- If a DOS extender or graphics library installs a custom INT 10h handler, it will be used instead
+- This allows enhanced graphics modes beyond what the emulator provides
+
+**Example 3: DOS Service (INT 21h - DOS API)**
+- Priority: `OsFirst`
+- If DOS is loaded, it provides the full INT 21h API
+- If no DOS is present (standalone COM file), the emulator provides minimal fallback (console I/O only)
+- The emulator prefers the DOS handler because file I/O and DOS-specific functions are DOS's responsibility
+
+### Benefits
+
+1. **Clear Separation of Concerns**: Hardware, BIOS, and OS responsibilities are clearly defined
+2. **Maintainable**: Adding new interrupt handlers requires understanding which range they belong to
+3. **Flexible**: DOS/OS can enhance BIOS services while hardware state remains accurate
+4. **Documented**: The range-based system is self-documenting and easy to understand
+5. **Tested**: Comprehensive test suite validates all three priority levels
+
 ## Operating System Boot Requirements
 
 This section documents BIOS interrupt requirements for booting various operating systems.

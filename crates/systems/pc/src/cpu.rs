@@ -16,6 +16,80 @@ const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
 /// BIOS Data Area: Hard drive count at 0x0040:0x0075
 const BDA_HARD_DRIVE_COUNT: u32 = 0x475;
 
+/// Interrupt handler priority behavior
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InterruptPriority {
+    /// Hardware/BIOS interrupt - always use emulated handler, cannot be overridden
+    /// These are CPU exceptions and hardware IRQs that must be handled by the emulator
+    HardwareFirst,
+
+    /// BIOS service - use emulated handler unless OS has overridden it
+    /// These are BIOS services that DOS/OS can optionally replace
+    BiosFirst,
+
+    /// OS service - check for OS handler first, use fallback if not present
+    /// These are typically DOS/Windows services with minimal BIOS fallback
+    OsFirst,
+}
+
+/// Determine the interrupt priority behavior based on interrupt number
+fn get_interrupt_priority(int_num: u8) -> InterruptPriority {
+    match int_num {
+        // CPU Exceptions (INT 00h-07h) - Always hardware first
+        // These are CPU-generated exceptions that cannot be overridden by DOS
+        0x00..=0x07 => InterruptPriority::HardwareFirst,
+
+        // Hardware IRQs (INT 08h-0Fh) - Always hardware first
+        // IRQ0-7: Timer, keyboard, cascade, serial, parallel, floppy
+        // These must be handled by the emulator to maintain hardware state
+        0x08..=0x0F => InterruptPriority::HardwareFirst,
+
+        // BIOS Services (INT 10h-1Fh) - BIOS first
+        // Core BIOS services: video, equipment, memory, disk, keyboard, etc.
+        // DOS can override some of these (e.g., INT 1Ah for timekeeping)
+        0x10..=0x1F => InterruptPriority::BiosFirst,
+
+        // DOS/OS Services (INT 20h-2Fh) - OS first
+        // INT 20h: Program terminate
+        // INT 21h: DOS API
+        // INT 22h-24h: DOS internal vectors
+        // INT 25h-26h: Absolute disk I/O
+        // INT 27h: TSR
+        // INT 28h: DOS idle
+        // INT 29h: Fast console output
+        // INT 2Ah: Network API
+        // INT 2Fh: Multiplex
+        0x20..=0x2F => InterruptPriority::OsFirst,
+
+        // Extended Services (INT 30h-3Fh) - OS first
+        // INT 31h: DPMI
+        // INT 33h: Mouse driver
+        // Others are mostly Windows/DOS extender services
+        0x30..=0x3F => InterruptPriority::OsFirst,
+
+        // User/Application (INT 40h-5Fh) - BIOS first
+        // INT 40h: Floppy disk (redirected INT 13h)
+        // INT 41h, 46h: Hard disk parameter tables
+        // INT 4Ah: RTC alarm
+        // INT 4Bh-4Fh: Reserved
+        // INT 5Ch: NetBIOS
+        0x40..=0x5F => InterruptPriority::BiosFirst,
+
+        // Reserved/Extended (INT 60h-6Fh) - OS first
+        // User interrupts and DOS extenders
+        0x60..=0x6F => InterruptPriority::OsFirst,
+
+        // Hardware IRQs (INT 70h-77h) - Always hardware first
+        // IRQ8-15 (AT+ systems): RTC, redirected IRQ2, mouse, math coprocessor, HDD
+        // These are hardware interrupts that must be handled by the emulator
+        0x70..=0x77 => InterruptPriority::HardwareFirst,
+
+        // Extended BIOS (INT 78h-FFh) - BIOS first
+        // Various manufacturer-specific and extended BIOS services
+        0x78..=0xFF => InterruptPriority::BiosFirst,
+    }
+}
+
 /// PC CPU wrapper
 pub struct PcCpu {
     cpu: Cpu8086<PcBus>,
@@ -230,25 +304,22 @@ impl PcCpu {
                 }
             }
 
-            // Check for interrupts that can be overridden by DOS/OS
-            // Hardware interrupts and core BIOS services must always be handled by the emulator
-            let can_be_overridden = matches!(
-                int_num,
-                0x21 | // DOS API
-                0x28 | // DOS idle
-                0x29 | // Fast console output
-                0x2A | // Network API
-                0x2F | // Multiplex
-                0x31 | // DPMI
-                0x33 | // Mouse driver
-                0x4A   // RTC Alarm
-            );
+            // Determine interrupt handling priority based on interrupt range
+            let priority = get_interrupt_priority(int_num);
 
-            // Generic interrupt override check for software/DOS interrupts
-            if can_be_overridden && self.is_interrupt_overridden(int_num) {
-                // OS has installed a custom handler, let CPU execute it
-                // Fall through to normal execution
-            } else {
+            // Check if we should use the OS handler or the emulated BIOS handler
+            let use_emulated_handler = match priority {
+                // Hardware interrupts always use emulated handler
+                InterruptPriority::HardwareFirst => true,
+
+                // BIOS services use emulated handler unless OS has overridden it
+                InterruptPriority::BiosFirst => !self.is_interrupt_overridden(int_num),
+
+                // OS services prefer OS handler, fall back to emulated handler if not present
+                InterruptPriority::OsFirst => !self.is_interrupt_overridden(int_num),
+            };
+
+            if use_emulated_handler {
                 // Use BIOS/emulator handler
                 match int_num {
                     0x05 => return self.handle_int05h(), // Print Screen / BOUND
@@ -6132,17 +6203,21 @@ mod tests {
         // Write custom handler code:
         // INC AX (40)
         cpu.cpu.memory.write(handler_addr, 0x40); // INC AX
-        // IRET (CF)
+                                                  // IRET (CF)
         cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
 
         // Install custom handler for INT 2Ah (vector at 0x00A8)
         // NOTE: We manually install this vector since we're not running BIOS init
         let vector_addr = 0x2A * 4;
-        cpu.cpu.memory.write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
         cpu.cpu
             .memory
             .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
-        cpu.cpu.memory.write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
         cpu.cpu
             .memory
             .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
@@ -6191,7 +6266,7 @@ mod tests {
             cpu.cpu.ax, 0x1235,
             "Custom INT 2Ah handler should have been called and incremented AX"
         );
-        
+
         // Should have returned to the instruction after INT
         assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
         assert_eq!(cpu.cpu.ip, 0x1002, "Should return to instruction after INT");
@@ -6220,7 +6295,10 @@ mod tests {
 
         // BIOS stub returns AL=0 (not installed) and sets CF
         assert_eq!(cpu.cpu.ax & 0xFF, 0x00, "AL should be 0 (not installed)");
-        assert!(cpu.get_carry_flag(), "CF should be set (error/not installed)");
+        assert!(
+            cpu.get_carry_flag(),
+            "CF should be set (error/not installed)"
+        );
     }
 
     #[test]
@@ -6228,45 +6306,48 @@ mod tests {
         // Test that the core CPU correctly executes custom interrupt handlers
         // This bypasses the PC wrapper to isolate the issue
         use emu_core::cpu_8086::Cpu8086;
-        
+
         let bus = PcBus::new();
         let mut cpu = Cpu8086::new(bus);
-        
+
         // Set up stack
         cpu.ss = 0x0000;
         cpu.sp = 0xFFFE;
-        
+
         // Create custom handler at 0x2000:0x0100
-        let handler_addr = 0x20100u32;  // Physical address
+        let handler_addr = 0x20100u32; // Physical address
         cpu.memory.write(handler_addr, 0x40); // INC AX
         cpu.memory.write(handler_addr + 1, 0xCF); // IRET
-        
+
         // Install vector for INT 2Ah
         let vector_addr = 0x2A * 4;
         cpu.memory.write(vector_addr, 0x00); // Offset low: 0x0100
         cpu.memory.write(vector_addr + 1, 0x01); // Offset high
         cpu.memory.write(vector_addr + 2, 0x00); // Segment low: 0x2000
         cpu.memory.write(vector_addr + 3, 0x20); // Segment high
-        
+
         // Write INT 2Ah at 0x0000:0x1000
         cpu.cs = 0x0000;
         cpu.ip = 0x1000;
         cpu.memory.write(0x1000, 0xCD); // INT
         cpu.memory.write(0x1001, 0x2A); // 2Ah
-        
+
         cpu.ax = 0x1234;
-        
+
         // Execute INT (this will jump to the handler)
         cpu.step();
-        
+
         // Now we're at the handler - execute INC AX
         cpu.step();
-        
+
         // Execute IRET to return
         cpu.step();
-        
+
         // Now we should be back and AX should be incremented
-        assert_eq!(cpu.ax, 0x1235, "Core CPU should execute custom handler and increment AX");
+        assert_eq!(
+            cpu.ax, 0x1235,
+            "Core CPU should execute custom handler and increment AX"
+        );
         assert_eq!(cpu.cs, 0x0000, "Should return to original CS");
         assert_eq!(cpu.ip, 0x1002, "Should return to instruction after INT");
     }
@@ -6705,5 +6786,275 @@ mod tests {
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_9), b']');
         assert_eq!(cpu.scancode_to_ascii(SCANCODE_0), b'}');
         cpu.cpu.memory.keyboard.key_release(SCANCODE_RIGHT_ALT);
+    }
+
+    #[test]
+    fn test_interrupt_priority_hardware_first() {
+        // Test that hardware interrupts (INT 08h-0Fh, 70h-77h) always use emulated handler
+        // even if OS has installed a custom handler
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Install a custom handler for INT 08h (timer) - OS should NOT be able to override this
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler: INC AX, IRET
+        cpu.cpu.memory.write(handler_addr, 0x40); // INC AX
+        cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+
+        // Install handler for INT 08h
+        let vector_addr = 0x08 * 4;
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Verify vector is overridden
+        assert!(
+            cpu.is_interrupt_overridden(0x08),
+            "INT 08h vector should be overridden"
+        );
+
+        // Set up code to call INT 08h
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x08); // 08h
+
+        cpu.cpu.ax = 0x1234;
+
+        // Execute INT 08h - should use emulated handler, NOT the custom handler
+        // The emulated handler increments the tick counter, not AX
+        cpu.step();
+
+        // AX should NOT be incremented (custom handler was not called)
+        assert_eq!(
+            cpu.cpu.ax, 0x1234,
+            "Hardware interrupt INT 08h should use emulated handler, not custom handler"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_priority_bios_first() {
+        // Test that BIOS services (INT 10h-1Fh) use emulated handler unless overridden
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Test 1: Without override, should use emulated handler
+        // Set up INT 11h (equipment list) call - BIOS service
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x11); // 11h
+
+        // Execute INT 11h - should use emulated handler (returns equipment flags in AX)
+        cpu.step();
+
+        // AX should contain equipment flags (non-zero)
+        assert_ne!(
+            cpu.cpu.ax, 0,
+            "INT 11h should return equipment flags from emulated handler"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_priority_bios_first_with_override() {
+        // Test that BIOS services can be overridden by OS
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Install custom handler for INT 1Ah (Time/Date service) - BIOS service that can be overridden
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler: MOV AX, 0xBEEF; IRET
+        cpu.cpu.memory.write(handler_addr, 0xB8); // MOV AX, imm16
+        cpu.cpu.memory.write(handler_addr + 1, 0xEF); // 0xBEEF (low byte)
+        cpu.cpu.memory.write(handler_addr + 2, 0xBE); // 0xBEEF (high byte)
+        cpu.cpu.memory.write(handler_addr + 3, 0xCF); // IRET
+
+        // Install handler for INT 1Ah
+        let vector_addr = 0x1A * 4;
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Set up code to call INT 1Ah
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x1A); // 1Ah
+
+        cpu.cpu.ax = 0x0000;
+
+        // Execute INT 1Ah - should call custom handler (BiosFirst but overridden)
+        cpu.step(); // Execute INT (jumps to handler)
+        cpu.step(); // Execute MOV AX, 0xBEEF
+        cpu.step(); // Execute IRET
+
+        // AX should be 0xBEEF from custom handler
+        assert_eq!(
+            cpu.cpu.ax, 0xBEEF,
+            "BIOS service INT 1Ah should use custom handler when overridden"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_priority_os_first() {
+        // Test that OS services (INT 20h-2Fh) prefer OS handler, fall back to emulated
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Install custom handler for INT 21h (DOS API)
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler: MOV AX, 0xDEAD; IRET
+        cpu.cpu.memory.write(handler_addr, 0xB8); // MOV AX, imm16
+        cpu.cpu.memory.write(handler_addr + 1, 0xAD); // 0xDEAD (low byte)
+        cpu.cpu.memory.write(handler_addr + 2, 0xDE); // 0xDEAD (high byte)
+        cpu.cpu.memory.write(handler_addr + 3, 0xCF); // IRET
+
+        // Install handler for INT 21h
+        let vector_addr = 0x21 * 4;
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Set up code to call INT 21h
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x21); // 21h
+
+        cpu.cpu.ax = 0x0000;
+
+        // Execute INT 21h - should call custom DOS handler
+        cpu.step(); // Execute INT (jumps to handler)
+        cpu.step(); // Execute MOV AX, 0xDEAD
+        cpu.step(); // Execute IRET
+
+        // AX should be 0xDEAD from custom DOS handler
+        assert_eq!(
+            cpu.cpu.ax, 0xDEAD,
+            "OS service INT 21h should use custom DOS handler when present"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_priority_ranges() {
+        // Test the interrupt priority classification for various ranges
+
+        // CPU Exceptions (00h-07h) - HardwareFirst
+        assert_eq!(
+            get_interrupt_priority(0x00),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x05),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x07),
+            InterruptPriority::HardwareFirst
+        );
+
+        // Hardware IRQs master PIC (08h-0Fh) - HardwareFirst
+        assert_eq!(
+            get_interrupt_priority(0x08),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x09),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x0F),
+            InterruptPriority::HardwareFirst
+        );
+
+        // BIOS Services (10h-1Fh) - BiosFirst
+        assert_eq!(get_interrupt_priority(0x10), InterruptPriority::BiosFirst);
+        assert_eq!(get_interrupt_priority(0x13), InterruptPriority::BiosFirst);
+        assert_eq!(get_interrupt_priority(0x1A), InterruptPriority::BiosFirst);
+        assert_eq!(get_interrupt_priority(0x1F), InterruptPriority::BiosFirst);
+
+        // DOS/OS Services (20h-2Fh) - OsFirst
+        assert_eq!(get_interrupt_priority(0x20), InterruptPriority::OsFirst);
+        assert_eq!(get_interrupt_priority(0x21), InterruptPriority::OsFirst);
+        assert_eq!(get_interrupt_priority(0x2A), InterruptPriority::OsFirst);
+        assert_eq!(get_interrupt_priority(0x2F), InterruptPriority::OsFirst);
+
+        // Extended Services (30h-3Fh) - OsFirst
+        assert_eq!(get_interrupt_priority(0x31), InterruptPriority::OsFirst);
+        assert_eq!(get_interrupt_priority(0x33), InterruptPriority::OsFirst);
+
+        // User/Application (40h-5Fh) - BiosFirst
+        assert_eq!(get_interrupt_priority(0x40), InterruptPriority::BiosFirst);
+        assert_eq!(get_interrupt_priority(0x4A), InterruptPriority::BiosFirst);
+
+        // Reserved/Extended (60h-6Fh) - OsFirst
+        assert_eq!(get_interrupt_priority(0x60), InterruptPriority::OsFirst);
+        assert_eq!(get_interrupt_priority(0x6F), InterruptPriority::OsFirst);
+
+        // Hardware IRQs slave PIC (70h-77h) - HardwareFirst
+        assert_eq!(
+            get_interrupt_priority(0x70),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x74),
+            InterruptPriority::HardwareFirst
+        );
+        assert_eq!(
+            get_interrupt_priority(0x77),
+            InterruptPriority::HardwareFirst
+        );
+
+        // Extended BIOS (78h-FFh) - BiosFirst
+        assert_eq!(get_interrupt_priority(0x78), InterruptPriority::BiosFirst);
+        assert_eq!(get_interrupt_priority(0xFF), InterruptPriority::BiosFirst);
     }
 }
