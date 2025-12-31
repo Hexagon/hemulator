@@ -763,6 +763,7 @@ struct CliArgs {
     create_blank_disk: Option<(String, String)>, // (path, format)
     show_help: bool,        // Show help message
     show_version: bool,     // Show version
+    benchmark: bool,        // Benchmark mode: disable frame limiter to measure raw performance
     // Logging configuration
     log_level: Option<String>,      // Global log level
     log_cpu: Option<String>,        // CPU log level
@@ -787,6 +788,9 @@ impl CliArgs {
                 }
                 "--version" | "-v" => {
                     args.show_version = true;
+                }
+                "--benchmark" => {
+                    args.benchmark = true;
                 }
                 "--system" | "-S" => {
                     if let Some(system) = arg_iter.next() {
@@ -915,6 +919,9 @@ impl CliArgs {
         eprintln!("  -h, --help               Show this help message");
         eprintln!("  -v, --version            Show version information");
         eprintln!(
+            "  --benchmark              Disable frame limiter to measure raw emulation performance"
+        );
+        eprintln!(
             "  -S, --system <SYSTEM>    Start clean system (pc, nes, gb, atari2600, snes, n64)"
         );
         eprintln!("  --slot1 <file>           Load file into slot 1 (BIOS for PC)");
@@ -941,6 +948,9 @@ impl CliArgs {
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  hemu game.nes                                  # Load NES ROM (auto-detect)");
+        eprintln!(
+            "  hemu --benchmark game.nes                      # Benchmark mode (no frame limiter)"
+        );
         eprintln!(
             "  hemu test.com                                  # Load DOS COM file (auto-detect)"
         );
@@ -1147,6 +1157,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // Print benchmark mode message
+    if cli_args.benchmark {
+        eprintln!("==========================================");
+        eprintln!("  BENCHMARK MODE: Frame limiter disabled");
+        eprintln!("  Press F10 to see raw FPS performance");
+        eprintln!("==========================================");
+        eprintln!();
     }
 
     // Load settings
@@ -3340,7 +3359,10 @@ fn main() {
         }
 
         // Get target frame time from system timing mode, adjusted by emulation speed
-        let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
+        // In benchmark mode, disable frame limiting to measure raw performance
+        let target_frame_time = if cli_args.benchmark {
+            Duration::from_secs(0) // No frame limiting in benchmark mode
+        } else if rom_loaded && settings.emulation_speed > 0.0 {
             let timing = sys.timing();
             let frame_rate = timing.frame_rate_hz();
             Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))

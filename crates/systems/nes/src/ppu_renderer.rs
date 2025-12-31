@@ -45,6 +45,10 @@ pub trait NesPpuRenderer: Renderer + std::fmt::Debug {
     /// Get mutable access to the framebuffer for direct scanline rendering
     fn get_frame_mut(&mut self) -> &mut Frame;
 
+    /// Take ownership of the current frame and replace it with a new empty frame.
+    /// This avoids cloning the frame buffer (61,440 pixels) every frame.
+    fn take_frame(&mut self) -> Frame;
+
     /// Render a single scanline using PPU state
     ///
     /// # Arguments
@@ -108,6 +112,12 @@ impl Renderer for SoftwareNesPpuRenderer {
 impl NesPpuRenderer for SoftwareNesPpuRenderer {
     fn get_frame_mut(&mut self) -> &mut Frame {
         &mut self.framebuffer
+    }
+
+    fn take_frame(&mut self) -> Frame {
+        // Take ownership of the current frame and replace with a new empty frame
+        // This avoids cloning 61,440 pixels (245KB) every frame (60 times/second)
+        std::mem::replace(&mut self.framebuffer, Frame::new(256, 240))
     }
 
     fn render_scanline(&mut self, ppu: &mut Ppu, scanline: u32) {
