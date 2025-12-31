@@ -42,7 +42,9 @@
 //! Future enhancements could include proper NES mixer simulation with
 //! non-linear output curves.
 
-use emu_core::apu::{NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE};
+use emu_core::apu::{
+    Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+};
 use std::cell::Cell;
 
 /// NES-specific sweep unit for pulse channels.
@@ -187,8 +189,11 @@ pub struct APU {
     pub pulse2: PulseChannel,
     pub(crate) sweep1: NesSweep,
     pub(crate) sweep2: NesSweep,
+    envelope1: Envelope,
+    envelope2: Envelope,
     pub triangle: TriangleChannel,
     pub noise: NoiseChannel,
+    envelope_noise: Envelope,
     cycle_accum: f64,
     timing: TimingMode,
     /// Frame counter for clocking length counters and envelopes
@@ -213,8 +218,11 @@ impl APU {
             pulse2: PulseChannel::new(),
             sweep1: NesSweep::new(true),  // Pulse 1 uses one's complement
             sweep2: NesSweep::new(false), // Pulse 2 uses two's complement
+            envelope1: Envelope::new(),
+            envelope2: Envelope::new(),
             triangle: TriangleChannel::new(),
             noise: NoiseChannel::new(),
+            envelope_noise: Envelope::new(),
             cycle_accum: 0.0,
             timing,
             frame_counter_cycles: 0,
@@ -240,6 +248,12 @@ impl APU {
                 self.pulse1.length_counter_halt = (val & 0x20) != 0;
                 self.pulse1.constant_volume = (val & 0x10) != 0;
                 self.pulse1.envelope = val & 15;
+
+                // Configure the envelope generator
+                // For NES: initial volume is always 15, period comes from bits 0-3
+                // Loop flag from bit 5 (same as length_counter_halt)
+                self.envelope1.set_params(15, false, val & 15);
+                self.envelope1.set_loop(self.pulse1.length_counter_halt);
             }
             0x4001 => {
                 // Sweep: EPPP NSSS
@@ -270,10 +284,15 @@ impl APU {
                 self.pulse1.reset_phase();
                 // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
                 self.sweep1.trigger();
+                // Restart envelope on note trigger
+                self.envelope1.restart();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.pulse1.enabled {
+                    self.pulse1.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Pulse 2 registers
@@ -282,6 +301,10 @@ impl APU {
                 self.pulse2.length_counter_halt = (val & 0x20) != 0;
                 self.pulse2.constant_volume = (val & 0x10) != 0;
                 self.pulse2.envelope = val & 15;
+
+                // Configure the envelope generator
+                self.envelope2.set_params(15, false, val & 15);
+                self.envelope2.set_loop(self.pulse2.length_counter_halt);
             }
             0x4005 => {
                 // Sweep: EPPP NSSS (same format as $4001)
@@ -308,9 +331,14 @@ impl APU {
                 self.pulse2.reset_phase();
                 // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
                 self.sweep2.trigger();
+                // Restart envelope on note trigger
+                self.envelope2.restart();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4007
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.pulse2.enabled {
+                    self.pulse2.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Triangle registers
@@ -336,8 +364,11 @@ impl APU {
                 // Set reload flag to reload linear counter
                 self.triangle.linear_counter_reload_flag = true;
                 // Length counter index in upper 5 bits
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.triangle.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.triangle.enabled {
+                    self.triangle.length_counter = LENGTH_TABLE[len_index as usize];
+                }
             }
 
             // Noise registers
@@ -346,6 +377,10 @@ impl APU {
                 self.noise.length_counter_halt = (val & 0x20) != 0;
                 self.noise.constant_volume = (val & 0x10) != 0;
                 self.noise.envelope = val & 0x0F;
+
+                // Configure the envelope generator
+                self.envelope_noise.set_params(15, false, val & 0x0F);
+                self.envelope_noise.set_loop(self.noise.length_counter_halt);
             }
             0x400D => {
                 // Unused
@@ -357,8 +392,13 @@ impl APU {
             }
             0x400F => {
                 // Length counter index
+                // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
-                self.noise.length_counter = LENGTH_TABLE[len_index as usize];
+                if self.noise.enabled {
+                    self.noise.length_counter = LENGTH_TABLE[len_index as usize];
+                }
+                // Restart envelope on note trigger
+                self.envelope_noise.restart();
             }
 
             // APU Enable register
@@ -502,6 +542,11 @@ impl APU {
                 // Check for quarter frame boundaries
                 let curr_quarter = self.frame_counter_cycles / quarter_frame_cycles;
                 if curr_quarter != prev_quarter {
+                    // Clock envelopes at every quarter frame (~240 Hz NTSC, ~200 Hz PAL)
+                    self.envelope1.clock();
+                    self.envelope2.clock();
+                    self.envelope_noise.clock();
+
                     // Length counters clock at quarters 2 and 4 (half frames)
                     // In 4-step mode: quarters 0, 1, 2, 3 -> clock at 1 and 3 (0-indexed)
                     // In 5-step mode: quarters 0, 1, 2, 3, 4 -> clock at 1 and 3 only (NOT at 4)
@@ -536,10 +581,43 @@ impl APU {
                 }
 
                 // Clock all channels
+                // Update envelope volumes before clocking
+                // When constant_volume is false, use envelope decay level; otherwise use the constant value
+                let pulse1_vol = if self.pulse1.constant_volume {
+                    self.pulse1.envelope
+                } else {
+                    self.envelope1.level()
+                };
+                let pulse2_vol = if self.pulse2.constant_volume {
+                    self.pulse2.envelope
+                } else {
+                    self.envelope2.level()
+                };
+                let noise_vol = if self.noise.constant_volume {
+                    self.noise.envelope
+                } else {
+                    self.envelope_noise.level()
+                };
+
+                // Temporarily set envelope values for this sample
+                let saved_p1_env = self.pulse1.envelope;
+                let saved_p2_env = self.pulse2.envelope;
+                let saved_noise_env = self.noise.envelope;
+
+                self.pulse1.envelope = pulse1_vol;
+                self.pulse2.envelope = pulse2_vol;
+                self.noise.envelope = noise_vol;
+
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
                 let s3 = self.triangle.clock() as i32;
                 let s4 = self.noise.clock() as i32;
+
+                // Restore original envelope values
+                self.pulse1.envelope = saved_p1_env;
+                self.pulse2.envelope = saved_p2_env;
+                self.noise.envelope = saved_noise_env;
+
                 acc += s1 + s2 + s3 + s4;
             }
 
@@ -727,5 +805,251 @@ mod tests {
         // Note: This is a basic integration test - actual frequency change
         // depends on timing and may not happen in the first 5000 samples
         assert!(samples.len() == 5000);
+    }
+
+    #[test]
+    fn test_length_counter_not_loaded_when_disabled() {
+        let mut apu = APU::new();
+
+        // Pulse 1: write to $4003 with channel disabled
+        apu.write_register(0x4015, 0x00); // Disable all channels
+                                          // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
+        assert_eq!(
+            apu.pulse1.length_counter, 0,
+            "Pulse 1 length counter should remain 0 when disabled"
+        );
+
+        // Pulse 2: write to $4007 with channel disabled
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4007, 0b11111000);
+        assert_eq!(
+            apu.pulse2.length_counter, 0,
+            "Pulse 2 length counter should remain 0 when disabled"
+        );
+
+        // Triangle: write to $400B with channel disabled
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x400B, 0b11111000);
+        assert_eq!(
+            apu.triangle.length_counter, 0,
+            "Triangle length counter should remain 0 when disabled"
+        );
+
+        // Noise: write to $400F with channel disabled
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x400F, 0b11111000);
+        assert_eq!(
+            apu.noise.length_counter, 0,
+            "Noise length counter should remain 0 when disabled"
+        );
+    }
+
+    #[test]
+    fn test_length_counter_loaded_when_enabled() {
+        let mut apu = APU::new();
+
+        // Enable all channels
+        apu.write_register(0x4015, 0x0F); // Enable pulse1, pulse2, triangle, noise
+
+        // Pulse 1: write to $4003 with channel enabled
+        // Binary 0b00001000 = bits 7-3 = 00001 = index 1, which gives LENGTH_TABLE[1] = 254
+        apu.write_register(0x4003, 0b00001000);
+        assert_eq!(
+            apu.pulse1.length_counter, 254,
+            "Pulse 1 length counter should be loaded when enabled"
+        );
+
+        // Pulse 2: write to $4007 with channel enabled
+        // Binary 0b00010000 = bits 7-3 = 00010 = index 2, which gives LENGTH_TABLE[2] = 20
+        apu.write_register(0x4007, 0b00010000);
+        assert_eq!(
+            apu.pulse2.length_counter, 20,
+            "Pulse 2 length counter should be loaded when enabled"
+        );
+
+        // Triangle: write to $400B with channel enabled
+        // Binary 0b00000000 = bits 7-3 = 00000 = index 0, which gives LENGTH_TABLE[0] = 10
+        apu.write_register(0x400B, 0b00000000);
+        assert_eq!(
+            apu.triangle.length_counter, 10,
+            "Triangle length counter should be loaded when enabled"
+        );
+
+        // Noise: write to $400F with channel enabled
+        // Binary 0b00011000 = bits 7-3 = 00011 = index 3, which gives LENGTH_TABLE[3] = 2
+        apu.write_register(0x400F, 0b00011000);
+        assert_eq!(
+            apu.noise.length_counter, 2,
+            "Noise length counter should be loaded when enabled"
+        );
+    }
+
+    #[test]
+    fn test_length_counter_toggle_enable() {
+        let mut apu = APU::new();
+
+        // Start with channel disabled
+        apu.write_register(0x4015, 0x00);
+
+        // Write length counter while disabled - should not load
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
+        assert_eq!(apu.pulse1.length_counter, 0);
+
+        // Enable the channel
+        apu.write_register(0x4015, 0x01);
+
+        // Write length counter while enabled - should load
+        // Binary 0b11111000 = bits 7-3 = 11111 = index 31, which gives LENGTH_TABLE[31] = 30
+        apu.write_register(0x4003, 0b11111000);
+        assert_eq!(apu.pulse1.length_counter, 30);
+
+        // Disable again
+        apu.write_register(0x4015, 0x00);
+
+        // Write length counter while disabled again - should not load
+        // Binary 0b00001000 = bits 7-3 = 00001 = index 1, which gives LENGTH_TABLE[1] = 254
+        apu.write_register(0x4003, 0b00001000);
+        assert_eq!(
+            apu.pulse1.length_counter, 30,
+            "Length counter should not change when disabled"
+        );
+    }
+
+    #[test]
+    fn test_envelope_basic_functionality() {
+        // Test the Envelope component directly to ensure we understand its behavior
+        let mut env = Envelope::new();
+
+        // Initially should be at 0
+        assert_eq!(env.level(), 0);
+
+        // Set params: initial_volume=15, add_mode=false (decay), period=0
+        env.set_params(15, false, 0);
+
+        // Still at 0 until restart and clock
+        assert_eq!(env.level(), 0);
+
+        // Restart the envelope
+        env.restart();
+
+        // Still at 0 until clocked
+        assert_eq!(env.level(), 0);
+
+        // Clock to process the start flag
+        env.clock();
+
+        // Now should be at initial_volume = 15
+        assert_eq!(
+            env.level(),
+            15,
+            "Envelope should start at 15 after restart and clock"
+        );
+
+        // Clock again with period=0 should decay immediately
+        env.clock();
+        assert_eq!(env.level(), 14, "Envelope should decay to 14");
+    }
+
+    #[test]
+    fn test_envelope_decay() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure pulse 1 with envelope mode (constant_volume=0) and period=0 (fastest decay)
+        // Binary: DDLC VVVV = 00000000 = duty 0, no loop, envelope mode, period 0
+        apu.write_register(0x4000, 0b00000000);
+
+        // Trigger a note
+        apu.write_register(0x4003, 0b00001000); // Length counter + trigger
+
+        // Generate enough samples to hit the first quarter frame boundary (~184 samples)
+        // This will clock the envelope and process the start flag
+        let _samples = apu.generate_samples(200);
+
+        // Verify envelope starts at 15 after being clocked
+        assert_eq!(apu.envelope1.level(), 15, "Envelope should start at 15");
+
+        // Generate samples for several more quarter frames
+        // With period=0, envelope decays by 1 every quarter frame
+        let _samples = apu.generate_samples(1000);
+
+        // After multiple quarter frames, envelope should have decayed from 15
+        let final_level = apu.envelope1.level();
+        assert!(
+            final_level < 15,
+            "Envelope should decay from 15, got {}",
+            final_level
+        );
+    }
+
+    #[test]
+    fn test_envelope_constant_volume() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure pulse 1 with constant volume mode (bit 4 = 1) and volume = 8
+        // Binary: DDLC VVVV = 00011000 = duty 0, no loop, constant volume, volume 8
+        apu.write_register(0x4000, 0b00011000);
+
+        // Trigger a note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate many samples
+        let _samples = apu.generate_samples(5000);
+
+        // In constant volume mode, the volume should remain at 8 (not decay)
+        // We can't directly check this, but we can verify the channel is still playing
+        // by checking that pulse1.envelope still equals 8
+        assert_eq!(
+            apu.pulse1.envelope, 8,
+            "Constant volume should remain unchanged"
+        );
+    }
+
+    #[test]
+    fn test_envelope_restart_on_retrigger() {
+        let mut apu = APU::new();
+
+        // Enable pulse 1
+        apu.write_register(0x4015, 0x01);
+
+        // Configure with envelope mode and period=0
+        apu.write_register(0x4000, 0b00000000);
+
+        // Trigger first note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate enough samples to hit first quarter frame and start envelope
+        let _samples = apu.generate_samples(200);
+
+        // Should start at 15
+        assert_eq!(apu.envelope1.level(), 15, "Envelope should start at 15");
+
+        // Generate samples to let envelope decay (several quarter frames)
+        let _samples = apu.generate_samples(1000);
+
+        // Envelope should have decayed
+        let decayed_level = apu.envelope1.level();
+        assert!(decayed_level < 15, "Envelope should have decayed from 15");
+
+        // Retrigger the note
+        apu.write_register(0x4003, 0b00001000);
+
+        // Generate enough samples to process the restart (hit next quarter frame)
+        let _samples = apu.generate_samples(200);
+
+        // After restart, envelope should be back at 15
+        let restarted_level = apu.envelope1.level();
+        assert_eq!(
+            restarted_level, 15,
+            "Envelope should restart at 15 after retrigger, got {}",
+            restarted_level
+        );
     }
 }

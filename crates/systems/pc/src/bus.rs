@@ -153,11 +153,16 @@ impl PcBus {
         let mut dpmi = DpmiDriver::new();
         dpmi.install();
 
+        let ram = vec![0; ram_size];
+        let extended_ram = vec![0; extended_ram_size]; // Initialize with 0x00 (was 0xFF - potential bug!)
+        let vram = vec![0; 0x20000]; // 128KB
+        let rom = vec![0; 0x40000]; // 256KB
+
         let mut bus = Self {
-            ram: vec![0; ram_size],
-            extended_ram: vec![0xFF; extended_ram_size], // Initialize with 0xFF to distinguish from low RAM
-            vram: vec![0; 0x20000],                      // 128KB
-            rom: vec![0; 0x40000],                       // 256KB
+            ram,
+            extended_ram,
+            vram,
+            rom,
             executable: None,
             keyboard: Keyboard::new(),
             floppy_a: None,
@@ -1171,6 +1176,44 @@ mod tests {
         assert_eq!(bus.ram.len(), 0xA0000);
         assert_eq!(bus.vram.len(), 0x20000);
         assert_eq!(bus.rom.len(), 0x40000);
+    }
+
+    #[test]
+    fn test_ram_initialized_to_zero() {
+        let bus = PcBus::new();
+
+        // Test specific addresses mentioned in Windows 95 boot bug
+        assert_eq!(bus.read(0x7BFA), 0x00, "Address 0x7BFA should be zero");
+        assert_eq!(bus.read(0x7BFB), 0x00, "Address 0x7BFB should be zero");
+        assert_eq!(bus.read(0x7BFC), 0x00, "Address 0x7BFC should be zero");
+        assert_eq!(bus.read(0x7BFD), 0x00, "Address 0x7BFD should be zero");
+
+        // Test a sample of RAM locations to ensure they're all zero
+        // Skip IVT area (0x0000-0x03FF) which is initialized by the bus constructor
+        // Test at 64KB intervals for efficiency (vec![0; n] should initialize all memory
+        // uniformly, so sampling is sufficient to detect initialization bugs)
+        for addr in (0x0400..0xA0000).step_by(0x10000) {
+            assert_eq!(
+                bus.read(addr),
+                0x00,
+                "Address 0x{:05X} should be zero",
+                addr
+            );
+        }
+
+        // Test key addresses in the stack area before boot sector
+        // Test first, middle, and last addresses, plus some strategic points
+        let stack_test_addrs = [
+            0x7000, 0x7001, 0x7100, 0x7200, 0x7400, 0x7800, 0x7BF0, 0x7BF8, 0x7BFC, 0x7BFE, 0x7BFF,
+        ];
+        for &addr in &stack_test_addrs {
+            assert_eq!(
+                bus.read(addr),
+                0x00,
+                "Stack area address 0x{:04X} should be zero",
+                addr
+            );
+        }
     }
 
     #[test]

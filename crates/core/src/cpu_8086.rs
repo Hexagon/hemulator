@@ -526,6 +526,28 @@ impl<M: Memory8086> Cpu8086<M> {
         self.cs = new_cs;
     }
 
+    /// Trigger a hardware interrupt (e.g., from PIT, keyboard controller, etc.)
+    ///
+    /// This is a public interface for system components to trigger hardware interrupts.
+    /// Hardware interrupts use the current IP (not instruction_start_ip).
+    ///
+    /// # Arguments
+    /// * `int_num` - The interrupt vector number (0x08 for timer, 0x09 for keyboard, etc.)
+    ///
+    /// # Returns
+    /// * `true` if the interrupt was triggered (IF flag is set)
+    /// * `false` if interrupts are disabled (IF flag is clear)
+    pub fn trigger_hardware_interrupt(&mut self, int_num: u8) -> bool {
+        // Check if interrupts are enabled (IF flag)
+        if !self.get_flag(FLAG_IF) {
+            return false;
+        }
+
+        // Trigger the interrupt (hardware interrupts are not exceptions)
+        self.trigger_interrupt(int_num, false);
+        true
+    }
+
     /// Read a byte from I/O port (stub implementation - returns 0xFF)
     #[inline]
     fn io_read(&self, _port: u16) -> u8 {
