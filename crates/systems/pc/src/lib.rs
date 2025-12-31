@@ -692,6 +692,9 @@ impl System for PcSystem {
                 // For now, just clear the flag
                 self.cpu.bus_mut().pit.clear_timer_interrupt();
             }
+
+            // Update VGA status register for vertical retrace simulation
+            self.cpu.bus().update_vga_status(cycles as u64);
         }
 
         // Render video memory to frame buffer

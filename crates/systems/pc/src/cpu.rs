@@ -10,32 +10,11 @@ use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 #[allow(dead_code)]
 const VIDEO_INTERRUPT: u8 = 0x10;
 
-/// INT 21h vector table offset (low word) in memory
-const INT21H_VECTOR_OFFSET: u32 = 0x84;
-
-/// INT 21h vector table segment (high word) in memory
-const INT21H_VECTOR_SEGMENT: u32 = 0x86;
-
-/// INT 2Fh vector table offset (low word) in memory
-const INT2FH_VECTOR_OFFSET: u32 = 0xBC;
-
-/// INT 2Fh vector table segment (high word) in memory
-const INT2FH_VECTOR_SEGMENT: u32 = 0xBE;
-
-/// INT 31h vector table offset (low word) in memory
-const INT31H_VECTOR_OFFSET: u32 = 0xC4;
-
-/// INT 31h vector table segment (high word) in memory
-const INT31H_VECTOR_SEGMENT: u32 = 0xC6;
-
-/// INT 33h vector table offset (low word) in memory
-const INT33H_VECTOR_OFFSET: u32 = 0xCC;
-
-/// INT 33h vector table segment (high word) in memory
-const INT33H_VECTOR_SEGMENT: u32 = 0xCE;
-
 /// DOS error code: invalid file handle
 const DOS_ERROR_INVALID_HANDLE: u16 = 0x0006;
+
+/// BIOS Data Area: Hard drive count at 0x0040:0x0075
+const BDA_HARD_DRIVE_COUNT: u32 = 0x475;
 
 /// PC CPU wrapper
 pub struct PcCpu {
@@ -251,99 +230,51 @@ impl PcCpu {
                 }
             }
 
-            match int_num {
-                0x05 => return self.handle_int05h(), // Print Screen / BOUND
-                0x08 => return self.handle_int08h(), // Timer tick
-                0x09 => return self.handle_int09h(), // Keyboard hardware interrupt
-                0x10 => return self.handle_int10h(), // Video BIOS
-                0x11 => return self.handle_int11h(), // Equipment list
-                0x12 => return self.handle_int12h(), // Get memory size
-                0x13 => return self.handle_int13h(), // Disk services
-                0x14 => return self.handle_int14h(), // Serial port services
-                0x15 => return self.handle_int15h(), // Extended services
-                0x16 => return self.handle_int16h(), // Keyboard services
-                0x17 => return self.handle_int17h(), // Printer services
-                0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
-                0x19 => return self.handle_int19h(), // Bootstrap loader
-                0x1A => return self.handle_int1ah(), // Time/Date services
-                // NOTE: INT 1Bh and 1Ch are meant to be hooked by DOS/programs, not intercepted by BIOS
-                // 0x1B => return self.handle_int1bh(), // Ctrl-Break handler (DOS/programs hook this)
-                // 0x1C => return self.handle_int1ch(), // Timer tick handler (programs hook this)
-                // NOTE: INT 20h and INT 21h are DOS API functions, not BIOS functions
-                // DOS (FreeDOS, MS-DOS, etc.) installs its own handlers for these interrupts during boot.
-                // For standalone programs (COM/EXE without DOS), we provide basic INT 21h support.
-                // If DOS has installed its own handler, we let the CPU execute it normally.
-                // 0x20 => return self.handle_int20h(), // DOS: Program terminate (DOS provides this)
-                0x21 => {
-                    // Check if DOS has installed an INT 21h handler (vector != 0x0000:0x0000)
-                    let int21_offset = self.cpu.memory.read(INT21H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT21H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int21_segment = self.cpu.memory.read(INT21H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT21H_VECTOR_SEGMENT + 1) as u16) << 8);
+            // Check for interrupts that can be overridden by DOS/OS
+            // Hardware interrupts and core BIOS services must always be handled by the emulator
+            let can_be_overridden = matches!(
+                int_num,
+                0x21 | // DOS API
+                0x28 | // DOS idle
+                0x29 | // Fast console output
+                0x2A | // Network API
+                0x2F | // Multiplex
+                0x31 | // DPMI
+                0x33 | // Mouse driver
+                0x4A   // RTC Alarm
+            );
 
-                    // If DOS has installed a handler, let the CPU execute it
-                    if int21_segment != 0 || int21_offset != 0 {
-                        // DOS handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No DOS handler, use our fallback handler for standalone programs
-                        return self.handle_int21h();
-                    }
+            // Generic interrupt override check for software/DOS interrupts
+            if can_be_overridden && self.is_interrupt_overridden(int_num) {
+                // OS has installed a custom handler, let CPU execute it
+                // Fall through to normal execution
+            } else {
+                // Use BIOS/emulator handler
+                match int_num {
+                    0x05 => return self.handle_int05h(), // Print Screen / BOUND
+                    0x08 => return self.handle_int08h(), // Timer tick
+                    0x09 => return self.handle_int09h(), // Keyboard hardware interrupt
+                    0x10 => return self.handle_int10h(), // Video BIOS
+                    0x11 => return self.handle_int11h(), // Equipment list
+                    0x12 => return self.handle_int12h(), // Get memory size
+                    0x13 => return self.handle_int13h(), // Disk services
+                    0x14 => return self.handle_int14h(), // Serial port services
+                    0x15 => return self.handle_int15h(), // Extended services
+                    0x16 => return self.handle_int16h(), // Keyboard services
+                    0x17 => return self.handle_int17h(), // Printer services
+                    0x18 => return self.handle_int18h(), // Cassette BASIC / Boot failure
+                    0x19 => return self.handle_int19h(), // Bootstrap loader
+                    0x1A => return self.handle_int1ah(), // Time/Date services
+                    0x21 => return self.handle_int21h(), // DOS API (fallback for standalone programs)
+                    0x28 => return self.handle_int28h(), // DOS idle
+                    0x29 => return self.handle_int29h(), // Fast console output
+                    0x2A => return self.handle_int2ah(), // Network Installation API
+                    0x2F => return self.handle_int2fh(), // Multiplex
+                    0x31 => return self.handle_int31h(), // DPMI
+                    0x33 => return self.handle_int33h(), // Mouse driver
+                    0x4A => return self.handle_int4ah(), // RTC Alarm
+                    _ => {} // No BIOS handler, let CPU handle it normally
                 }
-                0x28 => return self.handle_int28h(), // DOS idle callout
-                0x29 => return self.handle_int29h(), // Fast console output
-                0x2A => return self.handle_int2ah(), // Network Installation API (stub)
-                0x2F => {
-                    // Check if DOS/drivers have installed an INT 2Fh handler (vector != 0x0000:0x0000)
-                    // HIMEM.SYS, EMM386, network redirectors, etc. install INT 2Fh handlers
-                    let int2f_offset = self.cpu.memory.read(INT2FH_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT2FH_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int2f_segment = self.cpu.memory.read(INT2FH_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT2FH_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a handler exists, let the CPU execute it
-                    if int2f_segment != 0 || int2f_offset != 0 {
-                        // Handler exists (DOS/driver installed), let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No handler installed, use our BIOS-level handler for XMS/DPMI checks
-                        return self.handle_int2fh();
-                    }
-                }
-                0x31 => {
-                    // Check if DPMI host has installed an INT 31h handler
-                    let int31_offset = self.cpu.memory.read(INT31H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT31H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int31_segment = self.cpu.memory.read(INT31H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT31H_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a DPMI host handler exists, let the CPU execute it
-                    if int31_segment != 0 || int31_offset != 0 {
-                        // DPMI host handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No DPMI host, use our basic DPMI handler
-                        return self.handle_int31h();
-                    }
-                }
-                0x33 => {
-                    // Check if mouse driver has installed an INT 33h handler
-                    let int33_offset = self.cpu.memory.read(INT33H_VECTOR_OFFSET) as u16
-                        | ((self.cpu.memory.read(INT33H_VECTOR_OFFSET + 1) as u16) << 8);
-                    let int33_segment = self.cpu.memory.read(INT33H_VECTOR_SEGMENT) as u16
-                        | ((self.cpu.memory.read(INT33H_VECTOR_SEGMENT + 1) as u16) << 8);
-
-                    // If a mouse driver handler exists, let the CPU execute it
-                    if int33_segment != 0 || int33_offset != 0 {
-                        // Mouse driver handler exists, let CPU execute it normally
-                        // Fall through to normal execution
-                    } else {
-                        // No mouse driver, use our basic mouse handler
-                        return self.handle_int33h();
-                    }
-                }
-                0x4A => return self.handle_int4ah(), // RTC Alarm
-                _ => {}                              // Let CPU handle other interrupts normally
             }
         }
 
@@ -2250,8 +2181,30 @@ impl PcCpu {
             self.cpu.cx = ((ch as u32) << 8) | (cl as u32);
 
             // DH = maximum head number (0-based)
-            // DL = number of drives
-            self.cpu.dx = (((heads - 1) as u32) << 8) | 0x01;
+            // DL = number of drives of this type
+            let num_drives = if drive < 0x80 {
+                // Floppy drives: count floppy A and floppy B
+                let mut count = 0u8;
+                if self.cpu.memory.has_floppy(0x00) {
+                    count += 1;
+                }
+                if self.cpu.memory.has_floppy(0x01) {
+                    count += 1;
+                }
+                count
+            } else {
+                // Hard drives: read from BIOS Data Area at 0x0040:0x0075
+                // If BDA is not initialized (0), count directly
+                let bda_count = self.cpu.memory.read(BDA_HARD_DRIVE_COUNT);
+                if bda_count > 0 {
+                    bda_count
+                } else if self.cpu.memory.has_hard_drive() {
+                    1u8
+                } else {
+                    0u8
+                }
+            };
+            self.cpu.dx = (((heads - 1) as u32) << 8) | (num_drives as u32);
 
             // ES:DI = pointer to disk parameter table (DPT) in BIOS ROM
             // The DPT is located at F000:0250 (see bios.rs DISK_PARAMETER_TABLE_OFFSET)
@@ -2767,6 +2720,29 @@ impl PcCpu {
         }
     }
 
+    /// Check if an interrupt vector has been overridden by DOS/OS
+    ///
+    /// Returns true if the OS has installed its own handler (vector doesn't point to BIOS ROM).
+    /// Returns false if the vector still points to BIOS ROM (F000:xxxx) or is uninitialized (0000:0000).
+    ///
+    /// # Arguments
+    /// * `int_num` - The interrupt number (0x00-0xFF)
+    fn is_interrupt_overridden(&self, int_num: u8) -> bool {
+        // Calculate vector table offset (int_num * 4)
+        let vector_offset = (int_num as u32) * 4;
+
+        // Read offset (low word) and segment (high word) from interrupt vector table
+        let offset = self.cpu.memory.read(vector_offset) as u16
+            | ((self.cpu.memory.read(vector_offset + 1) as u16) << 8);
+        let segment = self.cpu.memory.read(vector_offset + 2) as u16
+            | ((self.cpu.memory.read(vector_offset + 3) as u16) << 8);
+
+        // Vector is overridden if:
+        // 1. It's not null (0000:0000) AND
+        // 2. It doesn't point to BIOS ROM (F000:xxxx)
+        (segment != 0 || offset != 0) && segment != 0xF000
+    }
+
     /// Handle INT 1Ah - Time and Date services
     #[allow(dead_code)] // Called dynamically based on interrupt number
     fn handle_int1ah(&mut self) -> u32 {
@@ -3234,9 +3210,14 @@ impl PcCpu {
         match ah {
             0x24 => self.int15h_a20_gate_control(),
             0x41 => self.int15h_wait_on_external_event(),
+            0x4F => self.int15h_keyboard_intercept(),
+            0x86 => self.int15h_wait(),
             0x87 => self.int15h_extended_memory_block_move(),
             0x88 => self.int15h_get_extended_memory_size(),
             0xC0 => self.int15h_get_system_configuration(),
+            0xC1 => self.int15h_get_extended_bios_data_area(),
+            0xC2 => self.int15h_pointing_device(),
+            0xD8 => self.int15h_eisa_functions(),
             0xE8 => {
                 // Get Extended Memory Size (32-bit)
                 let al = (self.cpu.ax & 0xFF) as u8;
@@ -3687,6 +3668,74 @@ impl PcCpu {
             )
         });
 
+        51
+    }
+
+    /// INT 15h, AH=4Fh - Keyboard Intercept
+    /// Called by INT 09h to allow programs to intercept keystrokes
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_keyboard_intercept(&mut self) -> u32 {
+        // AL = scan code
+        // Programs can hook this to intercept keystrokes before they reach the keyboard buffer
+        // If CF is set on return, the keystroke is discarded
+        // If CF is clear, AL contains the (possibly modified) scan code to process
+
+        // Default behavior: pass the scan code through unchanged
+        self.set_carry_flag(false); // CF=0 means process the keystroke
+        51
+    }
+
+    /// INT 15h, AH=86h - Wait (Delay)
+    /// Used by programs to create precise delays
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_wait(&mut self) -> u32 {
+        // CX:DX = interval in microseconds
+        // This should delay for the specified time
+        // For now, we just return success immediately
+        // A proper implementation would track cycles or use a timer
+
+        self.set_carry_flag(false); // CF=0 means success
+        51
+    }
+
+    /// INT 15h, AH=C1h - Get Extended BIOS Data Area Segment
+    /// Returns the segment address of the Extended BIOS Data Area (EBDA)
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_get_extended_bios_data_area(&mut self) -> u32 {
+        // Returns: ES = segment of EBDA
+        // The EBDA is typically located at the top of conventional memory
+        // For compatibility, we return "not supported"
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
+        51
+    }
+
+    /// INT 15h, AH=C2h - Pointing Device (PS/2 Mouse) Functions
+    /// Provides access to PS/2 mouse operations
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_pointing_device(&mut self) -> u32 {
+        // AL = subfunction
+        // Various subfunctions for mouse initialization, status, etc.
+        // For compatibility, we return "not supported"
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
+        51
+    }
+
+    /// INT 15h, AH=D8h - EISA System Functions
+    /// EISA (Extended Industry Standard Architecture) specific functions
+    /// These are hardware-specific and not applicable to most systems
+    #[allow(dead_code)] // Called from handle_int15h
+    fn int15h_eisa_functions(&mut self) -> u32 {
+        // AL = subfunction
+        // EISA-specific operations for system configuration
+        // These functions are only present on EISA systems
+        // Return "not supported" without logging spam
+
+        self.set_carry_flag(true); // CF=1 means function not supported
+        self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x86 << 8); // AH = 0x86 (function not supported)
         51
     }
 
@@ -4918,6 +4967,73 @@ mod tests {
 
         let dh = (cpu.cpu.dx >> 8) & 0xFF;
         assert_eq!(dh, 3); // Max head (0-based, so 4 heads = 0-3)
+
+        // Check DL = number of hard drives (should be 1)
+        let dl = cpu.cpu.dx & 0xFF;
+        assert_eq!(dl, 1); // 1 hard drive installed
+    }
+
+    #[test]
+    fn test_int13h_get_drive_params_returns_correct_drive_count() {
+        // Test that INT 13h AH=08h returns correct drive count in DL
+        let mut bus = PcBus::new();
+
+        // Mount a hard drive
+        bus.mount_hard_drive(vec![0u8; 10 * 1024 * 1024]);
+
+        // Manually set the hard drive count in BDA
+        // The system should read this value
+        bus.write(BDA_HARD_DRIVE_COUNT, 1); // 1 hard drive
+
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr = 0x1000;
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params), DL=80h (hard drive)
+        cpu.cpu.ax = 0x0800;
+        cpu.cpu.dx = 0x0080;
+
+        // Execute INT 13h
+        cpu.step();
+
+        // Check that DL contains the number of hard drives
+        let dl = cpu.cpu.dx & 0xFF;
+        assert_eq!(dl, 1, "DL should contain number of hard drives (1)");
+
+        // Test with floppy drives
+        let mut bus2 = PcBus::new();
+        bus2.mount_floppy_a(vec![0u8; 1474560]); // Mount floppy A
+        let mut cpu2 = PcCpu::new(bus2);
+
+        // Move CPU to RAM
+        cpu2.cpu.cs = 0x0000;
+        cpu2.cpu.ip = 0x1000;
+
+        // Setup: Write INT 13h instruction
+        let addr2 = 0x1000;
+        cpu2.cpu.memory.write(addr2, 0xCD); // INT
+        cpu2.cpu.memory.write(addr2 + 1, 0x13); // 13h
+
+        // Setup registers for AH=08h (get drive params), DL=00h (floppy A)
+        cpu2.cpu.ax = 0x0800;
+        cpu2.cpu.dx = 0x0000;
+
+        // Execute INT 13h
+        cpu2.step();
+
+        // Check that DL contains the number of floppy drives (should be 1)
+        let dl_floppy = cpu2.cpu.dx & 0xFF;
+        assert_eq!(
+            dl_floppy, 1,
+            "DL should contain number of floppy drives (1)"
+        );
     }
 
     #[test]
@@ -5897,6 +6013,85 @@ mod tests {
     }
 
     #[test]
+    fn test_int15h_eisa_functions() {
+        // Test INT 15h AH=D8h (EISA Functions) - should return not supported
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=D8h (EISA functions)
+        cpu.cpu.ax = 0xD800; // AH=D8h, AL=00
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should fail gracefully (CF set, AH=86h = function not supported)
+        assert!(cpu.get_carry_flag());
+        assert_eq!((cpu.cpu.ax >> 8) & 0xFF, 0x86);
+    }
+
+    #[test]
+    fn test_int15h_keyboard_intercept() {
+        // Test INT 15h AH=4Fh (Keyboard Intercept) - should return success
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=4Fh (keyboard intercept)
+        cpu.cpu.ax = 0x4F1C; // AH=4Fh, AL=1Ch (scan code)
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should succeed (CF clear, AL unchanged)
+        assert!(!cpu.get_carry_flag());
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x1C); // AL should be unchanged
+    }
+
+    #[test]
+    fn test_int15h_wait() {
+        // Test INT 15h AH=86h (Wait) - should return success
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 15h instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x15); // 15h
+
+        // Setup registers for AH=86h (wait)
+        cpu.cpu.ax = 0x8600; // AH=86h
+        cpu.cpu.cx = 0x0001; // CX:DX = microseconds to wait
+        cpu.cpu.dx = 0x0000;
+
+        // Execute INT 15h
+        cpu.step();
+
+        // Should succeed (CF clear)
+        assert!(!cpu.get_carry_flag());
+    }
+
+    #[test]
     fn test_int2fh_network_installation_check() {
         // Test INT 2Fh AH=11h (Network Installation Check)
         let bus = PcBus::new();
@@ -5919,6 +6114,161 @@ mod tests {
 
         // AL should be 0xFF (not installed)
         assert_eq!(cpu.cpu.ax & 0xFF, 0xFF);
+    }
+
+    #[test]
+    fn test_interrupt_override() {
+        // Test that OS-installed interrupt handlers are respected
+        // This tests INT 2Ah, but the same logic applies to INT 21h, 28h, 29h, 2Fh, 31h, 33h
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Create a custom handler in RAM at 0x2000:0x0100
+        // Handler will increment AX and return
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler code:
+        // INC AX (40)
+        cpu.cpu.memory.write(handler_addr, 0x40); // INC AX
+        // IRET (CF)
+        cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+
+        // Install custom handler for INT 2Ah (vector at 0x00A8)
+        // NOTE: We manually install this vector since we're not running BIOS init
+        let vector_addr = 0x2A * 4;
+        cpu.cpu.memory.write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu.memory.write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Verify the vector was set correctly
+        let read_offset = cpu.cpu.memory.read(vector_addr) as u16
+            | ((cpu.cpu.memory.read(vector_addr + 1) as u16) << 8);
+        let read_segment = cpu.cpu.memory.read(vector_addr + 2) as u16
+            | ((cpu.cpu.memory.read(vector_addr + 3) as u16) << 8);
+        assert_eq!(
+            read_offset, handler_offset,
+            "Vector offset should be correctly set"
+        );
+        assert_eq!(
+            read_segment, handler_segment,
+            "Vector segment should be correctly set"
+        );
+
+        // Verify is_interrupt_overridden returns true
+        assert!(
+            cpu.is_interrupt_overridden(0x2A),
+            "INT 2Ah should be detected as overridden"
+        );
+
+        // Set up code to call INT 2Ah
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+
+        // Write INT 2Ah instruction
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x2A); // 2Ah
+
+        // Set AX to 0x1234 before calling
+        cpu.cpu.ax = 0x1234;
+
+        // Execute INT 2Ah - should call our custom handler, not the BIOS stub
+        cpu.step(); // Execute INT (jumps to handler)
+        cpu.step(); // Execute INC AX in handler
+        cpu.step(); // Execute IRET (return from handler)
+
+        // Our custom handler should have incremented AX to 0x1235
+        assert_eq!(
+            cpu.cpu.ax, 0x1235,
+            "Custom INT 2Ah handler should have been called and incremented AX"
+        );
+        
+        // Should have returned to the instruction after INT
+        assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(cpu.cpu.ip, 0x1002, "Should return to instruction after INT");
+    }
+
+    #[test]
+    fn test_interrupt_override_bios_default() {
+        // Test that BIOS handlers are used when no OS handler is installed
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Move CPU to RAM
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+
+        // Write INT 2Ah instruction
+        let addr = ((cpu.cpu.cs as u32) << 4) + (cpu.cpu.ip as u32);
+        cpu.cpu.memory.write(addr, 0xCD); // INT
+        cpu.cpu.memory.write(addr + 1, 0x2A); // 2Ah
+
+        // Setup registers for a network API call
+        cpu.cpu.ax = 0x0100; // AH=01h (some function)
+
+        // Execute INT 2Ah - should use BIOS stub (since vector points to F000:0040)
+        cpu.step();
+
+        // BIOS stub returns AL=0 (not installed) and sets CF
+        assert_eq!(cpu.cpu.ax & 0xFF, 0x00, "AL should be 0 (not installed)");
+        assert!(cpu.get_carry_flag(), "CF should be set (error/not installed)");
+    }
+
+    #[test]
+    fn test_core_cpu_interrupt_vector() {
+        // Test that the core CPU correctly executes custom interrupt handlers
+        // This bypasses the PC wrapper to isolate the issue
+        use emu_core::cpu_8086::Cpu8086;
+        
+        let bus = PcBus::new();
+        let mut cpu = Cpu8086::new(bus);
+        
+        // Set up stack
+        cpu.ss = 0x0000;
+        cpu.sp = 0xFFFE;
+        
+        // Create custom handler at 0x2000:0x0100
+        let handler_addr = 0x20100u32;  // Physical address
+        cpu.memory.write(handler_addr, 0x40); // INC AX
+        cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+        
+        // Install vector for INT 2Ah
+        let vector_addr = 0x2A * 4;
+        cpu.memory.write(vector_addr, 0x00); // Offset low: 0x0100
+        cpu.memory.write(vector_addr + 1, 0x01); // Offset high
+        cpu.memory.write(vector_addr + 2, 0x00); // Segment low: 0x2000
+        cpu.memory.write(vector_addr + 3, 0x20); // Segment high
+        
+        // Write INT 2Ah at 0x0000:0x1000
+        cpu.cs = 0x0000;
+        cpu.ip = 0x1000;
+        cpu.memory.write(0x1000, 0xCD); // INT
+        cpu.memory.write(0x1001, 0x2A); // 2Ah
+        
+        cpu.ax = 0x1234;
+        
+        // Execute INT (this will jump to the handler)
+        cpu.step();
+        
+        // Now we're at the handler - execute INC AX
+        cpu.step();
+        
+        // Execute IRET to return
+        cpu.step();
+        
+        // Now we should be back and AX should be incremented
+        assert_eq!(cpu.ax, 0x1235, "Core CPU should execute custom handler and increment AX");
+        assert_eq!(cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(cpu.ip, 0x1002, "Should return to instruction after INT");
     }
 
     #[test]
