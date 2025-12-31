@@ -617,6 +617,7 @@ name = "emu_nes"
 version = "0.1.0"
 dependencies = [
  "emu_core",
+ "glow",
  "serde",
  "serde_json",
  "thiserror",
