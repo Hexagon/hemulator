@@ -345,19 +345,6 @@ impl PcCpu {
 
             // Determine interrupt handling priority based on interrupt range
             let priority = get_interrupt_priority(int_num);
-            // Check for interrupts that can be overridden by DOS/OS
-            // Hardware interrupts and core BIOS services must always be handled by the emulator
-            let can_be_overridden = matches!(
-                int_num,
-                0x21 | // DOS API
-                0x28 | // DOS idle
-                0x29 | // Fast console output
-                0x2A | // Network API
-                0x2F | // Multiplex
-                0x31 | // DPMI
-                0x33 | // Mouse driver
-                0x4A // RTC Alarm
-            );
 
             // Check if we should use the OS handler or the emulated BIOS handler
             let use_emulated_handler = match priority {
