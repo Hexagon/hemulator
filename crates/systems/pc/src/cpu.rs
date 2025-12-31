@@ -230,14 +230,26 @@ impl PcCpu {
                 }
             }
 
-            // Generic interrupt override check: if the OS/DOS has installed a custom
-            // handler for this interrupt, let the CPU execute it normally instead of
-            // intercepting it with our BIOS/emulator handler
-            if self.is_interrupt_overridden(int_num) {
+            // Check for interrupts that can be overridden by DOS/OS
+            // Hardware interrupts and core BIOS services must always be handled by the emulator
+            let can_be_overridden = matches!(
+                int_num,
+                0x21 | // DOS API
+                0x28 | // DOS idle
+                0x29 | // Fast console output
+                0x2A | // Network API
+                0x2F | // Multiplex
+                0x31 | // DPMI
+                0x33 | // Mouse driver
+                0x4A   // RTC Alarm
+            );
+
+            // Generic interrupt override check for software/DOS interrupts
+            if can_be_overridden && self.is_interrupt_overridden(int_num) {
                 // OS has installed a custom handler, let CPU execute it
                 // Fall through to normal execution
             } else {
-                // No OS handler installed, check if we have a BIOS/emulator handler
+                // Use BIOS/emulator handler
                 match int_num {
                     0x05 => return self.handle_int05h(), // Print Screen / BOUND
                     0x08 => return self.handle_int08h(), // Timer tick
