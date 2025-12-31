@@ -76,8 +76,8 @@ impl DebugWindow {
     }
 
     /// Handle mouse click on the debug window
-    /// Returns true if the click was handled
-    pub fn handle_click(&mut self, mouse_x: i32, mouse_y: i32) -> bool {
+    /// Returns (click_handled, should_close)
+    pub fn handle_click(&mut self, mouse_x: i32, mouse_y: i32) -> (bool, bool) {
         let mouse_x = mouse_x as usize;
         let mouse_y = mouse_y as usize;
 
@@ -87,11 +87,24 @@ impl DebugWindow {
             || mouse_y < self.y
             || mouse_y >= self.y + self.height
         {
-            return false;
+            return (false, false);
+        }
+
+        // Check if click is on close button
+        let title_height = 30;
+        let close_btn_size = 20;
+        let close_btn_x = self.x + self.width - close_btn_size - 5;
+        let close_btn_y = self.y + 5;
+
+        if mouse_x >= close_btn_x
+            && mouse_x < close_btn_x + close_btn_size
+            && mouse_y >= close_btn_y
+            && mouse_y < close_btn_y + close_btn_size
+        {
+            return (true, true); // Click handled, should close
         }
 
         // Check if click is on tabs
-        let title_height = 30;
         let tab_y = self.y + title_height;
         let tab_height = 25;
 
@@ -101,11 +114,11 @@ impl DebugWindow {
 
             if let Some(tab) = DebugTab::all().get(clicked_tab) {
                 self.active_tab = *tab;
-                return true;
+                return (true, false); // Click handled, don't close
             }
         }
 
-        true // Click was within window but not on any interactive element
+        (true, false) // Click was within window but not on any interactive element
     }
 
     /// Render the debug window content
@@ -165,6 +178,31 @@ impl DebugWindow {
             "Debug Window",
             x_offset + 10,
             y_offset + 11,
+            0xFFEBDBB2,
+        );
+
+        // Draw close button (X) in top-right corner of title bar
+        let close_btn_size = 20;
+        let close_btn_x = x_offset + win_width - close_btn_size - 5;
+        let close_btn_y = y_offset + 5;
+
+        // Draw close button background
+        for y in close_btn_y..close_btn_y + close_btn_size {
+            for x in close_btn_x..close_btn_x + close_btn_size {
+                if y < height && x < width {
+                    buffer[y * width + x] = 0xFF3C3836;
+                }
+            }
+        }
+
+        // Draw X symbol
+        ui_render::draw_text(
+            &mut buffer,
+            width,
+            height,
+            "X",
+            close_btn_x + 7,
+            close_btn_y + 5,
             0xFFEBDBB2,
         );
 
@@ -592,17 +630,19 @@ impl PopupWindowManager {
         // This prevents clicking through the semi-transparent overlay
         if self.has_open_popup() {
             // Try to handle the click with the debug window if it's open
-            let click_handled = if let Some(ref mut debug_window) = self.debug_window {
-                debug_window.handle_click(mouse_x, mouse_y)
-            } else {
-                false
-            };
-            
-            // If click was outside the window (not handled), close all popups
-            if !click_handled {
+            let (click_handled, should_close) =
+                if let Some(ref mut debug_window) = self.debug_window {
+                    debug_window.handle_click(mouse_x, mouse_y)
+                } else {
+                    (false, false)
+                };
+
+            // Close if requested by the window (e.g., close button clicked)
+            // or if click was outside the window (not handled)
+            if should_close || !click_handled {
                 self.close_all();
             }
-            
+
             // Always consume the click when a popup is open
             return true;
         }
