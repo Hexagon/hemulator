@@ -119,12 +119,20 @@ impl Sdl2Backend {
 
         let event_pump = sdl_context.event_pump()?;
 
-        // Auto-detect and open all connected game controllers
+        // Auto-detect and open all connected game controllers and joysticks
         let mut game_controllers = HashMap::new();
+        let mut joysticks = HashMap::new();
+        let mut gamepad_buttons = HashMap::new();
+        let mut gamepad_axes = HashMap::new();
+        let mut joystick_buttons = HashMap::new();
+        let mut joystick_axes = HashMap::new();
+        let mut joystick_hats = HashMap::new();
+        
         let num_joysticks = joystick_subsystem.num_joysticks()?;
 
         for id in 0..num_joysticks {
             if game_controller_subsystem.is_game_controller(id) {
+                // Open as game controller
                 match game_controller_subsystem.open(id) {
                     Ok(controller) => {
                         let instance_id = controller.instance_id();
@@ -135,9 +143,33 @@ impl Sdl2Backend {
                             instance_id
                         );
                         game_controllers.insert(instance_id, controller);
+                        // Initialize button and axis maps for this controller
+                        gamepad_buttons.insert(instance_id, HashSet::new());
+                        gamepad_axes.insert(instance_id, HashMap::new());
                     }
                     Err(e) => {
                         eprintln!("Failed to open game controller {}: {}", id, e);
+                    }
+                }
+            } else {
+                // Open as regular joystick
+                match joystick_subsystem.open(id) {
+                    Ok(joystick) => {
+                        let instance_id = joystick.instance_id();
+                        println!(
+                            "Opened joystick {}: {} (instance ID: {})",
+                            id,
+                            joystick.name(),
+                            instance_id
+                        );
+                        joysticks.insert(instance_id, joystick);
+                        // Initialize button, axis, and hat maps for this joystick
+                        joystick_buttons.insert(instance_id, HashSet::new());
+                        joystick_axes.insert(instance_id, HashMap::new());
+                        joystick_hats.insert(instance_id, HashMap::new());
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to open joystick {}: {}", id, e);
                     }
                 }
             }
@@ -159,12 +191,12 @@ impl Sdl2Backend {
             mouse_clicks: Vec::new(),
             mouse_position: (0, 0),
             game_controllers,
-            joysticks: HashMap::new(),
-            gamepad_buttons: HashMap::new(),
-            gamepad_axes: HashMap::new(),
-            joystick_buttons: HashMap::new(),
-            joystick_axes: HashMap::new(),
-            joystick_hats: HashMap::new(),
+            joysticks,
+            gamepad_buttons,
+            gamepad_axes,
+            joystick_buttons,
+            joystick_axes,
+            joystick_hats,
         })
     }
 
@@ -572,16 +604,24 @@ impl WindowBackend for Sdl2Backend {
                 }
                 // Game controller events
                 Event::ControllerDeviceAdded { which, .. } => {
-                    if let Ok(controller) = self._game_controller_subsystem.open(which) {
-                        let instance_id = controller.instance_id();
-                        println!(
-                            "Game controller added: {} (instance ID: {})",
-                            controller.name(),
-                            instance_id
-                        );
-                        self.game_controllers.insert(instance_id, controller);
-                        self.gamepad_buttons.insert(instance_id, HashSet::new());
-                        self.gamepad_axes.insert(instance_id, HashMap::new());
+                    match self._game_controller_subsystem.open(which) {
+                        Ok(controller) => {
+                            let instance_id = controller.instance_id();
+                            println!(
+                                "Game controller added: {} (instance ID: {})",
+                                controller.name(),
+                                instance_id
+                            );
+                            self.game_controllers.insert(instance_id, controller);
+                            self.gamepad_buttons.insert(instance_id, HashSet::new());
+                            self.gamepad_axes.insert(instance_id, HashMap::new());
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Failed to open hot-plugged game controller (index {}): {}",
+                                which, err
+                            );
+                        }
                     }
                 }
                 Event::ControllerDeviceRemoved { which, .. } => {
@@ -613,17 +653,22 @@ impl WindowBackend for Sdl2Backend {
                 Event::JoyDeviceAdded { which, .. } => {
                     // Only open if not already opened as a game controller
                     if !self._game_controller_subsystem.is_game_controller(which) {
-                        if let Ok(joystick) = self._joystick_subsystem.open(which) {
-                            let instance_id = joystick.instance_id();
-                            println!(
-                                "Joystick added: {} (instance ID: {})",
-                                joystick.name(),
-                                instance_id
-                            );
-                            self.joysticks.insert(instance_id, joystick);
-                            self.joystick_buttons.insert(instance_id, HashSet::new());
-                            self.joystick_axes.insert(instance_id, HashMap::new());
-                            self.joystick_hats.insert(instance_id, HashMap::new());
+                        match self._joystick_subsystem.open(which) {
+                            Ok(joystick) => {
+                                let instance_id = joystick.instance_id();
+                                println!(
+                                    "Joystick added: {} (instance ID: {})",
+                                    joystick.name(),
+                                    instance_id
+                                );
+                                self.joysticks.insert(instance_id, joystick);
+                                self.joystick_buttons.insert(instance_id, HashSet::new());
+                                self.joystick_axes.insert(instance_id, HashMap::new());
+                                self.joystick_hats.insert(instance_id, HashMap::new());
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to open joystick at index {}: {}", which, err);
+                            }
                         }
                     }
                 }

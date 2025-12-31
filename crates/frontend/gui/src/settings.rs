@@ -122,8 +122,14 @@ pub struct InputConfig {
     #[serde(default = "default_host_modifier")]
     pub host_modifier: String,
 
-    /// Optional controller profiles for advanced input configuration
-    /// If present, these override the simple KeyMapping configs above
+    /// Optional controller profiles for advanced input configuration.
+    ///
+    /// When present, these profiles may be used by the input system to override
+    /// the per-player `KeyMapping` fields (`player1`–`player4`). The mapping
+    /// between a `ControllerProfile` and a specific player (or device) is not
+    /// defined by `InputConfig` itself; instead, it is determined by the code
+    /// that consumes this configuration (for example, by inspecting fields on
+    /// `ControllerProfile` such as player index, device ID, or device type).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profiles: Option<Vec<ControllerProfile>>,
 

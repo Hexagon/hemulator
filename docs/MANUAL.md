@@ -100,9 +100,9 @@ Hemulator supports up to 4 players for systems that support multiple controllers
 
 **Note**: All Player 1 keys are on the left side of the keyboard, and all Player 2 keys are on the right side for comfortable simultaneous play. Players 3 and 4 are not mapped by default but can be configured in `config.json` for systems that support 4 players (future SNES support, etc.).
 
-### Future Enhancements
+### Gamepad and Joystick Support
 
-**Gamepad/Joystick Support**: ✅ **Now Available!** Physical USB gamepads and joysticks are automatically detected and can be used to control games. The emulator supports:
+**✅ Now Available!** Physical USB gamepads and joysticks are automatically detected and can be used to control games. The emulator supports:
 - **Game Controllers**: Xbox, PlayStation, and other controllers using the SDL2 GameController API
 - **Generic Joysticks**: Any USB joystick with buttons, axes, and hat switches
 - **Automatic Detection**: Controllers are detected when plugged in
@@ -505,9 +505,9 @@ Example with gamepad profile:
 - `JoystickAxis`: Joystick axis with direction
 - `JoystickHat`: Joystick hat switch with direction (1=up, 2=right, 4=down, 8=left)
 
-**When profiles are defined**, they take precedence over the simple keyboard mappings for the corresponding device type.
+**When profiles are defined**, they only affect inputs for their own device type (e.g., Gamepad vs Keyboard). For any logical button where both a simple mapping and a profile mapping exist for the same device type, the profile mapping is used and the simple mapping is ignored. Keyboard mappings remain active even when you add a gamepad (or other) profile; profiles add support for additional devices rather than disabling keyboard controls.
 - Empty strings ("") mean that button is unmapped
-- The `x`, `y`, `l`, and `r` buttons are for future SNES support and other systems
+- The `x`, `y`, `l`, and `r` buttons are used for SNES controllers and may also be reused by other systems
 - The `host_modifier` key (default: "RightCtrl") controls when function keys are passed to the emulator vs the PC system
 - The window size is automatically saved when you resize the window
 - CRT filter preference is saved automatically when you cycle filters with F11
