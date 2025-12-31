@@ -42,7 +42,9 @@
 //! Future enhancements could include proper NES mixer simulation with
 //! non-linear output curves.
 
-use emu_core::apu::{NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE};
+use emu_core::apu::{
+    Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+};
 use std::cell::Cell;
 
 /// NES-specific sweep unit for pulse channels.
@@ -187,8 +189,11 @@ pub struct APU {
     pub pulse2: PulseChannel,
     pub(crate) sweep1: NesSweep,
     pub(crate) sweep2: NesSweep,
+    envelope1: Envelope,
+    envelope2: Envelope,
     pub triangle: TriangleChannel,
     pub noise: NoiseChannel,
+    envelope_noise: Envelope,
     cycle_accum: f64,
     timing: TimingMode,
     /// Frame counter for clocking length counters and envelopes
@@ -213,8 +218,11 @@ impl APU {
             pulse2: PulseChannel::new(),
             sweep1: NesSweep::new(true),  // Pulse 1 uses one's complement
             sweep2: NesSweep::new(false), // Pulse 2 uses two's complement
+            envelope1: Envelope::new(),
+            envelope2: Envelope::new(),
             triangle: TriangleChannel::new(),
             noise: NoiseChannel::new(),
+            envelope_noise: Envelope::new(),
             cycle_accum: 0.0,
             timing,
             frame_counter_cycles: 0,
@@ -240,6 +248,12 @@ impl APU {
                 self.pulse1.length_counter_halt = (val & 0x20) != 0;
                 self.pulse1.constant_volume = (val & 0x10) != 0;
                 self.pulse1.envelope = val & 15;
+
+                // Configure the envelope generator
+                // For NES: initial volume is always 15, period comes from bits 0-3
+                // Loop flag from bit 5 (same as length_counter_halt)
+                self.envelope1.set_params(15, false, val & 15);
+                self.envelope1.set_loop(self.pulse1.length_counter_halt);
             }
             0x4001 => {
                 // Sweep: EPPP NSSS
@@ -270,6 +284,8 @@ impl APU {
                 self.pulse1.reset_phase();
                 // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
                 self.sweep1.trigger();
+                // Restart envelope on note trigger
+                self.envelope1.restart();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4003
                 // Length counter index in upper 5 bits
                 // Only reload length counter if channel is enabled
@@ -285,6 +301,10 @@ impl APU {
                 self.pulse2.length_counter_halt = (val & 0x20) != 0;
                 self.pulse2.constant_volume = (val & 0x10) != 0;
                 self.pulse2.envelope = val & 15;
+
+                // Configure the envelope generator
+                self.envelope2.set_params(15, false, val & 15);
+                self.envelope2.set_loop(self.pulse2.length_counter_halt);
             }
             0x4005 => {
                 // Sweep: EPPP NSSS (same format as $4001)
@@ -311,6 +331,8 @@ impl APU {
                 self.pulse2.reset_phase();
                 // Trigger sweep unit (NES sweep doesn't use the frequency parameter)
                 self.sweep2.trigger();
+                // Restart envelope on note trigger
+                self.envelope2.restart();
                 // Note: enabled flag is only controlled by $4015, not by writes to $4007
                 // Only reload length counter if channel is enabled
                 let len_index = (val >> 3) & 0x1F;
@@ -355,6 +377,10 @@ impl APU {
                 self.noise.length_counter_halt = (val & 0x20) != 0;
                 self.noise.constant_volume = (val & 0x10) != 0;
                 self.noise.envelope = val & 0x0F;
+
+                // Configure the envelope generator
+                self.envelope_noise.set_params(15, false, val & 0x0F);
+                self.envelope_noise.set_loop(self.noise.length_counter_halt);
             }
             0x400D => {
                 // Unused
@@ -371,6 +397,8 @@ impl APU {
                 if self.noise.enabled {
                     self.noise.length_counter = LENGTH_TABLE[len_index as usize];
                 }
+                // Restart envelope on note trigger
+                self.envelope_noise.restart();
             }
 
             // APU Enable register
@@ -514,6 +542,11 @@ impl APU {
                 // Check for quarter frame boundaries
                 let curr_quarter = self.frame_counter_cycles / quarter_frame_cycles;
                 if curr_quarter != prev_quarter {
+                    // Clock envelopes at every quarter frame (~240 Hz NTSC, ~200 Hz PAL)
+                    self.envelope1.clock();
+                    self.envelope2.clock();
+                    self.envelope_noise.clock();
+
                     // Length counters clock at quarters 2 and 4 (half frames)
                     // In 4-step mode: quarters 0, 1, 2, 3 -> clock at 1 and 3 (0-indexed)
                     // In 5-step mode: quarters 0, 1, 2, 3, 4 -> clock at 1 and 3 only (NOT at 4)
@@ -548,10 +581,43 @@ impl APU {
                 }
 
                 // Clock all channels
+                // Update envelope volumes before clocking
+                // When constant_volume is false, use envelope decay level; otherwise use the constant value
+                let pulse1_vol = if self.pulse1.constant_volume {
+                    self.pulse1.envelope
+                } else {
+                    self.envelope1.level()
+                };
+                let pulse2_vol = if self.pulse2.constant_volume {
+                    self.pulse2.envelope
+                } else {
+                    self.envelope2.level()
+                };
+                let noise_vol = if self.noise.constant_volume {
+                    self.noise.envelope
+                } else {
+                    self.envelope_noise.level()
+                };
+
+                // Temporarily set envelope values for this sample
+                let saved_p1_env = self.pulse1.envelope;
+                let saved_p2_env = self.pulse2.envelope;
+                let saved_noise_env = self.noise.envelope;
+
+                self.pulse1.envelope = pulse1_vol;
+                self.pulse2.envelope = pulse2_vol;
+                self.noise.envelope = noise_vol;
+
                 let s1 = self.pulse1.clock() as i32;
                 let s2 = self.pulse2.clock() as i32;
                 let s3 = self.triangle.clock() as i32;
                 let s4 = self.noise.clock() as i32;
+
+                // Restore original envelope values
+                self.pulse1.envelope = saved_p1_env;
+                self.pulse2.envelope = saved_p2_env;
+                self.noise.envelope = saved_noise_env;
+
                 acc += s1 + s2 + s3 + s4;
             }
 
