@@ -4,6 +4,9 @@ use crate::settings::ScalingMode;
 use crate::system_adapter::SystemDebugInfo;
 use egui::{ScrollArea, TextureHandle, Ui};
 
+/// Application version constant
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
@@ -501,7 +504,7 @@ impl TabManager {
                 ui.add_space(10.0);
 
                 ui.heading("Version Information");
-                ui.label("Version: 0.1.0");
+                ui.label(format!("Version: {}", APP_VERSION));
                 ui.add_space(10.0);
 
                 ui.heading("License");
