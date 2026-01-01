@@ -7811,40 +7811,77 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // INC reg16 (40-47)
+            // INC reg16/32 (40-47)
             // Note: INC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
+            // On 80386+: With 0x66 prefix, these become PUSH/POP in 32-bit mode
             0x40..=0x47 => {
                 let reg = opcode & 0x07;
-                let val = self.get_reg16(reg);
-                let result = val.wrapping_add(1);
-                let overflow = val == 0x7FFF;
-                // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
-                let af = (val & 0x0F) == 0x0F;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += 2;
-                2
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let val = self.get_reg32(reg);
+                    let result = val.wrapping_add(1);
+                    let overflow = val == 0x7FFFFFFF;
+                    // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
+                    let af = (val & 0x0F) == 0x0F;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 2;
+                    2
+                } else {
+                    // 16-bit operation
+                    let val = self.get_reg16(reg);
+                    let result = val.wrapping_add(1);
+                    let overflow = val == 0x7FFF;
+                    // AF calculation for INC: check if carry from bit 3 to bit 4 in low byte
+                    let af = (val & 0x0F) == 0x0F;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 2;
+                    2
+                }
             }
 
-            // DEC reg16 (48-4F)
+            // DEC reg16/32 (48-4F)
             // Note: DEC does not affect the Carry Flag (CF), only OF/SF/ZF/AF/PF
             0x48..=0x4F => {
                 let reg = opcode & 0x07;
-                let val = self.get_reg16(reg);
-                let result = val.wrapping_sub(1);
-                let overflow = val == 0x8000;
-                // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
-                let af = (val & 0x0F) == 0x00;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += 2;
-                2
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let val = self.get_reg32(reg);
+                    let result = val.wrapping_sub(1);
+                    let overflow = val == 0x80000000;
+                    // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
+                    let af = (val & 0x0F) == 0x00;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 2;
+                    2
+                } else {
+                    // 16-bit operation
+                    let val = self.get_reg16(reg);
+                    let result = val.wrapping_sub(1);
+                    let overflow = val == 0x8000;
+                    // AF calculation for DEC: check if borrow from bit 4 to bit 3 in low byte
+                    let af = (val & 0x0F) == 0x00;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 2;
+                    2
+                }
             }
 
             // PUSH reg16 (50-57)
