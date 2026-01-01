@@ -943,6 +943,11 @@ impl Tia {
 
     /// Get the color of a pixel at the given position using latched state
     fn get_pixel_color(state: &ScanlineState, x: usize) -> u32 {
+        // During VBLANK, all pixels are black (video signal is blanked)
+        if state.vblank {
+            return 0xFF000000; // Black
+        }
+
         // Priority order (when playfield priority is off):
         // 1. Player 0, Missile 0
         // 2. Player 1, Missile 1
