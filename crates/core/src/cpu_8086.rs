@@ -5984,7 +5984,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // 0x81 - r/m16, imm16
+            // 0x81 - r/m16/32, imm16/32
             0x81 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
@@ -5992,21 +5992,16 @@ impl<M: Memory8086> Cpu8086<M> {
                 // Check for operand-size override (0x66 prefix)
                 if self.operand_size_override && self.model.supports_80386_instructions() {
                     // 32-bit operand size
-                    let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
-                    // Fetch 32-bit immediate but only use lower 16 bits for now
-                    let imm_low = self.fetch_u16();
-                    let _imm_high = self.fetch_u16();
-                    let imm = imm_low; // Use only lower 16 bits in 16-bit mode
-                                       // NOTE: In true 32-bit mode, we'd use the full 32-bit value
-                                       // For now, just consume the bytes to keep instruction stream in sync
+                    let (rm_val, cached_seg, cached_offset) = self.read_rmw32(modbits, rm);
+                    let imm = self.fetch_u32();
 
                     let result = match op {
                         0 => {
                             // ADD
                             let r = rm_val.wrapping_add(imm);
-                            let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
-                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
-                            let af = Self::calc_af_add_16(rm_val, imm);
+                            let carry = (rm_val as u64 + imm as u64) > 0xFFFFFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_add_32(rm_val, imm);
                             self.set_flag(FLAG_CF, carry);
                             self.set_flag(FLAG_OF, overflow);
                             self.set_flag(FLAG_AF, af);
@@ -6021,10 +6016,10 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                         2 => {
                             // ADC
-                            let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                            let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
                             let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
-                            let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
-                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                            let carry = (rm_val as u64 + imm as u64 + carry_in as u64) > 0xFFFFFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80000000) != 0;
                             let af = (((rm_val & 0x0F) + (imm & 0x0F) + carry_in) & 0x10) != 0;
                             self.set_flag(FLAG_CF, carry);
                             self.set_flag(FLAG_OF, overflow);
@@ -6033,10 +6028,10 @@ impl<M: Memory8086> Cpu8086<M> {
                         }
                         3 => {
                             // SBB
-                            let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                            let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
                             let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
-                            let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
-                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                            let borrow = (rm_val as u64) < (imm as u64 + carry_in as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
                             let af = (rm_val & 0x0F) < ((imm & 0x0F) + carry_in);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
@@ -6053,9 +6048,9 @@ impl<M: Memory8086> Cpu8086<M> {
                         5 => {
                             // SUB
                             let r = rm_val.wrapping_sub(imm);
-                            let borrow = (rm_val as u32) < (imm as u32);
-                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
-                            let af = Self::calc_af_sub_16(rm_val, imm);
+                            let borrow = (rm_val as u64) < (imm as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_sub_32(rm_val, imm);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             self.set_flag(FLAG_AF, af);
@@ -6071,10 +6066,10 @@ impl<M: Memory8086> Cpu8086<M> {
                         7 => {
                             // CMP
                             let r = rm_val.wrapping_sub(imm);
-                            let borrow = (rm_val as u32) < (imm as u32);
-                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
-                            let af = Self::calc_af_sub_16(rm_val, imm);
-                            self.update_flags_16(r);
+                            let borrow = (rm_val as u64) < (imm as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_sub_32(rm_val, imm);
+                            self.update_flags_32(r);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
                             self.set_flag(FLAG_AF, af);
@@ -6084,8 +6079,8 @@ impl<M: Memory8086> Cpu8086<M> {
                         _ => unreachable!(),
                     };
                     if op != 7 {
-                        self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
-                        self.update_flags_16(result);
+                        self.write_rmw32(modbits, rm, result, cached_seg, cached_offset);
+                        self.update_flags_32(result);
                     }
                     self.cycles += if modbits == 0b11 { 4 } else { 17 };
                     if modbits == 0b11 {
@@ -6199,13 +6194,113 @@ impl<M: Memory8086> Cpu8086<M> {
                 self.step()
             }
 
-            // 0x83 - r/m16, imm8 (sign-extended)
+            // 0x83 - r/m16/32, imm8 (sign-extended)
             0x83 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
-                let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
-                let result = match op {
+
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation with sign-extended 8-bit immediate
+                    let (rm_val, cached_seg, cached_offset) = self.read_rmw32(modbits, rm);
+                    let imm = self.fetch_u8() as i8 as i32 as u32; // Sign extend to 32-bit
+                    let result = match op {
+                        0 => {
+                            // ADD
+                            let r = rm_val.wrapping_add(imm);
+                            let carry = (rm_val as u64 + imm as u64) > 0xFFFFFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_add_32(rm_val, imm);
+                            self.set_flag(FLAG_CF, carry);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        1 => {
+                            // OR
+                            let r = rm_val | imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        2 => {
+                            // ADC
+                            let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                            let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
+                            let carry = (rm_val as u64 + imm as u64 + carry_in as u64) > 0xFFFFFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x80000000) != 0;
+                            let af = (((rm_val & 0x0F) + (imm & 0x0F) + carry_in) & 0x10) != 0;
+                            self.set_flag(FLAG_CF, carry);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        3 => {
+                            // SBB
+                            let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                            let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
+                            let borrow = (rm_val as u64) < (imm as u64 + carry_in as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
+                            let af = (rm_val & 0x0F) < ((imm & 0x0F) + carry_in);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        4 => {
+                            // AND
+                            let r = rm_val & imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        5 => {
+                            // SUB
+                            let r = rm_val.wrapping_sub(imm);
+                            let borrow = (rm_val as u64) < (imm as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_sub_32(rm_val, imm);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        6 => {
+                            // XOR
+                            let r = rm_val ^ imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        7 => {
+                            // CMP
+                            let r = rm_val.wrapping_sub(imm);
+                            let borrow = (rm_val as u64) < (imm as u64);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x80000000) != 0;
+                            let af = Self::calc_af_sub_32(rm_val, imm);
+                            self.update_flags_32(r);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                            return if modbits == 0b11 { 4 } else { 17 };
+                        }
+                        _ => unreachable!(),
+                    };
+                    if op != 7 {
+                        self.write_rmw32(modbits, rm, result, cached_seg, cached_offset);
+                        self.update_flags_32(result);
+                    }
+                    self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        17
+                    }
+                } else {
+                    // 16-bit operation with sign-extended 8-bit immediate
+                    let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
+                    let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
+                    let result = match op {
                     0 => {
                         // ADD
                         let r = rm_val.wrapping_add(imm);
@@ -6297,6 +6392,7 @@ impl<M: Memory8086> Cpu8086<M> {
                     4
                 } else {
                     17
+                }
                 }
             }
 
