@@ -2987,9 +2987,8 @@ impl PcCpu {
             self.cpu.ax &= 0x00FF; // AH = 0 (success)
             self.set_carry_flag(false);
 
-            // Return lock status in AL
-            // For simplicity, always report as unlocked (AL=0)
-            self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00;
+            // Return lock status in AL (reflect requested state)
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | (al as u32);
         } else {
             // Invalid subfunction
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
@@ -3105,8 +3104,7 @@ impl PcCpu {
         // Return status in AL
         self.cpu.ax = (self.cpu.ax & 0xFF00) | (media_status as u32);
 
-        // AH = 0 (success)
-        self.cpu.ax &= 0x00FF;
+        // AH = 0 (success) - already set by the operation above clearing the high byte
         self.set_carry_flag(false);
 
         51

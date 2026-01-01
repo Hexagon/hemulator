@@ -9,7 +9,7 @@
 Both **INT 10h (Video BIOS)** and **INT 13h (Disk Services)** implementations are **production-ready** and provide **excellent DOS/Windows compatibility**. No changes are required.
 
 - **INT 10h**: 95%+ coverage (23/27 functions)
-- **INT 13h**: 90%+ coverage (16/31 functions)
+- **INT 13h**: ~65% coverage (20/31 functions, including CD-ROM extensions)
 
 Missing functions are obsolete, hardware-specific, or diagnostic tools that are never used in real DOS/Windows applications.
 
@@ -86,9 +86,9 @@ These functions are rarely or never used in DOS applications:
 
 ## INT 13h (Disk BIOS Services)
 
-### Status: ✅ EXCELLENT (90%+ coverage)
+### Status: ✅ EXCELLENT (~65% coverage)
 
-**16 functions implemented** covering all critical disk operations for both legacy CHS and modern LBA addressing.
+**20 functions implemented** covering all critical disk operations for both legacy CHS and modern LBA addressing, plus CD-ROM extensions.
 
 ### Implemented Functions
 
@@ -114,9 +114,15 @@ These functions are rarely or never used in DOS applications:
 - ✅ **AH=44h**: Extended verify sectors (LBA)
 - ✅ **AH=48h**: Get extended drive parameters
 
+#### CD-ROM Functions (AH=45h-4Eh)
+- ✅ **AH=45h**: Lock/unlock drive
+- ✅ **AH=46h**: Eject media
+- ✅ **AH=47h**: Extended seek
+- ✅ **AH=4Eh**: Get media status
+
 ### Missing Functions (Low Priority)
 
-These functions are diagnostic, obsolete, or CD-ROM specific:
+These functions are diagnostic, obsolete, or rarely used:
 
 #### Format Functions
 - ❌ **AH=06h-07h**: Format track with bad sector table
@@ -143,13 +149,10 @@ These functions are diagnostic, obsolete, or CD-ROM specific:
   - **Reason**: Rarely used
   - **Priority**: Very Low
 
-#### CD-ROM/Removable Media
-- ❌ **AH=45h**: Lock/unlock drive
-- ❌ **AH=46h**: Eject media
-- ❌ **AH=47h**: Extended seek
-- ❌ **AH=49h-4Eh**: Various extended functions
-  - **Reason**: CD-ROM and removable media specific
-  - **Priority**: Low (for CD-ROM emulation)
+#### Additional CD-ROM Functions
+- ❌ **AH=49h-4Dh**: Various extended CD-ROM functions
+  - **Reason**: Advanced CD-ROM features, rarely used
+  - **Priority**: Very Low
 
 ### Key Features
 
@@ -200,13 +203,13 @@ These functions are diagnostic, obsolete, or CD-ROM specific:
 
 Both implementations are complete and production-ready. No changes are required for full DOS/Windows compatibility.
 
-### Future Enhancements (Optional, Low Priority)
+### Enhancements and Notes (Optional, Low Priority)
 
-If CD-ROM emulation is added in the future:
+CD-ROM emulation support has been added, including:
 1. **INT 13h AH=45h-46h**: Lock/unlock and eject media
-2. **INT 13h AH=49h-4Eh**: CD-ROM specific extended functions
+2. **INT 13h AH=47h, 4Eh**: Extended seek and media status
 
-If VESA graphics support is desired:
+If VESA graphics support is desired in the future:
 1. **INT 10h AH=4Fh**: VESA VBE functions (requires separate VESA BIOS)
 
 ---
