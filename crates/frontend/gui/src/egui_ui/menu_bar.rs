@@ -18,7 +18,7 @@ pub enum MenuAction {
 
     // View menu
     Screenshot,
-    
+
     // Help menu
     ShowHelp,
     About,
@@ -36,7 +36,7 @@ impl MenuBar {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
-        egui::menu::bar(ui, |ui| {
+        ui.horizontal(|ui| {
             // File menu
             ui.menu_button("File", |ui| {
                 if ui.button("Open ROM... (F3)").clicked() {

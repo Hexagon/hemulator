@@ -25,7 +25,10 @@ impl SystemDebugInfo {
 
     pub fn from_nes(info: &emu_nes::DebugInfo) -> Self {
         let mut debug_info = Self::new("NES".to_string());
-        debug_info.add_field("Mapper".to_string(), format!("{} ({})", info.mapper_name, info.mapper_number));
+        debug_info.add_field(
+            "Mapper".to_string(),
+            format!("{} ({})", info.mapper_name, info.mapper_number),
+        );
         debug_info.add_field("Timing".to_string(), format!("{:?}", info.timing_mode));
         debug_info.add_field("PRG Banks".to_string(), format!("{}", info.prg_banks));
         debug_info.add_field("CHR Banks".to_string(), format!("{}", info.chr_banks));
@@ -58,7 +61,10 @@ impl SystemDebugInfo {
 
     pub fn from_pc(info: &emu_pc::DebugInfo) -> Self {
         let mut debug_info = Self::new("PC".to_string());
-        debug_info.add_field("CS:IP".to_string(), format!("{:04X}:{:04X}", info.cs, info.ip));
+        debug_info.add_field(
+            "CS:IP".to_string(),
+            format!("{:04X}:{:04X}", info.cs, info.ip),
+        );
         debug_info.add_field("AX".to_string(), format!("${:04X}", info.ax));
         debug_info.add_field("BX".to_string(), format!("${:04X}", info.bx));
         debug_info.add_field("CX".to_string(), format!("${:04X}", info.cx));
@@ -76,8 +82,14 @@ impl SystemDebugInfo {
         let mut debug_info = Self::new("SNES".to_string());
         debug_info.add_field("ROM Size".to_string(), format!("{} bytes", info.rom_size));
         debug_info.add_field("SMC Header".to_string(), format!("{}", info.has_smc_header));
-        debug_info.add_field("PBR:PC".to_string(), format!("{:02X}:{:04X}", info.pbr, info.pc));
-        debug_info.add_field("Emulation Mode".to_string(), format!("{}", info.emulation_mode));
+        debug_info.add_field(
+            "PBR:PC".to_string(),
+            format!("{:02X}:{:04X}", info.pbr, info.pc),
+        );
+        debug_info.add_field(
+            "Emulation Mode".to_string(),
+            format!("{}", info.emulation_mode),
+        );
         debug_info
     }
 
@@ -87,14 +99,22 @@ impl SystemDebugInfo {
         debug_info.add_field("ROM Size".to_string(), format!("{} MB", info.rom_size_mb));
         debug_info.add_field("PC".to_string(), format!("${:016X}", info.pc));
         debug_info.add_field("RSP Microcode".to_string(), info.rsp_microcode.clone());
-        debug_info.add_field("RSP Vertex Count".to_string(), format!("{}", info.rsp_vertex_count));
+        debug_info.add_field(
+            "RSP Vertex Count".to_string(),
+            format!("{}", info.rsp_vertex_count),
+        );
         debug_info.add_field("RDP Status".to_string(), format!("{:?}", info.rdp_status));
-        debug_info.add_field("Framebuffer".to_string(), info.framebuffer_resolution.clone());
+        debug_info.add_field(
+            "Framebuffer".to_string(),
+            info.framebuffer_resolution.clone(),
+        );
         debug_info
     }
 }
 
 /// Configuration options for different system types
+#[allow(clippy::upper_case_acronyms)]
+#[allow(dead_code)]
 pub enum SystemConfig {
     NES(NesConfig),
     GameBoy(GameBoyConfig),
@@ -104,6 +124,7 @@ pub enum SystemConfig {
     N64(N64Config),
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct NesConfig {
     pub ppu_show_sprites: bool,
@@ -111,6 +132,7 @@ pub struct NesConfig {
     pub apu_channels_enabled: [bool; 5], // Pulse1, Pulse2, Triangle, Noise, DMC
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct GameBoyConfig {
     pub ppu_show_sprites: bool,
@@ -118,23 +140,27 @@ pub struct GameBoyConfig {
     pub ppu_show_window: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct Atari2600Config {
     pub tia_show_playfield: bool,
     pub tia_show_sprites: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct PcConfig {
     pub show_bda_inspector: bool,
     pub video_adapter: String,
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct SnesConfig {
     pub ppu_mode: u8,
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct N64Config {
     pub rdp_enable_texturing: bool,
@@ -142,6 +168,7 @@ pub struct N64Config {
 }
 
 impl SystemConfig {
+    #[allow(dead_code)]
     pub fn system_name(&self) -> &str {
         match self {
             SystemConfig::NES(_) => "NES",

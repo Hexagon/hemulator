@@ -56,14 +56,17 @@ impl TabManager {
         // Tab bar
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.active_tab, Tab::Emulator, "Emulator");
-            
+
             if self.log_messages.is_empty() {
-                ui.add_enabled(false, egui::SelectableLabel::new(false, "Log"));
+                ui.add_enabled(false, egui::Button::new("Log"));
             } else {
-                ui.selectable_value(&mut self.active_tab, Tab::Log, 
-                    format!("Log ({})", self.log_messages.len()));
+                ui.selectable_value(
+                    &mut self.active_tab,
+                    Tab::Log,
+                    format!("Log ({})", self.log_messages.len()),
+                );
             }
-            
+
             if self.help_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "Help");
                 if ui.button("✖").on_hover_text("Close Help tab").clicked() {
@@ -73,7 +76,7 @@ impl TabManager {
                     }
                 }
             }
-            
+
             if self.debug_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Debug, "Debug");
                 if ui.button("✖").on_hover_text("Close Debug tab").clicked() {
@@ -103,10 +106,10 @@ impl TabManager {
                 let available_size = ui.available_size();
                 let texture_size = texture.size_vec2();
                 let aspect_ratio = texture_size.x / texture_size.y;
-                
+
                 let display_width = available_size.x.min(available_size.y * aspect_ratio);
                 let display_height = display_width / aspect_ratio;
-                
+
                 let image = egui::Image::from_texture(texture)
                     .fit_to_exact_size(egui::vec2(display_width, display_height));
                 ui.add(image);
@@ -136,27 +139,27 @@ impl TabManager {
             .show(ui, |ui| {
                 ui.heading("Hemulator - Controls & Help");
                 ui.separator();
-                
+
                 ui.heading("File Operations");
                 ui.label("F3 - Open ROM");
                 ui.label("ESC - Exit");
                 ui.add_space(10.0);
-                
+
                 ui.heading("Emulation");
                 ui.label("F2 - Reset");
                 ui.label("P - Pause/Resume");
                 ui.add_space(10.0);
-                
+
                 ui.heading("Save States");
                 ui.label("F5-F9 - Save to slots 1-5");
                 ui.label("Shift+F5-F9 - Load from slots 1-5");
                 ui.add_space(10.0);
-                
+
                 ui.heading("View");
                 ui.label("F4 - Screenshot");
                 ui.label("F1 - Toggle Debug Info");
                 ui.add_space(10.0);
-                
+
                 ui.heading("Default Controls");
                 ui.label("Z - A Button");
                 ui.label("X - B Button");
@@ -164,7 +167,7 @@ impl TabManager {
                 ui.label("Shift - Select");
                 ui.label("Arrow Keys - D-Pad");
                 ui.add_space(10.0);
-                
+
                 ui.label("For system-specific information and additional controls,");
                 ui.label("see the manual at docs/MANUAL.md");
             });
@@ -177,7 +180,7 @@ impl TabManager {
                 if let Some(ref debug_info) = self.debug_info {
                     ui.heading(format!("{} Debug Information", debug_info.system_type));
                     ui.separator();
-                    
+
                     egui::Grid::new("debug_grid")
                         .num_columns(2)
                         .spacing([40.0, 4.0])

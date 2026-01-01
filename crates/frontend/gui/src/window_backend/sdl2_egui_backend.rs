@@ -1,11 +1,12 @@
 //! SDL2 backend with egui integration using egui-sdl2-gl
 
 use crate::window_backend::{Key, WindowBackend};
-use egui_sdl2_gl::{EguiStateHandler, painter::Painter, ShaderVersion};
+use egui_sdl2_gl::{painter::Painter, EguiStateHandler, ShaderVersion};
 use std::any::Any;
 use std::error::Error;
 
 pub struct Sdl2EguiBackend {
+    #[allow(dead_code)]
     sdl_context: sdl2::Sdl,
     window: sdl2::video::Window,
     _gl_context: sdl2::video::GLContext,
@@ -13,7 +14,7 @@ pub struct Sdl2EguiBackend {
     egui_state: EguiStateHandler,
     egui_ctx: egui::Context,
     event_pump: sdl2::EventPump,
-    
+
     // State tracking
     keys_down: std::collections::HashSet<Key>,
     keys_pressed: std::collections::HashSet<Key>,
@@ -90,11 +91,8 @@ impl Sdl2EguiBackend {
 
         // Paint
         let clipped_primitives = self.egui_ctx.tessellate(shapes, pixels_per_point);
-        self.painter.paint_jobs(
-            None,
-            textures_delta,
-            clipped_primitives,
-        );
+        self.painter
+            .paint_jobs(None, textures_delta, clipped_primitives);
 
         self.window.gl_swap_window();
     }
@@ -108,17 +106,20 @@ impl Sdl2EguiBackend {
 
         // Collect events first to avoid borrow checker issues
         let events: Vec<_> = self.event_pump.poll_iter().collect();
-        
+
         for event in events {
             // Process event with egui state handler
-            self.egui_state.process_input(&self.window, event.clone(), &mut self.painter);
-            
+            self.egui_state
+                .process_input(&self.window, event.clone(), &mut self.painter);
+
             // Also process for emulator controls
             match event {
                 sdl2::event::Event::Quit { .. } => {
                     return false;
                 }
-                sdl2::event::Event::KeyDown { keycode, scancode, .. } => {
+                sdl2::event::Event::KeyDown {
+                    keycode, scancode, ..
+                } => {
                     if let Some(keycode) = keycode {
                         if let Some(key) = sdl_keycode_to_key(keycode) {
                             self.keys_down.insert(key);
@@ -129,7 +130,9 @@ impl Sdl2EguiBackend {
                         self.sdl2_scancodes_pressed.push(scancode);
                     }
                 }
-                sdl2::event::Event::KeyUp { keycode, scancode, .. } => {
+                sdl2::event::Event::KeyUp {
+                    keycode, scancode, ..
+                } => {
                     if let Some(keycode) = keycode {
                         if let Some(key) = sdl_keycode_to_key(keycode) {
                             self.keys_down.remove(&key);

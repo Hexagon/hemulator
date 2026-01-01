@@ -1,4 +1,5 @@
 pub mod display_filter;
+pub mod egui_ui;
 mod hemu_project;
 mod rom_detect;
 mod save_state;
@@ -7,10 +8,9 @@ mod system_adapter;
 mod ui_render;
 pub mod video_processor;
 pub mod window_backend;
-pub mod egui_ui;
 
-use emu_core::{types::Frame, System};
 use egui_ui::EguiApp;
+use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
@@ -35,6 +35,7 @@ struct RuntimeState {
 }
 
 impl RuntimeState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             current_project_path: None,
@@ -42,6 +43,7 @@ impl RuntimeState {
         }
     }
 
+    #[allow(dead_code)]
     fn set_mount(&mut self, mount_id: String, path: String) {
         self.current_mounts.insert(mount_id, path);
     }
@@ -66,6 +68,7 @@ impl RuntimeState {
         self.current_project_path = None;
     }
 
+    #[allow(dead_code)]
     fn get_project_filename(&self) -> Option<String> {
         self.current_project_path.as_ref().and_then(|p| {
             p.file_name()
@@ -87,6 +90,7 @@ enum EmulatorSystem {
     N64(Box<emu_n64::N64System>),
 }
 
+#[allow(dead_code)]
 impl EmulatorSystem {
     fn step_frame(&mut self) -> Result<Frame, Box<dyn std::error::Error>> {
         match self {
@@ -122,6 +126,7 @@ impl EmulatorSystem {
         }
     }
 
+    #[allow(dead_code)]
     fn mount(
         &mut self,
         mount_point_id: &str,
@@ -149,6 +154,7 @@ impl EmulatorSystem {
         }
     }
 
+    #[allow(dead_code)]
     fn mount_points(&self) -> Vec<emu_core::MountPointInfo> {
         match self {
             EmulatorSystem::NES(sys) => sys.mount_points(),
@@ -160,6 +166,7 @@ impl EmulatorSystem {
         }
     }
 
+    #[allow(dead_code)]
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             EmulatorSystem::NES(sys) => sys
@@ -655,6 +662,7 @@ impl Source for StreamSource {
 
 /// Save current emulation state to a .hemu project file
 /// Works for all systems, not just PC
+#[allow(dead_code)]
 fn save_project(
     sys: &EmulatorSystem,
     runtime_state: &RuntimeState,
@@ -759,6 +767,7 @@ fn save_project(
 /// Save a screenshot to the screenshots directory
 /// Format: screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png
 /// where RRR is a random number between 000 and 999
+#[allow(dead_code)]
 fn save_screenshot(
     buffer: &[u32],
     width: usize,
@@ -809,6 +818,7 @@ fn save_screenshot(
 
 /// Create a file dialog with individual filters for each file type plus an "All Files" option
 /// This improves the user experience by allowing them to filter by specific file types
+#[allow(dead_code)]
 fn create_file_dialog(mount_point: &emu_core::MountPointInfo) -> rfd::FileDialog {
     let mut dialog = rfd::FileDialog::new();
 
@@ -1857,7 +1867,7 @@ fn main() {
     }
 
     // Get resolution from the system
-    let (mut width, mut height) = sys.resolution();
+    let (width, height) = sys.resolution();
 
     // Window size is user-resizable and persisted; buffer size stays at native resolution.
     let window_width = settings.window_width.max(width);
@@ -1921,6 +1931,7 @@ fn main() {
         GameSaves::default()
     };
 
+    #[allow(dead_code)]
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
         let mut out = Vec::with_capacity(base.len());
@@ -2000,7 +2011,13 @@ fn main() {
                 MenuAction::OpenRom => {
                     // Open ROM file dialog
                     if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("ROM Files", &["nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe"])
+                        .add_filter(
+                            "ROM Files",
+                            &[
+                                "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
+                                "com", "exe",
+                            ],
+                        )
                         .add_filter("All Files", &["*"])
                         .pick_file()
                     {
@@ -2017,16 +2034,17 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::NES(Box::new(nes_sys));
                                         egui_app.property_pane.system_name = "NES".to_string();
-                                        runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                        runtime_state
+                                            .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("NES ROM loaded".to_string());
+                                        egui_app
+                                            .status_bar
+                                            .set_message("NES ROM loaded".to_string());
                                         // Update resolution
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Ok(SystemType::GameBoy) => {
@@ -2039,15 +2057,16 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
                                         egui_app.property_pane.system_name = "Game Boy".to_string();
-                                        runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                        runtime_state
+                                            .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("Game Boy ROM loaded".to_string());
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        egui_app
+                                            .status_bar
+                                            .set_message("Game Boy ROM loaded".to_string());
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Ok(SystemType::Atari2600) => {
@@ -2059,16 +2078,18 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                                        egui_app.property_pane.system_name = "Atari 2600".to_string();
-                                        runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                        egui_app.property_pane.system_name =
+                                            "Atari 2600".to_string();
+                                        runtime_state
+                                            .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("Atari 2600 ROM loaded".to_string());
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        egui_app
+                                            .status_bar
+                                            .set_message("Atari 2600 ROM loaded".to_string());
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Ok(SystemType::PC) => {
@@ -2081,15 +2102,16 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::PC(Box::new(pc_sys));
                                         egui_app.property_pane.system_name = "PC".to_string();
-                                        runtime_state.set_mount("Disk".to_string(), path_str.clone());
+                                        runtime_state
+                                            .set_mount("Disk".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("PC executable loaded".to_string());
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        egui_app
+                                            .status_bar
+                                            .set_message("PC executable loaded".to_string());
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Ok(SystemType::SNES) => {
@@ -2102,15 +2124,16 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::SNES(Box::new(snes_sys));
                                         egui_app.property_pane.system_name = "SNES".to_string();
-                                        runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                        runtime_state
+                                            .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("SNES ROM loaded".to_string());
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        egui_app
+                                            .status_bar
+                                            .set_message("SNES ROM loaded".to_string());
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Ok(SystemType::N64) => {
@@ -2123,23 +2146,28 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::N64(Box::new(n64_sys));
                                         egui_app.property_pane.system_name = "N64".to_string();
-                                        runtime_state.set_mount("Cartridge".to_string(), path_str.clone());
+                                        runtime_state
+                                            .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
-                                        egui_app.status_bar.set_message("N64 ROM loaded".to_string());
-                                        let (w, h) = sys.resolution();
-                                        width = w;
-                                        height = h;
+                                        egui_app
+                                            .status_bar
+                                            .set_message("N64 ROM loaded".to_string());
+                                        let _ = sys.resolution();
                                     }
                                 }
                                 Err(e) => {
-                                    egui_app.status_bar.set_message(format!("Error detecting ROM type: {}", e));
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error detecting ROM type: {}", e));
                                 }
                             },
                             Err(e) => {
-                                egui_app.status_bar.set_message(format!("Error reading file: {}", e));
+                                egui_app
+                                    .status_bar
+                                    .set_message(format!("Error reading file: {}", e));
                             }
                         }
                     }
@@ -2159,7 +2187,7 @@ fn main() {
                 MenuAction::Screenshot => {
                     // Take screenshot of current frame
                     if rom_loaded {
-                        if let Some(texture) = &egui_app.emulator_texture {
+                        if egui_app.emulator_texture.is_some() {
                             // Generate filename with timestamp
                             use std::time::SystemTime;
                             let timestamp = SystemTime::now()
@@ -2168,14 +2196,20 @@ fn main() {
                                 .as_secs();
                             let system_name = egui_app.property_pane.system_name.replace(" ", "_");
                             let filename = format!("screenshot_{}_{}.png", system_name, timestamp);
-                            
+
                             // Get texture data and save it
                             // Note: For now, we'll just show a message. Full implementation would require
                             // accessing the texture data and using an image library like `image` crate
-                            egui_app.status_bar.set_message(format!("Screenshot saved: {}", filename));
-                            egui_app.tab_manager.add_log(format!("Screenshot: {}", filename));
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Screenshot saved: {}", filename));
+                            egui_app
+                                .tab_manager
+                                .add_log(format!("Screenshot: {}", filename));
                         } else {
-                            egui_app.status_bar.set_message("No frame to capture".to_string());
+                            egui_app
+                                .status_bar
+                                .set_message("No frame to capture".to_string());
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
@@ -2185,7 +2219,9 @@ fn main() {
                     egui_app.tab_manager.show_help_tab();
                 }
                 MenuAction::About => {
-                    egui_app.status_bar.set_message("Hemulator Multi-System Emulator".to_string());
+                    egui_app
+                        .status_bar
+                        .set_message("Hemulator Multi-System Emulator".to_string());
                 }
                 _ => {}
             }
@@ -2202,14 +2238,24 @@ fn main() {
                                 let state = sys.save_state();
                                 let state_json = serde_json::to_string(&state).unwrap_or_default();
                                 _game_saves = GameSaves::load(hash);
-                                if let Err(e) = _game_saves.save_slot(slot, state_json.as_bytes(), hash) {
-                                    egui_app.status_bar.set_message(format!("Error saving state: {}", e));
+                                if let Err(e) =
+                                    _game_saves.save_slot(slot, state_json.as_bytes(), hash)
+                                {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error saving state: {}", e));
                                 } else {
-                                    egui_app.status_bar.set_message(format!("Saved to slot {}", slot));
-                                    egui_app.tab_manager.add_log(format!("State saved to slot {}", slot));
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Saved to slot {}", slot));
+                                    egui_app
+                                        .tab_manager
+                                        .add_log(format!("State saved to slot {}", slot));
                                 }
                             } else {
-                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
                             }
                         }
                     } else {
@@ -2226,24 +2272,41 @@ fn main() {
                                         if let Ok(state_str) = String::from_utf8(data) {
                                             if let Ok(state) = serde_json::from_str(&state_str) {
                                                 if let Err(e) = sys.load_state(&state) {
-                                                    egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Error loading state: {}",
+                                                        e
+                                                    ));
                                                 } else {
-                                                    egui_app.status_bar.set_message(format!("Loaded from slot {}", slot));
-                                                    egui_app.tab_manager.add_log(format!("State loaded from slot {}", slot));
+                                                    egui_app.status_bar.set_message(format!(
+                                                        "Loaded from slot {}",
+                                                        slot
+                                                    ));
+                                                    egui_app.tab_manager.add_log(format!(
+                                                        "State loaded from slot {}",
+                                                        slot
+                                                    ));
                                                 }
                                             } else {
-                                                egui_app.status_bar.set_message("Invalid state data".to_string());
+                                                egui_app
+                                                    .status_bar
+                                                    .set_message("Invalid state data".to_string());
                                             }
                                         } else {
-                                            egui_app.status_bar.set_message("Invalid state encoding".to_string());
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Invalid state encoding".to_string());
                                         }
                                     }
                                     Err(e) => {
-                                        egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error loading state: {}", e));
                                     }
                                 }
                             } else {
-                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                                egui_app.status_bar.set_message(
+                                    "Save states not supported for this system".to_string(),
+                                );
                             }
                         }
                     } else {
@@ -2338,5 +2401,4 @@ fn main() {
         }
         last_frame = Instant::now();
     }
-
 }

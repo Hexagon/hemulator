@@ -25,8 +25,8 @@ impl DisplayFilter {
 /// Actions that can be triggered from the property pane
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyAction {
-    SaveState(u8),  // Slot number 1-5
-    LoadState(u8),  // Slot number 1-5
+    SaveState(u8), // Slot number 1-5
+    LoadState(u8), // Slot number 1-5
 }
 
 pub struct PropertyPane {
@@ -38,17 +38,17 @@ pub struct PropertyPane {
     pub cpu_freq_target: Option<f64>,
     pub cpu_freq_actual: Option<f64>,
     pub rendering_backend: String,
-    
+
     // Settings
     pub display_filter: DisplayFilter,
     pub emulation_speed_percent: i32, // 0-400
-    
+
     // Mount points
     pub mount_points: Vec<MountPoint>,
-    
+
     // Pending action
     pending_action: Option<PropertyAction>,
-    
+
     // Collapsible section states
     metrics_open: bool,
     settings_open: bool,
@@ -101,28 +101,30 @@ impl PropertyPane {
                             ui.label("FPS:");
                             ui.label(format!("{:.1}", self.fps));
                         });
-                        
+
                         if !self.system_name.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label("System:");
                                 ui.label(&self.system_name);
                             });
                         }
-                        
+
                         if self.paused {
                             ui.colored_label(egui::Color32::YELLOW, "⏸ PAUSED");
                         } else if self.speed != 1.0 {
-                            ui.colored_label(egui::Color32::YELLOW, 
-                                format!("⏩ {}%", (self.speed * 100.0) as u32));
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!("⏩ {}%", (self.speed * 100.0) as u32),
+                            );
                         }
-                        
+
                         if let Some(target_freq) = self.cpu_freq_target {
                             ui.horizontal(|ui| {
                                 ui.label("CPU Target:");
                                 ui.label(format!("{:.2} MHz", target_freq));
                             });
                         }
-                        
+
                         ui.horizontal(|ui| {
                             ui.label("Renderer:");
                             ui.label(&self.rendering_backend);
@@ -141,20 +143,37 @@ impl PropertyPane {
                         egui::ComboBox::from_id_salt("display_filter")
                             .selected_text(self.display_filter.as_str())
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.display_filter, DisplayFilter::None, "None");
-                                ui.selectable_value(&mut self.display_filter, DisplayFilter::Scanlines, "Scanlines");
-                                ui.selectable_value(&mut self.display_filter, DisplayFilter::Phosphor, "Phosphor");
-                                ui.selectable_value(&mut self.display_filter, DisplayFilter::CRT, "CRT");
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::None,
+                                    "None",
+                                );
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::Scanlines,
+                                    "Scanlines",
+                                );
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::Phosphor,
+                                    "Phosphor",
+                                );
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::CRT,
+                                    "CRT",
+                                );
                             });
-                        
+
                         ui.horizontal(|ui| {
                             ui.label("Emulation Speed:");
                             ui.label(format!("{}%", self.emulation_speed_percent));
                         });
-                        
-                        ui.add(egui::Slider::new(&mut self.emulation_speed_percent, 0..=400)
-                            .text("%"));
-                        
+
+                        ui.add(
+                            egui::Slider::new(&mut self.emulation_speed_percent, 0..=400).text("%"),
+                        );
+
                         ui.horizontal(|ui| {
                             if ui.button("25%").clicked() {
                                 self.emulation_speed_percent = 25;
@@ -191,10 +210,8 @@ impl PropertyPane {
                                         if ui.button("Eject").clicked() {
                                             // TODO: Handle eject
                                         }
-                                    } else {
-                                        if ui.button("Mount...").clicked() {
-                                            // TODO: Handle mount
-                                        }
+                                    } else if ui.button("Mount...").clicked() {
+                                        // TODO: Handle mount
                                     }
                                 });
                             }
@@ -210,14 +227,26 @@ impl PropertyPane {
                         ui.label("Quick Save/Load:");
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
-                                if ui.button(format!("S{}", i)).on_hover_text(format!("Save to slot {} (F{})", i, i+4)).clicked() {
+                                if ui
+                                    .button(format!("S{}", i))
+                                    .on_hover_text(format!("Save to slot {} (F{})", i, i + 4))
+                                    .clicked()
+                                {
                                     self.pending_action = Some(PropertyAction::SaveState(i));
                                 }
                             }
                         });
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
-                                if ui.button(format!("L{}", i)).on_hover_text(format!("Load from slot {} (Shift+F{})", i, i+4)).clicked() {
+                                if ui
+                                    .button(format!("L{}", i))
+                                    .on_hover_text(format!(
+                                        "Load from slot {} (Shift+F{})",
+                                        i,
+                                        i + 4
+                                    ))
+                                    .clicked()
+                                {
                                     self.pending_action = Some(PropertyAction::LoadState(i));
                                 }
                             }

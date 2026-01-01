@@ -12,7 +12,7 @@ pub struct EguiApp {
     pub tab_manager: TabManager,
     pub property_pane: PropertyPane,
     pub status_bar: StatusBarWidget,
-    
+
     /// Frame texture for emulator display
     pub emulator_texture: Option<egui::TextureHandle>,
 }
@@ -29,7 +29,13 @@ impl EguiApp {
     }
 
     /// Update the emulator display texture
-    pub fn update_emulator_texture(&mut self, ctx: &Context, pixels: &[u32], width: usize, height: usize) {
+    pub fn update_emulator_texture(
+        &mut self,
+        ctx: &Context,
+        pixels: &[u32],
+        width: usize,
+        height: usize,
+    ) {
         // Convert ARGB to RGBA for egui
         let rgba_pixels: Vec<u8> = pixels
             .iter()

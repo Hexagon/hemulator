@@ -8,9 +8,9 @@
 //! - Status bar at the bottom
 
 mod layout;
-mod tabs;
-pub mod property_pane;
 pub mod menu_bar;
+pub mod property_pane;
 mod status_bar;
+mod tabs;
 
 pub use layout::EguiApp;
