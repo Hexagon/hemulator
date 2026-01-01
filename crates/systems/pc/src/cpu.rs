@@ -1159,12 +1159,16 @@ impl PcCpu {
             0x0A => self.int21h_buffered_input(),       // Buffered input
             0x0B => self.int21h_check_stdin(),          // Check stdin status
             0x25 => self.int21h_set_interrupt_vector(), // Set interrupt vector
+            0x30 => self.int21h_get_dos_version(),      // Get DOS version
             0x35 => self.int21h_get_interrupt_vector(), // Get interrupt vector
             0x3C => self.int21h_create_file(),          // Create or truncate file
             0x3D => self.int21h_open_file(),            // Open existing file
             0x3E => self.int21h_close_file(),           // Close file handle
             0x3F => self.int21h_read_file(),            // Read from file or device
             0x40 => self.int21h_write_file(),           // Write to file or device
+            0x48 => self.int21h_allocate_memory(),      // Allocate memory
+            0x49 => self.int21h_free_memory(),          // Free memory
+            0x4A => self.int21h_resize_memory(),        // Resize memory block
             0x4C => self.int21h_terminate_with_code(),  // Terminate with return code
             _ => {
                 // Unsupported function - log and return
@@ -1398,6 +1402,134 @@ impl PcCpu {
         // For now, return a dummy value
         self.cpu.es = 0x0000;
         self.cpu.bx = 0x0000u32;
+        51
+    }
+
+    /// INT 21h, AH=30h: Get DOS version
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_get_dos_version(&mut self) -> u32 {
+        // Returns: AL = major version, AH = minor version
+        //          BH = OEM serial number (0xFF = MS-DOS)
+        //          BL:CX = 24-bit user serial number (usually 0)
+        
+        // Report DOS 5.0 (most compatible version for older software)
+        // MS-DOS 5.0 was released in 1991 and has excellent compatibility
+        let major = 5u8;
+        let minor = 0u8;
+        
+        self.cpu.ax = (major as u32) | ((minor as u32) << 8);
+        self.cpu.bx = 0xFF00u32; // BH = 0xFF (MS-DOS), BL = 0x00
+        self.cpu.cx = 0x0000u32; // User serial number = 0
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("INT 0x21 AH=0x30: Get DOS version - returning {}.{}", major, minor)
+        });
+        
+        51
+    }
+
+    /// INT 21h, AH=48h: Allocate memory
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_allocate_memory(&mut self) -> u32 {
+        // BX = number of paragraphs (16-byte blocks) to allocate
+        // Returns: CF clear if success, AX = segment of allocated block
+        //          CF set if error, AX = error code (07h = memory control blocks destroyed,
+        //                                            08h = insufficient memory)
+        //          BX = size of largest available block
+        
+        let requested_paragraphs = self.cpu.bx;
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("INT 0x21 AH=0x48: Allocate {} paragraphs ({} bytes)", 
+                   requested_paragraphs, requested_paragraphs * 16)
+        });
+        
+        // Simple allocation strategy: use memory starting from 0x2000 (after DOS area)
+        // For now, always succeed and return a fixed segment
+        // In a real implementation, we would track allocated blocks
+        
+        // Use a simple counter-based allocation starting at 0x2000
+        // This is a minimal implementation that works for programs that don't
+        // allocate and free many blocks
+        static mut NEXT_ALLOC_SEGMENT: u32 = 0x2000;
+        
+        unsafe {
+            let allocated_segment = NEXT_ALLOC_SEGMENT;
+            
+            // Check if we have enough memory (conventional memory ends at 0xA000)
+            if allocated_segment + requested_paragraphs > 0xA000 {
+                // Insufficient memory
+                self.cpu.ax = 0x08; // Error code: insufficient memory
+                self.cpu.bx = 0xA000 - allocated_segment; // Largest available block
+                self.set_carry_flag(true);
+                
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "INT 0x21 AH=0x48: Insufficient memory".to_string()
+                });
+            } else {
+                // Success
+                self.cpu.ax = allocated_segment;
+                self.set_carry_flag(false);
+                
+                // Advance allocation pointer
+                NEXT_ALLOC_SEGMENT += requested_paragraphs;
+                
+                emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!("INT 0x21 AH=0x48: Allocated segment 0x{:04X}", allocated_segment)
+                });
+            }
+        }
+        
+        51
+    }
+
+    /// INT 21h, AH=49h: Free memory
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_free_memory(&mut self) -> u32 {
+        // ES = segment of block to free
+        // Returns: CF clear if success
+        //          CF set if error, AX = error code (07h = memory control blocks destroyed,
+        //                                            09h = invalid block address)
+        
+        let segment = self.cpu.es;
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("INT 0x21 AH=0x49: Free memory at segment 0x{:04X}", segment)
+        });
+        
+        // For our simple allocator, we don't actually track freed blocks
+        // Just return success
+        // A real implementation would maintain a linked list of free blocks
+        self.set_carry_flag(false);
+        
+        51
+    }
+
+    /// INT 21h, AH=4Ah: Resize memory block
+    #[allow(dead_code)] // Called from handle_int21h
+    fn int21h_resize_memory(&mut self) -> u32 {
+        // ES = segment of block to resize
+        // BX = new size in paragraphs
+        // Returns: CF clear if success
+        //          CF set if error, AX = error code (07h = memory control blocks destroyed,
+        //                                            08h = insufficient memory,
+        //                                            09h = invalid block address)
+        //          BX = maximum size available
+        
+        let segment = self.cpu.es;
+        let new_size = self.cpu.bx;
+        
+        emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("INT 0x21 AH=0x4A: Resize memory at segment 0x{:04X} to {} paragraphs",
+                   segment, new_size)
+        });
+        
+        // For our simple allocator, we always succeed
+        // In reality, we would need to check if the new size fits and potentially move the block
+        // Most programs use this to shrink their initial PSP allocation to make room for
+        // child processes, which we don't need to worry about in this simple implementation
+        self.set_carry_flag(false);
+        
         51
     }
 
