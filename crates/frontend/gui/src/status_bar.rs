@@ -118,7 +118,16 @@ impl StatusBar {
         }
 
         if let Some(ip) = self.ip {
-            right_parts.push(format!("${:04X}", ip));
+            // Format IP based on its size
+            // Use appropriate number of hex digits: 4 for 16-bit, 6 for 24-bit, 8 for 32-bit
+            let ip_str = if ip > 0xFFFFFF {
+                format!("${:08X}", ip) // 32-bit address (8 hex digits)
+            } else if ip > 0xFFFF {
+                format!("${:06X}", ip) // 24-bit address (6 hex digits)
+            } else {
+                format!("${:04X}", ip) // 16-bit address (4 hex digits)
+            };
+            right_parts.push(ip_str);
         }
 
         if let Some(cycles) = self.cycles {
@@ -160,5 +169,72 @@ impl StatusBar {
 impl Default for StatusBar {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_status_bar_new() {
+        let status_bar = StatusBar::new();
+        assert_eq!(status_bar.message, "");
+        assert_eq!(status_bar.fps, 0.0);
+        assert_eq!(status_bar.system_name, "");
+        assert!(!status_bar.paused);
+        assert_eq!(status_bar.speed, 1.0);
+        assert_eq!(status_bar.ip, None);
+        assert_eq!(status_bar.cycles, None);
+        assert_eq!(status_bar.rendering_backend, "Software");
+        assert_eq!(status_bar.cpu_freq_target, None);
+        assert_eq!(status_bar.cpu_freq_actual, None);
+    }
+
+    #[test]
+    fn test_status_bar_ip_formatting() {
+        let mut status_bar = StatusBar::new();
+        
+        // Test 16-bit IP (4 hex digits)
+        status_bar.ip = Some(0x1234);
+        let mut buffer = vec![0; 800 * 600];
+        status_bar.render(&mut buffer, 800, 600);
+        
+        // Test 24-bit IP (6 hex digits)
+        status_bar.ip = Some(0x123456);
+        status_bar.render(&mut buffer, 800, 600);
+        
+        // Test 32-bit IP (8 hex digits)
+        status_bar.ip = Some(0x12345678);
+        status_bar.render(&mut buffer, 800, 600);
+    }
+
+    #[test]
+    fn test_status_bar_cpu_freq() {
+        let mut status_bar = StatusBar::new();
+        
+        // Test target frequency only
+        status_bar.cpu_freq_target = Some(4.77);
+        let mut buffer = vec![0; 800 * 600];
+        status_bar.render(&mut buffer, 800, 600);
+        
+        // Test target and actual frequencies
+        status_bar.cpu_freq_target = Some(4.77);
+        status_bar.cpu_freq_actual = Some(4.75);
+        status_bar.render(&mut buffer, 800, 600);
+    }
+
+    #[test]
+    fn test_status_bar_rendering_backend() {
+        let mut status_bar = StatusBar::new();
+        
+        // Test Software backend
+        status_bar.rendering_backend = "Software".to_string();
+        let mut buffer = vec![0; 800 * 600];
+        status_bar.render(&mut buffer, 800, 600);
+        
+        // Test OpenGL backend
+        status_bar.rendering_backend = "OpenGL".to_string();
+        status_bar.render(&mut buffer, 800, 600);
     }
 }
