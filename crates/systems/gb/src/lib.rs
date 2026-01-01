@@ -499,6 +499,58 @@ mod tests {
     }
 
     #[test]
+    fn test_gb_joypad_register_integration() {
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        let mut sys = GbSystem::new();
+
+        // Test button matrix reading
+        // set_controller() takes GB layout directly: bits 0=Right, 1=Left, 2=Up, 3=Down, 4=A, 5=B, 6=Select, 7=Start
+        // GB hardware uses active-low: 0 = pressed, 1 = released
+
+        // Press A button (bit 4 in GB layout)
+        sys.set_controller(0x10);
+
+        // Select button keys (write 0x20 to clear P14, bit 4)
+        sys.cpu.memory.write(0xFF00, 0x20);
+
+        // Read joypad register - A is in the button matrix, bit 0 when reading buttons
+        let joypad = sys.cpu.memory.read(0xFF00);
+        assert_eq!(
+            joypad & 0x01,
+            0,
+            "A button should be pressed (bit 0 = 0 when reading button matrix)"
+        );
+
+        // Press Right button (bit 0 in GB layout)
+        sys.set_controller(0x01);
+
+        // Select direction keys (write 0x10 to clear P15, bit 5)
+        sys.cpu.memory.write(0xFF00, 0x10);
+
+        // Read joypad register - Right is in d-pad matrix, bit 0 when reading d-pad
+        let joypad = sys.cpu.memory.read(0xFF00);
+        assert_eq!(
+            joypad & 0x01,
+            0,
+            "Right button should be pressed (bit 0 = 0 when reading d-pad matrix)"
+        );
+
+        // Release all buttons (all bits set = all released in active-low GB format)
+        sys.set_controller(0xFF);
+
+        // Select button keys
+        sys.cpu.memory.write(0xFF00, 0x20);
+        let joypad = sys.cpu.memory.read(0xFF00);
+        assert_eq!(joypad & 0x0F, 0x0F, "All buttons should be released");
+
+        // Select direction keys
+        sys.cpu.memory.write(0xFF00, 0x10);
+        let joypad = sys.cpu.memory.read(0xFF00);
+        assert_eq!(joypad & 0x0F, 0x0F, "All directions should be released");
+    }
+
+    #[test]
     fn test_gb_ppu_registers() {
         let sys = GbSystem::new();
 
