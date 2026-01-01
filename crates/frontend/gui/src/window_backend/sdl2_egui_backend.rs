@@ -68,11 +68,11 @@ impl Sdl2EguiBackend {
         visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 70, 72);
         visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0, 122, 204); // VS Code blue
 
-        // Widget text colors - ensure good contrast (these are stroke colors)
+        // Widget text colors - much brighter for better contrast (matching VS Code)
         visuals.widgets.noninteractive.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200));
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(230, 230, 230));
         visuals.widgets.inactive.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180));
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220));
         visuals.widgets.hovered.fg_stroke =
             egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
         visuals.widgets.active.fg_stroke =
@@ -89,6 +89,9 @@ impl Sdl2EguiBackend {
         visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60));
         visuals.widgets.noninteractive.bg_stroke =
             egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60));
+
+        // Default text color - much brighter for all UI elements
+        visuals.override_text_color = Some(egui::Color32::from_rgb(230, 230, 230));
 
         egui_ctx.set_style(style);
 

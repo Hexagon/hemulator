@@ -177,23 +177,12 @@ impl TabManager {
                 }
             }
 
-            if self.pc_config_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::PcConfig, "PC Config");
-                // Use a colored button for the close icon to ensure visibility
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                );
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close PC Config tab")
-                    .clicked()
-                {
-                    self.pc_config_visible = false;
-                    if self.active_tab == Tab::PcConfig {
-                        self.active_tab = Tab::Emulator;
-                    }
-                }
-            }
+            // PC Config tab is deprecated - all info now shown in property pane
+            // Keep the data structure for backward compatibility but don't show the tab
+            // if self.pc_config_visible {
+            //     ui.selectable_value(&mut self.active_tab, Tab::PcConfig, "PC Config");
+            //     ...
+            // }
         });
 
         ui.separator();
@@ -205,6 +194,7 @@ impl TabManager {
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
+            // Keep PcConfig render for backward compat, but it won't be accessible
             Tab::PcConfig => self.render_pc_config_tab(ui),
         }
     }

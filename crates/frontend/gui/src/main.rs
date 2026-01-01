@@ -1983,11 +1983,17 @@ fn main() {
         egui_backend.begin_frame();
 
         // Update egui app state
-        egui_app.property_pane.fps = current_fps;
+        egui_app.property_pane.update_fps(current_fps);
         egui_app.property_pane.paused = settings.emulation_speed == 0.0;
         egui_app.property_pane.speed = settings.emulation_speed as f32;
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
         egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
+
+        // Update target FPS from system timing
+        if rom_loaded {
+            let timing = sys.timing();
+            egui_app.property_pane.target_fps = timing.frame_rate_hz() as f32;
+        }
 
         // Update mount points from current system
         if rom_loaded {
@@ -2012,11 +2018,56 @@ fn main() {
             egui_app.property_pane.mount_points.clear();
         }
 
-        // Update PC config tab if PC is loaded
+        // Update PC-specific property pane fields if PC is loaded
+        if rom_loaded {
+            if let EmulatorSystem::PC(pc_sys) = &sys {
+                // Read BDA values
+                use egui_ui::property_pane::PcBdaValues;
+                let bda = pc_sys.read_bda_values();
+                egui_app.property_pane.pc_bda_values = Some(PcBdaValues {
+                    equipment_word: bda.equipment_word,
+                    memory_size_kb: bda.memory_size_kb,
+                    video_mode: bda.video_mode,
+                    video_columns: bda.video_columns,
+                    num_serial_ports: bda.num_serial_ports,
+                    num_parallel_ports: bda.num_parallel_ports,
+                    num_hard_drives: bda.num_hard_drives,
+                });
+
+                // Set PC CPU model for dropdown
+                let cpu_model_str = match pc_sys.cpu_model() {
+                    emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
+                    emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
+                    emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
+                    emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
+                    emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
+                    emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
+                    emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
+                    emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
+                    emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
+                };
+                egui_app.property_pane.pc_cpu_model = Some(cpu_model_str.to_string());
+
+                // Set PC memory for dropdown
+                egui_app.property_pane.pc_memory_kb = Some(pc_sys.memory_kb());
+            } else {
+                // Clear PC-specific fields for non-PC systems
+                egui_app.property_pane.pc_bda_values = None;
+                egui_app.property_pane.pc_cpu_model = None;
+                egui_app.property_pane.pc_memory_kb = None;
+            }
+        }
+
+        // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
         if rom_loaded {
             if let EmulatorSystem::PC(pc_sys) = &sys {
                 use egui_ui::PcConfigInfo;
-                egui_app.tab_manager.show_pc_config_tab();
+                // Don't show the tab anymore - deprecated
+                // egui_app.tab_manager.show_pc_config_tab();
 
                 let boot_priority_str = match pc_sys.boot_priority() {
                     emu_pc::BootPriority::FloppyFirst => "Floppy First",
@@ -2468,6 +2519,64 @@ fn main() {
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                PropertyAction::MountFile(mount_id) => {
+                    // Find the mount point info to get allowed extensions
+                    let mount_points = sys.mount_points();
+                    if let Some(mount_info) = mount_points.iter().find(|mp| mp.id == mount_id) {
+                        // Create file dialog with appropriate filters
+                        let extensions: Vec<&str> =
+                            mount_info.extensions.iter().map(|s| s.as_str()).collect();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter(&mount_info.name, &extensions)
+                            .add_filter("All Files", &["*"])
+                            .pick_file()
+                        {
+                            match fs::read(&path) {
+                                Ok(data) => {
+                                    if let Err(e) = sys.mount(&mount_id, &data) {
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error mounting: {}", e));
+                                    } else {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        runtime_state.set_mount(mount_id.clone(), path_str.clone());
+                                        egui_app.status_bar.set_message(format!(
+                                            "Mounted {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file")
+                                        ));
+                                        egui_app.tab_manager.add_log(format!(
+                                            "Mounted {} to {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file"),
+                                            mount_info.name
+                                        ));
+                                    }
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error reading file: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
+                PropertyAction::EjectFile(mount_id) => {
+                    if let Err(e) = sys.unmount(&mount_id) {
+                        egui_app
+                            .status_bar
+                            .set_message(format!("Error ejecting: {}", e));
+                    } else {
+                        runtime_state.current_mounts.remove(&mount_id);
+                        egui_app.status_bar.set_message("Ejected".to_string());
+                        egui_app
+                            .tab_manager
+                            .add_log(format!("Ejected {}", mount_id));
                     }
                 }
             }
