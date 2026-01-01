@@ -570,4 +570,180 @@ mod tests {
         assert_eq!(s, 17);
         assert_eq!(h, 4);
     }
+
+    #[test]
+    fn test_linear_addressing_read() {
+        // Test linear addressing mode used by SYSLINUX bootloader
+        // When C=0, H=0, S > SPT (18 for floppy), sector is treated as direct LBA
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 1_474_560]; // 1.44MB floppy
+
+        // Fill sector at LBA 20 (should be at offset 20 * 512 = 10240)
+        for i in 0..512 {
+            disk_image[10240 + i] = (i % 256) as u8;
+        }
+
+        let mut buffer = vec![0; 512];
+
+        // Linear addressing: C=0, H=0, S=21 (> 18) means LBA = 21-1 = 20
+        let request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 21, // > 18 (SPT), so use linear addressing
+            count: 1,
+        };
+
+        let status = controller.read_sectors(&request, &mut buffer, Some(&disk_image));
+
+        assert_eq!(status, 0x00); // Success
+        assert_eq!(buffer[0], 0);
+        assert_eq!(buffer[255], 255);
+        assert_eq!(buffer[256], 0);
+    }
+
+    #[test]
+    fn test_linear_addressing_write() {
+        // Test that write_sectors uses the same linear addressing as read_sectors
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 1_474_560]; // 1.44MB floppy
+
+        // Create pattern to write
+        let buffer: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+
+        // Linear addressing: C=0, H=0, S=25 (> 18) means LBA = 25-1 = 24
+        let request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 25, // > 18 (SPT), so use linear addressing
+            count: 1,
+        };
+
+        let status = controller.write_sectors(&request, &buffer, Some(&mut disk_image));
+
+        assert_eq!(status, 0x00); // Success
+
+        // Verify data was written to LBA 24 (offset 24 * 512 = 12288)
+        assert_eq!(disk_image[12288], 0);
+        assert_eq!(disk_image[12288 + 255], 255);
+        assert_eq!(disk_image[12288 + 256], 0);
+    }
+
+    #[test]
+    fn test_linear_addressing_read_write_consistency() {
+        // Test that reading and writing to the same linear address access the same location
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 1_474_560]; // 1.44MB floppy
+
+        // Create pattern to write
+        let write_buffer: Vec<u8> = (0..512).map(|i| ((i * 3) % 256) as u8).collect();
+
+        // Write using linear addressing: S=30 (> 18) means LBA = 30-1 = 29
+        let write_request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 30, // Linear addressing
+            count: 1,
+        };
+
+        let write_status =
+            controller.write_sectors(&write_request, &write_buffer, Some(&mut disk_image));
+        assert_eq!(write_status, 0x00);
+
+        // Read back using the same linear addressing
+        let mut read_buffer = vec![0; 512];
+        let read_request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 30, // Same linear address
+            count: 1,
+        };
+
+        let read_status =
+            controller.read_sectors(&read_request, &mut read_buffer, Some(&disk_image));
+        assert_eq!(read_status, 0x00);
+
+        // Verify data matches what was written
+        assert_eq!(read_buffer, write_buffer);
+    }
+
+    #[test]
+    fn test_linear_addressing_boundary() {
+        // Test boundary conditions for linear addressing (S < 64)
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 1_474_560];
+
+        // S=63 should use linear addressing (< 64)
+        let buffer: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+        let request = DiskRequest {
+            drive: 0x00,
+            cylinder: 0,
+            head: 0,
+            sector: 63, // Linear addressing (< 64)
+            count: 1,
+        };
+
+        let status = controller.write_sectors(&request, &buffer, Some(&mut disk_image));
+        assert_eq!(status, 0x00);
+
+        // Verify written to LBA 62 (offset 62 * 512 = 31744)
+        assert_eq!(disk_image[31744], 0);
+        assert_eq!(disk_image[31744 + 255], 255);
+    }
+
+    #[test]
+    fn test_standard_chs_not_linear() {
+        // Test that standard CHS addressing is NOT affected (when C!=0 or H!=0 or S<=SPT)
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 1_474_560];
+
+        // Case 1: C=1, H=0, S=1 - should use standard CHS
+        // LBA = (1 * 2 + 0) * 18 + (1-1) = 36
+        let buffer: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+        let request = DiskRequest {
+            drive: 0x00,
+            cylinder: 1,
+            head: 0,
+            sector: 1,
+            count: 1,
+        };
+
+        let status = controller.write_sectors(&request, &buffer, Some(&mut disk_image));
+        assert_eq!(status, 0x00);
+
+        // Verify written to LBA 36 (offset 36 * 512 = 18432)
+        assert_eq!(disk_image[18432], 0);
+        assert_eq!(disk_image[18432 + 255], 255);
+
+        // Verify NOT written to LBA 1 (which would be linear addressing)
+        assert_eq!(disk_image[512], 0); // Should still be zero
+    }
+
+    #[test]
+    fn test_linear_addressing_hard_drive() {
+        // Test linear addressing on hard drive (SPT=17)
+        let mut controller = DiskController::new();
+        let mut disk_image = vec![0; 20_971_520]; // 20MB
+
+        let buffer: Vec<u8> = (0..512).map(|i| (i % 256) as u8).collect();
+
+        // Linear addressing: C=0, H=0, S=20 (> 17) means LBA = 20-1 = 19
+        let request = DiskRequest {
+            drive: 0x80, // Hard drive
+            cylinder: 0,
+            head: 0,
+            sector: 20, // > 17 (SPT for hard drive), so linear
+            count: 1,
+        };
+
+        let status = controller.write_sectors(&request, &buffer, Some(&mut disk_image));
+        assert_eq!(status, 0x00);
+
+        // Verify written to LBA 19 (offset 19 * 512 = 9728)
+        assert_eq!(disk_image[9728], 0);
+        assert_eq!(disk_image[9728 + 255], 255);
+    }
 }
