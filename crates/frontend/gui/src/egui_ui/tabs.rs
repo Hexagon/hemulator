@@ -1,5 +1,6 @@
 //! Tab manager for left panel
 
+use crate::system_adapter::SystemDebugInfo;
 use egui::{ScrollArea, TextureHandle, Ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,7 @@ pub struct TabManager {
     pub log_messages: Vec<String>,
     pub help_visible: bool,
     pub debug_visible: bool,
+    pub debug_info: Option<SystemDebugInfo>,
 }
 
 impl TabManager {
@@ -24,6 +26,7 @@ impl TabManager {
             log_messages: Vec::new(),
             help_visible: false,
             debug_visible: false,
+            debug_info: None,
         }
     }
 
@@ -43,6 +46,10 @@ impl TabManager {
     pub fn show_debug_tab(&mut self) {
         self.debug_visible = true;
         self.active_tab = Tab::Debug;
+    }
+
+    pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
+        self.debug_info = Some(info);
     }
 
     pub fn ui(&mut self, ui: &mut Ui, emulator_texture: &Option<TextureHandle>) {
@@ -167,10 +174,25 @@ impl TabManager {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                ui.heading("Debug Information");
-                ui.separator();
-                ui.label("Debug info will be displayed here");
-                // TODO: Add actual debug info display
+                if let Some(ref debug_info) = self.debug_info {
+                    ui.heading(format!("{} Debug Information", debug_info.system_type));
+                    ui.separator();
+                    
+                    egui::Grid::new("debug_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (label, value) in &debug_info.fields {
+                                ui.label(label);
+                                ui.label(value);
+                                ui.end_row();
+                            }
+                        });
+                } else {
+                    ui.label("No debug information available");
+                    ui.label("Load a ROM to see system-specific debug info");
+                }
             });
     }
 }

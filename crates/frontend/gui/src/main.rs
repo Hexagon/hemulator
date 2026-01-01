@@ -7,9 +7,11 @@ mod save_state;
 mod selector;
 mod settings;
 mod status_bar;
+mod system_adapter;
 mod ui_render;
 pub mod video_processor;
 pub mod window_backend;
+pub mod egui_ui;
 
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;

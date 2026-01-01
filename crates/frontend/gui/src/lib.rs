@@ -7,3 +7,4 @@ pub mod display_filter;
 pub mod video_processor;
 pub mod window_backend;
 pub mod egui_ui;
+pub mod system_adapter;
