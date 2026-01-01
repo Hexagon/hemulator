@@ -360,7 +360,7 @@ NUSIZ registers (0x04, 0x05) control sprite width and duplication:
 
 ✅ **Implemented**
 
-TIA has 15 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that set bits when sprites overlap:
+TIA has 8 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that set bits when sprites overlap:
 - **Collision registers**: All 8 collision registers implemented ✅
 - **CXCLR**: Clear collision registers supported ✅
 - **Impact**: High - enables proper gameplay for many games (Asteroids, Breakout, Combat)

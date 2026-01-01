@@ -202,7 +202,7 @@ pub struct Tia {
     enabl: bool, // Ball enable
     ball_x: u8,
 
-    // Collision detection registers (CXM0P, CXM1P, CXM0FB, CXM1FB, CXP0FB, CXP1FB, CXP0P1, CXBLPF, CXPPMx)
+    // Collision detection registers (CXM0P, CXM1P, CXP0FB, CXP1FB, CXM0FB, CXM1FB, CXBLPF, CXPPMM)
     cxm0p: u8,  // Missile 0 to Player collisions
     cxm1p: u8,  // Missile 1 to Player collisions
     cxp0fb: u8, // Player 0 to Playfield/Ball collisions
@@ -1059,7 +1059,10 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = (pos as usize + copy * spacing) % 160;
+            let copy_pos = pos as usize + copy * spacing;
+            if copy_pos >= 160 {
+                continue;
+            }
             let offset = x.wrapping_sub(copy_pos);
 
             if offset < 8 * player_size {
@@ -1120,7 +1123,10 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = (pos as usize + copy * spacing) % 160;
+            let copy_pos = pos as usize + copy * spacing;
+            if copy_pos >= 160 {
+                continue;
+            }
             let offset = x.wrapping_sub(copy_pos);
 
             if offset < missile_size {
@@ -1516,6 +1522,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // Normal width: 8 pixels
@@ -1535,6 +1542,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // Double width: 16 pixels (8 pixels * 2)
@@ -1554,6 +1562,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // Quad width: 32 pixels (8 pixels * 4)
@@ -1573,6 +1582,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // First copy at x=80
@@ -1595,6 +1605,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // First copy at x=50
@@ -1618,6 +1629,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         let mut frame = vec![0u32; 160];
+        tia.latch_scanline_state(0);
         tia.render_scanline(&mut frame, 0, 0);
 
         // 4 pixel wide missile
@@ -1640,6 +1652,7 @@ mod tests {
         tia.write(0x06, 0x28); // COLUP0
 
         // Detect collisions
+        tia.latch_scanline_state(0);
         tia.detect_collisions_for_scanline(0);
 
         // Read collision register - CXP0FB should have P0PF bit set
@@ -1659,6 +1672,7 @@ mod tests {
         tia.write(0x07, 0x38); // COLUP1
 
         // Detect collisions
+        tia.latch_scanline_state(0);
         tia.detect_collisions_for_scanline(0);
 
         // Read collision register - CXPPMM should have P0P1 bit set
@@ -1676,6 +1690,7 @@ mod tests {
         tia.write(0x1C, 0xFF);
 
         // Detect collisions
+        tia.latch_scanline_state(0);
         tia.detect_collisions_for_scanline(0);
 
         // Verify collision is set
