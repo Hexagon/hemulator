@@ -1889,6 +1889,7 @@ fn main() {
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
     egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
+    egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
 
     // Initialize audio output
