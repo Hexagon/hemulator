@@ -89,20 +89,20 @@ impl Memory6502 for Atari2600Bus {
 
             // RIOT RAM
             0x0080..=0x00FF => self.riot.read(addr),
-            
+
             // TIA mirrors (0x0100-0x017F) - A7=0
             0x0100..=0x012F => 0, // TIA write mirrors (read=0)
             0x0130..=0x013F => self.tia.read((addr & 0x0F) as u8), // TIA read mirrors
             0x0140..=0x017F => self.riot.read(addr), // Wait, 0140 is A7=0? No. 0140 is 101000000. A7=0.
-                                                     // But 0040 is RIOT RAM mirror? 
-                                                     // 0040 is 01000000. A7=0.
-                                                     // RIOT RAM is A7=1.
-                                                     // So 0040 is NOT RIOT RAM. 0040 is TIA.
-                                                     // My previous comment said "RIOT RAM (mirrored at 0x00-0x7F)".
-                                                     // This comment is WRONG. RIOT RAM is 0080-00FF.
-                                                     // 0000-007F is TIA.
-                                                     // So 0040-007F is TIA.
-                                                     // So 0140-017F is TIA.
+            // But 0040 is RIOT RAM mirror?
+            // 0040 is 01000000. A7=0.
+            // RIOT RAM is A7=1.
+            // So 0040 is NOT RIOT RAM. 0040 is TIA.
+            // My previous comment said "RIOT RAM (mirrored at 0x00-0x7F)".
+            // This comment is WRONG. RIOT RAM is 0080-00FF.
+            // 0000-007F is TIA.
+            // So 0040-007F is TIA.
+            // So 0140-017F is TIA.
 
             // RIOT RAM mirrors (0x0180-0x01FF) - A7=1
             // This is CRITICAL for the stack (SP=0xFF -> 0x01FF)
@@ -120,7 +120,7 @@ impl Memory6502 for Atari2600Bus {
                     let val = cart.read(addr);
                     // Debug logging for vector reads to diagnose boot issues
                     if addr >= 0x1FF0 {
-                         // emu_core::logging::log(emu_core::logging::LogCategory::Bus, emu_core::logging::LogLevel::Trace, || format!("Bus: Read ROM {:04X} -> {:02X}", addr, val));
+                        // emu_core::logging::log(emu_core::logging::LogCategory::Bus, emu_core::logging::LogLevel::Trace, || format!("Bus: Read ROM {:04X} -> {:02X}", addr, val));
                     }
                     val
                 } else {
@@ -156,10 +156,10 @@ impl Memory6502 for Atari2600Bus {
 
             // RIOT RAM
             0x0080..=0x00FF => self.riot.write(addr, val),
-            
+
             // TIA mirrors (0x0100-0x017F)
             0x0100..=0x017F => {
-                 if (addr & 0x3F) == 0x02 {
+                if (addr & 0x3F) == 0x02 {
                     self.wsync_request = true;
                 }
                 self.tia.write((addr & 0x3F) as u8, val);
@@ -198,7 +198,7 @@ mod tests {
 
         // Reading from TIA write-only addresses returns 0 (open bus emulation placeholder)
         assert_eq!(bus.read(0x0000), 0);
-        
+
         // Reading from TIA read registers works
         assert_eq!(bus.read(0x0030), 0); // CXM0P - collision register (returns 0)
     }

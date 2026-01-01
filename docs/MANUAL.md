@@ -557,6 +557,9 @@ The emulator supports the following cartridge banking schemes:
 
 **Features**:
 - TIA (Television Interface Adapter) video emulation with playfield rendering
+- **Player/Missile Sizing (NUSIZ)**: Full support for sprite sizing (1x, 2x, 4x) and duplication modes
+- **Collision Detection**: All 8 collision registers implemented with pixel-perfect detection
+- **Delayed Graphics (VDELP0/VDELP1)**: Player graphics can be delayed by one scanline
 - TIA audio emulation with 2 channels (polynomial waveform synthesis)
 - RIOT (6532) chip emulation for RAM, I/O, and timers
 - Save states (F5/F6)
@@ -564,9 +567,6 @@ The emulator supports the following cartridge banking schemes:
 - 160x192 resolution
 
 **Known Limitations**:
-- **Player/Missile Sizing**: NUSIZ registers not implemented - sprites always render at 1x size without duplication
-- **Collision Detection**: Collision registers exist but always return 0 - games relying on collision won't work correctly
-- **Delayed Graphics**: VDELP0/VDELP1 not implemented - affects some multi-sprite animation techniques
 - **Paddle Controllers**: INPT0-INPT3 always return 0 - paddle games (Breakout, Kaboom!, Warlords) are unplayable
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but some visual effects may differ
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
@@ -648,7 +648,6 @@ The emulator supports the following cartridge banking schemes:
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-  - Only 32x32 tilemap size (other sizes not implemented)
   - BG3 priority toggle (Mode 1, $2105 bit 3) not implemented
 - **Audio**: SPC700 APU not implemented - silent gameplay
 - **Cartridge**: 
