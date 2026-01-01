@@ -21,7 +21,6 @@
 //! - Mosaic effects ($2106)
 //! - Color math ($2130-$2132)
 //! - Sub-screen support ($212D)
-//! - Advanced tilemap sizes (only 32x32 currently supported)
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -662,6 +661,11 @@ impl Ppu {
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
             0 => (self.bg1_hofs, self.bg1_vofs),
@@ -671,23 +675,24 @@ impl Ppu {
             _ => (0, 0),
         };
 
-        // Mode 0 always uses 32x32 tilemap (we'll ignore size bits for now)
         // Render all visible tiles accounting for scrolling
         // The visible area is 256x224 pixels
         for screen_y in 0..224 {
             for screen_x in 0..256 {
                 // Calculate world coordinates with scrolling
-                let world_x = (screen_x as u16 + hofs) & 0xFF; // Wrap at 256 pixels (32 tiles)
-                let world_y = (screen_y as u16 + vofs) & 0xFF; // Wrap at 256 pixels (32 tiles)
+                // Wrap based on tilemap size (not hardcoded to 256)
+                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
 
                 // Calculate tile coordinates
-                let tile_x = (world_x / 8) as usize;
-                let tile_y = (world_y / 8) as usize;
-                let pixel_x_in_tile = (world_x % 8) as usize;
-                let pixel_y_in_tile = (world_y % 8) as usize;
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
 
                 // Read tile entry from tilemap (2 bytes per entry)
-                let tilemap_offset = (tile_y * 32 + tile_x) * 2;
+                // Tilemap layout for larger sizes uses a specific memory organization
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
                 if tilemap_addr + 1 >= VRAM_SIZE {
@@ -743,6 +748,60 @@ impl Ppu {
         let chr_base = (nba_reg as usize) << 13;
 
         (tilemap_base, chr_base)
+    }
+
+    /// Get tilemap size in tiles for a BG layer
+    /// Returns (width_in_tiles, height_in_tiles)
+    fn get_tilemap_size(&self, bg_index: usize) -> (usize, usize) {
+        let sc_reg = match bg_index {
+            0 => self.bg1sc,
+            1 => self.bg2sc,
+            2 => self.bg3sc,
+            3 => self.bg4sc,
+            _ => 0,
+        };
+
+        // Bits 0-1 of BGxSC register determine tilemap size
+        // 00 = 32x32, 01 = 64x32, 10 = 32x64, 11 = 64x64
+        let size_bits = sc_reg & 0x03;
+        match size_bits {
+            0b00 => (32, 32),
+            0b01 => (64, 32),
+            0b10 => (32, 64),
+            0b11 => (64, 64),
+            _ => (32, 32), // Should never happen
+        }
+    }
+
+    /// Calculate tilemap offset for a given tile position
+    /// SNES tilemaps are organized in 32x32 tile blocks
+    /// For larger tilemaps, multiple 32x32 blocks are arranged:
+    /// - 64x32: [Block 0 (0-31, 0-31)] [Block 1 (32-63, 0-31)]
+    /// - 32x64: [Block 0 (0-31, 0-31)]
+    ///   [Block 1 (0-31, 32-63)]
+    /// - 64x64: [Block 0 (0-31, 0-31)] [Block 1 (32-63, 0-31)]
+    ///   [Block 2 (0-31, 32-63)] [Block 3 (32-63, 32-63)]
+    fn get_tilemap_offset(&self, tile_x: usize, tile_y: usize, tilemap_width: usize) -> usize {
+        // Each tilemap entry is 2 bytes
+        // Tilemaps are organized in 32x32 tile blocks (2048 bytes each)
+        let block_x = tile_x / 32;
+        let block_y = tile_y / 32;
+        let in_block_x = tile_x % 32;
+        let in_block_y = tile_y % 32;
+
+        // Calculate which block we're in and offset within that block
+        let block_index = if tilemap_width == 64 {
+            // For 64-wide tilemaps, blocks are arranged horizontally then vertically
+            block_y * 2 + block_x
+        } else {
+            // For 32-wide tilemaps, blocks are stacked vertically
+            block_y
+        };
+
+        let block_offset = block_index * 32 * 32 * 2; // 2048 bytes per block
+        let in_block_offset = (in_block_y * 32 + in_block_x) * 2;
+
+        block_offset + in_block_offset
     }
 
     /// Get a single pixel color index from a tile in Mode 0 (2bpp)
@@ -855,6 +914,11 @@ impl Ppu {
         // Get tilemap and CHR base addresses for this BG
         let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
 
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
         // Get scroll offsets for this layer
         let (hofs, vofs) = match bg_index {
             0 => (self.bg1_hofs, self.bg1_vofs),
@@ -868,17 +932,18 @@ impl Ppu {
         for screen_y in 0..224 {
             for screen_x in 0..256 {
                 // Calculate world coordinates with scrolling
-                let world_x = (screen_x as u16 + hofs) & 0xFF;
-                let world_y = (screen_y as u16 + vofs) & 0xFF;
+                // Wrap based on tilemap size (not hardcoded to 256)
+                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
 
                 // Calculate tile coordinates
-                let tile_x = (world_x / 8) as usize;
-                let tile_y = (world_y / 8) as usize;
-                let pixel_x_in_tile = (world_x % 8) as usize;
-                let pixel_y_in_tile = (world_y % 8) as usize;
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
 
                 // Read tile entry from tilemap (2 bytes per entry)
-                let tilemap_offset = (tile_y * 32 + tile_x) * 2;
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
                 let tilemap_addr = tilemap_base + tilemap_offset;
 
                 if tilemap_addr + 1 >= VRAM_SIZE {
@@ -1826,5 +1891,109 @@ mod tests {
         ppu.write_register(0x2133, 0xFF); // SETINI
 
         // Just verify no crash - these are stubs
+    }
+
+    #[test]
+    fn test_tilemap_size_parsing() {
+        let mut ppu = Ppu::new();
+
+        // Test 32x32 (size bits = 00)
+        ppu.bg1sc = 0x00;
+        assert_eq!(ppu.get_tilemap_size(0), (32, 32));
+
+        // Test 64x32 (size bits = 01)
+        ppu.bg1sc = 0x01;
+        assert_eq!(ppu.get_tilemap_size(0), (64, 32));
+
+        // Test 32x64 (size bits = 10)
+        ppu.bg1sc = 0x02;
+        assert_eq!(ppu.get_tilemap_size(0), (32, 64));
+
+        // Test 64x64 (size bits = 11)
+        ppu.bg1sc = 0x03;
+        assert_eq!(ppu.get_tilemap_size(0), (64, 64));
+
+        // Test with other bits set (should still work)
+        ppu.bg1sc = 0xFD; // Size bits = 01, other bits set
+        assert_eq!(ppu.get_tilemap_size(0), (64, 32));
+    }
+
+    #[test]
+    fn test_tilemap_offset_32x32() {
+        let ppu = Ppu::new();
+
+        // 32x32 tilemap - single block
+        // Tile at (0,0) should be at offset 0
+        assert_eq!(ppu.get_tilemap_offset(0, 0, 32), 0);
+
+        // Tile at (1,0) should be at offset 2 (2 bytes per tile)
+        assert_eq!(ppu.get_tilemap_offset(1, 0, 32), 2);
+
+        // Tile at (0,1) should be at offset 64 (32 tiles * 2 bytes)
+        assert_eq!(ppu.get_tilemap_offset(0, 1, 32), 64);
+
+        // Tile at (31,31) should be at offset (31*32+31)*2 = 2046
+        assert_eq!(ppu.get_tilemap_offset(31, 31, 32), 2046);
+    }
+
+    #[test]
+    fn test_tilemap_offset_64x32() {
+        let ppu = Ppu::new();
+
+        // 64x32 tilemap - two 32x32 blocks side by side
+        // Tile at (0,0) should be in block 0 at offset 0
+        assert_eq!(ppu.get_tilemap_offset(0, 0, 64), 0);
+
+        // Tile at (31,0) should be in block 0 at offset (31)*2 = 62
+        assert_eq!(ppu.get_tilemap_offset(31, 0, 64), 62);
+
+        // Tile at (32,0) should be in block 1 at offset 2048 (start of block 1)
+        assert_eq!(ppu.get_tilemap_offset(32, 0, 64), 2048);
+
+        // Tile at (33,0) should be in block 1 at offset 2048 + 2
+        assert_eq!(ppu.get_tilemap_offset(33, 0, 64), 2050);
+
+        // Tile at (32,1) should be in block 1 at offset 2048 + 64
+        assert_eq!(ppu.get_tilemap_offset(32, 1, 64), 2112);
+    }
+
+    #[test]
+    fn test_tilemap_offset_32x64() {
+        let ppu = Ppu::new();
+
+        // 32x64 tilemap - two 32x32 blocks stacked vertically
+        // Tile at (0,0) should be in block 0 at offset 0
+        assert_eq!(ppu.get_tilemap_offset(0, 0, 32), 0);
+
+        // Tile at (0,31) should be in block 0 at offset (31*32)*2 = 1984
+        assert_eq!(ppu.get_tilemap_offset(0, 31, 32), 1984);
+
+        // Tile at (0,32) should be in block 1 at offset 2048 (start of block 1)
+        assert_eq!(ppu.get_tilemap_offset(0, 32, 32), 2048);
+
+        // Tile at (1,32) should be in block 1 at offset 2048 + 2
+        assert_eq!(ppu.get_tilemap_offset(1, 32, 32), 2050);
+    }
+
+    #[test]
+    fn test_tilemap_offset_64x64() {
+        let ppu = Ppu::new();
+
+        // 64x64 tilemap - four 32x32 blocks in 2x2 grid
+        // Block 0: (0-31, 0-31)
+        assert_eq!(ppu.get_tilemap_offset(0, 0, 64), 0);
+        assert_eq!(ppu.get_tilemap_offset(31, 31, 64), 2046);
+
+        // Block 1: (32-63, 0-31)
+        assert_eq!(ppu.get_tilemap_offset(32, 0, 64), 2048);
+        assert_eq!(ppu.get_tilemap_offset(63, 31, 64), 4094);
+
+        // Block 2: (0-31, 32-63)
+        assert_eq!(ppu.get_tilemap_offset(0, 32, 64), 4096);
+        assert_eq!(ppu.get_tilemap_offset(31, 63, 64), 6142);
+
+        // Block 3: (32-63, 32-63)
+        assert_eq!(ppu.get_tilemap_offset(32, 32, 64), 6144);
+        assert_eq!(ppu.get_tilemap_offset(63, 63, 64), 8190);
     }
 }
