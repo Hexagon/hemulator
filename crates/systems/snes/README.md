@@ -6,7 +6,7 @@ This crate implements Super Nintendo Entertainment System emulation for the Hemu
 
 ## Current Status
 
-The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrolling, and controller support.
+The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrolling, and full controller support.
 
 ### What Works
 
