@@ -32,9 +32,9 @@
 #[derive(Debug)]
 pub struct Mbc2 {
     rom: Vec<u8>,
-    ram: Vec<u8>,      // 512 bytes of built-in RAM
+    ram: Vec<u8>, // 512 bytes of built-in RAM
     ram_enabled: bool,
-    rom_bank: u8,      // 4-bit register (1-15, bank 0 maps to 1)
+    rom_bank: u8, // 4-bit register (1-15, bank 0 maps to 1)
 }
 
 impl Mbc2 {
@@ -87,7 +87,7 @@ impl Mbc2 {
 
         // RAM is 512 bytes (0xA000-0xA1FF), mirrored throughout 0xA000-0xBFFF
         let offset = ((addr - 0xA000) & 0x01FF) as usize;
-        
+
         // Only lower 4 bits are usable, upper 4 bits read as 1
         self.ram[offset] | 0xF0
     }
@@ -99,7 +99,7 @@ impl Mbc2 {
 
         // RAM is 512 bytes (0xA000-0xA1FF), mirrored throughout 0xA000-0xBFFF
         let offset = ((addr - 0xA000) & 0x01FF) as usize;
-        
+
         // Only lower 4 bits are writable, upper 4 bits are ignored
         self.ram[offset] = val & 0x0F;
     }
@@ -113,7 +113,7 @@ mod tests {
     fn test_mbc2_creation() {
         let rom = vec![0; 0x8000]; // 32KB ROM
         let mbc = Mbc2::new(rom, vec![]); // External RAM is ignored
-        
+
         assert_eq!(mbc.ram.len(), 512); // Built-in RAM is always 512 bytes
         assert!(!mbc.ram_enabled);
         assert_eq!(mbc.rom_bank, 1);
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn test_mbc2_rom_banking() {
         let mut rom = vec![0; 0x40000]; // 256KB (16 banks)
-        // Mark each bank with its number
+                                        // Mark each bank with its number
         for bank in 0..16 {
             rom[bank * 0x4000] = bank as u8;
         }
@@ -190,7 +190,7 @@ mod tests {
         assert!(!mbc.ram_enabled);
 
         let mut mbc = mbc;
-        
+
         // Enable RAM (bit 8 = 0)
         mbc.write_rom(0x0000, 0x0A);
         assert!(mbc.ram_enabled);
@@ -207,13 +207,13 @@ mod tests {
     #[test]
     fn test_mbc2_ram_4bit() {
         let mut mbc = Mbc2::new(vec![0; 0x8000], vec![]);
-        
+
         // Enable RAM
         mbc.write_rom(0x0000, 0x0A);
 
         // Write full byte (0xAB)
         mbc.write_ram(0xA000, 0xAB);
-        
+
         // Only lower 4 bits stored, upper 4 bits read as 1
         assert_eq!(mbc.read_ram(0xA000), 0xFB); // 0xF0 | 0x0B
 
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(mbc.read_ram(0xAC00), 0xF5); // +0xC00
         assert_eq!(mbc.read_ram(0xAE00), 0xF5); // +0xE00
         assert_eq!(mbc.read_ram(0xB000), 0xF5); // 0xB000
-        
+
         // 0xBFFF wraps to offset 0x1FF (last byte of 512-byte range)
         // which should be uninitialized (0xF0)
         assert_eq!(mbc.read_ram(0xBFFF), 0xF0);
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn test_mbc2_ram_disabled() {
         let mut mbc = Mbc2::new(vec![0; 0x8000], vec![]);
-        
+
         // RAM disabled by default
         assert_eq!(mbc.read_ram(0xA000), 0xFF);
 
