@@ -1892,6 +1892,11 @@ fn main() {
     egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
 
+    // Show New Project tab on startup if no ROM/project was loaded
+    if !rom_loaded {
+        egui_app.tab_manager.show_new_project_tab();
+    }
+
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
@@ -2116,12 +2121,15 @@ fn main() {
         }
 
         // Render egui UI
-        egui_app.ui(egui_backend.egui_ctx());
+        egui_app.ui(egui_backend.egui_ctx(), settings.scaling_mode);
 
         // Handle menu actions
         if let Some(action) = egui_app.menu_bar.take_action() {
             use egui_ui::menu_bar::MenuAction;
             match action {
+                MenuAction::NewProject => {
+                    egui_app.tab_manager.show_new_project_tab();
+                }
                 MenuAction::OpenRom => {
                     // Open ROM file dialog
                     if let Some(path) = rfd::FileDialog::new()
@@ -2362,6 +2370,62 @@ fn main() {
                         .status_bar
                         .set_message("Hemulator Multi-System Emulator".to_string());
                 }
+                MenuAction::ScalingOriginal => {
+                    settings.scaling_mode = settings::ScalingMode::Original;
+                    egui_app
+                        .status_bar
+                        .set_message("Scaling: Original".to_string());
+                }
+                MenuAction::ScalingFit => {
+                    settings.scaling_mode = settings::ScalingMode::Fit;
+                    egui_app.status_bar.set_message("Scaling: Fit".to_string());
+                }
+                MenuAction::ScalingStretch => {
+                    settings.scaling_mode = settings::ScalingMode::Stretch;
+                    egui_app
+                        .status_bar
+                        .set_message("Scaling: Stretch".to_string());
+                }
+                MenuAction::Fullscreen => {
+                    settings.fullscreen = !settings.fullscreen;
+                    settings.fullscreen_with_gui = false;
+                    if let Err(e) = egui_backend.set_fullscreen(settings.fullscreen) {
+                        eprintln!("Failed to toggle fullscreen: {}", e);
+                        egui_app
+                            .status_bar
+                            .set_message(format!("Fullscreen error: {}", e));
+                    } else {
+                        let msg = if settings.fullscreen {
+                            "Fullscreen enabled"
+                        } else {
+                            "Fullscreen disabled"
+                        };
+                        egui_app.status_bar.set_message(msg.to_string());
+                    }
+                }
+                MenuAction::FullscreenWithGui => {
+                    settings.fullscreen = !settings.fullscreen;
+                    settings.fullscreen_with_gui = settings.fullscreen;
+                    if let Err(e) = egui_backend.set_fullscreen(settings.fullscreen) {
+                        eprintln!("Failed to toggle fullscreen: {}", e);
+                        egui_app
+                            .status_bar
+                            .set_message(format!("Fullscreen error: {}", e));
+                    } else {
+                        let msg = if settings.fullscreen {
+                            "Fullscreen (With GUI) enabled"
+                        } else {
+                            "Fullscreen disabled"
+                        };
+                        egui_app.status_bar.set_message(msg.to_string());
+                    }
+                }
+                MenuAction::ShowLog => {
+                    egui_app.tab_manager.active_tab = egui_ui::Tab::Log;
+                }
+                MenuAction::ShowDebug => {
+                    egui_app.tab_manager.show_debug_tab();
+                }
                 _ => {}
             }
         }
@@ -2459,6 +2523,120 @@ fn main() {
 
         // Handle display filter changes from property pane
         settings.display_filter = egui_app.property_pane.display_filter;
+
+        // Handle tab actions (e.g., create new project)
+        if let Some(action) = egui_app.tab_manager.take_action() {
+            use egui_ui::TabAction;
+            match action {
+                TabAction::CreateNewProject(system_name) => {
+                    // Create a new system based on the selected type
+                    match system_name.as_str() {
+                        "NES" => {
+                            sys = EmulatorSystem::NES(Box::default());
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "NES".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new NES system".to_string());
+                        }
+                        "Game Boy" => {
+                            sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Game Boy".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Game Boy system".to_string());
+                        }
+                        "Atari 2600" => {
+                            sys = EmulatorSystem::Atari2600(Box::new(
+                                emu_atari2600::Atari2600System::new(),
+                            ));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Atari 2600".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Atari 2600 system".to_string());
+                        }
+                        "PC" => {
+                            sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "PC".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new PC system".to_string());
+                        }
+                        "SNES" => {
+                            sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "SNES".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SNES system".to_string());
+                        }
+                        "N64" => {
+                            sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "N64".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new N64 system".to_string());
+                        }
+                        _ => {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Unknown system: {}", system_name));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle host key + fullscreen toggle (switch between Fullscreen and Fullscreen with GUI)
+        if let Some(host_key) = string_to_key(&settings.input.host_modifier) {
+            if egui_backend.is_key_down(host_key) && egui_backend.is_key_pressed(Key::F11, false) {
+                // Toggle between fullscreen modes
+                if !settings.fullscreen {
+                    // Currently windowed, enable fullscreen with GUI
+                    settings.fullscreen = true;
+                    settings.fullscreen_with_gui = true;
+                    if let Err(e) = egui_backend.set_fullscreen(true) {
+                        eprintln!("Failed to enable fullscreen: {}", e);
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_message("Fullscreen (With GUI) enabled".to_string());
+                    }
+                } else if settings.fullscreen_with_gui {
+                    // Currently fullscreen with GUI, switch to fullscreen without GUI
+                    settings.fullscreen_with_gui = false;
+                    egui_app
+                        .status_bar
+                        .set_message("Fullscreen enabled".to_string());
+                } else {
+                    // Currently fullscreen without GUI, disable fullscreen
+                    settings.fullscreen = false;
+                    if let Err(e) = egui_backend.set_fullscreen(false) {
+                        eprintln!("Failed to disable fullscreen: {}", e);
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_message("Fullscreen disabled".to_string());
+                    }
+                }
+            }
+        }
 
         // Step emulation frame if ROM is loaded and not paused
         if rom_loaded && settings.emulation_speed > 0.0 {

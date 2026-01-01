@@ -4,6 +4,7 @@ use super::menu_bar::MenuBar;
 use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
+use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
 
 /// Main egui application state
@@ -62,7 +63,7 @@ impl EguiApp {
     }
 
     /// Render the UI
-    pub fn ui(&mut self, ctx: &Context) {
+    pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
         // Top menu bar
         TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.menu_bar.ui(ui);
@@ -85,7 +86,8 @@ impl EguiApp {
 
         // Central tabbed interface
         CentralPanel::default().show(ctx, |ui| {
-            self.tab_manager.ui(ui, &self.emulator_texture);
+            self.tab_manager
+                .ui(ui, &self.emulator_texture, scaling_mode);
         });
     }
 }

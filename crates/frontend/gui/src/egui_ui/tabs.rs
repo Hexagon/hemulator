@@ -1,25 +1,23 @@
 //! Tab manager for left panel
 
+use crate::settings::ScalingMode;
 use crate::system_adapter::SystemDebugInfo;
 use egui::{ScrollArea, TextureHandle, Ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
+    NewProject,
     Log,
     Help,
     Debug,
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
 }
 
-pub struct TabManager {
-    pub active_tab: Tab,
-    pub log_messages: Vec<String>,
-    pub help_visible: bool,
-    pub debug_visible: bool,
-    pub pc_config_visible: bool,
-    pub debug_info: Option<SystemDebugInfo>,
-    pub pc_config_info: Option<PcConfigInfo>,
+/// Actions that can be triggered from tabs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabAction {
+    CreateNewProject(String), // String is the system name
 }
 
 /// PC-specific configuration information for the DBA tab
@@ -35,6 +33,19 @@ pub struct PcConfigInfo {
     pub hdd_mounted: bool,
 }
 
+pub struct TabManager {
+    pub active_tab: Tab,
+    pub log_messages: Vec<String>,
+    pub help_visible: bool,
+    pub debug_visible: bool,
+    pub pc_config_visible: bool,
+    pub debug_info: Option<SystemDebugInfo>,
+    pub new_project_visible: bool,
+    pub selected_system: String,
+    pub pending_action: Option<TabAction>,
+    pub pc_config_info: Option<PcConfigInfo>,
+}
+
 impl TabManager {
     pub fn new() -> Self {
         Self {
@@ -44,6 +55,9 @@ impl TabManager {
             debug_visible: false,
             pc_config_visible: false,
             debug_info: None,
+            new_project_visible: false,
+            selected_system: "NES".to_string(),
+            pending_action: None,
             pc_config_info: None,
         }
     }
@@ -75,14 +89,47 @@ impl TabManager {
         self.active_tab = Tab::Debug;
     }
 
+    pub fn show_new_project_tab(&mut self) {
+        self.new_project_visible = true;
+        self.active_tab = Tab::NewProject;
+    }
+
     pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
         self.debug_info = Some(info);
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, emulator_texture: &Option<TextureHandle>) {
+    /// Get and clear any pending action
+    pub fn take_action(&mut self) -> Option<TabAction> {
+        self.pending_action.take()
+    }
+
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        emulator_texture: &Option<TextureHandle>,
+        scaling_mode: ScalingMode,
+    ) {
         // Tab bar
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.active_tab, Tab::Emulator, "Emulator");
+
+            if self.new_project_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::NewProject, "New Project");
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close New Project tab")
+                    .clicked()
+                {
+                    self.new_project_visible = false;
+                    if self.active_tab == Tab::NewProject {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
 
             if self.log_messages.is_empty() {
                 ui.add_enabled(false, egui::Button::new("Log"));
@@ -142,7 +189,8 @@ impl TabManager {
 
         // Tab content
         match self.active_tab {
-            Tab::Emulator => self.render_emulator_tab(ui, emulator_texture),
+            Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
+            Tab::NewProject => self.render_new_project_tab(ui),
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
@@ -151,16 +199,34 @@ impl TabManager {
         }
     }
 
-    fn render_emulator_tab(&self, ui: &mut Ui, emulator_texture: &Option<TextureHandle>) {
+    fn render_emulator_tab(
+        &self,
+        ui: &mut Ui,
+        emulator_texture: &Option<TextureHandle>,
+        scaling_mode: ScalingMode,
+    ) {
         ui.centered_and_justified(|ui| {
             if let Some(texture) = emulator_texture {
-                // Display the emulator frame, maintaining aspect ratio
                 let available_size = ui.available_size();
                 let texture_size = texture.size_vec2();
                 let aspect_ratio = texture_size.x / texture_size.y;
 
-                let display_width = available_size.x.min(available_size.y * aspect_ratio);
-                let display_height = display_width / aspect_ratio;
+                let (display_width, display_height) = match scaling_mode {
+                    ScalingMode::Original => {
+                        // 1:1 pixel mapping - use original texture size
+                        (texture_size.x, texture_size.y)
+                    }
+                    ScalingMode::Fit => {
+                        // Fit to window while maintaining aspect ratio
+                        let display_width = available_size.x.min(available_size.y * aspect_ratio);
+                        let display_height = display_width / aspect_ratio;
+                        (display_width, display_height)
+                    }
+                    ScalingMode::Stretch => {
+                        // Fill entire window, ignoring aspect ratio
+                        (available_size.x, available_size.y)
+                    }
+                };
 
                 let image = egui::Image::from_texture(texture)
                     .fit_to_exact_size(egui::vec2(display_width, display_height));
@@ -183,6 +249,65 @@ impl TabManager {
                     ui.label("No log messages");
                 }
             });
+    }
+
+    fn render_new_project_tab(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            ui.heading("Create New Project");
+            ui.add_space(20.0);
+
+            ui.label("Select the system you want to emulate:");
+            ui.add_space(10.0);
+
+            egui::ComboBox::from_label("System")
+                .selected_text(&self.selected_system)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "NES".to_string(),
+                        "NES (Nintendo Entertainment System)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "Game Boy".to_string(),
+                        "Game Boy / Game Boy Color",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "Atari 2600".to_string(),
+                        "Atari 2600",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "PC".to_string(),
+                        "PC (IBM PC/XT)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "SNES".to_string(),
+                        "SNES (Super Nintendo)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "N64".to_string(),
+                        "N64 (Nintendo 64)",
+                    );
+                });
+
+            ui.add_space(20.0);
+
+            if ui.button("Create").clicked() {
+                // Signal that we want to create a new project
+                self.pending_action =
+                    Some(TabAction::CreateNewProject(self.selected_system.clone()));
+                self.new_project_visible = false;
+                self.active_tab = Tab::Emulator;
+            }
+
+            ui.add_space(10.0);
+            ui.label("After creating, you can load ROMs/disks via File > Open ROM");
+        });
     }
 
     fn render_help_tab(&self, ui: &mut Ui) {
