@@ -4,6 +4,9 @@ use crate::settings::ScalingMode;
 use crate::system_adapter::SystemDebugInfo;
 use egui::{ScrollArea, TextureHandle, Ui};
 
+/// Application version constant
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
@@ -12,6 +15,7 @@ pub enum Tab {
     Help,
     Debug,
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
+    About,
 }
 
 /// Actions that can be triggered from tabs
@@ -39,6 +43,7 @@ pub struct TabManager {
     pub help_visible: bool,
     pub debug_visible: bool,
     pub pc_config_visible: bool,
+    pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
@@ -54,6 +59,7 @@ impl TabManager {
             help_visible: false,
             debug_visible: false,
             pc_config_visible: false,
+            about_visible: false,
             debug_info: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
@@ -87,6 +93,11 @@ impl TabManager {
     pub fn show_debug_tab(&mut self) {
         self.debug_visible = true;
         self.active_tab = Tab::Debug;
+    }
+
+    pub fn show_about_tab(&mut self) {
+        self.about_visible = true;
+        self.active_tab = Tab::About;
     }
 
     pub fn show_new_project_tab(&mut self) {
@@ -177,6 +188,24 @@ impl TabManager {
                 }
             }
 
+            if self.about_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::About, "About");
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close About tab")
+                    .clicked()
+                {
+                    self.about_visible = false;
+                    if self.active_tab == Tab::About {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
+
             // PC Config tab is deprecated - all info now shown in property pane
             // Keep the data structure for backward compatibility but don't show the tab
             // if self.pc_config_visible {
@@ -194,6 +223,7 @@ impl TabManager {
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
+            Tab::About => self.render_about_tab(ui),
             // Keep PcConfig render for backward compat, but it won't be accessible
             Tab::PcConfig => self.render_pc_config_tab(ui),
         }
@@ -253,60 +283,94 @@ impl TabManager {
 
     fn render_new_project_tab(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.heading("Create New Project");
             ui.add_space(20.0);
-
+            ui.heading("Create New Project");
+            ui.add_space(10.0);
             ui.label("Select the system you want to emulate:");
             ui.add_space(10.0);
 
-            egui::ComboBox::from_label("System")
-                .selected_text(&self.selected_system)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "NES".to_string(),
-                        "NES (Nintendo Entertainment System)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "Game Boy".to_string(),
-                        "Game Boy / Game Boy Color",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "Atari 2600".to_string(),
-                        "Atari 2600",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "PC".to_string(),
-                        "PC (IBM PC/XT)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "SNES".to_string(),
-                        "SNES (Super Nintendo)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "N64".to_string(),
-                        "N64 (Nintendo 64)",
-                    );
+            // Scrollable area for system selection boxes
+            ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    // Define systems with their descriptions
+                    let systems = vec![
+                        (
+                            "NES",
+                            "Nintendo Entertainment System",
+                            "Classic 8-bit console with extensive game library",
+                        ),
+                        (
+                            "Game Boy",
+                            "Game Boy / Game Boy Color",
+                            "Portable gaming system with monochrome and color support",
+                        ),
+                        (
+                            "Atari 2600",
+                            "Atari 2600",
+                            "Pioneering home video game console from 1977",
+                        ),
+                        (
+                            "SNES",
+                            "Super Nintendo Entertainment System",
+                            "16-bit console with advanced graphics and sound",
+                        ),
+                        (
+                            "N64",
+                            "Nintendo 64",
+                            "First Nintendo console with 3D graphics capabilities",
+                        ),
+                        (
+                            "PC",
+                            "IBM PC/XT Compatible",
+                            "DOS-based personal computer emulation",
+                        ),
+                    ];
+
+                    for (system_id, system_name, description) in systems {
+                        let is_selected = self.selected_system == system_id;
+
+                        // Create a clickable frame for each system
+                        let frame = egui::Frame::new()
+                            .fill(if is_selected {
+                                ui.visuals().selection.bg_fill
+                            } else {
+                                ui.visuals().window_fill()
+                            })
+                            .stroke(if is_selected {
+                                ui.visuals().selection.stroke
+                            } else {
+                                ui.visuals().widgets.noninteractive.bg_stroke
+                            })
+                            .corner_radius(4.0)
+                            .inner_margin(12.0);
+
+                        let response = frame.show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.vertical(|ui| {
+                                ui.heading(system_name);
+                                ui.add_space(4.0);
+                                ui.label(description);
+                            });
+                        });
+
+                        // Make the entire frame clickable
+                        if response.response.interact(egui::Sense::click()).clicked() {
+                            self.selected_system = system_id.to_string();
+                            // Immediately create the project when a system is clicked
+                            self.pending_action =
+                                Some(TabAction::CreateNewProject(system_id.to_string()));
+                            self.new_project_visible = false;
+                            self.active_tab = Tab::Emulator;
+                        }
+
+                        ui.add_space(8.0);
+                    }
                 });
 
-            ui.add_space(20.0);
-
-            if ui.button("Create").clicked() {
-                // Signal that we want to create a new project
-                self.pending_action =
-                    Some(TabAction::CreateNewProject(self.selected_system.clone()));
-                self.new_project_visible = false;
-                self.active_tab = Tab::Emulator;
-            }
-
             ui.add_space(10.0);
-            ui.label("After creating, you can load ROMs/disks via File > Open ROM");
+            ui.label("Click a system to create a new blank project.");
+            ui.label("After creating, load ROMs/disks via File > Open ROM.");
         });
     }
 
@@ -455,6 +519,77 @@ impl TabManager {
                     ui.label("No PC configuration available");
                     ui.label("This tab is only available when a PC system is loaded");
                 }
+            });
+    }
+
+    fn render_about_tab(&self, ui: &mut Ui) {
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.heading(egui::RichText::new("Hemulator").size(32.0));
+                    ui.add_space(5.0);
+                    ui.label(egui::RichText::new("Multi-System Console Emulator").size(16.0));
+                    ui.add_space(20.0);
+                });
+
+                ui.separator();
+                ui.add_space(10.0);
+
+                ui.heading("Version Information");
+                ui.label(format!("Version: {}", APP_VERSION));
+                ui.add_space(10.0);
+
+                ui.heading("License");
+                ui.label("MIT License");
+                ui.label("Copyright (c) 2025");
+                ui.add_space(10.0);
+
+                ui.heading("About");
+                ui.label("A cross-platform, multi-system console emulator written in Rust,");
+                ui.label("supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation");
+                ui.label("with comprehensive save state management and customizable controls.");
+                ui.add_space(10.0);
+
+                ui.heading("Supported Systems");
+                ui.label("✅ NES (Nintendo Entertainment System) - Fully working");
+                ui.label("⚠️ PC (IBM PC/XT) - Functional");
+                ui.label("🚧 Atari 2600 - In development");
+                ui.label("🚧 Game Boy / Game Boy Color - In development");
+                ui.label("🚧 SNES (Super Nintendo) - In development");
+                ui.label("🚧 N64 (Nintendo 64) - In development");
+                ui.add_space(10.0);
+
+                ui.heading("Links");
+                ui.horizontal(|ui| {
+                    ui.label("GitHub:");
+                    ui.hyperlink_to(
+                        "github.com/Hexagon/hemulator",
+                        "https://github.com/Hexagon/hemulator",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("README:");
+                    ui.hyperlink_to(
+                        "Documentation",
+                        "https://github.com/Hexagon/hemulator/blob/main/README.md",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("User Manual:");
+                    ui.hyperlink_to(
+                        "MANUAL.md",
+                        "https://github.com/Hexagon/hemulator/blob/main/docs/MANUAL.md",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("License:");
+                    ui.hyperlink_to(
+                        "MIT License",
+                        "https://github.com/Hexagon/hemulator/blob/main/LICENSE",
+                    );
+                });
             });
     }
 }
