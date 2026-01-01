@@ -527,11 +527,9 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x417, 0x00); // No keys pressed
                     self.cpu.bus_mut().write(0x418, 0x00); // Extended keyboard flags
 
-                    // Keyboard buffer area at 0x0040:0x001E (32 bytes)
-                    // This is the actual keyboard buffer where scancodes are stored
-                    for i in 0..32 {
-                        self.cpu.bus_mut().write(0x41E + i, 0x00);
-                    }
+                    // Keyboard buffer area at 0x0040:0x001E (32 bytes) is already zeroed
+                    // by RAM initialization (vec![0; ram_size] in bus.rs)
+                    // The buffer is dynamically filled by sync_bda_keyboard_buffer() in cpu.rs
 
                     // Keyboard buffer head/tail pointers at 0x0040:0x001A and 0x001C
                     self.cpu.bus_mut().write(0x41A, 0x1E); // Buffer head offset
