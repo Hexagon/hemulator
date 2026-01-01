@@ -1099,6 +1099,118 @@ impl<M: Memory8086> Cpu8086<M> {
         result
     }
 
+    /// Perform 32-bit shift/rotate operation
+    fn shift_rotate_32(&mut self, val: u32, op: u8, count: u8) -> u32 {
+        if count == 0 {
+            return val;
+        }
+
+        // On 80186+, shift count is masked to 5 bits (0-31)
+        // On 8086/8088, full 8-bit count is used (can shift by 0-255)
+        let count = if self.model.supports_80186_instructions() {
+            count & 0x1F
+        } else {
+            count
+        };
+        let mut result = val;
+
+        match op {
+            // ROL - Rotate left
+            0b000 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x80000000) != 0;
+                    result = (result << 1) | (if carry_out { 1 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let msb = (result & 0x80000000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // ROR - Rotate right
+            0b001 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x00000001) != 0;
+                    result = (result >> 1) | (if carry_out { 0x80000000 } else { 0 });
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let bit31 = (result & 0x80000000) != 0;
+                    let bit30 = (result & 0x40000000) != 0;
+                    self.set_flag(FLAG_OF, bit31 != bit30);
+                }
+            }
+            // RCL - Rotate through carry left
+            0b010 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let carry_out = (result & 0x80000000) != 0;
+                    result = (result << 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let msb = (result & 0x80000000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // RCR - Rotate through carry right
+            0b011 => {
+                for _ in 0..count {
+                    let old_cf = if self.get_flag(FLAG_CF) { 0x80000000 } else { 0 };
+                    let carry_out = (result & 0x00000001) != 0;
+                    result = (result >> 1) | old_cf;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                if count == 1 {
+                    let bit31 = (result & 0x80000000) != 0;
+                    let bit30 = (result & 0x40000000) != 0;
+                    self.set_flag(FLAG_OF, bit31 != bit30);
+                }
+            }
+            // SHL/SAL - Shift left
+            0b100 | 0b110 => {
+                for _ in 0..count {
+                    let carry_out = (result & 0x80000000) != 0;
+                    result <<= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_32(result);
+                if count == 1 {
+                    let msb = (result & 0x80000000) != 0;
+                    self.set_flag(FLAG_OF, msb != self.get_flag(FLAG_CF));
+                }
+            }
+            // SHR - Shift right
+            0b101 => {
+                if count == 1 {
+                    self.set_flag(FLAG_OF, (val & 0x80000000) != 0);
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x00000001) != 0;
+                    result >>= 1;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_32(result);
+            }
+            // SAR - Shift arithmetic right
+            0b111 => {
+                let sign_bit = val & 0x80000000;
+                if count == 1 {
+                    self.set_flag(FLAG_OF, false); // Always 0 for SAR
+                }
+                for _ in 0..count {
+                    let carry_out = (result & 0x00000001) != 0;
+                    result = (result >> 1) | sign_bit;
+                    self.set_flag(FLAG_CF, carry_out);
+                }
+                self.update_flags_32(result);
+            }
+            _ => {}
+        }
+
+        result
+    }
+
     /// Public method to read a byte from memory using segment:offset
     /// This is used for BIOS interrupt handlers that need to access memory
     #[inline]
@@ -4865,30 +4977,56 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // ADC r/m16, r16 (0x11) - Add with Carry
+            // ADC r/m16/32, r16/32 (0x11) - Add with Carry
             0x11 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
-                let carry = (rm_val as u32 + reg_val as u32 + carry_in as u32) > 0xFFFF;
-                let overflow =
-                    ((rm_val ^ (result as u16)) & (reg_val ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
-                let af = (((rm_val & 0x0F) + (reg_val & 0x0F) + carry_in) & 0x10) != 0;
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, carry);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
+                    let carry = (rm_val as u64 + reg_val as u64 + carry_in as u64) > 0xFFFFFFFF;
+                    let overflow = ((rm_val ^ result) & (reg_val ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af = (((rm_val & 0x0F) + (reg_val & 0x0F) + carry_in) & 0x10) != 0;
+
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = rm_val.wrapping_add(reg_val).wrapping_add(carry_in);
+                    let carry = (rm_val as u32 + reg_val as u32 + carry_in as u32) > 0xFFFF;
+                    let overflow =
+                        ((rm_val ^ (result as u16)) & (reg_val ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af = (((rm_val & 0x0F) + (reg_val & 0x0F) + carry_in) & 0x10) != 0;
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -4926,30 +5064,56 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // ADC r16, r/m16 (0x13) - Add with Carry
+            // ADC r16/32, r/m16/32 (0x13) - Add with Carry
             0x13 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
-                let carry = (reg_val as u32 + rm_val as u32 + carry_in as u32) > 0xFFFF;
-                let overflow =
-                    ((reg_val ^ (result as u16)) & (rm_val ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
-                let af = (((reg_val & 0x0F) + (rm_val & 0x0F) + carry_in) & 0x10) != 0;
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, carry);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
+                    let carry = (reg_val as u64 + rm_val as u64 + carry_in as u64) > 0xFFFFFFFF;
+                    let overflow = ((reg_val ^ result) & (rm_val ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af = (((reg_val & 0x0F) + (rm_val & 0x0F) + carry_in) & 0x10) != 0;
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = reg_val.wrapping_add(rm_val).wrapping_add(carry_in);
+                    let carry = (reg_val as u32 + rm_val as u32 + carry_in as u32) > 0xFFFF;
+                    let overflow =
+                        ((reg_val ^ (result as u16)) & (rm_val ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af = (((reg_val & 0x0F) + (rm_val & 0x0F) + carry_in) & 0x10) != 0;
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -4973,25 +5137,45 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
-            // ADC AX, imm16 (0x15) - Add with Carry
+            // ADC AX/EAX, imm16/32 (0x15) - Add with Carry
             0x15 => {
-                let val = self.fetch_u16();
-                let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = self.ax.wrapping_add(val as u32).wrapping_add(carry_in);
-                let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
-                let overflow =
-                    (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
-                let af =
-                    ((((self.ax as u16) & 0x0F) + (val & 0x0F) + (carry_in as u16)) & 0x10) != 0;
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let val = self.fetch_u32();
+                    let carry_in = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = self.ax.wrapping_add(val).wrapping_add(carry_in);
+                    let carry = (self.ax as u64 + val as u64 + carry_in as u64) > 0xFFFFFFFF;
+                    let overflow = ((self.ax ^ result) & (val ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af = (((self.ax & 0x0F) + (val & 0x0F) + carry_in) & 0x10) != 0;
 
-                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, carry);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += 4;
-                4
+                    self.ax = result;
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 4;
+                    4
+                } else {
+                    // 16-bit operation
+                    let val = self.fetch_u16();
+                    let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = self.ax.wrapping_add(val as u32).wrapping_add(carry_in);
+                    let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
+                    let overflow =
+                        (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
+                    let af =
+                        ((((self.ax as u16) & 0x0F) + (val & 0x0F) + (carry_in as u16)) & 0x10) != 0;
+
+                    self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, carry);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 4;
+                    4
+                }
             }
 
             // PUSH SS (0x16)
@@ -5053,29 +5237,55 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // SBB r/m16, r16 (0x19) - Subtract with Borrow
+            // SBB r/m16/32, r16/32 (0x19) - Subtract with Borrow
             0x19 => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
-                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
-                let borrow = (rm_val as u32) < (reg_val as u32 + carry as u32);
-                let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
-                let af = (rm_val & 0x0F) < ((reg_val & 0x0F) + carry);
 
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, borrow);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 16 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let (rm_val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let carry = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
+                    let borrow = (rm_val as u64) < (reg_val as u64 + carry as u64);
+                    let overflow = ((rm_val ^ reg_val) & (rm_val ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = (rm_val & 0x0F) < ((reg_val & 0x0F) + carry);
+
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 } else {
-                    16
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let (rm_val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = rm_val.wrapping_sub(reg_val).wrapping_sub(carry);
+                    let borrow = (rm_val as u32) < (reg_val as u32 + carry as u32);
+                    let overflow = ((rm_val ^ reg_val) & (rm_val ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = (rm_val & 0x0F) < ((reg_val & 0x0F) + carry);
+
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 16 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        16
+                    }
                 }
             }
 
@@ -5113,29 +5323,55 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // SBB r16, r/m16 (0x1B) - Subtract with Borrow
+            // SBB r16/32, r/m16/32 (0x1B) - Subtract with Borrow
             0x1B => {
                 let modrm = self.fetch_u8();
                 let (modbits, reg, rm) = Self::decode_modrm(modrm);
-                let reg_val = self.get_reg16(reg);
-                let rm_val = self.read_rm16(modbits, rm);
-                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
-                let borrow = (reg_val as u32) < (rm_val as u32 + carry as u32);
-                let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
-                let af = (reg_val & 0x0F) < ((rm_val & 0x0F) + carry);
 
-                self.set_reg16(reg, result);
-                self.update_flags_16(result);
-                self.set_flag(FLAG_CF, borrow);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += if modbits == 0b11 { 3 } else { 9 };
-                if modbits == 0b11 {
-                    3
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let reg_val = self.get_reg32(reg);
+                    let rm_val = self.read_rm32(modbits, rm);
+                    let carry = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
+                    let borrow = (reg_val as u64) < (rm_val as u64 + carry as u64);
+                    let overflow = ((reg_val ^ rm_val) & (reg_val ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = (reg_val & 0x0F) < ((rm_val & 0x0F) + carry);
+
+                    self.set_reg32(reg, result);
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 } else {
-                    9
+                    // 16-bit operation
+                    let reg_val = self.get_reg16(reg);
+                    let rm_val = self.read_rm16(modbits, rm);
+                    let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = reg_val.wrapping_sub(rm_val).wrapping_sub(carry);
+                    let borrow = (reg_val as u32) < (rm_val as u32 + carry as u32);
+                    let overflow = ((reg_val ^ rm_val) & (reg_val ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = (reg_val & 0x0F) < ((rm_val & 0x0F) + carry);
+
+                    self.set_reg16(reg, result);
+                    self.update_flags_16(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += if modbits == 0b11 { 3 } else { 9 };
+                    if modbits == 0b11 {
+                        3
+                    } else {
+                        9
+                    }
                 }
             }
 
@@ -5159,24 +5395,44 @@ impl<M: Memory8086> Cpu8086<M> {
                 4
             }
 
-            // SBB AX, imm16 (0x1D) - Subtract with Borrow
+            // SBB AX/EAX, imm16/32 (0x1D) - Subtract with Borrow
             0x1D => {
-                let val = self.fetch_u16();
-                let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
-                let borrow = (self.ax as u16) < (val + carry as u16);
-                let overflow =
-                    (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
-                // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
-                let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let val = self.fetch_u32();
+                    let carry = if self.get_flag(FLAG_CF) { 1u32 } else { 0u32 };
+                    let result = self.ax.wrapping_sub(val).wrapping_sub(carry);
+                    let borrow = (self.ax as u64) < (val as u64 + carry as u64);
+                    let overflow = ((self.ax ^ val) & (self.ax ^ result) & 0x80000000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = (self.ax & 0x0F) < ((val & 0x0F) + carry);
 
-                self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
-                self.update_flags_16(result as u16);
-                self.set_flag(FLAG_CF, borrow);
-                self.set_flag(FLAG_OF, overflow);
-                self.set_flag(FLAG_AF, af);
-                self.cycles += 4;
-                4
+                    self.ax = result;
+                    self.update_flags_32(result);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 4;
+                    4
+                } else {
+                    // 16-bit operation
+                    let val = self.fetch_u16();
+                    let carry = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                    let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
+                    let borrow = (self.ax as u16) < (val + carry as u16);
+                    let overflow =
+                        (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
+                    // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
+                    let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
+
+                    self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
+                    self.update_flags_16(result as u16);
+                    self.set_flag(FLAG_CF, borrow);
+                    self.set_flag(FLAG_OF, overflow);
+                    self.set_flag(FLAG_AF, af);
+                    self.cycles += 4;
+                    4
+                }
             }
 
             // PUSH DS (0x1E)
