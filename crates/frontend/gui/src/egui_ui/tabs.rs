@@ -253,60 +253,94 @@ impl TabManager {
 
     fn render_new_project_tab(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.heading("Create New Project");
             ui.add_space(20.0);
-
+            ui.heading("Create New Project");
+            ui.add_space(10.0);
             ui.label("Select the system you want to emulate:");
             ui.add_space(10.0);
 
-            egui::ComboBox::from_label("System")
-                .selected_text(&self.selected_system)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "NES".to_string(),
-                        "NES (Nintendo Entertainment System)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "Game Boy".to_string(),
-                        "Game Boy / Game Boy Color",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "Atari 2600".to_string(),
-                        "Atari 2600",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "PC".to_string(),
-                        "PC (IBM PC/XT)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "SNES".to_string(),
-                        "SNES (Super Nintendo)",
-                    );
-                    ui.selectable_value(
-                        &mut self.selected_system,
-                        "N64".to_string(),
-                        "N64 (Nintendo 64)",
-                    );
+            // Scrollable area for system selection boxes
+            ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    // Define systems with their descriptions
+                    let systems = vec![
+                        (
+                            "NES",
+                            "Nintendo Entertainment System",
+                            "Classic 8-bit console with extensive game library",
+                        ),
+                        (
+                            "Game Boy",
+                            "Game Boy / Game Boy Color",
+                            "Portable gaming system with monochrome and color support",
+                        ),
+                        (
+                            "Atari 2600",
+                            "Atari 2600",
+                            "Pioneering home video game console from 1977",
+                        ),
+                        (
+                            "SNES",
+                            "Super Nintendo Entertainment System",
+                            "16-bit console with advanced graphics and sound",
+                        ),
+                        (
+                            "N64",
+                            "Nintendo 64",
+                            "First Nintendo console with 3D graphics capabilities",
+                        ),
+                        (
+                            "PC",
+                            "IBM PC/XT Compatible",
+                            "DOS-based personal computer emulation",
+                        ),
+                    ];
+
+                    for (system_id, system_name, description) in systems {
+                        let is_selected = self.selected_system == system_id;
+
+                        // Create a clickable frame for each system
+                        let frame = egui::Frame::new()
+                            .fill(if is_selected {
+                                ui.visuals().selection.bg_fill
+                            } else {
+                                ui.visuals().window_fill()
+                            })
+                            .stroke(if is_selected {
+                                ui.visuals().selection.stroke
+                            } else {
+                                ui.visuals().widgets.noninteractive.bg_stroke
+                            })
+                            .corner_radius(4.0)
+                            .inner_margin(12.0);
+
+                        let response = frame.show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.vertical(|ui| {
+                                ui.heading(system_name);
+                                ui.add_space(4.0);
+                                ui.label(description);
+                            });
+                        });
+
+                        // Make the entire frame clickable
+                        if response.response.interact(egui::Sense::click()).clicked() {
+                            self.selected_system = system_id.to_string();
+                            // Immediately create the project when a system is clicked
+                            self.pending_action =
+                                Some(TabAction::CreateNewProject(system_id.to_string()));
+                            self.new_project_visible = false;
+                            self.active_tab = Tab::Emulator;
+                        }
+
+                        ui.add_space(8.0);
+                    }
                 });
 
-            ui.add_space(20.0);
-
-            if ui.button("Create").clicked() {
-                // Signal that we want to create a new project
-                self.pending_action =
-                    Some(TabAction::CreateNewProject(self.selected_system.clone()));
-                self.new_project_visible = false;
-                self.active_tab = Tab::Emulator;
-            }
-
             ui.add_space(10.0);
-            ui.label("After creating, you can load ROMs/disks via File > Open ROM");
+            ui.label("Click a system to create a new blank project.");
+            ui.label("After creating, load ROMs/disks via File > Open ROM.");
         });
     }
 
