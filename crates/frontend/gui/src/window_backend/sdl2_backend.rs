@@ -539,6 +539,30 @@ impl WindowBackend for Sdl2Backend {
                 Event::Quit { .. } => {
                     self.is_open = false;
                 }
+                Event::Window { win_event, .. } => {
+                    use sdl2::event::WindowEvent;
+                    match win_event {
+                        // Handle both Resized and SizeChanged for cross-platform compatibility
+                        // Resized: fires during resize; SizeChanged: fires after resize completes
+                        WindowEvent::Resized(width, height)
+                        | WindowEvent::SizeChanged(width, height) => {
+                            // Update video processor viewport for the new window size
+                            let result = match &mut self.render_mode {
+                                RenderMode::OpenGL { processor, .. } => {
+                                    processor.resize(width as usize, height as usize)
+                                }
+                                RenderMode::Software { processor, .. } => {
+                                    processor.resize(width as usize, height as usize)
+                                }
+                            };
+
+                            if let Err(e) = result {
+                                eprintln!("Failed to resize video processor: {}", e);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 Event::MouseButtonDown { x, y, .. } => {
                     self.mouse_clicks.push((x, y));
                     self.mouse_position = (x, y);

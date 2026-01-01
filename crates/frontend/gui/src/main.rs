@@ -344,6 +344,63 @@ impl EmulatorSystem {
         }
     }
 
+    /// Get instruction pointer (IP/PC) from any system
+    fn get_instruction_pointer(&self) -> Option<u32> {
+        match self {
+            EmulatorSystem::NES(_) => {
+                let stats = self.get_runtime_stats();
+                if stats.pc > 0 {
+                    Some(stats.pc as u32)
+                } else {
+                    None
+                }
+            }
+            EmulatorSystem::GameBoy(sys) => {
+                let debug = sys.debug_info();
+                Some(debug.pc as u32)
+            }
+            EmulatorSystem::Atari2600(_) => {
+                // Atari 2600 doesn't expose PC in a simple way
+                None
+            }
+            EmulatorSystem::PC(sys) => {
+                let debug = sys.debug_info();
+                // For x86, IP is 16-bit but we can show full linear address CS:IP
+                Some(((debug.cs as u32) << 4) + debug.ip)
+            }
+            EmulatorSystem::SNES(sys) => {
+                let debug = sys.get_debug_info();
+                // SNES has PBR:PC (24-bit address)
+                Some(((debug.pbr as u32) << 16) | (debug.pc as u32))
+            }
+            EmulatorSystem::N64(sys) => {
+                let debug = sys.get_debug_info();
+                // N64 PC is 64-bit, truncate to 32-bit for display
+                Some(debug.pc as u32)
+            }
+        }
+    }
+
+    /// Get target CPU frequency in MHz (historical/configured value)
+    fn get_cpu_freq_target(&self) -> Option<f64> {
+        match self {
+            EmulatorSystem::NES(_) => Some(1.79), // NTSC NES CPU (1.789773 MHz)
+            EmulatorSystem::GameBoy(_) => Some(4.19), // Game Boy CPU (4.194304 MHz)
+            EmulatorSystem::Atari2600(_) => Some(1.19), // Atari 2600 6507 (1.19 MHz)
+            EmulatorSystem::PC(sys) => Some(sys.cpu_speed_mhz()), // Variable based on CPU model
+            EmulatorSystem::SNES(_) => Some(3.58), // SNES 65C816 (3.58 MHz)
+            EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
+        }
+    }
+
+    /// Get actual CPU frequency in MHz (measured from cycle count)
+    /// Returns None if we can't calculate it yet
+    fn get_cpu_freq_actual(&self) -> Option<f64> {
+        // For now, return None - actual frequency would require tracking cycles over time
+        // This could be implemented by tracking cycles per second in the main loop
+        None
+    }
+
     fn get_runtime_stats(&self) -> emu_nes::RuntimeStats {
         match self {
             EmulatorSystem::NES(sys) => sys.get_runtime_stats(),
@@ -2158,12 +2215,6 @@ fn main() {
                     MenuAction::SaveProject => {
                         save_project(&sys, &runtime_state, &settings, &mut status_message);
                     }
-                    MenuAction::MountPoints => {
-                        // Mount points are now handled via the Mounts menu
-                        // This legacy action just closes selectors
-                        selector_manager.close();
-                        popup_manager.close_all();
-                    }
                     MenuAction::Exit => {
                         break;
                     }
@@ -2267,8 +2318,8 @@ fn main() {
                         popup_manager.toggle_debug();
                         selector_manager.close();
                     }
-                    MenuAction::CrtFilterToggle => {
-                        settings.display_filter = settings.display_filter.next();
+                    MenuAction::CrtFilter(filter) => {
+                        settings.display_filter = filter;
                         if let Some(sdl2_backend) =
                             window.as_any_mut().downcast_mut::<Sdl2Backend>()
                         {
@@ -2278,6 +2329,8 @@ fn main() {
                             eprintln!("Warning: Failed to save CRT filter setting: {}", e);
                         }
                         println!("CRT Filter: {}", settings.display_filter.name());
+                        status_message = format!("CRT Filter: {}", settings.display_filter.name());
+                        status_bar.message = status_message.clone();
                     }
                     MenuAction::Help => {
                         popup_manager.toggle_help();
@@ -2288,12 +2341,13 @@ fn main() {
                         println!("Hemulator - Multi-System Emulator");
                     }
                     MenuAction::NewProject => {
-                        // Show system selector
-                        selector_manager.close();
-                        popup_manager.close_all();
-                        // Set a flag to show system selector
-                        // This will be handled in the rendering section
-                        println!("New Project - Select System Type");
+                        // Create a new project by prompting for system type
+                        // For now, show an info message - full implementation would show a system selector dialog
+                        status_message =
+                            "New Project: Please use File -> Open ROM to load a ROM file"
+                                .to_string();
+                        status_bar.message = status_message.clone();
+                        println!("New Project - Use File -> Open ROM to load a ROM");
                     }
                     MenuAction::Resume => {
                         settings.emulation_speed = 1.0;
@@ -3349,10 +3403,27 @@ fn main() {
         status_bar.paused = settings.emulation_speed == 0.0;
         status_bar.speed = settings.emulation_speed as f32;
 
-        // Update IP and cycles from runtime stats
+        // Update rendering backend
+        status_bar.rendering_backend = if settings.video_backend == "opengl" {
+            "OpenGL".to_string()
+        } else {
+            "Software".to_string()
+        };
+
+        // Update IP from system-specific debug info
+        status_bar.ip = sys.get_instruction_pointer();
+
+        // Update CPU frequency info
+        status_bar.cpu_freq_target = sys.get_cpu_freq_target();
+        status_bar.cpu_freq_actual = sys.get_cpu_freq_actual();
+
+        // Update cycles from runtime stats (for systems that support it)
         let stats = sys.get_runtime_stats();
-        status_bar.ip = Some(stats.pc as u32);
-        status_bar.cycles = Some(stats.cpu_cycles as u64);
+        if stats.cpu_cycles > 0 {
+            status_bar.cycles = Some(stats.cpu_cycles as u64);
+        } else {
+            status_bar.cycles = None;
+        }
 
         // Update menu state based on current emulator state
         menu_bar.update_menu_state(
