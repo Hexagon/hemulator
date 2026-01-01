@@ -1,0 +1,147 @@
+//! Main egui application layout
+
+use super::menu_bar::MenuBar;
+use super::property_pane::PropertyPane;
+use super::status_bar::StatusBarWidget;
+use super::tabs::TabManager;
+use crate::settings::ScalingMode;
+use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
+
+/// Convert a single sRGB color component (0-255) to linear color space (0-255)
+/// This implements the sRGB to linear conversion formula
+#[inline]
+fn srgb_to_linear(srgb: u8) -> u8 {
+    let srgb_f = srgb as f32 / 255.0;
+    let linear_f = if srgb_f <= 0.04045 {
+        srgb_f / 12.92
+    } else {
+        ((srgb_f + 0.055) / 1.055).powf(2.4)
+    };
+    (linear_f * 255.0).round().min(255.0) as u8
+}
+
+/// Main egui application state
+pub struct EguiApp {
+    pub menu_bar: MenuBar,
+    pub tab_manager: TabManager,
+    pub property_pane: PropertyPane,
+    pub status_bar: StatusBarWidget,
+
+    /// Frame texture for emulator display
+    pub emulator_texture: Option<egui::TextureHandle>,
+}
+
+impl EguiApp {
+    pub fn new() -> Self {
+        Self {
+            menu_bar: MenuBar::new(),
+            tab_manager: TabManager::new(),
+            property_pane: PropertyPane::new(),
+            status_bar: StatusBarWidget::new(),
+            emulator_texture: None,
+        }
+    }
+
+    /// Update the emulator display texture
+    pub fn update_emulator_texture(
+        &mut self,
+        ctx: &Context,
+        pixels: &[u32],
+        width: usize,
+        height: usize,
+    ) {
+        // Convert ARGB to RGBA for egui
+        // Also apply gamma correction to convert from sRGB to linear color space
+        // This is needed because egui uses GL_RGBA textures (linear) but enables
+        // GL_FRAMEBUFFER_SRGB when rendering to the screen
+        let rgba_pixels: Vec<u8> = pixels
+            .iter()
+            .flat_map(|&pixel| {
+                let a = ((pixel >> 24) & 0xFF) as u8;
+                let r = ((pixel >> 16) & 0xFF) as u8;
+                let g = ((pixel >> 8) & 0xFF) as u8;
+                let b = (pixel & 0xFF) as u8;
+
+                // Convert sRGB to linear color space
+                // This prevents the dark tint issue when GL_FRAMEBUFFER_SRGB is enabled
+                let r_linear = srgb_to_linear(r);
+                let g_linear = srgb_to_linear(g);
+                let b_linear = srgb_to_linear(b);
+
+                [r_linear, g_linear, b_linear, a]
+            })
+            .collect();
+
+        let color_image = egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba_pixels);
+
+        if let Some(texture) = &mut self.emulator_texture {
+            texture.set(color_image, egui::TextureOptions::NEAREST);
+        } else {
+            self.emulator_texture = Some(ctx.load_texture(
+                "emulator_frame",
+                color_image,
+                egui::TextureOptions::NEAREST,
+            ));
+        }
+    }
+
+    /// Render the UI
+    pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
+        // Top menu bar
+        TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            self.menu_bar.ui(ui);
+        });
+
+        // Bottom status bar
+        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            self.status_bar.ui(ui);
+        });
+
+        // Right property pane
+        SidePanel::right("property_pane")
+            .default_width(300.0)
+            .min_width(200.0)
+            .max_width(500.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                self.property_pane.ui(ui);
+            });
+
+        // Central tabbed interface
+        CentralPanel::default().show(ctx, |ui| {
+            self.tab_manager
+                .ui(ui, &self.emulator_texture, scaling_mode);
+        });
+    }
+}
+
+impl Default for EguiApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_srgb_to_linear_conversion() {
+        // Test black (should stay black)
+        assert_eq!(srgb_to_linear(0), 0);
+
+        // Test white (should stay white)
+        assert_eq!(srgb_to_linear(255), 255);
+
+        // Test middle gray (sRGB 128 should convert to darker linear value)
+        // sRGB 128/255 = 0.502, linear = ((0.502 + 0.055) / 1.055)^2.4 ≈ 0.214
+        // linear 0.214 * 255 ≈ 55
+        let result = srgb_to_linear(128);
+        assert!((53..=57).contains(&result), "Expected ~55, got {}", result);
+
+        // Test common sRGB value (187 is common in UI)
+        // Should convert to a brighter linear value
+        let result = srgb_to_linear(187);
+        assert!(result > 100, "Linear value should be > 100 for sRGB 187");
+    }
+}

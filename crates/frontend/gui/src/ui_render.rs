@@ -1,4 +1,5 @@
 //! Simple text rendering for overlays and default screen
+#![allow(dead_code)]
 
 const FONT_WIDTH: usize = 8;
 const FONT_HEIGHT: usize = 8;

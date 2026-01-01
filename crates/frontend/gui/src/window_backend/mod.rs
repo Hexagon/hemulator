@@ -6,8 +6,10 @@
 use std::error::Error;
 
 mod sdl2_backend;
+mod sdl2_egui_backend;
 
 pub use sdl2_backend::Sdl2Backend;
+pub use sdl2_egui_backend::Sdl2EguiBackend;
 
 /// Common key codes used across backends
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

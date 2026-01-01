@@ -222,6 +222,8 @@ impl Riot {
             0x0000..=0x007F => self.ram[addr as usize],
             0x0080..=0x00FF => self.ram[(addr & 0x7F) as usize],
             0x0100..=0x017F => self.ram[(addr & 0x7F) as usize],
+            // Stack mirror ($180-$1FF)
+            0x0180..=0x01FF => self.ram[(addr & 0x7F) as usize],
 
             // I/O and timer ($280-$297, mirrored every 32 bytes)
             0x0280..=0x029F => {
@@ -257,6 +259,8 @@ impl Riot {
             0x0000..=0x007F => self.ram[addr as usize] = val,
             0x0080..=0x00FF => self.ram[(addr & 0x7F) as usize] = val,
             0x0100..=0x017F => self.ram[(addr & 0x7F) as usize] = val,
+            // Stack mirror ($180-$1FF)
+            0x0180..=0x01FF => self.ram[(addr & 0x7F) as usize] = val,
 
             // I/O and timer ($280-$29F, mirrored every 32 bytes)
             0x0280..=0x029F => {
@@ -281,6 +285,7 @@ impl Riot {
                     }
                     0x16 => {
                         // TIM64T
+                        // eprintln!("RIOT: TIM64T write val={} interval=64", val);
                         self.timer = val;
                         self.timer_interval = 64;
                         self.timer_cycles = 0;
@@ -311,6 +316,7 @@ impl Riot {
                 // Decrement timer
                 if self.timer == 0 {
                     // Timer at 0, wrap around
+                    // eprintln!("RIOT: Timer underflow! interval=1");
                     self.timer_underflow.set(true);
                     self.timer_interval = 1; // After underflow, decrement every cycle
                     self.timer = 0xFF;
@@ -318,9 +324,10 @@ impl Riot {
                     self.timer = self.timer.wrapping_sub(1);
                     // Check if we just hit 0
                     if self.timer == 0 {
+                        // eprintln!("RIOT: Timer hit 0! interval=1");
                         self.timer_underflow.set(true);
                         self.timer_interval = 1;
-                        self.timer = 0xFF;
+                        // self.timer = 0xFF; // REMOVED: Don't wrap immediately, stay at 0 for one interval
                     }
                 }
             }
@@ -390,10 +397,14 @@ mod tests {
         riot.clock(1);
         assert_eq!(riot.read(0x0284), 9);
 
-        // Clock until underflow
+        // Clock until 0
         riot.clock(9);
-        assert_eq!(riot.read(0x0284), 0xFF); // Should wrap to 0xFF
+        assert_eq!(riot.read(0x0284), 0); // Should be 0
         assert_eq!(riot.read(0x0285) & 0x80, 0x80); // Underflow flag set at $285
+
+        // Clock one more time
+        riot.clock(1);
+        assert_eq!(riot.read(0x0284), 0xFF); // Should wrap to 0xFF
     }
 
     #[test]

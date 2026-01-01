@@ -6,6 +6,28 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// Scaling mode for emulator display
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScalingMode {
+    /// Original size: 1:1 pixel mapping, centered
+    Original,
+    /// Fit to window: Scale to fit maintaining aspect ratio
+    #[default]
+    Fit,
+    /// Stretch: Fill entire window, ignoring aspect ratio
+    Stretch,
+}
+
+impl ScalingMode {
+    pub fn name(&self) -> &str {
+        match self {
+            ScalingMode::Original => "Original",
+            ScalingMode::Fit => "Fit",
+            ScalingMode::Stretch => "Stretch",
+        }
+    }
+}
+
 /// Standard controller button mapping (for NES, SNES, GB, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyMapping {
@@ -187,6 +209,12 @@ pub struct Settings {
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
     #[serde(default = "default_video_backend")]
     pub video_backend: String, // "software" or "opengl"
+    #[serde(default)]
+    pub scaling_mode: ScalingMode, // How to scale emulator display
+    #[serde(default, skip_serializing)] // Runtime only, not saved
+    pub fullscreen: bool, // Fullscreen state
+    #[serde(default, skip_serializing)] // Runtime only, not saved
+    pub fullscreen_with_gui: bool, // Fullscreen with GUI overlay
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
 }
@@ -218,6 +246,9 @@ impl Default for Settings {
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
             video_backend: "software".to_string(),
+            scaling_mode: ScalingMode::default(),
+            fullscreen: false,
+            fullscreen_with_gui: false,
             extra: HashMap::new(),
         }
     }
@@ -700,4 +731,44 @@ fn test_emulation_speed_default_issue() {
             panic!("Failed to deserialize: {}", e);
         }
     }
+}
+
+#[test]
+fn test_scaling_mode_names() {
+    assert_eq!(ScalingMode::Original.name(), "Original");
+    assert_eq!(ScalingMode::Fit.name(), "Fit");
+    assert_eq!(ScalingMode::Stretch.name(), "Stretch");
+}
+
+#[test]
+fn test_scaling_mode_default() {
+    assert_eq!(ScalingMode::default(), ScalingMode::Fit);
+}
+
+#[test]
+fn test_scaling_mode_serialization() {
+    // Test that scaling modes can be serialized/deserialized
+    let modes = vec![
+        ScalingMode::Original,
+        ScalingMode::Fit,
+        ScalingMode::Stretch,
+    ];
+
+    for mode in modes {
+        let json = serde_json::to_string(&mode).expect("Failed to serialize");
+        let deserialized: ScalingMode = serde_json::from_str(&json).expect("Failed to deserialize");
+        assert_eq!(mode, deserialized);
+    }
+}
+
+#[test]
+fn test_settings_with_scaling_mode() {
+    let mut settings = Settings::default();
+    assert_eq!(settings.scaling_mode, ScalingMode::Fit);
+
+    settings.scaling_mode = ScalingMode::Original;
+    assert_eq!(settings.scaling_mode, ScalingMode::Original);
+
+    settings.scaling_mode = ScalingMode::Stretch;
+    assert_eq!(settings.scaling_mode, ScalingMode::Stretch);
 }

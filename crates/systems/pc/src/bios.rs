@@ -560,6 +560,7 @@ pub fn update_post_screen_mounts(
     floppy_a: bool,
     floppy_b: bool,
     hard_drive: bool,
+    cdrom: bool,
     boot_priority: BootPriority,
 ) {
     let text_offset = 0x18000;
@@ -600,18 +601,25 @@ pub fn update_post_screen_mounts(
         write_line(12, 4, "Hard Disk C: Not present   ", absent_attr);
     }
 
-    // Update boot priority
+    // CD-ROM Drive
+    if cdrom {
+        write_line(13, 4, "CD-ROM: Present            ", present_attr);
+    } else {
+        write_line(13, 4, "CD-ROM: Not present        ", absent_attr);
+    }
+
+    // Update boot priority (moved down one line)
     let boot_text = match boot_priority {
         BootPriority::FloppyFirst => "Floppy First   ",
         BootPriority::HardDriveFirst => "Hard Drive First",
         BootPriority::FloppyOnly => "Floppy Only    ",
         BootPriority::HardDriveOnly => "Hard Drive Only",
     };
-    write_line(14, 18, boot_text, 0x0E);
+    write_line(15, 18, boot_text, 0x0E);
 
     // Update bottom message based on disk availability
     let header_attr = 0x1F;
-    if floppy_a || floppy_b || hard_drive {
+    if floppy_a || floppy_b || hard_drive || cdrom {
         write_line(
             24,
             2,

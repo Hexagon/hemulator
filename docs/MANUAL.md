@@ -637,6 +637,9 @@ The emulator supports the following cartridge banking schemes:
 
 **Features**:
 - TIA (Television Interface Adapter) video emulation with playfield rendering
+- **Player/Missile Sizing (NUSIZ)**: Full support for sprite sizing (1x, 2x, 4x) and duplication modes
+- **Collision Detection**: All 8 collision registers implemented with pixel-perfect detection
+- **Delayed Graphics (VDELP0/VDELP1)**: Player graphics can be delayed by one scanline
 - TIA audio emulation with 2 channels (polynomial waveform synthesis)
 - RIOT (6532) chip emulation for RAM, I/O, and timers
 - Save states (F5/F6)
@@ -644,9 +647,6 @@ The emulator supports the following cartridge banking schemes:
 - 160x192 resolution
 
 **Known Limitations**:
-- **Player/Missile Sizing**: NUSIZ registers not implemented - sprites always render at 1x size without duplication
-- **Collision Detection**: Collision registers exist but always return 0 - games relying on collision won't work correctly
-- **Delayed Graphics**: VDELP0/VDELP1 not implemented - affects some multi-sprite animation techniques
 - **Paddle Controllers**: INPT0-INPT3 always return 0 - paddle games (Breakout, Kaboom!, Warlords) are unplayable
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but some visual effects may differ
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
@@ -660,7 +660,7 @@ The emulator supports the following cartridge banking schemes:
 ### Game Boy / Game Boy Color
 
 **Status**: ✅ Fully Working  
-**Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
+**Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
@@ -671,6 +671,7 @@ The emulator supports the following cartridge banking schemes:
 - **MBC (Memory Bank Controller) Support**:
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
+  - MBC2: Built-in RAM mapper (~1% of games, up to 256KB ROM, 512×4 bits built-in RAM)
   - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
 - Joypad input with matrix selection
@@ -682,7 +683,6 @@ The emulator supports the following cartridge banking schemes:
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **MBC2**: Not implemented (~1% of games) - rare mapper with built-in 512×4 bits RAM
 - **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
@@ -728,7 +728,6 @@ The emulator supports the following cartridge banking schemes:
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-  - Only 32x32 tilemap size (other sizes not implemented)
   - BG3 priority toggle (Mode 1, $2105 bit 3) not implemented
 - **Audio**: SPC700 APU not implemented - silent gameplay
 - **Cartridge**: 
@@ -1083,7 +1082,7 @@ There are two ways to mount disk images and BIOS:
 
 **Known Limitations**:
 - **BIOS Interrupts**: 
-  - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
+  - INT 10h (Video): Extensive implementation with teletype, cursor control, scrolling, character I/O (video mode switching acknowledged but not functional)
   - INT 13h (Disk): **FULLY IMPLEMENTED** ✅ - All standard and extended functions work
     - AH=00h (Reset), AH=01h (Get Status), AH=02h (Read), AH=03h (Write)
     - AH=04h (Verify), AH=05h (Format), AH=08h (Get Params)
@@ -1093,7 +1092,7 @@ There are two ways to mount disk images and BIOS:
     - AH=88h (Get Extended Memory), AH=C0h (Get System Configuration) ✅
     - AH=E801h/E820h (Extended Memory Detection) ✅
     - AH=41h (Wait on External Event) - returns "not supported" ✅
-  - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
+  - INT 16h (Keyboard): All functions work - read keystroke, check keystroke, and get shift flags
   - INT 1Ah (Time/Date Services): **Time/Date and PCI BIOS functions implemented** ✅
     - AH=00h-05h (Time/Date): Read/Set system clock, RTC time/date ✅
     - AH=B1h (PCI BIOS): Returns "not present" for PC/XT (no PCI bus) ✅
@@ -1167,9 +1166,8 @@ There are two ways to mount disk images and BIOS:
   - AH=00h (read keystroke) and AH=01h (check keystroke) functional
   - No mouse support
   - No serial/parallel port emulation
-- **No audio**: PC speaker not implemented
-- **No timer**: PIT (Programmable Interval Timer) not implemented
-- **Timing**: Frame-based execution - not cycle-accurate
+- **No audio**: PC speaker tone generation not connected (PIT channel 2 tracks frequency but audio output not implemented)
+- **Timing**: Frame-based execution with PIT timer (INT 08h) - not cycle-accurate
 
 ## Troubleshooting
 

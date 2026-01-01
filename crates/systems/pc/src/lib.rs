@@ -309,6 +309,7 @@ impl PcSystem {
         let floppy_a = self.cpu.bus().floppy_a().is_some();
         let floppy_b = self.cpu.bus().floppy_b().is_some();
         let hard_drive = self.cpu.bus().hard_drive().is_some();
+        let cdrom = self.cpu.bus().has_cdrom();
         let boot_priority = self.cpu.bus().boot_priority();
 
         // Get CPU model and memory
@@ -323,7 +324,7 @@ impl PcSystem {
         bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
 
         // Update mount status
-        bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
+        bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, cdrom, boot_priority);
     }
 
     /// Get a reference to floppy A disk image (for saving)
@@ -340,6 +341,55 @@ impl PcSystem {
     pub fn get_hard_drive(&self) -> Option<&[u8]> {
         self.cpu.bus().hard_drive()
     }
+
+    /// Read BDA (BIOS Data Area) values for displaying system information
+    /// BDA is located at 0x0040:0x0000 (physical address 0x0400-0x04FF)
+    pub fn read_bda_values(&self) -> BdaValues {
+        let bus = self.cpu.bus();
+
+        // Read equipment word at 0x0410-0x0411
+        let equipment_word = bus.read(0x0410) as u16 | ((bus.read(0x0411) as u16) << 8);
+
+        // Read memory size at 0x0413-0x0414 (in KB)
+        let memory_size_kb = bus.read(0x0413) as u16 | ((bus.read(0x0414) as u16) << 8);
+
+        // Read video mode at 0x0449
+        let video_mode = bus.read(0x0449);
+
+        // Read video columns at 0x044A-0x044B
+        let video_columns = bus.read(0x044A);
+
+        // Count serial ports from equipment word (bits 9-11)
+        let num_serial_ports = ((equipment_word >> 9) & 0x07) as u8;
+
+        // Count parallel ports from equipment word (bits 14-15)
+        let num_parallel_ports = ((equipment_word >> 14) & 0x03) as u8;
+
+        // Read number of hard drives at 0x0475
+        let num_hard_drives = bus.read(0x0475);
+
+        BdaValues {
+            equipment_word,
+            memory_size_kb,
+            video_mode,
+            video_columns,
+            num_serial_ports,
+            num_parallel_ports,
+            num_hard_drives,
+        }
+    }
+}
+
+/// BIOS Data Area values for PC system diagnostics
+#[derive(Debug, Clone)]
+pub struct BdaValues {
+    pub equipment_word: u16,
+    pub memory_size_kb: u16,
+    pub video_mode: u8,
+    pub video_columns: u8,
+    pub num_serial_ports: u8,
+    pub num_parallel_ports: u8,
+    pub num_hard_drives: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -450,6 +500,24 @@ impl System for PcSystem {
 
                     // Initialize BIOS Data Area (BDA) at 0x0040:0x0000
                     // DOS expects this to be properly initialized
+                    // Reference: https://wiki.osdev.org/BIOS_Data_Area
+                    //
+                    // Standard BDA Layout (partial):
+                    // 0x0400 (4 words)  - IO ports for COM1-COM4 serial
+                    // 0x0408 (3 words)  - IO ports for LPT1-LPT3 parallel
+                    // 0x040E (word)     - EBDA base address >> 4
+                    // 0x0410 (word)     - Equipment list flags
+                    // 0x0413 (word)     - Conventional memory size in KB
+                    // 0x0417 (word)     - Keyboard state flags
+                    // 0x041E (32 bytes) - Keyboard buffer
+                    // 0x0449 (byte)     - Display mode
+                    // 0x044A (word)     - Number of columns in text mode
+                    // 0x0463 (word)     - Base IO port for video
+                    // 0x046C (dword)    - Timer ticks since boot (IRQ0 count)
+                    // 0x0475 (byte)     - Number of hard disk drives
+                    // 0x0480 (word)     - Keyboard buffer start offset
+                    // 0x0482 (word)     - Keyboard buffer end offset
+                    // 0x0497 (byte)     - Last keyboard LED/Shift key state
                     use emu_core::cpu_8086::Memory8086;
 
                     // COM port base addresses at 0x0040:0x0000 (4 words)
@@ -507,6 +575,10 @@ impl System for PcSystem {
                     // Keyboard flags at 0x0040:0x0017 (shift states, etc.)
                     self.cpu.bus_mut().write(0x417, 0x00); // No keys pressed
                     self.cpu.bus_mut().write(0x418, 0x00); // Extended keyboard flags
+
+                    // Keyboard buffer area at 0x0040:0x001E (32 bytes) is already zeroed
+                    // by RAM initialization (vec![0; ram_size] in bus.rs)
+                    // The buffer is dynamically filled by sync_bda_keyboard_buffer() in cpu.rs
 
                     // Keyboard buffer head/tail pointers at 0x0040:0x001A and 0x001C
                     self.cpu.bus_mut().write(0x41A, 0x1E); // Buffer head offset
@@ -591,6 +663,9 @@ impl System for PcSystem {
                     self.cpu.bus_mut().write(0x48D, 0x00); // Diskette motor timeout
                     self.cpu.bus_mut().write(0x48E, 0x00); // Disk status return code
                     self.cpu.bus_mut().write(0x48F, 0x00); // Diskette controller status
+
+                    // Last keyboard LED/Shift key state at 0x0040:0x0097
+                    self.cpu.bus_mut().write(0x497, 0x00); // No LEDs/shift keys active
 
                     // Set up BIOS interrupt vectors (normally done by BIOS init code)
                     // INT 0x10 (Video Services) at 0x0040
@@ -762,6 +837,12 @@ impl System for PcSystem {
                 extensions: vec!["img".to_string(), "vhd".to_string()],
                 required: false,
             },
+            MountPointInfo {
+                id: "CDROM".to_string(),
+                name: "CD-ROM Drive".to_string(),
+                extensions: vec!["iso".to_string(), "cue".to_string()],
+                required: false,
+            },
         ]
     }
 
@@ -826,6 +907,15 @@ impl System for PcSystem {
 
                 Ok(())
             }
+            "CDROM" => {
+                // Mount CD-ROM (ISO 9660 format)
+                // Minimum size check: at least 32KB for ISO 9660 system area
+                if data.len() < 32 * 1024 {
+                    return Err(PcError::InvalidExecutable);
+                }
+                self.cpu.bus_mut().mount_cdrom(data.to_vec());
+                Ok(())
+            }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
         }
     }
@@ -854,6 +944,10 @@ impl System for PcSystem {
                 // This is CRITICAL for DOS to stop seeing a non-existent drive
                 self.cpu.bus_mut().write(0x475, 0); // 0 hard drives installed
 
+                Ok(())
+            }
+            "CDROM" => {
+                self.cpu.bus_mut().unmount_cdrom();
                 Ok(())
             }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
@@ -933,7 +1027,7 @@ mod tests {
         let sys = PcSystem::new();
         let mps = sys.mount_points();
 
-        assert_eq!(mps.len(), 4);
+        assert_eq!(mps.len(), 5);
 
         // Check BIOS mount point
         assert_eq!(mps[0].id, "BIOS");
@@ -951,6 +1045,11 @@ mod tests {
         // Check Hard Drive
         assert_eq!(mps[3].id, "HardDrive");
         assert!(!mps[3].required);
+
+        // Check CD-ROM
+        assert_eq!(mps[4].id, "CDROM");
+        assert!(!mps[4].required);
+        assert!(mps[4].extensions.contains(&"iso".to_string()));
     }
 
     #[test]
@@ -1000,6 +1099,60 @@ mod tests {
             hd_count_after_unmount, 0,
             "BDA should reflect 0 hard drives after unmounting"
         );
+    }
+
+    #[test]
+    fn test_mount_cdrom() {
+        let mut sys = PcSystem::new();
+
+        // Create a minimal ISO 9660 image (64KB)
+        let iso_data = vec![0u8; 64 * 1024];
+
+        // Mount CD-ROM
+        assert!(sys.mount("CDROM", &iso_data).is_ok());
+
+        // Verify CD-ROM is mounted
+        assert!(sys.cpu.bus().has_cdrom());
+    }
+
+    #[test]
+    fn test_unmount_cdrom() {
+        let mut sys = PcSystem::new();
+
+        // Mount and then unmount
+        let iso_data = vec![0u8; 64 * 1024];
+        sys.mount("CDROM", &iso_data).unwrap();
+        assert!(sys.cpu.bus().has_cdrom());
+
+        sys.unmount("CDROM").unwrap();
+        assert!(!sys.cpu.bus().has_cdrom());
+    }
+
+    #[test]
+    fn test_cdrom_read_only() {
+        use crate::bus::PcBus;
+        use crate::disk::DiskRequest;
+
+        let mut bus = PcBus::new();
+
+        // Mount CD-ROM
+        let iso_data = vec![0xAA; 2048]; // One sector
+        bus.mount_cdrom(iso_data);
+
+        // Try to write to CD-ROM (should fail with write protect error)
+        let request = DiskRequest {
+            drive: 0xE0, // CD-ROM drive
+            cylinder: 0,
+            head: 0,
+            sector: 1,
+            count: 1,
+        };
+
+        let buffer = vec![0x55; 512];
+        let status = bus.disk_write(&request, &buffer);
+
+        // Should return write protect error (0x03)
+        assert_eq!(status, 0x03);
     }
 
     #[test]
@@ -2370,5 +2523,139 @@ mod boot_output_tests {
             "Timer interrupt test passed! Tick counter increased by {} (from {} to {})",
             tick_delta, initial_ticks, final_ticks
         );
+    }
+
+    #[test]
+    fn test_bda_initialization() {
+        // Test that the BIOS Data Area (BDA) is properly initialized
+        // according to osdev.org specification
+        use emu_core::cpu_8086::Memory8086;
+
+        let mut sys = PcSystem::new();
+
+        // The BDA is initialized when boot_delay_frames reaches 0
+        // Set it to 1 so that the first step_frame() will decrement it to 0
+        // and trigger the initialization
+        sys.boot_delay_frames = 1;
+        sys.boot_started = false;
+
+        // Call step_frame once to trigger BDA initialization
+        let _ = sys.step_frame();
+
+        let bus = sys.cpu.bus();
+
+        // 0x0400-0x0407: COM port addresses (4 words)
+        // COM1 should be at 0x03F8
+        let com1_addr = (bus.read(0x400) as u16) | ((bus.read(0x401) as u16) << 8);
+        assert_eq!(com1_addr, 0x03F8, "COM1 should be at 0x03F8");
+
+        // COM2 should be at 0x02F8
+        let com2_addr = (bus.read(0x402) as u16) | ((bus.read(0x403) as u16) << 8);
+        assert_eq!(com2_addr, 0x02F8, "COM2 should be at 0x02F8");
+
+        // 0x0408-0x040D: LPT port addresses (3 words)
+        // LPT1 should be at 0x0378
+        let lpt1_addr = (bus.read(0x408) as u16) | ((bus.read(0x409) as u16) << 8);
+        assert_eq!(lpt1_addr, 0x0378, "LPT1 should be at 0x0378");
+
+        // 0x040E: EBDA segment (should be 0x9FC0 >> 4 = 0x9FC0, not shifted in memory)
+        let ebda_seg = (bus.read(0x40E) as u16) | ((bus.read(0x40F) as u16) << 8);
+        assert_eq!(ebda_seg, 0x9FC0, "EBDA segment should be 0x9FC0");
+
+        // 0x0410: Equipment word
+        let equipment = (bus.read(0x410) as u16) | ((bus.read(0x411) as u16) << 8);
+        assert_ne!(equipment, 0, "Equipment word should be non-zero");
+
+        // 0x0413: Conventional memory size in KB (should be 640 or less)
+        let mem_kb = (bus.read(0x413) as u16) | ((bus.read(0x414) as u16) << 8);
+        assert!(
+            mem_kb > 0 && mem_kb <= 640,
+            "Memory size should be 1-640 KB, got {}",
+            mem_kb
+        );
+
+        // 0x0417-0x0418: Keyboard flags (should be initialized to 0)
+        let kb_flags = bus.read(0x417);
+        assert_eq!(kb_flags, 0, "Keyboard flags should be 0 initially");
+
+        // 0x041E-0x043D: Keyboard buffer (32 bytes, should be zeroed)
+        for i in 0..32 {
+            let val = bus.read(0x41E + i);
+            assert_eq!(val, 0, "Keyboard buffer byte {} should be 0", i);
+        }
+
+        // 0x041A: Keyboard buffer head pointer
+        let kb_head = (bus.read(0x41A) as u16) | ((bus.read(0x41B) as u16) << 8);
+        assert_eq!(kb_head, 0x1E, "Keyboard buffer head should be 0x1E");
+
+        // 0x041C: Keyboard buffer tail pointer
+        let kb_tail = (bus.read(0x41C) as u16) | ((bus.read(0x41D) as u16) << 8);
+        assert_eq!(kb_tail, 0x1E, "Keyboard buffer tail should be 0x1E (empty)");
+
+        // 0x0449: Display mode
+        let display_mode = bus.read(0x449);
+        assert_eq!(
+            display_mode, 0x03,
+            "Display mode should be 0x03 (CGA 80x25)"
+        );
+
+        // 0x044A: Screen columns
+        let columns = (bus.read(0x44A) as u16) | ((bus.read(0x44B) as u16) << 8);
+        assert_eq!(columns, 80, "Screen should have 80 columns");
+
+        // 0x0463: Video base port (should be 0x03D4 for CGA)
+        let video_port = (bus.read(0x463) as u16) | ((bus.read(0x464) as u16) << 8);
+        assert_eq!(video_port, 0x03D4, "Video base port should be 0x03D4");
+
+        // 0x046C: Timer tick count (4 bytes, should be initialized to 0)
+        let ticks = (bus.read(0x46C) as u32)
+            | ((bus.read(0x46D) as u32) << 8)
+            | ((bus.read(0x46E) as u32) << 16)
+            | ((bus.read(0x46F) as u32) << 24);
+        assert_eq!(ticks, 0, "Timer tick count should be 0 initially");
+
+        // 0x0475: Hard drive count
+        let hd_count = bus.read(0x475);
+        assert_eq!(hd_count, 0, "Hard drive count should be 0 initially");
+
+        // 0x0480: Keyboard buffer start offset
+        let kb_start = (bus.read(0x480) as u16) | ((bus.read(0x481) as u16) << 8);
+        assert_eq!(kb_start, 0x1E, "Keyboard buffer start should be 0x1E");
+
+        // 0x0482: Keyboard buffer end offset
+        let kb_end = (bus.read(0x482) as u16) | ((bus.read(0x483) as u16) << 8);
+        assert_eq!(kb_end, 0x3E, "Keyboard buffer end should be 0x3E");
+
+        // 0x0497: Last keyboard LED/Shift key state
+        let kb_led_state = bus.read(0x497);
+        assert_eq!(kb_led_state, 0, "Keyboard LED state should be 0 initially");
+    }
+
+    #[test]
+    fn test_keyboard_shift_flags_updated_in_bda() {
+        // Test that keyboard shift flags in BDA are updated during operation
+        // The sync happens when INT 16h is called, which occurs during normal execution
+        use crate::keyboard::SCANCODE_LEFT_SHIFT;
+
+        let mut sys = PcSystem::new();
+
+        // Initialize the system by triggering boot
+        sys.boot_delay_frames = 1;
+        sys.boot_started = false;
+        let _ = sys.step_frame();
+
+        // Press Left Shift key
+        sys.cpu.bus_mut().keyboard.key_press(SCANCODE_LEFT_SHIFT);
+
+        // Verify that shift flags can be read from keyboard
+        let shift_flags = sys.cpu.bus().keyboard.get_shift_flags();
+        assert_eq!(
+            shift_flags & 0x02,
+            0x02,
+            "Left shift flag should be set in keyboard state"
+        );
+
+        // Note: BDA synchronization happens when INT 16h is called during program execution
+        // The sync_bda_keyboard_buffer() function updates both 0x417 and 0x497
     }
 }

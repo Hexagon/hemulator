@@ -290,6 +290,13 @@ impl<M: Memory6502> Cpu6502<M> {
 
     /// Execute one instruction and return cycles used.
     pub fn step(&mut self) -> u32 {
+        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
+            let op = self.read(self.pc);
+            eprintln!(
+                "CPU: PC={:04X} OP={:02X} A={:02X} X={:02X} Y={:02X} SP={:02X} P={:02X}",
+                self.pc, op, self.a, self.x, self.y, self.sp, self.status
+            );
+        }
         let op = self.fetch_u8();
         match op {
             0x08 => {

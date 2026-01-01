@@ -64,6 +64,7 @@ pub struct HemuProject {
 
 impl HemuProject {
     /// Create a new project for a given system
+    #[allow(dead_code)]
     pub fn new(system: String) -> Self {
         Self {
             version: 1,
@@ -86,6 +87,7 @@ impl HemuProject {
     }
 
     /// Save the project to a .hemu file
+    #[allow(dead_code)]
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
         let contents = serde_json::to_string_pretty(self)?;
         fs::write(path, contents)?;
@@ -93,6 +95,7 @@ impl HemuProject {
     }
 
     /// Set a mount point
+    #[allow(dead_code)]
     pub fn set_mount(&mut self, mount_id: String, file_path: String) {
         self.mounts.insert(mount_id, file_path);
     }
@@ -149,6 +152,7 @@ impl HemuProject {
     }
 
     /// Set display settings
+    #[allow(dead_code)]
     pub fn set_display_settings(&mut self, width: usize, height: usize, filter: DisplayFilter) {
         self.display.window_width = width;
         self.display.window_height = height;
