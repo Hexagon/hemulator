@@ -2213,12 +2213,6 @@ fn main() {
                     MenuAction::SaveProject => {
                         save_project(&sys, &runtime_state, &settings, &mut status_message);
                     }
-                    MenuAction::MountPoints => {
-                        // Mount points are now handled via the Mounts menu
-                        // This legacy action just closes selectors
-                        selector_manager.close();
-                        popup_manager.close_all();
-                    }
                     MenuAction::Exit => {
                         break;
                     }
@@ -2322,8 +2316,8 @@ fn main() {
                         popup_manager.toggle_debug();
                         selector_manager.close();
                     }
-                    MenuAction::CrtFilterToggle => {
-                        settings.display_filter = settings.display_filter.next();
+                    MenuAction::CrtFilter(filter) => {
+                        settings.display_filter = filter;
                         if let Some(sdl2_backend) =
                             window.as_any_mut().downcast_mut::<Sdl2Backend>()
                         {
@@ -2333,6 +2327,8 @@ fn main() {
                             eprintln!("Warning: Failed to save CRT filter setting: {}", e);
                         }
                         println!("CRT Filter: {}", settings.display_filter.name());
+                        status_message = format!("CRT Filter: {}", settings.display_filter.name());
+                        status_bar.message = status_message.clone();
                     }
                     MenuAction::Help => {
                         popup_manager.toggle_help();
@@ -2343,12 +2339,13 @@ fn main() {
                         println!("Hemulator - Multi-System Emulator");
                     }
                     MenuAction::NewProject => {
-                        // Show system selector
-                        selector_manager.close();
-                        popup_manager.close_all();
-                        // Set a flag to show system selector
-                        // This will be handled in the rendering section
-                        println!("New Project - Select System Type");
+                        // Create a new project by prompting for system type
+                        // For now, show an info message - full implementation would show a system selector dialog
+                        status_message =
+                            "New Project: Please use File -> Open ROM to load a ROM file"
+                                .to_string();
+                        status_bar.message = status_message.clone();
+                        println!("New Project - Use File -> Open ROM to load a ROM");
                     }
                     MenuAction::Resume => {
                         settings.emulation_speed = 1.0;
