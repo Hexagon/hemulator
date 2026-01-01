@@ -71,7 +71,7 @@
 //!
 //! **Collision Detection**: The TIA has hardware collision detection registers that set bits
 //! when different objects overlap. This implementation tracks collisions pixel-by-pixel during
-//! rendering and updates all 8 collision registers (CXM0P, CXM1P, CXP0FB, CXP1FB, CXM0FB, CXM1FB, 
+//! rendering and updates all 8 collision registers (CXM0P, CXM1P, CXP0FB, CXP1FB, CXM0FB, CXM1FB,
 //! CXBLPF, CXPPMM). Collision registers can be cleared using CXCLR (0x2C).
 //!
 //! # Audio Generation
