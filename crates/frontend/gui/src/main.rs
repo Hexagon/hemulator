@@ -3145,12 +3145,47 @@ fn main() {
         // Prepare debug overlay buffer when requested
         let mut debug_overlay: Option<Vec<u32>> = None;
         if let Some(ref mut debug_window) = popup_manager.debug_window {
-            // For now, use simple debug window rendering
-            // TODO: Properly extract and pass debug info from different systems
+            // Get debug info from the active system and store it to extend its lifetime
+            let pc_debug = sys.get_debug_info_pc();
+            let nes_debug = sys.get_debug_info_nes();
+            let gb_debug = sys.get_debug_info_gb();
+            let atari_debug = sys.get_debug_info_atari2600();
+            let snes_debug = sys.get_debug_info_snes();
+            let n64_debug = sys.get_debug_info_n64();
+
+            let debug_info_ref: Option<&dyn popup_window::DebugInfo> = pc_debug
+                .as_ref()
+                .map(|info| info as &dyn popup_window::DebugInfo)
+                .or_else(|| {
+                    nes_debug
+                        .as_ref()
+                        .map(|info| info as &dyn popup_window::DebugInfo)
+                })
+                .or_else(|| {
+                    gb_debug
+                        .as_ref()
+                        .map(|info| info as &dyn popup_window::DebugInfo)
+                })
+                .or_else(|| {
+                    atari_debug
+                        .as_ref()
+                        .map(|info| info as &dyn popup_window::DebugInfo)
+                })
+                .or_else(|| {
+                    snes_debug
+                        .as_ref()
+                        .map(|info| info as &dyn popup_window::DebugInfo)
+                })
+                .or_else(|| {
+                    n64_debug
+                        .as_ref()
+                        .map(|info| info as &dyn popup_window::DebugInfo)
+                });
+
             debug_overlay = Some(debug_window.render(
                 width,
                 height,
-                None,
+                debug_info_ref,
                 current_fps,
                 &settings.video_backend,
             ));

@@ -262,7 +262,7 @@ impl DebugWindow {
         if let Some(info) = debug_info {
             let lines = info.get_cpu_lines();
             for line in lines {
-                ui_render::draw_text(buffer, width, height, line, x_offset + 10, y, 0xFFEBDBB2);
+                ui_render::draw_text(buffer, width, height, &line, x_offset + 10, y, 0xFFEBDBB2);
                 y += line_height;
                 if y + line_height > height {
                     break;
@@ -321,7 +321,7 @@ impl DebugWindow {
         if let Some(info) = debug_info {
             let lines = info.get_graphics_lines();
             for line in lines {
-                ui_render::draw_text(buffer, width, height, line, x_offset + 10, y, 0xFFEBDBB2);
+                ui_render::draw_text(buffer, width, height, &line, x_offset + 10, y, 0xFFEBDBB2);
                 y += line_height;
                 if y + line_height > height {
                     break;
@@ -382,7 +382,7 @@ impl DebugWindow {
         if let Some(info) = debug_info {
             let lines = info.get_bus_lines();
             for line in lines {
-                ui_render::draw_text(buffer, width, height, line, x_offset + 10, y, 0xFFEBDBB2);
+                ui_render::draw_text(buffer, width, height, &line, x_offset + 10, y, 0xFFEBDBB2);
                 y += line_height;
                 if y + line_height > height {
                     break;
@@ -606,22 +606,189 @@ impl Default for PopupWindowManager {
 
 /// Unified debug info trait for rendering
 pub trait DebugInfo {
-    fn get_cpu_lines(&self) -> Vec<&str>;
-    fn get_graphics_lines(&self) -> Vec<&str>;
-    fn get_bus_lines(&self) -> Vec<&str>;
+    fn get_cpu_lines(&self) -> Vec<String>;
+    fn get_graphics_lines(&self) -> Vec<String>;
+    fn get_bus_lines(&self) -> Vec<String>;
 }
 
-// Implement DebugInfo for different system debug info types
+// Implement DebugInfo for PC system
+impl DebugInfo for emu_pc::DebugInfo {
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("CS:IP = {:04X}:{:08X}", self.cs, self.ip),
+            format!("AX = {:08X}  BX = {:08X}", self.ax, self.bx),
+            format!("CX = {:08X}  DX = {:08X}", self.cx, self.dx),
+            format!("SP = {:08X}  BP = {:08X}", self.sp, self.bp),
+            format!("SI = {:08X}  DI = {:08X}", self.si, self.di),
+            format!("FLAGS = {:08X}", self.flags),
+            format!("Cycles = {}", self.cycles),
+        ]
+    }
+
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            "Video adapter information".to_string(),
+            "Not yet implemented".to_string(),
+        ]
+    }
+
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            "Bus and IRQ information".to_string(),
+            "Not yet implemented".to_string(),
+        ]
+    }
+}
+
+// Implement DebugInfo for NES system
 impl DebugInfo for emu_nes::DebugInfo {
-    fn get_cpu_lines(&self) -> Vec<&str> {
-        vec![] // TODO: Extract CPU state from NES debug info
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("Mapper: {} (#{:03})", self.mapper_name, self.mapper_number),
+            format!(
+                "Timing: {}",
+                match self.timing_mode {
+                    emu_core::apu::TimingMode::Ntsc => "NTSC",
+                    emu_core::apu::TimingMode::Pal => "PAL",
+                }
+            ),
+        ]
     }
 
-    fn get_graphics_lines(&self) -> Vec<&str> {
-        vec![] // TODO: Extract graphics state from NES debug info
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            format!(
+                "CHR Banks: {} ({})",
+                self.chr_banks,
+                if self.chr_banks == 0 {
+                    "RAM".to_string()
+                } else {
+                    format!("{}KB", self.chr_banks * 8)
+                }
+            ),
+        ]
     }
 
-    fn get_bus_lines(&self) -> Vec<&str> {
-        vec![] // TODO: Extract bus state from NES debug info
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            format!("PRG Banks: {} ({}KB)", self.prg_banks, self.prg_banks * 16),
+        ]
+    }
+}
+
+// Implement DebugInfo for Game Boy system
+impl DebugInfo for emu_gb::DebugInfo {
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("PC = {:04X}  SP = {:04X}", self.pc, self.sp),
+            format!("AF = {:04X}  BC = {:04X}", self.af, self.bc),
+            format!("DE = {:04X}  HL = {:04X}", self.de, self.hl),
+            format!(
+                "IME = {}  Halted = {}",
+                if self.ime { "ON" } else { "OFF" },
+                if self.halted { "YES" } else { "NO" }
+            ),
+        ]
+    }
+
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            format!("LY = {} (scanline)", self.ly),
+            format!("LCDC = {:02X}", self.lcdc),
+        ]
+    }
+
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            "Game Boy bus information".to_string(),
+            "Not yet implemented".to_string(),
+        ]
+    }
+}
+
+// Implement DebugInfo for Atari 2600 system
+impl DebugInfo for emu_atari2600::DebugInfo {
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("Banking: {}", self.banking_scheme),
+            format!("Current Bank: {}", self.current_bank),
+        ]
+    }
+
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            format!("Scanline: {}", self.scanline),
+            format!("ROM Size: {} bytes", self.rom_size),
+        ]
+    }
+
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            "Atari 2600 bus information".to_string(),
+            "Not yet implemented".to_string(),
+        ]
+    }
+}
+
+// Implement DebugInfo for SNES system
+impl DebugInfo for emu_snes::DebugInfo {
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("PC = {:02X}:{:04X}", self.pbr, self.pc),
+            format!(
+                "Mode: {}",
+                if self.emulation_mode {
+                    "Emulation (6502)"
+                } else {
+                    "Native (65C816)"
+                }
+            ),
+        ]
+    }
+
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            format!("ROM Size: {} KB", self.rom_size / 1024),
+            format!(
+                "Header: {}",
+                if self.has_smc_header {
+                    "SMC (512 bytes)"
+                } else {
+                    "None"
+                }
+            ),
+        ]
+    }
+
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            "SNES bus information".to_string(),
+            "Not yet implemented".to_string(),
+        ]
+    }
+}
+
+// Implement DebugInfo for N64 system
+impl DebugInfo for emu_n64::DebugInfo {
+    fn get_cpu_lines(&self) -> Vec<String> {
+        vec![
+            format!("ROM: {}", self.rom_name),
+            format!("PC: {:016X}", self.pc),
+            format!("RSP Microcode: {}", self.rsp_microcode),
+        ]
+    }
+
+    fn get_graphics_lines(&self) -> Vec<String> {
+        vec![
+            format!("ROM Size: {:.2} MB", self.rom_size_mb),
+            format!("RSP Vertices: {}", self.rsp_vertex_count),
+            format!("Framebuffer: {}", self.framebuffer_resolution),
+        ]
+    }
+
+    fn get_bus_lines(&self) -> Vec<String> {
+        vec![
+            format!("RDP Status: {:08X}", self.rdp_status),
+        ]
     }
 }
