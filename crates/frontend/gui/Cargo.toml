@@ -33,9 +33,9 @@ glow = "0.13"
 bytemuck = "1.14"
 
 # egui support
-egui = "0.29"
-egui_glow = "0.29"
-egui_extras = { version = "0.29", features = ["image"] }
+egui = "0.32"
+egui_glow = "0.32"
+egui_extras = { version = "0.32", features = ["image"] }
 egui_sdl2_gl = "0.32"
 
 [features]

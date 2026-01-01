@@ -41,20 +41,20 @@ impl MenuBar {
             ui.menu_button("File", |ui| {
                 if ui.button("Open ROM... (F3)").clicked() {
                     self.pending_action = Some(MenuAction::OpenRom);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Open Project...").clicked() {
                     self.pending_action = Some(MenuAction::OpenProject);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Save Project...").clicked() {
                     self.pending_action = Some(MenuAction::SaveProject);
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 if ui.button("Exit (ESC)").clicked() {
                     self.pending_action = Some(MenuAction::Exit);
-                    ui.close_menu();
+                    ui.close();
                 }
             });
 
@@ -62,15 +62,15 @@ impl MenuBar {
             ui.menu_button("Emulation", |ui| {
                 if ui.button("Reset (F2)").clicked() {
                     self.pending_action = Some(MenuAction::Reset);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Pause (P)").clicked() {
                     self.pending_action = Some(MenuAction::Pause);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Resume").clicked() {
                     self.pending_action = Some(MenuAction::Resume);
-                    ui.close_menu();
+                    ui.close();
                 }
             });
 
@@ -78,7 +78,7 @@ impl MenuBar {
             ui.menu_button("View", |ui| {
                 if ui.button("Screenshot (F4)").clicked() {
                     self.pending_action = Some(MenuAction::Screenshot);
-                    ui.close_menu();
+                    ui.close();
                 }
             });
 
@@ -86,12 +86,12 @@ impl MenuBar {
             ui.menu_button("Help", |ui| {
                 if ui.button("Controls & Help").clicked() {
                     self.pending_action = Some(MenuAction::ShowHelp);
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 if ui.button("About").clicked() {
                     self.pending_action = Some(MenuAction::About);
-                    ui.close_menu();
+                    ui.close();
                 }
             });
         });

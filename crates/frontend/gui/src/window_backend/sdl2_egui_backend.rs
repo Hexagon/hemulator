@@ -1,6 +1,7 @@
 //! SDL2 backend with egui integration using egui-sdl2-gl
 
 use crate::window_backend::{Key, WindowBackend};
+use egui_sdl2_gl::{EguiStateHandler, painter::Painter, ShaderVersion};
 use std::any::Any;
 use std::error::Error;
 
@@ -8,7 +9,9 @@ pub struct Sdl2EguiBackend {
     sdl_context: sdl2::Sdl,
     window: sdl2::video::Window,
     _gl_context: sdl2::video::GLContext,
-    egui_sdl2: egui_sdl2_gl::EguiSDL2,
+    painter: Painter,
+    egui_state: EguiStateHandler,
+    egui_ctx: egui::Context,
     event_pump: sdl2::EventPump,
     
     // State tracking
@@ -42,8 +45,10 @@ impl Sdl2EguiBackend {
         // Enable vsync
         video_subsystem.gl_set_swap_interval(sdl2::video::SwapInterval::VSync)?;
 
-        // Initialize egui-sdl2
-        let egui_sdl2 = egui_sdl2_gl::EguiSDL2::new(&window, &video_subsystem);
+        // Initialize painter and egui state
+        let painter = Painter::new(&window, 1.0, ShaderVersion::Default);
+        let egui_state = EguiStateHandler::new(&painter);
+        let egui_ctx = egui::Context::default();
 
         let event_pump = sdl_context.event_pump()?;
 
@@ -51,7 +56,9 @@ impl Sdl2EguiBackend {
             sdl_context,
             window,
             _gl_context: gl_context,
-            egui_sdl2,
+            painter,
+            egui_state,
+            egui_ctx,
             event_pump,
             keys_down: std::collections::HashSet::new(),
             keys_pressed: std::collections::HashSet::new(),
@@ -62,23 +69,39 @@ impl Sdl2EguiBackend {
 
     /// Get the egui context for rendering UI
     pub fn egui_ctx(&self) -> &egui::Context {
-        self.egui_sdl2.egui_ctx()
+        &self.egui_ctx
     }
 
     /// Begin an egui frame
-    pub fn begin_frame(&mut self, window: &sdl2::video::Window) {
-        self.egui_sdl2.begin_frame(window);
+    pub fn begin_frame(&mut self) {
+        let raw_input = self.egui_state.input.take();
+        self.egui_ctx.begin_pass(raw_input);
     }
 
     /// End an egui frame and render
-    pub fn end_frame(&mut self, window: &sdl2::video::Window) {
-        self.egui_sdl2.end_frame(window);
+    pub fn end_frame(&mut self) {
+        let egui::FullOutput {
+            platform_output: _,
+            textures_delta,
+            shapes,
+            pixels_per_point,
+            viewport_output: _,
+        } = self.egui_ctx.end_pass();
+
+        // Paint
+        let clipped_primitives = self.egui_ctx.tessellate(shapes, pixels_per_point);
+        self.painter.paint_jobs(
+            None,
+            textures_delta,
+            clipped_primitives,
+        );
+
         self.window.gl_swap_window();
     }
 
     /// Handle SDL2 events and update egui input
     /// Returns false if the window should close
-    pub fn handle_events(&mut self, window: &sdl2::video::Window) -> bool {
+    pub fn handle_events(&mut self) -> bool {
         self.keys_pressed.clear();
         self.sdl2_scancodes_pressed.clear();
         self.sdl2_scancodes_released.clear();
@@ -86,39 +109,37 @@ impl Sdl2EguiBackend {
         // Collect events first to avoid borrow checker issues
         let events: Vec<_> = self.event_pump.poll_iter().collect();
         
-        for event in &events {
-            // Pass event to egui first
-            let consumed = self.egui_sdl2.process_event(window, event);
+        for event in events {
+            // Process event with egui state handler
+            self.egui_state.process_input(&self.window, event.clone(), &mut self.painter);
             
-            // Only process for emulator if egui didn't consume it
-            if !consumed {
-                match event {
-                    sdl2::event::Event::Quit { .. } => {
-                        return false;
-                    }
-                    sdl2::event::Event::KeyDown { keycode, scancode, .. } => {
-                        if let Some(keycode) = keycode {
-                            if let Some(key) = sdl_keycode_to_key(*keycode) {
-                                self.keys_down.insert(key);
-                                self.keys_pressed.insert(key);
-                            }
-                        }
-                        if let Some(scancode) = scancode {
-                            self.sdl2_scancodes_pressed.push(*scancode);
-                        }
-                    }
-                    sdl2::event::Event::KeyUp { keycode, scancode, .. } => {
-                        if let Some(keycode) = keycode {
-                            if let Some(key) = sdl_keycode_to_key(*keycode) {
-                                self.keys_down.remove(&key);
-                            }
-                        }
-                        if let Some(scancode) = scancode {
-                            self.sdl2_scancodes_released.push(*scancode);
-                        }
-                    }
-                    _ => {}
+            // Also process for emulator controls
+            match event {
+                sdl2::event::Event::Quit { .. } => {
+                    return false;
                 }
+                sdl2::event::Event::KeyDown { keycode, scancode, .. } => {
+                    if let Some(keycode) = keycode {
+                        if let Some(key) = sdl_keycode_to_key(keycode) {
+                            self.keys_down.insert(key);
+                            self.keys_pressed.insert(key);
+                        }
+                    }
+                    if let Some(scancode) = scancode {
+                        self.sdl2_scancodes_pressed.push(scancode);
+                    }
+                }
+                sdl2::event::Event::KeyUp { keycode, scancode, .. } => {
+                    if let Some(keycode) = keycode {
+                        if let Some(key) = sdl_keycode_to_key(keycode) {
+                            self.keys_down.remove(&key);
+                        }
+                    }
+                    if let Some(scancode) = scancode {
+                        self.sdl2_scancodes_released.push(scancode);
+                    }
+                }
+                _ => {}
             }
         }
 
