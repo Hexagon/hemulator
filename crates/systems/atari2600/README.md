@@ -344,37 +344,39 @@ Addresses $40-$7F write to BOTH TIA and RAM simultaneously on real hardware:
 
 See [MANUAL.md](../../../docs/MANUAL.md#atari-2600) for user-facing limitations.
 
-### Not Implemented Features
-
-These features are not yet implemented but would improve game compatibility:
+### Implemented Features
 
 #### Player/Missile Sizing (NUSIZ)
 
-❌ **Not Implemented**
+✅ **Implemented**
 
-NUSIZ registers (0x04, 0x05) control sprite width and duplication but are currently not implemented:
-- **Size modes**: 1x (8 pixels), 2x (16 pixels), 4x (32 pixels)
-- **Duplication modes**: None, Close (16px apart), Medium (32px), Wide (64px)  
-- **Missile sizes**: 1px, 2px, 4px, 8px widths
+NUSIZ registers (0x04, 0x05) control sprite width and duplication:
+- **Size modes**: 1x (8 pixels), 2x (16 pixels), 4x (32 pixels) ✅
+- **Duplication modes**: None, Close (16px apart), Medium (32px), Wide (64px) ✅  
+- **Missile sizes**: 1px, 2px, 4px, 8px widths ✅
 - **Impact**: High - many games use sprite sizing and duplication (e.g., Space Invaders for duplicated invaders)
 
 #### Collision Detection
 
-❌ **Not Implemented**
+✅ **Implemented**
 
-TIA has 15 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that should set bits when sprites overlap. Currently, all collision registers return 0.
-
-- **Impact**: High - affects many games (Asteroids, Breakout, Combat)
-- **Needed**: Pixel-perfect overlap tracking during rendering and CXCLR to clear registers
+TIA has 8 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that set bits when sprites overlap:
+- **Collision registers**: All 8 collision registers implemented ✅
+- **CXCLR**: Clear collision registers supported ✅
+- **Impact**: High - enables proper gameplay for many games (Asteroids, Breakout, Combat)
 
 #### Delayed Graphics Registers (VDELPx)
 
-❌ **Not Implemented**
+✅ **Implemented**
 
-VDELP0/VDELP1 delay player graphics update by one scanline for smoother animation.
+VDELP0/VDELP1 delay player graphics update by one scanline for smoother animation:
+- **VDELP0/VDELP1**: Both registers implemented ✅
+- **Impact**: Medium - improves rendering for games using delayed graphics for flicker reduction
+- **Use case**: Multi-sprite games rely on this for smooth animation
 
-- **Impact**: Medium - affects games using delayed graphics for flicker reduction
-- **Use case**: Some multi-sprite games rely on this for smooth animation
+### Not Implemented Features
+
+These features are not yet implemented but would improve game compatibility:
 
 #### Paddle Controllers
 
@@ -435,12 +437,9 @@ SWACNT/SWBCNT Data Direction Registers are stored but not used to filter reads. 
 
 Priority improvements for better game compatibility:
 
-1. **Collision Detection** - Required for many popular games (Asteroids, Breakout, Combat)
-2. **Player/Missile Sizing (NUSIZ)** - Common feature used by many games (Space Invaders)
-3. **Paddle Controller Support** - Essential for paddle games (Breakout, Kaboom!, Warlords)
-4. **Delayed Graphics (VDELPx)** - Affects multi-sprite games
-5. **Additional Banking Schemes** (DPC, FE, 3F, E0) - Needed for specific commercial games
-6. **Cycle-Accurate TIA Rendering** - Better accuracy for racing-the-beam techniques
+1. **Paddle Controller Support** - Essential for paddle games (Breakout, Kaboom!, Warlords)
+2. **Additional Banking Schemes** (DPC, FE, 3F, E0) - Needed for specific commercial games
+3. **Cycle-Accurate TIA Rendering** - Better accuracy for racing-the-beam techniques
 
 ## Contributing
 
