@@ -3,7 +3,7 @@
 //! This module contains tests for 8-bit operations on AL, BL, CL, DL, AH, BH, CH, DH
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
+use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
 
 #[test]
 fn test_test_rm8_r8() {
@@ -728,4 +728,119 @@ fn test_sub_ch_preserves_cl_and_high_bits() {
         0xAABB_0000,
         "High 16 bits should be preserved"
     );
+}
+
+#[test]
+fn test_cmpsb_sets_af_flag() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+
+    // Write test values to memory
+    // DS:SI = 0x1F (low nibble = 0xF)
+    // ES:DI = 0x01 (low nibble = 0x1)
+    // Subtraction: 0x1F - 0x01 = 0x1E
+    // AF should be set because (0xF - 0x1) requires no borrow from bit 4
+    let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+    let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+    cpu.memory.write(src_addr, 0x1F);
+    cpu.memory.write(dst_addr, 0x01);
+
+    // CMPSB (0xA6)
+    cpu.memory.load_program(0xFFFF0, &[0xA6]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    // AF should be set when there's a borrow from bit 4 to bit 3
+    // In this case, 0xF >= 0x1, so no borrow - AF should be clear
+    assert!(!cpu.get_flag(FLAG_AF), "AF should be clear for 0x1F - 0x01");
+}
+
+#[test]
+fn test_cmpsb_clears_af_flag_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+
+    // Write test values that will cause AF to be set
+    // DS:SI = 0x10 (low nibble = 0x0)
+    // ES:DI = 0x01 (low nibble = 0x1)
+    // Subtraction: 0x10 - 0x01 = 0x0F
+    // AF should be set because 0x0 < 0x1 (borrow from bit 4)
+    let src_addr = Cpu8086::<ArrayMemory>::physical_address(0x1000, 0x0100);
+    let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+    cpu.memory.write(src_addr, 0x10);
+    cpu.memory.write(dst_addr, 0x01);
+
+    // CMPSB (0xA6)
+    cpu.memory.load_program(0xFFFF0, &[0xA6]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    // AF should be set when (src & 0xF) < (dst & 0xF)
+    assert!(cpu.get_flag(FLAG_AF), "AF should be set for 0x10 - 0x01");
+}
+
+#[test]
+fn test_scasb_sets_af_flag() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.ax = 0x001F; // AL = 0x1F
+
+    // Write test value to memory at ES:DI
+    // ES:DI = 0x01 (low nibble = 0x1)
+    // Subtraction: 0x1F - 0x01 = 0x1E
+    // AF should be clear because (0xF - 0x1) requires no borrow
+    let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+    cpu.memory.write(dst_addr, 0x01);
+
+    // SCASB (0xAE)
+    cpu.memory.load_program(0xFFFF0, &[0xAE]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(!cpu.get_flag(FLAG_AF), "AF should be clear for 0x1F - 0x01");
+}
+
+#[test]
+fn test_scasb_clears_af_flag_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.ax = 0x0010; // AL = 0x10
+
+    // Write test value to memory at ES:DI
+    // ES:DI = 0x01 (low nibble = 0x1)
+    // Subtraction: 0x10 - 0x01 = 0x0F
+    // AF should be set because 0x0 < 0x1 (borrow from bit 4)
+    let dst_addr = Cpu8086::<ArrayMemory>::physical_address(0x2000, 0x0200);
+    cpu.memory.write(dst_addr, 0x01);
+
+    // SCASB (0xAE)
+    cpu.memory.load_program(0xFFFF0, &[0xAE]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(cpu.get_flag(FLAG_AF), "AF should be set for 0x10 - 0x01");
 }
