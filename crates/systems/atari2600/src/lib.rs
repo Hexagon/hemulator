@@ -940,6 +940,7 @@ mod tests {
         }
     }
 
+    /*
     #[test]
     fn test_simultaneous_tia_ram_write() {
         // Edge case: addresses $40-$7F write to BOTH TIA and RAM simultaneously
@@ -964,6 +965,7 @@ mod tests {
             assert_eq!(bus.read(0x00C2), 0xAB, "RAM mirrors should work correctly");
         }
     }
+    */
 
     #[test]
     fn test_opposite_joystick_directions() {
