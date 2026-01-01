@@ -98,10 +98,13 @@ impl TabManager {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "Help");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
-                    egui::RichText::new("✖")
-                        .color(egui::Color32::from_rgb(220, 220, 220))
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
                 );
-                if ui.add(close_button).on_hover_text("Close Help tab").clicked() {
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close Help tab")
+                    .clicked()
+                {
                     self.help_visible = false;
                     if self.active_tab == Tab::Help {
                         self.active_tab = Tab::Emulator;
@@ -113,10 +116,13 @@ impl TabManager {
                 ui.selectable_value(&mut self.active_tab, Tab::Debug, "Debug");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
-                    egui::RichText::new("✖")
-                        .color(egui::Color32::from_rgb(220, 220, 220))
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
                 );
-                if ui.add(close_button).on_hover_text("Close Debug tab").clicked() {
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close Debug tab")
+                    .clicked()
+                {
                     self.debug_visible = false;
                     if self.active_tab == Tab::Debug {
                         self.active_tab = Tab::Emulator;
@@ -128,10 +134,13 @@ impl TabManager {
                 ui.selectable_value(&mut self.active_tab, Tab::PcConfig, "PC Config");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
-                    egui::RichText::new("✖")
-                        .color(egui::Color32::from_rgb(220, 220, 220))
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
                 );
-                if ui.add(close_button).on_hover_text("Close PC Config tab").clicked() {
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close PC Config tab")
+                    .clicked()
+                {
                     self.pc_config_visible = false;
                     if self.active_tab == Tab::PcConfig {
                         self.active_tab = Tab::Emulator;
@@ -292,19 +301,35 @@ impl TabManager {
                         .striped(true)
                         .show(ui, |ui| {
                             ui.label("BIOS:");
-                            ui.label(if config.bios_mounted { "✓ Mounted" } else { "✗ Not mounted" });
+                            ui.label(if config.bios_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
                             ui.end_row();
 
                             ui.label("Floppy A:");
-                            ui.label(if config.floppy_a_mounted { "✓ Mounted" } else { "✗ Not mounted" });
+                            ui.label(if config.floppy_a_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
                             ui.end_row();
 
                             ui.label("Floppy B:");
-                            ui.label(if config.floppy_b_mounted { "✓ Mounted" } else { "✗ Not mounted" });
+                            ui.label(if config.floppy_b_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
                             ui.end_row();
 
                             ui.label("Hard Drive:");
-                            ui.label(if config.hdd_mounted { "✓ Mounted" } else { "✗ Not mounted" });
+                            ui.label(if config.hdd_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
                             ui.end_row();
                         });
 

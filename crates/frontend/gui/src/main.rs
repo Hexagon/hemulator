@@ -2012,14 +2012,14 @@ fn main() {
             if let EmulatorSystem::PC(pc_sys) = &sys {
                 use egui_ui::PcConfigInfo;
                 egui_app.tab_manager.show_pc_config_tab();
-                
+
                 let boot_priority_str = match pc_sys.boot_priority() {
                     emu_pc::BootPriority::FloppyFirst => "Floppy First",
                     emu_pc::BootPriority::HardDriveFirst => "Hard Drive First",
                     emu_pc::BootPriority::FloppyOnly => "Floppy Only",
                     emu_pc::BootPriority::HardDriveOnly => "Hard Drive Only",
                 };
-                
+
                 let cpu_model_str = match pc_sys.cpu_model() {
                     emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
                     emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
@@ -2035,7 +2035,7 @@ fn main() {
                     emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
                     emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
                 };
-                
+
                 let config = PcConfigInfo {
                     cpu_model: cpu_model_str.to_string(),
                     memory_kb: pc_sys.memory_kb(),
@@ -2421,7 +2421,11 @@ fn main() {
             match sys.step_frame() {
                 Ok(mut frame) => {
                     // Apply display filter to the frame
-                    settings.display_filter.apply(&mut frame.pixels, frame.width as usize, frame.height as usize);
+                    settings.display_filter.apply(
+                        &mut frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    );
 
                     // Store frame buffer for screenshots (after filter is applied)
                     latest_frame_buffer = Some((

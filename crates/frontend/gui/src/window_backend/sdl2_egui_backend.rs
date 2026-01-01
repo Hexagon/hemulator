@@ -60,31 +60,36 @@ impl Sdl2EguiBackend {
         visuals.panel_fill = egui::Color32::from_rgb(37, 37, 38); // Darker base
         visuals.window_fill = egui::Color32::from_rgb(30, 30, 30); // Very dark for main window
         visuals.extreme_bg_color = egui::Color32::from_rgb(25, 25, 26); // Darkest backgrounds
-        
+
         // Override widget colors for better text visibility
         // Widget backgrounds
         visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(50, 50, 52);
         visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(60, 60, 62);
         visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 70, 72);
         visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0, 122, 204); // VS Code blue
-        
+
         // Widget text colors - ensure good contrast (these are stroke colors)
-        visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200));
-        visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180));
-        visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
-        visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
-        
+        visuals.widgets.noninteractive.fg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200));
+        visuals.widgets.inactive.fg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180));
+        visuals.widgets.hovered.fg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
+        visuals.widgets.active.fg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
+
         // Selection colors
         visuals.selection.bg_fill = egui::Color32::from_rgb(0, 122, 204); // VS Code blue
         visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 122, 204));
-        
+
         // Hyperlink color (for tabs, etc.)
         visuals.hyperlink_color = egui::Color32::from_rgb(75, 150, 255); // Bright blue
-        
+
         // Window/panel stroke colors
         visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60));
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60));
-        
+        visuals.widgets.noninteractive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60));
+
         egui_ctx.set_style(style);
 
         let event_pump = sdl_context.event_pump()?;
