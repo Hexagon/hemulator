@@ -6,14 +6,14 @@ This crate implements Game Boy and Game Boy Color (in DMG mode) emulation for th
 
 ## Current Status
 
-The Game Boy emulator is **fully working** with ~95% game coverage through MBC0/1/3/5 support.
+The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/1/2/3/5 support.
 
 ### What Works
 
 - ✅ **CPU (LR35902)** - Complete Sharp LR35902 CPU from `emu_core::cpu_lr35902`
 - ✅ **PPU** - Full DMG PPU with background, window, sprites
 - ✅ **APU** - Complete audio with all 4 channels
-- ✅ **Mappers** - MBC0, MBC1, MBC3, MBC5 (~95% coverage)
+- ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5 (~96% coverage)
 - ✅ **Joypad** - Full input support
 - ✅ **Timer** - DIV, TIMA, TMA, TAC with interrupts
 - ✅ **Interrupts** - VBlank and Timer interrupts
@@ -25,6 +25,9 @@ The Game Boy emulator is **fully working** with ~95% game coverage through MBC0/
 - **MBC1**: Most common (~70% of games)
   - Up to 2MB ROM, 32KB RAM
   - ROM/RAM banking modes
+- **MBC2**: Built-in RAM mapper (~1% of games)
+  - Up to 256KB ROM, 512×4 bits built-in RAM
+  - Address bit 8 determines register function
 - **MBC3**: Popular for games with saves (~15% of games)
   - Up to 2MB ROM, 32KB RAM
   - RTC registers (accessible but clock doesn't tick)
@@ -114,11 +117,11 @@ cargo run --release -p emu_gui -- path/to/game.gb
 
 The Game Boy crate includes comprehensive tests:
 
-- **86 total tests**:
+- **97 total tests**:
   - PPU tests (rendering, registers, scrolling)
   - APU tests (all channels, registers)
   - System tests (reset, state management, controller input, joypad integration)
-  - Mapper tests (MBC0/1/3/5)
+  - Mapper tests (MBC0/1/2/3/5)
   - Timer tests (DIV, TIMA overflow, interrupts)
   - Renderer tests (software renderer)
 
@@ -147,7 +150,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 
 **Technical Limitations**:
 - DMG mode only (no Game Boy Color features)
-- MBC2 not implemented (~1% of games)
 - Frame-based timing (not cycle-accurate)
 - RTC in MBC3 doesn't count time
 - No serial/link cable support
@@ -160,7 +162,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 
 ## Future Improvements
 
-- MBC2 mapper support
 - Game Boy Color support (CGB mode)
 - Cycle-accurate timing
 - Link cable emulation
