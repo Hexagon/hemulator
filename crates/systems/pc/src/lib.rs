@@ -309,6 +309,7 @@ impl PcSystem {
         let floppy_a = self.cpu.bus().floppy_a().is_some();
         let floppy_b = self.cpu.bus().floppy_b().is_some();
         let hard_drive = self.cpu.bus().hard_drive().is_some();
+        let cdrom = self.cpu.bus().has_cdrom();
         let boot_priority = self.cpu.bus().boot_priority();
 
         // Get CPU model and memory
@@ -323,7 +324,7 @@ impl PcSystem {
         bios::write_post_screen_to_vram(vram, cpu_model, memory_kb, cpu_speed_mhz);
 
         // Update mount status
-        bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, boot_priority);
+        bios::update_post_screen_mounts(vram, floppy_a, floppy_b, hard_drive, cdrom, boot_priority);
     }
 
     /// Get a reference to floppy A disk image (for saving)
@@ -952,7 +953,7 @@ mod tests {
         let sys = PcSystem::new();
         let mps = sys.mount_points();
 
-        assert_eq!(mps.len(), 4);
+        assert_eq!(mps.len(), 5);
 
         // Check BIOS mount point
         assert_eq!(mps[0].id, "BIOS");
@@ -970,6 +971,11 @@ mod tests {
         // Check Hard Drive
         assert_eq!(mps[3].id, "HardDrive");
         assert!(!mps[3].required);
+
+        // Check CD-ROM
+        assert_eq!(mps[4].id, "CDROM");
+        assert!(!mps[4].required);
+        assert!(mps[4].extensions.contains(&"iso".to_string()));
     }
 
     #[test]

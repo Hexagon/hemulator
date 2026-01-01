@@ -513,6 +513,7 @@ impl PcBus {
     }
 
     /// Get reference to CD-ROM
+    #[allow(dead_code)]
     pub fn cdrom(&self) -> Option<&[u8]> {
         self.cdrom.as_deref()
     }
