@@ -14,3 +14,4 @@ mod status_bar;
 mod tabs;
 
 pub use layout::EguiApp;
+pub use tabs::Tab;

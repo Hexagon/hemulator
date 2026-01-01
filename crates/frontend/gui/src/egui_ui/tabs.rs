@@ -1,5 +1,6 @@
 //! Tab manager for left panel
 
+use crate::settings::ScalingMode;
 use crate::system_adapter::SystemDebugInfo;
 use egui::{ScrollArea, TextureHandle, Ui};
 
@@ -52,7 +53,12 @@ impl TabManager {
         self.debug_info = Some(info);
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, emulator_texture: &Option<TextureHandle>) {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        emulator_texture: &Option<TextureHandle>,
+        scaling_mode: ScalingMode,
+    ) {
         // Tab bar
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.active_tab, Tab::Emulator, "Emulator");
@@ -92,23 +98,41 @@ impl TabManager {
 
         // Tab content
         match self.active_tab {
-            Tab::Emulator => self.render_emulator_tab(ui, emulator_texture),
+            Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
         }
     }
 
-    fn render_emulator_tab(&self, ui: &mut Ui, emulator_texture: &Option<TextureHandle>) {
+    fn render_emulator_tab(
+        &self,
+        ui: &mut Ui,
+        emulator_texture: &Option<TextureHandle>,
+        scaling_mode: ScalingMode,
+    ) {
         ui.centered_and_justified(|ui| {
             if let Some(texture) = emulator_texture {
-                // Display the emulator frame, maintaining aspect ratio
                 let available_size = ui.available_size();
                 let texture_size = texture.size_vec2();
                 let aspect_ratio = texture_size.x / texture_size.y;
 
-                let display_width = available_size.x.min(available_size.y * aspect_ratio);
-                let display_height = display_width / aspect_ratio;
+                let (display_width, display_height) = match scaling_mode {
+                    ScalingMode::Original => {
+                        // 1:1 pixel mapping - use original texture size
+                        (texture_size.x, texture_size.y)
+                    }
+                    ScalingMode::Fit => {
+                        // Fit to window while maintaining aspect ratio
+                        let display_width = available_size.x.min(available_size.y * aspect_ratio);
+                        let display_height = display_width / aspect_ratio;
+                        (display_width, display_height)
+                    }
+                    ScalingMode::Stretch => {
+                        // Fill entire window, ignoring aspect ratio
+                        (available_size.x, available_size.y)
+                    }
+                };
 
                 let image = egui::Image::from_texture(texture)
                     .fit_to_exact_size(egui::vec2(display_width, display_height));

@@ -18,6 +18,13 @@ pub enum MenuAction {
 
     // View menu
     Screenshot,
+    ScalingOriginal,
+    ScalingFit,
+    ScalingStretch,
+    Fullscreen,
+    FullscreenWithGui,
+    ShowLog,
+    ShowDebug,
 
     // Help menu
     ShowHelp,
@@ -76,6 +83,45 @@ impl MenuBar {
 
             // View menu
             ui.menu_button("View", |ui| {
+                ui.menu_button("Scaling", |ui| {
+                    if ui.button("Original").clicked() {
+                        self.pending_action = Some(MenuAction::ScalingOriginal);
+                        ui.close();
+                    }
+                    if ui.button("Fit").clicked() {
+                        self.pending_action = Some(MenuAction::ScalingFit);
+                        ui.close();
+                    }
+                    if ui.button("Stretch").clicked() {
+                        self.pending_action = Some(MenuAction::ScalingStretch);
+                        ui.close();
+                    }
+                });
+
+                ui.separator();
+
+                if ui.button("Fullscreen").clicked() {
+                    self.pending_action = Some(MenuAction::Fullscreen);
+                    ui.close();
+                }
+                if ui.button("Fullscreen (With GUI)").clicked() {
+                    self.pending_action = Some(MenuAction::FullscreenWithGui);
+                    ui.close();
+                }
+
+                ui.separator();
+
+                if ui.button("Log").clicked() {
+                    self.pending_action = Some(MenuAction::ShowLog);
+                    ui.close();
+                }
+                if ui.button("Debug").clicked() {
+                    self.pending_action = Some(MenuAction::ShowDebug);
+                    ui.close();
+                }
+
+                ui.separator();
+
                 if ui.button("Screenshot (F4)").clicked() {
                     self.pending_action = Some(MenuAction::Screenshot);
                     ui.close();

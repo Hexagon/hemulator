@@ -158,6 +158,23 @@ impl Sdl2EguiBackend {
     pub fn get_sdl2_scancodes_released(&self) -> &[sdl2::keyboard::Scancode] {
         &self.sdl2_scancodes_released
     }
+
+    /// Toggle fullscreen mode
+    pub fn set_fullscreen(&mut self, fullscreen: bool) -> Result<(), Box<dyn Error>> {
+        if fullscreen {
+            self.window
+                .set_fullscreen(sdl2::video::FullscreenType::Desktop)?;
+        } else {
+            self.window
+                .set_fullscreen(sdl2::video::FullscreenType::Off)?;
+        }
+        Ok(())
+    }
+
+    /// Get current fullscreen state
+    pub fn is_fullscreen(&self) -> bool {
+        self.window.fullscreen_state() != sdl2::video::FullscreenType::Off
+    }
 }
 
 impl WindowBackend for Sdl2EguiBackend {
