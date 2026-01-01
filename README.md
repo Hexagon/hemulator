@@ -23,7 +23,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 
 | System | Status | CPU | Graphics | Audio | Input | Save States / Persistance | Coverage/Notes |
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
-| **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
+| **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90%+ of all games via 14 mappers |
 | **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Complete) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
 | **Game Boy** | ✅ Fully Working | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~96% of games; MBC0/1/2/3/5 supported |
 | **SNES** | ⚠️ Functional | 65C816 (Complete) | PPU (Modes 0 & 1 + Sprites) | ❌ Not implemented | ✅ Full controller support | ✅ | CPU & basic PPU working; playable without audio |
@@ -34,6 +34,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - ✅ Fully Working - Production ready with comprehensive features
 - ⚠️ Functional - Core features work but missing some capabilities
 - 🚧 In Development - Active work in progress with partial functionality
+- 🧪 Experimental - Early development stage, not recommended for general use
 - ❌ Not implemented - Component not yet available
 
 ## For Users
@@ -100,7 +101,7 @@ Hemulator uses a modular architecture that separates reusable emulation componen
 - Traits: System, Cpu, Renderer, AudioChip
 
 **System Implementations** (`crates/systems/`):
-- ✅ NES (~90% game coverage), Atari 2600 (complete), Game Boy (complete)
+- ✅ NES (~90%+ game coverage), Atari 2600 (complete), Game Boy (complete)
 - ⚠️ SNES (functional - Modes 0 & 1, no audio)
 - 🚧 N64 (in development)
 - 🧪 PC (experimental)
@@ -148,7 +149,7 @@ See [MANUAL.md](docs/MANUAL.md) for user-facing mapper information and game comp
 
 | System | Format | Detection Method | Status | Notes |
 |--------|--------|------------------|--------|-------|
-| **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90% game coverage |
+| **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90%+ game coverage |
 | **Atari 2600** | Raw binary (.a26, .bin) | File size | ✅ Fully supported | 2K-32K ROMs |
 | **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | ✅ Fully supported | ~96% compatible |
 | **SNES** | SMC/SFC (.smc, .sfc) | Header detection | ⚠️ Functional | LoROM, Modes 0 & 1 |

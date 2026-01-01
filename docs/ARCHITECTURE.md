@@ -174,12 +174,12 @@ Each system crate combines core components with system-specific logic.
 
 | System | Status | Description |
 |--------|--------|-------------|
-| **[NES](crates/systems/nes/README.md)** | ✅ Fully Working | ~90% game coverage, 14 mappers |
-| **[Atari 2600](crates/systems/atari2600/README.md)** | ✅ Fully Working | Complete TIA/RIOT emulation |
-| **[Game Boy](crates/systems/gb/README.md)** | ✅ Fully Working | ~96% game coverage, MBC0/1/2/3/5, full APU |
-| **[SNES](crates/systems/snes/README.md)** | ⚠️ Functional | PPU Modes 0 & 1, sprites, controllers (no audio) |
-| **[N64](crates/systems/n64/README.md)** | 🚧 In Development | 3D rendering, 4 controllers with analog |
-| **[PC](crates/systems/pc/README.md)** | 🧪 Experimental | CGA/EGA/VGA modes, multi-slot disk mounting |
+| **[NES](../crates/systems/nes/README.md)** | ✅ Fully Working | ~90%+ game coverage, 14 mappers |
+| **[Atari 2600](../crates/systems/atari2600/README.md)** | ✅ Fully Working | Complete TIA/RIOT emulation |
+| **[Game Boy](../crates/systems/gb/README.md)** | ✅ Fully Working | ~96% game coverage, MBC0/1/2/3/5, full APU |
+| **[SNES](../crates/systems/snes/README.md)** | ⚠️ Functional | PPU Modes 0 & 1, sprites, controllers (no audio) |
+| **[N64](../crates/systems/n64/README.md)** | 🚧 In Development | 3D rendering, 4 controllers with analog |
+| **[PC](../crates/systems/pc/README.md)** | 🧪 Experimental | CGA/EGA/VGA modes, multi-slot disk mounting |
 
 For detailed implementation information, see each system's README.md file.
 

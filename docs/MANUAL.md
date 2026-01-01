@@ -514,7 +514,7 @@ This emulator supports 6 different retro gaming systems. Here's a quick overview
 ### NES (Nintendo Entertainment System)
 
 **Status**: ✅ Fully Working  
-**Coverage**: ~90% of all NES games (14 mappers supported)
+**Coverage**: ~90%+ of all NES games (14 mappers supported)
 
 The emulator supports the following NES mappers:
 - **Mapper 0 (NROM)** - Simple games (~10% of games)
