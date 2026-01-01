@@ -96,11 +96,18 @@ pub struct PcCpu {
 }
 
 impl PcCpu {
-    // BDA keyboard buffer constants
-    const BDA_KB_BUFFER_HEAD: u32 = 0x041A;  // Buffer head (offset to next character to read)
-    const BDA_KB_BUFFER_TAIL: u32 = 0x041C;  // Buffer tail (offset to next free slot)
-    const BDA_KB_BUFFER_START: u32 = 0x041E; // Buffer start address
-    const BDA_KB_BUFFER_END: u32 = 0x043E;   // Buffer end address (exclusive)
+    // BDA keyboard buffer field addresses (linear addresses in segment 0x0040)
+    // These locations each contain a 16-bit offset within the BDA segment,
+    // not absolute physical addresses. The actual buffer data is accessed
+    // by computing linear address as 0x400 + offset_value.
+    const BDA_KB_BUFFER_HEAD_ADDR: u32 = 0x041A;  // Linear address of word holding buffer head offset
+    const BDA_KB_BUFFER_TAIL_ADDR: u32 = 0x041C;  // Linear address of word holding buffer tail offset
+    const BDA_KB_BUFFER_START_ADDR: u32 = 0x0480; // Linear address of word holding buffer start offset
+    const BDA_KB_BUFFER_END_ADDR: u32 = 0x0482;   // Linear address of word holding buffer end offset
+    
+    // Default BDA keyboard buffer offsets within segment 0x0040
+    const BDA_KB_BUFFER_START_OFFSET: u16 = 0x001E; // Default buffer start offset
+    const BDA_KB_BUFFER_END_OFFSET: u16 = 0x003E;   // Default buffer end offset (exclusive)
     
     /// Create a new PC CPU with the given bus (defaults to 8086)
     #[allow(dead_code)] // Public API, used in tests
@@ -1066,31 +1073,67 @@ impl PcCpu {
         // 0040:001Ah - Buffer head (offset to next character to read)
         // 0040:001Ch - Buffer tail (offset to next free slot)
         // 0040:001Eh-003Dh - Circular buffer (16 entries, 2 bytes each: scancode + ASCII)
-        // 0040:0080h - Buffer start pointer (0x001E)
-        // 0040:0082h - Buffer end pointer (0x003E)
+        // 0040:0080h - Buffer start pointer (offset value, typically 0x001E)
+        // 0040:0082h - Buffer end pointer (offset value, typically 0x003E)
         
         // Read current head and tail pointers
-        let head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
-        let tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        let mut head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR + 1) as u16) << 8);
+        let mut tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR + 1) as u16) << 8);
         
-        // Add keys from internal buffer to BDA buffer
-        // peek_make_code() already filters out break codes (high bit set)
-        if let Some(scancode) = self.cpu.memory.keyboard.peek_make_code() {
+        // Read buffer boundaries (or use defaults if not initialized)
+        let buffer_start = {
+            let val = self.cpu.memory.read(Self::BDA_KB_BUFFER_START_ADDR) as u16
+                | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_START_ADDR + 1) as u16) << 8);
+            if val == 0 { Self::BDA_KB_BUFFER_START_OFFSET } else { val }
+        };
+        let buffer_end = {
+            let val = self.cpu.memory.read(Self::BDA_KB_BUFFER_END_ADDR) as u16
+                | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_END_ADDR + 1) as u16) << 8);
+            if val == 0 { Self::BDA_KB_BUFFER_END_OFFSET } else { val }
+        };
+        
+        // Validate and initialize head/tail if invalid
+        let head_invalid = head_offset < buffer_start || head_offset >= buffer_end || (head_offset & 0x1) != 0;
+        let tail_invalid = tail_offset < buffer_start || tail_offset >= buffer_end || (tail_offset & 0x1) != 0;
+        
+        if head_invalid || tail_invalid {
+            // Initialize empty buffer: head = tail = buffer_start
+            head_offset = buffer_start;
+            tail_offset = buffer_start;
+            
+            // Write head and tail pointers back to BDA
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD_ADDR, (head_offset & 0xFF) as u8);
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD_ADDR + 1, ((head_offset >> 8) & 0xFF) as u8);
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL_ADDR, (tail_offset & 0xFF) as u8);
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL_ADDR + 1, ((tail_offset >> 8) & 0xFF) as u8);
+            
+            // Initialize buffer start/end pointers if not set
+            if buffer_start == Self::BDA_KB_BUFFER_START_OFFSET && buffer_end == Self::BDA_KB_BUFFER_END_OFFSET {
+                self.cpu.memory.write(Self::BDA_KB_BUFFER_START_ADDR, (buffer_start & 0xFF) as u8);
+                self.cpu.memory.write(Self::BDA_KB_BUFFER_START_ADDR + 1, ((buffer_start >> 8) & 0xFF) as u8);
+                self.cpu.memory.write(Self::BDA_KB_BUFFER_END_ADDR, (buffer_end & 0xFF) as u8);
+                self.cpu.memory.write(Self::BDA_KB_BUFFER_END_ADDR + 1, ((buffer_end >> 8) & 0xFF) as u8);
+            }
+        }
+        
+        // Transfer all available keys from internal buffer to BDA buffer
+        // We peek and remove from internal buffer, adding to BDA buffer
+        while let Some(scancode) = self.cpu.memory.keyboard.peek_make_code() {
             let ascii = self.scancode_to_ascii(scancode);
             
             // Calculate next tail position
             let mut new_tail = tail_offset + 2;
-            if new_tail >= Self::BDA_KB_BUFFER_END as u16 {
-                new_tail = Self::BDA_KB_BUFFER_START as u16; // Wrap around
+            if new_tail >= buffer_end {
+                new_tail = buffer_start; // Wrap around
             }
             
             // Check if buffer is full
             if new_tail == head_offset {
-                // Buffer full - don't add this key
+                // Buffer full - don't add more keys
                 // In a real BIOS, this might beep
-                return;
+                break;
             }
             
             // Write scancode and ASCII to BDA buffer
@@ -1099,12 +1142,16 @@ impl PcCpu {
             self.cpu.memory.write(addr + 1, scancode);
             
             // Update tail pointer
-            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL, (new_tail & 0xFF) as u8);
-            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL + 1, ((new_tail >> 8) & 0xFF) as u8);
+            tail_offset = new_tail;
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL_ADDR, (tail_offset & 0xFF) as u8);
+            self.cpu.memory.write(Self::BDA_KB_BUFFER_TAIL_ADDR + 1, ((tail_offset >> 8) & 0xFF) as u8);
+            
+            // Remove from internal buffer now that it's in BDA
+            self.cpu.memory.keyboard.read_scancode();
             
             emu_core::logging::log(LogCategory::Interrupts, LogLevel::Trace, || {
                 format!("BDA KB Buffer: Added scancode=0x{:02X} ascii=0x{:02X} at offset 0x{:04X}",
-                       scancode, ascii, tail_offset)
+                       scancode, ascii, tail_offset.wrapping_sub(2))
             });
         }
     }
@@ -1117,10 +1164,22 @@ impl PcCpu {
 
         // Read from BDA keyboard buffer
         // Read current head and tail pointers
-        let head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
-        let tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        let head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR + 1) as u16) << 8);
+        let tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR + 1) as u16) << 8);
+        
+        // Read buffer boundaries
+        let buffer_start = {
+            let val = self.cpu.memory.read(Self::BDA_KB_BUFFER_START_ADDR) as u16
+                | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_START_ADDR + 1) as u16) << 8);
+            if val == 0 { Self::BDA_KB_BUFFER_START_OFFSET } else { val }
+        };
+        let buffer_end = {
+            let val = self.cpu.memory.read(Self::BDA_KB_BUFFER_END_ADDR) as u16
+                | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_END_ADDR + 1) as u16) << 8);
+            if val == 0 { Self::BDA_KB_BUFFER_END_OFFSET } else { val }
+        };
         
         // Check if buffer is empty
         if head_offset == tail_offset {
@@ -1139,16 +1198,11 @@ impl PcCpu {
         
         // Advance head pointer
         let mut new_head = head_offset + 2;
-        if new_head >= Self::BDA_KB_BUFFER_END as u16 {
-            new_head = Self::BDA_KB_BUFFER_START as u16; // Wrap around
+        if new_head >= buffer_end {
+            new_head = buffer_start; // Wrap around
         }
-        self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD, (new_head & 0xFF) as u8);
-        self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD + 1, ((new_head >> 8) & 0xFF) as u8);
-        
-        // Also remove from internal buffer to keep them in sync
-        if self.cpu.memory.keyboard.has_data() {
-            self.cpu.memory.keyboard.read_scancode();
-        }
+        self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD_ADDR, (new_head & 0xFF) as u8);
+        self.cpu.memory.write(Self::BDA_KB_BUFFER_HEAD_ADDR + 1, ((new_head >> 8) & 0xFF) as u8);
         
         // Log at trace level for debugging
         if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
@@ -1179,10 +1233,10 @@ impl PcCpu {
 
         // Read from BDA keyboard buffer
         // Read current head and tail pointers
-        let head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
-        let tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL) as u16
-            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        let head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR + 1) as u16) << 8);
+        let tail_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR) as u16
+            | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_TAIL_ADDR + 1) as u16) << 8);
         
         // Check if buffer is empty
         if head_offset == tail_offset {
@@ -1534,21 +1588,52 @@ impl PcCpu {
                    requested_paragraphs, requested_paragraphs * 16)
         });
         
-        // Simple allocation strategy: use memory starting from 0x2000 (after DOS area)
-        // For now, always succeed and return a fixed segment
-        // In a real implementation, we would track allocated blocks
+        // Simple allocation strategy: allocate memory above the program's data segment
+        // This is a minimal fallback implementation for standalone programs (no DOS loaded).
+        // When DOS is loaded, DOS handles INT 21h and this code is not executed.
+        //
+        // Note: This allocator never reclaims freed memory. Once NEXT_ALLOC_SEGMENT
+        // reaches 0xA000, allocations fail even if memory was freed. This is acceptable
+        // for the fallback use case, as programs running without DOS typically don't
+        // perform complex memory management. For full DOS compatibility, boot real DOS.
         
-        // Use a simple counter-based allocation starting at 0x2000
-        // This is a minimal implementation that works for programs that don't
-        // allocate and free many blocks
         use std::sync::atomic::{AtomicU32, Ordering};
-        static NEXT_ALLOC_SEGMENT: AtomicU32 = AtomicU32::new(0x2000);
+        static NEXT_ALLOC_SEGMENT: AtomicU32 = AtomicU32::new(0);
         
-        let allocated_segment = NEXT_ALLOC_SEGMENT.load(Ordering::Relaxed);
+        // Lazily initialize allocation start on first use
+        let mut allocated_segment = NEXT_ALLOC_SEGMENT.load(Ordering::Relaxed);
+        if allocated_segment == 0 {
+            // Start allocations above the program's data segment (DS) with a margin
+            // to avoid colliding with the program's code and data.
+            let program_segment = self.cpu.ds as u32;
+            let mut start_segment = program_segment.saturating_add(0x100); // 4KB margin
+            
+            // Enforce bounds: stay clear of IVT/BDA/DOS structures (below 0x1000)
+            // and below conventional memory limit (0xA000)
+            if start_segment < 0x1000 {
+                start_segment = 0x1000;
+            }
+            if start_segment >= 0xA000 {
+                start_segment = 0x9F00; // Leave some room
+            }
+            
+            // Atomically set the initial segment (only first caller wins)
+            let _ = NEXT_ALLOC_SEGMENT.compare_exchange(
+                0,
+                start_segment,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+            allocated_segment = NEXT_ALLOC_SEGMENT.load(Ordering::Relaxed);
+        }
+        
+        let requested_paragraphs_u32 = requested_paragraphs as u32;
         
         // Check if we have enough memory (conventional memory ends at 0xA000)
-        // Also check for potential overflow
-        if allocated_segment >= 0xA000 || requested_paragraphs > 0xA000 - allocated_segment {
+        // Use saturating_add to avoid overflow
+        if allocated_segment >= 0xA000
+            || allocated_segment.saturating_add(requested_paragraphs_u32) > 0xA000
+        {
             // Insufficient memory
             self.cpu.ax = 0x08; // Error code: insufficient memory
             self.cpu.bx = if allocated_segment < 0xA000 {
@@ -1567,7 +1652,10 @@ impl PcCpu {
             self.set_carry_flag(false);
             
             // Advance allocation pointer
-            NEXT_ALLOC_SEGMENT.store(allocated_segment + requested_paragraphs, Ordering::Relaxed);
+            NEXT_ALLOC_SEGMENT.store(
+                allocated_segment.saturating_add(requested_paragraphs_u32),
+                Ordering::Relaxed
+            );
             
             emu_core::logging::log(LogCategory::Interrupts, LogLevel::Debug, || {
                 format!("INT 0x21 AH=0x48: Allocated segment 0x{:04X}", allocated_segment)
@@ -6034,8 +6122,13 @@ mod tests {
         assert_eq!(cpu.cpu.ax & 0xFF, b'b' as u32); // AL = ASCII 'b'
         assert_eq!(cpu.cpu.flags & 0x0040, 0); // ZF = 0 (key available)
 
-        // Key should still be in buffer (peek doesn't consume)
-        assert!(cpu.cpu.memory.keyboard.has_data());
+        // Key should still be in BDA buffer (check doesn't consume)
+        // Read BDA buffer head and tail to verify key is still there
+        let head = cpu.cpu.memory.read(0x041A) as u16
+            | ((cpu.cpu.memory.read(0x041B) as u16) << 8);
+        let tail = cpu.cpu.memory.read(0x041C) as u16
+            | ((cpu.cpu.memory.read(0x041D) as u16) << 8);
+        assert_ne!(head, tail, "BDA buffer should not be empty after check");
     }
 
     #[test]
