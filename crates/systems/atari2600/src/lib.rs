@@ -514,7 +514,6 @@ impl System for Atari2600System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use emu_core::cpu_6502::Memory6502;
 
     #[test]
     fn test_system_creation() {

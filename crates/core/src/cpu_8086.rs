@@ -1156,7 +1156,11 @@ impl<M: Memory8086> Cpu8086<M> {
             // RCR - Rotate through carry right
             0b011 => {
                 for _ in 0..count {
-                    let old_cf = if self.get_flag(FLAG_CF) { 0x80000000 } else { 0 };
+                    let old_cf = if self.get_flag(FLAG_CF) {
+                        0x80000000
+                    } else {
+                        0
+                    };
                     let carry_out = (result & 0x00000001) != 0;
                     result = (result >> 1) | old_cf;
                     self.set_flag(FLAG_CF, carry_out);
@@ -5163,10 +5167,12 @@ impl<M: Memory8086> Cpu8086<M> {
                     let result = self.ax.wrapping_add(val as u32).wrapping_add(carry_in);
                     let carry = (self.ax as u32 + val as u32 + carry_in as u32) > 0xFFFF;
                     let overflow =
-                        (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000) != 0;
+                        (((self.ax as u16) ^ (result as u16)) & (val ^ (result as u16)) & 0x8000)
+                            != 0;
                     // AF calculation: check if carry from bit 3 to bit 4 in low byte including carry-in
-                    let af =
-                        ((((self.ax as u16) & 0x0F) + (val & 0x0F) + (carry_in as u16)) & 0x10) != 0;
+                    let af = ((((self.ax as u16) & 0x0F) + (val & 0x0F) + (carry_in as u16))
+                        & 0x10)
+                        != 0;
 
                     self.ax = (self.ax & 0xFFFF_0000) | (result as u32);
                     self.update_flags_16(result as u16);
@@ -5421,7 +5427,8 @@ impl<M: Memory8086> Cpu8086<M> {
                     let result = self.ax.wrapping_sub(val as u32).wrapping_sub(carry);
                     let borrow = (self.ax as u16) < (val + carry as u16);
                     let overflow =
-                        (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
+                        (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000)
+                            != 0;
                     // AF calculation: check if borrow from bit 4 to bit 3 in low byte including carry-in
                     let af = ((self.ax as u16) & 0x0F) < ((val & 0x0F) + (carry as u16));
 
@@ -6301,98 +6308,98 @@ impl<M: Memory8086> Cpu8086<M> {
                     let (rm_val, cached_seg, cached_offset) = self.read_rmw16(modbits, rm);
                     let imm = self.fetch_u8() as i8 as i16 as u16; // Sign extend
                     let result = match op {
-                    0 => {
-                        // ADD
-                        let r = rm_val.wrapping_add(imm);
-                        let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
-                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
-                        let af = Self::calc_af_add_16(rm_val, imm);
-                        self.set_flag(FLAG_CF, carry);
-                        self.set_flag(FLAG_OF, overflow);
-                        self.set_flag(FLAG_AF, af);
-                        r
+                        0 => {
+                            // ADD
+                            let r = rm_val.wrapping_add(imm);
+                            let carry = (rm_val as u32 + imm as u32) > 0xFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                            let af = Self::calc_af_add_16(rm_val, imm);
+                            self.set_flag(FLAG_CF, carry);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        1 => {
+                            // OR
+                            let r = rm_val | imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        2 => {
+                            // ADC
+                            let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                            let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
+                            let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
+                            let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
+                            let af = (((rm_val & 0x0F) + (imm & 0x0F) + carry_in) & 0x10) != 0;
+                            self.set_flag(FLAG_CF, carry);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        3 => {
+                            // SBB
+                            let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
+                            let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
+                            let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                            let af = (rm_val & 0x0F) < ((imm & 0x0F) + carry_in);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        4 => {
+                            // AND
+                            let r = rm_val & imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        5 => {
+                            // SUB
+                            let r = rm_val.wrapping_sub(imm);
+                            let borrow = (rm_val as u32) < (imm as u32);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                            let af = Self::calc_af_sub_16(rm_val, imm);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            r
+                        }
+                        6 => {
+                            // XOR
+                            let r = rm_val ^ imm;
+                            self.set_flag(FLAG_CF, false);
+                            self.set_flag(FLAG_OF, false);
+                            r
+                        }
+                        7 => {
+                            // CMP
+                            let r = rm_val.wrapping_sub(imm);
+                            let borrow = (rm_val as u32) < (imm as u32);
+                            let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
+                            let af = Self::calc_af_sub_16(rm_val, imm);
+                            self.update_flags_16(r);
+                            self.set_flag(FLAG_CF, borrow);
+                            self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
+                            self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                            return if modbits == 0b11 { 4 } else { 17 };
+                        }
+                        _ => unreachable!(),
+                    };
+                    if op != 7 {
+                        self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
+                        self.update_flags_16(result);
                     }
-                    1 => {
-                        // OR
-                        let r = rm_val | imm;
-                        self.set_flag(FLAG_CF, false);
-                        self.set_flag(FLAG_OF, false);
-                        r
+                    self.cycles += if modbits == 0b11 { 4 } else { 17 };
+                    if modbits == 0b11 {
+                        4
+                    } else {
+                        17
                     }
-                    2 => {
-                        // ADC
-                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                        let r = rm_val.wrapping_add(imm).wrapping_add(carry_in);
-                        let carry = (rm_val as u32 + imm as u32 + carry_in as u32) > 0xFFFF;
-                        let overflow = ((rm_val ^ r) & (imm ^ r) & 0x8000) != 0;
-                        let af = (((rm_val & 0x0F) + (imm & 0x0F) + carry_in) & 0x10) != 0;
-                        self.set_flag(FLAG_CF, carry);
-                        self.set_flag(FLAG_OF, overflow);
-                        self.set_flag(FLAG_AF, af);
-                        r
-                    }
-                    3 => {
-                        // SBB
-                        let carry_in = if self.get_flag(FLAG_CF) { 1 } else { 0 };
-                        let r = rm_val.wrapping_sub(imm).wrapping_sub(carry_in);
-                        let borrow = (rm_val as u32) < (imm as u32 + carry_in as u32);
-                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
-                        let af = (rm_val & 0x0F) < ((imm & 0x0F) + carry_in);
-                        self.set_flag(FLAG_CF, borrow);
-                        self.set_flag(FLAG_OF, overflow);
-                        self.set_flag(FLAG_AF, af);
-                        r
-                    }
-                    4 => {
-                        // AND
-                        let r = rm_val & imm;
-                        self.set_flag(FLAG_CF, false);
-                        self.set_flag(FLAG_OF, false);
-                        r
-                    }
-                    5 => {
-                        // SUB
-                        let r = rm_val.wrapping_sub(imm);
-                        let borrow = (rm_val as u32) < (imm as u32);
-                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
-                        let af = Self::calc_af_sub_16(rm_val, imm);
-                        self.set_flag(FLAG_CF, borrow);
-                        self.set_flag(FLAG_OF, overflow);
-                        self.set_flag(FLAG_AF, af);
-                        r
-                    }
-                    6 => {
-                        // XOR
-                        let r = rm_val ^ imm;
-                        self.set_flag(FLAG_CF, false);
-                        self.set_flag(FLAG_OF, false);
-                        r
-                    }
-                    7 => {
-                        // CMP
-                        let r = rm_val.wrapping_sub(imm);
-                        let borrow = (rm_val as u32) < (imm as u32);
-                        let overflow = ((rm_val ^ imm) & (rm_val ^ r) & 0x8000) != 0;
-                        let af = Self::calc_af_sub_16(rm_val, imm);
-                        self.update_flags_16(r);
-                        self.set_flag(FLAG_CF, borrow);
-                        self.set_flag(FLAG_OF, overflow);
-                        self.set_flag(FLAG_AF, af);
-                        self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                        return if modbits == 0b11 { 4 } else { 17 };
-                    }
-                    _ => unreachable!(),
-                };
-                if op != 7 {
-                    self.write_rmw16(modbits, rm, result, cached_seg, cached_offset);
-                    self.update_flags_16(result);
-                }
-                self.cycles += if modbits == 0b11 { 4 } else { 17 };
-                if modbits == 0b11 {
-                    4
-                } else {
-                    17
-                }
                 }
             }
 
