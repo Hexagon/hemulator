@@ -11,6 +11,7 @@ pub enum Tab {
     Log,
     Help,
     Debug,
+    PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
 }
 
 /// Actions that can be triggered from tabs
@@ -19,15 +20,30 @@ pub enum TabAction {
     CreateNewProject(String), // String is the system name
 }
 
+/// PC-specific configuration information for the DBA tab
+#[derive(Clone)]
+pub struct PcConfigInfo {
+    pub cpu_model: String,
+    pub memory_kb: u32,
+    pub video_adapter: String,
+    pub boot_priority: String,
+    pub bios_mounted: bool,
+    pub floppy_a_mounted: bool,
+    pub floppy_b_mounted: bool,
+    pub hdd_mounted: bool,
+}
+
 pub struct TabManager {
     pub active_tab: Tab,
     pub log_messages: Vec<String>,
     pub help_visible: bool,
     pub debug_visible: bool,
+    pub pc_config_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
+    pub pc_config_info: Option<PcConfigInfo>,
 }
 
 impl TabManager {
@@ -37,10 +53,12 @@ impl TabManager {
             log_messages: Vec::new(),
             help_visible: false,
             debug_visible: false,
+            pc_config_visible: false,
             debug_info: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
+            pc_config_info: None,
         }
     }
 
@@ -50,6 +68,15 @@ impl TabManager {
         if self.log_messages.len() > 1000 {
             self.log_messages.remove(0);
         }
+    }
+
+    pub fn show_pc_config_tab(&mut self) {
+        self.pc_config_visible = true;
+        self.active_tab = Tab::PcConfig;
+    }
+
+    pub fn update_pc_config_info(&mut self, info: PcConfigInfo) {
+        self.pc_config_info = Some(info);
     }
 
     pub fn show_help_tab(&mut self) {
@@ -88,8 +115,12 @@ impl TabManager {
 
             if self.new_project_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::NewProject, "New Project");
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
                 if ui
-                    .button("✖")
+                    .add(close_button)
                     .on_hover_text("Close New Project tab")
                     .clicked()
                 {
@@ -112,7 +143,15 @@ impl TabManager {
 
             if self.help_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "Help");
-                if ui.button("✖").on_hover_text("Close Help tab").clicked() {
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close Help tab")
+                    .clicked()
+                {
                     self.help_visible = false;
                     if self.active_tab == Tab::Help {
                         self.active_tab = Tab::Emulator;
@@ -122,9 +161,35 @@ impl TabManager {
 
             if self.debug_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Debug, "Debug");
-                if ui.button("✖").on_hover_text("Close Debug tab").clicked() {
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close Debug tab")
+                    .clicked()
+                {
                     self.debug_visible = false;
                     if self.active_tab == Tab::Debug {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
+
+            if self.pc_config_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::PcConfig, "PC Config");
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close PC Config tab")
+                    .clicked()
+                {
+                    self.pc_config_visible = false;
+                    if self.active_tab == Tab::PcConfig {
                         self.active_tab = Tab::Emulator;
                     }
                 }
@@ -140,6 +205,7 @@ impl TabManager {
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
+            Tab::PcConfig => self.render_pc_config_tab(ui),
         }
     }
 
@@ -316,6 +382,88 @@ impl TabManager {
                 } else {
                     ui.label("No debug information available");
                     ui.label("Load a ROM to see system-specific debug info");
+                }
+            });
+    }
+
+    fn render_pc_config_tab(&self, ui: &mut Ui) {
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(ref config) = self.pc_config_info {
+                    ui.heading("PC System Configuration");
+                    ui.separator();
+
+                    egui::Grid::new("pc_config_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("CPU Model:");
+                            ui.label(&config.cpu_model);
+                            ui.end_row();
+
+                            ui.label("Memory:");
+                            ui.label(format!("{} KB", config.memory_kb));
+                            ui.end_row();
+
+                            ui.label("Video Adapter:");
+                            ui.label(&config.video_adapter);
+                            ui.end_row();
+
+                            ui.label("Boot Priority:");
+                            ui.label(&config.boot_priority);
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+                    ui.heading("Mounted Devices");
+                    ui.separator();
+
+                    egui::Grid::new("pc_mounts_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("BIOS:");
+                            ui.label(if config.bios_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
+                            ui.end_row();
+
+                            ui.label("Floppy A:");
+                            ui.label(if config.floppy_a_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
+                            ui.end_row();
+
+                            ui.label("Floppy B:");
+                            ui.label(if config.floppy_b_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
+                            ui.end_row();
+
+                            ui.label("Hard Drive:");
+                            ui.label(if config.hdd_mounted {
+                                "✓ Mounted"
+                            } else {
+                                "✗ Not mounted"
+                            });
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+                    ui.label("This tab shows PC-specific configuration and mounted devices.");
+                    ui.label("Use the Mount Points panel to manage disk images.");
+                } else {
+                    ui.label("No PC configuration available");
+                    ui.label("This tab is only available when a PC system is loaded");
                 }
             });
     }

@@ -1889,6 +1889,7 @@ fn main() {
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
     egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
+    egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
 
     // Show New Project tab on startup if no ROM/project was loaded
@@ -1987,6 +1988,72 @@ fn main() {
         egui_app.property_pane.speed = settings.emulation_speed as f32;
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
         egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
+
+        // Update mount points from current system
+        if rom_loaded {
+            use egui_ui::property_pane::MountPoint;
+            let mount_points_info = sys.mount_points();
+            egui_app.property_pane.mount_points = mount_points_info
+                .iter()
+                .map(|mp| MountPoint {
+                    id: mp.id.clone(),
+                    name: mp.name.clone(),
+                    mounted_file: runtime_state.get_mount(&mp.id).map(|s| {
+                        // Show just the filename, not the full path
+                        std::path::Path::new(s)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(s)
+                            .to_string()
+                    }),
+                })
+                .collect();
+        } else {
+            egui_app.property_pane.mount_points.clear();
+        }
+
+        // Update PC config tab if PC is loaded
+        if rom_loaded {
+            if let EmulatorSystem::PC(pc_sys) = &sys {
+                use egui_ui::PcConfigInfo;
+                egui_app.tab_manager.show_pc_config_tab();
+
+                let boot_priority_str = match pc_sys.boot_priority() {
+                    emu_pc::BootPriority::FloppyFirst => "Floppy First",
+                    emu_pc::BootPriority::HardDriveFirst => "Hard Drive First",
+                    emu_pc::BootPriority::FloppyOnly => "Floppy Only",
+                    emu_pc::BootPriority::HardDriveOnly => "Hard Drive Only",
+                };
+
+                let cpu_model_str = match pc_sys.cpu_model() {
+                    emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
+                    emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
+                    emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
+                    emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
+                    emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
+                    emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
+                    emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
+                    emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
+                    emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
+                };
+
+                let config = PcConfigInfo {
+                    cpu_model: cpu_model_str.to_string(),
+                    memory_kb: pc_sys.memory_kb(),
+                    video_adapter: pc_sys.video_adapter_name().to_string(),
+                    boot_priority: boot_priority_str.to_string(),
+                    bios_mounted: runtime_state.get_mount("BIOS").is_some(),
+                    floppy_a_mounted: runtime_state.get_mount("FloppyA").is_some(),
+                    floppy_b_mounted: runtime_state.get_mount("FloppyB").is_some(),
+                    hdd_mounted: runtime_state.get_mount("HardDrive").is_some(),
+                };
+                egui_app.tab_manager.update_pc_config_info(config);
+            }
+        }
 
         // Update debug info if debug tab is visible
         if egui_app.tab_manager.debug_visible {
@@ -2409,6 +2476,9 @@ fn main() {
         // Handle emulation speed changes from property pane
         settings.emulation_speed = (egui_app.property_pane.emulation_speed_percent as f64) / 100.0;
 
+        // Handle display filter changes from property pane
+        settings.display_filter = egui_app.property_pane.display_filter;
+
         // Handle tab actions (e.g., create new project)
         if let Some(action) = egui_app.tab_manager.take_action() {
             use egui_ui::TabAction;
@@ -2527,15 +2597,22 @@ fn main() {
         if rom_loaded && settings.emulation_speed > 0.0 {
             // Step the frame
             match sys.step_frame() {
-                Ok(frame) => {
-                    // Store frame buffer for screenshots
+                Ok(mut frame) => {
+                    // Apply display filter to the frame
+                    settings.display_filter.apply(
+                        &mut frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    );
+
+                    // Store frame buffer for screenshots (after filter is applied)
                     latest_frame_buffer = Some((
                         frame.pixels.clone(),
                         frame.width as usize,
                         frame.height as usize,
                     ));
 
-                    // Update emulator texture with new frame
+                    // Update emulator texture with filtered frame
                     egui_app.update_emulator_texture(
                         egui_backend.egui_ctx(),
                         &frame.pixels,
