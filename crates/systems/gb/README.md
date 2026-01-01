@@ -58,23 +58,28 @@ GbSystem
 
 ### PPU Implementation
 
-**Location**: `src/ppu.rs`
+**Location**: `src/ppu.rs`, `src/ppu_renderer.rs`
 
-Implements DMG (original Game Boy) mode:
+Implements DMG (original Game Boy) mode with a flexible renderer architecture:
 
 - **Resolution**: 160x144 pixels
 - **Tile System**:
   - 8x8 pixel tiles, 2 bits per pixel (4 colors)
-  - Two tile data areas
-  - Two tilemap areas
+  - Two tile data areas (unsigned $8000-$8FFF, signed $8800-$97FF)
+  - Two tilemap areas ($9800-$9BFF, $9C00-$9FFF)
 - **Layers**:
   - Background with scrolling (SCX, SCY)
   - Window layer (WX, WY)
   - 40 sprites (8x8 or 8x16 modes)
 - **Features**:
   - Sprite flipping (horizontal/vertical)
-  - Sprite priority
+  - Sprite priority (BG priority flag)
   - Palette support (BGP, OBP0, OBP1)
+  - DMG color mode (4 shades of gray)
+- **Rendering**:
+  - **Software Renderer**: CPU-based tile/sprite rendering (default)
+  - **Hardware Renderer**: GPU-accelerated rendering (future work)
+  - Follows `emu_core::renderer::Renderer` trait pattern
 - **Timing**: Frame-based rendering (~59.73 Hz)
 
 ### APU Implementation
@@ -109,14 +114,15 @@ cargo run --release -p emu_gui -- path/to/game.gb
 
 The Game Boy crate includes comprehensive tests:
 
-- **80 total tests**:
+- **86 total tests**:
   - PPU tests (rendering, registers, scrolling)
   - APU tests (all channels, registers)
-  - System tests (reset, state management)
+  - System tests (reset, state management, controller input, joypad integration)
   - Mapper tests (MBC0/1/3/5)
   - Timer tests (DIV, TIMA overflow, interrupts)
+  - Renderer tests (software renderer)
 
-- **Smoke Test**: Uses `test_roms/gb/test.gb` to verify basic functionality
+- **Smoke Tests**: Uses `test_roms/gb/test.gb` and `test_roms/gbc/test.gbc` to verify basic functionality
 
 ## Usage Example
 

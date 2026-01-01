@@ -1002,7 +1002,7 @@ There are two ways to mount disk images and BIOS:
 
 **Known Limitations**:
 - **BIOS Interrupts**: 
-  - INT 10h (Video): Teletype output and cursor control work; video mode switching functions are stubs
+  - INT 10h (Video): Extensive implementation with teletype, cursor control, scrolling, character I/O (video mode switching acknowledged but not functional)
   - INT 13h (Disk): **FULLY IMPLEMENTED** ✅ - All standard and extended functions work
     - AH=00h (Reset), AH=01h (Get Status), AH=02h (Read), AH=03h (Write)
     - AH=04h (Verify), AH=05h (Format), AH=08h (Get Params)
@@ -1012,7 +1012,7 @@ There are two ways to mount disk images and BIOS:
     - AH=88h (Get Extended Memory), AH=C0h (Get System Configuration) ✅
     - AH=E801h/E820h (Extended Memory Detection) ✅
     - AH=41h (Wait on External Event) - returns "not supported" ✅
-  - INT 16h (Keyboard): Read and check keystroke functions work; shift flags is stub
+  - INT 16h (Keyboard): All functions work - read keystroke, check keystroke, and get shift flags
   - INT 1Ah (Time/Date Services): **Time/Date and PCI BIOS functions implemented** ✅
     - AH=00h-05h (Time/Date): Read/Set system clock, RTC time/date ✅
     - AH=B1h (PCI BIOS): Returns "not present" for PC/XT (no PCI bus) ✅
@@ -1086,9 +1086,8 @@ There are two ways to mount disk images and BIOS:
   - AH=00h (read keystroke) and AH=01h (check keystroke) functional
   - No mouse support
   - No serial/parallel port emulation
-- **No audio**: PC speaker not implemented
-- **No timer**: PIT (Programmable Interval Timer) not implemented
-- **Timing**: Frame-based execution - not cycle-accurate
+- **No audio**: PC speaker tone generation not connected (PIT channel 2 tracks frequency but audio output not implemented)
+- **Timing**: Frame-based execution with PIT timer (INT 08h) - not cycle-accurate
 
 ## Troubleshooting
 

@@ -14,11 +14,13 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **CPU Model Selection** - Support for 8086, 8088, 80186, 80188, 80286
 - ✅ **Memory** - 640KB RAM, 128KB VRAM, 256KB ROM
 - ✅ **BIOS** - Minimal custom BIOS built from assembly
+- ✅ **PIT (8253/8254)** - Full Programmable Interval Timer with timer interrupts (INT 08h)
 - ✅ **Video Adapters** - CGA, EGA, VGA with multiple modes and runtime switching
+- ✅ **INT 10h Video BIOS** - Extensive implementation with teletype, cursor control, scrolling, read/write char/attr (video mode switching returns success but doesn't change modes)
 - ✅ **Disk Controller** - Full INT 13h disk I/O (read, write, get params, reset)
 - ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
-- ✅ **Keyboard** - Full passthrough with host modifier
-- ✅ **INT 16h Integration** - Keyboard BIOS services connected to controller
+- ✅ **Keyboard** - Full passthrough with host modifier and shift flag tracking
+- ✅ **INT 16h Keyboard Services** - Read keystroke, check keystroke, get shift flags (all functions working)
 - ✅ **Mount System** - Multi-slot disk image mounting with validation
 - ✅ **Persistent Disk State** - Disk images are modified in-place (writes persist to files)
 
@@ -59,11 +61,8 @@ All fonts include complete CP437 (Code Page 437) character set with:
 
 ### What's Missing
 
-- ⏳ **Audio**: PC speaker not implemented
-- ⏳ **Timer**: PIT (Programmable Interval Timer) not implemented
+- ⏳ **Audio**: PC speaker tone generation not implemented (PIT channel 2 tracks frequency/state but audio output not connected)
 - ⏳ **Serial/Parallel**: No COM/LPT port support
-- ⏳ **INT 10h**: Video BIOS services (set mode, cursor control, etc.) are stubs
-- ⏳ **INT 16h**: Keyboard services AH=02h (shift flags) is a stub
 - ⏳ **INT 21h**: DOS API functions are mostly stubs
 
 ## Architecture
@@ -236,12 +235,10 @@ See [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt) for user-facing limitati
   - Disk writes are performed in-memory on the mounted disk image
   - To persist changes, the disk image would need to be written back to the file system
   - This is fundamentally different from NES/GB where ROM is read-only and state is separate
-- INT 10h (Video BIOS) is partially implemented (teletype, cursor control work; mode switching is stub)
-- INT 16h (Keyboard) read/check functions work; shift flags is stub
+- INT 10h (Video BIOS) extensively implemented (teletype, cursor control, scrolling, character I/O all work; video mode switching acknowledged but not functional)
 - INT 21h (DOS API) is partially implemented (character I/O works; file operations are stubs)
 - Frame-based timing (not cycle-accurate)
-- No PC speaker audio
-- No PIT timer
+- PC speaker audio output not implemented (PIT channel 2 tracks frequency/state but audio generation not connected to frontend)
 - No serial/parallel ports
 
 ## Performance
@@ -279,20 +276,17 @@ For detailed implementation plans, see `docs/references/cpu_8086.md` for CPU arc
 ## Future Improvements
 
 **Short Term**:
-- Expand INT 10h video services (more functions)
-- Expand INT 16h keyboard services (actual key reading)
+- Connect PC speaker audio output (PIT channel 2 frequency already tracked)
 - Expand INT 21h DOS API (file I/O, etc.)
 - Additional video modes
 
 **Medium Term**:
-- PC speaker audio
-- PIT timer
 - More complete DOS compatibility
+- Serial/parallel ports (COM/LPT)
 
 **Long Term**:
 - EMS/XMS memory
 - Mouse support
-- Serial/parallel ports
 - Protected mode (80286)
 
 ## Contributing
