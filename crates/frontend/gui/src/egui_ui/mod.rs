@@ -14,4 +14,4 @@ mod status_bar;
 mod tabs;
 
 pub use layout::EguiApp;
-pub use tabs::PcConfigInfo;
+pub use tabs::{PcConfigInfo, Tab, TabAction};
