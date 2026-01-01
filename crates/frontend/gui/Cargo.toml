@@ -32,5 +32,11 @@ sdl2 = { version = "0.38", features = ["bundled"] }
 glow = "0.13"
 bytemuck = "1.14"
 
+# egui support
+egui = "0.29"
+egui_glow = "0.29"
+egui_extras = { version = "0.29", features = ["image"] }
+egui-sdl2-gl = "0.23"
+
 [features]
 default = []
