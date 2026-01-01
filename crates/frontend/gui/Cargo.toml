@@ -28,9 +28,15 @@ rand = "0.8"
 chrono = "0.4"
 
 # Window and rendering support
-sdl2 = { version = "0.38", features = ["bundled"] }
+sdl2 = { version = "0.36", features = ["bundled"] }
 glow = "0.13"
 bytemuck = "1.14"
+
+# egui support
+egui = "0.32"
+egui_glow = "0.32"
+egui_extras = { version = "0.32", features = ["image"] }
+egui_sdl2_gl = "0.32"
 
 [features]
 default = []
