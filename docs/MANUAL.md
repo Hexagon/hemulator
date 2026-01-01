@@ -1002,7 +1002,7 @@ There are two ways to mount disk images and BIOS:
 
 **Known Limitations**:
 - **BIOS Interrupts**: 
-  - INT 10h (Video): 22 functions implemented including teletype, cursor control, scrolling, character I/O; only video mode switching is stub
+  - INT 10h (Video): 21 functions implemented including teletype, cursor control, scrolling, character I/O; only video mode switching is stub
   - INT 13h (Disk): **FULLY IMPLEMENTED** ✅ - All standard and extended functions work
     - AH=00h (Reset), AH=01h (Get Status), AH=02h (Read), AH=03h (Write)
     - AH=04h (Verify), AH=05h (Format), AH=08h (Get Params)

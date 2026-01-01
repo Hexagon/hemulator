@@ -16,7 +16,7 @@ The PC emulator is **experimental** with CGA/EGA/VGA graphics support and basic 
 - ✅ **BIOS** - Minimal custom BIOS built from assembly
 - ✅ **PIT (8253/8254)** - Full Programmable Interval Timer with timer interrupts (INT 08h)
 - ✅ **Video Adapters** - CGA, EGA, VGA with multiple modes and runtime switching
-- ✅ **INT 10h Video BIOS** - 22 functions including teletype, cursor control, scrolling, read/write char/attr, video mode detection
+- ✅ **INT 10h Video BIOS** - 21 functions implemented including teletype, cursor control, scrolling, read/write char/attr, video mode detection (plus 2 stub functions for undocumented VGA calls)
 - ✅ **Disk Controller** - Full INT 13h disk I/O (read, write, get params, reset)
 - ✅ **Boot Sector Loading** - Loads from floppy/hard drive with boot priority
 - ✅ **Keyboard** - Full passthrough with host modifier and shift flag tracking
@@ -235,7 +235,7 @@ See [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt) for user-facing limitati
   - Disk writes are performed in-memory on the mounted disk image
   - To persist changes, the disk image would need to be written back to the file system
   - This is fundamentally different from NES/GB where ROM is read-only and state is separate
-- INT 10h (Video BIOS) has 22 functions implemented (teletype, cursor control, scrolling, character I/O all work; only video mode switching is stub)
+- INT 10h (Video BIOS) has 21 functions implemented (teletype, cursor control, scrolling, character I/O all work; only video mode switching is stub)
 - INT 21h (DOS API) is partially implemented (character I/O works; file operations are stubs)
 - Frame-based timing (not cycle-accurate)
 - PC speaker tone generation not connected (PIT channel 2 tracks frequency but audio output not implemented)
