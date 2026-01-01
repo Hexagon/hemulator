@@ -2483,25 +2483,25 @@ mod boot_output_tests {
         // Test that the BIOS Data Area (BDA) is properly initialized
         // according to osdev.org specification
         use emu_core::cpu_8086::Memory8086;
-        
+
         let mut sys = PcSystem::new();
-        
+
         // The BDA is initialized when boot_delay_frames reaches 0
         // Set it to 1 so that the first step_frame() will decrement it to 0
         // and trigger the initialization
         sys.boot_delay_frames = 1;
         sys.boot_started = false;
-        
+
         // Call step_frame once to trigger BDA initialization
         let _ = sys.step_frame();
-        
+
         let bus = sys.cpu.bus();
 
         // 0x0400-0x0407: COM port addresses (4 words)
         // COM1 should be at 0x03F8
         let com1_addr = (bus.read(0x400) as u16) | ((bus.read(0x401) as u16) << 8);
         assert_eq!(com1_addr, 0x03F8, "COM1 should be at 0x03F8");
-        
+
         // COM2 should be at 0x02F8
         let com2_addr = (bus.read(0x402) as u16) | ((bus.read(0x403) as u16) << 8);
         assert_eq!(com2_addr, 0x02F8, "COM2 should be at 0x02F8");
@@ -2521,7 +2521,11 @@ mod boot_output_tests {
 
         // 0x0413: Conventional memory size in KB (should be 640 or less)
         let mem_kb = (bus.read(0x413) as u16) | ((bus.read(0x414) as u16) << 8);
-        assert!(mem_kb > 0 && mem_kb <= 640, "Memory size should be 1-640 KB, got {}", mem_kb);
+        assert!(
+            mem_kb > 0 && mem_kb <= 640,
+            "Memory size should be 1-640 KB, got {}",
+            mem_kb
+        );
 
         // 0x0417-0x0418: Keyboard flags (should be initialized to 0)
         let kb_flags = bus.read(0x417);
@@ -2543,7 +2547,10 @@ mod boot_output_tests {
 
         // 0x0449: Display mode
         let display_mode = bus.read(0x449);
-        assert_eq!(display_mode, 0x03, "Display mode should be 0x03 (CGA 80x25)");
+        assert_eq!(
+            display_mode, 0x03,
+            "Display mode should be 0x03 (CGA 80x25)"
+        );
 
         // 0x044A: Screen columns
         let columns = (bus.read(0x44A) as u16) | ((bus.read(0x44B) as u16) << 8);
