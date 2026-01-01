@@ -705,3 +705,44 @@ fn test_emulation_speed_default_issue() {
         }
     }
 }
+
+#[test]
+fn test_scaling_mode_names() {
+    assert_eq!(ScalingMode::Original.name(), "Original");
+    assert_eq!(ScalingMode::Fit.name(), "Fit");
+    assert_eq!(ScalingMode::Stretch.name(), "Stretch");
+}
+
+#[test]
+fn test_scaling_mode_default() {
+    assert_eq!(ScalingMode::default(), ScalingMode::Fit);
+}
+
+#[test]
+fn test_scaling_mode_serialization() {
+    // Test that scaling modes can be serialized/deserialized
+    let modes = vec![
+        ScalingMode::Original,
+        ScalingMode::Fit,
+        ScalingMode::Stretch,
+    ];
+
+    for mode in modes {
+        let json = serde_json::to_string(&mode).expect("Failed to serialize");
+        let deserialized: ScalingMode =
+            serde_json::from_str(&json).expect("Failed to deserialize");
+        assert_eq!(mode, deserialized);
+    }
+}
+
+#[test]
+fn test_settings_with_scaling_mode() {
+    let mut settings = Settings::default();
+    assert_eq!(settings.scaling_mode, ScalingMode::Fit);
+
+    settings.scaling_mode = ScalingMode::Original;
+    assert_eq!(settings.scaling_mode, ScalingMode::Original);
+
+    settings.scaling_mode = ScalingMode::Stretch;
+    assert_eq!(settings.scaling_mode, ScalingMode::Stretch);
+}
