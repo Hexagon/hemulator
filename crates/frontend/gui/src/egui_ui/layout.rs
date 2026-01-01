@@ -61,13 +61,13 @@ impl EguiApp {
                 let r = ((pixel >> 16) & 0xFF) as u8;
                 let g = ((pixel >> 8) & 0xFF) as u8;
                 let b = (pixel & 0xFF) as u8;
-                
+
                 // Convert sRGB to linear color space
                 // This prevents the dark tint issue when GL_FRAMEBUFFER_SRGB is enabled
                 let r_linear = srgb_to_linear(r);
                 let g_linear = srgb_to_linear(g);
                 let b_linear = srgb_to_linear(b);
-                
+
                 [r_linear, g_linear, b_linear, a]
             })
             .collect();
@@ -129,16 +129,16 @@ mod tests {
     fn test_srgb_to_linear_conversion() {
         // Test black (should stay black)
         assert_eq!(srgb_to_linear(0), 0);
-        
+
         // Test white (should stay white)
         assert_eq!(srgb_to_linear(255), 255);
-        
+
         // Test middle gray (sRGB 128 should convert to darker linear value)
         // sRGB 128/255 = 0.502, linear = ((0.502 + 0.055) / 1.055)^2.4 ≈ 0.214
         // linear 0.214 * 255 ≈ 55
         let result = srgb_to_linear(128);
-        assert!(result >= 53 && result <= 57, "Expected ~55, got {}", result);
-        
+        assert!((53..=57).contains(&result), "Expected ~55, got {}", result);
+
         // Test common sRGB value (187 is common in UI)
         // Should convert to a brighter linear value
         let result = srgb_to_linear(187);
