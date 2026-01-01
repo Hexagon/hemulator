@@ -129,10 +129,16 @@ struct ScanlineState {
     colup1: u8,
     grp0: u8,
     grp1: u8,
+    grp0_delayed: u8,
+    grp1_delayed: u8,
     player0_x: u8,
     player1_x: u8,
     player0_reflect: bool,
     player1_reflect: bool,
+    nusiz0: u8,
+    nusiz1: u8,
+    vdelp0: bool,
+    vdelp1: bool,
     enam0: bool,
     enam1: bool,
     missile0_x: u8,
@@ -165,10 +171,16 @@ pub struct Tia {
     // Players (sprites)
     grp0: u8, // Player 0 graphics
     grp1: u8, // Player 1 graphics
+    grp0_old: u8, // Previous GRP0 value for delayed graphics
+    grp1_old: u8, // Previous GRP1 value for delayed graphics
     player0_x: u8,
     player1_x: u8,
     player0_reflect: bool,
     player1_reflect: bool,
+    nusiz0: u8, // Player 0 number and size
+    nusiz1: u8, // Player 1 number and size
+    vdelp0: bool, // Player 0 delayed graphics enable
+    vdelp1: bool, // Player 1 delayed graphics enable
 
     // Missiles
     enam0: bool, // Missile 0 enable
@@ -179,6 +191,16 @@ pub struct Tia {
     // Ball
     enabl: bool, // Ball enable
     ball_x: u8,
+
+    // Collision detection registers (CXM0P, CXM1P, CXM0FB, CXM1FB, CXP0FB, CXP1FB, CXP0P1, CXBLPF, CXPPMx)
+    cxm0p: u8,   // Missile 0 to Player collisions
+    cxm1p: u8,   // Missile 1 to Player collisions
+    cxp0fb: u8,  // Player 0 to Playfield/Ball collisions
+    cxp1fb: u8,  // Player 1 to Playfield/Ball collisions
+    cxm0fb: u8,  // Missile 0 to Playfield/Ball collisions
+    cxm1fb: u8,  // Missile 1 to Playfield/Ball collisions
+    cxblpf: u8,  // Ball to Playfield collisions
+    cxppmm: u8,  // Player and Missile collisions
 
     // Horizontal motion
     hmp0: i8,
@@ -283,16 +305,30 @@ impl Tia {
             colup1: 0,
             grp0: 0,
             grp1: 0,
+            grp0_old: 0,
+            grp1_old: 0,
             player0_x: 0,
             player1_x: 0,
             player0_reflect: false,
             player1_reflect: false,
+            nusiz0: 0,
+            nusiz1: 0,
+            vdelp0: false,
+            vdelp1: false,
             enam0: false,
             enam1: false,
             missile0_x: 0,
             missile1_x: 0,
             enabl: false,
             ball_x: 0,
+            cxm0p: 0,
+            cxm1p: 0,
+            cxp0fb: 0,
+            cxp1fb: 0,
+            cxm0fb: 0,
+            cxm1fb: 0,
+            cxblpf: 0,
+            cxppmm: 0,
             hmp0: 0,
             hmp1: 0,
             hmm0: 0,
@@ -394,12 +430,18 @@ impl Tia {
             colupf: self.colupf,
             colup0: self.colup0,
             colup1: self.colup1,
-            grp0: self.grp0,
-            grp1: self.grp1,
+            grp0: if self.vdelp0 { self.grp0_old } else { self.grp0 },
+            grp1: if self.vdelp1 { self.grp1_old } else { self.grp1 },
+            grp0_delayed: self.grp0_old,
+            grp1_delayed: self.grp1_old,
             player0_x: self.player0_x,
             player1_x: self.player1_x,
             player0_reflect: self.player0_reflect,
             player1_reflect: self.player1_reflect,
+            nusiz0: self.nusiz0,
+            nusiz1: self.nusiz1,
+            vdelp0: self.vdelp0,
+            vdelp1: self.vdelp1,
             enam0: self.enam0,
             enam1: self.enam1,
             missile0_x: self.missile0_x,
@@ -443,10 +485,11 @@ impl Tia {
             // Player 0
             0x04 => {
                 // NUSIZ0 - Player 0 number and size
-                // Simplified: just store it
+                self.nusiz0 = val;
             }
             0x05 => {
                 // NUSIZ1 - Player 1 number and size
+                self.nusiz1 = val;
             }
             0x06 => {
                 self.writes_colors = self.writes_colors.saturating_add(1);
@@ -557,6 +600,7 @@ impl Tia {
                         eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
+                self.grp0_old = self.grp0; // Save old value before writing new
                 self.grp0 = val;
             }
             0x1C => {
@@ -567,6 +611,7 @@ impl Tia {
                         eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {}", val, self.scanline);
                     }
                 }
+                self.grp1_old = self.grp1; // Save old value before writing new
                 self.grp1 = val;
             }
 
@@ -581,6 +626,10 @@ impl Tia {
             0x22 => self.hmm0 = (val as i8) >> 4,
             0x23 => self.hmm1 = (val as i8) >> 4,
             0x24 => self.hmbl = (val as i8) >> 4,
+            
+            // Delayed graphics enable
+            0x25 => self.vdelp0 = (val & 0x01) != 0, // VDELP0
+            0x26 => self.vdelp1 = (val & 0x01) != 0, // VDELP1
 
             // Apply horizontal motion (HMOVE)
             0x2A => {
@@ -599,6 +648,18 @@ impl Tia {
                 self.hmm1 = 0;
                 self.hmbl = 0;
             }
+            
+            // Clear collision detection latches (CXCLR)
+            0x2C => {
+                self.cxm0p = 0;
+                self.cxm1p = 0;
+                self.cxp0fb = 0;
+                self.cxp1fb = 0;
+                self.cxm0fb = 0;
+                self.cxm1fb = 0;
+                self.cxblpf = 0;
+                self.cxppmm = 0;
+            }
 
             _ => {}
         }
@@ -612,7 +673,14 @@ impl Tia {
     pub fn read(&self, addr: u8) -> u8 {
         // TIA read registers are for collision detection and input
         match addr & 0x0F {
-            0x00..=0x07 => 0,   // Collision registers (not implemented)
+            0x00 => self.cxm0p,  // Missile 0 to Player collisions
+            0x01 => self.cxm1p,  // Missile 1 to Player collisions
+            0x02 => self.cxp0fb, // Player 0 to Playfield/Ball collisions
+            0x03 => self.cxp1fb, // Player 1 to Playfield/Ball collisions
+            0x04 => self.cxm0fb, // Missile 0 to Playfield/Ball collisions
+            0x05 => self.cxm1fb, // Missile 1 to Playfield/Ball collisions
+            0x06 => self.cxblpf, // Ball to Playfield collisions
+            0x07 => self.cxppmm, // Player and Missile collisions
             0x08..=0x0B => 0,   // Input ports 0-3 (paddles, not implemented)
             0x0C => self.inpt4, // Input port 4 (Player 0 fire button)
             0x0D => self.inpt5, // Input port 5 (Player 1 fire button)
@@ -763,6 +831,97 @@ impl Tia {
             buffer[visible_line * 160 + x] = color;
         }
     }
+    
+    /// Detect and record collisions for a scanline (called during frame rendering)
+    /// This should be called once per scanline to update collision registers
+    fn detect_collisions_for_scanline(&mut self, tia_scanline: u16) {
+        let state = self
+            .scanline_states
+            .get((tia_scanline as usize).min(261))
+            .copied()
+            .unwrap_or_default();
+        
+        // Check all 160 pixels for collisions
+        for x in 0..160 {
+            let p0 = Self::is_player_pixel(&state, 0, x);
+            let p1 = Self::is_player_pixel(&state, 1, x);
+            let m0 = Self::is_missile_pixel(&state, 0, x);
+            let m1 = Self::is_missile_pixel(&state, 1, x);
+            let bl = Self::is_ball_pixel(&state, x);
+            let pf = Self::is_playfield_pixel(&state, x);
+            
+            // Missile 0 to Player collisions (CXM0P)
+            if m0 && p1 {
+                self.cxm0p |= 0x80; // M0P1
+            }
+            if m0 && p0 {
+                self.cxm0p |= 0x40; // M0P0
+            }
+            
+            // Missile 1 to Player collisions (CXM1P)
+            if m1 && p0 {
+                self.cxm1p |= 0x80; // M1P0
+            }
+            if m1 && p1 {
+                self.cxm1p |= 0x40; // M1P1
+            }
+            
+            // Player 0 to Playfield/Ball collisions (CXP0FB)
+            if p0 && pf {
+                self.cxp0fb |= 0x80; // P0PF
+            }
+            if p0 && bl {
+                self.cxp0fb |= 0x40; // P0BL
+            }
+            
+            // Player 1 to Playfield/Ball collisions (CXP1FB)
+            if p1 && pf {
+                self.cxp1fb |= 0x80; // P1PF
+            }
+            if p1 && bl {
+                self.cxp1fb |= 0x40; // P1BL
+            }
+            
+            // Missile 0 to Playfield/Ball collisions (CXM0FB)
+            if m0 && pf {
+                self.cxm0fb |= 0x80; // M0PF
+            }
+            if m0 && bl {
+                self.cxm0fb |= 0x40; // M0BL
+            }
+            
+            // Missile 1 to Playfield/Ball collisions (CXM1FB)
+            if m1 && pf {
+                self.cxm1fb |= 0x80; // M1PF
+            }
+            if m1 && bl {
+                self.cxm1fb |= 0x40; // M1BL
+            }
+            
+            // Ball to Playfield collisions (CXBLPF)
+            if bl && pf {
+                self.cxblpf |= 0x80; // BLPF
+            }
+            
+            // Player and Missile collisions (CXPPMM)
+            if m0 && m1 {
+                self.cxppmm |= 0x80; // M0M1
+            }
+            if p0 && p1 {
+                self.cxppmm |= 0x40; // P0P1
+            }
+        }
+    }
+    
+    /// Detect collisions for the entire frame (should be called after rendering)
+    /// This updates the collision registers based on the current frame state
+    pub fn detect_collisions_for_frame(&mut self, visible_start: u16) {
+        // Detect collisions for all 192 visible scanlines
+        for visible_line in 0..192 {
+            let tia_scanline = (visible_start + visible_line) % 262;
+            self.detect_collisions_for_scanline(tia_scanline);
+        }
+    }
 
     /// Get the color of a pixel at the given position using latched state
     fn get_pixel_color(state: &ScanlineState, x: usize) -> u32 {
@@ -839,43 +998,109 @@ impl Tia {
 
     /// Check if a player pixel is visible at the given x position
     fn is_player_pixel(state: &ScanlineState, player: usize, x: usize) -> bool {
-        let (grp, pos, reflect) = if player == 0 {
-            (state.grp0, state.player0_x, state.player0_reflect)
+        let (grp, pos, reflect, nusiz) = if player == 0 {
+            (state.grp0, state.player0_x, state.player0_reflect, state.nusiz0)
         } else {
-            (state.grp1, state.player1_x, state.player1_reflect)
+            (state.grp1, state.player1_x, state.player1_reflect, state.nusiz1)
         };
 
-        // Calculate pixel offset from player position
-        let offset = x.wrapping_sub(pos as usize);
-        if offset >= 8 {
-            return false; // Outside player sprite
+        // NUSIZ bits 0-2 control number and size
+        // Bits 0-2: 000=one, 001=two close, 010=two medium, 011=three close,
+        //           100=two wide, 101=double size, 110=three medium, 111=quad size
+        let nusiz_mode = nusiz & 0x07;
+        
+        // Get player size (1x, 2x, or 4x)
+        let player_size = match nusiz_mode {
+            0x05 => 2, // Double width (2x)
+            0x07 => 4, // Quad width (4x)
+            _ => 1,    // Normal width (1x)
+        };
+        
+        // Get number of copies and their spacing
+        let (num_copies, spacing) = match nusiz_mode {
+            0x00 => (1, 0),   // One copy
+            0x01 => (2, 16),  // Two copies close together
+            0x02 => (2, 32),  // Two copies medium spacing
+            0x03 => (3, 16),  // Three copies close together
+            0x04 => (2, 64),  // Two copies wide spacing
+            0x05 => (1, 0),   // One double-width copy
+            0x06 => (3, 32),  // Three copies medium spacing
+            0x07 => (1, 0),   // One quad-width copy
+            _ => (1, 0),
+        };
+        
+        // Check each copy
+        for copy in 0..num_copies {
+            let copy_pos = (pos as usize + copy * spacing) % 160;
+            let offset = x.wrapping_sub(copy_pos);
+            
+            if offset < 8 * player_size {
+                // Which pixel of the 8-pixel sprite?
+                let sprite_pixel = offset / player_size;
+                
+                // Get the bit from the graphics register
+                let bit = if reflect {
+                    sprite_pixel // Normal order when reflected
+                } else {
+                    7 - sprite_pixel // Reverse order when not reflected
+                };
+                
+                if (grp & (1 << bit)) != 0 {
+                    return true;
+                }
+            }
         }
-
-        // Get the bit from the graphics register
-        let bit = if reflect {
-            offset // Normal order when reflected
-        } else {
-            7 - offset // Reverse order when not reflected
-        };
-
-        (grp & (1 << bit)) != 0
+        
+        false
     }
 
     /// Check if a missile pixel is visible at the given x position
     fn is_missile_pixel(state: &ScanlineState, missile: usize, x: usize) -> bool {
-        let (enabled, pos) = if missile == 0 {
-            (state.enam0, state.missile0_x)
+        let (enabled, pos, nusiz) = if missile == 0 {
+            (state.enam0, state.missile0_x, state.nusiz0)
         } else {
-            (state.enam1, state.missile1_x)
+            (state.enam1, state.missile1_x, state.nusiz1)
         };
 
         if !enabled {
             return false;
         }
 
-        // Missiles are 1 pixel wide by default
-        let offset = x.wrapping_sub(pos as usize);
-        offset < 1
+        // NUSIZ bits 4-5 control missile width
+        // 00=1 pixel, 01=2 pixels, 10=4 pixels, 11=8 pixels
+        let missile_size = match (nusiz >> 4) & 0x03 {
+            0x00 => 1,
+            0x01 => 2,
+            0x02 => 4,
+            0x03 => 8,
+            _ => 1,
+        };
+        
+        // Missiles use the same duplication pattern as players (bits 0-2)
+        let nusiz_mode = nusiz & 0x07;
+        let (num_copies, spacing) = match nusiz_mode {
+            0x00 => (1, 0),   // One copy
+            0x01 => (2, 16),  // Two copies close together
+            0x02 => (2, 32),  // Two copies medium spacing
+            0x03 => (3, 16),  // Three copies close together
+            0x04 => (2, 64),  // Two copies wide spacing
+            0x05 => (1, 0),   // One copy (double size doesn't affect missiles)
+            0x06 => (3, 32),  // Three copies medium spacing
+            0x07 => (1, 0),   // One copy (quad size doesn't affect missiles)
+            _ => (1, 0),
+        };
+        
+        // Check each copy
+        for copy in 0..num_copies {
+            let copy_pos = (pos as usize + copy * spacing) % 160;
+            let offset = x.wrapping_sub(copy_pos);
+            
+            if offset < missile_size {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Check if the ball pixel is visible at the given x position
@@ -1250,5 +1475,212 @@ mod tests {
             // Should have alpha channel set
             assert_eq!(color & 0xFF000000, 0xFF000000);
         }
+    }
+
+    #[test]
+    fn test_nusiz_normal_width() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 to normal width (mode 000)
+        tia.write(0x04, 0x00);
+        tia.player0_x = 80;
+        tia.write(0x1B, 0xFF); // GRP0 - all bits set
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // Normal width: 8 pixels
+        assert_ne!(frame[80], ntsc_to_rgb(0));
+        assert_ne!(frame[87], ntsc_to_rgb(0));
+        assert_eq!(frame[88], ntsc_to_rgb(0)); // Outside sprite
+    }
+
+    #[test]
+    fn test_nusiz_double_width() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 to double width (mode 101)
+        tia.write(0x04, 0x05);
+        tia.player0_x = 80;
+        tia.write(0x1B, 0xFF); // GRP0 - all bits set
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // Double width: 16 pixels (8 pixels * 2)
+        assert_ne!(frame[80], ntsc_to_rgb(0));
+        assert_ne!(frame[95], ntsc_to_rgb(0));
+        assert_eq!(frame[96], ntsc_to_rgb(0)); // Outside sprite
+    }
+
+    #[test]
+    fn test_nusiz_quad_width() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 to quad width (mode 111)
+        tia.write(0x04, 0x07);
+        tia.player0_x = 80;
+        tia.write(0x1B, 0xFF); // GRP0 - all bits set
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // Quad width: 32 pixels (8 pixels * 4)
+        assert_ne!(frame[80], ntsc_to_rgb(0));
+        assert_ne!(frame[111], ntsc_to_rgb(0));
+        assert_eq!(frame[112], ntsc_to_rgb(0)); // Outside sprite
+    }
+
+    #[test]
+    fn test_nusiz_two_copies_close() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 to two copies close (mode 001)
+        tia.write(0x04, 0x01);
+        tia.player0_x = 80;
+        tia.write(0x1B, 0xFF); // GRP0
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // First copy at x=80
+        assert_ne!(frame[80], ntsc_to_rgb(0));
+        assert_ne!(frame[87], ntsc_to_rgb(0));
+        
+        // Second copy at x=96 (80 + 16)
+        assert_ne!(frame[96], ntsc_to_rgb(0));
+        assert_ne!(frame[103], ntsc_to_rgb(0));
+    }
+
+    #[test]
+    fn test_nusiz_three_copies_close() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 to three copies close (mode 011)
+        tia.write(0x04, 0x03);
+        tia.player0_x = 50;
+        tia.write(0x1B, 0xFF); // GRP0
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // First copy at x=50
+        assert_ne!(frame[50], ntsc_to_rgb(0));
+        
+        // Second copy at x=66 (50 + 16)
+        assert_ne!(frame[66], ntsc_to_rgb(0));
+        
+        // Third copy at x=82 (50 + 32)
+        assert_ne!(frame[82], ntsc_to_rgb(0));
+    }
+
+    #[test]
+    fn test_missile_nusiz_width() {
+        let mut tia = Tia::new();
+        
+        // Set NUSIZ0 bits 4-5 to 10 (4 pixel width)
+        tia.write(0x04, 0x20);
+        tia.missile0_x = 80;
+        tia.write(0x1D, 0x02); // ENAM0
+        tia.write(0x06, 0x28); // COLUP0
+
+        let mut frame = vec![0u32; 160];
+        tia.render_scanline(&mut frame, 0, 0);
+
+        // 4 pixel wide missile
+        assert_ne!(frame[80], ntsc_to_rgb(0));
+        assert_ne!(frame[83], ntsc_to_rgb(0));
+        assert_eq!(frame[84], ntsc_to_rgb(0)); // Outside missile
+    }
+
+    #[test]
+    fn test_collision_player_playfield() {
+        let mut tia = Tia::new();
+        
+        // Set up playfield
+        tia.write(0x0D, 0xF0); // PF0
+        tia.write(0x08, 0x0E); // COLUPF
+        
+        // Set up player overlapping playfield
+        tia.player0_x = 0;
+        tia.write(0x1B, 0xFF); // GRP0
+        tia.write(0x06, 0x28); // COLUP0
+        
+        // Detect collisions
+        tia.detect_collisions_for_scanline(0);
+        
+        // Read collision register - CXP0FB should have P0PF bit set
+        assert_ne!(tia.read(0x02) & 0x80, 0); // CXP0FB bit 7 (P0PF)
+    }
+
+    #[test]
+    fn test_collision_player_player() {
+        let mut tia = Tia::new();
+        
+        // Set up both players at same position
+        tia.player0_x = 80;
+        tia.player1_x = 80;
+        tia.write(0x1B, 0xFF); // GRP0
+        tia.write(0x1C, 0xFF); // GRP1
+        tia.write(0x06, 0x28); // COLUP0
+        tia.write(0x07, 0x38); // COLUP1
+        
+        // Detect collisions
+        tia.detect_collisions_for_scanline(0);
+        
+        // Read collision register - CXPPMM should have P0P1 bit set
+        assert_ne!(tia.read(0x07) & 0x40, 0); // CXPPMM bit 6 (P0P1)
+    }
+
+    #[test]
+    fn test_collision_clear() {
+        let mut tia = Tia::new();
+        
+        // Set up collision
+        tia.player0_x = 80;
+        tia.player1_x = 80;
+        tia.write(0x1B, 0xFF);
+        tia.write(0x1C, 0xFF);
+        
+        // Detect collisions
+        tia.detect_collisions_for_scanline(0);
+        
+        // Verify collision is set
+        assert_ne!(tia.read(0x07), 0);
+        
+        // Clear collisions with CXCLR
+        tia.write(0x2C, 0x00);
+        
+        // Verify collision is cleared
+        assert_eq!(tia.read(0x07), 0);
+    }
+
+    #[test]
+    fn test_vdelp_delayed_graphics() {
+        let mut tia = Tia::new();
+        
+        // Write initial graphics
+        tia.write(0x1B, 0xAA); // GRP0 = 0xAA
+        assert_eq!(tia.grp0, 0xAA);
+        assert_eq!(tia.grp0_old, 0x00); // Old value is 0
+        
+        // Write new graphics - old value should be saved
+        tia.write(0x1B, 0xFF); // GRP0 = 0xFF
+        assert_eq!(tia.grp0, 0xFF);
+        assert_eq!(tia.grp0_old, 0xAA); // Old value saved
+        
+        // Enable delayed graphics
+        tia.write(0x25, 0x01); // VDELP0
+        assert!(tia.vdelp0);
+        
+        // When latching state, delayed graphics should use old value
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.grp0, 0xAA); // Uses old value when VDELP0 is set
     }
 }

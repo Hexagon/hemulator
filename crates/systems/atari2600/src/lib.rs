@@ -367,6 +367,12 @@ impl System for Atari2600System {
             // Use renderer to render the frame
             self.renderer.render_frame(&bus.tia, visible_start);
         }
+        
+        // Detect collisions for the frame (must be done after rendering)
+        if let Some(bus) = self.cpu.bus_mut() {
+            let visible_start = bus.tia.visible_window_start_scanline();
+            bus.tia.detect_collisions_for_frame(visible_start);
+        }
 
         if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Trace) {
             let frame = self.renderer.get_frame();
