@@ -648,7 +648,6 @@ The emulator supports the following cartridge banking schemes:
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-  - Only 32x32 tilemap size (other sizes not implemented)
   - BG3 priority toggle (Mode 1, $2105 bit 3) not implemented
 - **Audio**: SPC700 APU not implemented - silent gameplay
 - **Cartridge**: 
