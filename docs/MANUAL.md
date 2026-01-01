@@ -580,7 +580,7 @@ The emulator supports the following cartridge banking schemes:
 ### Game Boy / Game Boy Color
 
 **Status**: ✅ Fully Working  
-**Coverage**: ~95%+ of Game Boy games supported (MBC0, MBC1, MBC3, MBC5 implemented)
+**Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
@@ -591,6 +591,7 @@ The emulator supports the following cartridge banking schemes:
 - **MBC (Memory Bank Controller) Support**:
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
+  - MBC2: Built-in RAM mapper (~1% of games, up to 256KB ROM, 512×4 bits built-in RAM)
   - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
 - Joypad input with matrix selection
@@ -602,7 +603,6 @@ The emulator supports the following cartridge banking schemes:
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **MBC2**: Not implemented (~1% of games) - rare mapper with built-in 512×4 bits RAM
 - **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games

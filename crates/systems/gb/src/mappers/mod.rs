@@ -5,11 +5,13 @@
 
 mod mbc0;
 mod mbc1;
+mod mbc2;
 mod mbc3;
 mod mbc5;
 
 pub use mbc0::Mbc0;
 pub use mbc1::Mbc1;
+pub use mbc2::Mbc2;
 pub use mbc3::Mbc3;
 pub use mbc5::Mbc5;
 
@@ -18,6 +20,7 @@ pub use mbc5::Mbc5;
 pub enum Mapper {
     Mbc0(Mbc0),
     Mbc1(Mbc1),
+    Mbc2(Mbc2),
     Mbc3(Mbc3),
     Mbc5(Mbc5),
 }
@@ -30,6 +33,8 @@ impl Mapper {
             0x01 => Mapper::Mbc1(Mbc1::new(rom, ram)), // MBC1
             0x02 => Mapper::Mbc1(Mbc1::new(rom, ram)), // MBC1+RAM
             0x03 => Mapper::Mbc1(Mbc1::new(rom, ram)), // MBC1+RAM+BATTERY
+            0x05 => Mapper::Mbc2(Mbc2::new(rom, ram)), // MBC2
+            0x06 => Mapper::Mbc2(Mbc2::new(rom, ram)), // MBC2+BATTERY
             0x0F => Mapper::Mbc3(Mbc3::new(rom, ram)), // MBC3+TIMER+BATTERY
             0x10 => Mapper::Mbc3(Mbc3::new(rom, ram)), // MBC3+TIMER+RAM+BATTERY
             0x11 => Mapper::Mbc3(Mbc3::new(rom, ram)), // MBC3
@@ -50,6 +55,7 @@ impl Mapper {
         match self {
             Mapper::Mbc0(m) => m.read_rom(addr),
             Mapper::Mbc1(m) => m.read_rom(addr),
+            Mapper::Mbc2(m) => m.read_rom(addr),
             Mapper::Mbc3(m) => m.read_rom(addr),
             Mapper::Mbc5(m) => m.read_rom(addr),
         }
@@ -60,6 +66,7 @@ impl Mapper {
         match self {
             Mapper::Mbc0(m) => m.write_rom(addr, val),
             Mapper::Mbc1(m) => m.write_rom(addr, val),
+            Mapper::Mbc2(m) => m.write_rom(addr, val),
             Mapper::Mbc3(m) => m.write_rom(addr, val),
             Mapper::Mbc5(m) => m.write_rom(addr, val),
         }
@@ -70,6 +77,7 @@ impl Mapper {
         match self {
             Mapper::Mbc0(m) => m.read_ram(addr),
             Mapper::Mbc1(m) => m.read_ram(addr),
+            Mapper::Mbc2(m) => m.read_ram(addr),
             Mapper::Mbc3(m) => m.read_ram(addr),
             Mapper::Mbc5(m) => m.read_ram(addr),
         }
@@ -80,6 +88,7 @@ impl Mapper {
         match self {
             Mapper::Mbc0(m) => m.write_ram(addr, val),
             Mapper::Mbc1(m) => m.write_ram(addr, val),
+            Mapper::Mbc2(m) => m.write_ram(addr, val),
             Mapper::Mbc3(m) => m.write_ram(addr, val),
             Mapper::Mbc5(m) => m.write_ram(addr, val),
         }
@@ -91,6 +100,7 @@ impl Mapper {
         match self {
             Mapper::Mbc0(_) => "MBC0",
             Mapper::Mbc1(_) => "MBC1",
+            Mapper::Mbc2(_) => "MBC2",
             Mapper::Mbc3(_) => "MBC3",
             Mapper::Mbc5(_) => "MBC5",
         }
@@ -116,6 +126,13 @@ mod tests {
 
         let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0x03);
         assert_eq!(mapper.name(), "MBC1");
+
+        // MBC2
+        let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0x05);
+        assert_eq!(mapper.name(), "MBC2");
+
+        let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0x06);
+        assert_eq!(mapper.name(), "MBC2");
 
         // MBC3
         let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0x0F);
