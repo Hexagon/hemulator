@@ -2011,7 +2011,7 @@ fn main() {
         } else {
             egui_app.property_pane.mount_points.clear();
         }
-        
+
         // Update PC-specific property pane fields if PC is loaded
         if rom_loaded {
             if let EmulatorSystem::PC(pc_sys) = &sys {
@@ -2027,7 +2027,7 @@ fn main() {
                     num_parallel_ports: bda.num_parallel_ports,
                     num_hard_drives: bda.num_hard_drives,
                 });
-                
+
                 // Set PC CPU model for dropdown
                 let cpu_model_str = match pc_sys.cpu_model() {
                     emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
@@ -2045,7 +2045,7 @@ fn main() {
                     emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
                 };
                 egui_app.property_pane.pc_cpu_model = Some(cpu_model_str.to_string());
-                
+
                 // Set PC memory for dropdown
                 egui_app.property_pane.pc_memory_kb = Some(pc_sys.memory_kb());
             } else {

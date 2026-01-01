@@ -341,33 +341,33 @@ impl PcSystem {
     pub fn get_hard_drive(&self) -> Option<&[u8]> {
         self.cpu.bus().hard_drive()
     }
-    
+
     /// Read BDA (BIOS Data Area) values for displaying system information
     /// BDA is located at 0x0040:0x0000 (physical address 0x0400-0x04FF)
     pub fn read_bda_values(&self) -> BdaValues {
         let bus = self.cpu.bus();
-        
+
         // Read equipment word at 0x0410-0x0411
         let equipment_word = bus.read(0x0410) as u16 | ((bus.read(0x0411) as u16) << 8);
-        
+
         // Read memory size at 0x0413-0x0414 (in KB)
         let memory_size_kb = bus.read(0x0413) as u16 | ((bus.read(0x0414) as u16) << 8);
-        
+
         // Read video mode at 0x0449
         let video_mode = bus.read(0x0449);
-        
+
         // Read video columns at 0x044A-0x044B
         let video_columns = bus.read(0x044A);
-        
+
         // Count serial ports from equipment word (bits 9-11)
         let num_serial_ports = ((equipment_word >> 9) & 0x07) as u8;
-        
+
         // Count parallel ports from equipment word (bits 14-15)
         let num_parallel_ports = ((equipment_word >> 14) & 0x03) as u8;
-        
+
         // Read number of hard drives at 0x0475
         let num_hard_drives = bus.read(0x0475);
-        
+
         BdaValues {
             equipment_word,
             memory_size_kb,
