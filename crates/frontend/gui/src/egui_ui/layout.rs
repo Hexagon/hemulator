@@ -7,6 +7,19 @@ use super::tabs::TabManager;
 use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
 
+/// Convert a single sRGB color component (0-255) to linear color space (0-255)
+/// This implements the sRGB to linear conversion formula
+#[inline]
+fn srgb_to_linear(srgb: u8) -> u8 {
+    let srgb_f = srgb as f32 / 255.0;
+    let linear_f = if srgb_f <= 0.04045 {
+        srgb_f / 12.92
+    } else {
+        ((srgb_f + 0.055) / 1.055).powf(2.4)
+    };
+    (linear_f * 255.0).round().min(255.0) as u8
+}
+
 /// Main egui application state
 pub struct EguiApp {
     pub menu_bar: MenuBar,
@@ -38,6 +51,9 @@ impl EguiApp {
         height: usize,
     ) {
         // Convert ARGB to RGBA for egui
+        // Also apply gamma correction to convert from sRGB to linear color space
+        // This is needed because egui uses GL_RGBA textures (linear) but enables
+        // GL_FRAMEBUFFER_SRGB when rendering to the screen
         let rgba_pixels: Vec<u8> = pixels
             .iter()
             .flat_map(|&pixel| {
@@ -45,7 +61,14 @@ impl EguiApp {
                 let r = ((pixel >> 16) & 0xFF) as u8;
                 let g = ((pixel >> 8) & 0xFF) as u8;
                 let b = (pixel & 0xFF) as u8;
-                [r, g, b, a]
+                
+                // Convert sRGB to linear color space
+                // This prevents the dark tint issue when GL_FRAMEBUFFER_SRGB is enabled
+                let r_linear = srgb_to_linear(r);
+                let g_linear = srgb_to_linear(g);
+                let b_linear = srgb_to_linear(b);
+                
+                [r_linear, g_linear, b_linear, a]
             })
             .collect();
 
