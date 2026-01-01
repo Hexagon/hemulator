@@ -367,7 +367,7 @@ impl System for Atari2600System {
             // Use renderer to render the frame
             self.renderer.render_frame(&bus.tia, visible_start);
         }
-        
+
         // Detect collisions for the frame (must be done after rendering)
         if let Some(bus) = self.cpu.bus_mut() {
             let visible_start = bus.tia.visible_window_start_scanline();
@@ -520,7 +520,6 @@ impl System for Atari2600System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use emu_core::cpu_6502::Memory6502;
 
     #[test]
     fn test_system_creation() {

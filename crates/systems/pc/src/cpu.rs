@@ -1969,9 +1969,9 @@ impl PcCpu {
             0x42 => self.int13h_extended_read(),
             0x43 => self.int13h_extended_write(),
             0x44 => self.int13h_extended_verify(),
-            0x45 => self.int13h_lock_unlock(),     // CD-ROM: Lock/unlock drive
-            0x46 => self.int13h_eject_media(),     // CD-ROM: Eject media
-            0x47 => self.int13h_extended_seek(),   // CD-ROM: Extended seek
+            0x45 => self.int13h_lock_unlock(), // CD-ROM: Lock/unlock drive
+            0x46 => self.int13h_eject_media(), // CD-ROM: Eject media
+            0x47 => self.int13h_extended_seek(), // CD-ROM: Extended seek
             0x48 => self.int13h_get_extended_params(),
             0x4E => self.int13h_get_media_status(), // CD-ROM: Get media status
             _ => {
