@@ -3,8 +3,6 @@ pub mod egui_ui;
 mod hemu_project;
 pub mod input;
 pub mod input_mapper;
-mod menu;
-mod popup_window;
 mod rom_detect;
 mod save_state;
 mod settings;

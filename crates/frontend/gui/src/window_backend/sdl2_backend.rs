@@ -3,7 +3,7 @@
 use super::{Key, WindowBackend};
 use crate::display_filter::DisplayFilter;
 use crate::video_processor::{OpenGLProcessor, SoftwareProcessor, VideoProcessor};
-use sdl2::controller::{Axis, Button, GameController};
+use sdl2::controller::GameController;
 use sdl2::event::Event;
 use sdl2::joystick::Joystick;
 use sdl2::keyboard::{Keycode, Scancode};
@@ -657,7 +657,7 @@ impl WindowBackend for Sdl2Backend {
                 Event::ControllerButtonDown { which, button, .. } => {
                     self.gamepad_buttons
                         .entry(which)
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(button as u8);
                 }
                 Event::ControllerButtonUp { which, button, .. } => {
@@ -670,7 +670,7 @@ impl WindowBackend for Sdl2Backend {
                 } => {
                     self.gamepad_axes
                         .entry(which)
-                        .or_insert_with(HashMap::new)
+                        .or_default()
                         .insert(axis as u8, value);
                 }
                 // Joystick events (for non-gamepad joysticks)
@@ -708,7 +708,7 @@ impl WindowBackend for Sdl2Backend {
                 } => {
                     self.joystick_buttons
                         .entry(which)
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(button_idx);
                 }
                 Event::JoyButtonUp {
@@ -726,7 +726,7 @@ impl WindowBackend for Sdl2Backend {
                 } => {
                     self.joystick_axes
                         .entry(which)
-                        .or_insert_with(HashMap::new)
+                        .or_default()
                         .insert(axis_idx, value);
                 }
                 Event::JoyHatMotion {
@@ -749,7 +749,7 @@ impl WindowBackend for Sdl2Backend {
                     };
                     self.joystick_hats
                         .entry(which)
-                        .or_insert_with(HashMap::new)
+                        .or_default()
                         .insert(hat_idx, hat_value);
                 }
                 _ => {}

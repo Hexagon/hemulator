@@ -4,7 +4,7 @@
 //! to virtual controller buttons using controller profiles.
 
 use crate::input::{ControllerProfile, InputSource, VirtualButton};
-use crate::window_backend::{Key, WindowBackend};
+use crate::window_backend::WindowBackend;
 
 /// Axis threshold for activation (~50% of half-range, ~25% deflection from center)
 /// This represents approximately 25% deflection from center position.
