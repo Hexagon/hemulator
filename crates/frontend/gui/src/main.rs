@@ -1915,7 +1915,7 @@ fn main() {
     const SAMPLE_RATE: usize = 44100;
 
     // Load saves for current ROM if available
-    let _game_saves = if let Some(ref hash) = rom_hash {
+    let mut _game_saves = if let Some(ref hash) = rom_hash {
         GameSaves::load(hash)
     } else {
         GameSaves::default()
@@ -2188,6 +2188,68 @@ fn main() {
                     egui_app.status_bar.set_message("Hemulator Multi-System Emulator".to_string());
                 }
                 _ => {}
+            }
+        }
+
+        // Handle property pane actions (save/load states)
+        if let Some(action) = egui_app.property_pane.take_action() {
+            use egui_ui::property_pane::PropertyAction;
+            match action {
+                PropertyAction::SaveState(slot) => {
+                    if rom_loaded {
+                        if let Some(ref hash) = rom_hash {
+                            if sys.supports_save_states() {
+                                let state = sys.save_state();
+                                let state_json = serde_json::to_string(&state).unwrap_or_default();
+                                _game_saves = GameSaves::load(hash);
+                                if let Err(e) = _game_saves.save_slot(slot, state_json.as_bytes(), hash) {
+                                    egui_app.status_bar.set_message(format!("Error saving state: {}", e));
+                                } else {
+                                    egui_app.status_bar.set_message(format!("Saved to slot {}", slot));
+                                    egui_app.tab_manager.add_log(format!("State saved to slot {}", slot));
+                                }
+                            } else {
+                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                            }
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                PropertyAction::LoadState(slot) => {
+                    if rom_loaded {
+                        if let Some(ref hash) = rom_hash {
+                            if sys.supports_save_states() {
+                                _game_saves = GameSaves::load(hash);
+                                match _game_saves.load_slot(slot, hash) {
+                                    Ok(data) => {
+                                        if let Ok(state_str) = String::from_utf8(data) {
+                                            if let Ok(state) = serde_json::from_str(&state_str) {
+                                                if let Err(e) = sys.load_state(&state) {
+                                                    egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                                } else {
+                                                    egui_app.status_bar.set_message(format!("Loaded from slot {}", slot));
+                                                    egui_app.tab_manager.add_log(format!("State loaded from slot {}", slot));
+                                                }
+                                            } else {
+                                                egui_app.status_bar.set_message("Invalid state data".to_string());
+                                            }
+                                        } else {
+                                            egui_app.status_bar.set_message("Invalid state encoding".to_string());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        egui_app.status_bar.set_message(format!("Error loading state: {}", e));
+                                    }
+                                }
+                            } else {
+                                egui_app.status_bar.set_message("Save states not supported for this system".to_string());
+                            }
+                        }
+                    } else {
+                        egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
             }
         }
 

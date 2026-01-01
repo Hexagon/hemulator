@@ -22,6 +22,13 @@ impl DisplayFilter {
     }
 }
 
+/// Actions that can be triggered from the property pane
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyAction {
+    SaveState(u8),  // Slot number 1-5
+    LoadState(u8),  // Slot number 1-5
+}
+
 pub struct PropertyPane {
     // Machine metrics
     pub fps: f32,
@@ -38,6 +45,9 @@ pub struct PropertyPane {
     
     // Mount points
     pub mount_points: Vec<MountPoint>,
+    
+    // Pending action
+    pending_action: Option<PropertyAction>,
     
     // Collapsible section states
     metrics_open: bool,
@@ -70,7 +80,13 @@ impl PropertyPane {
             settings_open: true,
             mounts_open: false,
             save_states_open: false,
+            pending_action: None,
         }
+    }
+
+    /// Take the pending action if any
+    pub fn take_action(&mut self) -> Option<PropertyAction> {
+        self.pending_action.take()
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -195,14 +211,14 @@ impl PropertyPane {
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui.button(format!("S{}", i)).on_hover_text(format!("Save to slot {} (F{})", i, i+4)).clicked() {
-                                    // TODO: Handle save
+                                    self.pending_action = Some(PropertyAction::SaveState(i));
                                 }
                             }
                         });
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui.button(format!("L{}", i)).on_hover_text(format!("Load from slot {} (Shift+F{})", i, i+4)).clicked() {
-                                    // TODO: Handle load
+                                    self.pending_action = Some(PropertyAction::LoadState(i));
                                 }
                             }
                         });

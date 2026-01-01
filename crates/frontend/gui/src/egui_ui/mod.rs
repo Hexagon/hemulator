@@ -9,7 +9,7 @@
 
 mod layout;
 mod tabs;
-mod property_pane;
+pub mod property_pane;
 pub mod menu_bar;
 mod status_bar;
 
