@@ -1978,7 +1978,7 @@ fn main() {
         egui_backend.begin_frame();
 
         // Update egui app state
-        egui_app.property_pane.fps = current_fps;
+        egui_app.property_pane.update_fps(current_fps);
         egui_app.property_pane.paused = settings.emulation_speed == 0.0;
         egui_app.property_pane.speed = settings.emulation_speed as f32;
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
@@ -2006,12 +2006,57 @@ fn main() {
         } else {
             egui_app.property_pane.mount_points.clear();
         }
+        
+        // Update PC-specific property pane fields if PC is loaded
+        if rom_loaded {
+            if let EmulatorSystem::PC(pc_sys) = &sys {
+                // Read BDA values
+                use egui_ui::property_pane::PcBdaValues;
+                let bda = pc_sys.read_bda_values();
+                egui_app.property_pane.pc_bda_values = Some(PcBdaValues {
+                    equipment_word: bda.equipment_word,
+                    memory_size_kb: bda.memory_size_kb,
+                    video_mode: bda.video_mode,
+                    video_columns: bda.video_columns,
+                    num_serial_ports: bda.num_serial_ports,
+                    num_parallel_ports: bda.num_parallel_ports,
+                    num_hard_drives: bda.num_hard_drives,
+                });
+                
+                // Set PC CPU model for dropdown
+                let cpu_model_str = match pc_sys.cpu_model() {
+                    emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
+                    emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
+                    emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
+                    emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
+                    emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
+                    emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
+                    emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
+                    emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
+                    emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
+                    emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
+                };
+                egui_app.property_pane.pc_cpu_model = Some(cpu_model_str.to_string());
+                
+                // Set PC memory for dropdown
+                egui_app.property_pane.pc_memory_kb = Some(pc_sys.memory_kb());
+            } else {
+                // Clear PC-specific fields for non-PC systems
+                egui_app.property_pane.pc_bda_values = None;
+                egui_app.property_pane.pc_cpu_model = None;
+                egui_app.property_pane.pc_memory_kb = None;
+            }
+        }
 
-        // Update PC config tab if PC is loaded
+        // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
         if rom_loaded {
             if let EmulatorSystem::PC(pc_sys) = &sys {
                 use egui_ui::PcConfigInfo;
-                egui_app.tab_manager.show_pc_config_tab();
+                // Don't show the tab anymore - deprecated
+                // egui_app.tab_manager.show_pc_config_tab();
 
                 let boot_priority_str = match pc_sys.boot_priority() {
                     emu_pc::BootPriority::FloppyFirst => "Floppy First",

@@ -19,10 +19,20 @@ pub struct PropertyPane {
     pub cpu_freq_target: Option<f64>,
     pub cpu_freq_actual: Option<f64>,
     pub rendering_backend: String,
+    
+    // FPS sparkline data (last 60 frames)
+    fps_history: Vec<f32>,
+
+    // PC-specific BDA values (only populated for PC system)
+    pub pc_bda_values: Option<PcBdaValues>,
 
     // Settings
     pub display_filter: DisplayFilter,
     pub emulation_speed_percent: i32, // 0-400
+    
+    // PC-specific settings (only shown for PC system)
+    pub pc_cpu_model: Option<String>,
+    pub pc_memory_kb: Option<u32>,
 
     // Mount points
     pub mount_points: Vec<MountPoint>,
@@ -35,6 +45,18 @@ pub struct PropertyPane {
     settings_open: bool,
     mounts_open: bool,
     save_states_open: bool,
+}
+
+/// PC-specific BDA (BIOS Data Area) values
+#[derive(Clone, Debug)]
+pub struct PcBdaValues {
+    pub equipment_word: u16,
+    pub memory_size_kb: u16,
+    pub video_mode: u8,
+    pub video_columns: u8,
+    pub num_serial_ports: u8,
+    pub num_parallel_ports: u8,
+    pub num_hard_drives: u8,
 }
 
 #[derive(Clone)]
@@ -54,8 +76,12 @@ impl PropertyPane {
             cpu_freq_target: None,
             cpu_freq_actual: None,
             rendering_backend: "Software".to_string(),
+            fps_history: Vec::with_capacity(60),
+            pc_bda_values: None,
             display_filter: DisplayFilter::None,
             emulation_speed_percent: 100,
+            pc_cpu_model: None,
+            pc_memory_kb: None,
             mount_points: Vec::new(),
             metrics_open: true,
             settings_open: true,
@@ -68,6 +94,15 @@ impl PropertyPane {
     /// Take the pending action if any
     pub fn take_action(&mut self) -> Option<PropertyAction> {
         self.pending_action.take()
+    }
+    
+    /// Update FPS and add to sparkline history
+    pub fn update_fps(&mut self, fps: f32) {
+        self.fps = fps;
+        self.fps_history.push(fps);
+        if self.fps_history.len() > 60 {
+            self.fps_history.remove(0);
+        }
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -82,6 +117,52 @@ impl PropertyPane {
                             ui.label("FPS:");
                             ui.label(format!("{:.1}", self.fps));
                         });
+                        
+                        // FPS sparkline (last 60 frames)
+                        if !self.fps_history.is_empty() {
+                            let max_fps = self.fps_history.iter().fold(0.0f32, |a, &b| a.max(b)).max(60.0);
+                            let min_fps = 0.0f32;
+                            
+                            use egui::*;
+                            let desired_size = vec2(ui.available_width(), 30.0);
+                            let (rect, _response) = ui.allocate_exact_size(desired_size, Sense::hover());
+                            
+                            if ui.is_rect_visible(rect) {
+                                let painter = ui.painter();
+                                
+                                // Draw background
+                                painter.rect_filled(rect, 2.0, Color32::from_rgb(30, 30, 30));
+                                
+                                // Draw sparkline
+                                let _points_per_pixel = self.fps_history.len() as f32 / rect.width();
+                                let mut points = Vec::new();
+                                
+                                for (i, &fps_val) in self.fps_history.iter().enumerate() {
+                                    let x = rect.left() + (i as f32 / self.fps_history.len() as f32) * rect.width();
+                                    let normalized = ((fps_val - min_fps) / (max_fps - min_fps)).clamp(0.0, 1.0);
+                                    let y = rect.bottom() - normalized * rect.height();
+                                    points.push(pos2(x, y));
+                                }
+                                
+                                // Draw line
+                                if points.len() >= 2 {
+                                    painter.add(epaint::PathShape::line(
+                                        points,
+                                        Stroke::new(1.5, Color32::from_rgb(0, 200, 0)),
+                                    ));
+                                }
+                                
+                                // Draw reference line at 60 FPS
+                                if max_fps > 60.0 {
+                                    let normalized_60 = (60.0 - min_fps) / (max_fps - min_fps);
+                                    let y_60 = rect.bottom() - normalized_60 * rect.height();
+                                    painter.line_segment(
+                                        [pos2(rect.left(), y_60), pos2(rect.right(), y_60)],
+                                        Stroke::new(0.5, Color32::from_rgb(100, 100, 100)),
+                                    );
+                                }
+                            }
+                        }
 
                         if !self.system_name.is_empty() {
                             ui.horizontal(|ui| {
@@ -105,11 +186,48 @@ impl PropertyPane {
                                 ui.label(format!("{:.2} MHz", target_freq));
                             });
                         }
-
-                        ui.horizontal(|ui| {
-                            ui.label("Renderer:");
-                            ui.label(&self.rendering_backend);
-                        });
+                        
+                        // Display PC-specific BDA values if available
+                        if let Some(ref bda) = self.pc_bda_values {
+                            ui.add_space(5.0);
+                            ui.separator();
+                            ui.label(egui::RichText::new("BIOS Data Area").strong());
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Video Mode:");
+                                ui.label(format!("{:02X}h", bda.video_mode));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Video Columns:");
+                                ui.label(format!("{}", bda.video_columns));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Memory (BDA):");
+                                ui.label(format!("{} KB", bda.memory_size_kb));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Serial Ports:");
+                                ui.label(format!("{}", bda.num_serial_ports));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Parallel Ports:");
+                                ui.label(format!("{}", bda.num_parallel_ports));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Hard Drives:");
+                                ui.label(format!("{}", bda.num_hard_drives));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.label("Equipment:");
+                                ui.label(format!("{:04X}h", bda.equipment_word));
+                            });
+                        }
                     });
 
                 ui.add_space(5.0);
@@ -118,6 +236,78 @@ impl PropertyPane {
                 egui::CollapsingHeader::new("Project Settings")
                     .default_open(self.settings_open)
                     .show(ui, |ui| {
+                        // Renderer selection (moved from Machine Metrics)
+                        ui.horizontal(|ui| {
+                            ui.label("Renderer:");
+                        });
+                        let backend_clone = self.rendering_backend.clone();
+                        egui::ComboBox::from_id_salt("renderer_select")
+                            .selected_text(&self.rendering_backend)
+                            .show_ui(ui, |ui| {
+                                // Note: This is currently display-only as renderer switching
+                                // would require significant refactoring. For now, just show current value.
+                                ui.selectable_value(
+                                    &mut self.rendering_backend,
+                                    backend_clone.clone(),
+                                    &backend_clone,
+                                );
+                            });
+                        
+                        // PC-specific settings: CPU Model
+                        if self.pc_cpu_model.is_some() {
+                            ui.add_space(5.0);
+                            ui.separator();
+                            ui.label(egui::RichText::new("PC Configuration").strong());
+                            
+                            if let Some(ref mut cpu_model) = self.pc_cpu_model {
+                                ui.horizontal(|ui| {
+                                    ui.label("CPU Model:");
+                                });
+                                egui::ComboBox::from_id_salt("cpu_model_select")
+                                    .selected_text(cpu_model.as_str())
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(cpu_model, "Intel 8086".to_string(), "Intel 8086");
+                                        ui.selectable_value(cpu_model, "Intel 8088".to_string(), "Intel 8088");
+                                        ui.selectable_value(cpu_model, "Intel 80186".to_string(), "Intel 80186");
+                                        ui.selectable_value(cpu_model, "Intel 80188".to_string(), "Intel 80188");
+                                        ui.selectable_value(cpu_model, "Intel 80286".to_string(), "Intel 80286");
+                                        ui.selectable_value(cpu_model, "Intel 80386".to_string(), "Intel 80386");
+                                        ui.selectable_value(cpu_model, "Intel 80486".to_string(), "Intel 80486");
+                                        ui.selectable_value(cpu_model, "Intel 80486SX".to_string(), "Intel 80486SX");
+                                        ui.selectable_value(cpu_model, "Intel 80486DX2".to_string(), "Intel 80486DX2");
+                                        ui.selectable_value(cpu_model, "Intel 80486SX2".to_string(), "Intel 80486SX2");
+                                        ui.selectable_value(cpu_model, "Intel 80486DX4".to_string(), "Intel 80486DX4");
+                                        ui.selectable_value(cpu_model, "Intel Pentium".to_string(), "Intel Pentium");
+                                        ui.selectable_value(cpu_model, "Intel Pentium MMX".to_string(), "Intel Pentium MMX");
+                                    });
+                            }
+                            
+                            // PC-specific settings: Memory
+                            if let Some(ref mut memory_kb) = self.pc_memory_kb {
+                                ui.horizontal(|ui| {
+                                    ui.label("Memory:");
+                                });
+                                egui::ComboBox::from_id_salt("memory_select")
+                                    .selected_text(format!("{} KB", memory_kb))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(memory_kb, 64, "64 KB");
+                                        ui.selectable_value(memory_kb, 128, "128 KB");
+                                        ui.selectable_value(memory_kb, 256, "256 KB");
+                                        ui.selectable_value(memory_kb, 512, "512 KB");
+                                        ui.selectable_value(memory_kb, 640, "640 KB");
+                                        ui.selectable_value(memory_kb, 1024, "1024 KB (1 MB)");
+                                        ui.selectable_value(memory_kb, 2048, "2048 KB (2 MB)");
+                                        ui.selectable_value(memory_kb, 4096, "4096 KB (4 MB)");
+                                        ui.selectable_value(memory_kb, 8192, "8192 KB (8 MB)");
+                                        ui.selectable_value(memory_kb, 16384, "16384 KB (16 MB)");
+                                    });
+                            }
+                            
+                            ui.add_space(5.0);
+                            ui.separator();
+                        }
+                        
+                        // Display filter
                         ui.horizontal(|ui| {
                             ui.label("Display Filter:");
                         });
