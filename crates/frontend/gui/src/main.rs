@@ -14,6 +14,7 @@ pub mod window_backend;
 pub mod egui_ui;
 
 use emu_core::{types::Frame, System};
+use egui_ui::EguiApp;
 use hemu_project::HemuProject;
 use menu::{MenuAction, MenuBar};
 use popup_window::PopupWindowManager;
@@ -29,7 +30,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
-use window_backend::{string_to_key, Key, Sdl2Backend, WindowBackend};
+use window_backend::{string_to_key, Key, Sdl2Backend, Sdl2EguiBackend, WindowBackend};
 
 /// Runtime state for tracking currently loaded project and mounts
 /// This replaces the mount_points field in Settings which has been deprecated
@@ -1870,21 +1871,26 @@ fn main() {
     let window_width = settings.window_width.max(width);
     let window_height = settings.window_height.max(height);
 
-    // Determine whether to use OpenGL or software rendering
-    let use_opengl = settings.video_backend == "opengl";
+    // Use egui backend instead of old custom UI
+    let use_egui = true; // TODO: Make this configurable if needed
 
-    let mut window: Box<dyn WindowBackend> = match Sdl2Backend::new(
+    let mut egui_backend = match Sdl2EguiBackend::new(
         "Hemulator - Multi-System Emulator",
-        window_width,
-        window_height,
-        use_opengl,
+        window_width as u32,
+        window_height as u32,
     ) {
-        Ok(w) => Box::new(w),
+        Ok(w) => w,
         Err(e) => {
-            eprintln!("Failed to create window: {}", e);
+            eprintln!("Failed to create egui window: {}", e);
             return;
         }
     };
+
+    // Initialize egui app
+    let mut egui_app = EguiApp::new();
+    egui_app.property_pane.system_name = sys.system_name().to_string();
+    egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
+    egui_app.status_bar.set_message(status_message.clone());
 
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
@@ -1984,1587 +1990,171 @@ fn main() {
         out
     }
 
-    // Main event loop
-    // Host key (Right Alt) must be held to use emulator controls (F1-F12, ESC to exit)
-    // Without host key, all keys are passed to the emulated system
-    while window.is_open() {
-        // Poll events at the start of each frame
-        window.poll_events();
+    // Main event loop with egui
+    loop {
+        // Handle SDL2 events and update egui input
+        if !egui_backend.handle_events() {
+            break; // Window closed
+        }
 
-        // Handle menu clicks and hover - collect data first to avoid borrow issues
-        let (mouse_clicks, mouse_position): (Vec<(i32, i32)>, (i32, i32)) =
-            if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                (
-                    sdl2_backend.get_mouse_clicks().to_vec(),
-                    sdl2_backend.get_mouse_position(),
-                )
-            } else {
-                (Vec::new(), (0, 0))
+        // Begin egui frame
+        egui_backend.begin_frame();
+
+        // Update egui app state
+        egui_app.property_pane.fps = current_fps;
+        egui_app.property_pane.paused = settings.emulation_speed == 0.0;
+        egui_app.property_pane.speed = settings.emulation_speed as f32;
+        egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
+        egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
+
+        // Update debug info if debug tab is visible
+        if egui_app.tab_manager.debug_visible {
+            use system_adapter::SystemDebugInfo;
+            let debug_info = match &sys {
+                EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
+                EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
+                EmulatorSystem::Atari2600(s) => {
+                    if let Some(info) = s.debug_info() {
+                        SystemDebugInfo::from_atari2600(&info)
+                    } else {
+                        SystemDebugInfo::new("Atari 2600".to_string())
+                    }
+                }
+                EmulatorSystem::PC(s) => SystemDebugInfo::from_pc(&s.debug_info()),
+                EmulatorSystem::SNES(s) => SystemDebugInfo::from_snes(&s.get_debug_info()),
+                EmulatorSystem::N64(s) => SystemDebugInfo::from_n64(&s.get_debug_info()),
             };
-
-        // Handle menu hover for visual feedback and auto-menu-switching
-        let (mx, my) = mouse_position;
-        if mx >= 0 && my >= 0 {
-            menu_bar.handle_hover(mx as usize, my as usize);
+            egui_app.tab_manager.update_debug_info(debug_info);
         }
 
-        for (x, y) in mouse_clicks {
-            // Ignore clicks with negative coordinates to avoid wrapping when casting to usize
-            if x < 0 || y < 0 {
-                continue;
-            }
+        // Render egui UI
+        egui_app.ui(egui_backend.egui_ctx());
 
-            // Check if popup window consumed the click first
-            if popup_manager.handle_click(x, y) {
-                continue; // Popup consumed the click, don't process menu
-            }
-
-            if let Some(action) = menu_bar.handle_click(x as usize, y as usize) {
-                // Process menu action
-                match action {
-                    MenuAction::OpenRom => {
-                        // Open ROM file dialog and load the ROM
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter(
-                                "ROM Files",
-                                &[
-                                    "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
-                                    "com", "exe",
-                                ],
-                            )
-                            .add_filter("All Files", &["*"])
-                            .pick_file()
-                        {
-                            let path_str = path.to_string_lossy().to_string();
-                            match std::fs::read(&path) {
-                                Ok(data) => match detect_rom_type(&data) {
-                                    Ok(SystemType::NES) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut nes_sys = emu_nes::NesSystem::default();
-                                        if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                            eprintln!("Failed to load NES ROM: {}", e);
-                                            status_message = format!("Error: {}", e);
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::NES(Box::new(nes_sys));
-                                            status_bar.system_name = "NES".to_string();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                path_str.clone(),
-                                            );
-                                            settings.last_rom_path = Some(path_str.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
-                                            }
-                                            status_message = "NES ROM loaded".to_string();
-                                            status_bar.message = status_message.clone();
-                                            println!("Loaded NES ROM: {}", path_str);
-                                        }
-                                    }
-                                    Ok(SystemType::GameBoy) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut gb_sys = emu_gb::GbSystem::new();
-                                        if let Err(e) = gb_sys.mount("Cartridge", &data) {
-                                            eprintln!("Failed to load Game Boy ROM: {}", e);
-                                            status_message = format!("Error: {}", e);
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                                            status_bar.system_name = "Game Boy".to_string();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                path_str.clone(),
-                                            );
-                                            settings.last_rom_path = Some(path_str.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
-                                            }
-                                            status_message = "Game Boy ROM loaded".to_string();
-                                            status_bar.message = status_message.clone();
-                                            println!("Loaded Game Boy ROM: {}", path_str);
-                                        }
-                                    }
-                                    Ok(SystemType::Atari2600) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut a2600_sys = emu_atari2600::Atari2600System::new();
-                                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                                            eprintln!("Failed to load Atari 2600 ROM: {}", e);
-                                            status_message = format!("Error: {}", e);
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                                            status_bar.system_name = "Atari 2600".to_string();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                path_str.clone(),
-                                            );
-                                            settings.last_rom_path = Some(path_str.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
-                                            }
-                                            status_message = "Atari 2600 ROM loaded".to_string();
-                                            status_bar.message = status_message.clone();
-                                            println!("Loaded Atari 2600 ROM: {}", path_str);
-                                        }
-                                    }
-                                    Ok(SystemType::SNES) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut snes_sys = emu_snes::SnesSystem::new();
-                                        if let Err(e) = snes_sys.mount("Cartridge", &data) {
-                                            eprintln!("Failed to load SNES ROM: {}", e);
-                                            status_message = format!("Error: {}", e);
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                                            status_bar.system_name = "SNES".to_string();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                path_str.clone(),
-                                            );
-                                            settings.last_rom_path = Some(path_str.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
-                                            }
-                                            status_message = "SNES ROM loaded".to_string();
-                                            status_bar.message = status_message.clone();
-                                            println!("Loaded SNES ROM: {}", path_str);
-                                        }
-                                    }
-                                    Ok(SystemType::N64) => {
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut n64_sys = emu_n64::N64System::new();
-                                        if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                            eprintln!("Failed to load N64 ROM: {}", e);
-                                            status_message = format!("Error: {}", e);
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                            status_bar.system_name = "N64".to_string();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                path_str.clone(),
-                                            );
-                                            settings.last_rom_path = Some(path_str.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
-                                            }
-                                            status_message = "N64 ROM loaded".to_string();
-                                            status_bar.message = status_message.clone();
-                                            println!("Loaded N64 ROM: {}", path_str);
-                                        }
-                                    }
-                                    Ok(SystemType::PC) => {
-                                        status_message =
-                                            "PC system: Use Mount Points for disk images"
-                                                .to_string();
-                                        status_bar.message = status_message.clone();
-                                        rom_hash = None;
-                                        let pc_sys = emu_pc::PcSystem::new();
-                                        sys = EmulatorSystem::PC(Box::new(pc_sys));
-                                        status_bar.system_name = "PC".to_string();
-                                        println!("Initialized PC system");
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Unsupported ROM: {}", e);
-                                        status_message = format!("Unsupported ROM: {}", e);
-                                        status_bar.message = status_message.clone();
-                                    }
-                                },
-                                Err(e) => {
-                                    eprintln!("Failed to read ROM file: {}", e);
-                                    status_message = format!("Failed to read ROM: {}", e);
-                                    status_bar.message = status_message.clone();
-                                }
-                            }
-                        }
-                    }
-                    MenuAction::OpenProject => {
-                        // Open .hemu project file
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Hemulator Project", &["hemu"])
-                            .add_filter("All Files", &["*"])
-                            .pick_file()
-                        {
-                            println!("Open project: {}", path.display());
-                            // TODO: Implement full project loading logic similar to old F7 handler
-                            status_message =
-                                "Project loading not yet fully implemented".to_string();
-                            status_bar.message = status_message.clone();
-                        }
-                    }
-                    MenuAction::SaveProject => {
-                        save_project(&sys, &runtime_state, &settings, &mut status_message);
-                    }
-                    MenuAction::Exit => {
-                        break;
-                    }
-                    MenuAction::Reset => {
-                        let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
-                        if can_reset {
-                            sys.reset();
-                            println!("System reset");
-                            status_message = "System reset".to_string();
-                            status_bar.message = status_message.clone();
-                        }
-                    }
-                    MenuAction::Pause => {
-                        settings.emulation_speed = 0.0;
-                        status_message = "Paused".to_string();
-                        status_bar.paused = true;
-                        status_bar.speed = 0.0;
-                        status_bar.message = status_message.clone();
-                        if let Err(e) = settings.save() {
-                            eprintln!("Warning: Failed to save speed setting: {}", e);
-                        }
-                    }
-                    MenuAction::Speed(speed_setting) => {
-                        settings.emulation_speed = speed_setting.to_float() as f64;
-                        status_bar.paused = settings.emulation_speed == 0.0;
-                        status_bar.speed = settings.emulation_speed as f32;
-                        status_message =
-                            format!("Speed: {}%", (settings.emulation_speed * 100.0) as u32);
-                        status_bar.message = status_message.clone();
-                        if let Err(e) = settings.save() {
-                            eprintln!("Warning: Failed to save speed setting: {}", e);
-                        }
-                    }
-                    MenuAction::SaveState(slot) => {
-                        if rom_loaded && sys.supports_save_states() {
-                            let state_data = sys.save_state();
-                            if let Ok(state_bytes) = serde_json::to_vec(&state_data) {
-                                if let Some(ref hash) = rom_hash {
-                                    if let Err(e) = game_saves.save_slot(slot, &state_bytes, hash) {
-                                        eprintln!("Failed to save state: {}", e);
-                                        status_message = format!("Failed to save state: {}", e);
-                                    } else {
-                                        println!("Saved state to slot {}", slot);
-                                        status_message = format!("State saved to slot {}", slot);
-                                    }
-                                } else {
-                                    status_message = "Cannot save state: no ROM loaded".to_string();
-                                }
-                            } else {
-                                status_message = "Failed to serialize state".to_string();
-                            }
-                            status_bar.message = status_message.clone();
-                        }
-                    }
-                    MenuAction::LoadState(slot) => {
-                        if rom_loaded && sys.supports_save_states() {
-                            if let Some(ref hash) = rom_hash {
-                                match game_saves.load_slot(slot, hash) {
-                                    Ok(state_bytes) => {
-                                        if let Ok(state_data) =
-                                            serde_json::from_slice::<serde_json::Value>(
-                                                &state_bytes,
-                                            )
-                                        {
-                                            if let Err(e) = sys.load_state(&state_data) {
-                                                eprintln!("Failed to load state: {}", e);
-                                                status_message =
-                                                    format!("Failed to load state: {}", e);
-                                            } else {
-                                                println!("Loaded state from slot {}", slot);
-                                                status_message =
-                                                    format!("State loaded from slot {}", slot);
-                                            }
-                                        } else {
-                                            status_message =
-                                                "Failed to deserialize state".to_string();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        status_message =
-                                            format!("No save state in slot {}: {}", slot, e);
-                                    }
-                                }
-                            } else {
-                                status_message = "Cannot load state: no ROM loaded".to_string();
-                            }
-                            status_bar.message = status_message.clone();
-                        }
-                    }
-                    MenuAction::Screenshot => {
-                        match save_screenshot(&buffer, width, height, sys.system_name()) {
-                            Ok(path) => {
-                                println!("Screenshot saved to: {}", path);
-                                status_message = "Screenshot saved".to_string();
-                                status_bar.message = status_message.clone();
-                            }
-                            Err(e) => eprintln!("Failed to save screenshot: {}", e),
-                        }
-                    }
-                    MenuAction::DebugInfo => {
-                        popup_manager.toggle_debug();
-                        selector_manager.close();
-                    }
-                    MenuAction::CrtFilter(filter) => {
-                        settings.display_filter = filter;
-                        if let Some(sdl2_backend) =
-                            window.as_any_mut().downcast_mut::<Sdl2Backend>()
-                        {
-                            sdl2_backend.set_filter(settings.display_filter);
-                        }
-                        if let Err(e) = settings.save() {
-                            eprintln!("Warning: Failed to save CRT filter setting: {}", e);
-                        }
-                        println!("CRT Filter: {}", settings.display_filter.name());
-                        status_message = format!("CRT Filter: {}", settings.display_filter.name());
-                        status_bar.message = status_message.clone();
-                    }
-                    MenuAction::Help => {
-                        popup_manager.toggle_help();
-                        selector_manager.close();
-                    }
-                    MenuAction::About => {
-                        // TODO: Show about dialog
-                        println!("Hemulator - Multi-System Emulator");
-                    }
-                    MenuAction::NewProject => {
-                        // Create a new project by prompting for system type
-                        // For now, show an info message - full implementation would show a system selector dialog
-                        status_message =
-                            "New Project: Please use File -> Open ROM to load a ROM file"
-                                .to_string();
-                        status_bar.message = status_message.clone();
-                        println!("New Project - Use File -> Open ROM to load a ROM");
-                    }
-                    MenuAction::Resume => {
-                        settings.emulation_speed = 1.0;
-                        status_message = "Resumed".to_string();
-                        status_bar.paused = false;
-                        status_bar.speed = 1.0;
-                        status_bar.message = status_message.clone();
-                        if let Err(e) = settings.save() {
-                            eprintln!("Warning: Failed to save speed setting: {}", e);
-                        }
-                    }
-                    MenuAction::StartLogging => {
-                        // Start logging to file
-                        use std::path::PathBuf;
-                        let log_path = PathBuf::from("log.txt");
-                        match emu_core::logging::LogConfig::global().set_log_file(log_path) {
-                            Ok(()) => {
-                                logging_active = true;
-                                status_message = "Logging started (log.txt)".to_string();
-                                status_bar.message = status_message.clone();
-                                println!("Logging enabled - writing to log.txt");
-                            }
-                            Err(e) => {
-                                status_message = format!("Failed to start logging: {}", e);
-                                status_bar.message = status_message.clone();
-                                eprintln!("Failed to start logging: {}", e);
-                            }
-                        }
-                    }
-                    MenuAction::StopLogging => {
-                        // Stop logging
-                        emu_core::logging::LogConfig::global().clear_log_file();
-                        logging_active = false;
-                        status_message = "Logging stopped".to_string();
-                        status_bar.message = status_message.clone();
-                        println!("Logging disabled");
-                    }
-                    MenuAction::MountFile(mount_id) => {
-                        // Find the mount point info
-                        let mount_points = sys.mount_points();
-                        if let Some(mp) = mount_points.iter().find(|m| m.id == mount_id) {
-                            if let Some(path) = create_file_dialog(mp).pick_file() {
-                                match std::fs::read(&path) {
-                                    Ok(data) => {
-                                        if let Err(e) = sys.mount(&mount_id, &data) {
-                                            eprintln!("Failed to mount {}: {}", mount_id, e);
-                                            status_message = format!("Mount failed: {}", e);
-                                        } else {
-                                            runtime_state.set_mount(
-                                                mount_id.clone(),
-                                                path.to_string_lossy().to_string(),
-                                            );
-                                            status_message = format!("Mounted {}", mp.name);
-                                            // Update menu to reflect new mount state
-                                            menu_bar.update_mount_points(
-                                                &sys.mount_points(),
-                                                &runtime_state.current_mounts,
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to read file: {}", e);
-                                        status_message = format!("Read error: {}", e);
-                                    }
-                                }
-                                status_bar.message = status_message.clone();
-                            }
-                        }
-                    }
-                    MenuAction::EjectMount(mount_id) => {
-                        if let Err(e) = sys.unmount(&mount_id) {
-                            eprintln!("Failed to eject {}: {}", mount_id, e);
-                            status_message = format!("Eject failed: {}", e);
-                        } else {
-                            runtime_state.current_mounts.remove(&mount_id);
-                            status_message = format!("Ejected {}", mount_id);
-                            // Update menu to reflect new mount state
-                            menu_bar.update_mount_points(
-                                &sys.mount_points(),
-                                &runtime_state.current_mounts,
-                            );
-                        }
-                        status_bar.message = status_message.clone();
-                    }
-                    MenuAction::StartMachine => {
-                        // Start/resume machine
-                        if settings.emulation_speed == 0.0 {
-                            settings.emulation_speed = 1.0;
-                            status_bar.paused = false;
-                            status_bar.speed = 1.0;
-                        }
-                    }
-                    MenuAction::StopMachine => {
-                        // Stop/pause machine
-                        settings.emulation_speed = 0.0;
-                        status_bar.paused = true;
-                        status_bar.speed = 0.0;
+        // Handle menu actions
+        if let Some(action) = egui_app.menu_bar.take_action() {
+            use egui_ui::menu_bar::MenuAction;
+            match action {
+                MenuAction::OpenRom => {
+                    // Open ROM file dialog
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("ROM Files", &["nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe"])
+                        .add_filter("All Files", &["*"])
+                        .pick_file()
+                    {
+                        // TODO: Implement ROM loading logic (move from old main loop)
+                        egui_app.status_bar.set_message(format!("Opening ROM: {}", path.display()));
                     }
                 }
-            }
-        }
-
-        // Check if host key (from settings) is held
-        let host_modifier_key =
-            window_backend::string_to_key(&settings.input.host_modifier).unwrap_or(Key::RightCtrl); // fallback to RightCtrl if invalid
-        let host_key_held = window.is_key_down(host_modifier_key);
-
-        // Check if this system requires host key for function keys
-        let needs_host_key = sys.requires_host_key_for_function_keys();
-
-        // Only exit on ESC if host key is held (when required by system), else allow ESC always
-        // But first check if any overlay is open - close it instead of exiting
-        if (needs_host_key && host_key_held && window.is_key_down(Key::Escape))
-            || (!needs_host_key && window.is_key_down(Key::Escape))
-        {
-            // Close overlays first, only exit if no overlay is open
-            if selector_manager.is_open() || popup_manager.has_open_popup() {
-                selector_manager.close();
-                popup_manager.close_all();
-            } else {
-                break;
-            }
-        }
-
-        // Toggle help overlay (F1)
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F1, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F1, false))
-        {
-            popup_manager.toggle_help();
-            selector_manager.close(); // Close selector if open
-                                      // Close disk format selector if open
-        }
-
-        // Toggle debug overlay (F10)
-        let can_debug = rom_loaded || needs_host_key; // Allow debug for PC even without ROM
-        if ((needs_host_key && host_key_held && window.is_key_pressed(Key::F10, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F10, false)))
-            && can_debug
-        {
-            popup_manager.toggle_debug();
-            selector_manager.close(); // Close selector if open
-
-            // Dump debug info to console when opening debug overlay
-            if popup_manager.is_debug_open() {
-                println!("\n=== Debug Info Dump ===");
-
-                // Try NES debug info first
-                if let Some(debug_info) = sys.get_debug_info_nes() {
-                    let timing_str = match debug_info.timing_mode {
-                        emu_core::apu::TimingMode::Ntsc => "NTSC",
-                        emu_core::apu::TimingMode::Pal => "PAL",
-                    };
-                    println!("System: NES");
-                    println!(
-                        "Mapper: {} (#{:03})",
-                        debug_info.mapper_name, debug_info.mapper_number
-                    );
-                    println!("Timing: {}", timing_str);
-                    println!(
-                        "PRG Banks: {} ({}KB total)",
-                        debug_info.prg_banks,
-                        debug_info.prg_banks * 16
-                    );
-                    println!(
-                        "CHR Banks: {} ({}KB total)",
-                        debug_info.chr_banks,
-                        if debug_info.chr_banks == 0 {
-                            "RAM".to_string()
-                        } else {
-                            format!("{}", debug_info.chr_banks * 8)
-                        }
-                    );
-                    let stats = sys.get_runtime_stats();
-                    println!("Frame: {}", stats.frame_index);
-                    println!("PC: 0x{:04X}", stats.pc);
+                MenuAction::Reset => {
+                    sys.reset();
+                    egui_app.status_bar.set_message("System reset".to_string());
                 }
-                // Try Atari 2600 debug info
-                else if let Some(debug_info) = sys.get_debug_info_atari2600() {
-                    println!("System: Atari 2600");
-                    println!("ROM Size: {} bytes", debug_info.rom_size);
-                    println!("Banking: {}", debug_info.banking_scheme);
-                    println!("Current Bank: {}", debug_info.current_bank);
-                    println!("Scanline: {}", debug_info.scanline);
+                MenuAction::Pause => {
+                    settings.emulation_speed = 0.0;
+                    egui_app.status_bar.set_message("Paused".to_string());
                 }
-                // Try Game Boy debug info
-                else if let Some(debug_info) = sys.get_debug_info_gb() {
-                    println!("System: Game Boy");
-                    println!("PC: 0x{:04X}", debug_info.pc);
-                    println!("SP: 0x{:04X}", debug_info.sp);
-                    println!("AF: 0x{:04X}", debug_info.af);
-                    println!("BC: 0x{:04X}", debug_info.bc);
-                    println!("DE: 0x{:04X}", debug_info.de);
-                    println!("HL: 0x{:04X}", debug_info.hl);
-                    println!("IME: {}", if debug_info.ime { "ON" } else { "OFF" });
-                    println!("Halted: {}", if debug_info.halted { "YES" } else { "NO" });
-                    println!("LY: {} (scanline)", debug_info.ly);
-                    println!("LCDC: 0x{:02X}", debug_info.lcdc);
+                MenuAction::Resume => {
+                    settings.emulation_speed = 1.0;
+                    egui_app.status_bar.set_message("Resumed".to_string());
                 }
-                // Try N64 debug info
-                else if let Some(debug_info) = sys.get_debug_info_n64() {
-                    println!("System: Nintendo 64");
-                    println!("ROM: {}", debug_info.rom_name);
-                    println!("ROM Size: {:.2} MB", debug_info.rom_size_mb);
-                    println!("PC: 0x{:016X}", debug_info.pc);
-                    println!("RSP Microcode: {}", debug_info.rsp_microcode);
-                    println!("RSP Vertices: {}", debug_info.rsp_vertex_count);
-                    println!("RDP Status: 0x{:08X}", debug_info.rdp_status);
-                    println!("Framebuffer: {}", debug_info.framebuffer_resolution);
+                MenuAction::Screenshot => {
+                    // TODO: Implement screenshot
+                    egui_app.status_bar.set_message("Screenshot not yet implemented".to_string());
                 }
-                // Try SNES debug info
-                else if let Some(debug_info) = sys.get_debug_info_snes() {
-                    println!("System: SNES");
-                    println!("ROM Size: {} KB", debug_info.rom_size / 1024);
-                    println!(
-                        "Header: {}",
-                        if debug_info.has_smc_header {
-                            "SMC (512 bytes)"
-                        } else {
-                            "None"
-                        }
-                    );
-                    println!("PC: 0x{:02X}:{:04X}", debug_info.pbr, debug_info.pc);
-                    println!(
-                        "Mode: {}",
-                        if debug_info.emulation_mode {
-                            "Emulation (6502)"
-                        } else {
-                            "Native (65C816)"
-                        }
-                    );
+                MenuAction::ShowHelp => {
+                    egui_app.tab_manager.show_help_tab();
                 }
-
-                println!("FPS: {:.1}", current_fps);
-                println!("Video Backend: {}", settings.video_backend);
-                println!("======================\n");
-            }
-        }
-
-        // Cycle CRT filter (F11) - only when host key is held
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F11, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F11, false))
-        {
-            settings.display_filter = settings.display_filter.next();
-            // Update the backend's filter setting
-            if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                sdl2_backend.set_filter(settings.display_filter);
-            }
-            if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save CRT filter setting: {}", e);
-            }
-            println!("CRT Filter: {}", settings.display_filter.name());
-        }
-
-        // New keyboard shortcuts (Ctrl+key combinations)
-        let ctrl_held = window.is_key_down(Key::LeftCtrl) || window.is_key_down(Key::RightCtrl);
-        let shift_held = window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift);
-
-        // Ctrl+O - Open ROM
-        if ctrl_held && !shift_held && window.is_key_pressed(Key::O, false) {
-            // Trigger F3 handler (mount points)
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter(
-                    "ROM Files",
-                    &[
-                        "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64", "com", "exe",
-                    ],
-                )
-                .add_filter("All Files", &["*"])
-                .pick_file()
-            {
-                // Load ROM logic would go here - for now, trigger same as F3
-                println!("Open ROM: {}", path.display());
-            }
-        }
-
-        // Ctrl+S - Save Project
-        if ctrl_held && !shift_held && window.is_key_pressed(Key::S, false) {
-            // Trigger F8 handler (save project)
-            save_project(&sys, &runtime_state, &settings, &mut status_message);
-        }
-
-        // Ctrl+R - Reset
-        if ctrl_held && !shift_held && window.is_key_pressed(Key::R, false) {
-            let can_reset = rom_loaded || matches!(&sys, EmulatorSystem::PC(_));
-            if can_reset {
-                sys.reset();
-                println!("System reset");
-                status_message = "System reset".to_string();
-                status_bar.message = status_message.clone();
-            }
-        }
-
-        // Ctrl+P - Pause/Resume
-        if ctrl_held && !shift_held && window.is_key_pressed(Key::P, false) {
-            if settings.emulation_speed == 0.0 {
-                settings.emulation_speed = 1.0;
-                status_message = "Resumed".to_string();
-            } else {
-                settings.emulation_speed = 0.0;
-                status_message = "Paused".to_string();
-            }
-            status_bar.paused = settings.emulation_speed == 0.0;
-            status_bar.speed = settings.emulation_speed as f32;
-            status_bar.message = status_message.clone();
-            if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save speed setting: {}", e);
-            }
-        }
-
-        // Ctrl+1-5 - Save state slots
-        if ctrl_held && !shift_held && rom_loaded && sys.supports_save_states() {
-            for i in 1..=5 {
-                let key = match i {
-                    1 => Key::Key1,
-                    2 => Key::Key2,
-                    3 => Key::Key3,
-                    4 => Key::Key4,
-                    5 => Key::Key5,
-                    _ => continue,
-                };
-
-                if window.is_key_pressed(key, false) {
-                    let state_data = sys.save_state();
-                    // Serialize to bytes
-                    if let Ok(state_bytes) = serde_json::to_vec(&state_data) {
-                        if let Some(ref hash) = rom_hash {
-                            if let Err(e) = game_saves.save_slot(i, &state_bytes, hash) {
-                                eprintln!("Failed to save state: {}", e);
-                                status_message = format!("Failed to save state: {}", e);
-                            } else {
-                                println!("Saved state to slot {}", i);
-                                status_message = format!("State saved to slot {}", i);
-                            }
-                        } else {
-                            status_message = "Cannot save state: no ROM loaded".to_string();
-                        }
-                    } else {
-                        status_message = "Failed to serialize state".to_string();
-                    }
-                    status_bar.message = status_message.clone();
-                    break;
+                MenuAction::About => {
+                    egui_app.status_bar.set_message("Hemulator Multi-System Emulator".to_string());
                 }
+                _ => {}
             }
         }
 
-        // Ctrl+Shift+1-5 - Load state slots
-        if ctrl_held && shift_held && rom_loaded && sys.supports_save_states() {
-            for i in 1..=5 {
-                let key = match i {
-                    1 => Key::Key1,
-                    2 => Key::Key2,
-                    3 => Key::Key3,
-                    4 => Key::Key4,
-                    5 => Key::Key5,
-                    _ => continue,
-                };
+        // Handle emulation speed changes from property pane
+        settings.emulation_speed = (egui_app.property_pane.emulation_speed_percent as f64) / 100.0;
 
-                if window.is_key_pressed(key, false) {
-                    if let Some(ref hash) = rom_hash {
-                        match game_saves.load_slot(i, hash) {
-                            Ok(state_bytes) => {
-                                // Deserialize from bytes
-                                if let Ok(state_data) =
-                                    serde_json::from_slice::<serde_json::Value>(&state_bytes)
-                                {
-                                    if let Err(e) = sys.load_state(&state_data) {
-                                        eprintln!("Failed to load state: {}", e);
-                                        status_message = format!("Failed to load state: {}", e);
-                                    } else {
-                                        println!("Loaded state from slot {}", i);
-                                        status_message = format!("State loaded from slot {}", i);
-                                    }
-                                } else {
-                                    status_message = "Failed to deserialize state".to_string();
-                                }
-                            }
-                            Err(e) => {
-                                status_message = format!("No save state in slot {}: {}", i, e);
-                            }
-                        }
-                    } else {
-                        status_message = "Cannot load state: no ROM loaded".to_string();
-                    }
-                    status_bar.message = status_message.clone();
-                    break;
-                }
-            }
-        }
-
-        // Handle speed selector
-        if false {
-            // Check for speed selection (0-5) or cancel (ESC)
-            let mut selected_speed: Option<f64> = None;
-
-            if window.is_key_pressed(Key::Key0, false) {
-                selected_speed = Some(0.0); // Pause
-            } else if window.is_key_pressed(Key::Key1, false) {
-                selected_speed = Some(0.25);
-            } else if window.is_key_pressed(Key::Key2, false) {
-                selected_speed = Some(0.5);
-            } else if window.is_key_pressed(Key::Key3, false) {
-                selected_speed = Some(1.0);
-            } else if window.is_key_pressed(Key::Key4, false) {
-                selected_speed = Some(2.0);
-            } else if window.is_key_pressed(Key::Key5, false) {
-                selected_speed = Some(10.0);
-            }
-
-            if let Some(speed) = selected_speed {
-                settings.emulation_speed = speed;
-                if let Err(e) = settings.save() {
-                    eprintln!("Warning: Failed to save speed setting: {}", e);
-                }
-                println!("Emulation speed: {}x", speed);
-            }
-        }
-
-        // Handle slot selector
-        if selector_manager.is_open() {
-            // For PC system in SAVE mode, show disk persist menu instead of save state slots
-            if matches!(&sys, EmulatorSystem::PC(_))
-                && selector_manager
-                    .active_selector
-                    .as_ref()
-                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
-                    .unwrap_or(false)
-            {
-                // PC disk persist menu
-                let mount_points = sys.mount_points();
-                let mounted: Vec<bool> = mount_points
-                    .iter()
-                    .map(|mp| sys.get_disk_image(&mp.id).is_some())
-                    .collect();
-
-                // Check for selection (1 = persist all, 2+ = individual mounts)
-                let mut selected_option: Option<usize> = None;
-
-                if window.is_key_pressed(Key::Key1, false) {
-                    selected_option = Some(0); // Persist all
-                } else if window.is_key_pressed(Key::Key2, false) {
-                    selected_option = Some(1);
-                } else if window.is_key_pressed(Key::Key3, false) {
-                    selected_option = Some(2);
-                } else if window.is_key_pressed(Key::Key4, false) {
-                    selected_option = Some(3);
-                } else if window.is_key_pressed(Key::Key5, false) {
-                    selected_option = Some(4);
-                } else if window.is_key_pressed(Key::Key6, false) {
-                    selected_option = Some(5);
-                }
-
-                if let Some(option) = selected_option {
-                    selector_manager.close();
-
-                    if option == 0 {
-                        // Persist all images
-                        let mut saved_count = 0;
-                        for (i, mp) in mount_points.iter().enumerate() {
-                            if i < mounted.len() && mounted[i] {
-                                if let Some(disk_data) = sys.get_disk_image(&mp.id) {
-                                    if let Some(path) = runtime_state.get_mount(&mp.id) {
-                                        match std::fs::write(path, disk_data) {
-                                            Ok(_) => {
-                                                println!("Saved {} to {}", mp.name, path);
-                                                saved_count += 1;
-                                            }
-                                            Err(e) => {
-                                                eprintln!(
-                                                    "Failed to save {} to {}: {}",
-                                                    mp.name, path, e
-                                                );
-                                            }
-                                        }
-                                    } else {
-                                        eprintln!("No path stored for {}", mp.name);
-                                    }
-                                }
-                            }
-                        }
-                        println!("Persisted {} disk image(s)", saved_count);
-                    } else {
-                        // Persist individual image
-                        // Map option 1-5 to mount point index, skipping unmounted ones
-                        let mut current_option = 1;
-                        for (i, mp) in mount_points.iter().enumerate() {
-                            if i < mounted.len() && mounted[i] {
-                                if current_option == option {
-                                    if let Some(disk_data) = sys.get_disk_image(&mp.id) {
-                                        if let Some(path) = runtime_state.get_mount(&mp.id) {
-                                            match std::fs::write(path, disk_data) {
-                                                Ok(_) => println!("Saved {} to {}", mp.name, path),
-                                                Err(e) => eprintln!(
-                                                    "Failed to save {} to {}: {}",
-                                                    mp.name, path, e
-                                                ),
-                                            }
-                                        } else {
-                                            eprintln!("No path stored for {}", mp.name);
-                                        }
-                                    }
-                                    break;
-                                }
-                                current_option += 1;
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Regular save/load state handling for other systems
-                // Check for slot selection (1-5) or cancel (ESC)
-                let mut selected_slot: Option<u8> = None;
-
-                if window.is_key_pressed(Key::Key1, false) {
-                    selected_slot = Some(1);
-                } else if window.is_key_pressed(Key::Key2, false) {
-                    selected_slot = Some(2);
-                } else if window.is_key_pressed(Key::Key3, false) {
-                    selected_slot = Some(3);
-                } else if window.is_key_pressed(Key::Key4, false) {
-                    selected_slot = Some(4);
-                } else if window.is_key_pressed(Key::Key5, false) {
-                    selected_slot = Some(5);
-                }
-
-                if let Some(slot) = selected_slot {
-                    selector_manager.close();
-
-                    if let Some(ref hash) = rom_hash {
-                        if selector_manager
-                            .active_selector
-                            .as_ref()
-                            .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
-                            .unwrap_or(false)
-                        {
-                            // Check if system supports save states
-                            if !sys.supports_save_states() {
-                                eprintln!("Save states are not supported for this system");
-                            } else {
-                                // Save state
-                                let state = sys.save_state();
-                                match serde_json::to_vec(&state) {
-                                    Ok(data) => match game_saves.save_slot(slot, &data, hash) {
-                                        Ok(_) => println!("Saved state to slot {}", slot),
-                                        Err(e) => {
-                                            eprintln!("Failed to save to slot {}: {}", slot, e)
-                                        }
-                                    },
-                                    Err(e) => eprintln!("Failed to serialize state: {}", e),
-                                }
-                            }
-                        } else {
-                            // Load state
-                            if !sys.supports_save_states() {
-                                eprintln!("Save states are not supported for this system");
-                            } else {
-                                match game_saves.load_slot(slot, hash) {
-                                    Ok(data) => {
-                                        match serde_json::from_slice::<serde_json::Value>(&data) {
-                                            Ok(state) => match sys.load_state(&state) {
-                                                Ok(_) => {
-                                                    println!("Loaded state from slot {}", slot)
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("Failed to load state: {}", e)
-                                                }
-                                            },
-                                            Err(e) => {
-                                                eprintln!("Failed to parse save state: {}", e)
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Failed to load from slot {}: {}", slot, e)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Handle mount point selector
-        if false {
-            let mount_points = sys.mount_points();
-
-            // Check for mount point selection
-            let mut selected_index: Option<usize> = None;
-
-            if window.is_key_pressed(Key::Key1, false) {
-                selected_index = Some(0);
-            } else if window.is_key_pressed(Key::Key2, false) {
-                selected_index = Some(1);
-            } else if window.is_key_pressed(Key::Key3, false) {
-                selected_index = Some(2);
-            } else if window.is_key_pressed(Key::Key4, false) {
-                selected_index = Some(3);
-            } else if window.is_key_pressed(Key::Key5, false) {
-                selected_index = Some(4);
-            } else if window.is_key_pressed(Key::Key6, false) {
-                selected_index = Some(5);
-            } else if window.is_key_pressed(Key::Key7, false) {
-                selected_index = Some(6);
-            } else if window.is_key_pressed(Key::Key8, false) {
-                selected_index = Some(7);
-            } else if window.is_key_pressed(Key::Key9, false) {
-                // Key 9: Show disk format selector for creating new blank disk (PC only)
-                if sys.system_name() == "pc" {}
-            }
-
-            if let Some(idx) = selected_index {
-                if idx < mount_points.len() {
-                    // Now show file dialog for the selected mount point
-                    let mp_info = &mount_points[idx];
-
-                    if let Some(path) = create_file_dialog(mp_info).pick_file() {
-                        let path_str = path.to_string_lossy().to_string();
-                        match std::fs::read(&path) {
-                            Ok(data) => {
-                                match sys.mount(&mp_info.id, &data) {
-                                    Ok(_) => {
-                                        rom_loaded = true;
-                                        rom_hash = Some(GameSaves::rom_hash(&data));
-                                        runtime_state
-                                            .set_mount(mp_info.id.clone(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone()); // Keep for backward compat
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        game_saves = if let Some(ref hash) = rom_hash {
-                                            GameSaves::load(hash)
-                                        } else {
-                                            GameSaves::default()
-                                        };
-
-                                        // Update resolution to match the system's native resolution
-                                        // This is critical when loading a ROM into a system with different
-                                        // resolution than the initial system (e.g., loading Atari ROM after
-                                        // starting with NES system)
-                                        let (new_width, new_height) = sys.resolution();
-                                        width = new_width;
-                                        height = new_height;
-                                        buffer = vec![0; width * height];
-
-                                        println!(
-                                            "Loaded media into {}: {}",
-                                            mp_info.name, path_str
-                                        );
-                                        // Update POST screen for PC system
-                                        sys.update_post_screen();
-                                    }
-                                    Err(e) => {
-                                        eprintln!(
-                                            "Failed to mount media into {}: {}",
-                                            mp_info.name, e
-                                        );
-                                        status_message = format!("Failed to mount: {}", e);
-                                        buffer = ui_render::create_splash_screen_with_status(
-                                            width,
-                                            height,
-                                            &status_message,
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to read file: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Render mount point selector
-            let mount_buffer = ui_render::create_mount_point_selector(
-                width,
-                height,
-                &mount_points,
-                sys.system_name(),
-            );
-            if let Err(e) = window.update_with_buffer(&mount_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
-        }
-
-        // Handle disk format selector
-        if false {
-            // Check for format selection (1-7)
-            let mut selected_format: Option<usize> = None;
-
-            if window.is_key_pressed(Key::Key1, false) {
-                selected_format = Some(0);
-            } else if window.is_key_pressed(Key::Key2, false) {
-                selected_format = Some(1);
-            } else if window.is_key_pressed(Key::Key3, false) {
-                selected_format = Some(2);
-            } else if window.is_key_pressed(Key::Key4, false) {
-                selected_format = Some(3);
-            } else if window.is_key_pressed(Key::Key5, false) {
-                selected_format = Some(4);
-            } else if window.is_key_pressed(Key::Key6, false) {
-                selected_format = Some(5);
-            } else if window.is_key_pressed(Key::Key7, false) {
-                selected_format = Some(6);
-            } else if window.is_key_pressed(Key::Key8, false) {
-                selected_format = Some(7);
-            }
-
-            if let Some(fmt_idx) = selected_format {
-                // Create the blank disk based on selected format
-                let (disk_data, default_name, description) = match fmt_idx {
-                    0 => (
-                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy360K),
-                        "floppy_360k.img",
-                        "360KB Floppy",
-                    ),
-                    1 => (
-                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy720K),
-                        "floppy_720k.img",
-                        "720KB Floppy",
-                    ),
-                    2 => (
-                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_2M),
-                        "floppy_1_2m.img",
-                        "1.2MB Floppy",
-                    ),
-                    3 => (
-                        emu_pc::create_blank_floppy(emu_pc::FloppyFormat::Floppy1_44M),
-                        "floppy_1_44m.img",
-                        "1.44MB Floppy",
-                    ),
-                    4 => (
-                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20M),
-                        "hdd_20m.img",
-                        "20MB Hard Drive",
-                    ),
-                    5 => (
-                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive250M),
-                        "hdd_250m.img",
-                        "250MB Hard Drive",
-                    ),
-                    6 => (
-                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive1G),
-                        "hdd_1g.img",
-                        "1GB Hard Drive",
-                    ),
-                    7 => (
-                        emu_pc::create_blank_hard_drive(emu_pc::HardDriveFormat::HardDrive20G),
-                        "hdd_20g.img",
-                        "20GB Hard Drive",
-                    ),
-                    _ => {
-                        eprintln!("Invalid disk format index: {}", fmt_idx);
-                        continue;
-                    }
-                };
-
-                // Show save dialog
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Disk Image", &["img"])
-                    .add_filter("All Files", &["*"])
-                    .set_file_name(default_name)
-                    .save_file()
-                {
-                    match std::fs::write(&path, &disk_data) {
-                        Ok(_) => {
-                            println!("Created {} disk image: {}", description, path.display());
-                            status_message = format!("Created {} disk image", description);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to save disk image: {}", e);
-                            status_message = format!("Failed to save disk: {}", e);
-                        }
-                    }
-                }
-            }
-
-            // Render disk format selector
-            let format_buffer = ui_render::create_disk_format_selector(width, height);
-            if let Err(e) = window.update_with_buffer(&format_buffer, width, height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(16));
-            continue;
-        }
-
-        // Prepare popup window overlays
-        let mut help_overlay: Option<Vec<u32>> = None;
-        if let Some(ref help_window) = popup_manager.help_window {
-            help_overlay = Some(help_window.render(width, height, &settings));
-        }
-
-        // Prepare debug overlay buffer when requested
-        let mut debug_overlay: Option<Vec<u32>> = None;
-        if let Some(ref mut debug_window) = popup_manager.debug_window {
-            // For now, use simple debug window rendering
-            // TODO: Properly extract and pass debug info from different systems
-            debug_overlay = Some(debug_window.render(
-                width,
-                height,
-                None,
-                current_fps,
-                &settings.video_backend,
-            ));
-        }
-
-        // Legacy debug overlay for systems not yet migrated to popup window
-        // This will be removed once all systems are migrated
-        if debug_overlay.is_none() && rom_loaded && popup_manager.is_debug_open() {
-            // Try NES debug info first
-            if let Some(debug_info) = sys.get_debug_info_nes() {
-                let timing_str = match debug_info.timing_mode {
-                    emu_core::apu::TimingMode::Ntsc => "NTSC",
-                    emu_core::apu::TimingMode::Pal => "PAL",
-                };
-                debug_overlay = Some(ui_render::create_debug_overlay(
-                    width,
-                    height,
-                    &debug_info.mapper_name,
-                    debug_info.mapper_number,
-                    timing_str,
-                    debug_info.prg_banks,
-                    debug_info.chr_banks,
-                    current_fps,
-                    sys.get_runtime_stats(),
-                    &settings.video_backend,
-                ));
-            }
-            // Try Atari 2600 debug info
-            else if let Some(debug_info) = sys.get_debug_info_atari2600() {
-                debug_overlay = Some(ui_render::create_atari2600_debug_overlay(
-                    width,
-                    height,
-                    debug_info.rom_size,
-                    &debug_info.banking_scheme,
-                    debug_info.current_bank,
-                    debug_info.scanline,
-                    current_fps,
-                    &settings.video_backend,
-                ));
-            }
-            // Try Game Boy debug info
-            else if let Some(debug_info) = sys.get_debug_info_gb() {
-                debug_overlay = Some(ui_render::create_gb_debug_overlay(
-                    width,
-                    height,
-                    debug_info.pc,
-                    debug_info.sp,
-                    debug_info.af,
-                    debug_info.bc,
-                    debug_info.de,
-                    debug_info.hl,
-                    debug_info.ime,
-                    debug_info.halted,
-                    debug_info.ly,
-                    debug_info.lcdc,
-                    current_fps,
-                    &settings.video_backend,
-                ));
-            }
-            // Try N64 debug info if NES didn't match
-            else if let Some(debug_info) = sys.get_debug_info_n64() {
-                debug_overlay = Some(ui_render::create_n64_debug_overlay(
-                    width,
-                    height,
-                    &debug_info.rom_name,
-                    debug_info.rom_size_mb,
-                    debug_info.pc,
-                    &debug_info.rsp_microcode,
-                    debug_info.rsp_vertex_count,
-                    debug_info.rdp_status,
-                    &debug_info.framebuffer_resolution,
-                    current_fps,
-                    &settings.video_backend,
-                ));
-            }
-            // Try SNES debug info
-            else if let Some(debug_info) = sys.get_debug_info_snes() {
-                debug_overlay = Some(ui_render::create_snes_debug_overlay(
-                    width,
-                    height,
-                    debug_info.rom_size,
-                    debug_info.has_smc_header,
-                    debug_info.pc,
-                    debug_info.pbr,
-                    debug_info.emulation_mode,
-                    current_fps,
-                    &settings.video_backend,
-                ));
-            }
-            // Try PC debug info
-            else if let Some(debug_info) = sys.get_debug_info_pc() {
-                debug_overlay = Some(ui_render::create_pc_debug_overlay(
-                    width,
-                    height,
-                    debug_info.cs,
-                    debug_info.ip,
-                    debug_info.ax,
-                    debug_info.bx,
-                    debug_info.cx,
-                    debug_info.dx,
-                    debug_info.sp,
-                    debug_info.bp,
-                    debug_info.si,
-                    debug_info.di,
-                    debug_info.flags,
-                    debug_info.cycles,
-                    current_fps,
-                    &settings.video_backend,
-                ));
-            }
-        }
-
-        // Check for screenshot key (F4) - only when host key is held
-        if (needs_host_key && host_key_held && window.is_key_pressed(Key::F4, false))
-            || (!needs_host_key && window.is_key_pressed(Key::F4, false))
-        {
-            match save_screenshot(&buffer, width, height, sys.system_name()) {
-                Ok(path) => println!("Screenshot saved to: {}", path),
-                Err(e) => eprintln!("Failed to save screenshot: {}", e),
-            }
-        }
-
-        // Handle controller input / emulation step when ROM is loaded.
-        // Debug overlay should NOT pause the game, but selectors should.
-        // Speed selector and 0x speed also pause the game.
-        // For PC systems, always render frames (to show POST screen even when no disk is loaded)
-        let should_step = (rom_loaded || matches!(&sys, EmulatorSystem::PC(_)))
-            && !popup_manager.is_help_open()
-            && !selector_manager.is_open()
-            && settings.emulation_speed > 0.0;
-
-        if should_step {
-            // Handle keyboard input for PC system
-            if matches!(&sys, EmulatorSystem::PC(_)) {
-                // PC system: Use SDL2 scancodes directly for accurate physical key mapping
-                // This bypasses the Key enum and directly maps SDL2 scancodes to PC scancodes
-                if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
-                        // Handle pressed scancodes (only if host key is not held)
-                        if !host_key_held {
-                            for &scancode in sdl2_backend.get_sdl2_scancodes_pressed() {
-                                pc_sys.key_press_sdl2(scancode);
-                            }
-                            for &scancode in sdl2_backend.get_sdl2_scancodes_released() {
-                                pc_sys.key_release_sdl2(scancode);
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Controller-based systems (NES, GB, Atari, SNES, etc.)
-                if matches!(&sys, EmulatorSystem::SNES(_)) {
-                    // SNES uses 16-bit controller state
-                    let ctrl0 = get_snes_controller_state(window.as_ref(), &settings.input.player1);
-                    let ctrl1 = get_snes_controller_state(window.as_ref(), &settings.input.player2);
-                    sys.set_controller_16(0, ctrl0);
-                    sys.set_controller_16(1, ctrl1);
-                } else {
-                    // Other systems use 8-bit controller state
-                    let ctrl0 = get_controller_state(window.as_ref(), &settings.input.player1);
-                    let ctrl1 = get_controller_state(window.as_ref(), &settings.input.player2);
-                    // Note: Player 3 and 4 would be ctrl2 and ctrl3 for systems that support them
-                    sys.set_controller(0, ctrl0);
-                    sys.set_controller(1, ctrl1);
-                }
-            }
-
-            // Step one frame and display
+        // Step emulation frame if ROM is loaded and not paused
+        if rom_loaded && settings.emulation_speed > 0.0 {
+            // Step the frame
             match sys.step_frame() {
-                Ok(f) => {
-                    buffer = f.pixels; // Move instead of clone
+                Ok(frame) => {
+                    // Update emulator texture with new frame
+                    egui_app.update_emulator_texture(
+                        egui_backend.egui_ctx(),
+                        &frame.pixels,
+                        frame.width as usize,
+                        frame.height as usize,
+                    );
 
-                    // Apply CRT filter if not showing overlays
-                    if !popup_manager.is_help_open() && !selector_manager.is_open() {
-                        settings.display_filter.apply(&mut buffer, width, height);
-                    }
-
-                    // Audio generation: generate samples based on actual frame rate
-                    // NTSC: ~60.1 FPS (≈734 samples), PAL: ~50.0 FPS (≈882 samples)
+                    // Handle audio
                     let timing = sys.timing();
-                    let samples_per_frame =
-                        (SAMPLE_RATE as f64 / timing.frame_rate_hz()).round() as usize;
+                    let frame_rate = timing.frame_rate_hz();
+                    let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
                     let audio_samples = sys.get_audio_samples(samples_per_frame);
-                    for s in audio_samples {
-                        let _ = audio_tx.try_send(s);
+                    for sample in audio_samples {
+                        let _ = audio_tx.try_send(sample);
                     }
                 }
-                Err(e) => eprintln!("Frame generation error: {:?}", e),
+                Err(e) => {
+                    eprintln!("Emulation error: {}", e);
+                }
             }
-        }
 
-        // Prepare frame to present (with overlays if any)
-        let slot_selector_buffer;
-        let debug_composed_buffer;
-
-        let frame_to_present: &[u32] = if selector_manager.is_open() {
-            // Render slot selector overlay
-            // For PC system in SAVE mode, show disk persist menu
-            if matches!(&sys, EmulatorSystem::PC(_))
-                && selector_manager
-                    .active_selector
-                    .as_ref()
-                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
-                    .unwrap_or(false)
-            {
-                let mount_points = sys.mount_points();
-                let mounted: Vec<bool> = mount_points
-                    .iter()
-                    .map(|mp| sys.get_disk_image(&mp.id).is_some())
-                    .collect();
-                slot_selector_buffer =
-                    ui_render::create_pc_save_selector(width, height, &mount_points, &mounted);
-                &slot_selector_buffer
+            // Handle keyboard input for emulator
+            if !matches!(&sys, EmulatorSystem::PC(_)) {
+                // For non-PC systems, use standard controller mapping
+                let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
+                let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
+                match &mut sys {
+                    EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
+                    _ => sys.set_controller(0, controller_state),
+                }
             } else {
-                let has_saves = [
-                    game_saves.slots.contains_key(&1),
-                    game_saves.slots.contains_key(&2),
-                    game_saves.slots.contains_key(&3),
-                    game_saves.slots.contains_key(&4),
-                    game_saves.slots.contains_key(&5),
-                ];
-                let mode_str = if selector_manager
-                    .active_selector
-                    .as_ref()
-                    .map(|s| s.selector_type == selector::SelectorType::SaveSlot)
-                    .unwrap_or(false)
-                {
-                    "SAVE"
-                } else {
-                    "LOAD"
-                };
-                slot_selector_buffer =
-                    ui_render::create_slot_selector_overlay(width, height, mode_str, &has_saves);
-                &slot_selector_buffer
-            }
-        } else if let Some(ref overlay) = debug_overlay {
-            // Blend debug overlay with game buffer
-            debug_composed_buffer = blend_over(&buffer, overlay);
-            &debug_composed_buffer
-        } else if let Some(ref overlay) = help_overlay {
-            overlay.as_slice()
-        } else {
-            &buffer
-        };
-
-        // Update status bar state
-        status_bar.fps = current_fps as f32;
-        status_bar.paused = settings.emulation_speed == 0.0;
-        status_bar.speed = settings.emulation_speed as f32;
-
-        // Update rendering backend
-        status_bar.rendering_backend = if settings.video_backend == "opengl" {
-            "OpenGL".to_string()
-        } else {
-            "Software".to_string()
-        };
-
-        // Update IP from system-specific debug info
-        status_bar.ip = sys.get_instruction_pointer();
-
-        // Update CPU frequency info
-        status_bar.cpu_freq_target = sys.get_cpu_freq_target();
-        status_bar.cpu_freq_actual = sys.get_cpu_freq_actual();
-
-        // Update cycles from runtime stats (for systems that support it)
-        let stats = sys.get_runtime_stats();
-        if stats.cpu_cycles > 0 {
-            status_bar.cycles = Some(stats.cpu_cycles as u64);
-        } else {
-            status_bar.cycles = None;
-        }
-
-        // Update menu state based on current emulator state
-        menu_bar.update_menu_state(
-            rom_loaded,
-            settings.emulation_speed == 0.0,
-            sys.supports_save_states(),
-            logging_active,
-        );
-
-        // Update window title with project filename if available
-        let title = if let Some(project_name) = runtime_state.get_project_filename() {
-            format!("Hemulator - {}", project_name)
-        } else {
-            "Hemulator - Multi-System Emulator".to_string()
-        };
-        if let Some(sdl2_backend) = window.as_any_mut().downcast_mut::<Sdl2Backend>() {
-            let _ = sdl2_backend.set_title(&title);
-        }
-
-        // Render frame with UI elements at window resolution
-        // UI elements (menu bar, status bar) are always fixed pixel size regardless of game resolution
-        if !frame_to_present.is_empty() {
-            let (window_width, window_height) = window.get_size();
-
-            const MENU_HEIGHT: usize = 24;
-            const STATUS_HEIGHT: usize = 20;
-
-            // Create a buffer at window resolution
-            let mut window_buffer = vec![0xFF000000; window_width * window_height];
-
-            // Calculate game display area (middle section between menu and status bar)
-            let game_display_y = MENU_HEIGHT;
-            let game_display_height = window_height.saturating_sub(MENU_HEIGHT + STATUS_HEIGHT);
-
-            // Scale and blit game content to the middle section
-            if game_display_height > 0 {
-                // Calculate scaling to fit game in available space while maintaining aspect ratio
-                let scale_x = window_width as f32 / width as f32;
-                let scale_y = game_display_height as f32 / height as f32;
-                let scale = scale_x.min(scale_y);
-
-                let scaled_width = (width as f32 * scale) as usize;
-                let scaled_height = (height as f32 * scale) as usize;
-
-                // Center the game horizontally
-                let offset_x = (window_width.saturating_sub(scaled_width)) / 2;
-                let offset_y =
-                    game_display_y + (game_display_height.saturating_sub(scaled_height)) / 2;
-
-                // Optimized nearest-neighbor scaling using integer arithmetic
-                // Pre-compute inverse scale as fixed-point (16.16) to avoid per-pixel division
-                let scale_inv = (65536.0 / scale) as usize;
-
-                for sy in 0..scaled_height {
-                    // Use fixed-point arithmetic instead of float division
-                    let src_y = (sy * scale_inv) >> 16;
-                    if src_y >= height {
-                        continue;
+                // PC systems handle keyboard directly via scancodes
+                let pressed = egui_backend.get_sdl2_scancodes_pressed();
+                let released = egui_backend.get_sdl2_scancodes_released();
+                if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                    for &scancode in pressed {
+                        pc_sys.key_press_sdl2(scancode as u32);
                     }
-
-                    for sx in 0..scaled_width {
-                        let src_x = (sx * scale_inv) >> 16;
-                        if src_x >= width {
-                            continue;
-                        }
-
-                        let dst_x = offset_x + sx;
-                        let dst_y = offset_y + sy;
-
-                        if dst_x < window_width && dst_y < window_height {
-                            let src_idx = src_y * width + src_x;
-                            let dst_idx = dst_y * window_width + dst_x;
-
-                            if src_idx < frame_to_present.len() && dst_idx < window_buffer.len() {
-                                window_buffer[dst_idx] = frame_to_present[src_idx];
-                            }
-                        }
+                    for &scancode in released {
+                        pc_sys.key_release_sdl2(scancode as u32);
                     }
                 }
             }
-
-            // Render menu bar at top (fixed 24px height at window resolution)
-            menu_bar.render(&mut window_buffer, window_width, window_height);
-
-            // Render status bar at bottom (fixed 20px height at window resolution)
-            status_bar.render(&mut window_buffer, window_width, window_height);
-
-            // Update window with the composite buffer
-            if let Err(e) = window.update_with_buffer(&window_buffer, window_width, window_height) {
-                eprintln!("Window update error: {}", e);
-                break;
-            }
         }
 
-        // Dynamic frame pacing based on timing mode (NTSC ~60.1 FPS, PAL ~50.0 FPS)
-        let frame_dt = last_frame.elapsed();
+        // End egui frame and render
+        egui_backend.end_frame();
 
+        // FPS tracking
+        let frame_dt = last_frame.elapsed();
         frame_times.push(frame_dt);
         if frame_times.len() > 60 {
             frame_times.remove(0);
         }
-
         if !frame_times.is_empty() {
             let total_time: Duration = frame_times.iter().sum();
             let avg_frame_time = total_time.as_secs_f64() / frame_times.len() as f64;
             if avg_frame_time > 0.0 {
-                current_fps = 1.0 / avg_frame_time;
+                current_fps = (1.0 / avg_frame_time) as f32;
             }
         }
 
-        // Get target frame time from system timing mode, adjusted by emulation speed
-        // In benchmark mode, disable frame limiting to measure raw performance
-        let target_frame_time = if cli_args.benchmark {
-            Duration::from_secs(0) // No frame limiting in benchmark mode
-        } else if rom_loaded && settings.emulation_speed > 0.0 {
+        // Frame timing
+        let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
             let timing = sys.timing();
             let frame_rate = timing.frame_rate_hz();
             Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
-        } else if settings.emulation_speed > 0.0 {
-            // Default to NTSC timing when no ROM loaded
-            Duration::from_secs_f64(
-                1.0 / (emu_core::apu::TimingMode::Ntsc.frame_rate_hz() * settings.emulation_speed),
-            )
         } else {
-            // When paused (0x speed), use a longer sleep time
-            Duration::from_millis(100)
+            Duration::from_millis(16) // ~60 FPS when idle
         };
 
         if frame_dt < target_frame_time {
             std::thread::sleep(target_frame_time - frame_dt);
         }
         last_frame = Instant::now();
-
-        // Save window size if it changed
-        let (new_width, new_height) = window.get_size();
-        if new_width != settings.window_width || new_height != settings.window_height {
-            settings.window_width = new_width;
-            settings.window_height = new_height;
-            if let Err(e) = settings.save() {
-                eprintln!("Warning: Failed to save window size: {}", e);
-            }
-        }
     }
+
 }

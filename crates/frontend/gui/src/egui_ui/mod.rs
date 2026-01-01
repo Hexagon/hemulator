@@ -10,7 +10,7 @@
 mod layout;
 mod tabs;
 mod property_pane;
-mod menu_bar;
+pub mod menu_bar;
 mod status_bar;
 
 pub use layout::EguiApp;
