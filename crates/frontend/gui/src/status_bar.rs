@@ -11,8 +11,11 @@ pub struct StatusBar {
     pub system_name: String,
     pub paused: bool,
     pub speed: f32,
-    pub ip: Option<u32>,     // Instruction pointer
-    pub cycles: Option<u64>, // Cycle count
+    pub ip: Option<u32>,              // Instruction pointer
+    pub cycles: Option<u64>,          // Cycle count
+    pub rendering_backend: String,    // "Software" or "OpenGL"
+    pub cpu_freq_target: Option<f64>, // Target CPU frequency in MHz
+    pub cpu_freq_actual: Option<f64>, // Actual CPU frequency in MHz
 }
 
 impl StatusBar {
@@ -25,6 +28,9 @@ impl StatusBar {
             speed: 1.0,
             ip: None,
             cycles: None,
+            rendering_backend: "Software".to_string(),
+            cpu_freq_target: None,
+            cpu_freq_actual: None,
         }
     }
 
@@ -86,6 +92,25 @@ impl StatusBar {
 
         // Right side: Compact runtime stats
         let mut right_parts = Vec::new();
+
+        // Rendering backend indicator
+        if !self.rendering_backend.is_empty() {
+            right_parts.push(self.rendering_backend.clone());
+        }
+
+        // CPU frequency info (target and actual)
+        if let Some(target) = self.cpu_freq_target {
+            if let Some(actual) = self.cpu_freq_actual {
+                // Show both target and actual if they differ significantly
+                if (target - actual).abs() > 0.1 {
+                    right_parts.push(format!("{:.1}/{:.1}MHz", actual, target));
+                } else {
+                    right_parts.push(format!("{:.1}MHz", target));
+                }
+            } else {
+                right_parts.push(format!("{:.1}MHz", target));
+            }
+        }
 
         // Only show FPS if it's meaningful
         if self.fps > 0.1 {
