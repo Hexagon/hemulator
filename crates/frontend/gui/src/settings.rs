@@ -729,8 +729,7 @@ fn test_scaling_mode_serialization() {
 
     for mode in modes {
         let json = serde_json::to_string(&mode).expect("Failed to serialize");
-        let deserialized: ScalingMode =
-            serde_json::from_str(&json).expect("Failed to deserialize");
+        let deserialized: ScalingMode = serde_json::from_str(&json).expect("Failed to deserialize");
         assert_eq!(mode, deserialized);
     }
 }

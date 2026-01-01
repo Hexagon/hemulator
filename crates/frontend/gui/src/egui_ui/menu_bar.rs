@@ -6,6 +6,7 @@ use egui::Ui;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
     // File menu
+    NewProject,
     OpenRom,
     OpenProject,
     SaveProject,
@@ -46,6 +47,11 @@ impl MenuBar {
         ui.horizontal(|ui| {
             // File menu
             ui.menu_button("File", |ui| {
+                if ui.button("New Project...").clicked() {
+                    self.pending_action = Some(MenuAction::NewProject);
+                    ui.close();
+                }
+                ui.separator();
                 if ui.button("Open ROM... (F3)").clicked() {
                     self.pending_action = Some(MenuAction::OpenRom);
                     ui.close();

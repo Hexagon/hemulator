@@ -7,9 +7,16 @@ use egui::{ScrollArea, TextureHandle, Ui};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Emulator,
+    NewProject,
     Log,
     Help,
     Debug,
+}
+
+/// Actions that can be triggered from tabs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TabAction {
+    CreateNewProject(String), // String is the system name
 }
 
 pub struct TabManager {
@@ -18,6 +25,9 @@ pub struct TabManager {
     pub help_visible: bool,
     pub debug_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
+    pub new_project_visible: bool,
+    pub selected_system: String,
+    pub pending_action: Option<TabAction>,
 }
 
 impl TabManager {
@@ -28,6 +38,9 @@ impl TabManager {
             help_visible: false,
             debug_visible: false,
             debug_info: None,
+            new_project_visible: false,
+            selected_system: "NES".to_string(),
+            pending_action: None,
         }
     }
 
@@ -49,8 +62,18 @@ impl TabManager {
         self.active_tab = Tab::Debug;
     }
 
+    pub fn show_new_project_tab(&mut self) {
+        self.new_project_visible = true;
+        self.active_tab = Tab::NewProject;
+    }
+
     pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
         self.debug_info = Some(info);
+    }
+
+    /// Get and clear any pending action
+    pub fn take_action(&mut self) -> Option<TabAction> {
+        self.pending_action.take()
     }
 
     pub fn ui(
@@ -62,6 +85,20 @@ impl TabManager {
         // Tab bar
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.active_tab, Tab::Emulator, "Emulator");
+
+            if self.new_project_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::NewProject, "New Project");
+                if ui
+                    .button("✖")
+                    .on_hover_text("Close New Project tab")
+                    .clicked()
+                {
+                    self.new_project_visible = false;
+                    if self.active_tab == Tab::NewProject {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
 
             if self.log_messages.is_empty() {
                 ui.add_enabled(false, egui::Button::new("Log"));
@@ -99,6 +136,7 @@ impl TabManager {
         // Tab content
         match self.active_tab {
             Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
+            Tab::NewProject => self.render_new_project_tab(ui),
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
@@ -155,6 +193,65 @@ impl TabManager {
                     ui.label("No log messages");
                 }
             });
+    }
+
+    fn render_new_project_tab(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            ui.heading("Create New Project");
+            ui.add_space(20.0);
+
+            ui.label("Select the system you want to emulate:");
+            ui.add_space(10.0);
+
+            egui::ComboBox::from_label("System")
+                .selected_text(&self.selected_system)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "NES".to_string(),
+                        "NES (Nintendo Entertainment System)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "Game Boy".to_string(),
+                        "Game Boy / Game Boy Color",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "Atari 2600".to_string(),
+                        "Atari 2600",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "PC".to_string(),
+                        "PC (IBM PC/XT)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "SNES".to_string(),
+                        "SNES (Super Nintendo)",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_system,
+                        "N64".to_string(),
+                        "N64 (Nintendo 64)",
+                    );
+                });
+
+            ui.add_space(20.0);
+
+            if ui.button("Create").clicked() {
+                // Signal that we want to create a new project
+                self.pending_action =
+                    Some(TabAction::CreateNewProject(self.selected_system.clone()));
+                self.new_project_visible = false;
+                self.active_tab = Tab::Emulator;
+            }
+
+            ui.add_space(10.0);
+            ui.label("After creating, you can load ROMs/disks via File > Open ROM");
+        });
     }
 
     fn render_help_tab(&self, ui: &mut Ui) {

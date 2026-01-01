@@ -1891,6 +1891,11 @@ fn main() {
     egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
     egui_app.status_bar.set_message(status_message.clone());
 
+    // Show New Project tab on startup if no ROM/project was loaded
+    if !rom_loaded {
+        egui_app.tab_manager.show_new_project_tab();
+    }
+
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,
@@ -2010,6 +2015,9 @@ fn main() {
         if let Some(action) = egui_app.menu_bar.take_action() {
             use egui_ui::menu_bar::MenuAction;
             match action {
+                MenuAction::NewProject => {
+                    egui_app.tab_manager.show_new_project_tab();
+                }
                 MenuAction::OpenRom => {
                     // Open ROM file dialog
                     if let Some(path) = rfd::FileDialog::new()
@@ -2400,6 +2408,85 @@ fn main() {
 
         // Handle emulation speed changes from property pane
         settings.emulation_speed = (egui_app.property_pane.emulation_speed_percent as f64) / 100.0;
+
+        // Handle tab actions (e.g., create new project)
+        if let Some(action) = egui_app.tab_manager.take_action() {
+            use egui_ui::TabAction;
+            match action {
+                TabAction::CreateNewProject(system_name) => {
+                    // Create a new system based on the selected type
+                    match system_name.as_str() {
+                        "NES" => {
+                            sys = EmulatorSystem::NES(Box::default());
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "NES".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new NES system".to_string());
+                        }
+                        "Game Boy" => {
+                            sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Game Boy".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Game Boy system".to_string());
+                        }
+                        "Atari 2600" => {
+                            sys = EmulatorSystem::Atari2600(Box::new(
+                                emu_atari2600::Atari2600System::new(),
+                            ));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "Atari 2600".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new Atari 2600 system".to_string());
+                        }
+                        "PC" => {
+                            sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "PC".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new PC system".to_string());
+                        }
+                        "SNES" => {
+                            sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "SNES".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SNES system".to_string());
+                        }
+                        "N64" => {
+                            sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "N64".to_string();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new N64 system".to_string());
+                        }
+                        _ => {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Unknown system: {}", system_name));
+                        }
+                    }
+                }
+            }
+        }
 
         // Handle host key + fullscreen toggle (switch between Fullscreen and Fullscreen with GUI)
         if let Some(host_key) = string_to_key(&settings.input.host_modifier) {
