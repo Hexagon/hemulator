@@ -52,6 +52,8 @@ pub struct PcBus {
     floppy_b: Option<Vec<u8>>,
     /// Hard drive image
     hard_drive: Option<Vec<u8>>,
+    /// CD-ROM drive image (ISO 9660)
+    cdrom: Option<Vec<u8>>,
     /// Disk controller
     disk_controller: DiskController,
     /// Boot priority order
@@ -168,6 +170,7 @@ impl PcBus {
             floppy_a: None,
             floppy_b: None,
             hard_drive: None,
+            cdrom: None,
             disk_controller: DiskController::new(),
             boot_priority: BootPriority::default(),
             boot_sector_loaded: false,
@@ -499,6 +502,26 @@ impl PcBus {
         self.hard_drive.as_deref()
     }
 
+    /// Mount CD-ROM drive image (ISO 9660 format)
+    pub fn mount_cdrom(&mut self, data: Vec<u8>) {
+        self.cdrom = Some(data);
+    }
+
+    /// Unmount CD-ROM drive
+    pub fn unmount_cdrom(&mut self) {
+        self.cdrom = None;
+    }
+
+    /// Get reference to CD-ROM
+    pub fn cdrom(&self) -> Option<&[u8]> {
+        self.cdrom.as_deref()
+    }
+
+    /// Check if CD-ROM is mounted
+    pub fn has_cdrom(&self) -> bool {
+        self.cdrom.is_some()
+    }
+
     /// Get mutable reference to hard drive (for write operations)
     #[allow(dead_code)]
     pub fn hard_drive_mut(&mut self) -> Option<&mut Vec<u8>> {
@@ -541,7 +564,7 @@ impl PcBus {
     /// Perform a disk read operation
     pub fn disk_read(&mut self, request: &crate::disk::DiskRequest, buffer: &mut [u8]) -> u8 {
         let disk_image = if request.drive < 0x80 {
-            // Floppy drive
+            // Floppy drive (0x00-0x7F)
             if request.drive == 0x00 {
                 self.floppy_a.as_deref()
             } else if request.drive == 0x01 {
@@ -549,9 +572,21 @@ impl PcBus {
             } else {
                 None
             }
+        } else if request.drive >= 0xE0 {
+            // CD-ROM drive (0xE0-0xFF)
+            // Drive 0xE0 is the first CD-ROM drive
+            if request.drive == 0xE0 {
+                self.cdrom.as_deref()
+            } else {
+                None
+            }
         } else {
-            // Hard drive
-            self.hard_drive.as_deref()
+            // Hard drive (0x80-0xDF)
+            if request.drive == 0x80 {
+                self.hard_drive.as_deref()
+            } else {
+                None
+            }
         };
 
         self.disk_controller
@@ -561,7 +596,7 @@ impl PcBus {
     /// Perform a disk write operation
     pub fn disk_write(&mut self, request: &crate::disk::DiskRequest, buffer: &[u8]) -> u8 {
         let disk_mut = if request.drive < 0x80 {
-            // Floppy drive
+            // Floppy drive (0x00-0x7F)
             if request.drive == 0x00 {
                 self.floppy_a.as_mut()
             } else if request.drive == 0x01 {
@@ -569,9 +604,17 @@ impl PcBus {
             } else {
                 None
             }
+        } else if request.drive >= 0xE0 {
+            // CD-ROM drive (0xE0-0xFF) - read-only, return error
+            // CD-ROMs cannot be written to
+            return 0x03; // Write protect error
         } else {
-            // Hard drive
-            self.hard_drive.as_mut()
+            // Hard drive (0x80-0xDF)
+            if request.drive == 0x80 {
+                self.hard_drive.as_mut()
+            } else {
+                None
+            }
         };
 
         self.disk_controller
@@ -581,7 +624,7 @@ impl PcBus {
     /// Perform a disk read operation using LBA
     pub fn disk_read_lba(&mut self, drive: u8, lba: u32, count: u8, buffer: &mut [u8]) -> u8 {
         let disk_image = if drive < 0x80 {
-            // Floppy drive
+            // Floppy drive (0x00-0x7F)
             if drive == 0x00 {
                 self.floppy_a.as_deref()
             } else if drive == 0x01 {
@@ -589,9 +632,20 @@ impl PcBus {
             } else {
                 None
             }
+        } else if drive >= 0xE0 {
+            // CD-ROM drive (0xE0-0xFF)
+            if drive == 0xE0 {
+                self.cdrom.as_deref()
+            } else {
+                None
+            }
         } else {
-            // Hard drive
-            self.hard_drive.as_deref()
+            // Hard drive (0x80-0xDF)
+            if drive == 0x80 {
+                self.hard_drive.as_deref()
+            } else {
+                None
+            }
         };
 
         self.disk_controller
@@ -601,7 +655,7 @@ impl PcBus {
     /// Perform a disk write operation using LBA
     pub fn disk_write_lba(&mut self, drive: u8, lba: u32, count: u8, buffer: &[u8]) -> u8 {
         let disk_mut = if drive < 0x80 {
-            // Floppy drive
+            // Floppy drive (0x00-0x7F)
             if drive == 0x00 {
                 self.floppy_a.as_mut()
             } else if drive == 0x01 {
@@ -609,9 +663,16 @@ impl PcBus {
             } else {
                 None
             }
+        } else if drive >= 0xE0 {
+            // CD-ROM drive (0xE0-0xFF) - read-only, return error
+            return 0x03; // Write protect error
         } else {
-            // Hard drive
-            self.hard_drive.as_mut()
+            // Hard drive (0x80-0xDF)
+            if drive == 0x80 {
+                self.hard_drive.as_mut()
+            } else {
+                None
+            }
         };
 
         self.disk_controller

@@ -762,6 +762,12 @@ impl System for PcSystem {
                 extensions: vec!["img".to_string(), "vhd".to_string()],
                 required: false,
             },
+            MountPointInfo {
+                id: "CDROM".to_string(),
+                name: "CD-ROM Drive".to_string(),
+                extensions: vec!["iso".to_string(), "cue".to_string()],
+                required: false,
+            },
         ]
     }
 
@@ -826,6 +832,15 @@ impl System for PcSystem {
 
                 Ok(())
             }
+            "CDROM" => {
+                // Mount CD-ROM (ISO 9660 format)
+                // Minimum size check: at least 32KB for ISO 9660 system area
+                if data.len() < 32 * 1024 {
+                    return Err(PcError::InvalidExecutable);
+                }
+                self.cpu.bus_mut().mount_cdrom(data.to_vec());
+                Ok(())
+            }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
         }
     }
@@ -854,6 +869,10 @@ impl System for PcSystem {
                 // This is CRITICAL for DOS to stop seeing a non-existent drive
                 self.cpu.bus_mut().write(0x475, 0); // 0 hard drives installed
 
+                Ok(())
+            }
+            "CDROM" => {
+                self.cpu.bus_mut().unmount_cdrom();
                 Ok(())
             }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
@@ -1000,6 +1019,60 @@ mod tests {
             hd_count_after_unmount, 0,
             "BDA should reflect 0 hard drives after unmounting"
         );
+    }
+
+    #[test]
+    fn test_mount_cdrom() {
+        let mut sys = PcSystem::new();
+
+        // Create a minimal ISO 9660 image (64KB)
+        let iso_data = vec![0u8; 64 * 1024];
+
+        // Mount CD-ROM
+        assert!(sys.mount("CDROM", &iso_data).is_ok());
+
+        // Verify CD-ROM is mounted
+        assert!(sys.cpu.bus().has_cdrom());
+    }
+
+    #[test]
+    fn test_unmount_cdrom() {
+        let mut sys = PcSystem::new();
+
+        // Mount and then unmount
+        let iso_data = vec![0u8; 64 * 1024];
+        sys.mount("CDROM", &iso_data).unwrap();
+        assert!(sys.cpu.bus().has_cdrom());
+
+        sys.unmount("CDROM").unwrap();
+        assert!(!sys.cpu.bus().has_cdrom());
+    }
+
+    #[test]
+    fn test_cdrom_read_only() {
+        use crate::bus::PcBus;
+        use crate::disk::DiskRequest;
+
+        let mut bus = PcBus::new();
+
+        // Mount CD-ROM
+        let iso_data = vec![0xAA; 2048]; // One sector
+        bus.mount_cdrom(iso_data);
+
+        // Try to write to CD-ROM (should fail with write protect error)
+        let request = DiskRequest {
+            drive: 0xE0, // CD-ROM drive
+            cylinder: 0,
+            head: 0,
+            sector: 1,
+            count: 1,
+        };
+
+        let buffer = vec![0x55; 512];
+        let status = bus.disk_write(&request, &buffer);
+
+        // Should return write protect error (0x03)
+        assert_eq!(status, 0x03);
     }
 
     #[test]

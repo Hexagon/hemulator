@@ -1969,7 +1969,11 @@ impl PcCpu {
             0x42 => self.int13h_extended_read(),
             0x43 => self.int13h_extended_write(),
             0x44 => self.int13h_extended_verify(),
+            0x45 => self.int13h_lock_unlock(),     // CD-ROM: Lock/unlock drive
+            0x46 => self.int13h_eject_media(),     // CD-ROM: Eject media
+            0x47 => self.int13h_extended_seek(),   // CD-ROM: Extended seek
             0x48 => self.int13h_get_extended_params(),
+            0x4E => self.int13h_get_media_status(), // CD-ROM: Get media status
             _ => {
                 eprintln!("!!! UNSUPPORTED INT 13h function: AH=0x{:02X} !!!", ah);
                 // Unsupported function - set error in AH
@@ -2951,6 +2955,159 @@ impl PcCpu {
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
             self.set_carry_flag(true);
         }
+
+        51
+    }
+
+    /// INT 13h, AH=45h: Lock/unlock drive (CD-ROM)
+    fn int13h_lock_unlock(&mut self) -> u32 {
+        // AL = 0: unlock drive, 1: lock drive
+        // DL = drive number
+        let al = (self.cpu.ax & 0xFF) as u8;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Only valid for CD-ROM drives (0xE0+)
+        if drive < 0xE0 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Check if CD-ROM is mounted
+        if !self.cpu.memory.has_cdrom() {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0xAA << 8); // Drive not ready
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Lock/unlock operation - we always succeed (emulator doesn't prevent ejection)
+        // AL = 0 (unlock) or 1 (lock)
+        if al <= 1 {
+            // Success
+            self.cpu.ax &= 0x00FF; // AH = 0 (success)
+            self.set_carry_flag(false);
+
+            // Return lock status in AL
+            // For simplicity, always report as unlocked (AL=0)
+            self.cpu.ax = (self.cpu.ax & 0xFF00) | 0x00;
+        } else {
+            // Invalid subfunction
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+            self.set_carry_flag(true);
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=46h: Eject media (CD-ROM)
+    fn int13h_eject_media(&mut self) -> u32 {
+        // AL = 0: eject media, 1: load media
+        // DL = drive number
+        let al = (self.cpu.ax & 0xFF) as u8;
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Only valid for CD-ROM drives (0xE0+)
+        if drive < 0xE0 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // For emulator, we don't physically eject
+        // This is a stub that returns success
+        match al {
+            0x00 => {
+                // Eject media - report success
+                self.cpu.ax &= 0x00FF; // AH = 0 (success)
+                self.set_carry_flag(false);
+            }
+            0x01 => {
+                // Load media - report success
+                self.cpu.ax &= 0x00FF; // AH = 0 (success)
+                self.set_carry_flag(false);
+            }
+            _ => {
+                // Invalid subfunction
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8);
+                self.set_carry_flag(true);
+            }
+        }
+
+        51
+    }
+
+    /// INT 13h, AH=47h: Extended seek (CD-ROM)
+    fn int13h_extended_seek(&mut self) -> u32 {
+        // DS:SI = pointer to disk address packet
+        // DL = drive number
+
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Only valid for CD-ROM drives (0xE0+)
+        if drive < 0xE0 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Check if CD-ROM is mounted
+        if !self.cpu.memory.has_cdrom() {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0xAA << 8); // Drive not ready
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Read disk address packet
+        let ds = self.cpu.ds;
+        let si = self.cpu.si;
+        let packet_addr = ((ds as u32) << 4) + si;
+
+        // Packet structure:
+        // Offset 0: Packet size (1 byte)
+        // Offset 1: Reserved (1 byte)
+        // Offset 2-3: Number of blocks to transfer (2 bytes) - unused for seek
+        // Offset 4-7: Transfer buffer address (4 bytes) - unused for seek
+        // Offset 8-15: Starting absolute block number (8 bytes)
+
+        let _packet_size = self.cpu.memory.read(packet_addr);
+
+        // For seek operation, we just validate the request and return success
+        // The actual seek is implicit in the next read operation
+        self.cpu.ax &= 0x00FF; // AH = 0 (success)
+        self.set_carry_flag(false);
+
+        51
+    }
+
+    /// INT 13h, AH=4Eh: Get media status (CD-ROM)
+    fn int13h_get_media_status(&mut self) -> u32 {
+        // DL = drive number
+        // Returns: AL = media status
+
+        let drive = (self.cpu.dx & 0xFF) as u8;
+
+        // Only valid for CD-ROM drives (0xE0+)
+        if drive < 0xE0 {
+            self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
+            self.set_carry_flag(true);
+            return 51;
+        }
+
+        // Check if CD-ROM is mounted
+        let media_status = if self.cpu.memory.has_cdrom() {
+            // Media present, door closed, no change
+            0x02 // Door closed, media present
+        } else {
+            // No media
+            0x00 // Door open or no media
+        };
+
+        // Return status in AL
+        self.cpu.ax = (self.cpu.ax & 0xFF00) | (media_status as u32);
+
+        // AH = 0 (success)
+        self.cpu.ax &= 0x00FF;
+        self.set_carry_flag(false);
 
         51
     }
