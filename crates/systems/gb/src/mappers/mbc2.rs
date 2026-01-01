@@ -57,8 +57,8 @@ impl Mbc2 {
             0 // Bank 0 is fixed at 0x0000-0x3FFF
         } else {
             // Bank 1-15 at 0x4000-0x7FFF
-            let bank = if self.rom_bank == 0 { 1 } else { self.rom_bank };
-            (bank as usize) % self.rom_bank_count().max(1)
+            let selected_bank = if self.rom_bank == 0 { 1 } else { self.rom_bank };
+            (selected_bank as usize) % self.rom_bank_count().max(1)
         };
 
         let offset = (bank * 0x4000) + ((addr & 0x3FFF) as usize);
