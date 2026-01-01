@@ -7892,10 +7892,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = src.wrapping_sub(dst);
                 let borrow = (src as u16) < (dst as u16);
                 let overflow = ((src ^ dst) & (src ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(src, dst);
 
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
 
                 // Update SI and DI
                 if self.get_flag(FLAG_DF) {
@@ -7918,10 +7920,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = src.wrapping_sub(dst);
                 let borrow = (src as u32) < (dst as u32);
                 let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(src, dst);
 
                 self.update_flags_16(result as u16);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
 
                 // Update SI and DI
                 if self.get_flag(FLAG_DF) {
@@ -8007,10 +8011,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let result = al.wrapping_sub(val);
                 let borrow = (al as u16) < (val as u16);
                 let overflow = ((al ^ val) & (al ^ result) & 0x80) != 0;
+                let af = Self::calc_af_sub_8(al, val);
 
                 self.update_flags_8(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
 
                 // Update DI
                 if self.get_flag(FLAG_DF) {
@@ -8030,10 +8036,12 @@ impl<M: Memory8086> Cpu8086<M> {
                 let borrow = (self.ax as u16) < val;
                 let overflow =
                     (((self.ax as u16) ^ val) & ((self.ax as u16) ^ (result as u16)) & 0x8000) != 0;
+                let af = Self::calc_af_sub_16(self.ax as u16, val);
 
                 self.update_flags_16(result);
                 self.set_flag(FLAG_CF, borrow);
                 self.set_flag(FLAG_OF, overflow);
+                self.set_flag(FLAG_AF, af);
 
                 // Update DI
                 if self.get_flag(FLAG_DF) {
