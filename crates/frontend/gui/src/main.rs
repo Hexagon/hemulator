@@ -767,7 +767,6 @@ fn save_project(
 /// Save a screenshot to the screenshots directory
 /// Format: screenshots/<system-name>/YYYYMMDDHHMMSSRRR.png
 /// where RRR is a random number between 000 and 999
-#[allow(dead_code)]
 fn save_screenshot(
     buffer: &[u32],
     width: usize,
@@ -1931,6 +1930,9 @@ fn main() {
         GameSaves::default()
     };
 
+    // Store latest frame buffer for screenshots
+    let mut latest_frame_buffer: Option<(Vec<u32>, usize, usize)> = None;
+
     #[allow(dead_code)]
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
@@ -2045,6 +2047,10 @@ fn main() {
                                             .set_message("NES ROM loaded".to_string());
                                         // Update resolution
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Ok(SystemType::GameBoy) => {
@@ -2067,6 +2073,10 @@ fn main() {
                                             .status_bar
                                             .set_message("Game Boy ROM loaded".to_string());
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Ok(SystemType::Atari2600) => {
@@ -2090,6 +2100,10 @@ fn main() {
                                             .status_bar
                                             .set_message("Atari 2600 ROM loaded".to_string());
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Ok(SystemType::PC) => {
@@ -2112,6 +2126,10 @@ fn main() {
                                             .status_bar
                                             .set_message("PC executable loaded".to_string());
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Ok(SystemType::SNES) => {
@@ -2134,6 +2152,10 @@ fn main() {
                                             .status_bar
                                             .set_message("SNES ROM loaded".to_string());
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Ok(SystemType::N64) => {
@@ -2156,6 +2178,10 @@ fn main() {
                                             .status_bar
                                             .set_message("N64 ROM loaded".to_string());
                                         let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -2187,25 +2213,26 @@ fn main() {
                 MenuAction::Screenshot => {
                     // Take screenshot of current frame
                     if rom_loaded {
-                        if egui_app.emulator_texture.is_some() {
-                            // Generate filename with timestamp
-                            use std::time::SystemTime;
-                            let timestamp = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
+                        if let Some((ref buffer, width, height)) = latest_frame_buffer {
                             let system_name = egui_app.property_pane.system_name.replace(" ", "_");
-                            let filename = format!("screenshot_{}_{}.png", system_name, timestamp);
-
-                            // Get texture data and save it
-                            // Note: For now, we'll just show a message. Full implementation would require
-                            // accessing the texture data and using an image library like `image` crate
-                            egui_app
-                                .status_bar
-                                .set_message(format!("Screenshot saved: {}", filename));
-                            egui_app
-                                .tab_manager
-                                .add_log(format!("Screenshot: {}", filename));
+                            match save_screenshot(buffer, width, height, &system_name) {
+                                Ok(filename) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Screenshot saved: {}", filename));
+                                    egui_app
+                                        .tab_manager
+                                        .add_log(format!("Screenshot saved: {}", filename));
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error saving screenshot: {}", e));
+                                    egui_app
+                                        .tab_manager
+                                        .add_log(format!("Error saving screenshot: {}", e));
+                                }
+                            }
                         } else {
                             egui_app
                                 .status_bar
@@ -2237,7 +2264,7 @@ fn main() {
                             if sys.supports_save_states() {
                                 let state = sys.save_state();
                                 let state_json = serde_json::to_string(&state).unwrap_or_default();
-                                _game_saves = GameSaves::load(hash);
+                                // save_slot will persist to disk internally
                                 if let Err(e) =
                                     _game_saves.save_slot(slot, state_json.as_bytes(), hash)
                                 {
@@ -2266,7 +2293,6 @@ fn main() {
                     if rom_loaded {
                         if let Some(ref hash) = rom_hash {
                             if sys.supports_save_states() {
-                                _game_saves = GameSaves::load(hash);
                                 match _game_saves.load_slot(slot, hash) {
                                     Ok(data) => {
                                         if let Ok(state_str) = String::from_utf8(data) {
@@ -2324,6 +2350,13 @@ fn main() {
             // Step the frame
             match sys.step_frame() {
                 Ok(frame) => {
+                    // Store frame buffer for screenshots
+                    latest_frame_buffer = Some((
+                        frame.pixels.clone(),
+                        frame.width as usize,
+                        frame.height as usize,
+                    ));
+
                     // Update emulator texture with new frame
                     egui_app.update_emulator_texture(
                         egui_backend.egui_ctx(),
@@ -2360,11 +2393,11 @@ fn main() {
                 let pressed = egui_backend.get_sdl2_scancodes_pressed();
                 let released = egui_backend.get_sdl2_scancodes_released();
                 if let EmulatorSystem::PC(pc_sys) = &mut sys {
-                    for &scancode in pressed {
-                        pc_sys.key_press_sdl2(scancode as u32);
+                    for scancode in pressed {
+                        pc_sys.key_press_sdl2(*scancode as u32);
                     }
-                    for &scancode in released {
-                        pc_sys.key_release_sdl2(scancode as u32);
+                    for scancode in released {
+                        pc_sys.key_release_sdl2(*scancode as u32);
                     }
                 }
             }
