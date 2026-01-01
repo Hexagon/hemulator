@@ -1035,6 +1035,9 @@ impl PcCpu {
         // We intercept before CPU executes it, so just advance IP past it
         self.cpu.ip = self.cpu.ip.wrapping_add(2);
 
+        // Synchronize BDA keyboard buffer with internal buffer before processing
+        self.sync_bda_keyboard_buffer();
+
         // Get function code from AH register
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
@@ -1049,46 +1052,142 @@ impl PcCpu {
         }
     }
 
+    /// Synchronize BIOS Data Area keyboard buffer with internal keyboard buffer
+    /// This allows programs to read the keyboard buffer directly from memory (BDA at 0040:001Eh)
+    /// instead of only using INT 16h services
+    fn sync_bda_keyboard_buffer(&mut self) {
+        // BDA keyboard buffer structure:
+        // 0040:001Ah - Buffer head (offset to next character to read)
+        // 0040:001Ch - Buffer tail (offset to next free slot)
+        // 0040:001Eh-003Dh - Circular buffer (16 entries, 2 bytes each: scancode + ASCII)
+        // 0040:0080h - Buffer start pointer (0x001E)
+        // 0040:0082h - Buffer end pointer (0x003E)
+        
+        const BDA_KB_BUFFER_HEAD: u32 = 0x041A;
+        const BDA_KB_BUFFER_TAIL: u32 = 0x041C;
+        const BDA_KB_BUFFER_START: u32 = 0x041E;
+        const BDA_KB_BUFFER_END: u32 = 0x043E; // Exclusive end
+        
+        // Read current head and tail pointers
+        let head_offset = self.cpu.memory.read(BDA_KB_BUFFER_HEAD) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
+        let tail_offset = self.cpu.memory.read(BDA_KB_BUFFER_TAIL) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        
+        // Add keys from internal buffer to BDA buffer
+        // Peek at the internal buffer to avoid consuming keys
+        if let Some(scancode) = self.cpu.memory.keyboard.peek_make_code() {
+            // Skip break codes (high bit set) - only store make codes
+            if scancode & 0x80 != 0 {
+                return;
+            }
+            
+            let ascii = self.scancode_to_ascii(scancode);
+            
+            // Calculate next tail position
+            let mut new_tail = tail_offset + 2;
+            if new_tail >= BDA_KB_BUFFER_END as u16 {
+                new_tail = BDA_KB_BUFFER_START as u16; // Wrap around
+            }
+            
+            // Check if buffer is full
+            if new_tail == head_offset {
+                // Buffer full - don't add this key
+                // In a real BIOS, this might beep
+                return;
+            }
+            
+            // Check if this key is already in the BDA buffer at the tail position
+            // to avoid duplicates
+            let addr = 0x400 + tail_offset as u32;
+            let existing_ascii = self.cpu.memory.read(addr);
+            let existing_scancode = self.cpu.memory.read(addr + 1);
+            
+            if existing_ascii == ascii && existing_scancode == scancode {
+                // This key is already in the BDA buffer
+                return;
+            }
+            
+            // Write scancode and ASCII to BDA buffer
+            self.cpu.memory.write(addr, ascii);
+            self.cpu.memory.write(addr + 1, scancode);
+            
+            // Update tail pointer
+            self.cpu.memory.write(BDA_KB_BUFFER_TAIL, (new_tail & 0xFF) as u8);
+            self.cpu.memory.write(BDA_KB_BUFFER_TAIL + 1, ((new_tail >> 8) & 0xFF) as u8);
+            
+            emu_core::logging::log(LogCategory::Interrupts, LogLevel::Trace, || {
+                format!("BDA KB Buffer: Added scancode=0x{:02X} ascii=0x{:02X} at offset 0x{:04X}",
+                       scancode, ascii, tail_offset)
+            });
+        }
+    }
+
     /// INT 16h, AH=00h: Read keystroke (blocking)
     fn int16h_read_keystroke(&mut self) -> u32 {
         // Returns: AH = scan code, AL = ASCII character
         // Note: In a real BIOS, this would block until a key is available
         // We emulate blocking by halting the CPU until keyboard input arrives
 
-        // Check for available keystroke (only make codes are in the buffer now)
-        if self.cpu.memory.keyboard.has_data() {
-            let scancode = self.cpu.memory.keyboard.read_scancode();
-
-            // Convert scancode to ASCII
-            let ascii = self.scancode_to_ascii(scancode);
-
-            // Log at trace level for debugging
-            if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
-                eprintln!(
-                    "INT 16h AH=00h: Read scancode=0x{:02X} ascii=0x{:02X} '{}'",
-                    scancode,
-                    ascii,
-                    if (0x20..0x7F).contains(&ascii) {
-                        ascii as char
-                    } else {
-                        '?'
-                    }
-                );
-            }
-
-            // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
-
-            // Ensure CPU is not halted when we return a key
-            self.cpu.set_halted(false);
+        // Read from BDA keyboard buffer
+        const BDA_KB_BUFFER_HEAD: u32 = 0x041A;
+        const BDA_KB_BUFFER_TAIL: u32 = 0x041C;
+        const BDA_KB_BUFFER_START: u32 = 0x041E;
+        const BDA_KB_BUFFER_END: u32 = 0x043E;
+        
+        // Read current head and tail pointers
+        let head_offset = self.cpu.memory.read(BDA_KB_BUFFER_HEAD) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
+        let tail_offset = self.cpu.memory.read(BDA_KB_BUFFER_TAIL) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        
+        // Check if buffer is empty
+        if head_offset == tail_offset {
+            // No keys in buffer - halt CPU to wait for input
+            // This emulates the blocking behavior of INT 16h AH=00h
+            // The CPU will remain halted until keyboard input arrives and unhalts it
+            self.cpu.set_halted(true);
+            self.cpu.ax = 0x0000u32;
             return 51;
         }
+        
+        // Read scancode and ASCII from buffer
+        let addr = 0x400 + head_offset as u32;
+        let ascii = self.cpu.memory.read(addr);
+        let scancode = self.cpu.memory.read(addr + 1);
+        
+        // Advance head pointer
+        let mut new_head = head_offset + 2;
+        if new_head >= BDA_KB_BUFFER_END as u16 {
+            new_head = BDA_KB_BUFFER_START as u16; // Wrap around
+        }
+        self.cpu.memory.write(BDA_KB_BUFFER_HEAD, (new_head & 0xFF) as u8);
+        self.cpu.memory.write(BDA_KB_BUFFER_HEAD + 1, ((new_head >> 8) & 0xFF) as u8);
+        
+        // Also remove from internal buffer to keep them in sync
+        if self.cpu.memory.keyboard.has_data() {
+            self.cpu.memory.keyboard.read_scancode();
+        }
+        
+        // Log at trace level for debugging
+        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
+            eprintln!(
+                "INT 16h AH=00h: Read scancode=0x{:02X} ascii=0x{:02X} '{}'",
+                scancode,
+                ascii,
+                if (0x20..0x7F).contains(&ascii) {
+                    ascii as char
+                } else {
+                    '?'
+                }
+            );
+        }
 
-        // No keys in buffer - halt CPU to wait for input
-        // This emulates the blocking behavior of INT 16h AH=00h
-        // The CPU will remain halted until keyboard input arrives and unhalts it
-        self.cpu.set_halted(true);
-        self.cpu.ax = 0x0000u32;
+        // AH = scan code, AL = ASCII character
+        self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
+
+        // Ensure CPU is not halted when we return a key
+        self.cpu.set_halted(false);
         51
     }
 
@@ -1097,19 +1196,32 @@ impl PcCpu {
         // Returns: ZF = 1 if no key available, ZF = 0 if key available
         // If key available: AH = scan code, AL = ASCII character
 
-        // Look for the first make code in the buffer (skip any break codes)
-        if let Some(scancode) = self.cpu.memory.keyboard.peek_make_code() {
-            let ascii = self.scancode_to_ascii(scancode);
-
-            // Set ZF = 0 (key available)
-            self.set_zero_flag(false);
-
-            // AH = scan code, AL = ASCII character
-            self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
-        } else {
-            // No make code available
+        // Read from BDA keyboard buffer
+        const BDA_KB_BUFFER_HEAD: u32 = 0x041A;
+        const BDA_KB_BUFFER_TAIL: u32 = 0x041C;
+        
+        // Read current head and tail pointers
+        let head_offset = self.cpu.memory.read(BDA_KB_BUFFER_HEAD) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_HEAD + 1) as u16) << 8);
+        let tail_offset = self.cpu.memory.read(BDA_KB_BUFFER_TAIL) as u16
+            | ((self.cpu.memory.read(BDA_KB_BUFFER_TAIL + 1) as u16) << 8);
+        
+        // Check if buffer is empty
+        if head_offset == tail_offset {
+            // No keys available
             self.set_zero_flag(true); // ZF = 1 (no key)
             self.cpu.ax = 0x0000u32;
+        } else {
+            // Key available - peek at it (don't remove from buffer)
+            let addr = 0x400 + head_offset as u32;
+            let ascii = self.cpu.memory.read(addr);
+            let scancode = self.cpu.memory.read(addr + 1);
+            
+            // Set ZF = 0 (key available)
+            self.set_zero_flag(false);
+            
+            // AH = scan code, AL = ASCII character
+            self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
         }
 
         51
