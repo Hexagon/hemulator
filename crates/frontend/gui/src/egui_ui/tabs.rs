@@ -12,6 +12,7 @@ pub enum Tab {
     Help,
     Debug,
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
+    About,
 }
 
 /// Actions that can be triggered from tabs
@@ -39,6 +40,7 @@ pub struct TabManager {
     pub help_visible: bool,
     pub debug_visible: bool,
     pub pc_config_visible: bool,
+    pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
@@ -54,6 +56,7 @@ impl TabManager {
             help_visible: false,
             debug_visible: false,
             pc_config_visible: false,
+            about_visible: false,
             debug_info: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
@@ -87,6 +90,11 @@ impl TabManager {
     pub fn show_debug_tab(&mut self) {
         self.debug_visible = true;
         self.active_tab = Tab::Debug;
+    }
+
+    pub fn show_about_tab(&mut self) {
+        self.about_visible = true;
+        self.active_tab = Tab::About;
     }
 
     pub fn show_new_project_tab(&mut self) {
@@ -177,6 +185,24 @@ impl TabManager {
                 }
             }
 
+            if self.about_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::About, "About");
+                // Use a colored button for the close icon to ensure visibility
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                );
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close About tab")
+                    .clicked()
+                {
+                    self.about_visible = false;
+                    if self.active_tab == Tab::About {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
+
             // PC Config tab is deprecated - all info now shown in property pane
             // Keep the data structure for backward compatibility but don't show the tab
             // if self.pc_config_visible {
@@ -194,6 +220,7 @@ impl TabManager {
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
+            Tab::About => self.render_about_tab(ui),
             // Keep PcConfig render for backward compat, but it won't be accessible
             Tab::PcConfig => self.render_pc_config_tab(ui),
         }
@@ -455,6 +482,77 @@ impl TabManager {
                     ui.label("No PC configuration available");
                     ui.label("This tab is only available when a PC system is loaded");
                 }
+            });
+    }
+
+    fn render_about_tab(&self, ui: &mut Ui) {
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(20.0);
+                    ui.heading(egui::RichText::new("Hemulator").size(32.0));
+                    ui.add_space(5.0);
+                    ui.label(egui::RichText::new("Multi-System Console Emulator").size(16.0));
+                    ui.add_space(20.0);
+                });
+
+                ui.separator();
+                ui.add_space(10.0);
+
+                ui.heading("Version Information");
+                ui.label("Version: 0.1.0");
+                ui.add_space(10.0);
+
+                ui.heading("License");
+                ui.label("MIT License");
+                ui.label("Copyright (c) 2025");
+                ui.add_space(10.0);
+
+                ui.heading("About");
+                ui.label("A cross-platform, multi-system console emulator written in Rust,");
+                ui.label("supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation");
+                ui.label("with comprehensive save state management and customizable controls.");
+                ui.add_space(10.0);
+
+                ui.heading("Supported Systems");
+                ui.label("✅ NES (Nintendo Entertainment System) - Fully working");
+                ui.label("⚠️ PC (IBM PC/XT) - Functional");
+                ui.label("🚧 Atari 2600 - In development");
+                ui.label("🚧 Game Boy / Game Boy Color - In development");
+                ui.label("🚧 SNES (Super Nintendo) - In development");
+                ui.label("🚧 N64 (Nintendo 64) - In development");
+                ui.add_space(10.0);
+
+                ui.heading("Links");
+                ui.horizontal(|ui| {
+                    ui.label("GitHub:");
+                    ui.hyperlink_to(
+                        "github.com/Hexagon/hemulator",
+                        "https://github.com/Hexagon/hemulator",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("README:");
+                    ui.hyperlink_to(
+                        "Documentation",
+                        "https://github.com/Hexagon/hemulator/blob/main/README.md",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("User Manual:");
+                    ui.hyperlink_to(
+                        "MANUAL.md",
+                        "https://github.com/Hexagon/hemulator/blob/main/docs/MANUAL.md",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("License:");
+                    ui.hyperlink_to(
+                        "MIT License",
+                        "https://github.com/Hexagon/hemulator/blob/main/LICENSE",
+                    );
+                });
             });
     }
 }
