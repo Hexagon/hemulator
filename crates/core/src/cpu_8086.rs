@@ -7158,7 +7158,7 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // Group 2 opcodes (0xC1) - Shift/rotate r/m16 by immediate byte (80186+)
+            // Group 2 opcodes (0xC1) - Shift/rotate r/m16/32 by immediate byte (80186+)
             0xC1 => {
                 if !self.model.supports_80186_instructions() {
                     // Invalid opcode on 8086/8088
@@ -7168,19 +7168,37 @@ impl<M: Memory8086> Cpu8086<M> {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = self.fetch_u8();
-                // Use RMW helpers to avoid double-fetching displacement
-                let (val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = self.shift_rotate_16(val, op, count);
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.cycles += if modbits == 0b11 {
-                    5 + (4 * count as u64)
+
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let (val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = self.shift_rotate_32(val, op, count);
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 {
+                        5 + (4 * count as u64)
+                    } else {
+                        17 + (4 * count as u64)
+                    };
+                    if modbits == 0b11 {
+                        5 + (4 * count as u32)
+                    } else {
+                        17 + (4 * count as u32)
+                    }
                 } else {
-                    17 + (4 * count as u64)
-                };
-                if modbits == 0b11 {
-                    5 + (4 * count as u32)
-                } else {
-                    17 + (4 * count as u32)
+                    // 16-bit operation
+                    let (val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = self.shift_rotate_16(val, op, count);
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 {
+                        5 + (4 * count as u64)
+                    } else {
+                        17 + (4 * count as u64)
+                    };
+                    if modbits == 0b11 {
+                        5 + (4 * count as u32)
+                    } else {
+                        17 + (4 * count as u32)
+                    }
                 }
             }
 
@@ -7286,19 +7304,33 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // Group 2 opcodes (0xD1) - Shift/rotate r/m16 by 1
+            // Group 2 opcodes (0xD1) - Shift/rotate r/m16/32 by 1
             0xD1 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
-                // Use RMW helpers to avoid double-fetching displacement
-                let (val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = self.shift_rotate_16(val, op, 1);
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.cycles += if modbits == 0b11 { 2 } else { 15 };
-                if modbits == 0b11 {
-                    2
+
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let (val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = self.shift_rotate_32(val, op, 1);
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 { 2 } else { 15 };
+                    if modbits == 0b11 {
+                        2
+                    } else {
+                        15
+                    }
                 } else {
-                    15
+                    // 16-bit operation
+                    let (val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = self.shift_rotate_16(val, op, 1);
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 { 2 } else { 15 };
+                    if modbits == 0b11 {
+                        2
+                    } else {
+                        15
+                    }
                 }
             }
 
@@ -7323,24 +7355,42 @@ impl<M: Memory8086> Cpu8086<M> {
                 }
             }
 
-            // Group 2 opcodes (0xD3) - Shift/rotate r/m16 by CL
+            // Group 2 opcodes (0xD3) - Shift/rotate r/m16/32 by CL
             0xD3 => {
                 let modrm = self.fetch_u8();
                 let (modbits, op, rm) = Self::decode_modrm(modrm);
                 let count = (self.cx & 0xFF) as u8;
-                // Use RMW helpers to avoid double-fetching displacement
-                let (val, seg, offset) = self.read_rmw16(modbits, rm);
-                let result = self.shift_rotate_16(val, op, count);
-                self.write_rmw16(modbits, rm, result, seg, offset);
-                self.cycles += if modbits == 0b11 {
-                    8 + (4 * count as u64)
+
+                if self.operand_size_override && self.model.supports_80386_instructions() {
+                    // 32-bit operation
+                    let (val, seg, offset) = self.read_rmw32(modbits, rm);
+                    let result = self.shift_rotate_32(val, op, count);
+                    self.write_rmw32(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 {
+                        8 + (4 * count as u64)
+                    } else {
+                        20 + (4 * count as u64)
+                    };
+                    if modbits == 0b11 {
+                        8 + (4 * count as u32)
+                    } else {
+                        20 + (4 * count as u32)
+                    }
                 } else {
-                    20 + (4 * count as u64)
-                };
-                if modbits == 0b11 {
-                    8 + (4 * count as u32)
-                } else {
-                    20 + (4 * count as u32)
+                    // 16-bit operation
+                    let (val, seg, offset) = self.read_rmw16(modbits, rm);
+                    let result = self.shift_rotate_16(val, op, count);
+                    self.write_rmw16(modbits, rm, result, seg, offset);
+                    self.cycles += if modbits == 0b11 {
+                        8 + (4 * count as u64)
+                    } else {
+                        20 + (4 * count as u64)
+                    };
+                    if modbits == 0b11 {
+                        8 + (4 * count as u32)
+                    } else {
+                        20 + (4 * count as u32)
+                    }
                 }
             }
 
