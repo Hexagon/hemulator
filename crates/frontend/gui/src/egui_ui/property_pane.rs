@@ -4,10 +4,12 @@ use crate::display_filter::DisplayFilter;
 use egui::{ScrollArea, Ui};
 
 /// Actions that can be triggered from the property pane
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PropertyAction {
-    SaveState(u8), // Slot number 1-5
-    LoadState(u8), // Slot number 1-5
+    SaveState(u8),     // Slot number 1-5
+    LoadState(u8),     // Slot number 1-5
+    MountFile(String), // Mount point ID
+    EjectFile(String), // Mount point ID
 }
 
 pub struct PropertyPane {
@@ -22,6 +24,9 @@ pub struct PropertyPane {
 
     // FPS sparkline data (last 60 frames)
     fps_history: Vec<f32>,
+
+    // Target FPS from system timing mode (for sparkline reference line)
+    pub target_fps: f32,
 
     // PC-specific BDA values (only populated for PC system)
     pub pc_bda_values: Option<PcBdaValues>,
@@ -77,6 +82,7 @@ impl PropertyPane {
             cpu_freq_actual: None,
             rendering_backend: "Software".to_string(),
             fps_history: Vec::with_capacity(60),
+            target_fps: 60.0,
             pc_bda_values: None,
             display_filter: DisplayFilter::None,
             emulation_speed_percent: 100,
@@ -124,7 +130,7 @@ impl PropertyPane {
                                 .fps_history
                                 .iter()
                                 .fold(0.0f32, |a, &b| a.max(b))
-                                .max(60.0);
+                                .max(self.target_fps);
                             let min_fps = 0.0f32;
 
                             use egui::*;
@@ -160,12 +166,14 @@ impl PropertyPane {
                                     ));
                                 }
 
-                                // Draw reference line at 60 FPS
-                                if max_fps > 60.0 {
-                                    let normalized_60 = (60.0 - min_fps) / (max_fps - min_fps);
-                                    let y_60 = rect.bottom() - normalized_60 * rect.height();
+                                // Draw reference line at target FPS
+                                if max_fps > self.target_fps {
+                                    let normalized_target =
+                                        (self.target_fps - min_fps) / (max_fps - min_fps);
+                                    let y_target =
+                                        rect.bottom() - normalized_target * rect.height();
                                     painter.line_segment(
-                                        [pos2(rect.left(), y_60), pos2(rect.right(), y_60)],
+                                        [pos2(rect.left(), y_target), pos2(rect.right(), y_target)],
                                         Stroke::new(0.5, Color32::from_rgb(100, 100, 100)),
                                     );
                                 }
@@ -446,10 +454,12 @@ impl PropertyPane {
                                     if let Some(ref file) = mount.mounted_file {
                                         ui.label(file);
                                         if ui.button("Eject").clicked() {
-                                            // TODO: Handle eject
+                                            self.pending_action =
+                                                Some(PropertyAction::EjectFile(mount.id.clone()));
                                         }
                                     } else if ui.button("Mount...").clicked() {
-                                        // TODO: Handle mount
+                                        self.pending_action =
+                                            Some(PropertyAction::MountFile(mount.id.clone()));
                                     }
                                 });
                             }

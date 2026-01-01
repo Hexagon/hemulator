@@ -1989,6 +1989,12 @@ fn main() {
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
         egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
 
+        // Update target FPS from system timing
+        if rom_loaded {
+            let timing = sys.timing();
+            egui_app.property_pane.target_fps = timing.frame_rate_hz() as f32;
+        }
+
         // Update mount points from current system
         if rom_loaded {
             use egui_ui::property_pane::MountPoint;
@@ -2513,6 +2519,64 @@ fn main() {
                         }
                     } else {
                         egui_app.status_bar.set_message("No ROM loaded".to_string());
+                    }
+                }
+                PropertyAction::MountFile(mount_id) => {
+                    // Find the mount point info to get allowed extensions
+                    let mount_points = sys.mount_points();
+                    if let Some(mount_info) = mount_points.iter().find(|mp| mp.id == mount_id) {
+                        // Create file dialog with appropriate filters
+                        let extensions: Vec<&str> =
+                            mount_info.extensions.iter().map(|s| s.as_str()).collect();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter(&mount_info.name, &extensions)
+                            .add_filter("All Files", &["*"])
+                            .pick_file()
+                        {
+                            match fs::read(&path) {
+                                Ok(data) => {
+                                    if let Err(e) = sys.mount(&mount_id, &data) {
+                                        egui_app
+                                            .status_bar
+                                            .set_message(format!("Error mounting: {}", e));
+                                    } else {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        runtime_state.set_mount(mount_id.clone(), path_str.clone());
+                                        egui_app.status_bar.set_message(format!(
+                                            "Mounted {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file")
+                                        ));
+                                        egui_app.tab_manager.add_log(format!(
+                                            "Mounted {} to {}",
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("file"),
+                                            mount_info.name
+                                        ));
+                                    }
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Error reading file: {}", e));
+                                }
+                            }
+                        }
+                    }
+                }
+                PropertyAction::EjectFile(mount_id) => {
+                    if let Err(e) = sys.unmount(&mount_id) {
+                        egui_app
+                            .status_bar
+                            .set_message(format!("Error ejecting: {}", e));
+                    } else {
+                        runtime_state.current_mounts.remove(&mount_id);
+                        egui_app.status_bar.set_message("Ejected".to_string());
+                        egui_app
+                            .tab_manager
+                            .add_log(format!("Ejected {}", mount_id));
                     }
                 }
             }
