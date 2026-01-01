@@ -132,8 +132,8 @@ mod tests {
 
     #[test]
     fn test_mbc2_rom_banking() {
-        let mut rom = vec![0; 0x40000]; // 256KB (16 banks)
-                                        // Mark each bank with its number
+        // 256KB (16 banks) - mark each bank with its number
+        let mut rom = vec![0; 0x40000];
         for bank in 0..16 {
             rom[bank * 0x4000] = bank as u8;
         }
