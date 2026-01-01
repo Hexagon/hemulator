@@ -819,6 +819,11 @@ impl System for PcSystem {
                     return Err(PcError::InvalidExecutable);
                 }
                 self.cpu.bus_mut().mount_hard_drive(data.to_vec());
+
+                // Update BIOS Data Area (BDA) at 0x0040:0x0075 to reflect hard drive count
+                // This is CRITICAL for DOS to detect the drive
+                self.cpu.bus_mut().write(0x475, 1); // 1 hard drive installed
+
                 Ok(())
             }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
@@ -844,6 +849,11 @@ impl System for PcSystem {
             }
             "HardDrive" => {
                 self.cpu.bus_mut().unmount_hard_drive();
+
+                // Update BIOS Data Area (BDA) at 0x0040:0x0075 to reflect no hard drives
+                // This is CRITICAL for DOS to stop seeing a non-existent drive
+                self.cpu.bus_mut().write(0x475, 0); // 0 hard drives installed
+
                 Ok(())
             }
             _ => Err(PcError::InvalidMountPoint(mount_point_id.to_string())),
@@ -974,8 +984,22 @@ mod tests {
         assert!(sys.mount("HardDrive", &hd_data).is_ok());
         assert!(sys.is_mounted("HardDrive"));
 
+        // Verify BDA at 0x475 is updated to reflect 1 hard drive
+        let hd_count = sys.cpu.bus().read(0x475);
+        assert_eq!(
+            hd_count, 1,
+            "BDA should reflect 1 hard drive after mounting"
+        );
+
         sys.unmount("HardDrive").unwrap();
         assert!(!sys.is_mounted("HardDrive"));
+
+        // Verify BDA at 0x475 is updated to reflect 0 hard drives
+        let hd_count_after_unmount = sys.cpu.bus().read(0x475);
+        assert_eq!(
+            hd_count_after_unmount, 0,
+            "BDA should reflect 0 hard drives after unmounting"
+        );
     }
 
     #[test]
