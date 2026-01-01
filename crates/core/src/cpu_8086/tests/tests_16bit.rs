@@ -3,9 +3,7 @@
 //! This module contains tests for 16-bit operations on AX, BX, CX, DX, SI, DI, BP, SP
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{
-    Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF,
-};
+use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
 
 use super::physical_address;
 
@@ -1351,8 +1349,10 @@ fn test_repe_cmpsw_af_with_borrow() {
     cpu.cx = 0x0001; // Compare one word
 
     // Write test values to memory
-    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0010); // DS:SI
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001); // ES:DI
+    cpu.memory
+        .write_u16(physical_address(0x1000, 0x0100), 0x0010); // DS:SI
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001); // ES:DI
 
     // REPE CMPSW (0xF3 0xA7)
     cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA7]);
@@ -1382,8 +1382,10 @@ fn test_repe_cmpsw_af_no_borrow() {
     cpu.di = 0x0200;
     cpu.cx = 0x0001;
 
-    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0012);
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x1000, 0x0100), 0x0012);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA7]);
     cpu.ip = 0x0000;
@@ -1410,7 +1412,8 @@ fn test_repe_scasw_af_with_borrow() {
     cpu.cx = 0x0001;
     cpu.ax = 0x0010;
 
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     // REPE SCASW (0xF3 0xAF)
     cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAF]);
@@ -1438,7 +1441,8 @@ fn test_repe_scasw_af_no_borrow() {
     cpu.cx = 0x0001;
     cpu.ax = 0x0012;
 
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAF]);
     cpu.ip = 0x0000;
@@ -1465,8 +1469,10 @@ fn test_repne_cmpsw_af_with_borrow() {
     cpu.di = 0x0200;
     cpu.cx = 0x0001;
 
-    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0010);
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x1000, 0x0100), 0x0010);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     // REPNE CMPSW (0xF2 0xA7)
     cpu.memory.load_program(0xFFFF0, &[0xF2, 0xA7]);
@@ -1494,8 +1500,10 @@ fn test_repne_cmpsw_af_no_borrow() {
     cpu.di = 0x0200;
     cpu.cx = 0x0001;
 
-    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0012);
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x1000, 0x0100), 0x0012);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     cpu.memory.load_program(0xFFFF0, &[0xF2, 0xA7]);
     cpu.ip = 0x0000;
@@ -1521,7 +1529,8 @@ fn test_repne_scasw_af_with_borrow() {
     cpu.cx = 0x0001;
     cpu.ax = 0x0010;
 
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     // REPNE SCASW (0xF2 0xAF)
     cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAF]);
@@ -1548,7 +1557,8 @@ fn test_repne_scasw_af_no_borrow() {
     cpu.cx = 0x0001;
     cpu.ax = 0x0012;
 
-    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+    cpu.memory
+        .write_u16(physical_address(0x2000, 0x0200), 0x0001);
 
     cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAF]);
     cpu.ip = 0x0000;
