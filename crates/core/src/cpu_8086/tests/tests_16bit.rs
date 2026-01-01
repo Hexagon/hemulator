@@ -3,7 +3,9 @@
 //! This module contains tests for 16-bit operations on AX, BX, CX, DX, SI, DI, BP, SP
 
 use crate::cpu_8086::ArrayMemory;
-use crate::cpu_8086::{Cpu8086, CpuModel, Memory8086, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF};
+use crate::cpu_8086::{
+    Cpu8086, CpuModel, Memory8086, FLAG_AF, FLAG_CF, FLAG_OF, FLAG_SF, FLAG_ZF,
+};
 
 use super::physical_address;
 
@@ -1329,4 +1331,233 @@ fn test_lodsw_preserves_high_bits() {
         "High 16 bits should be preserved"
     );
     assert_eq!(cpu.si & 0xFFFF, 0x0002, "SI should be incremented by 2");
+}
+
+// Tests for AF flag in REP-prefixed 16-bit string operations
+// These tests validate the fix for missing AF calculations similar to PR #222
+
+#[test]
+fn test_repe_cmpsw_af_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: src=0x0010, dst=0x0001
+    // Subtraction: 0x0010 - 0x0001 = 0x000F
+    // AF should be set (borrow from bit 4: (0x10 & 0xF) = 0, (0x01 & 0xF) = 1, 0 < 1)
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001; // Compare one word
+
+    // Write test values to memory
+    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0010); // DS:SI
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001); // ES:DI
+
+    // REPE CMPSW (0xF3 0xA7)
+    cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA7]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    // AF should be set when there's a borrow from bit 4 to bit 3
+    assert!(
+        cpu.get_flag(FLAG_AF),
+        "AF should be set when (src & 0xF) < (dst & 0xF)"
+    );
+}
+
+#[test]
+fn test_repe_cmpsw_af_no_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: src=0x0012, dst=0x0001
+    // Subtraction: 0x0012 - 0x0001 = 0x0011
+    // AF should NOT be set (no borrow: (0x12 & 0xF) = 2, (0x01 & 0xF) = 1, 2 >= 1)
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+
+    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0012);
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    cpu.memory.load_program(0xFFFF0, &[0xF3, 0xA7]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        !cpu.get_flag(FLAG_AF),
+        "AF should not be set when (src & 0xF) >= (dst & 0xF)"
+    );
+}
+
+#[test]
+fn test_repe_scasw_af_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: AX=0x0010, [ES:DI]=0x0001
+    // Subtraction: 0x0010 - 0x0001 = 0x000F
+    // AF should be set
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+    cpu.ax = 0x0010;
+
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    // REPE SCASW (0xF3 0xAF)
+    cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAF]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        cpu.get_flag(FLAG_AF),
+        "AF should be set when (AX & 0xF) < (val & 0xF)"
+    );
+}
+
+#[test]
+fn test_repe_scasw_af_no_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: AX=0x0012, [ES:DI]=0x0001
+    // Subtraction: 0x0012 - 0x0001 = 0x0011
+    // AF should NOT be set
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+    cpu.ax = 0x0012;
+
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    cpu.memory.load_program(0xFFFF0, &[0xF3, 0xAF]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        !cpu.get_flag(FLAG_AF),
+        "AF should not be set when (AX & 0xF) >= (val & 0xF)"
+    );
+}
+
+#[test]
+fn test_repne_cmpsw_af_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: src=0x0010, dst=0x0001
+    // AF should be set
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+
+    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0010);
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    // REPNE CMPSW (0xF2 0xA7)
+    cpu.memory.load_program(0xFFFF0, &[0xF2, 0xA7]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        cpu.get_flag(FLAG_AF),
+        "AF should be set when (src & 0xF) < (dst & 0xF)"
+    );
+}
+
+#[test]
+fn test_repne_cmpsw_af_no_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: src=0x0012, dst=0x0001
+    // AF should NOT be set
+    cpu.ds = 0x1000;
+    cpu.es = 0x2000;
+    cpu.si = 0x0100;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+
+    cpu.memory.write_u16(physical_address(0x1000, 0x0100), 0x0012);
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    cpu.memory.load_program(0xFFFF0, &[0xF2, 0xA7]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        !cpu.get_flag(FLAG_AF),
+        "AF should not be set when (src & 0xF) >= (dst & 0xF)"
+    );
+}
+
+#[test]
+fn test_repne_scasw_af_with_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: AX=0x0010, [ES:DI]=0x0001
+    // AF should be set
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+    cpu.ax = 0x0010;
+
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    // REPNE SCASW (0xF2 0xAF)
+    cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAF]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        cpu.get_flag(FLAG_AF),
+        "AF should be set when (AX & 0xF) < (val & 0xF)"
+    );
+}
+
+#[test]
+fn test_repne_scasw_af_no_borrow() {
+    let mem = ArrayMemory::new();
+    let mut cpu = Cpu8086::new(mem);
+
+    // Test case: AX=0x0012, [ES:DI]=0x0001
+    // AF should NOT be set
+    cpu.es = 0x2000;
+    cpu.di = 0x0200;
+    cpu.cx = 0x0001;
+    cpu.ax = 0x0012;
+
+    cpu.memory.write_u16(physical_address(0x2000, 0x0200), 0x0001);
+
+    cpu.memory.load_program(0xFFFF0, &[0xF2, 0xAF]);
+    cpu.ip = 0x0000;
+    cpu.cs = 0xFFFF;
+
+    cpu.step();
+
+    assert!(
+        !cpu.get_flag(FLAG_AF),
+        "AF should not be set when (AX & 0xF) >= (val & 0xF)"
+    );
 }

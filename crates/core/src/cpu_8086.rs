@@ -1831,9 +1831,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u32) < (dst as u32);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            let af = Self::calc_af_sub_16(src, dst);
                             self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2u32);
                                 self.di = self.di.wrapping_sub(2u32);
@@ -1889,9 +1891,11 @@ impl<M: Memory8086> Cpu8086<M> {
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
                                 != 0;
+                            let af = Self::calc_af_sub_16(self.ax as u16, val);
                             self.update_flags_16(result);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
                             if self.get_flag(FLAG_DF) {
                                 self.di = self.di.wrapping_sub(2u32);
                             } else {
@@ -1967,9 +1971,11 @@ impl<M: Memory8086> Cpu8086<M> {
                             let result = src.wrapping_sub(dst);
                             let borrow = (src as u32) < (dst as u32);
                             let overflow = ((src ^ dst) & (src ^ result) & 0x8000) != 0;
+                            let af = Self::calc_af_sub_16(src, dst);
                             self.update_flags_16(result as u16);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
                             if self.get_flag(FLAG_DF) {
                                 self.si = self.si.wrapping_sub(2u32);
                                 self.di = self.di.wrapping_sub(2u32);
@@ -2025,9 +2031,11 @@ impl<M: Memory8086> Cpu8086<M> {
                                 & ((self.ax as u16) ^ (result as u16))
                                 & 0x8000)
                                 != 0;
+                            let af = Self::calc_af_sub_16(self.ax as u16, val);
                             self.update_flags_16(result);
                             self.set_flag(FLAG_CF, borrow);
                             self.set_flag(FLAG_OF, overflow);
+                            self.set_flag(FLAG_AF, af);
                             if self.get_flag(FLAG_DF) {
                                 self.di = self.di.wrapping_sub(2u32);
                             } else {
