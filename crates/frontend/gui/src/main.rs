@@ -1,12 +1,8 @@
 pub mod display_filter;
 mod hemu_project;
-mod menu;
-mod popup_window;
 mod rom_detect;
 mod save_state;
-mod selector;
 mod settings;
-mod status_bar;
 mod system_adapter;
 mod ui_render;
 pub mod video_processor;
@@ -16,21 +12,17 @@ pub mod egui_ui;
 use emu_core::{types::Frame, System};
 use egui_ui::EguiApp;
 use hemu_project::HemuProject;
-use menu::{MenuAction, MenuBar};
-use popup_window::PopupWindowManager;
 use rodio::{OutputStream, Source};
 use rom_detect::{detect_rom_type, SystemType};
 use save_state::GameSaves;
-use selector::SelectorManager;
 use settings::Settings;
-use status_bar::StatusBar;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
-use window_backend::{string_to_key, Key, Sdl2Backend, Sdl2EguiBackend, WindowBackend};
+use window_backend::{string_to_key, Key, Sdl2EguiBackend, WindowBackend};
 
 /// Runtime state for tracking currently loaded project and mounts
 /// This replaces the mount_points field in Settings which has been deprecated
@@ -1871,9 +1863,7 @@ fn main() {
     let window_width = settings.window_width.max(width);
     let window_height = settings.window_height.max(height);
 
-    // Use egui backend instead of old custom UI
-    let use_egui = true; // TODO: Make this configurable if needed
-
+    // Create egui backend
     let mut egui_backend = match Sdl2EguiBackend::new(
         "Hemulator - Multi-System Emulator",
         window_width as u32,
@@ -1914,23 +1904,10 @@ fn main() {
         eprintln!("Warning: Failed to start audio playback: {}", e);
     }
 
-    // Buffer for rendering
-    let mut buffer = if rom_loaded {
-        vec![0; width * height]
-    } else {
-        ui_render::create_splash_screen_with_status(width, height, &status_message)
-    };
-
-    // Popup window manager (replaces old overlay system)
-    let mut popup_manager = PopupWindowManager::new();
-
-    // Selector manager (for slot/speed/disk format selection)
-    let mut selector_manager = SelectorManager::new();
-
     // Timing trackers
     let mut last_frame = Instant::now();
 
-    // FPS tracking (used by the debug overlay)
+    // FPS tracking
     let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
     let mut current_fps = 60.0;
 
@@ -1938,25 +1915,11 @@ fn main() {
     const SAMPLE_RATE: usize = 44100;
 
     // Load saves for current ROM if available
-    let mut game_saves = if let Some(ref hash) = rom_hash {
+    let _game_saves = if let Some(ref hash) = rom_hash {
         GameSaves::load(hash)
     } else {
         GameSaves::default()
     };
-
-    // Initialize menu bar and status bar
-    let mut menu_bar = MenuBar::new();
-    let mut status_bar = StatusBar::new();
-    status_bar.system_name = sys.system_name().to_string();
-    status_bar.message = status_message.clone();
-    status_bar.paused = settings.emulation_speed == 0.0;
-    status_bar.speed = settings.emulation_speed as f32;
-
-    // Initialize mount points menu
-    menu_bar.update_mount_points(&sys.mount_points(), &runtime_state.current_mounts);
-
-    // Track logging state
-    let mut logging_active = false;
 
     fn blend_over(base: &[u32], overlay: &[u32]) -> Vec<u32> {
         debug_assert_eq!(base.len(), overlay.len());
