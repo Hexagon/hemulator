@@ -1,26 +1,7 @@
 //! Right-side property pane with collapsible sections
 
+use crate::display_filter::DisplayFilter;
 use egui::{ScrollArea, Ui};
-
-/// Display filter options
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisplayFilter {
-    None,
-    Scanlines,
-    Phosphor,
-    CRT,
-}
-
-impl DisplayFilter {
-    pub fn as_str(&self) -> &str {
-        match self {
-            DisplayFilter::None => "None",
-            DisplayFilter::Scanlines => "Scanlines",
-            DisplayFilter::Phosphor => "Phosphor",
-            DisplayFilter::CRT => "CRT",
-        }
-    }
-}
 
 /// Actions that can be triggered from the property pane
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +122,7 @@ impl PropertyPane {
                             ui.label("Display Filter:");
                         });
                         egui::ComboBox::from_id_salt("display_filter")
-                            .selected_text(self.display_filter.as_str())
+                            .selected_text(self.display_filter.name())
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
                                     &mut self.display_filter,
@@ -150,18 +131,28 @@ impl PropertyPane {
                                 );
                                 ui.selectable_value(
                                     &mut self.display_filter,
-                                    DisplayFilter::Scanlines,
-                                    "Scanlines",
+                                    DisplayFilter::SonyTrinitron,
+                                    "Sony Trinitron",
                                 );
                                 ui.selectable_value(
                                     &mut self.display_filter,
-                                    DisplayFilter::Phosphor,
-                                    "Phosphor",
+                                    DisplayFilter::Ibm5151,
+                                    "IBM 5151",
                                 );
                                 ui.selectable_value(
                                     &mut self.display_filter,
-                                    DisplayFilter::CRT,
-                                    "CRT",
+                                    DisplayFilter::Commodore1702,
+                                    "Commodore 1702",
+                                );
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::SharpLcd,
+                                    "Sharp LCD",
+                                );
+                                ui.selectable_value(
+                                    &mut self.display_filter,
+                                    DisplayFilter::RcaVictor,
+                                    "RCA Victor",
                                 );
                             });
 
@@ -170,10 +161,7 @@ impl PropertyPane {
                             ui.label(format!("{}%", self.emulation_speed_percent));
                         });
 
-                        ui.add(
-                            egui::Slider::new(&mut self.emulation_speed_percent, 0..=400).text("%"),
-                        );
-
+                        // Removed slider per requirements, only showing buttons
                         ui.horizontal(|ui| {
                             if ui.button("25%").clicked() {
                                 self.emulation_speed_percent = 25;
