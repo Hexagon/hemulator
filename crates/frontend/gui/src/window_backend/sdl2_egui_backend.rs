@@ -1,19 +1,14 @@
-//! SDL2 backend with egui integration
+//! SDL2 backend with egui integration using egui-sdl2-gl
 
 use crate::window_backend::{Key, WindowBackend};
-use egui_glow::EguiGlow;
-use glow::HasContext;
 use std::any::Any;
 use std::error::Error;
-use std::time::Instant;
 
 pub struct Sdl2EguiBackend {
     sdl_context: sdl2::Sdl,
-    video_subsystem: sdl2::VideoSubsystem,
     window: sdl2::video::Window,
     _gl_context: sdl2::video::GLContext,
-    gl: std::rc::Rc<glow::Context>,
-    egui_glow: EguiGlow,
+    egui_sdl2: egui_sdl2_gl::EguiSDL2,
     event_pump: sdl2::EventPump,
     
     // State tracking
@@ -21,8 +16,6 @@ pub struct Sdl2EguiBackend {
     keys_pressed: std::collections::HashSet<Key>,
     sdl2_scancodes_pressed: Vec<sdl2::keyboard::Scancode>,
     sdl2_scancodes_released: Vec<sdl2::keyboard::Scancode>,
-    mouse_pos: (i32, i32),
-    start_time: Instant,
 }
 
 impl Sdl2EguiBackend {
@@ -30,12 +23,11 @@ impl Sdl2EguiBackend {
         let sdl_context = sdl2::init()?;
         let video_subsystem = sdl_context.video()?;
 
-        // Set up OpenGL attributes
+        // Set up OpenGL attributes for egui
         let gl_attr = video_subsystem.gl_attr();
         gl_attr.set_context_profile(sdl2::video::GLProfile::Core);
-        gl_attr.set_context_version(3, 3);
+        gl_attr.set_context_version(3, 2);
         gl_attr.set_double_buffer(true);
-        gl_attr.set_depth_size(24);
 
         let window = video_subsystem
             .window(title, width, height)
@@ -50,78 +42,43 @@ impl Sdl2EguiBackend {
         // Enable vsync
         video_subsystem.gl_set_swap_interval(sdl2::video::SwapInterval::VSync)?;
 
-        // Load OpenGL function pointers
-        let gl = unsafe {
-            glow::Context::from_loader_function(|s| {
-                video_subsystem.gl_get_proc_address(s) as *const _
-            })
-        };
-        let gl = std::rc::Rc::new(gl);
-
-        // Initialize egui
-        let egui_glow = EguiGlow::new(&window, gl.clone(), None, None);
+        // Initialize egui-sdl2
+        let egui_sdl2 = egui_sdl2_gl::EguiSDL2::new(&window, &video_subsystem);
 
         let event_pump = sdl_context.event_pump()?;
 
         Ok(Self {
             sdl_context,
-            video_subsystem,
             window,
             _gl_context: gl_context,
-            gl,
-            egui_glow,
+            egui_sdl2,
             event_pump,
             keys_down: std::collections::HashSet::new(),
             keys_pressed: std::collections::HashSet::new(),
             sdl2_scancodes_pressed: Vec::new(),
             sdl2_scancodes_released: Vec::new(),
-            mouse_pos: (0, 0),
-            start_time: Instant::now(),
         })
     }
 
     /// Get the egui context for rendering UI
     pub fn egui_ctx(&self) -> &egui::Context {
-        self.egui_glow.egui_ctx()
+        self.egui_sdl2.egui_ctx()
     }
 
     /// Begin an egui frame
-    pub fn begin_frame(&mut self) {
-        let (width, height) = self.window.size();
-        self.egui_glow.begin_frame(egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(width as f32, height as f32),
-            )),
-            time: Some(self.start_time.elapsed().as_secs_f64()),
-            ..Default::default()
-        });
+    pub fn begin_frame(&mut self, window: &sdl2::video::Window) {
+        self.egui_sdl2.begin_frame(window);
     }
 
     /// End an egui frame and render
-    pub fn end_frame(&mut self) {
-        let egui::FullOutput {
-            platform_output: _,
-            textures_delta,
-            shapes,
-            pixels_per_point,
-            viewport_output: _,
-        } = self.egui_glow.end_frame();
-
-        let clipped_primitives = self.egui_glow.egui_ctx().tessellate(shapes, pixels_per_point);
-        
-        unsafe {
-            self.gl.clear_color(0.1, 0.1, 0.1, 1.0);
-            self.gl.clear(glow::COLOR_BUFFER_BIT);
-        }
-
-        self.egui_glow.paint(&clipped_primitives, &textures_delta);
-
+    pub fn end_frame(&mut self, window: &sdl2::video::Window) {
+        self.egui_sdl2.end_frame(window);
         self.window.gl_swap_window();
     }
 
     /// Handle SDL2 events and update egui input
-    pub fn handle_events(&mut self) -> bool {
+    /// Returns false if the window should close
+    pub fn handle_events(&mut self, window: &sdl2::video::Window) -> bool {
         self.keys_pressed.clear();
         self.sdl2_scancodes_pressed.clear();
         self.sdl2_scancodes_released.clear();
@@ -129,37 +86,39 @@ impl Sdl2EguiBackend {
         // Collect events first to avoid borrow checker issues
         let events: Vec<_> = self.event_pump.poll_iter().collect();
         
-        for event in events {
-            // Pass events to egui
-            match &event {
-                sdl2::event::Event::Quit { .. } => {
-                    return false;
-                }
-                sdl2::event::Event::KeyDown { keycode, scancode, .. } => {
-                    if let Some(keycode) = keycode {
-                        if let Some(key) = sdl_keycode_to_key(*keycode) {
-                            self.keys_down.insert(key);
-                            self.keys_pressed.insert(key);
+        for event in &events {
+            // Pass event to egui first
+            let consumed = self.egui_sdl2.process_event(window, event);
+            
+            // Only process for emulator if egui didn't consume it
+            if !consumed {
+                match event {
+                    sdl2::event::Event::Quit { .. } => {
+                        return false;
+                    }
+                    sdl2::event::Event::KeyDown { keycode, scancode, .. } => {
+                        if let Some(keycode) = keycode {
+                            if let Some(key) = sdl_keycode_to_key(*keycode) {
+                                self.keys_down.insert(key);
+                                self.keys_pressed.insert(key);
+                            }
+                        }
+                        if let Some(scancode) = scancode {
+                            self.sdl2_scancodes_pressed.push(*scancode);
                         }
                     }
-                    if let Some(scancode) = scancode {
-                        self.sdl2_scancodes_pressed.push(*scancode);
-                    }
-                }
-                sdl2::event::Event::KeyUp { keycode, scancode, .. } => {
-                    if let Some(keycode) = keycode {
-                        if let Some(key) = sdl_keycode_to_key(*keycode) {
-                            self.keys_down.remove(&key);
+                    sdl2::event::Event::KeyUp { keycode, scancode, .. } => {
+                        if let Some(keycode) = keycode {
+                            if let Some(key) = sdl_keycode_to_key(*keycode) {
+                                self.keys_down.remove(&key);
+                            }
+                        }
+                        if let Some(scancode) = scancode {
+                            self.sdl2_scancodes_released.push(*scancode);
                         }
                     }
-                    if let Some(scancode) = scancode {
-                        self.sdl2_scancodes_released.push(*scancode);
-                    }
+                    _ => {}
                 }
-                sdl2::event::Event::MouseMotion { x, y, .. } => {
-                    self.mouse_pos = (*x, *y);
-                }
-                _ => {}
             }
         }
 
@@ -179,7 +138,6 @@ impl Sdl2EguiBackend {
 
 impl WindowBackend for Sdl2EguiBackend {
     fn is_open(&self) -> bool {
-        // Window is open as long as handle_events returns true
         true
     }
 
@@ -197,7 +155,7 @@ impl WindowBackend for Sdl2EguiBackend {
         _width: usize,
         _height: usize,
     ) -> Result<(), Box<dyn Error>> {
-        // This is handled by egui now, so we just return Ok
+        // Buffer rendering is handled by egui texture updates now
         Ok(())
     }
 
@@ -207,10 +165,6 @@ impl WindowBackend for Sdl2EguiBackend {
 
     fn is_key_pressed(&self, key: Key, _shift: bool) -> bool {
         self.keys_pressed.contains(&key)
-    }
-
-    fn set_title(&mut self, title: &str) {
-        let _ = self.window.set_title(title);
     }
 
     fn get_size(&self) -> (usize, usize) {
