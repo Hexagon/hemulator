@@ -120,3 +120,28 @@ impl Default for EguiApp {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_srgb_to_linear_conversion() {
+        // Test black (should stay black)
+        assert_eq!(srgb_to_linear(0), 0);
+        
+        // Test white (should stay white)
+        assert_eq!(srgb_to_linear(255), 255);
+        
+        // Test middle gray (sRGB 128 should convert to darker linear value)
+        // sRGB 128/255 = 0.502, linear = ((0.502 + 0.055) / 1.055)^2.4 ≈ 0.214
+        // linear 0.214 * 255 ≈ 55
+        let result = srgb_to_linear(128);
+        assert!(result >= 53 && result <= 57, "Expected ~55, got {}", result);
+        
+        // Test common sRGB value (187 is common in UI)
+        // Should convert to a brighter linear value
+        let result = srgb_to_linear(187);
+        assert!(result > 100, "Linear value should be > 100 for sRGB 187");
+    }
+}
