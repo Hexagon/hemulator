@@ -1076,6 +1076,14 @@ impl PcCpu {
         // 0040:0080h - Buffer start pointer (offset value, typically 0x001E)
         // 0040:0082h - Buffer end pointer (offset value, typically 0x003E)
 
+        // Synchronize keyboard shift flags to BDA
+        // 0040:0017h - Keyboard shift flags (shift/ctrl/alt/lock keys state)
+        // 0040:0097h - Keyboard LED/shift state (dual purpose: mirrors shift flags
+        //              and is also used for LED state management on AT+ keyboards)
+        let shift_flags = self.cpu.memory.keyboard.get_shift_flags();
+        self.cpu.memory.write(0x417, shift_flags);
+        self.cpu.memory.write(0x497, shift_flags); // Mirror shift flags to 0x497
+
         // Read current head and tail pointers
         let mut head_offset = self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR) as u16
             | ((self.cpu.memory.read(Self::BDA_KB_BUFFER_HEAD_ADDR + 1) as u16) << 8);
