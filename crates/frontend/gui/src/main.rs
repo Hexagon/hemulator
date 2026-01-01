@@ -2372,9 +2372,7 @@ fn main() {
                     egui_app.tab_manager.show_help_tab();
                 }
                 MenuAction::About => {
-                    egui_app
-                        .status_bar
-                        .set_message("Hemulator Multi-System Emulator".to_string());
+                    egui_app.tab_manager.show_about_tab();
                 }
                 MenuAction::ScalingOriginal => {
                     settings.scaling_mode = settings::ScalingMode::Original;
