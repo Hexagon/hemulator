@@ -25,7 +25,8 @@ impl N64Cpu {
         self.cpu.reset();
 
         // Check if we have a commercial ROM loaded with an entry point
-        if let Some(entry_point) = self.cpu.memory.get_entry_point() {
+        // We need to access the bus through our wrapper methods
+        if let Some(entry_point) = self.bus().get_entry_point() {
             log(LogCategory::CPU, LogLevel::Info, || {
                 format!(
                     "N64 CPU: Commercial ROM detected, initializing CP0 and jumping to entry point 0x{:016X}",
