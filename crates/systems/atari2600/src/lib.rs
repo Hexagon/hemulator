@@ -356,7 +356,7 @@ impl System for Atari2600System {
         }
 
         // Render the frame using the renderer
-        if let Some(bus) = self.cpu.bus() {
+        if let Some(bus) = self.cpu.bus_mut() {
             // Dynamically determine visible window based on VBLANK timing
             let visible_start = bus.tia.visible_window_start_scanline();
 
@@ -384,15 +384,16 @@ impl System for Atari2600System {
             let mut all_scanlines_with_grp = 0u32;
             let mut final_colors = None;
 
-            if let Some(bus) = self.cpu.bus() {
+            if let Some(bus) = self.cpu.bus_mut() {
+                let visible_start = bus.tia.visible_window_start_scanline();
                 final_colors = Some((
                     bus.tia.get_scanline(),
-                    bus.tia.visible_window_start_scanline(),
+                    visible_start,
                 ));
 
                 let (pf, grp) = bus
                     .tia
-                    .debug_visible_scanline_activity(bus.tia.visible_window_start_scanline());
+                    .debug_visible_scanline_activity(visible_start);
                 scanlines_with_pf = pf;
                 scanlines_with_grp = grp;
 
@@ -1233,6 +1234,37 @@ mod tests {
                     // Some variation is acceptable, but not drastic changes
                     // If this fails, it indicates background color flickering
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn test_visible_window_stability() {
+        // This test checks that visible_window_start is stable across frames
+        // Instability here causes vertical jumping in games
+        let test_rom = include_bytes!("../../../../test_roms/atari2600/game_test.bin");
+
+        let mut sys = Atari2600System::new();
+        sys.mount("Cartridge", test_rom).unwrap();
+
+        // Run several frames and track visible_start
+        let mut visible_starts = Vec::new();
+        for _ in 0..20 {
+            sys.step_frame().unwrap();
+            if let Some(bus) = sys.cpu.bus_mut() {
+                let visible_start = bus.tia.visible_window_start_scanline();
+                visible_starts.push(visible_start);
+            }
+        }
+
+        // Check that visible_start is consistent
+        if let Some(&first_start) = visible_starts.first() {
+            for (i, &start) in visible_starts.iter().enumerate() {
+                assert_eq!(
+                    start, first_start,
+                    "visible_window_start changed from {} to {} at frame {}. This causes vertical jumping!",
+                    first_start, start, i
+                );
             }
         }
     }

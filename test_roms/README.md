@@ -104,6 +104,29 @@ cd rgbds && make && sudo make install
 - Behavior: Sets playfield to alternating pattern ($AA)
 - Expected output: Visible playfield pattern on screen
 
+### Atari 2600 (checkerboard.bin)
+- Format: Raw binary
+- Size: 4KB
+- Behavior: Creates checkerboard pattern by alternating playfield every 2 scanlines
+- Expected output: Checkerboard pattern with ~50% white pixels
+
+### Atari 2600 (test_timer.bin)
+- Format: Raw binary
+- Size: 4KB
+- Behavior: Tests RIOT timer interrupt flag clear-on-read behavior
+- Expected output: Playfield with changing colors based on timer
+
+### Atari 2600 (game_test.bin)
+- Format: Raw binary
+- Size: 4KB
+- Behavior: Game-like test ROM with realistic patterns:
+  - Color bars (8 bars of 8 scanlines each, cycling through hues)
+  - Sprite positioning and horizontal movement (two player sprites)
+  - Multiple playfield patterns (alternating 0xAA/0x55 and 0x55/0xFF/0x00)
+  - Per-scanline background color changes
+- Expected output: Multi-section display with color bars, moving sprites, and playfield patterns
+- Purpose: Stress-test emulator with realistic game-like behavior to expose timing and rendering issues
+
 ### N64 (test.z64)
 - Format: Z64 (big-endian N64 ROM)
 - Size: 1MB (minimum ROM size)

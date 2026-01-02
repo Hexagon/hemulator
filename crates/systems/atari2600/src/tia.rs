@@ -273,6 +273,10 @@ pub struct Tia {
     writes_colors: u64,
     #[serde(skip)]
     writes_colors_nonzero: u64,
+
+    // Cached visible window start (to prevent vertical jumping)
+    #[serde(skip)]
+    cached_visible_start: Option<u16>,
 }
 
 impl Default for Tia {
@@ -374,6 +378,8 @@ impl Tia {
             writes_grp1_nonzero: 0,
             writes_colors: 0,
             writes_colors_nonzero: 0,
+
+            cached_visible_start: None,
         }
     }
 
@@ -754,7 +760,16 @@ impl Tia {
     }
 
     /// Try to infer the start of the visible picture area based on VBLANK timing
-    pub fn visible_window_start_scanline(&self) -> u16 {
+    /// 
+    /// This method caches the first detected visible start to prevent vertical jumping
+    /// between frames. Once a valid VBLANK transition is detected, that value is used
+    /// for all subsequent frames to ensure stable rendering.
+    pub fn visible_window_start_scanline(&mut self) -> u16 {
+        // If we have a cached value, use it for stability
+        if let Some(cached) = self.cached_visible_start {
+            return cached;
+        }
+
         // Find where VBLANK transitions from true to false
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
@@ -771,15 +786,18 @@ impl Tia {
 
             if prev.vblank && !cur.vblank {
                 if debug {
-                    eprintln!("[VISIBLE] Found transition at scanline {}", i);
+                    eprintln!("[VISIBLE] Found transition at scanline {}, caching for stability", i);
                 }
+                self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
         }
+        
         // Fallback: common NTSC visible start is around scanline ~37-40
         if debug {
             eprintln!("[VISIBLE] No transition found, using fallback 40");
         }
+        self.cached_visible_start = Some(40);
         40
     }
 
