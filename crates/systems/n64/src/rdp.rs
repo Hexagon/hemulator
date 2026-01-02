@@ -1041,15 +1041,15 @@ impl Rdp {
                         for x in 0..width {
                             let px = xl + x;
                             let py = yl + y;
-                            
+
                             if px < self.width && py < self.height {
                                 // Calculate texture coordinates (simple mapping)
-                                let s = ((x as u32 * 64) / width.max(1)) & 0x3F; // Map to 0-63
-                                let t = ((y as u32 * 64) / height.max(1)) & 0x3F;
-                                
+                                let s = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63
+                                let t = ((y * 64) / height.max(1)) & 0x3F;
+
                                 // Sample texture
                                 let color = self.sample_texture(tile, s, t);
-                                
+
                                 // Draw pixel using renderer
                                 self.renderer.set_pixel(px, py, color);
                             }
@@ -1156,7 +1156,7 @@ impl Rdp {
                 // Calculate number of palette entries to load
                 // Each palette entry is 16 bits (RGBA5551)
                 let count = ((lrs - uls) + 1) as usize;
-                
+
                 log(LogCategory::PPU, LogLevel::Debug, || {
                     format!(
                         "N64 RDP: LOAD_TLUT - Loading {} palette entries to tile {} (addr=0x{:08X})",
@@ -1168,7 +1168,7 @@ impl Rdp {
                 // Palettes are stored at TMEM offset 0x800 (upper 2KB of 4KB TMEM)
                 let palette_base = 0x800;
                 let src_addr = self.texture_image_addr as usize;
-                
+
                 for i in 0..count.min(256) {
                     let tmem_offset = palette_base + (i * 2);
                     if tmem_offset + 1 < self.tmem.len() && src_addr + (i * 2) + 1 < rdram.len() {

@@ -196,38 +196,41 @@ impl RspHle {
         self.microcode = match crc {
             // F3DEX2 variants (most common in later N64 games)
             0xB545B679 | 0x9F0B2B0E | 0x3A1C2B34 | 0x4AED6B3A => MicrocodeType::F3DEX2,
-            
+
             // F3DEX variants (common in earlier N64 games)
             0xBF0DA4E5 | 0xE9C86D0F | 0xD7C3B8B5 | 0x5EC6E85F => MicrocodeType::F3DEX,
-            
+
             // Audio microcodes
             0x1A7DDD1E | 0x3E3E0CA2 => MicrocodeType::Audio,
-            
+
             // If CRC doesn't match known signatures, try pattern matching
             _ => {
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("RSP: Unknown microcode CRC 0x{:08X}, using heuristic detection", crc)
+                    format!(
+                        "RSP: Unknown microcode CRC 0x{:08X}, using heuristic detection",
+                        crc
+                    )
                 });
-                
+
                 // Heuristic: Look for common instruction patterns
                 // F3DEX/F3DEX2 microcodes have distinctive patterns in their code
-                
+
                 // Check for F3DEX2 patterns (more optimized)
                 // F3DEX2 typically has more vector operations (LQV/SQV) early in code
                 let has_f3dex2_pattern = (0..256).step_by(4).any(|i| {
-                    let word = u32::from_be_bytes([imem[i], imem[i+1], imem[i+2], imem[i+3]]);
+                    let word = u32::from_be_bytes([imem[i], imem[i + 1], imem[i + 2], imem[i + 3]]);
                     // LQV instruction opcode pattern
                     (word & 0xFC000000) == 0xC8000000
                 });
-                
+
                 // Check for F3DEX patterns (older, more general)
                 // F3DEX typically has more branching and scalar operations
                 let has_f3dex_pattern = (0..256).step_by(4).any(|i| {
-                    let word = u32::from_be_bytes([imem[i], imem[i+1], imem[i+2], imem[i+3]]);
+                    let word = u32::from_be_bytes([imem[i], imem[i + 1], imem[i + 2], imem[i + 3]]);
                     // BGEZ/BLTZ instruction opcodes (common in F3DEX control flow)
                     (word & 0xFC1F0000) == 0x04010000 || (word & 0xFC1F0000) == 0x04000000
                 });
-                
+
                 if has_f3dex2_pattern {
                     MicrocodeType::F3DEX2
                 } else if has_f3dex_pattern {
@@ -243,7 +246,10 @@ impl RspHle {
         };
 
         log(LogCategory::PPU, LogLevel::Info, || {
-            format!("RSP: Detected microcode: {:?} (CRC: 0x{:08X})", self.microcode, crc)
+            format!(
+                "RSP: Detected microcode: {:?} (CRC: 0x{:08X})",
+                self.microcode, crc
+            )
         });
     }
 
