@@ -635,8 +635,8 @@ mod tests {
         // 3. Exception vector set up at 0x0180
         let exception_vec =
             u32::from_be_bytes([rdram[0x0180], rdram[0x0181], rdram[0x0182], rdram[0x0183]]);
-        // Should be j 0x80000180 (0x08000060)
-        assert_eq!(exception_vec, 0x08000060, "Exception vector set up");
+        // Should be eret (0x42000018)
+        assert_eq!(exception_vec, 0x42000018, "Exception vector set up");
 
         // 4. CP0 registers initialized
         assert_eq!(

@@ -6,8 +6,13 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// CP0_STATUS register value for commercial ROM boot
 /// CU0=1 (Coprocessor 0 usable), CU1=1 (FPU usable), BEV=0 (use normal exception vectors)
+/// IE=1 (Interrupts Enabled), IM3=1 (VI interrupt enabled on line 3)
+/// Bit breakdown:
+/// - Bit 0 (IE): 1 = Interrupts enabled
+/// - Bit 11 (IM3): 1 = Allow interrupt line 3 (VI interrupt)
+/// - Bits 28-29 (CU0, CU1): 1 = Coprocessors enabled
 #[allow(dead_code)] // Used in tests
-pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000000;
+pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000801; // 0x34000000 | 0x01 (IE) | 0x800 (IM3)
 
 /// CP0_CONFIG register value for commercial ROM boot
 /// Standard configuration used by IPL3 bootloader

@@ -186,9 +186,8 @@ impl Rdp {
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
         let mut renderer = Box::new(SoftwareRdpRenderer::new(width, height));
-        // Initialize framebuffer to visible dark blue (0xFF000040) so display shows something
-        // This helps distinguish "no rendering" from "black rendered content"
-        renderer.clear(0xFF000040);
+        // Initialize framebuffer to black (transparent)
+        renderer.clear(0x00000000);
 
         Self {
             renderer,
@@ -231,8 +230,8 @@ impl Rdp {
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.renderer.reset();
-        // Clear to visible dark blue so we can see the display is active
-        self.renderer.clear(0xFF000040);
+        // Clear to black (transparent)
+        self.renderer.clear(0x00000000);
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
