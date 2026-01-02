@@ -237,4 +237,154 @@ mod tests {
         // After fix: Mapper should be 0x01 (1) because byte 7 is zeroed.
         assert_eq!(cart.mapper, 1);
     }
+
+    #[test]
+    fn test_minimal_valid_rom() {
+        // Edge case: Smallest valid iNES ROM (16-byte header + 16KB PRG, no CHR)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, // PRG size: 1 unit = 16KB
+            0x00, // CHR size: 0 (CHR-RAM)
+            0x00, // Flags 6: Mapper 0, horizontal mirroring
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Padding
+        ];
+        // Add 16KB PRG ROM
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0);
+        assert_eq!(cart.prg_rom.len(), 16 * 1024);
+        assert_eq!(cart.chr_rom.len(), 0); // No CHR ROM (will use CHR-RAM)
+        assert_eq!(cart.mirroring, Mirroring::Horizontal);
+    }
+
+    #[test]
+    fn test_rom_with_chr_ram() {
+        // Edge case: ROM with CHR size 0 indicates CHR-RAM should be used
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x02, // PRG size: 2 units = 32KB
+            0x00, // CHR size: 0 (CHR-RAM)
+            0x01, // Flags 6: Mapper 0, vertical mirroring
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 32 * 1024]); // PRG ROM
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.prg_rom.len(), 32 * 1024);
+        assert_eq!(cart.chr_rom.len(), 0);
+        assert_eq!(cart.mirroring, Mirroring::Vertical);
+    }
+
+    #[test]
+    fn test_rom_with_trainer() {
+        // Edge case: ROM with trainer (512-byte trainer before PRG ROM)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, // PRG size: 16KB
+            0x01, // CHR size: 8KB
+            0x04, // Flags 6: Trainer present (bit 2)
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0xFF; 512]); // Trainer (512 bytes)
+        data.extend(vec![0xAA; 16 * 1024]); // PRG ROM
+        data.extend(vec![0x55; 8 * 1024]); // CHR ROM
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        // Verify trainer was skipped and PRG/CHR loaded correctly
+        assert_eq!(cart.prg_rom.len(), 16 * 1024);
+        assert_eq!(cart.chr_rom.len(), 8 * 1024);
+        assert_eq!(cart.prg_rom[0], 0xAA); // First PRG byte, not trainer
+        assert_eq!(cart.chr_rom[0], 0x55); // First CHR byte
+    }
+
+    #[test]
+    fn test_four_screen_mirroring() {
+        // Edge case: Four-screen VRAM (bit 3 of flags 6)
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x01, // 16KB PRG, 8KB CHR
+            0x08, // Flags 6: Four-screen VRAM (bit 3)
+            0x00, // Flags 7
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024 + 8 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mirroring, Mirroring::FourScreen);
+    }
+
+    #[test]
+    fn test_invalid_rom_too_small() {
+        // Edge case: Data too small to contain header
+        let data = vec![0x4E, 0x45, 0x53]; // Only 3 bytes
+
+        let result = Cartridge::from_bytes(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_rom_wrong_magic() {
+        // Edge case: Invalid magic number
+        let mut data = vec![
+            0x4E, 0x45, 0x58, 0x1A, // NE X <EOF> (wrong magic)
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let result = Cartridge::from_bytes(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_rom_size_mismatch() {
+        // Edge case: Header indicates more data than provided
+        let data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x10, // PRG size: 16 units = 256KB (but we won't provide this much)
+            0x00, // CHR size: 0
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        // Only provide 16 bytes of data, not 256KB
+
+        let result = Cartridge::from_bytes(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_nes2_timing_detection() {
+        // Edge case: NES 2.0 format with PAL timing
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x01, // 16KB PRG, 8KB CHR
+            0x00, // Flags 6
+            0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10)
+            0x00, 0x00, 0x00, 0x00,
+            0x01, // Byte 12: PAL timing (bits 0-1 = 01)
+            0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024 + 8 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.timing, TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_mapper_number_extraction() {
+        // Edge case: Mapper number from both nibbles of flags 6 and 7
+        let mut data = vec![
+            0x4E, 0x45, 0x53, 0x1A, // NES<EOF>
+            0x01, 0x00, // 16KB PRG, no CHR
+            0x40, // Flags 6: Mapper low nibble = 4
+            0x30, // Flags 7: Mapper high nibble = 3 -> mapper = 0x34 (52)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        data.extend(vec![0; 16 * 1024]);
+
+        let cart = Cartridge::from_bytes(&data).unwrap();
+        assert_eq!(cart.mapper, 0x34); // Mapper 52 (0x30 | 0x04)
+    }
 }
