@@ -892,4 +892,61 @@ mod tests {
         assert_eq!(buttons2 & (1 << 15), 0);
         assert_ne!(buttons2 & (1 << 14), 0);
     }
+
+    #[test]
+    fn test_enhanced_rom_interrupts() {
+        // Test the enhanced ROM that properly sets up and handles interrupts
+        use emu_core::cpu_mips_r4300i::MemoryMips;
+
+        let test_rom = include_bytes!("../../../../test_roms/n64/test_enhanced.z64");
+        let mut sys = N64System::default();
+
+        // Mount the enhanced test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+
+        // Verify the ROM was mounted and CPU is at entry point
+        assert_eq!(
+            sys.cpu.cpu.pc, 0x80000400,
+            "CPU should be at entry point 0x80000400 after mount"
+        );
+
+        // Run several frames to allow the ROM to:
+        // 1. Set up interrupts
+        // 2. Trigger RDP rendering  
+        // 3. Enter main loop
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+
+        // Get the rendered frame
+        let frame = sys.cpu.bus().rdp().get_frame();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+
+        // Verify red rectangle was rendered
+        let red_pixel_idx = (100 * 320 + 100) as usize;
+        let red_pixel = frame.pixels[red_pixel_idx];
+        assert_eq!(
+            red_pixel, 0xFFFF0000,
+            "Expected red pixel at (100,100), got 0x{:08X}",
+            red_pixel
+        );
+
+        // Verify green rectangle was rendered
+        let green_pixel_idx = (115 * 320 + 185) as usize;
+        let green_pixel = frame.pixels[green_pixel_idx];
+        assert_eq!(
+            green_pixel, 0xFF00FF00,
+            "Expected green pixel at (185,115), got 0x{:08X}",
+            green_pixel
+        );
+
+        // Verify background is black
+        let black_pixel = frame.pixels[0];
+        assert_eq!(
+            black_pixel, 0,
+            "Expected black background at (0,0), got 0x{:08X}",
+            black_pixel
+        );
+    }
 }
