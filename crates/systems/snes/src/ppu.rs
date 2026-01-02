@@ -609,7 +609,7 @@ impl Ppu {
     /// Render a frame
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(256, 224); // SNES resolution
-        
+
         // Priority buffer: tracks the priority level of each pixel
         // Priority levels: 0 (backdrop) to 7 (highest sprite priority)
         // We use 255 as "unset" since it's higher than any valid priority
@@ -630,7 +630,7 @@ impl Ppu {
                 // 2. Sprites with priority=0-1
                 // 3. BG layers with priority=1 (back to front: BG4->BG3->BG2->BG1)
                 // 4. Sprites with priority=2-3
-                
+
                 // Render priority 0 BG layers
                 if self.tm & 0x08 != 0 {
                     self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 0);
@@ -644,12 +644,12 @@ impl Ppu {
                 if self.tm & 0x01 != 0 {
                     self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
                 }
-                
+
                 // Render sprites with priority 0-1
                 if self.tm & 0x10 != 0 {
                     self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
                 }
-                
+
                 // Render priority 1 BG layers
                 if self.tm & 0x08 != 0 {
                     self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 1);
@@ -663,7 +663,7 @@ impl Ppu {
                 if self.tm & 0x01 != 0 {
                     self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
                 }
-                
+
                 // Render sprites with priority 2-3
                 if self.tm & 0x10 != 0 {
                     self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
@@ -673,7 +673,7 @@ impl Ppu {
             1 => {
                 // Check BG3 priority toggle (bit 3 of BGMODE)
                 let bg3_priority_high = (self.bgmode & 0x08) != 0;
-                
+
                 // Priority-based rendering order for Mode 1:
                 // If BG3 priority toggle is off:
                 //   1. BG layers with priority=0 (BG3->BG2->BG1)
@@ -682,7 +682,7 @@ impl Ppu {
                 //   4. Sprites with priority=2-3
                 // If BG3 priority toggle is on:
                 //   BG3 renders above ALL sprites (last)
-                
+
                 if !bg3_priority_high {
                     // Normal priority mode
                     // Render priority 0 BG layers
@@ -695,12 +695,12 @@ impl Ppu {
                     if self.tm & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
                     }
-                    
+
                     // Render sprites with priority 0-1
                     if self.tm & 0x10 != 0 {
                         self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
                     }
-                    
+
                     // Render priority 1 BG layers
                     if self.tm & 0x04 != 0 {
                         self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 1);
@@ -711,7 +711,7 @@ impl Ppu {
                     if self.tm & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
                     }
-                    
+
                     // Render sprites with priority 2-3
                     if self.tm & 0x10 != 0 {
                         self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
@@ -725,12 +725,12 @@ impl Ppu {
                     if self.tm & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
                     }
-                    
+
                     // Render sprites with priority 0-1
                     if self.tm & 0x10 != 0 {
                         self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
                     }
-                    
+
                     // Render priority 1 BG1 and BG2
                     if self.tm & 0x02 != 0 {
                         self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
@@ -738,12 +738,12 @@ impl Ppu {
                     if self.tm & 0x01 != 0 {
                         self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
                     }
-                    
+
                     // Render sprites with priority 2-3
                     if self.tm & 0x10 != 0 {
                         self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
                     }
-                    
+
                     // Render BG3 last (above all sprites)
                     if self.tm & 0x04 != 0 {
                         // Use a very high priority value to ensure BG3 is always on top
@@ -1069,7 +1069,6 @@ impl Ppu {
         (name_base * 0x4000) + 0xC000 + (name_select * 0x1000)
     }
 
-
     /// Render a single BG layer in 2bpp mode with priority handling
     fn render_bg_layer_2bpp_priority(
         &self,
@@ -1268,6 +1267,12 @@ impl Ppu {
         // Get OBJ base address
         let obj_base = self.get_obj_base_address();
 
+        // Track sprites and tiles per scanline (SNES hardware limits)
+        // - Maximum 32 sprites per scanline
+        // - Maximum 34 8x8 tile slots per scanline
+        let mut sprites_per_scanline = vec![0u8; 224];
+        let mut tiles_per_scanline = vec![0u8; 224];
+
         // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
         for sprite_index in (0..128).rev() {
             // Each sprite has 4 bytes in main OAM table
@@ -1313,6 +1318,37 @@ impl Ppu {
             // Skip offscreen sprites (basic culling)
             if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
                 continue;
+            }
+
+            // Check scanline limits for this sprite
+            // Calculate which scanlines this sprite occupies
+            let start_y = y.max(0) as usize;
+            let end_y = (y + height as i16).min(224) as usize;
+            let tiles_wide = (width / 8) as u8;
+
+            // Check if rendering this sprite would exceed scanline limits
+            let mut can_render = true;
+            for scanline in start_y..end_y {
+                if sprites_per_scanline[scanline] >= 32 {
+                    can_render = false;
+                    break;
+                }
+                // Each row of the sprite adds tiles_wide to the scanline
+                if tiles_per_scanline[scanline] + tiles_wide > 34 {
+                    can_render = false;
+                    break;
+                }
+            }
+
+            // Skip if limits exceeded
+            if !can_render {
+                continue;
+            }
+
+            // Update scanline counters
+            for scanline in start_y..end_y {
+                sprites_per_scanline[scanline] += 1;
+                tiles_per_scanline[scanline] += tiles_wide;
             }
 
             // Render sprite pixels with priority
