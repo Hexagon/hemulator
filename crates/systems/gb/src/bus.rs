@@ -187,6 +187,11 @@ impl GbBus {
         // 0xC0 = CGB only
         let cgb_flag = data[0x143];
         self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
+        
+        // Enable CGB mode in PPU if CGB ROM
+        if self.cgb_mode {
+            self.ppu.enable_cgb_mode();
+        }
 
         let ram_size = match ram_size_code {
             0x00 => 0,
@@ -277,6 +282,12 @@ impl MemoryLr35902 for GbBus {
                 0xFF49 => self.ppu.obp1,
                 0xFF4A => self.ppu.wy,
                 0xFF4B => self.ppu.wx,
+                // CGB registers
+                0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
+                0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
+                0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
+                0xFF6A => self.ppu.read_obpi(),     // OCPS/OBPI - OBJ palette index
+                0xFF6B => self.ppu.read_obpd(),     // OCPD/OBPD - OBJ palette data
                 _ => 0xFF,
             },
             // High RAM
@@ -332,6 +343,12 @@ impl MemoryLr35902 for GbBus {
                     0xFF49 => self.ppu.obp1 = val,
                     0xFF4A => self.ppu.wy = val,
                     0xFF4B => self.ppu.wx = val,
+                    // CGB registers
+                    0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
+                    0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
+                    0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
+                    0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI
+                    0xFF6B => self.ppu.write_obpd(val),    // OCPD/OBPD
                     0xFF50 => self.boot_rom_enabled = false, // Disable boot ROM
                     _ => {}
                 }
