@@ -346,6 +346,37 @@ impl TabManager {
                 ui.separator();
                 ui.add_space(10.0);
 
+                // Rate limit configuration
+                ui.heading("Rate Limiting");
+                ui.add_space(5.0);
+                ui.label("Control the maximum number of logs per second per category:");
+                ui.add_space(10.0);
+
+                ui.horizontal(|ui| {
+                    ui.label("Max logs/second:");
+                    ui.add_space(10.0);
+
+                    let mut rate_limit = log_config.get_rate_limit() as i32;
+                    let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
+                        .text("logs/sec")
+                        .logarithmic(true);
+
+                    if ui.add(slider).changed() {
+                        log_config.set_rate_limit(rate_limit as usize);
+                    }
+                });
+
+                ui.add_space(5.0);
+                ui.label(format!(
+                    "Current limit: {} logs per second per category",
+                    log_config.get_rate_limit()
+                ));
+                ui.label("When exceeded, logs are dropped and a warning is emitted.");
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
                 // Info section
                 ui.heading("About Logging");
                 ui.add_space(5.0);
