@@ -391,6 +391,10 @@ impl Rdp {
 
     /// Write to RDP register
     pub fn write_register(&mut self, offset: u32, value: u32) {
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!("N64 RDP: Write register offset=0x{:02X} value=0x{:08X}", offset, value)
+        });
+        
         match offset {
             DPC_START => {
                 self.dpc_start = value & 0x00FFFFFF;
@@ -401,6 +405,12 @@ impl Rdp {
                 // The bus will call process_display_list after this write
                 if self.dpc_start != self.dpc_end {
                     self.dpc_status &= !DPC_STATUS_CBUF_READY;
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "N64 RDP: Display list queued, start=0x{:08X} end=0x{:08X}",
+                            self.dpc_start, self.dpc_end
+                        )
+                    });
                 }
             }
             DPC_STATUS => {
@@ -443,6 +453,13 @@ impl Rdp {
 
     /// Process display list commands from RDRAM
     pub fn process_display_list(&mut self, rdram: &[u8]) {
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "N64 RDP: Processing display list from 0x{:08X} to 0x{:08X}",
+                self.dpc_start, self.dpc_end
+            )
+        });
+        
         // Set DMA busy flag
         self.dpc_status |= DPC_STATUS_DMA_BUSY;
         self.dpc_status &= !DPC_STATUS_CBUF_READY;
@@ -468,6 +485,13 @@ impl Rdp {
 
             // Extract command ID from top 6 bits of first word
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
+            
+            log(LogCategory::PPU, LogLevel::Trace, || {
+                format!(
+                    "N64 RDP: Command 0x{:02X} at 0x{:08X}: word0=0x{:08X} word1=0x{:08X}",
+                    cmd_id, addr, cmd_word0, cmd_word1
+                )
+            });
 
             // Execute command
             self.execute_rdp_command(cmd_id, cmd_word0, cmd_word1, rdram);
@@ -480,6 +504,10 @@ impl Rdp {
         self.dpc_current = self.dpc_end;
         self.dpc_status |= DPC_STATUS_CBUF_READY;
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
+        
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            "N64 RDP: Display list processing completed".to_string()
+        });
     }
 
     /// Load texture data from RDRAM to TMEM (used by LOAD_BLOCK and LOAD_TILE)

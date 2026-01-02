@@ -8,6 +8,7 @@ use crate::rsp::Rsp;
 use crate::vi::VideoInterface;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
+use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// N64 memory bus
 pub struct N64Bus {
@@ -63,7 +64,13 @@ impl N64Bus {
     }
 
     pub fn load_cartridge(&mut self, data: &[u8]) -> Result<(), N64Error> {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!("N64 Bus: Loading cartridge, size={} bytes", data.len())
+        });
         self.cartridge = Some(Cartridge::load(data)?);
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "N64 Bus: Cartridge loaded successfully".to_string()
+        });
         Ok(())
     }
 
@@ -145,6 +152,10 @@ impl MemoryMips for N64Bus {
     fn read_byte(&self, addr: u32) -> u8 {
         let phys_addr = self.translate_address(addr);
 
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("N64 Bus: Read byte from 0x{:08X} (phys: 0x{:08X})", addr, phys_addr)
+        });
+
         match phys_addr {
             // RDRAM (0x00000000 - 0x003FFFFF)
             0x0000_0000..=0x003F_FFFF => self.rdram[(phys_addr & 0x003FFFFF) as usize],
@@ -183,6 +194,10 @@ impl MemoryMips for N64Bus {
 
     fn read_word(&self, addr: u32) -> u32 {
         let phys_addr = self.translate_address(addr);
+
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("N64 Bus: Read word from 0x{:08X} (phys: 0x{:08X})", addr, phys_addr)
+        });
 
         match phys_addr {
             // RDRAM
@@ -248,6 +263,10 @@ impl MemoryMips for N64Bus {
     fn write_byte(&mut self, addr: u32, val: u8) {
         let phys_addr = self.translate_address(addr);
 
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("N64 Bus: Write byte 0x{:02X} to 0x{:08X} (phys: 0x{:08X})", val, addr, phys_addr)
+        });
+
         match phys_addr {
             // RDRAM
             0x0000_0000..=0x003F_FFFF => {
@@ -280,6 +299,10 @@ impl MemoryMips for N64Bus {
 
     fn write_word(&mut self, addr: u32, val: u32) {
         let phys_addr = self.translate_address(addr);
+
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("N64 Bus: Write word 0x{:08X} to 0x{:08X} (phys: 0x{:08X})", val, addr, phys_addr)
+        });
 
         match phys_addr {
             // RDRAM

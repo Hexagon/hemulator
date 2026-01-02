@@ -28,6 +28,7 @@ mod vi;
 
 use bus::N64Bus;
 use cpu::N64Cpu;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use thiserror::Error;
 
@@ -194,6 +195,10 @@ impl System for N64System {
             if bus.vi_mut().update_scanline(scanline) {
                 // VI interrupt triggered - set interrupt in MI
                 bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+
+                log(LogCategory::Interrupts, LogLevel::Info, || {
+                    format!("N64: VI interrupt triggered at scanline {}", scanline)
+                });
 
                 // Set interrupt pending bit in CPU's Cause register
                 // VI interrupt is typically mapped to hardware interrupt 3 (bit 11 in Cause)
