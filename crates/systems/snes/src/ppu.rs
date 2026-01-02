@@ -443,6 +443,8 @@ impl Ppu {
                 self.cgram[addr] = val;
 
                 // Log complete palette entry write (after high byte)
+                // Note: This happens BEFORE cgram_addr is incremented below,
+                // so color_addr correctly points to the color entry we just completed
                 if self.cgram_write_latch {
                     let color_addr = self.cgram_addr as usize;
                     let low = self.cgram[(color_addr * 2) % CGRAM_SIZE] as u16;
