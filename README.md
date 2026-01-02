@@ -24,9 +24,9 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 | System | Status | CPU | Graphics | Audio | Input | Save States / Persistance | Coverage/Notes |
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
-| **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16 bit) complete, 32-bit in progrss | CGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; text + graphics modes |
+| **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
 | **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
-| **Game Boy** | 🚧 In Development | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/3/5 supported |
+| **Game Boy** | 🚧 In Development | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/2/3/5 supported |
 | **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 
@@ -34,6 +34,7 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 - ✅ Fully Working - Production ready with comprehensive features
 - ⚠️ Functional - Core features work but missing some capabilities
 - 🚧 In Development - Active work in progress with partial functionality
+- 🧪 Experimental - Early development stage, not recommended for general use
 - ❌ Not implemented - Component not yet available
 
 ## For Users
@@ -94,7 +95,7 @@ cargo run --release -p emu_gui
 Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 **Core Components** (`crates/core/`):
-- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086
+- CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086/80186/80286/80386
 - Audio: APU channels, envelopes, mixers
 - Graphics: ZBuffer, ColorOps, palette/tile utilities
 - Traits: System, Cpu, Renderer, AudioChip
@@ -148,10 +149,10 @@ See [MANUAL.md](docs/MANUAL.md) for user-facing mapper information and game comp
 |--------|--------|------------------|--------|-------|
 | **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90% game coverage |
 | **Atari 2600** | Raw binary (.a26, .bin) | File size | ✅ Fully supported | 2K-32K ROMs |
-| **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | ⚠️ Functional | No audio, ~95% compatible |
+| **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | 🚧 In Development | MBC0/1/2/3/5, ~95% compatible |
 | **SNES** | SMC/SFC (.smc, .sfc) | Header detection | 🚧 Basic | LoROM only, minimal PPU |
 | **N64** | Z64/N64/V64 (.z64, .n64, .v64) | Magic byte + conversion | 🚧 In development | Byte-order auto-detection |
-| **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | CGA text + graphics modes |
+| **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | CGA/EGA/VGA modes |
 
 ## Video Processing System
 
