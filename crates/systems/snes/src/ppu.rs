@@ -445,8 +445,8 @@ impl Ppu {
                 // Log complete palette entry write (after high byte)
                 if self.cgram_write_latch {
                     let color_addr = self.cgram_addr as usize;
-                    let low = self.cgram[color_addr * 2] as u16;
-                    let high = val as u16;
+                    let low = self.cgram[(color_addr * 2) % CGRAM_SIZE] as u16;
+                    let high = self.cgram[(color_addr * 2 + 1) % CGRAM_SIZE] as u16;
                     let color = low | (high << 8);
                     log(LogCategory::PPU, LogLevel::Debug, || {
                         format!(

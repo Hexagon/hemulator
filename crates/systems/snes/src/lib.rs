@@ -246,7 +246,7 @@ impl System for SnesSystem {
 
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            log(LogCategory::Bus, LogLevel::Error, || {
+            log(LogCategory::Bus, LogLevel::Warn, || {
                 format!("SNES: Invalid mount point: {}", mount_point_id)
             });
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
@@ -262,7 +262,7 @@ impl System for SnesSystem {
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
-            log(LogCategory::Bus, LogLevel::Error, || {
+            log(LogCategory::Bus, LogLevel::Warn, || {
                 format!("SNES: Invalid mount point for unmount: {}", mount_point_id)
             });
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
