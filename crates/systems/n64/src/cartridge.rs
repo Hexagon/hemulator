@@ -2,6 +2,10 @@
 
 use crate::N64Error;
 
+/// N64 ROM magic number (big-endian format)
+#[allow(dead_code)] // Used in tests
+pub const N64_ROM_MAGIC: [u8; 4] = [0x80, 0x37, 0x12, 0x40];
+
 /// N64 ROM byte order formats
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[allow(clippy::enum_variant_names)]
@@ -105,10 +109,10 @@ mod tests {
     #[test]
     fn test_detect_big_endian() {
         let mut data = vec![0; 0x1000];
-        data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
 
         let cart = Cartridge::load(&data).unwrap();
-        assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
+        assert_eq!(cart.rom[0..4], N64_ROM_MAGIC);
     }
 
     #[test]
@@ -118,7 +122,7 @@ mod tests {
 
         let cart = Cartridge::load(&data).unwrap();
         // Should be converted to big-endian
-        assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
+        assert_eq!(cart.rom[0..4], N64_ROM_MAGIC);
     }
 
     #[test]
@@ -128,13 +132,13 @@ mod tests {
 
         let cart = Cartridge::load(&data).unwrap();
         // Should be converted to big-endian
-        assert_eq!(cart.rom[0..4], [0x80, 0x37, 0x12, 0x40]);
+        assert_eq!(cart.rom[0..4], N64_ROM_MAGIC);
     }
 
     #[test]
     fn test_read_rom() {
         let mut data = vec![0; 0x1000];
-        data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
         data[4] = 0x42;
 
         let cart = Cartridge::load(&data).unwrap();
@@ -144,7 +148,7 @@ mod tests {
     #[test]
     fn test_read_out_of_bounds() {
         let mut data = vec![0; 0x1000];
-        data[0..4].copy_from_slice(&[0x80, 0x37, 0x12, 0x40]);
+        data[0..4].copy_from_slice(&N64_ROM_MAGIC);
 
         let cart = Cartridge::load(&data).unwrap();
         assert_eq!(cart.read(0x10000), 0);
