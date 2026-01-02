@@ -2428,13 +2428,13 @@ mod tests {
 
         // Clear and set up again with base nametable 1
         ppu.vram = [0; 0x800];
-        
+
         // For vertical mirroring, logical NT 1 (0x2400) maps to physical offset 0x0400
         // Set tile at start of NT 1
         let addr_nt1 = ppu.map_nametable_addr(0x2400);
         ppu.vram[addr_nt1] = 0x02; // Tile 0x02
 
-        // Set tile at start of NT 0 
+        // Set tile at start of NT 0
         let addr_nt0 = ppu.map_nametable_addr(0x2000);
         ppu.vram[addr_nt0] = 0x01; // Tile 0x01
 
