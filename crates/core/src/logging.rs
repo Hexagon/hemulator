@@ -30,13 +30,15 @@
 //! });
 //! ```
 
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Log level for controlling verbosity
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -85,7 +87,7 @@ impl LogLevel {
 }
 
 /// Log category for different emulator components
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogCategory {
     /// CPU execution (instruction execution, PC tracing)
     CPU,
@@ -99,6 +101,120 @@ pub enum LogCategory {
     Interrupts,
     /// Unimplemented features/stubs
     Stubs,
+}
+
+/// Rate limiter for controlling log output frequency per category
+///
+/// Uses a sliding window algorithm to track log timestamps and enforce
+/// a maximum rate of logs per second.
+struct RateLimiter {
+    /// Maximum logs allowed per second (atomic for dynamic updates)
+    max_logs_per_second: AtomicUsize,
+    /// Sliding window duration (1 second)
+    window_duration: Duration,
+    /// Timestamps of recent logs (one queue per category)
+    timestamps: Mutex<[VecDeque<Instant>; 6]>,
+    /// Counter for dropped messages per category
+    dropped_counts: Mutex<[usize; 6]>,
+    /// Last time we reported dropped messages per category
+    last_drop_report: Mutex<[Option<Instant>; 6]>,
+}
+
+impl RateLimiter {
+    /// Create a new rate limiter with the specified maximum logs per second
+    fn new(max_logs_per_second: usize) -> Self {
+        Self {
+            max_logs_per_second: AtomicUsize::new(max_logs_per_second),
+            window_duration: Duration::from_secs(1),
+            timestamps: Mutex::new([
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+            ]),
+            dropped_counts: Mutex::new([0; 6]),
+            last_drop_report: Mutex::new([None; 6]),
+        }
+    }
+
+    /// Update the maximum logs per second
+    fn set_max_logs_per_second(&self, max: usize) {
+        self.max_logs_per_second.store(max, Ordering::Relaxed);
+    }
+
+    /// Get the current maximum logs per second
+    fn get_max_logs_per_second(&self) -> usize {
+        self.max_logs_per_second.load(Ordering::Relaxed)
+    }
+
+    /// Get the category index for array access
+    fn category_index(category: LogCategory) -> usize {
+        match category {
+            LogCategory::CPU => 0,
+            LogCategory::Bus => 1,
+            LogCategory::PPU => 2,
+            LogCategory::APU => 3,
+            LogCategory::Interrupts => 4,
+            LogCategory::Stubs => 5,
+        }
+    }
+
+    /// Check if a log should be allowed based on rate limits
+    /// Returns (allowed, dropped_count) where dropped_count is Some(n) if we should report drops
+    fn should_allow(&self, category: LogCategory) -> (bool, Option<usize>) {
+        let now = Instant::now();
+        let idx = Self::category_index(category);
+
+        let mut timestamps = self.timestamps.lock().unwrap();
+        let mut dropped_counts = self.dropped_counts.lock().unwrap();
+        let mut last_drop_report = self.last_drop_report.lock().unwrap();
+
+        // Remove timestamps outside the sliding window
+        let window = &mut timestamps[idx];
+        while let Some(&front) = window.front() {
+            if now.duration_since(front) > self.window_duration {
+                window.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        // Check if we're under the rate limit (load atomically)
+        let max_logs = self.max_logs_per_second.load(Ordering::Relaxed);
+        if window.len() < max_logs {
+            window.push_back(now);
+
+            // Check if we need to report dropped messages
+            let dropped = dropped_counts[idx];
+            if dropped > 0 {
+                dropped_counts[idx] = 0;
+                last_drop_report[idx] = Some(now);
+                return (true, Some(dropped));
+            }
+
+            (true, None)
+        } else {
+            // Rate limit exceeded, drop this log
+            dropped_counts[idx] += 1;
+
+            // Report dropped messages once per second
+            let should_report = match last_drop_report[idx] {
+                None => true,
+                Some(last) => now.duration_since(last) >= Duration::from_secs(1),
+            };
+
+            if should_report {
+                let dropped = dropped_counts[idx];
+                dropped_counts[idx] = 0;
+                last_drop_report[idx] = Some(now);
+                (false, Some(dropped))
+            } else {
+                (false, None)
+            }
+        }
+    }
 }
 
 /// Global logging configuration
@@ -121,11 +237,13 @@ pub struct LogConfig {
     log_sender: Mutex<Option<Sender<String>>>,
     /// Flag indicating if logging to file is enabled
     file_logging_enabled: AtomicBool,
+    /// Rate limiter for controlling log output frequency
+    rate_limiter: RateLimiter,
 }
 
 impl LogConfig {
-    /// Create a new LogConfig with all logging disabled
-    const fn new() -> Self {
+    /// Create a new LogConfig with all logging disabled and default rate limit (60 logs/second)
+    fn new() -> Self {
         Self {
             global_level: AtomicU8::new(LogLevel::Off as u8),
             cpu_level: AtomicU8::new(LogLevel::Off as u8),
@@ -136,13 +254,15 @@ impl LogConfig {
             stub_level: AtomicU8::new(LogLevel::Off as u8),
             log_sender: Mutex::new(None),
             file_logging_enabled: AtomicBool::new(false),
+            rate_limiter: RateLimiter::new(60), // Default: 60 logs per second
         }
     }
 
     /// Get the global singleton instance
     pub fn global() -> &'static Self {
-        static INSTANCE: LogConfig = LogConfig::new();
-        &INSTANCE
+        use std::sync::OnceLock;
+        static INSTANCE: OnceLock<LogConfig> = OnceLock::new();
+        INSTANCE.get_or_init(LogConfig::new)
     }
 
     /// Set the global log level (applies to all categories unless overridden)
@@ -206,6 +326,17 @@ impl LogConfig {
         self.set_level(LogCategory::APU, LogLevel::Off);
         self.set_level(LogCategory::Interrupts, LogLevel::Off);
         self.set_level(LogCategory::Stubs, LogLevel::Off);
+    }
+
+    /// Set the maximum logs per second per category (rate limit)
+    pub fn set_rate_limit(&self, max_logs_per_second: usize) {
+        self.rate_limiter
+            .set_max_logs_per_second(max_logs_per_second);
+    }
+
+    /// Get the current rate limit (maximum logs per second per category)
+    pub fn get_rate_limit(&self) -> usize {
+        self.rate_limiter.get_max_logs_per_second()
     }
 
     /// Set the log file path
@@ -284,6 +415,12 @@ impl LogConfig {
 /// The message is lazily evaluated via a closure, so complex formatting only occurs
 /// when logging is actually enabled for the given category and level.
 ///
+/// # Rate Limiting
+///
+/// To prevent log flooding, this function enforces a rate limit of 60 logs per second
+/// per category. When the rate limit is exceeded, logs are dropped and a summary
+/// message is periodically emitted.
+///
 /// # Arguments
 ///
 /// * `category` - The logging category (CPU, Bus, PPU, etc.)
@@ -293,6 +430,7 @@ impl LogConfig {
 /// # Performance
 ///
 /// - Zero overhead when logging is disabled (closure is never called)
+/// - Rate limiting prevents log flooding and performance degradation
 /// - Thread-safe file writing with automatic fallback to stderr
 /// - Single point of control for all logging output
 ///
@@ -311,8 +449,25 @@ where
 {
     let config = LogConfig::global();
     if config.should_log(category, level) {
-        let message = message_fn();
-        config.write_message(&message);
+        // Check rate limit before evaluating the message
+        let (allowed, dropped_count) = config.rate_limiter.should_allow(category);
+
+        // If we have dropped messages to report, emit a warning
+        if let Some(count) = dropped_count {
+            if count > 0 {
+                let warning = format!(
+                    "[{:?}] WARNING: Rate limit exceeded, {} log message(s) dropped in the last second",
+                    category, count
+                );
+                config.write_message(&warning);
+            }
+        }
+
+        // Only evaluate and log the message if allowed by rate limiter
+        if allowed {
+            let message = message_fn();
+            config.write_message(&message);
+        }
     }
 }
 
@@ -433,5 +588,100 @@ mod tests {
         assert_eq!(config.get_global_level(), LogLevel::Off);
         assert_eq!(config.get_level(LogCategory::CPU), LogLevel::Off);
         assert_eq!(config.get_level(LogCategory::Bus), LogLevel::Off);
+    }
+
+    #[test]
+    fn test_rate_limiter_allows_within_limit() {
+        let limiter = RateLimiter::new(60);
+
+        // Should allow up to 60 logs
+        for _ in 0..60 {
+            let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+            assert!(allowed, "Should allow logs within the rate limit");
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_over_limit() {
+        let limiter = RateLimiter::new(60);
+
+        // Fill up the rate limit
+        for _ in 0..60 {
+            limiter.should_allow(LogCategory::CPU);
+        }
+
+        // The 61st log should be blocked
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        assert!(!allowed, "Should block logs exceeding the rate limit");
+    }
+
+    #[test]
+    fn test_rate_limiter_per_category() {
+        let limiter = RateLimiter::new(60);
+
+        // Fill up CPU category
+        for _ in 0..60 {
+            limiter.should_allow(LogCategory::CPU);
+        }
+
+        // CPU should be blocked
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        assert!(!allowed, "CPU category should be blocked");
+
+        // But Bus should still be allowed
+        let (allowed, _) = limiter.should_allow(LogCategory::Bus);
+        assert!(allowed, "Bus category should still be allowed");
+    }
+
+    #[test]
+    fn test_rate_limiter_sliding_window() {
+        use std::thread::sleep;
+
+        let limiter = RateLimiter::new(5); // Small limit for faster testing
+
+        // Fill up the limit
+        for _ in 0..5 {
+            limiter.should_allow(LogCategory::CPU);
+        }
+
+        // Should be blocked
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        assert!(!allowed);
+
+        // Wait for the window to slide (1.1 seconds to ensure we're past the window)
+        sleep(Duration::from_millis(1100));
+
+        // Should be allowed again after window slides
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        assert!(allowed, "Should allow logs after sliding window expires");
+    }
+
+    #[test]
+    fn test_rate_limiter_reports_dropped_count() {
+        let limiter = RateLimiter::new(5);
+
+        // Fill up the limit
+        for _ in 0..5 {
+            limiter.should_allow(LogCategory::CPU);
+        }
+
+        // Drop some logs
+        for _ in 0..10 {
+            limiter.should_allow(LogCategory::CPU);
+        }
+
+        // Wait for window to slide
+        std::thread::sleep(Duration::from_millis(1100));
+
+        // Next log should report dropped count
+        let (allowed, dropped) = limiter.should_allow(LogCategory::CPU);
+        assert!(allowed, "Should be allowed after window slides");
+        assert!(dropped.is_some(), "Should report dropped count");
+        // The count might be 9 or 10 depending on timing of the drop report
+        assert!(
+            dropped.unwrap() >= 9 && dropped.unwrap() <= 10,
+            "Should report approximately 10 dropped messages, got {}",
+            dropped.unwrap()
+        );
     }
 }
