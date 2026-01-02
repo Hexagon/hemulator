@@ -49,10 +49,12 @@
 /// Physical address of the exception vector in RDRAM
 const EXCEPTION_VECTOR_ADDR: usize = 0x0180;
 
-/// Exception vector code: j 0x80000180; nop
-/// Instruction encoding for an infinite loop at the exception vector
+/// Exception vector code: eret; nop
+/// ERET (Exception Return) instruction allows the interrupt to return gracefully
+/// This is a placeholder until the game sets up its own exception handler
+/// Instruction encoding: 0x42000018 (eret), 0x00000000 (nop)
 const EXCEPTION_VECTOR_CODE: [u8; 8] = [
-    0x08, 0x00, 0x00, 0x60, // j 0x80000180 (jump to self)
+    0x42, 0x00, 0x00, 0x18, // eret (exception return)
     0x00, 0x00, 0x00, 0x00, // nop (delay slot)
 ];
 

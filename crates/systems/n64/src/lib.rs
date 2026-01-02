@@ -184,9 +184,10 @@ impl System for N64System {
         static mut FRAME_COUNTER: u32 = 0;
         unsafe {
             FRAME_COUNTER += 1;
-            if FRAME_COUNTER % 60 == 0 {
+            if FRAME_COUNTER.is_multiple_of(60) {
+                let counter = FRAME_COUNTER; // Copy to avoid shared reference
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("N64: Frame {} complete", FRAME_COUNTER)
+                    format!("N64: Frame {} complete", counter)
                 });
             }
         }
@@ -635,8 +636,8 @@ mod tests {
         // 3. Exception vector set up at 0x0180
         let exception_vec =
             u32::from_be_bytes([rdram[0x0180], rdram[0x0181], rdram[0x0182], rdram[0x0183]]);
-        // Should be j 0x80000180 (0x08000060)
-        assert_eq!(exception_vec, 0x08000060, "Exception vector set up");
+        // Should be eret (0x42000018)
+        assert_eq!(exception_vec, 0x42000018, "Exception vector set up");
 
         // 4. CP0 registers initialized
         assert_eq!(
@@ -891,5 +892,60 @@ mod tests {
         // Verify controller 2 has B pressed
         assert_eq!(buttons2 & (1 << 15), 0);
         assert_ne!(buttons2 & (1 << 14), 0);
+    }
+
+    #[test]
+    fn test_enhanced_rom_interrupts() {
+        // Test the enhanced ROM that properly sets up and handles interrupts
+        let test_rom = include_bytes!("../../../../test_roms/n64/test_enhanced.z64");
+        let mut sys = N64System::default();
+
+        // Mount the enhanced test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+
+        // Verify the ROM was mounted and CPU is at entry point
+        assert_eq!(
+            sys.cpu.cpu.pc, 0x80000400,
+            "CPU should be at entry point 0x80000400 after mount"
+        );
+
+        // Run several frames to allow the ROM to:
+        // 1. Set up interrupts
+        // 2. Trigger RDP rendering
+        // 3. Enter main loop
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+
+        // Get the rendered frame
+        let frame = sys.cpu.bus().rdp().get_frame();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+
+        // Verify red rectangle was rendered
+        let red_pixel_idx = (100 * 320 + 100) as usize;
+        let red_pixel = frame.pixels[red_pixel_idx];
+        assert_eq!(
+            red_pixel, 0xFFFF0000,
+            "Expected red pixel at (100,100), got 0x{:08X}",
+            red_pixel
+        );
+
+        // Verify green rectangle was rendered
+        let green_pixel_idx = (115 * 320 + 185) as usize;
+        let green_pixel = frame.pixels[green_pixel_idx];
+        assert_eq!(
+            green_pixel, 0xFF00FF00,
+            "Expected green pixel at (185,115), got 0x{:08X}",
+            green_pixel
+        );
+
+        // Verify background is black
+        let black_pixel = frame.pixels[0];
+        assert_eq!(
+            black_pixel, 0,
+            "Expected black background at (0,0), got 0x{:08X}",
+            black_pixel
+        );
     }
 }
