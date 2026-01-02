@@ -19,5 +19,9 @@ if [ -f "test_timer.asm" ]; then
     dasm test_timer.asm -f3 -otest_timer.bin
 fi
 
+# Build the game-like test ROM
+echo "  Building game_test.bin..."
+dasm game_test.asm -f3 -ogame_test.bin
+
 echo "Atari 2600 test ROMs built successfully:"
 ls -lh *.bin

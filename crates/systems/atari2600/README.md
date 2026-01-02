@@ -402,6 +402,16 @@ Only standard schemes supported: 2K, 4K, F8, FA, F6, F4. Missing formats:
 
 ### Timing and Rendering
 
+#### Visible Window Stability
+
+✅ **Fixed**
+
+The emulator now caches the first detected visible window start position to prevent frame-to-frame variation:
+- **Issue**: VBLANK timing variations caused visible_start to jump between frames (e.g., 77→83), resulting in vertical instability
+- **Fix**: Cache the first detected visible_start and use it for all subsequent frames
+- **Impact**: High - eliminates vertical jumping in games with variable VBLANK timing
+- **Test Coverage**: `test_visible_window_stability` ensures consistent rendering across frames
+
 #### Frame-Based Rendering
 
 ⚠️ **Simplified Implementation**

@@ -651,6 +651,10 @@ The emulator supports the following cartridge banking schemes:
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but some visual effects may differ
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
 
+**Recent Fixes**:
+- **Vertical Stability**: Fixed vertical jumping issue by caching the visible window start position across frames
+- **Frame Consistency**: Enhanced test ROMs to catch timing-related rendering issues
+
 **Controls**: The Atari 2600 joystick is mapped to the same keyboard layout as NES:
 - Arrow keys = Joystick directions
 - Z = Fire button
