@@ -1296,14 +1296,6 @@ fn main() {
     // Determine what to load based on CLI args
     let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
 
-    // Validate that we have something to load or a system to start
-    if cli_args.system.is_none() && rom_path.is_none() {
-        eprintln!("Error: Must specify either a system (--system) or a file to load.");
-        eprintln!();
-        CliArgs::print_usage();
-        std::process::exit(1);
-    }
-
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
     let mut rom_loaded = false;
@@ -1314,6 +1306,7 @@ fn main() {
         match system_name.to_lowercase().as_str() {
             "nes" => {
                 sys = EmulatorSystem::NES(Box::default());
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean NES system started".to_string();
                 println!("Started clean NES system");
 
@@ -1349,6 +1342,7 @@ fn main() {
             }
             "gb" | "gameboy" => {
                 sys = EmulatorSystem::GameBoy(Box::new(emu_gb::GbSystem::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean Game Boy system started".to_string();
                 println!("Started clean Game Boy system");
 
@@ -1384,6 +1378,7 @@ fn main() {
             }
             "atari2600" | "atari" => {
                 sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean Atari 2600 system started".to_string();
                 println!("Started clean Atari 2600 system");
 
@@ -1419,6 +1414,7 @@ fn main() {
             }
             "pc" => {
                 sys = EmulatorSystem::PC(Box::new(emu_pc::PcSystem::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean PC system started".to_string();
                 println!("Started clean PC system");
 
@@ -1452,6 +1448,7 @@ fn main() {
             }
             "snes" => {
                 sys = EmulatorSystem::SNES(Box::new(emu_snes::SnesSystem::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean SNES system started".to_string();
                 println!("Started clean SNES system");
 
@@ -1487,6 +1484,7 @@ fn main() {
             }
             "n64" => {
                 sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
+                rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean N64 system started".to_string();
                 println!("Started clean N64 system");
 
