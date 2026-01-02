@@ -30,8 +30,7 @@ const MI_INTR: u32 = 0x08;
 const MI_INTR_MASK: u32 = 0x0C;
 
 /// Interrupt bit positions
-#[allow(dead_code)]
-const MI_INTR_SP: u32 = 0x01; // Bit 0
+pub const MI_INTR_SP: u32 = 0x01; // Bit 0
 #[allow(dead_code)]
 const MI_INTR_SI: u32 = 0x02; // Bit 1
 #[allow(dead_code)]
@@ -39,8 +38,7 @@ const MI_INTR_AI: u32 = 0x04; // Bit 2
 pub const MI_INTR_VI: u32 = 0x08; // Bit 3
 #[allow(dead_code)]
 const MI_INTR_PI: u32 = 0x10; // Bit 4
-#[allow(dead_code)]
-const MI_INTR_DP: u32 = 0x20; // Bit 5
+pub const MI_INTR_DP: u32 = 0x20; // Bit 5
 
 /// MIPS Interface (MI) - Interrupt controller
 pub struct MipsInterface {

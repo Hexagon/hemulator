@@ -291,10 +291,11 @@ impl Rsp {
 
     /// Execute RSP task via HLE
     /// Called when RSP is un-halted by writing to SP_STATUS
-    pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> u32 {
+    /// Returns (cycles, should_interrupt)
+    pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> (u32, bool) {
         // Check if RSP is halted
         if self.sp_status & SP_STATUS_HALT != 0 {
-            return 0;
+            return (0, false);
         }
 
         // Execute HLE task
@@ -303,7 +304,10 @@ impl Rsp {
         // Set broke flag and halt after task completion
         self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT;
 
-        cycles
+        // Check if interrupt on break is enabled
+        let should_interrupt = (self.sp_status & SP_STATUS_INTR_BREAK) != 0;
+
+        (cycles, should_interrupt)
     }
 
     /// Get current microcode type (for debugging/monitoring)
