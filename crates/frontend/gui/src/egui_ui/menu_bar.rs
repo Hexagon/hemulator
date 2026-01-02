@@ -46,9 +46,9 @@ impl MenuBar {
     pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             // File menu
-            ui.menu_button("File", |ui| {
+            ui.menu_button("📁 File", |ui| {
                 if ui
-                    .button("New Project...")
+                    .button("➕ New Project...")
                     .on_hover_text("Create a new emulator system")
                     .clicked()
                 {
@@ -57,7 +57,7 @@ impl MenuBar {
                 }
                 ui.separator();
                 if ui
-                    .button("Open ROM... (F3)")
+                    .button("📂 Open ROM... (F3)")
                     .on_hover_text("Load a game ROM or disk image")
                     .clicked()
                 {
@@ -65,7 +65,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Open Project...")
+                    .button("📁 Open Project...")
                     .on_hover_text("Load a saved .hemu project file")
                     .clicked()
                 {
@@ -73,7 +73,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Save Project...")
+                    .button("💾 Save Project...")
                     .on_hover_text("Save current system configuration to a .hemu project file")
                     .clicked()
                 {
@@ -82,7 +82,7 @@ impl MenuBar {
                 }
                 ui.separator();
                 if ui
-                    .button("Exit (ESC)")
+                    .button("🚪 Exit (ESC)")
                     .on_hover_text("Quit the emulator")
                     .clicked()
                 {
@@ -92,9 +92,9 @@ impl MenuBar {
             });
 
             // Emulation menu
-            ui.menu_button("Emulation", |ui| {
+            ui.menu_button("🎮 Emulation", |ui| {
                 if ui
-                    .button("Reset (F2)")
+                    .button("🔄 Reset (F2)")
                     .on_hover_text("Reset the emulated system")
                     .clicked()
                 {
@@ -102,7 +102,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Pause (P)")
+                    .button("⏸️ Pause (P)")
                     .on_hover_text("Pause emulation")
                     .clicked()
                 {
@@ -110,7 +110,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Resume")
+                    .button("▶️ Resume")
                     .on_hover_text("Resume emulation")
                     .clicked()
                 {
@@ -120,10 +120,10 @@ impl MenuBar {
             });
 
             // View menu
-            ui.menu_button("View", |ui| {
-                ui.menu_button("Scaling", |ui| {
+            ui.menu_button("👁️ View", |ui| {
+                ui.menu_button("🔍 Scaling", |ui| {
                     if ui
-                        .button("Original")
+                        .button("1️⃣ Original")
                         .on_hover_text("1:1 pixel mapping, no scaling")
                         .clicked()
                     {
@@ -131,7 +131,7 @@ impl MenuBar {
                         ui.close();
                     }
                     if ui
-                        .button("Fit")
+                        .button("📐 Fit")
                         .on_hover_text("Scale to fit window, maintain aspect ratio")
                         .clicked()
                     {
@@ -139,7 +139,7 @@ impl MenuBar {
                         ui.close();
                     }
                     if ui
-                        .button("Stretch")
+                        .button("⬛ Stretch")
                         .on_hover_text("Stretch to fill window, ignore aspect ratio")
                         .clicked()
                     {
@@ -151,7 +151,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("Fullscreen (F11)")
+                    .button("🖼️ Fullscreen (F11)")
                     .on_hover_text("Toggle fullscreen mode without GUI")
                     .clicked()
                 {
@@ -159,7 +159,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Fullscreen with GUI (Host+F11)")
+                    .button("🖥️ Fullscreen with GUI (Host+F11)")
                     .on_hover_text("Toggle fullscreen mode with GUI visible")
                     .clicked()
                 {
@@ -170,7 +170,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("Log")
+                    .button("📋 Log")
                     .on_hover_text("Show emulation log messages")
                     .clicked()
                 {
@@ -178,7 +178,7 @@ impl MenuBar {
                     ui.close();
                 }
                 if ui
-                    .button("Debug")
+                    .button("🔧 Debug")
                     .on_hover_text("Show system debug information")
                     .clicked()
                 {
@@ -189,7 +189,7 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("Screenshot (F4)")
+                    .button("📸 Screenshot (F4)")
                     .on_hover_text("Save a screenshot of the current frame")
                     .clicked()
                 {
@@ -199,9 +199,9 @@ impl MenuBar {
             });
 
             // Help menu
-            ui.menu_button("Help", |ui| {
+            ui.menu_button("❓ Help", |ui| {
                 if ui
-                    .button("Controls & Help")
+                    .button("⌨️ Controls & Help")
                     .on_hover_text("View keyboard controls and usage instructions")
                     .clicked()
                 {
@@ -210,7 +210,7 @@ impl MenuBar {
                 }
                 ui.separator();
                 if ui
-                    .button("About")
+                    .button("ℹ️ About")
                     .on_hover_text("About Hemulator")
                     .clicked()
                 {

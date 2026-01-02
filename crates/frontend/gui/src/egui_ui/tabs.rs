@@ -653,40 +653,87 @@ impl TabManager {
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(20.0);
-                    ui.heading(egui::RichText::new("Hemulator").size(32.0));
+                    ui.heading(egui::RichText::new("🎮 Hemulator").size(36.0).strong());
                     ui.add_space(5.0);
-                    ui.label(egui::RichText::new("Multi-System Console Emulator").size(16.0));
+                    ui.label(
+                        egui::RichText::new("Multi-System Console Emulator")
+                            .size(16.0)
+                            .italics(),
+                    );
+                    ui.add_space(3.0);
+                    ui.label(
+                        egui::RichText::new(format!("Version {}", APP_VERSION))
+                            .size(14.0)
+                            .weak(),
+                    );
                     ui.add_space(20.0);
                 });
 
                 ui.separator();
                 ui.add_space(10.0);
 
-                ui.heading("Version Information");
-                ui.label(format!("Version: {}", APP_VERSION));
-                ui.add_space(10.0);
-
-                ui.heading("License");
-                ui.label("MIT License");
-                ui.label("Copyright (c) 2025");
-                ui.add_space(10.0);
-
-                ui.heading("About");
+                // About section
+                ui.heading(egui::RichText::new("📖 About").strong());
+                ui.add_space(5.0);
                 ui.label("A cross-platform, multi-system console emulator written in Rust,");
                 ui.label("supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation");
                 ui.label("with comprehensive save state management and customizable controls.");
                 ui.add_space(10.0);
 
-                ui.heading("Supported Systems");
-                ui.label("✅ NES (Nintendo Entertainment System) - Fully working");
-                ui.label("⚠️ PC (IBM PC/XT) - Functional");
-                ui.label("🚧 Atari 2600 - In development");
-                ui.label("🚧 Game Boy / Game Boy Color - In development");
-                ui.label("🚧 SNES (Super Nintendo) - In development");
-                ui.label("🚧 N64 (Nintendo 64) - In development");
+                // Supported Systems
+                ui.heading(egui::RichText::new("🖥️ Supported Systems").strong());
+                ui.add_space(5.0);
+                egui::Grid::new("systems_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 5.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("✅ NES");
+                        ui.label("Nintendo Entertainment System - Fully working");
+                        ui.end_row();
+
+                        ui.label("⚠️ PC");
+                        ui.label("IBM PC/XT - Functional");
+                        ui.end_row();
+
+                        ui.label("🚧 Atari 2600");
+                        ui.label("In development");
+                        ui.end_row();
+
+                        ui.label("🚧 Game Boy");
+                        ui.label("Game Boy / Game Boy Color - In development");
+                        ui.end_row();
+
+                        ui.label("🚧 SNES");
+                        ui.label("Super Nintendo - In development");
+                        ui.end_row();
+
+                        ui.label("🚧 N64");
+                        ui.label("Nintendo 64 - In development");
+                        ui.end_row();
+                    });
                 ui.add_space(10.0);
 
-                ui.heading("Links");
+                // Features
+                ui.heading(egui::RichText::new("✨ Features").strong());
+                ui.add_space(5.0);
+                ui.label("💾 Save States - 5 slots per game with instant save/load");
+                ui.label("⚙️ Persistent Settings - Customizable controls and window scaling");
+                ui.label("🎨 CRT Filters - Hardware-accelerated shader-based effects");
+                ui.label("🎵 Audio Support - Integrated audio playback via rodio");
+                ui.label("📁 ROM Auto-Detection - Automatic format detection");
+                ui.label("🖱️ Modern GUI - Menu bar and status bar with mouse support");
+                ui.add_space(10.0);
+
+                // License
+                ui.heading(egui::RichText::new("📜 License").strong());
+                ui.add_space(5.0);
+                ui.label("MIT License - Copyright (c) 2025");
+                ui.add_space(10.0);
+
+                // Links
+                ui.heading(egui::RichText::new("🔗 Links").strong());
+                ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     ui.label("GitHub:");
                     ui.hyperlink_to(
@@ -695,21 +742,21 @@ impl TabManager {
                     );
                 });
                 ui.horizontal(|ui| {
-                    ui.label("README:");
-                    ui.hyperlink_to(
-                        "Documentation",
-                        "https://github.com/Hexagon/hemulator/blob/main/README.md",
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("User Manual:");
+                    ui.label("📚 User Manual:");
                     ui.hyperlink_to(
                         "MANUAL.md",
                         "https://github.com/Hexagon/hemulator/blob/main/docs/MANUAL.md",
                     );
                 });
                 ui.horizontal(|ui| {
-                    ui.label("License:");
+                    ui.label("📖 Documentation:");
+                    ui.hyperlink_to(
+                        "README.md",
+                        "https://github.com/Hexagon/hemulator/blob/main/README.md",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("📄 License:");
                     ui.hyperlink_to(
                         "MIT License",
                         "https://github.com/Hexagon/hemulator/blob/main/LICENSE",
