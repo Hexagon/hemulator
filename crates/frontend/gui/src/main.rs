@@ -1290,6 +1290,9 @@ fn main() {
         eprintln!("Warning: Failed to save config.json: {}", e);
     }
 
+    // Configure rate limit from settings
+    log_config.set_rate_limit(settings.log_rate_limit);
+
     // Create runtime state for tracking current project and mounts
     let mut runtime_state = RuntimeState::new();
 
@@ -2836,6 +2839,16 @@ fn main() {
         // Handle display filter changes from property pane
         settings.display_filter = egui_app.property_pane.display_filter;
 
+        // Handle log rate limit changes
+        let current_rate_limit = emu_core::logging::LogConfig::global().get_rate_limit();
+        if settings.log_rate_limit != current_rate_limit {
+            settings.log_rate_limit = current_rate_limit;
+            // Auto-save settings when rate limit changes
+            if let Err(e) = settings.save() {
+                eprintln!("Failed to save log rate limit: {}", e);
+            }
+        }
+
         // Handle input configuration changes from property pane
         // Sync mouse settings back to the appropriate config (global or project-specific)
         let input_config_changed = settings.input.mouse_enabled
@@ -2991,43 +3004,61 @@ fn main() {
 
         // Step emulation frame if ROM is loaded and not paused
         if rom_loaded && settings.emulation_speed > 0.0 {
-            // Step the frame
-            match sys.step_frame() {
-                Ok(mut frame) => {
-                    // Apply display filter to the frame
-                    settings.display_filter.apply(
-                        &mut frame.pixels,
-                        frame.width as usize,
-                        frame.height as usize,
-                    );
+            // For speeds > 1.0, step multiple frames per display iteration
+            // For speeds <= 1.0, step one frame per iteration (timing controlled by sleep below)
+            let frames_to_step = if settings.emulation_speed > 1.0 {
+                settings.emulation_speed.round() as usize
+            } else {
+                1
+            };
 
-                    // Store frame buffer for screenshots (after filter is applied)
-                    latest_frame_buffer = Some((
-                        frame.pixels.clone(),
-                        frame.width as usize,
-                        frame.height as usize,
-                    ));
+            let mut last_frame_opt: Option<emu_core::types::Frame> = None;
 
-                    // Update emulator texture with filtered frame
-                    egui_app.update_emulator_texture(
-                        egui_backend.egui_ctx(),
-                        &frame.pixels,
-                        frame.width as usize,
-                        frame.height as usize,
-                    );
+            for _ in 0..frames_to_step {
+                // Step the frame
+                match sys.step_frame() {
+                    Ok(frame) => {
+                        last_frame_opt = Some(frame);
 
-                    // Handle audio
-                    let timing = sys.timing();
-                    let frame_rate = timing.frame_rate_hz();
-                    let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
-                    let audio_samples = sys.get_audio_samples(samples_per_frame);
-                    for sample in audio_samples {
-                        let _ = audio_tx.try_send(sample);
+                        // Handle audio for each stepped frame
+                        let timing = sys.timing();
+                        let frame_rate = timing.frame_rate_hz();
+                        let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
+                        let audio_samples = sys.get_audio_samples(samples_per_frame);
+                        for sample in audio_samples {
+                            let _ = audio_tx.try_send(sample);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Emulation error: {}", e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    eprintln!("Emulation error: {}", e);
-                }
+            }
+
+            // Render only the last frame to the display
+            if let Some(mut frame) = last_frame_opt {
+                // Apply display filter to the frame
+                settings.display_filter.apply(
+                    &mut frame.pixels,
+                    frame.width as usize,
+                    frame.height as usize,
+                );
+
+                // Store frame buffer for screenshots (after filter is applied)
+                latest_frame_buffer = Some((
+                    frame.pixels.clone(),
+                    frame.width as usize,
+                    frame.height as usize,
+                ));
+
+                // Update emulator texture with filtered frame
+                egui_app.update_emulator_texture(
+                    egui_backend.egui_ctx(),
+                    &frame.pixels,
+                    frame.width as usize,
+                    frame.height as usize,
+                );
             }
 
             // Handle keyboard input for emulator
@@ -3071,17 +3102,29 @@ fn main() {
             }
         }
 
-        // Frame timing
-        let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
-            let timing = sys.timing();
-            let frame_rate = timing.frame_rate_hz();
-            Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
-        } else {
-            Duration::from_millis(16) // ~60 FPS when idle
-        };
+        // Frame timing - skip sleep in benchmark mode
+        if !cli_args.benchmark {
+            let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
+                let timing = sys.timing();
+                let frame_rate = timing.frame_rate_hz();
 
-        if frame_dt < target_frame_time {
-            std::thread::sleep(target_frame_time - frame_dt);
+                if settings.emulation_speed >= 1.0 {
+                    // For normal speed or faster: maintain native frame rate (60 FPS)
+                    // We step multiple emulated frames above, so display stays at 60 FPS
+                    Duration::from_secs_f64(1.0 / frame_rate)
+                } else {
+                    // For slow motion: slow down both emulation and display
+                    // target_time = (1 / frame_rate) / emulation_speed
+                    // Example: 25% speed = (1/60) / 0.25 = 0.0666s = 15 FPS
+                    Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
+                }
+            } else {
+                Duration::from_millis(16) // ~60 FPS when idle
+            };
+
+            if frame_dt < target_frame_time {
+                std::thread::sleep(target_frame_time - frame_dt);
+            }
         }
         last_frame = Instant::now();
     }
