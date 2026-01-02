@@ -28,9 +28,9 @@
   - **Core architecture**: Reusable CPU implementations in `crates/core/` (e.g., `cpu_6502`)
 
 - **Agent tasks**:
-  - Run `cargo fmt` and `cargo clippy` on PRs.
+  - Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` on PRs.
   - Build the workspace (`cargo build --workspace`).
-  - Run unit/integration tests (`cargo test`).
+  - Run unit/integration tests (`cargo test --workspace`).
   - Optionally run benchmarks in a separate job.
 
 - **Pre-commit checks** (REQUIRED before committing any code):
