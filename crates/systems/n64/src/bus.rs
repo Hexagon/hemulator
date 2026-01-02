@@ -157,11 +157,19 @@ impl N64Bus {
     /// Execute pending RSP task if RSP is not halted
     /// Returns true if an SP interrupt should be triggered
     pub fn process_rsp_task(&mut self) -> bool {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+        log(LogCategory::PPU, LogLevel::Info, || {
+            "N64 Bus: process_rsp_task() called".to_string()
+        });
+        
         // Clone RDRAM reference to avoid borrow checker issues
         let rdram_clone = self.rdram.clone();
         let (_cycles, should_interrupt) = self.rsp.execute_task(&rdram_clone, &mut self.rdp);
 
         if should_interrupt {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                "N64 Bus: RSP task complete, triggering SP interrupt".to_string()
+            });
             // Set SP interrupt in MI
             self.mi.set_interrupt(super::mi::MI_INTR_SP);
         }

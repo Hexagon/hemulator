@@ -211,6 +211,11 @@ impl Rsp {
             SP_RD_LEN => {
                 // DMA read from RDRAM to RSP memory (DMEM or IMEM)
                 self.sp_rd_len = value & 0x0FFF;
+                use emu_core::logging::{log, LogCategory, LogLevel};
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("RSP: DMA read - DRAM:0x{:08X} -> RSP:0x{:04X}, len:{}", 
+                            self.sp_dram_addr, self.sp_mem_addr, (self.sp_rd_len & 0xFFF) + 1)
+                });
                 self.dma_read(rdram);
             }
             SP_WR_LEN => {
@@ -220,13 +225,24 @@ impl Rsp {
             }
             SP_STATUS => {
                 // Status register write (control bits)
+                use emu_core::logging::{log, LogCategory, LogLevel};
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("RSP: SP_STATUS write 0x{:08X}", value)
+                });
+                
                 // Bit 0: Clear halt
                 if value & 0x0001 != 0 {
                     self.sp_status &= !SP_STATUS_HALT;
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        "RSP: Cleared HALT flag (RSP starting)".to_string()
+                    });
                 }
                 // Bit 1: Set halt
                 if value & 0x0002 != 0 {
                     self.sp_status |= SP_STATUS_HALT;
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        "RSP: Set HALT flag (RSP stopping)".to_string()
+                    });
                 }
                 // Bit 2: Clear broke
                 if value & 0x0004 != 0 {
@@ -264,7 +280,11 @@ impl Rsp {
 
         // If we just loaded IMEM, detect microcode
         if is_imem {
+            use emu_core::logging::{log, LogCategory, LogLevel};
             self.hle.detect_microcode(&self.imem);
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!("RSP: Microcode detected: {:?}", self.hle.microcode())
+            });
         }
     }
 
@@ -293,13 +313,26 @@ impl Rsp {
     /// Called when RSP is un-halted by writing to SP_STATUS
     /// Returns (cycles, should_interrupt)
     pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> (u32, bool) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+        
         // Check if RSP is halted
         if self.sp_status & SP_STATUS_HALT != 0 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                "RSP: execute_task() called but RSP is halted".to_string()
+            });
             return (0, false);
         }
 
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!("RSP: Executing task (microcode: {:?})", self.hle.microcode())
+        });
+
         // Execute HLE task
         let cycles = self.hle.execute_task(&self.dmem, rdram, rdp);
+
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!("RSP: Task complete ({} cycles)", cycles)
+        });
 
         // Set broke flag and halt after task completion
         self.sp_status |= SP_STATUS_BROKE | SP_STATUS_HALT;

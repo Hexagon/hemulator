@@ -277,6 +277,10 @@ impl Pif {
         // Check if this is a controller command write (PIF RAM offset 0x7C0-0x7FF)
         // This is where games write controller command blocks
         if addr >= 0x7C0 {
+            use emu_core::logging::{log, LogCategory, LogLevel};
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!("PIF: Write to offset 0x{:03X} = 0x{:02X}", addr, value)
+            });
             self.process_controller_commands();
         }
     }

@@ -180,6 +180,17 @@ impl System for N64System {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         self.current_cycles = 0;
 
+        // Log every 60th frame (once per second at 60fps)
+        static mut FRAME_COUNTER: u32 = 0;
+        unsafe {
+            FRAME_COUNTER += 1;
+            if FRAME_COUNTER % 60 == 0 {
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("N64: Frame {} complete", FRAME_COUNTER)
+                });
+            }
+        }
+
         // NTSC has 262 scanlines per frame
         const SCANLINES_PER_FRAME: u32 = 262;
         let cycles_per_scanline = self.frame_cycles / SCANLINES_PER_FRAME;
