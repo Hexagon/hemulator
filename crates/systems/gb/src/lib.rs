@@ -760,8 +760,8 @@ mod tests {
         rom[0x104] = 0xFB; // EI (enable interrupts)
         rom[0x105] = 0x76; // HALT
         rom[0x106] = 0x00; // NOP (should execute after interrupt)
-        rom[0x107] = 0x18; // JR -3 (loop back to HALT)
-        rom[0x108] = 0xFD;
+        rom[0x107] = 0x18; // JR -4 (loop back to HALT at 0x105)
+        rom[0x108] = 0xFC; // -4 offset
 
         sys.mount("Cartridge", &rom).unwrap();
 
