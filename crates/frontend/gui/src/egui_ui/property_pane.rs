@@ -3,13 +3,22 @@
 use crate::display_filter::DisplayFilter;
 use egui::{ScrollArea, Ui};
 
+/// Source of input configuration (global config.json or project-specific)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputConfigSource {
+    Global,  // Using config.json
+    Project, // Using project .hemu file override
+}
+
 /// Actions that can be triggered from the property pane
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PropertyAction {
-    SaveState(u8),     // Slot number 1-5
-    LoadState(u8),     // Slot number 1-5
-    MountFile(String), // Mount point ID
-    EjectFile(String), // Mount point ID
+    SaveState(u8),                     // Slot number 1-5
+    LoadState(u8),                     // Slot number 1-5
+    MountFile(String),                 // Mount point ID
+    EjectFile(String),                 // Mount point ID
+    ConfigureInput,                    // Open input configuration dialog
+    SetInputSource(InputConfigSource), // Switch between global/project input config
 }
 
 pub struct PropertyPane {
@@ -34,6 +43,15 @@ pub struct PropertyPane {
     // Settings
     pub display_filter: DisplayFilter,
     pub emulation_speed_percent: i32, // 0-400
+
+    // Input configuration (can be global or project-specific)
+    pub input_config_source: InputConfigSource, // Global or Project
+    pub player1_enabled: bool,
+    pub player2_enabled: bool,
+    pub mouse_enabled: bool,
+    pub mouse_sensitivity: f32,
+    pub num_gamepads_detected: usize,
+    pub num_joysticks_detected: usize,
 
     // PC-specific settings (only shown for PC system)
     pub pc_cpu_model: Option<String>,
@@ -86,6 +104,13 @@ impl PropertyPane {
             pc_bda_values: None,
             display_filter: DisplayFilter::None,
             emulation_speed_percent: 100,
+            input_config_source: InputConfigSource::Global,
+            player1_enabled: true,
+            player2_enabled: false,
+            mouse_enabled: false,
+            mouse_sensitivity: 1.0,
+            num_gamepads_detected: 0,
+            num_joysticks_detected: 0,
             pc_cpu_model: None,
             pc_memory_kb: None,
             mount_points: Vec::new(),
@@ -450,6 +475,81 @@ impl PropertyPane {
                                 self.emulation_speed_percent = 400;
                             }
                         });
+
+                        // Input Configuration section
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.label(egui::RichText::new("Input Configuration").strong());
+
+                        // Input source selection (Global vs Project)
+                        ui.horizontal(|ui| {
+                            ui.label("Config Source:");
+                            if ui
+                                .selectable_label(
+                                    self.input_config_source == InputConfigSource::Global,
+                                    "Global",
+                                )
+                                .on_hover_text("Use global config.json settings for all projects")
+                                .clicked()
+                                && self.input_config_source != InputConfigSource::Global
+                            {
+                                self.pending_action =
+                                    Some(PropertyAction::SetInputSource(InputConfigSource::Global));
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.input_config_source == InputConfigSource::Project,
+                                    "Project",
+                                )
+                                .on_hover_text("Use project-specific .hemu file settings")
+                                .clicked()
+                                && self.input_config_source != InputConfigSource::Project
+                            {
+                                self.pending_action = Some(PropertyAction::SetInputSource(
+                                    InputConfigSource::Project,
+                                ));
+                            }
+                        });
+
+                        // Input device status
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Gamepads:");
+                            ui.label(format!("{} detected", self.num_gamepads_detected));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Joysticks:");
+                            ui.label(format!("{} detected", self.num_joysticks_detected));
+                        });
+
+                        // Player configuration
+                        ui.add_space(5.0);
+                        ui.checkbox(&mut self.player1_enabled, "Player 1 Enabled");
+                        ui.checkbox(&mut self.player2_enabled, "Player 2 Enabled");
+
+                        // Mouse configuration
+                        ui.add_space(5.0);
+                        ui.checkbox(&mut self.mouse_enabled, "Mouse Input Enabled");
+                        if self.mouse_enabled {
+                            ui.horizontal(|ui| {
+                                ui.label("Sensitivity:");
+                                ui.add(
+                                    egui::Slider::new(&mut self.mouse_sensitivity, 0.1..=5.0)
+                                        .step_by(0.1)
+                                        .show_value(true),
+                                );
+                            });
+                        }
+
+                        // Configure button
+                        ui.add_space(5.0);
+                        if ui
+                            .button("Configure Buttons...")
+                            .on_hover_text("Open detailed input configuration dialog")
+                            .clicked()
+                        {
+                            self.pending_action = Some(PropertyAction::ConfigureInput);
+                        }
                     });
 
                 ui.add_space(5.0);

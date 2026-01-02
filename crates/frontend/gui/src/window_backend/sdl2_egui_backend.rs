@@ -2,7 +2,10 @@
 
 use crate::window_backend::{Key, WindowBackend};
 use egui_sdl2_gl::{painter::Painter, EguiStateHandler, ShaderVersion};
+use sdl2::controller::GameController;
+use sdl2::joystick::Joystick;
 use std::any::Any;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 pub struct Sdl2EguiBackend {
@@ -14,12 +17,30 @@ pub struct Sdl2EguiBackend {
     egui_state: EguiStateHandler,
     egui_ctx: egui::Context,
     event_pump: sdl2::EventPump,
+    _game_controller_subsystem: sdl2::GameControllerSubsystem,
+    _joystick_subsystem: sdl2::JoystickSubsystem,
 
     // State tracking
     keys_down: std::collections::HashSet<Key>,
     keys_pressed: std::collections::HashSet<Key>,
     sdl2_scancodes_pressed: Vec<sdl2::keyboard::Scancode>,
     sdl2_scancodes_released: Vec<sdl2::keyboard::Scancode>,
+
+    // Gamepad/joystick state
+    /// Connected game controllers (indexed by SDL instance ID)
+    game_controllers: HashMap<u32, GameController>,
+    /// Connected joysticks that aren't game controllers (indexed by SDL instance ID)
+    joysticks: HashMap<u32, Joystick>,
+    /// Gamepad button state (indexed by instance ID, then button)
+    gamepad_buttons: HashMap<u32, HashSet<u8>>,
+    /// Gamepad axis values (indexed by instance ID, then axis ID)
+    gamepad_axes: HashMap<u32, HashMap<u8, i16>>,
+    /// Joystick button state (indexed by instance ID, then button)
+    joystick_buttons: HashMap<u32, HashSet<u8>>,
+    /// Joystick axis values (indexed by instance ID, then axis ID)
+    joystick_axes: HashMap<u32, HashMap<u8, i16>>,
+    /// Joystick hat values (indexed by instance ID, then hat ID, value is bitmask: 1=up, 2=right, 4=down, 8=left)
+    joystick_hats: HashMap<u32, HashMap<u8, u8>>,
 }
 
 impl Sdl2EguiBackend {
@@ -53,6 +74,66 @@ impl Sdl2EguiBackend {
 
         let event_pump = sdl_context.event_pump()?;
 
+        // Initialize gamepad and joystick subsystems
+        let game_controller_subsystem = sdl_context.game_controller()?;
+        let joystick_subsystem = sdl_context.joystick()?;
+
+        // Auto-detect and open all connected game controllers and joysticks
+        let mut game_controllers = HashMap::new();
+        let mut joysticks = HashMap::new();
+        let mut gamepad_buttons = HashMap::new();
+        let mut gamepad_axes = HashMap::new();
+        let mut joystick_buttons = HashMap::new();
+        let mut joystick_axes = HashMap::new();
+        let mut joystick_hats = HashMap::new();
+
+        let num_joysticks = joystick_subsystem.num_joysticks()?;
+
+        for id in 0..num_joysticks {
+            if game_controller_subsystem.is_game_controller(id) {
+                // Open as game controller
+                match game_controller_subsystem.open(id) {
+                    Ok(controller) => {
+                        let instance_id = controller.instance_id();
+                        println!(
+                            "Opened game controller {}: {} (instance ID: {})",
+                            id,
+                            controller.name(),
+                            instance_id
+                        );
+                        game_controllers.insert(instance_id, controller);
+                        // Initialize button and axis maps for this controller
+                        gamepad_buttons.insert(instance_id, HashSet::new());
+                        gamepad_axes.insert(instance_id, HashMap::new());
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to open game controller {}: {}", id, e);
+                    }
+                }
+            } else {
+                // Open as regular joystick
+                match joystick_subsystem.open(id) {
+                    Ok(joystick) => {
+                        let instance_id = joystick.instance_id();
+                        println!(
+                            "Opened joystick {}: {} (instance ID: {})",
+                            id,
+                            joystick.name(),
+                            instance_id
+                        );
+                        joysticks.insert(instance_id, joystick);
+                        // Initialize button, axis, and hat maps for this joystick
+                        joystick_buttons.insert(instance_id, HashSet::new());
+                        joystick_axes.insert(instance_id, HashMap::new());
+                        joystick_hats.insert(instance_id, HashMap::new());
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to open joystick {}: {}", id, e);
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             sdl_context,
             window,
@@ -61,10 +142,19 @@ impl Sdl2EguiBackend {
             egui_state,
             egui_ctx,
             event_pump,
+            _game_controller_subsystem: game_controller_subsystem,
+            _joystick_subsystem: joystick_subsystem,
             keys_down: std::collections::HashSet::new(),
             keys_pressed: std::collections::HashSet::new(),
             sdl2_scancodes_pressed: Vec::new(),
             sdl2_scancodes_released: Vec::new(),
+            game_controllers,
+            joysticks,
+            gamepad_buttons,
+            gamepad_axes,
+            joystick_buttons,
+            joystick_axes,
+            joystick_hats,
         })
     }
 
@@ -142,6 +232,132 @@ impl Sdl2EguiBackend {
                         self.sdl2_scancodes_released.push(scancode);
                     }
                 }
+                // Game controller events
+                sdl2::event::Event::ControllerDeviceAdded { which, .. } => {
+                    match self._game_controller_subsystem.open(which) {
+                        Ok(controller) => {
+                            let instance_id = controller.instance_id();
+                            println!(
+                                "Game controller added: {} (instance ID: {})",
+                                controller.name(),
+                                instance_id
+                            );
+                            self.game_controllers.insert(instance_id, controller);
+                            self.gamepad_buttons.insert(instance_id, HashSet::new());
+                            self.gamepad_axes.insert(instance_id, HashMap::new());
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Failed to open hot-plugged game controller (index {}): {}",
+                                which, err
+                            );
+                        }
+                    }
+                }
+                sdl2::event::Event::ControllerDeviceRemoved { which, .. } => {
+                    println!("Game controller removed (instance ID: {})", which);
+                    self.game_controllers.remove(&which);
+                    self.gamepad_buttons.remove(&which);
+                    self.gamepad_axes.remove(&which);
+                }
+                sdl2::event::Event::ControllerButtonDown { which, button, .. } => {
+                    self.gamepad_buttons
+                        .entry(which)
+                        .or_default()
+                        .insert(button as u8);
+                }
+                sdl2::event::Event::ControllerButtonUp { which, button, .. } => {
+                    if let Some(buttons) = self.gamepad_buttons.get_mut(&which) {
+                        buttons.remove(&(button as u8));
+                    }
+                }
+                sdl2::event::Event::ControllerAxisMotion {
+                    which, axis, value, ..
+                } => {
+                    self.gamepad_axes
+                        .entry(which)
+                        .or_default()
+                        .insert(axis as u8, value);
+                }
+                // Joystick events (for non-gamepad joysticks)
+                sdl2::event::Event::JoyDeviceAdded { which, .. } => {
+                    // Only open if not already opened as a game controller
+                    if !self._game_controller_subsystem.is_game_controller(which) {
+                        match self._joystick_subsystem.open(which) {
+                            Ok(joystick) => {
+                                let instance_id = joystick.instance_id();
+                                println!(
+                                    "Joystick added: {} (instance ID: {})",
+                                    joystick.name(),
+                                    instance_id
+                                );
+                                self.joysticks.insert(instance_id, joystick);
+                                self.joystick_buttons.insert(instance_id, HashSet::new());
+                                self.joystick_axes.insert(instance_id, HashMap::new());
+                                self.joystick_hats.insert(instance_id, HashMap::new());
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to open joystick at index {}: {}", which, err);
+                            }
+                        }
+                    }
+                }
+                sdl2::event::Event::JoyDeviceRemoved { which, .. } => {
+                    println!("Joystick removed (instance ID: {})", which);
+                    self.joysticks.remove(&which);
+                    self.joystick_buttons.remove(&which);
+                    self.joystick_axes.remove(&which);
+                    self.joystick_hats.remove(&which);
+                }
+                sdl2::event::Event::JoyButtonDown {
+                    which, button_idx, ..
+                } => {
+                    self.joystick_buttons
+                        .entry(which)
+                        .or_default()
+                        .insert(button_idx);
+                }
+                sdl2::event::Event::JoyButtonUp {
+                    which, button_idx, ..
+                } => {
+                    if let Some(buttons) = self.joystick_buttons.get_mut(&which) {
+                        buttons.remove(&button_idx);
+                    }
+                }
+                sdl2::event::Event::JoyAxisMotion {
+                    which,
+                    axis_idx,
+                    value,
+                    ..
+                } => {
+                    self.joystick_axes
+                        .entry(which)
+                        .or_default()
+                        .insert(axis_idx, value);
+                }
+                sdl2::event::Event::JoyHatMotion {
+                    which,
+                    hat_idx,
+                    state,
+                    ..
+                } => {
+                    // Convert SDL hat state to bitmask (1=up, 2=right, 4=down, 8=left)
+                    let hat_value = match state {
+                        sdl2::joystick::HatState::Centered => 0,
+                        sdl2::joystick::HatState::Up => 1,
+                        sdl2::joystick::HatState::Right => 2,
+                        sdl2::joystick::HatState::Down => 4,
+                        sdl2::joystick::HatState::Left => 8,
+                        sdl2::joystick::HatState::RightUp => 3,
+                        sdl2::joystick::HatState::RightDown => 6,
+                        sdl2::joystick::HatState::LeftUp => 9,
+                        sdl2::joystick::HatState::LeftDown => 12,
+                    };
+                    self.joystick_hats
+                        .entry(which)
+                        .or_default()
+                        .insert(hat_idx, hat_value);
+                }
                 _ => {}
             }
         }
@@ -174,6 +390,61 @@ impl Sdl2EguiBackend {
     /// Get current fullscreen state
     pub fn is_fullscreen(&self) -> bool {
         self.window.fullscreen_state() != sdl2::video::FullscreenType::Off
+    }
+
+    /// Check if a gamepad button is pressed
+    /// instance_id: SDL2 controller instance ID (usually 0 for first controller)
+    /// button: SDL2 GameController button ID
+    pub fn is_gamepad_button_down(&self, instance_id: u32, button: u8) -> bool {
+        self.gamepad_buttons
+            .get(&instance_id)
+            .map(|buttons| buttons.contains(&button))
+            .unwrap_or(false)
+    }
+
+    /// Get gamepad axis value
+    /// instance_id: SDL2 controller instance ID
+    /// axis: SDL2 GameController axis ID
+    /// Returns value in range -32768 to 32767, or 0 if not found
+    pub fn get_gamepad_axis(&self, instance_id: u32, axis: u8) -> i16 {
+        self.gamepad_axes
+            .get(&instance_id)
+            .and_then(|axes| axes.get(&axis).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get number of connected gamepads
+    pub fn num_gamepads(&self) -> usize {
+        self.game_controllers.len()
+    }
+
+    /// Check if a joystick button is pressed
+    pub fn is_joystick_button_down(&self, instance_id: u32, button: u8) -> bool {
+        self.joystick_buttons
+            .get(&instance_id)
+            .map(|buttons| buttons.contains(&button))
+            .unwrap_or(false)
+    }
+
+    /// Get joystick axis value
+    pub fn get_joystick_axis(&self, instance_id: u32, axis: u8) -> i16 {
+        self.joystick_axes
+            .get(&instance_id)
+            .and_then(|axes| axes.get(&axis).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get joystick hat value
+    pub fn get_joystick_hat(&self, instance_id: u32, hat: u8) -> u8 {
+        self.joystick_hats
+            .get(&instance_id)
+            .and_then(|hats| hats.get(&hat).copied())
+            .unwrap_or(0)
+    }
+
+    /// Get number of connected joysticks (non-gamepad)
+    pub fn num_joysticks(&self) -> usize {
+        self.joysticks.len()
     }
 }
 
@@ -214,6 +485,10 @@ impl WindowBackend for Sdl2EguiBackend {
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }
