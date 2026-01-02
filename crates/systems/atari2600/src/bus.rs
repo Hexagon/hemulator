@@ -90,19 +90,14 @@ impl Memory6502 for Atari2600Bus {
             // RIOT RAM
             0x0080..=0x00FF => self.riot.read(addr),
 
-            // TIA mirrors (0x0100-0x017F) - A7=0
+            // TIA mirrors (0x0100-0x012F) - write-only TIA registers mirror
             0x0100..=0x012F => 0, // TIA write mirrors (read=0)
-            0x0130..=0x013F => self.tia.read((addr & 0x0F) as u8), // TIA read mirrors
-            0x0140..=0x017F => self.riot.read(addr), // Wait, 0140 is A7=0? No. 0140 is 101000000. A7=0.
-            // But 0040 is RIOT RAM mirror?
-            // 0040 is 01000000. A7=0.
-            // RIOT RAM is A7=1.
-            // So 0040 is NOT RIOT RAM. 0040 is TIA.
-            // My previous comment said "RIOT RAM (mirrored at 0x00-0x7F)".
-            // This comment is WRONG. RIOT RAM is 0080-00FF.
-            // 0000-007F is TIA.
-            // So 0040-007F is TIA.
-            // So 0140-017F is TIA.
+            
+            // TIA read mirrors (0x0130-0x013F) - collision detection registers
+            0x0130..=0x013F => self.tia.read((addr & 0x0F) as u8),
+            
+            // TIA + RAM mirrors (0x0140-0x017F) - mirrors the dual read/write region at 0x40-0x7F
+            0x0140..=0x017F => self.riot.read(addr),
 
             // RIOT RAM mirrors (0x0180-0x01FF) - A7=1
             // This is CRITICAL for the stack (SP=0xFF -> 0x01FF)
@@ -145,24 +140,35 @@ impl Memory6502 for Atari2600Bus {
             }
             0x002D..=0x003F => {} // Unused
 
-            // TIA write (mirrored)
+            // TIA write (mirrored) AND RIOT RAM simultaneously
+            // On real hardware, addresses $40-$7F write to BOTH TIA and RAM
             0x0040..=0x007F => {
                 // WSYNC is mirrored too (e.g., $42)
                 if (addr & 0x3F) == 0x02 {
                     self.wsync_request = true;
                 }
                 self.tia.write((addr & 0x3F) as u8, val);
+                self.riot.write(addr, val);
             }
 
             // RIOT RAM
             0x0080..=0x00FF => self.riot.write(addr, val),
 
-            // TIA mirrors (0x0100-0x017F)
-            0x0100..=0x017F => {
+            // TIA mirrors (0x0100-0x013F) - TIA only
+            0x0100..=0x013F => {
                 if (addr & 0x3F) == 0x02 {
                     self.wsync_request = true;
                 }
                 self.tia.write((addr & 0x3F) as u8, val);
+            }
+
+            // TIA + RAM mirrors (0x0140-0x017F) - mirrors the dual-write behavior of 0x40-0x7F
+            0x0140..=0x017F => {
+                if (addr & 0x3F) == 0x02 {
+                    self.wsync_request = true;
+                }
+                self.tia.write((addr & 0x3F) as u8, val);
+                self.riot.write(addr, val);
             }
 
             // RIOT RAM mirrors (0x0180-0x01FF)
@@ -238,5 +244,32 @@ mod tests {
         // 6507 has 13-bit address bus, so high bits should be masked
         // $2000 should map to $0000
         assert_eq!(bus.read(0x2000), bus.read(0x0000));
+    }
+
+    #[test]
+    fn test_bus_tia_ram_simultaneous_write() {
+        let mut bus = Atari2600Bus::new();
+
+        // Addresses $40-$7F should write to BOTH TIA and RAM on real hardware
+        // Write to $40 (first byte of this dual-write range)
+        bus.write(0x0040, 0xAB);
+
+        // Verify the value was written to RAM (readable at $40)
+        assert_eq!(bus.read(0x0040), 0xAB);
+
+        // Write to another address in the range
+        bus.write(0x007F, 0xCD);
+        assert_eq!(bus.read(0x007F), 0xCD);
+
+        // Verify we can still access normal RIOT RAM at $80+
+        bus.write(0x0080, 0x12);
+        assert_eq!(bus.read(0x0080), 0x12);
+
+        // Test that the mirror at 0x140-0x17F also works (mirrors 0x40-0x7F behavior)
+        bus.write(0x0140, 0xEF);
+        assert_eq!(bus.read(0x0140), 0xEF);
+
+        // Verify it's the same RAM location (address masking)
+        assert_eq!(bus.read(0x0040), 0xEF);
     }
 }

@@ -155,6 +155,7 @@ struct ScanlineState {
     missile1_x: u8,
     enabl: bool,
     ball_x: u8,
+    ball_size: u8, // Ball size (1, 2, 4, or 8 pixels)
 }
 
 /// TIA chip state
@@ -201,6 +202,7 @@ pub struct Tia {
     // Ball
     enabl: bool, // Ball enable
     ball_x: u8,
+    ball_size: u8, // Ball size (1, 2, 4, or 8 pixels) from CTRLPF bits 4-5
 
     // Collision detection registers (CXM0P, CXM1P, CXP0FB, CXP1FB, CXM0FB, CXM1FB, CXBLPF, CXPPMM)
     cxm0p: u8,  // Missile 0 to Player collisions
@@ -335,6 +337,7 @@ impl Tia {
             missile1_x: 0,
             enabl: false,
             ball_x: 0,
+            ball_size: 1, // Default to 1 pixel
             cxm0p: 0,
             cxm1p: 0,
             cxp0fb: 0,
@@ -472,6 +475,7 @@ impl Tia {
             missile1_x: self.missile1_x,
             enabl: self.enabl,
             ball_x: self.ball_x,
+            ball_size: self.ball_size,
         };
     }
 
@@ -549,6 +553,14 @@ impl Tia {
                 self.playfield_reflect = (val & 0x01) != 0;
                 self.playfield_score_mode = (val & 0x02) != 0;
                 self.playfield_priority = (val & 0x04) != 0;
+                // Bits 4-5 control ball size: 00=1px, 01=2px, 10=4px, 11=8px
+                self.ball_size = match (val >> 4) & 0x03 {
+                    0x00 => 1,
+                    0x01 => 2,
+                    0x02 => 4,
+                    0x03 => 8,
+                    _ => 1,
+                };
             }
 
             // Player reflect
@@ -1169,9 +1181,9 @@ impl Tia {
             return false;
         }
 
-        // Ball is 1 pixel wide by default
+        // Ball size is controlled by CTRLPF bits 4-5 (1, 2, 4, or 8 pixels)
         let offset = x.wrapping_sub(state.ball_x as usize);
-        offset < 1
+        offset < state.ball_size as usize
     }
 
     /// Check if a pixel is part of the playfield
@@ -1466,6 +1478,49 @@ mod tests {
 
         // Ball should be visible at x=100
         assert_ne!(frame[100], ntsc_to_rgb(0));
+    }
+
+    #[test]
+    fn test_tia_ball_size() {
+        let mut tia = Tia::new();
+
+        tia.write(0x14, 0x00); // RESBL - position ball at x=0
+        tia.write(0x1F, 0x02); // ENABL - enable ball
+
+        // Test 1-pixel ball (CTRLPF bits 4-5 = 00)
+        tia.write(0x0A, 0x00);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 1);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(!Tia::is_ball_pixel(&state, 1));
+
+        // Test 2-pixel ball (CTRLPF bits 4-5 = 01)
+        tia.write(0x0A, 0x10);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 2);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 1));
+        assert!(!Tia::is_ball_pixel(&state, 2));
+
+        // Test 4-pixel ball (CTRLPF bits 4-5 = 10)
+        tia.write(0x0A, 0x20);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 4);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 3));
+        assert!(!Tia::is_ball_pixel(&state, 4));
+
+        // Test 8-pixel ball (CTRLPF bits 4-5 = 11)
+        tia.write(0x0A, 0x30);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 8);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 7));
+        assert!(!Tia::is_ball_pixel(&state, 8));
     }
 
     #[test]
