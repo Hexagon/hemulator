@@ -1116,8 +1116,11 @@ impl Ppu {
                 }
 
                 // Read tile entry (format: vhopppcc cccccccc)
-                // v = vertical flip (bit 15), h = horizontal flip (bit 14)
-                // o = priority (bit 13), ppp = palette (bits 12-10)
+                // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
+                // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
+                // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
+                // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
+                // cccccccccc = tile number (bits 9-0)
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
@@ -1209,6 +1212,11 @@ impl Ppu {
                 }
 
                 // Read tile entry (format: vhopppcc cccccccc)
+                // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
+                // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
+                // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
+                // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
+                // cccccccccc = tile number (bits 9-0)
                 let tile_low = self.vram[tilemap_addr];
                 let tile_high = self.vram[tilemap_addr + 1];
 
