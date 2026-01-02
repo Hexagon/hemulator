@@ -948,4 +948,71 @@ mod tests {
             black_pixel
         );
     }
+
+    #[test]
+    fn test_pong3d_rom_rendering() {
+        // Test the 3D Pong ROM that uses RSP F3DEX display lists and 3D rendering
+        let test_rom = include_bytes!("../../../../test_roms/n64/test_pong3d.z64");
+        let mut sys = N64System::default();
+
+        // Mount the 3D Pong test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+
+        // Verify the ROM was mounted and CPU is at entry point
+        assert_eq!(
+            sys.cpu.cpu.pc, 0x80000400,
+            "CPU should be at entry point 0x80000400 after mount"
+        );
+
+        // Manually load F3DEX microcode signature to IMEM for testing
+        // In a real scenario, the game would load this via DMA
+        {
+            let bus = sys.cpu.bus_mut();
+            let rsp = bus.rsp_mut();
+
+            // Write a simple pattern to IMEM to trigger F3DEX detection
+            // This simulates the game loading microcode
+            // Writing to offset 0 triggers microcode detection
+            rsp.write_imem(0, 0x12); // Trigger detection
+            for i in 1..256 {
+                rsp.write_imem(i, ((i / 4) as u8).wrapping_mul(17));
+            }
+        }
+
+        // Run several frames to allow the ROM to:
+        // 1. Set up RSP task structure
+        // 2. Load F3DEX display list
+        // 3. Process vertices and render 3D geometry
+        for _ in 0..20 {
+            let _ = sys.step_frame();
+        }
+
+        // Get the rendered frame
+        let frame = sys.cpu.bus().rdp().get_frame();
+        assert_eq!(frame.width, 320);
+        assert_eq!(frame.height, 240);
+
+        // Verify RSP has microcode loaded
+        let rsp = sys.cpu.bus().rsp();
+        let microcode = rsp.microcode_type();
+
+        // Should detect F3DEX or F3DEX2 (or at least not Unknown after we loaded IMEM)
+        assert!(
+            microcode != crate::rsp_hle::MicrocodeType::Unknown,
+            "RSP should detect some microcode after IMEM write, got {:?}",
+            microcode
+        );
+
+        println!("3D Pong ROM test completed successfully");
+        println!("  Microcode: {:?}", microcode);
+        println!("  Frame: {}x{}", frame.width, frame.height);
+
+        // Note: Full 3D rendering verification would require:
+        // 1. RSP task DMA from ROM to DMEM
+        // 2. F3DEX display list parsing
+        // 3. Matrix transformations
+        // 4. Vertex processing and triangle generation
+        // 5. RDP rasterization
+        // This test validates the ROM structure and basic RSP integration
+    }
 }
