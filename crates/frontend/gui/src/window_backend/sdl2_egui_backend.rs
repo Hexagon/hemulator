@@ -51,50 +51,6 @@ impl Sdl2EguiBackend {
         let egui_state = EguiStateHandler::new(&painter);
         let egui_ctx = egui::Context::default();
 
-        // Configure egui style for better contrast and VS Code-like appearance
-        let mut style = (*egui_ctx.style()).clone();
-        let visuals = &mut style.visuals;
-
-        // VS Code-like color scheme with properly brightened colors
-        // Use actual VS Code Dark+ theme colors for authenticity
-        visuals.panel_fill = egui::Color32::from_rgb(45, 45, 48); // VS Code sidebar
-        visuals.window_fill = egui::Color32::from_rgb(30, 30, 30); // VS Code editor background
-        visuals.extreme_bg_color = egui::Color32::from_rgb(37, 37, 38); // VS Code activity bar
-
-        // Override widget colors for better text visibility
-        // Widget backgrounds - lighter for better contrast
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(60, 60, 62);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(60, 60, 62);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(80, 80, 82);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0, 122, 204); // VS Code blue
-
-        // Widget text colors - much brighter for better contrast (matching VS Code)
-        visuals.widgets.noninteractive.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(204, 204, 204));
-        visuals.widgets.inactive.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(204, 204, 204));
-        visuals.widgets.hovered.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
-        visuals.widgets.active.fg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 255, 255));
-
-        // Selection colors
-        visuals.selection.bg_fill = egui::Color32::from_rgb(0, 122, 204); // VS Code blue
-        visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 122, 204));
-
-        // Hyperlink color (for tabs, etc.)
-        visuals.hyperlink_color = egui::Color32::from_rgb(75, 150, 255); // Bright blue
-
-        // Window/panel stroke colors - lighter borders
-        visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80));
-        visuals.widgets.noninteractive.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80));
-
-        // Default text color - VS Code default text color (#CCCCCC)
-        visuals.override_text_color = Some(egui::Color32::from_rgb(204, 204, 204));
-
-        egui_ctx.set_style(style);
-
         let event_pump = sdl_context.event_pump()?;
 
         Ok(Self {
