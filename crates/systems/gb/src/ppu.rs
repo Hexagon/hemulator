@@ -644,7 +644,7 @@ mod tests {
 
         // Set up sprite at X=4 (partially visible on left edge)
         ppu.write_oam(0, 16); // Y position (screen Y = 0)
-        ppu.write_oam(1, 4); // X position (wraps to 252 after -8, but should still render)
+        ppu.write_oam(1, 4); // X position (after -8 offset, rightmost 4 pixels visible at screen X=0-3)
         ppu.write_oam(2, 0); // Tile index
         ppu.write_oam(3, 0); // Flags (no flip, palette 0, above BG)
 
@@ -656,7 +656,7 @@ mod tests {
         let frame = ppu.render_frame();
 
         // Verify sprite is rendered: the rightmost 4 pixels should be visible (X = 0-3)
-        // Color index 3 with palette 0xE4 = (0xE4 >> 6) & 0x03 = 0b11 = color 3 (black)
+        // Color index 3 with palette 0xE4: (0xE4 >> (3 * 2)) & 0x03 = (0xE4 >> 6) & 0x03 = 3 (darkest/black)
         let expected_color = 0xFF000000; // Black
 
         // Check that at least one pixel from the sprite is visible on screen
