@@ -505,16 +505,16 @@ This emulator supports 6 different retro gaming systems. Here's a quick overview
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
-| **Atari 2600** | ✅ Fully Working | Everything | Paddle controllers, exotic banking | Playing Atari games |
-| **Game Boy** | ✅ Fully Working | Everything | GBC color mode, link cable | Playing GB games |
-| **SNES** | ⚠️ Functional | CPU, PPU Modes 0 & 1, sprites, controllers | Audio, advanced PPU modes | Playing compatible games |
-| **N64** | 🚧 In Development | 3D rendering, 4 controllers | Full graphics, audio, RSP | Development/testing |
-| **PC/DOS** | 🧪 Experimental | Multi-slot disk mounting, CGA/EGA/VGA, BIOS | Complete DOS compatibility | Development/testing |
+| **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
+| **Game Boy** | ✅ Fully Working | Everything | - | Playing GB games |
+| **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
+| **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
+| **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
 ### NES (Nintendo Entertainment System)
 
 **Status**: ✅ Fully Working  
-**Coverage**: ~90%+ of all NES games (14 mappers supported)
+**Coverage**: ~90% of all NES games (14 mappers supported)
 
 The emulator supports the following NES mappers:
 - **Mapper 0 (NROM)** - Simple games (~10% of games)
@@ -617,7 +617,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: ⚠️ Functional (PPU Modes 0 & 1, sprites, scrolling, full controller support - ready for compatible games without audio)  
+**Status**: ✅ Functional (Modes 0 & 1, sprites, scrolling, input - ready for gameplay)  
 **Coverage**: Good - CPU complete, Modes 0 & 1 PPU functional, sprites, scrolling, controller support
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected

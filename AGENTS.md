@@ -107,9 +107,9 @@ For system-specific implementation details, see each system's README:
 - Traits: System, Cpu, Renderer, AudioChip
 
 **System Modules** (`crates/systems/`):
-- ✅ NES (~90%+ game coverage), Atari 2600 (complete), Game Boy (complete)
-- ⚠️ SNES (functional - Modes 0 & 1, no audio), 🧪 PC (experimental)
-- 🚧 N64 (in development)
+- ✅ NES (~90% game coverage), Atari 2600 (complete), Game Boy (complete)
+- 🚧 SNES (basic), N64 (in development)
+- 🧪 PC (experimental)
 
 ## Implementation Guidelines
 

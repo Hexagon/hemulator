@@ -5,11 +5,11 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 ## Features
 
 - 🎮 **NES Emulation**: ✅ Fully working - ~90%+ of NES games via 14 mapper implementations
-- 🕹️ **Atari 2600 Emulation**: ✅ Fully working - Complete TIA/RIOT emulation, most cartridge formats (2K-32K)
-- 🎲 **Game Boy Emulation**: ✅ Fully working - ~96% game coverage (MBC0/1/2/3/5), full APU and timer support
-- 🏰 **SNES Emulation**: ⚠️ Functional - PPU Modes 0 & 1, sprites, scrolling, full controller support (no audio)
-- 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, 4 controllers with analog stick, limited game support
-- 💻 **PC Emulation**: 🧪 Experimental - COM/EXE loading, CGA/EGA/VGA modes, MS-DOS 5.0 and FreeDOS boot
+- 💻 **PC Emulation**: ⚠️ Functional - COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS boots.
+- 🕹️ **Atari 2600 Emulation**: 🚧 In development - Support for most cartridge formats (2K-32K) with multiple banking schemes
+- 🎲 **Game Boy Emulation**: 🚧 In development - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
+- 🏰 **SNES Emulation**: 🚧 In development - CPU working, minimal PPU, no APU/input yet
+- 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
 - 🖱️ **Modern GUI**: Menu bar and status bar with mouse and keyboard support - no more cryptic F-keys!
 - 💾 **Save States**: 5 slots per game with instant save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
@@ -23,12 +23,12 @@ A cross-platform, multi-system console emulator written in Rust, supporting NES,
 
 | System | Status | CPU | Graphics | Audio | Input | Save States / Persistance | Coverage/Notes |
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
-| **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90%+ of all games via 14 mappers |
-| **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Complete) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
-| **Game Boy** | ✅ Fully Working | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~96% of games; MBC0/1/2/3/5 supported |
-| **SNES** | ⚠️ Functional | 65C816 (Complete) | PPU (Modes 0 & 1 + Sprites) | ❌ Not implemented | ✅ Full controller support | ✅ | CPU & basic PPU working; playable without audio |
-| **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ✅ 4 controllers w/ analog | ✅ | 3D rendering works; limited game support |
-| **PC (DOS)** | 🧪 Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ✅ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
+| **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
+| **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
+| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Game Boy** | 🚧 In Development | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/2/3/5 supported |
+| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
+| **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 
 **Legend:**
 - ✅ Fully Working - Production ready with comprehensive features
@@ -101,10 +101,8 @@ Hemulator uses a modular architecture that separates reusable emulation componen
 - Traits: System, Cpu, Renderer, AudioChip
 
 **System Implementations** (`crates/systems/`):
-- ✅ NES (~90%+ game coverage), Atari 2600 (complete), Game Boy (complete)
-- ⚠️ SNES (functional - Modes 0 & 1, no audio)
-- 🚧 N64 (in development)
-- 🧪 PC (experimental)
+- Each system combines core components with system-specific logic
+- See individual [system READMEs](#for-developers) for implementation details
 
 ### Renderer Architecture
 
@@ -149,10 +147,10 @@ See [MANUAL.md](docs/MANUAL.md) for user-facing mapper information and game comp
 
 | System | Format | Detection Method | Status | Notes |
 |--------|--------|------------------|--------|-------|
-| **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90%+ game coverage |
+| **NES** | iNES (.nes) | Header signature | ✅ Fully supported | ~90% game coverage |
 | **Atari 2600** | Raw binary (.a26, .bin) | File size | ✅ Fully supported | 2K-32K ROMs |
-| **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | ✅ Fully supported | ~96% compatible |
-| **SNES** | SMC/SFC (.smc, .sfc) | Header detection | ⚠️ Functional | LoROM, Modes 0 & 1 |
+| **Game Boy** | GB/GBC (.gb, .gbc) | Nintendo logo | 🚧 In Development | MBC0/1/2/3/5, ~95% compatible |
+| **SNES** | SMC/SFC (.smc, .sfc) | Header detection | 🚧 Basic | LoROM only, minimal PPU |
 | **N64** | Z64/N64/V64 (.z64, .n64, .v64) | Magic byte + conversion | 🚧 In development | Byte-order auto-detection |
 | **PC/DOS** | COM/EXE (.com, .exe) | MZ header or size | 🧪 Experimental | CGA/EGA/VGA modes |
 
@@ -210,10 +208,10 @@ hemulator/
 │   ├── systems/
 │   │   ├── nes/        # ✅ NES emulation (CPU, PPU, APU, mappers)
 │   │   ├── atari2600/  # ✅ Atari 2600 emulation (TIA, RIOT, cartridge banking)
-│   │   ├── gb/         # ✅ Game Boy emulation (complete with APU and timer)
-│   │   ├── snes/       # ⚠️ SNES emulation (functional - Modes 0 & 1, no audio)
+│   │   ├── gb/         # ⚠️ Game Boy emulation (functional, no audio)
+│   │   ├── snes/       # 🚧 SNES emulation (basic infrastructure)
 │   │   ├── n64/        # 🚧 N64 emulation (in development, 3D rendering)
-│   │   └── pc/         # 🧪 IBM PC/XT emulation (experimental, CGA/EGA/VGA)
+│   │   └── pc/         # 🧪 IBM PC/XT emulation (experimental)
 │   └── frontend/
 │       └── gui/        # GUI frontend (SDL2 + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
@@ -304,13 +302,13 @@ The project follows a modular architecture:
   - `ppu` module: Reusable video primitives
   - Save state serialization support
   
-**System Implementations** (`crates/systems/`):
-- **NES (`emu_nes`)**: ✅ Complete NES emulator with CPU, PPU, APU, and 14 mappers
-- **Atari 2600 (`emu_atari2600`)**: ✅ Complete Atari 2600 with TIA, RIOT, and cartridge banking
-- **Game Boy (`emu_gb`)**: ✅ Complete Game Boy emulator (MBC0/1/2/3/5, full APU and timer)
-- **SNES (`emu_snes`)**: ⚠️ Functional SNES (CPU, PPU Modes 0 & 1, sprites, controllers - no audio)
-- **N64 (`emu_n64`)**: 🚧 N64 in development (CPU, RDP 3D rendering, RSP HLE, 4 controllers)
-- **PC (`emu_pc`)**: 🧪 Experimental IBM PC/XT emulator with 8086 CPU and CGA/EGA/VGA support
+- **Systems**: Individual emulator implementations
+  - **NES (`emu_nes`)**: ✅ Complete NES emulator with CPU, PPU, APU, and 14 mappers
+  - **Atari 2600 (`emu_atari2600`)**: ✅ Complete Atari 2600 with TIA, RIOT, and cartridge banking
+  - **Game Boy (`emu_gb`)**: ⚠️ Functional Game Boy emulator (MBC0/1/3/5, no audio/timer)
+  - **SNES (`emu_snes`)**: 🚧 Basic SNES infrastructure (CPU working, minimal PPU)
+  - **N64 (`emu_n64`)**: 🚧 N64 in development (CPU, RDP 3D rendering, RSP HLE)
+  - **PC (`emu_pc`)**: 🧪 Experimental IBM PC/XT emulator with 8086 CPU and BIOS stub
   
 - **Frontend (`emu_gui`)**: GUI application
   - Window management with SDL2
