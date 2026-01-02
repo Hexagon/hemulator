@@ -1939,6 +1939,7 @@ fn main() {
 
     // Timing trackers
     let mut last_frame = Instant::now();
+    let mut accumulated_emulation_time = Duration::ZERO;
 
     // FPS tracking
     let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
@@ -3004,6 +3005,9 @@ fn main() {
 
         // Step emulation frame if ROM is loaded and not paused
         if rom_loaded && settings.emulation_speed > 0.0 {
+            // Measure emulation time separately from UI/rendering overhead
+            let emulation_start = Instant::now();
+
             // For speeds > 1.0, step multiple frames per display iteration
             // For speeds <= 1.0, step one frame per iteration (timing controlled by sleep below)
             let frames_to_step = if settings.emulation_speed > 1.0 {
@@ -3035,6 +3039,9 @@ fn main() {
                     }
                 }
             }
+
+            // Track emulation time (excluding UI overhead)
+            accumulated_emulation_time += emulation_start.elapsed();
 
             // Render only the last frame to the display
             if let Some(mut frame) = last_frame_opt {
@@ -3122,9 +3129,14 @@ fn main() {
                 Duration::from_millis(16) // ~60 FPS when idle
             };
 
-            if frame_dt < target_frame_time {
-                std::thread::sleep(target_frame_time - frame_dt);
+            // Sleep based on accumulated emulation time, not total frame time
+            // This ensures consistent timing regardless of UI overhead
+            if accumulated_emulation_time < target_frame_time {
+                std::thread::sleep(target_frame_time - accumulated_emulation_time);
             }
+
+            // Reset accumulated time for next frame
+            accumulated_emulation_time = Duration::ZERO;
         }
         last_frame = Instant::now();
     }
