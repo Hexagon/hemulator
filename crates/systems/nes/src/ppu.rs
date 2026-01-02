@@ -45,6 +45,7 @@
 //! - **$2007 (PPUDATA)**: VRAM data read/write (with buffering)
 
 use crate::cartridge::Mirroring;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -250,10 +251,16 @@ impl Ppu {
         let prev = self.vblank.replace(v);
         if v && !prev && self.nmi_enabled() {
             // VBlank just started and NMI is enabled - trigger NMI
+            log(LogCategory::PPU, LogLevel::Trace, || {
+                "PPU: VBlank started, triggering NMI".to_string()
+            });
             self.nmi_pending.set(true);
         } else if !v {
             // VBlank cleared (pre-render scanline) - clear any pending NMI
             // This is critical: NMI must be cleared when VBlank ends
+            log(LogCategory::PPU, LogLevel::Trace, || {
+                "PPU: VBlank cleared".to_string()
+            });
             self.nmi_pending.set(false);
         }
     }
@@ -385,14 +392,27 @@ impl Ppu {
                 let old_nmi = (self.ctrl & 0x80) != 0;
                 self.ctrl = val;
                 let new_nmi = (self.ctrl & 0x80) != 0;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!(
+                        "PPUCTRL write: 0x{:02X} (NMI: {})",
+                        val,
+                        if new_nmi { "ON" } else { "OFF" }
+                    )
+                });
                 // If NMI gets enabled while already in VBlank, the PPU triggers an NMI.
                 if !old_nmi && new_nmi && self.vblank.get() {
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        "PPU: NMI enabled during VBlank, triggering NMI".to_string()
+                    });
                     self.nmi_pending.set(true);
                 }
             }
             1 => {
                 // PPUMASK
                 self.mask = val;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!("PPUMASK write: 0x{:02X}", val)
+                });
             }
             3 => {
                 // OAMADDR: set OAM address for $2004 access
@@ -412,6 +432,9 @@ impl Ppu {
                 } else {
                     self.scroll_y = val;
                     self.addr_latch.set(false);
+                    log(LogCategory::PPU, LogLevel::Trace, || {
+                        format!("PPUSCROLL set: X={}, Y={}", self.scroll_x, self.scroll_y)
+                    });
                 }
             }
             6 => {
