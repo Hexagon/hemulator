@@ -187,7 +187,7 @@ impl GbBus {
         // 0xC0 = CGB only
         let cgb_flag = data[0x143];
         self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
-        
+
         // Enable CGB mode in PPU if CGB ROM
         if self.cgb_mode {
             self.ppu.enable_cgb_mode();

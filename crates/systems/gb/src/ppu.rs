@@ -21,7 +21,9 @@
 //!   - `$9800-$9BFF`: Background/Window tilemap
 //!   - `$9C00-$9FFF`: Background/Window tilemap
 //!
-//! ## Color Palettes (DMG Mode)
+//! ## Color Palettes
+//!
+//! ### DMG Mode (Monochrome)
 //! - BGP ($FF47): Background palette
 //! - OBP0 ($FF48): Object palette 0
 //! - OBP1 ($FF49): Object palette 1
@@ -30,6 +32,27 @@
 //!   - 1: Light gray (0xAAAAAA)
 //!   - 2: Dark gray (0x555555)
 //!   - 3: Black (0x000000)
+//!
+//! ### CGB Mode (Color)
+//! - BCPS/BGPI ($FF68): Background palette index/specification
+//! - BCPD/BGPD ($FF69): Background palette data
+//! - OCPS/OBPI ($FF6A): Object palette index/specification
+//! - OCPD/OBPD ($FF6B): Object palette data
+//! - 8 background palettes, 8 object palettes
+//! - Each palette has 4 colors
+//! - Each color is 15-bit RGB (5 bits per channel)
+//! - Color format: gggrrrrr 0bbbbbgg (little-endian)
+//! - Auto-increment on palette data write when bit 7 of index register is set
+//!
+//! ## VRAM Banking (CGB)
+//! - VBK ($FF4F): VRAM bank select (bit 0)
+//! - Bank 0: Tile pixel data (compatible with DMG)
+//! - Bank 1: Tile attributes (CGB only)
+//!   - Bit 7: BG-to-OAM priority
+//!   - Bit 6: Vertical flip
+//!   - Bit 5: Horizontal flip
+//!   - Bit 3: Tile VRAM bank (0 or 1)
+//!   - Bits 2-0: Background palette number (0-7)
 //!
 //! # LCD Control Register (LCDC - $FF40)
 //!
@@ -58,11 +81,18 @@
 //! - Byte 1: X position (actual position - 8)
 //! - Byte 2: Tile index
 //! - Byte 3: Flags
-//!   - Bit 7: BG/Window priority (0=above BG, 1=behind BG colors 1-3)
-//!   - Bit 6: Y flip
-//!   - Bit 5: X flip
-//!   - Bit 4: Palette (0=OBP0, 1=OBP1)
-//!   - Bits 3-0: Unused (CGB palette in CGB mode)
+//!   - **DMG Mode:**
+//!     - Bit 7: BG/Window priority (0=above BG, 1=behind BG colors 1-3)
+//!     - Bit 6: Y flip
+//!     - Bit 5: X flip
+//!     - Bit 4: Palette (0=OBP0, 1=OBP1)
+//!     - Bits 3-0: Unused
+//!   - **CGB Mode:**
+//!     - Bit 7: BG/Window priority
+//!     - Bit 6: Y flip
+//!     - Bit 5: X flip
+//!     - Bit 3: Tile VRAM bank (0 or 1)
+//!     - Bits 2-0: CGB palette number (0-7)
 //!
 //! # Timing Model
 //!
@@ -87,9 +117,14 @@
 //! - ✅ Sprite rendering (8x8 and 8x16)
 //! - ✅ Sprite flipping (horizontal and vertical)
 //! - ✅ Sprite priority (above/behind background)
-//! - ✅ Palette support (BGP, OBP0, OBP1)
+//! - ✅ DMG palette support (BGP, OBP0, OBP1)
+//! - ✅ CGB color palettes (8 BG, 8 OBJ, 15-bit RGB)
+//! - ✅ CGB VRAM banking (2 banks of 8KB)
+//! - ✅ CGB tile attributes (palette, VRAM bank, flip)
+//! - ✅ CGB sprite attributes (palette, VRAM bank)
 //! - ✅ LYC=LY coincidence detection
 //! - ✅ Frame-based timing with scanline counter
+//! - ✅ Automatic CGB mode detection and activation
 //!
 //! ## Not Implemented
 //! - ❌ Cycle-accurate PPU timing
@@ -98,7 +133,6 @@
 //! - ❌ PPU mode transitions (Mode 0-3)
 //! - ❌ STAT interrupts
 //! - ❌ OAM DMA transfer
-//! - ❌ Game Boy Color features (color palettes, VRAM banking)
 
 use emu_core::types::Frame;
 
@@ -607,7 +641,7 @@ impl Ppu {
             let flip_x = (flags & 0x20) != 0;
             let flip_y = (flags & 0x40) != 0;
             let bg_priority = (flags & 0x80) != 0;
-            
+
             let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) = if self.cgb_mode {
                 (0, flags & 0x07, (flags >> 3) & 0x01)
             } else {
