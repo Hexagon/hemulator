@@ -213,8 +213,12 @@ impl Rsp {
                 self.sp_rd_len = value & 0x0FFF;
                 use emu_core::logging::{log, LogCategory, LogLevel};
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("RSP: DMA read - DRAM:0x{:08X} -> RSP:0x{:04X}, len:{}", 
-                            self.sp_dram_addr, self.sp_mem_addr, (self.sp_rd_len & 0xFFF) + 1)
+                    format!(
+                        "RSP: DMA read - DRAM:0x{:08X} -> RSP:0x{:04X}, len:{}",
+                        self.sp_dram_addr,
+                        self.sp_mem_addr,
+                        (self.sp_rd_len & 0xFFF) + 1
+                    )
                 });
                 self.dma_read(rdram);
             }
@@ -229,7 +233,7 @@ impl Rsp {
                 log(LogCategory::PPU, LogLevel::Info, || {
                     format!("RSP: SP_STATUS write 0x{:08X}", value)
                 });
-                
+
                 // Bit 0: Clear halt
                 if value & 0x0001 != 0 {
                     self.sp_status &= !SP_STATUS_HALT;
@@ -314,7 +318,7 @@ impl Rsp {
     /// Returns (cycles, should_interrupt)
     pub fn execute_task(&mut self, rdram: &[u8], rdp: &mut Rdp) -> (u32, bool) {
         use emu_core::logging::{log, LogCategory, LogLevel};
-        
+
         // Check if RSP is halted
         if self.sp_status & SP_STATUS_HALT != 0 {
             log(LogCategory::PPU, LogLevel::Debug, || {
@@ -324,7 +328,10 @@ impl Rsp {
         }
 
         log(LogCategory::PPU, LogLevel::Info, || {
-            format!("RSP: Executing task (microcode: {:?})", self.hle.microcode())
+            format!(
+                "RSP: Executing task (microcode: {:?})",
+                self.hle.microcode()
+            )
         });
 
         // Execute HLE task

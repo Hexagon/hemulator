@@ -184,9 +184,10 @@ impl System for N64System {
         static mut FRAME_COUNTER: u32 = 0;
         unsafe {
             FRAME_COUNTER += 1;
-            if FRAME_COUNTER % 60 == 0 {
+            if FRAME_COUNTER.is_multiple_of(60) {
+                let counter = FRAME_COUNTER; // Copy to avoid shared reference
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("N64: Frame {} complete", FRAME_COUNTER)
+                    format!("N64: Frame {} complete", counter)
                 });
             }
         }
@@ -896,8 +897,6 @@ mod tests {
     #[test]
     fn test_enhanced_rom_interrupts() {
         // Test the enhanced ROM that properly sets up and handles interrupts
-        use emu_core::cpu_mips_r4300i::MemoryMips;
-
         let test_rom = include_bytes!("../../../../test_roms/n64/test_enhanced.z64");
         let mut sys = N64System::default();
 
@@ -912,7 +911,7 @@ mod tests {
 
         // Run several frames to allow the ROM to:
         // 1. Set up interrupts
-        // 2. Trigger RDP rendering  
+        // 2. Trigger RDP rendering
         // 3. Enter main loop
         for _ in 0..10 {
             let _ = sys.step_frame();

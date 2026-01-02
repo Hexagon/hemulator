@@ -161,7 +161,7 @@ impl N64Bus {
         log(LogCategory::PPU, LogLevel::Info, || {
             "N64 Bus: process_rsp_task() called".to_string()
         });
-        
+
         // Clone RDRAM reference to avoid borrow checker issues
         let rdram_clone = self.rdram.clone();
         let (_cycles, should_interrupt) = self.rsp.execute_task(&rdram_clone, &mut self.rdp);

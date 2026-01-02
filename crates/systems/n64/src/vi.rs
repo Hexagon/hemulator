@@ -125,14 +125,14 @@ impl VideoInterface {
     /// Write to VI register
     pub fn write_register(&mut self, offset: u32, value: u32) {
         use emu_core::logging::{log, LogCategory, LogLevel};
-        
+
         // Log significant VI register writes
         if offset == VI_STATUS || offset == VI_ORIGIN || offset == VI_INTR {
             log(LogCategory::PPU, LogLevel::Info, || {
                 format!("VI: Write to offset 0x{:02X} = 0x{:08X}", offset, value)
             });
         }
-        
+
         match offset {
             VI_STATUS => self.status = value,
             VI_ORIGIN => self.origin = value & 0x00FFFFFF, // 24-bit address
@@ -140,7 +140,11 @@ impl VideoInterface {
             VI_INTR => {
                 self.intr = value & 0x3FF;
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("VI: VI_INTR set to 0x{:03X} (scanline {})", self.intr, self.intr >> 1)
+                    format!(
+                        "VI: VI_INTR set to 0x{:03X} (scanline {})",
+                        self.intr,
+                        self.intr >> 1
+                    )
                 });
             }
             VI_CURRENT => {

@@ -233,11 +233,13 @@ impl<M: MemoryMips> CpuMips<M> {
             static mut CHECK_COUNTER: u32 = 0;
             unsafe {
                 CHECK_COUNTER += 1;
-                if CHECK_COUNTER % 600 == 0 {
+                if CHECK_COUNTER.is_multiple_of(600) {
                     use crate::logging::{log, LogCategory, LogLevel};
                     log(LogCategory::Interrupts, LogLevel::Info, || {
-                        format!("CPU: Interrupts disabled (IE={}, EXL={}, ERL={}, Status=0x{:016X})", 
-                                ie, exl, erl, status)
+                        format!(
+                            "CPU: Interrupts disabled (IE={}, EXL={}, ERL={}, Status=0x{:016X})",
+                            ie, exl, erl, status
+                        )
                     });
                 }
             }

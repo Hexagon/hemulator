@@ -58,7 +58,7 @@ impl N64Cpu {
             // Based on real N64 IPL3 boot sequence
             self.cpu.gpr[11] = 0xFFFFFFFF_A4000040; // $t3 = cart domain 1 config address
             self.cpu.gpr[20] = 0x0000000000000001; // $s4 = 1
-            self.cpu.gpr[22] = 0x000000000000003F; // $s6 = 0x3F  
+            self.cpu.gpr[22] = 0x000000000000003F; // $s6 = 0x3F
             self.cpu.gpr[29] = 0xFFFFFFFF_A4001FF0; // $sp = stack pointer (end of RDRAM - 0x10)
             self.cpu.gpr[31] = 0xFFFFFFFF_A4001550; // $ra = return address placeholder
 
@@ -66,7 +66,10 @@ impl N64Cpu {
             self.cpu.pc = entry_point;
 
             log(LogCategory::CPU, LogLevel::Info, || {
-                format!("N64 CPU: Initialized CP0 and GPRs, PC now at 0x{:016X}", self.cpu.pc)
+                format!(
+                    "N64 CPU: Initialized CP0 and GPRs, PC now at 0x{:016X}",
+                    self.cpu.pc
+                )
             });
         } else {
             // Test ROM or no ROM - use default PIF boot sequence
