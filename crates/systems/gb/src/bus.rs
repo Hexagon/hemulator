@@ -163,11 +163,6 @@ impl GbBus {
         self.if_reg |= interrupt_bit;
     }
 
-    /// Check if any interrupts are pending
-    pub fn has_pending_interrupts(&self) -> bool {
-        self.if_reg != 0
-    }
-
     /// Check if CGB mode is enabled
     #[allow(dead_code)] // Will be used when CGB features are fully implemented
     pub fn is_cgb_mode(&self) -> bool {
