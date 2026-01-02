@@ -491,12 +491,10 @@ impl PropertyPane {
                                 )
                                 .on_hover_text("Use global config.json settings for all projects")
                                 .clicked()
+                                && self.input_config_source != InputConfigSource::Global
                             {
-                                if self.input_config_source != InputConfigSource::Global {
-                                    self.pending_action = Some(PropertyAction::SetInputSource(
-                                        InputConfigSource::Global,
-                                    ));
-                                }
+                                self.pending_action =
+                                    Some(PropertyAction::SetInputSource(InputConfigSource::Global));
                             }
                             if ui
                                 .selectable_label(
@@ -505,12 +503,11 @@ impl PropertyPane {
                                 )
                                 .on_hover_text("Use project-specific .hemu file settings")
                                 .clicked()
+                                && self.input_config_source != InputConfigSource::Project
                             {
-                                if self.input_config_source != InputConfigSource::Project {
-                                    self.pending_action = Some(PropertyAction::SetInputSource(
-                                        InputConfigSource::Project,
-                                    ));
-                                }
+                                self.pending_action = Some(PropertyAction::SetInputSource(
+                                    InputConfigSource::Project,
+                                ));
                             }
                         });
 
