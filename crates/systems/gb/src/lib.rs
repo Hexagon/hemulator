@@ -588,6 +588,8 @@ mod tests {
 
         // Check that CGB mode is detected
         assert!(sys.cpu.memory.is_cgb_mode());
+        // Verify A register is set to 0x11 for CGB mode
+        assert_eq!(sys.cpu.a, 0x11, "A register should be 0x11 for CGB mode");
 
         // Create a ROM without CGB flag
         let mut rom2 = vec![0; 0x150];
@@ -600,6 +602,29 @@ mod tests {
 
         // Check that CGB mode is not detected
         assert!(!sys.cpu.memory.is_cgb_mode());
+        // Verify A register is set to 0x01 for DMG mode
+        assert_eq!(sys.cpu.a, 0x01, "A register should be 0x01 for DMG mode");
+    }
+
+    #[test]
+    fn test_gb_cgb_only_mode() {
+        // Test CGB-only games (flag 0xC0)
+        let mut sys = GbSystem::new();
+
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0xC0; // CGB only
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Check that CGB mode is detected for CGB-only games
+        assert!(sys.cpu.memory.is_cgb_mode());
+        // Verify A register is set to 0x11 for CGB-only mode
+        assert_eq!(
+            sys.cpu.a, 0x11,
+            "A register should be 0x11 for CGB-only games"
+        );
     }
 
     #[test]
