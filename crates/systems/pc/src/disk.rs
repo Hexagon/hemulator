@@ -382,13 +382,23 @@ pub fn create_blank_floppy(format: FloppyFormat) -> Vec<u8> {
 }
 
 /// Create a blank hard drive image
+/// 
+/// # Panics
+/// 
+/// Panics if the requested disk size exceeds the platform's address space (usize::MAX).
+/// On 32-bit systems, this limits disk sizes to approximately 4GB.
 pub fn create_blank_hard_drive(format: HardDriveFormat) -> Vec<u8> {
     let size = format.size_bytes();
     // On 32-bit systems, we can't allocate more than usize::MAX bytes
-    // In practice, trying to allocate 20GB will fail on any system due to memory limits,
-    // but we need to handle the conversion from u64 to usize
-    let size_usize = size.min(usize::MAX as u64) as usize;
-    vec![0; size_usize]
+    if size > usize::MAX as u64 {
+        panic!(
+            "Cannot create {}GB hard drive on this platform: size ({} bytes) exceeds address space limit ({} bytes)",
+            size / (1024 * 1024 * 1024),
+            size,
+            usize::MAX
+        );
+    }
+    vec![0; size as usize]
 }
 
 #[cfg(test)]
