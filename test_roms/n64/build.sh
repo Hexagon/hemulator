@@ -87,9 +87,9 @@ rom.extend(mips_instr(0xAD090004))  # sw $t1, 4($t0)
 rom.extend(mips_instr(0x3C093625))  # lui $t1, 0x3625
 rom.extend(mips_instr(0x35298258))  # ori $t1, $t1, 0x8258
 rom.extend(mips_instr(0xAD090008))  # sw $t1, 8($t0)
-# li $t1, 0x00C800C8
-rom.extend(mips_instr(0x3C0900C8))  # lui $t1, 0x00C8
-rom.extend(mips_instr(0x352900C8))  # ori $t1, $t1, 0x00C8
+# li $t1, 0x000C80C8 (fixed: was 0x00C800C8)
+rom.extend(mips_instr(0x3C09000C))  # lui $t1, 0x000C
+rom.extend(mips_instr(0x352980C8))  # ori $t1, $t1, 0x80C8
 rom.extend(mips_instr(0xAD09000C))  # sw $t1, 12($t0)
 
 # Command 3: SET_FILL_COLOR - Green
@@ -103,8 +103,8 @@ rom.extend(mips_instr(0xAD090014))  # sw $t1, 20($t0)
 rom.extend(mips_instr(0x3C093634))  # lui $t1, 0x3634
 rom.extend(mips_instr(0x35298230))  # ori $t1, $t1, 0x8230
 rom.extend(mips_instr(0xAD090018))  # sw $t1, 24($t0)
-rom.extend(mips_instr(0x3C090280))  # lui $t1, 0x0280
-rom.extend(mips_instr(0x35290168))  # ori $t1, $t1, 0x0168
+rom.extend(mips_instr(0x3C090028))  # lui $t1, 0x0028 (fixed: upper 16 bits of 0x00280168)
+rom.extend(mips_instr(0x35290168))  # ori $t1, $t1, 0x0168 (fixed: lower 16 bits)
 rom.extend(mips_instr(0xAD09001C))  # sw $t1, 28($t0)
 
 # Command 5: SYNC_FULL
