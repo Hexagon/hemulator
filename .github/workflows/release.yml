@@ -37,7 +37,7 @@ jobs:
           mkdir -p release-package
           cp target/${{ matrix.target.rust_target }}/release/hemu.exe release-package/
           cp LICENSE release-package/
-          cp MANUAL.md release-package/
+          cp docs/MANUAL.md release-package/
 
       - name: Create zip archive
         shell: pwsh
@@ -103,7 +103,7 @@ jobs:
           mkdir -p release-package
           cp target/${{ matrix.target.rust_target }}/release/hemu release-package/
           cp LICENSE release-package/
-          cp MANUAL.md release-package/
+          cp docs/MANUAL.md release-package/
           tar -czf hemu-${{ github.event.release.tag_name }}-linux-${{ matrix.target.arch }}.tar.gz -C release-package .
 
       - name: Upload tarball release asset
@@ -133,7 +133,7 @@ jobs:
           cp target/${{ matrix.target.rust_target }}/release/hemu deb-package/usr/bin/
           
           # Copy documentation
-          cp MANUAL.md deb-package/usr/share/doc/hemu/
+          cp docs/MANUAL.md deb-package/usr/share/doc/hemu/
           cp LICENSE deb-package/usr/share/licenses/hemu/
           
           # Create control file

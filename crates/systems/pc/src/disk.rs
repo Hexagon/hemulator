@@ -356,7 +356,7 @@ pub enum HardDriveFormat {
 
 impl HardDriveFormat {
     /// Get the size in bytes for this format
-    pub fn size_bytes(&self) -> usize {
+    pub fn size_bytes(&self) -> u64 {
         match self {
             HardDriveFormat::HardDrive20M => 20_971_520, // 20MB (20 * 1024 * 1024)
             HardDriveFormat::HardDrive250M => 262_144_000, // 250MB (250 * 1024 * 1024)
@@ -382,8 +382,23 @@ pub fn create_blank_floppy(format: FloppyFormat) -> Vec<u8> {
 }
 
 /// Create a blank hard drive image
+///
+/// # Panics
+///
+/// Panics if the requested disk size exceeds the platform's address space (usize::MAX).
+/// On 32-bit systems, this limits disk sizes to approximately 4GB.
 pub fn create_blank_hard_drive(format: HardDriveFormat) -> Vec<u8> {
-    vec![0; format.size_bytes()]
+    let size = format.size_bytes();
+    // On 32-bit systems, we can't allocate more than usize::MAX bytes
+    if size > usize::MAX as u64 {
+        panic!(
+            "Cannot create {}GB hard drive on this platform: size ({} bytes) exceeds address space limit ({} bytes)",
+            size / (1024 * 1024 * 1024),
+            size,
+            usize::MAX
+        );
+    }
+    vec![0; size as usize]
 }
 
 #[cfg(test)]
