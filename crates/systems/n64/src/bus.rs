@@ -155,10 +155,18 @@ impl N64Bus {
     }
 
     /// Execute pending RSP task if RSP is not halted
-    pub fn process_rsp_task(&mut self) {
+    /// Returns true if an SP interrupt should be triggered
+    pub fn process_rsp_task(&mut self) -> bool {
         // Clone RDRAM reference to avoid borrow checker issues
         let rdram_clone = self.rdram.clone();
-        self.rsp.execute_task(&rdram_clone, &mut self.rdp);
+        let (_cycles, should_interrupt) = self.rsp.execute_task(&rdram_clone, &mut self.rdp);
+
+        if should_interrupt {
+            // Set SP interrupt in MI
+            self.mi.set_interrupt(super::mi::MI_INTR_SP);
+        }
+
+        should_interrupt
     }
 
     /// Process pending RDP display list if needed

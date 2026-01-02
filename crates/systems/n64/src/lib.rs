@@ -192,6 +192,25 @@ impl System for N64System {
             while self.current_cycles < target_cycles {
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+
+                // Check for pending interrupts in MI and route them to CPU
+                let bus = self.cpu.bus();
+                let pending = bus.mi().get_pending_interrupts();
+                if pending != 0 {
+                    // Map MI interrupt bits to MIPS interrupt lines
+                    // SP (bit 0) -> IP2 (interrupt 2)
+                    if pending & crate::mi::MI_INTR_SP != 0 {
+                        self.cpu.cpu.set_interrupt(2);
+                    }
+                    // VI (bit 3) -> IP3 (interrupt 3)
+                    if pending & crate::mi::MI_INTR_VI != 0 {
+                        self.cpu.cpu.set_interrupt(3);
+                    }
+                    // DP (bit 5) -> IP5 (interrupt 5)
+                    if pending & crate::mi::MI_INTR_DP != 0 {
+                        self.cpu.cpu.set_interrupt(5);
+                    }
+                }
             }
 
             // Update VI scanline and check for interrupt

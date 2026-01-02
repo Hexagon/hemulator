@@ -35,6 +35,7 @@
 //! - 0xE0-0xFF: Various RDP passthrough commands
 
 use super::rdp::Rdp;
+use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// RSP microcode types (detected by analyzing IMEM signature)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,6 +476,109 @@ impl RspHle {
 
                 // Clear specified bits then set new bits
                 self.geometry_mode = (self.geometry_mode & !clear_bits) | set_bits;
+                true
+            }
+            // G_MOVEWORD (0xDB) - Modify internal state word
+            0xDB => {
+                // word0: cmd_id | index (which word to modify) | offset (within that word)
+                // word1: value to write
+                let index = (word0 >> 16) & 0xFF;
+                let _offset = word0 & 0xFFFF;
+                let _value = word1;
+
+                // Common indices:
+                // 0x00: G_MW_MATRIX - Modify current matrix
+                // 0x02: G_MW_NUMLIGHT - Set number of lights
+                // 0x04: G_MW_CLIP - Modify clipping planes
+                // 0x06: G_MW_SEGMENT - Set segment address
+                // 0x08: G_MW_FOG - Fog parameters
+                // 0x0A: G_MW_LIGHTCOL - Light color
+                // 0x0C: G_MW_POINTS - Point rendering params
+                // 0x0E: G_MW_PERSPNORM - Perspective normalization
+
+                // For HLE, we log but don't implement most of these
+                // Full LLE would modify RSP internal state
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_MOVEWORD stub - index=0x{:02X}, offset=0x{:04X}, value=0x{:08X}",
+                        index, _offset, _value
+                    )
+                });
+                true
+            }
+            // G_MOVEMEM (0xDC) - Load memory segment
+            0xDC => {
+                // word0: cmd_id | size | offset
+                // word1: RDRAM address to load from
+                let _size = ((word0 >> 16) & 0xFF) as usize;
+                let _offset = (word0 & 0xFFFF) as usize;
+                let _rdram_addr = word1;
+
+                // Common uses:
+                // - Load viewport settings
+                // - Load light data
+                // - Load matrix data
+                // For HLE, we log but don't fully implement
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
+                        _size, _offset, _rdram_addr
+                    )
+                });
+                true
+            }
+            // G_TEXTURE (0xD7) - Configure texture settings
+            0xD7 => {
+                // word0: cmd_id | level (mipmap level) | tile | on (enable/disable)
+                // word1: scaleS(16) | scaleT(16) - texture coordinate scaling
+                let _level = (word0 >> 11) & 0x07;
+                let _tile = (word0 >> 8) & 0x07;
+                let _on = (word0 >> 1) & 0x7F; // Non-zero = texture on
+                let _scale_s = (word1 >> 16) & 0xFFFF;
+                let _scale_t = word1 & 0xFFFF;
+
+                // For HLE, we could update geometry mode or pass to RDP
+                // For now, log and continue
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_TEXTURE - tile={}, on={}, scaleS=0x{:04X}, scaleT=0x{:04X}",
+                        _tile, _on, _scale_s, _scale_t
+                    )
+                });
+                true
+            }
+            // G_SETOTHERMODE_L (0xB2) - Set lower other modes
+            0xB2 => {
+                // word0: cmd_id | shift | length
+                // word1: data to set
+                let _shift = (word0 >> 8) & 0xFF;
+                let _length = word0 & 0xFF;
+                let _data = word1;
+
+                // Other modes control rendering pipeline settings (alpha blend, Z-mode, etc.)
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETOTHERMODE_L stub - shift={}, len={}, data=0x{:08X}",
+                        _shift, _length, _data
+                    )
+                });
+                true
+            }
+            // G_SETOTHERMODE_H (0xB3) - Set upper other modes
+            0xB3 => {
+                // word0: cmd_id | shift | length
+                // word1: data to set
+                let _shift = (word0 >> 8) & 0xFF;
+                let _length = word0 & 0xFF;
+                let _data = word1;
+
+                // Other modes control rendering pipeline settings
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETOTHERMODE_H stub - shift={}, len={}, data=0x{:08X}",
+                        _shift, _length, _data
+                    )
+                });
                 true
             }
             // G_DL (0xDE) - Display list branch/call

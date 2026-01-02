@@ -160,6 +160,16 @@ pub struct Rdp {
     /// Current texture image address in RDRAM
     texture_image_addr: u32,
 
+    /// Color registers for RDP rendering modes
+    blend_color: u32, // RGBA8888 - used in blending operations
+    prim_color: u32,   // RGBA8888 - primitive color
+    env_color: u32,    // RGBA8888 - environment color
+    fog_color: u32,    // RGBA8888 - fog color
+    combine_mode: u64, // 64-bit combine mode setting
+
+    /// Z-buffer image address in RDRAM
+    z_image_addr: u32,
+
     /// DPC registers
     dpc_start: u32,
     dpc_end: u32,
@@ -175,10 +185,10 @@ impl Rdp {
 
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
-        let mut renderer = Box::new(SoftwareRdpRenderer::new(width, height));
-        // Initialize framebuffer to dark blue (common N64 default)
-        renderer.clear(0xFF000040);
-        
+        let renderer = Box::new(SoftwareRdpRenderer::new(width, height));
+        // Initialize framebuffer to black (tests expect this)
+        // Note: renderer.new() already initializes to black
+
         Self {
             renderer,
             width,
@@ -204,6 +214,12 @@ impl Rdp {
                 t_shift: 0,
             }; 8],
             texture_image_addr: 0,
+            blend_color: 0xFF000000, // Black
+            prim_color: 0xFFFFFFFF,  // White
+            env_color: 0xFF000000,   // Black
+            fog_color: 0xFF000000,   // Black
+            combine_mode: 0,         // No combine mode
+            z_image_addr: 0,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -214,9 +230,7 @@ impl Rdp {
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.renderer.reset();
-        // Clear framebuffer to a dark blue (common default for N64 games before rendering)
-        // Use a visible color with full alpha to ensure the frame is displayable
-        self.renderer.clear(0xFF000040); // Dark blue with full alpha
+        // renderer.reset() already initializes framebuffer to 0 (transparent black)
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
@@ -237,6 +251,12 @@ impl Rdp {
             t_shift: 0,
         }; 8];
         self.texture_image_addr = 0;
+        self.blend_color = 0xFF000000;
+        self.prim_color = 0xFFFFFFFF;
+        self.env_color = 0xFF000000;
+        self.fog_color = 0xFF000000;
+        self.combine_mode = 0;
+        self.z_image_addr = 0;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -655,6 +675,109 @@ impl Rdp {
                     0xFFFF00FF
                 }
             }
+            // CI (Color Index) 8-bit (format=2, size=1)
+            (2, 1) => {
+                // Color index format - lookup in palette
+                let index = self.tmem[addr] as usize;
+                // Palette is stored in upper half of TMEM (0x800-0xFFF)
+                let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
+                let color_addr = palette_offset + (index * 2);
+
+                if color_addr + 1 < self.tmem.len() {
+                    let texel =
+                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                    let r = ((texel >> 11) & 0x1F) as u32;
+                    let g = ((texel >> 6) & 0x1F) as u32;
+                    let b = ((texel >> 1) & 0x1F) as u32;
+                    let a = (texel & 0x01) as u32;
+                    let r8 = (r * 255 / 31) & 0xFF;
+                    let g8 = (g * 255 / 31) & 0xFF;
+                    let b8 = (b * 255 / 31) & 0xFF;
+                    let a8 = if a != 0 { 0xFF } else { 0x00 };
+                    (a8 << 24) | (r8 << 16) | (g8 << 8) | b8
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // CI (Color Index) 4-bit (format=2, size=0)
+            (2, 0) => {
+                // 4-bit color index - two texels per byte
+                let byte = self.tmem[addr];
+                let index = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F // High nibble
+                } else {
+                    byte & 0x0F // Low nibble
+                } as usize;
+
+                let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
+                let color_addr = palette_offset + (index * 2);
+
+                if color_addr + 1 < self.tmem.len() {
+                    let texel =
+                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                    let r = ((texel >> 11) & 0x1F) as u32;
+                    let g = ((texel >> 6) & 0x1F) as u32;
+                    let b = ((texel >> 1) & 0x1F) as u32;
+                    let a = (texel & 0x01) as u32;
+                    let r8 = (r * 255 / 31) & 0xFF;
+                    let g8 = (g * 255 / 31) & 0xFF;
+                    let b8 = (b * 255 / 31) & 0xFF;
+                    let a8 = if a != 0 { 0xFF } else { 0x00 };
+                    (a8 << 24) | (r8 << 16) | (g8 << 8) | b8
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // IA (Intensity + Alpha) 16-bit (format=3, size=2)
+            (3, 2) => {
+                if addr + 1 < self.tmem.len() {
+                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let intensity = ((texel >> 8) & 0xFF) as u32;
+                    let alpha = (texel & 0xFF) as u32;
+                    (alpha << 24) | (intensity << 16) | (intensity << 8) | intensity
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // IA (Intensity + Alpha) 8-bit (format=3, size=1)
+            (3, 1) => {
+                let texel = self.tmem[addr];
+                let intensity = ((texel >> 4) & 0x0F) as u32;
+                let alpha = (texel & 0x0F) as u32;
+                let i8 = (intensity * 255 / 15) & 0xFF;
+                let a8 = (alpha * 255 / 15) & 0xFF;
+                (a8 << 24) | (i8 << 16) | (i8 << 8) | i8
+            }
+            // IA (Intensity + Alpha) 4-bit (format=3, size=0)
+            (3, 0) => {
+                let byte = self.tmem[addr];
+                let texel = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F
+                } else {
+                    byte & 0x0F
+                };
+                let intensity = ((texel >> 1) & 0x07) as u32;
+                let alpha = (texel & 0x01) as u32;
+                let i8 = (intensity * 255 / 7) & 0xFF;
+                let a8 = if alpha != 0 { 0xFF } else { 0x00 };
+                (a8 << 24) | (i8 << 16) | (i8 << 8) | i8
+            }
+            // I (Intensity) 8-bit (format=4, size=1)
+            (4, 1) => {
+                let intensity = self.tmem[addr] as u32;
+                0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
+            }
+            // I (Intensity) 4-bit (format=4, size=0)
+            (4, 0) => {
+                let byte = self.tmem[addr];
+                let nibble = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F
+                } else {
+                    byte & 0x0F
+                };
+                let intensity = (nibble * 255 / 15) as u32;
+                0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
+            }
             // Other formats not yet implemented - return white
             _ => 0xFFFFFFFF,
         }
@@ -991,6 +1114,56 @@ impl Rdp {
             0x29 => {
                 // Full synchronization - wait for all rendering to complete
                 // In frame-based implementation, this is a no-op
+            }
+            // SET_FOG_COLOR (0x38)
+            0x38 => {
+                // word1 contains the fog color (RGBA8888)
+                self.fog_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_FOG_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_BLEND_COLOR (0x39)
+            0x39 => {
+                // word1 contains the blend color (RGBA8888)
+                self.blend_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_BLEND_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_PRIM_COLOR (0x3A)
+            0x3A => {
+                // word0: cmd | min_level(8) | prim_level(8)
+                // word1: primitive color (RGBA8888)
+                self.prim_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_PRIM_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_ENV_COLOR (0x3B)
+            0x3B => {
+                // word1 contains the environment color (RGBA8888)
+                self.env_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_ENV_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_COMBINE_MODE (0x3C)
+            0x3C => {
+                // 64-bit combine mode command
+                // word0 and word1 together form the combine mode settings
+                self.combine_mode = ((word0 as u64) << 32) | (word1 as u64);
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_COMBINE_MODE = 0x{:08X}{:08X}", word0, word1)
+                });
+            }
+            // SET_Z_IMAGE (0x3E)
+            0x3E => {
+                // word1: DRAM address of Z-buffer
+                self.z_image_addr = word1 & 0x00FFFFFF;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_Z_IMAGE = 0x{:08X}", self.z_image_addr)
+                });
             }
             // SET_COLOR_IMAGE (0x3F)
             0x3F => {
