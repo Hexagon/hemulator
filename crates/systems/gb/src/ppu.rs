@@ -359,8 +359,8 @@ impl Ppu {
             return frame;
         }
 
-        // Track background color indices for sprite priority
-        // Each pixel stores the background/window color index (0-3)
+        // Track background color indices and priority for sprite rendering
+        // Each byte stores: [bit 7: BG priority, bits 1-0: color index (0-3)]
         let mut bg_color_indices = vec![0u8; 160 * 144];
 
         // Render background if enabled
@@ -402,7 +402,7 @@ impl Ppu {
 
         for screen_y in 0u8..144 {
             let y = screen_y.wrapping_add(self.scy);
-            let tile_y = (y / 8) as u16;
+            let tile_y = ((y / 8) & 31) as u16;
             let pixel_y = (y % 8) as u16;
 
             for screen_x in 0u8..160 {
@@ -432,6 +432,7 @@ impl Ppu {
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
+                let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
                 let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
@@ -468,9 +469,10 @@ impl Ppu {
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
-                // Store color index for sprite priority
+                // Store color index and priority flag for sprite rendering
+                // Format: [bit 7: BG priority flag, bits 1-0: color index]
                 let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
-                bg_color_indices[pixel_idx] = color_index;
+                bg_color_indices[pixel_idx] = if bg_priority { 0x80 } else { 0 } | color_index;
 
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
@@ -547,6 +549,7 @@ impl Ppu {
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
+                let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
                 let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
@@ -587,9 +590,10 @@ impl Ppu {
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
-                // Store color index for sprite priority
+                // Store color index and priority flag for sprite rendering
+                // Format: [bit 7: BG priority flag, bits 1-0: color index]
                 let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
-                bg_color_indices[pixel_idx] = color_index;
+                bg_color_indices[pixel_idx] = if bg_priority { 0x80 } else { 0 } | color_index;
 
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
@@ -707,16 +711,28 @@ impl Ppu {
                     }
 
                     // Check background priority
-                    if bg_priority {
-                        // Sprite is behind background colors 1-3
-                        // Check the actual color index from the background, not the RGB value
-                        let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
-                        let bg_color_index = bg_color_indices[pixel_idx];
-                        // If background pixel has color index 1-3, sprite is behind it
-                        if bg_color_index != 0 {
-                            continue;
-                        }
+                    // Extract color index and priority flag from bg_color_indices
+                    let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                    let bg_data = bg_color_indices[pixel_idx];
+                    let bg_color_index = bg_data & 0x03; // Bits 1-0: color index
+                    let bg_has_priority = (bg_data & 0x80) != 0; // Bit 7: BG priority flag
+
+                    // CGB priority rules:
+                    // 1. If BG color is 0, sprite always shows
+                    // 2. If BG tile has priority flag set, BG is above sprite
+                    // 3. If sprite OBJ priority flag is set, sprite is behind BG colors 1-3
+                    // 4. Otherwise, sprite is above BG
+
+                    if bg_color_index == 0 {
+                        // BG is transparent, sprite always shows
+                    } else if self.cgb_mode && bg_has_priority {
+                        // CGB: BG tile has priority, sprite is behind
+                        continue;
+                    } else if bg_priority {
+                        // Sprite has priority flag set, behind BG colors 1-3
+                        continue;
                     }
+                    // Otherwise, sprite is above BG
 
                     // Apply palette and convert to RGB
                     let rgb = if self.cgb_mode {
