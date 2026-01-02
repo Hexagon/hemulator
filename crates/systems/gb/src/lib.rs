@@ -95,13 +95,13 @@
 //! - ✅ APU: Audio sample generation at 44.1 kHz
 //! - ✅ APU: Integrated with frontend for audio output
 //! - ✅ Timer: Programmable timer with DIV, TIMA, TMA, TAC registers
-//! - ✅ Interrupts: VBlank and Timer interrupts (basic support)
+//! - ✅ Interrupts: Full interrupt handling (VBlank, LCD STAT, Timer, Serial, Joypad)
+//! - ✅ Interrupts: Priority-based interrupt servicing with IME flag
 //!
 //! ## Not Yet Implemented
 //! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
 //! - ❌ Game Boy Color: CGB mode, color palettes
 //! - ❌ Serial: Link cable communication
-//! - ❌ Interrupts: Full interrupt handling (basic support implemented)
 //! - ❌ DMA: OAM DMA transfer
 //!
 //! # Known Limitations
@@ -294,15 +294,6 @@ impl System for GbSystem {
             if self.cpu.memory.ppu.step(cpu_cycles) {
                 // V-Blank started - request VBlank interrupt (bit 0)
                 self.cpu.memory.request_interrupt(0x01);
-
-                // Wake CPU from HALT on VBlank
-                self.cpu.halted = false;
-            }
-
-            // Handle interrupts (simplified - full interrupt handling would check IE and IME)
-            // For now, just wake from HALT if any interrupt is pending
-            if self.cpu.memory.has_pending_interrupts() && self.cpu.halted {
-                self.cpu.halted = false;
             }
         }
 
