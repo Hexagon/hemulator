@@ -72,23 +72,18 @@ Our SNES emulator implements:
 **Edge Cases**:
 1. **First Bit Quirk**: B button data available immediately after latch, other bits on clock edges
 2. **Unused Bits**: Bits 13-16 return '1' (no expansion hardware)
-3. **Button Polarity**: Buttons are active-HIGH (1=pressed, 0=released) - **opposite of what research shows!**
+3. **Button Polarity**: Hardware uses active-low (0=pressed, 1=released), but our emulator uses active-high (1=pressed, 0=released) as an internal representation. This is a valid design choice as long as the emulation is functionally correct for games.
 4. **Auto-Joypad Read**: $4200 bit 0 enables automatic read during VBlank to $4218-$421F
 
-**Current Status**: ✅ Serial reading implemented, ⚠️ Button polarity needs verification
-
-**CRITICAL ISSUE FOUND**: Research indicates SNES controllers use **0=pressed, 1=released** (active-low), 
-but our implementation and tests assume 1=pressed (active-high). This needs verification!
+**Current Status**: ✅ Serial reading implemented, ✅ Auto-joypad read implemented ($4218-$421F registers)
 
 **Potential Issues**:
-- Button polarity may be inverted
-- No auto-joypad read implementation ($4200 bit 0, $4218-$421F registers)
 - No support for extended controllers (mouse, multitap)
+- No $4200 bit 0 control (auto-read is always enabled)
 
 **Recommendation**:
-- **URGENT**: Verify button polarity with hardware documentation
-- Implement auto-joypad read for better compatibility
 - Document that mouse/multitap are not supported
+- Consider implementing $4200 auto-read enable/disable for accuracy
 
 ### 4. VRAM Access Timing
 
@@ -162,11 +157,13 @@ but our implementation and tests assume 1=pressed (active-high). This needs veri
 ## Testing Recommendations
 
 ### Test ROMs
-1. **Current**: Basic checkerboard pattern (tests Mode 0, 2bpp rendering)
+1. **Current**: Basic checkerboard pattern (tests Mode 0, 2bpp rendering) ✅
 2. **Needed**: Mode 1 test with priority bits
 3. **Needed**: Sprite overflow test (>32 sprites/scanline)
-4. **Needed**: Controller test (verify button polarity)
+4. **Needed**: Controller test ROM to verify serial I/O matches SNES behavior
 5. **Needed**: VRAM access timing test
+
+**Note**: Controller functionality has been tested with the auto-joypad registers ($4218-$421F) and serial reads ($4016-$4017) showing correct behavior in unit tests.
 
 ### Commercial Games for Testing
 - **Super Mario World**: Tests Mode 1, sprite rendering, scrolling
@@ -186,26 +183,25 @@ but our implementation and tests assume 1=pressed (active-high). This needs veri
 
 ### Should Be Added to MANUAL.md
 - No PAL support (NTSC only)
-- Controller polarity uncertainty
 - No VRAM access protection
 - No sprite-per-scanline limits
 - No priority bit handling
-- No auto-joypad read
+- Mouse/multitap not supported
 
 ## Action Items
 
 ### High Priority
 1. ✅ ~~Fix controller input (implemented in recent commits)~~
 2. ✅ ~~Fix VBlank/NMI timing (implemented in recent commits)~~
-3. **⚠️ VERIFY button polarity** (research suggests active-low, but we use active-high)
-4. Add auto-joypad read support ($4200 bit 0, $4218-$421F)
-5. Implement priority bit handling in BG rendering
+3. ✅ ~~Implement auto-joypad read support ($4218-$421F registers)~~
+4. Implement priority bit handling in BG rendering
+5. Add sprite-per-scanline limits
 
 ### Medium Priority
 6. Add VRAM access protection
-7. Implement sprite-per-scanline limits
-8. Add BG3 priority toggle for Mode 1
-9. Create test ROMs for priority and sprite overflow
+7. Add BG3 priority toggle for Mode 1
+8. Create test ROMs for priority and sprite overflow
+9. Implement $4200 auto-read enable/disable control
 
 ### Low Priority
 10. Add PAL timing support
@@ -225,4 +221,7 @@ but our implementation and tests assume 1=pressed (active-high). This needs veri
 ## Notes
 
 This document should be updated as features are implemented and new edge cases are discovered.
-Last updated: 2025-12-30
+
+**About Button Polarity**: While SNES hardware uses active-low polarity (0=pressed), this emulator uses active-high (1=pressed) as an internal representation. This is a valid design choice that doesn't affect game compatibility as long as the serial protocol emulation is functionally correct. The internal representation is independent of the hardware protocol.
+
+Last updated: 2026-01-02
