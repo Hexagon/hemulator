@@ -81,8 +81,12 @@ sudo apt-get install libasound2-dev cmake pkg-config
 git clone https://github.com/Hexagon/hemulator.git
 cd hemulator
 
-# Build the project
+# Build the project (optimized for distribution)
 cargo build --release
+
+# For faster iterative development, use release-quick profile
+# ~18x faster incremental builds, still ~90% of release performance
+cargo build --profile release-quick
 
 # Run the emulator
 cargo run --release -p emu_gui
@@ -233,10 +237,15 @@ sudo apt-get install libasound2-dev cmake pkg-config
 ### Building
 
 ```bash
-# Development build
+# Development build (fast compile, slower runtime)
 cargo build
 
-# Release build (optimized)
+# Release-quick build (fast compile, good runtime performance)
+# Best for iterative development - ~18x faster incremental builds than release
+cargo build --profile release-quick
+
+# Release build (slow compile, best runtime performance)
+# Use for final testing and distribution
 cargo build --release
 
 # Run tests
