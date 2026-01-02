@@ -1,8 +1,8 @@
 # N64 Emulator Development Status
 
 **Last Updated**: January 2, 2026  
-**Status**: Interrupts enabled, enhanced test ROM working, ready for RSP/RDP expansion  
-**ROM Tested**: Enhanced test ROM with interrupt handling, Super Mario 64 (8MB)
+**Status**: RSP microcode detection improved, texture commands added, 3D Pong test ROM created
+**ROM Tested**: Enhanced test ROM with interrupt handling, 3D Pong test ROM, Super Mario 64 (8MB)
 
 ## Current State
 
@@ -16,7 +16,9 @@
 - **Interrupt System**: IE bit enabled, IM3 configured for VI interrupts, exception handler uses ERET
 - **Framebuffer**: Rendering pipeline functional (black background by default)
 - **RDP Display Lists**: SET_FILL_COLOR and FILL_RECTANGLE commands working
-- **Test ROM**: Enhanced test ROM with interrupt handling passes all tests
+- **RDP Texture Commands**: LOAD_TLUT, TEXTURE_RECTANGLE with texture sampling
+- **RSP Microcode Detection**: CRC32-based signature matching for F3DEX/F3DEX2/Audio
+- **Test ROMs**: Enhanced test ROM and 3D Pong test ROM both working
 
 ### 🔧 Partially Working
 
@@ -34,7 +36,49 @@
 
 ## Recent Changes (January 2, 2026)
 
-### 1. Interrupt System Enable
+### 1. RSP Microcode Detection Enhancement
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Changes**:
+- Implemented CRC32-based microcode signature matching
+- Added known CRC32 signatures for F3DEX, F3DEX2, and Audio microcodes
+- Fallback to heuristic pattern matching for unknown microcodes
+- Improved logging of microcode detection results
+
+**Result**: RSP can now accurately detect different microcode variants used by commercial games
+
+---
+
+### 2. Texture Commands Implementation
+**Files**: `crates/systems/n64/src/rdp.rs`
+
+**Changes**:
+- Added LOAD_TLUT (0x30) command for loading color palettes for CI textures
+- Implemented proper TEXTURE_RECTANGLE (0x24) with texture sampling
+- Enhanced texture sampling to check for valid TMEM data before rendering
+- Fixed texture coordinate mapping for rectangle rendering
+
+**Result**: Textured rectangles now render correctly, palette-based textures supported
+
+---
+
+### 3. 3D Pong Test ROM
+**Files**: `test_roms/n64/pong3d_test.py`, `test_roms/n64/test_pong3d.z64`
+
+**Features**:
+- Complete 3D game ROM using F3DEX display lists
+- Three game objects: left paddle (red), right paddle (blue), ball (green)
+- Perspective projection matrix (60° FOV, 4:3 aspect ratio)
+- Camera translation matrix (moved back 300 units)
+- Gouraud shading with vertex colors
+- F3DEX commands: G_VTX, G_TRI2, G_MTX, G_ENDDL
+- Comprehensive test validates RSP integration and rendering pipeline
+
+**Result**: First fully 3D test ROM demonstrating the complete RSP/RDP pipeline
+
+---
+
+### 4. Interrupt System Enable
 **Files**: `crates/systems/n64/src/cpu.rs`, `crates/systems/n64/src/pif.rs`
 
 **Changes**:
@@ -46,7 +90,7 @@
 
 ---
 
-### 2. Enhanced Test ROM
+### 5. Enhanced Test ROM
 **File**: `test_roms/n64/enhanced_test.py`, `test_roms/n64/test_enhanced.z64`
 
 **Features**:
@@ -60,12 +104,12 @@
 
 ---
 
-### 3. Framebuffer Initialization
+### 6. Framebuffer Initialization
 **File**: `crates/systems/n64/src/rdp.rs`
 
 **Changes**: Reverted dark blue initialization (0xFF000040) back to black (0x00000000) for test compatibility
 
-**Result**: All 125 tests pass without false failures
+**Result**: All 126 tests pass without false failures
 
 ## Solution Path Progress
 
@@ -84,7 +128,7 @@
 
 ## Testing Strategy
 
-All tests passing (125/125):
+All tests passing (126/126):
 ```
 cargo test --package emu_n64 --lib
 ```
@@ -92,11 +136,12 @@ cargo test --package emu_n64 --lib
 Test categories:
 - ✅ System creation and reset (5 tests)
 - ✅ ROM loading and boot sequence (3 tests)
-- ✅ RDP rendering (fill, triangles, Z-buffer) (35+ tests)
+- ✅ RDP rendering (fill, triangles, textures, Z-buffer) (36+ tests)
 - ✅ Interrupt flow (VI, MI, CPU integration) (6 tests)
 - ✅ Controller input (PIF, multi-player) (5 tests)
 - ✅ Enhanced ROM with interrupts (1 test)
-- ✅ Component tests (MI, VI, RSP, cartridge) (70+ tests)
+- ✅ 3D Pong ROM with F3DEX display lists (1 test)
+- ✅ Component tests (MI, VI, RSP, cartridge) (69+ tests)
 
 ## Known Limitations
 
@@ -126,11 +171,12 @@ Commercial ROMs (e.g., Super Mario 64) still don't progress past initialization 
 
 ## Next Session Priorities
 
-1. **Expand RSP HLE**: Implement more F3DEX commands (G_VTX, G_TRI1, G_MATRIX, etc.)
-2. **Microcode Detection**: Parse RSP IMEM to identify F3DEX vs F3DEX2
-3. **Display List Processing**: Process task structures and generate RDP commands
-4. **Texture Loading**: Implement LOAD_BLOCK and LOAD_TILE properly
-5. **Test with Commercial ROM**: Verify improvements with Super Mario 64
+1. **Expand RSP Task DMA**: Implement proper task structure parsing from DMEM
+2. **Add More RDP Commands**: SET_COMBINE_MODE usage, SET_Z_IMAGE, more texture formats
+3. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
+4. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
+5. **Matrix Stack Management**: Improve G_POPMTX handling for nested display lists
+6. **Display List Branching**: Full support for G_DL with proper call stack
 
 ## Reference Documentation
 
