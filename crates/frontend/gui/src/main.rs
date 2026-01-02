@@ -34,6 +34,9 @@ struct RuntimeState {
     /// Current mount points (mount_id -> file_path)
     /// This is runtime-only and not persisted to config.json
     current_mounts: HashMap<String, String>,
+    /// Project-specific input override (when using per-project config)
+    /// None means using global config.json settings
+    input_override: Option<settings::InputConfig>,
 }
 
 impl RuntimeState {
@@ -42,6 +45,7 @@ impl RuntimeState {
         Self {
             current_project_path: None,
             current_mounts: HashMap::new(),
+            input_override: None,
         }
     }
 
@@ -1990,6 +1994,21 @@ fn main() {
         egui_app.property_pane.speed = settings.emulation_speed as f32;
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
         egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
+        
+        // Update input device counts from backend
+        egui_app.property_pane.num_gamepads_detected = egui_backend.num_gamepads();
+        egui_app.property_pane.num_joysticks_detected = egui_backend.num_joysticks();
+        
+        // Update input configuration from settings
+        egui_app.property_pane.mouse_enabled = settings.input.mouse_enabled;
+        egui_app.property_pane.mouse_sensitivity = settings.input.mouse_sensitivity;
+        
+        // Determine input config source
+        if runtime_state.input_override.is_some() {
+            egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Project;
+        } else {
+            egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Global;
+        }
 
         // Update target FPS from system timing
         if rom_loaded {
@@ -2577,6 +2596,48 @@ fn main() {
                         egui_app
                             .tab_manager
                             .add_log(format!("Ejected {}", mount_id));
+                    }
+                }
+                PropertyAction::ConfigureInput => {
+                    // TODO: Open input configuration dialog
+                    // For now, just show a message that this feature is coming soon
+                    egui_app.status_bar.set_message(
+                        "Input configuration dialog coming soon. Edit config.json manually for now."
+                            .to_string(),
+                    );
+                    egui_app.tab_manager.add_log(
+                        "Input configuration: Feature in development. Use config.json for now."
+                            .to_string(),
+                    );
+                }
+                PropertyAction::SetInputSource(source) => {
+                    use egui_ui::InputConfigSource;
+                    match source {
+                        InputConfigSource::Global => {
+                            // Clear project-specific input override
+                            runtime_state.input_override = None;
+                            egui_app.property_pane.input_config_source = InputConfigSource::Global;
+                            egui_app
+                                .status_bar
+                                .set_message("Using global input config".to_string());
+                            egui_app
+                                .tab_manager
+                                .add_log("Switched to global input configuration".to_string());
+                        }
+                        InputConfigSource::Project => {
+                            // Create project-specific input override if not exists
+                            if runtime_state.input_override.is_none() {
+                                runtime_state.input_override = Some(settings.input.clone());
+                            }
+                            egui_app.property_pane.input_config_source =
+                                InputConfigSource::Project;
+                            egui_app
+                                .status_bar
+                                .set_message("Using project-specific input config".to_string());
+                            egui_app.tab_manager.add_log(
+                                "Switched to project-specific input configuration".to_string(),
+                            );
+                        }
                     }
                 }
             }
