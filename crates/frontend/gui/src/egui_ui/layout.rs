@@ -104,14 +104,14 @@ impl EguiApp {
 
         // Top menu bar - VS Code menu bar color RGB(24,24,24)
         TopBottomPanel::top("menu_bar")
-            .frame(egui::Frame::none().fill(color_from_rgb(24, 24, 24)))
+            .frame(egui::Frame::new().fill(color_from_rgb(24, 24, 24)))
             .show(ctx, |ui| {
                 self.menu_bar.ui(ui);
             });
 
         // Bottom status bar - VS Code lighter area RGB(31,31,31)
         TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::none().fill(color_from_rgb(31, 31, 31)))
+            .frame(egui::Frame::new().fill(color_from_rgb(31, 31, 31)))
             .show(ctx, |ui| {
                 self.status_bar.ui(ui);
             });
@@ -122,14 +122,14 @@ impl EguiApp {
             .min_width(200.0)
             .max_width(500.0)
             .resizable(true)
-            .frame(egui::Frame::none().fill(color_from_rgb(12, 12, 12)))
+            .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
             .show(ctx, |ui| {
                 self.property_pane.ui(ui);
             });
 
         // Central tabbed interface - pitch black for emulator display
         CentralPanel::default()
-            .frame(egui::Frame::none().fill(color_from_rgb(0, 0, 0)))
+            .frame(egui::Frame::new().fill(color_from_rgb(0, 0, 0)))
             .show(ctx, |ui| {
                 self.tab_manager
                     .ui(ui, &self.emulator_texture, scaling_mode);
@@ -148,22 +148,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_srgb_to_linear_conversion() {
+    fn test_linear_to_srgb_conversion() {
         // Test black (should stay black)
-        assert_eq!(srgb_to_linear(0), 0);
+        assert_eq!(linear_to_srgb(0), 0);
 
         // Test white (should stay white)
-        assert_eq!(srgb_to_linear(255), 255);
+        assert_eq!(linear_to_srgb(255), 255);
 
-        // Test middle gray (sRGB 128 should convert to darker linear value)
-        // sRGB 128/255 = 0.502, linear = ((0.502 + 0.055) / 1.055)^2.4 ≈ 0.214
-        // linear 0.214 * 255 ≈ 55
-        let result = srgb_to_linear(128);
-        assert!((53..=57).contains(&result), "Expected ~55, got {}", result);
+        // Test middle gray (linear 128 should convert to brighter sRGB value)
+        // linear 128/255 = 0.502, sRGB = 1.055 * 0.502^(1/2.4) - 0.055 ≈ 0.735
+        // sRGB 0.735 * 255 ≈ 188
+        let result = linear_to_srgb(128);
+        assert!(
+            (186..=190).contains(&result),
+            "Expected ~188, got {}",
+            result
+        );
 
-        // Test common sRGB value (187 is common in UI)
-        // Should convert to a brighter linear value
-        let result = srgb_to_linear(187);
-        assert!(result > 100, "Linear value should be > 100 for sRGB 187");
+        // Test darker linear value (should convert to brighter sRGB)
+        let result = linear_to_srgb(100);
+        assert!(result > 100, "sRGB value should be > 100 for linear 100");
     }
 }

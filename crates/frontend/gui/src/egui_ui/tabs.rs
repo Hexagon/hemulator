@@ -142,15 +142,8 @@ impl TabManager {
                 }
             }
 
-            if self.log_messages.is_empty() {
-                ui.add_enabled(false, egui::Button::new("Log"));
-            } else {
-                ui.selectable_value(
-                    &mut self.active_tab,
-                    Tab::Log,
-                    format!("Log ({})", self.log_messages.len()),
-                );
-            }
+            // Log tab is always clickable
+            ui.selectable_value(&mut self.active_tab, Tab::Log, "Log");
 
             if self.help_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "Help");
@@ -268,15 +261,137 @@ impl TabManager {
     }
 
     fn render_log_tab(&self, ui: &mut Ui) {
+        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+
+        let log_config = LogConfig::global();
+
+        // Define levels array once for reuse
+        let levels = [
+            (LogLevel::Off, "Off"),
+            (LogLevel::Error, "Error"),
+            (LogLevel::Warn, "Warn"),
+            (LogLevel::Info, "Info"),
+            (LogLevel::Debug, "Debug"),
+            (LogLevel::Trace, "Trace"),
+        ];
+
+        let categories = [
+            (LogCategory::CPU, "CPU"),
+            (LogCategory::Bus, "Bus"),
+            (LogCategory::PPU, "PPU"),
+            (LogCategory::APU, "APU"),
+            (LogCategory::Interrupts, "Interrupts"),
+            (LogCategory::Stubs, "Stubs"),
+        ];
+
+        // Top section: Log level controls
+        ui.heading("Logging Configuration");
+        ui.separator();
+        ui.add_space(5.0);
+
         ScrollArea::vertical()
             .auto_shrink([false; 2])
-            .stick_to_bottom(true)
             .show(ui, |ui| {
-                for msg in &self.log_messages {
-                    ui.label(msg);
-                }
-                if self.log_messages.is_empty() {
-                    ui.label("No log messages");
+                // Global log level
+                ui.horizontal(|ui| {
+                    ui.label("Global Level:");
+                    ui.add_space(10.0);
+
+                    let global_level = log_config.get_global_level();
+
+                    for (level, name) in &levels {
+                        if ui.selectable_label(global_level == *level, *name).clicked() {
+                            log_config.set_global_level(*level);
+                        }
+                    }
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Category-specific log levels
+                ui.heading("Component-Specific Levels");
+                ui.add_space(5.0);
+                ui.label("Override global level for specific components:");
+                ui.add_space(10.0);
+
+                egui::Grid::new("log_category_grid")
+                    .num_columns(7)
+                    .spacing([10.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        // Header row
+                        ui.label("");
+                        for (_, name) in &levels {
+                            ui.label(*name);
+                        }
+                        ui.end_row();
+
+                        // Category rows
+                        for (category, name) in &categories {
+                            ui.label(format!("{}:", name));
+                            let current_level = log_config.get_level(*category);
+
+                            for (level, _) in &levels {
+                                if ui.selectable_label(current_level == *level, "•").clicked() {
+                                    log_config.set_level(*category, *level);
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Info section
+                ui.heading("About Logging");
+                ui.add_space(5.0);
+                ui.label("Log messages are written to stderr by default.");
+                ui.label("Use --log-file <path> CLI argument to log to a file.");
+                ui.label("Category-specific levels override the global level.");
+                ui.label("Set a category to 'Off' to use the global level.");
+
+                ui.add_space(10.0);
+
+                // Current configuration summary
+                ui.heading("Current Configuration");
+                ui.add_space(5.0);
+
+                egui::Grid::new("log_status_grid")
+                    .num_columns(2)
+                    .spacing([20.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("Global Level:");
+                        ui.label(format!("{:?}", log_config.get_global_level()));
+                        ui.end_row();
+
+                        for (category, name) in &categories {
+                            let cat_level = log_config.get_level(*category);
+                            ui.label(format!("{} Level:", name));
+                            if cat_level == LogLevel::Off {
+                                ui.label(format!("{:?} (using global)", cat_level));
+                            } else {
+                                ui.label(format!("{:?}", cat_level));
+                            }
+                            ui.end_row();
+                        }
+                    });
+
+                // Legacy log messages section (kept for backward compatibility)
+                if !self.log_messages.is_empty() {
+                    ui.add_space(15.0);
+                    ui.separator();
+                    ui.add_space(10.0);
+                    ui.heading("Application Messages");
+                    ui.add_space(5.0);
+
+                    for msg in &self.log_messages {
+                        ui.label(msg);
+                    }
                 }
             });
     }
