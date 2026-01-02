@@ -706,6 +706,11 @@ fn save_project(
             settings.window_height,
             settings.display_filter,
         );
+        
+        // Save project-specific input override if it exists
+        if let Some(ref input_override) = runtime_state.input_override {
+            project.set_input_override(input_override.clone());
+        }
 
         // For PC system, also save PC-specific configuration
         if let EmulatorSystem::PC(pc_sys) = sys {
@@ -1646,6 +1651,12 @@ fn main() {
                         rom_loaded = true; // Allow POST screen to be displayed
                         status_message = "PC virtual machine loaded".to_string();
                         println!("Switched to PC system");
+                        
+                        // Load project-specific input override if it exists
+                        if let Some(input_override) = project.get_input_override() {
+                            runtime_state.input_override = Some(input_override.clone());
+                            println!("Loaded project-specific input configuration");
+                        }
 
                         if let Err(e) = settings.save() {
                             eprintln!("Warning: Failed to save settings: {}", e);
@@ -2785,6 +2796,9 @@ fn main() {
                             // Clear project-specific input override
                             runtime_state.input_override = None;
                             egui_app.property_pane.input_config_source = InputConfigSource::Global;
+                            // Update property pane to show current global settings
+                            egui_app.property_pane.mouse_enabled = settings.input.mouse_enabled;
+                            egui_app.property_pane.mouse_sensitivity = settings.input.mouse_sensitivity;
                             egui_app
                                 .status_bar
                                 .set_message("Using global input config".to_string());
@@ -2798,9 +2812,14 @@ fn main() {
                                 runtime_state.input_override = Some(settings.input.clone());
                             }
                             egui_app.property_pane.input_config_source = InputConfigSource::Project;
+                            // Update property pane to show project-specific settings
+                            if let Some(ref input_override) = runtime_state.input_override {
+                                egui_app.property_pane.mouse_enabled = input_override.mouse_enabled;
+                                egui_app.property_pane.mouse_sensitivity = input_override.mouse_sensitivity;
+                            }
                             egui_app
                                 .status_bar
-                                .set_message("Using project-specific input config".to_string());
+                                .set_message("Using project-specific input config (save project to persist)".to_string());
                             egui_app.tab_manager.add_log(
                                 "Switched to project-specific input configuration".to_string(),
                             );
@@ -2815,6 +2834,40 @@ fn main() {
 
         // Handle display filter changes from property pane
         settings.display_filter = egui_app.property_pane.display_filter;
+        
+        // Handle input configuration changes from property pane
+        // Sync mouse settings back to the appropriate config (global or project-specific)
+        let input_config_changed = 
+            settings.input.mouse_enabled != egui_app.property_pane.mouse_enabled
+            || (settings.input.mouse_sensitivity - egui_app.property_pane.mouse_sensitivity).abs() > 0.01;
+        
+        if input_config_changed {
+            match egui_app.property_pane.input_config_source {
+                egui_ui::InputConfigSource::Global => {
+                    // Update global settings
+                    settings.input.mouse_enabled = egui_app.property_pane.mouse_enabled;
+                    settings.input.mouse_sensitivity = egui_app.property_pane.mouse_sensitivity;
+                    // Auto-save global config
+                    if let Err(e) = settings.save() {
+                        eprintln!("Failed to save global input config: {}", e);
+                        egui_app.status_bar.set_message(format!("Failed to save config: {}", e));
+                    } else {
+                        egui_app.status_bar.set_message("Global input config saved".to_string());
+                    }
+                }
+                egui_ui::InputConfigSource::Project => {
+                    // Update project-specific override
+                    if let Some(ref mut input_override) = runtime_state.input_override {
+                        input_override.mouse_enabled = egui_app.property_pane.mouse_enabled;
+                        input_override.mouse_sensitivity = egui_app.property_pane.mouse_sensitivity;
+                        // Note: Project will be saved when user explicitly saves the project
+                        egui_app.status_bar.set_message(
+                            "Project input config updated (save project to persist)".to_string()
+                        );
+                    }
+                }
+            }
+        }
 
         // Handle tab actions (e.g., create new project)
         if let Some(action) = egui_app.tab_manager.take_action() {
