@@ -2050,4 +2050,73 @@ mod tests {
         assert_eq!(ppu.get_tilemap_offset(32, 32, 64), 6144);
         assert_eq!(ppu.get_tilemap_offset(63, 63, 64), 8190);
     }
+
+    #[test]
+    fn test_mode1_typical_commercial_pattern() {
+        let mut ppu = Ppu::new();
+
+        // Simulate typical commercial ROM initialization
+        // Most commercial games use Mode 1
+        ppu.write_register(0x2105, 0x01); // Mode 1
+
+        // Typical settings: BG1 tilemap at $0000, CHR at $4000
+        ppu.write_register(0x2107, 0x00); // BG1 tilemap at $0000
+        ppu.write_register(0x210B, 0x02); // BG1 CHR at $4000 (0x02 << 13 = $4000)
+
+        // Enable BG1 and sprites
+        ppu.write_register(0x212C, 0x11); // BG1 + sprites
+
+        // Set up a typical 4bpp palette
+        ppu.write_register(0x2121, 0x00);
+        // Color 0: transparent (black)
+        ppu.write_register(0x2122, 0x00);
+        ppu.write_register(0x2122, 0x00);
+        // Color 1: white  
+        ppu.write_register(0x2122, 0xFF);
+        ppu.write_register(0x2122, 0x7F);
+        // Color 2: red
+        ppu.write_register(0x2122, 0x1F);
+        ppu.write_register(0x2122, 0x00);
+
+        // Upload tile to CHR at $4000 (word address $2000)
+        ppu.write_register(0x2115, 0x80); // Increment on low byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20); // Word address $2000 = byte $4000
+
+        // Create a simple 4bpp tile (color 1 = white)
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0xFF); // Bitplane 0
+            ppu.write_register(0x2119, 0x00); // Bitplane 1
+        }
+        for _ in 0..24 {
+            ppu.write_register(0x2118, 0x00); // Bitplanes 2, 3
+            ppu.write_register(0x2119, 0x00);
+        }
+
+        // Set tilemap entry at position (0,0)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00); // Tile 0
+        ppu.write_register(0x2119, 0x00); // No flip, palette 0
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // Check that top-left tile has visible pixels
+        let mut has_visible = false;
+        for y in 0..8 {
+            for x in 0..8 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    has_visible = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            has_visible,
+            "Mode 1 with typical commercial settings should produce visible output"
+        );
+    }
 }
+
