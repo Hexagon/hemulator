@@ -215,8 +215,14 @@ pub struct Settings {
     pub fullscreen: bool, // Fullscreen state
     #[serde(default, skip_serializing)] // Runtime only, not saved
     pub fullscreen_with_gui: bool, // Fullscreen with GUI overlay
+    #[serde(default = "default_log_rate_limit")]
+    pub log_rate_limit: usize, // Maximum logs per second per category (default: 60)
     #[serde(default, flatten, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, Value>,
+}
+
+fn default_log_rate_limit() -> usize {
+    60 // Default: 60 logs per second per category
 }
 
 fn default_window_width() -> usize {
@@ -249,6 +255,7 @@ impl Default for Settings {
             scaling_mode: ScalingMode::default(),
             fullscreen: false,
             fullscreen_with_gui: false,
+            log_rate_limit: 60, // Default: 60 logs per second
             extra: HashMap::new(),
         }
     }

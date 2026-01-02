@@ -1290,6 +1290,9 @@ fn main() {
         eprintln!("Warning: Failed to save config.json: {}", e);
     }
 
+    // Configure rate limit from settings
+    log_config.set_rate_limit(settings.log_rate_limit);
+
     // Create runtime state for tracking current project and mounts
     let mut runtime_state = RuntimeState::new();
 
@@ -2837,6 +2840,16 @@ fn main() {
 
         // Handle display filter changes from property pane
         settings.display_filter = egui_app.property_pane.display_filter;
+
+        // Handle log rate limit changes
+        let current_rate_limit = emu_core::logging::LogConfig::global().get_rate_limit();
+        if settings.log_rate_limit != current_rate_limit {
+            settings.log_rate_limit = current_rate_limit;
+            // Auto-save settings when rate limit changes
+            if let Err(e) = settings.save() {
+                eprintln!("Failed to save log rate limit: {}", e);
+            }
+        }
 
         // Handle input configuration changes from property pane
         // Sync mouse settings back to the appropriate config (global or project-specific)
