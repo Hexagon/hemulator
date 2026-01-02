@@ -85,7 +85,7 @@ cd hemulator
 cargo build --release
 
 # For faster iterative development, use release-quick profile
-# ~18x faster incremental builds, still ~90% of release performance
+# ~18x faster incremental builds with near-release performance
 cargo build --profile release-quick
 
 # Run the emulator
