@@ -1005,20 +1005,21 @@ impl Rdp {
             }
             // TEXTURE_RECTANGLE (0x24)
             0x24 => {
-                // Texture rectangle command - for now, just fill with fill color
-                // Real implementation would load and sample texture from TMEM
+                // Texture rectangle command - renders a textured rectangle
                 // word0: cmd | XH(12) | YH(12)
                 // word1: tile(3) | XL(12) | YL(12)
-                // This is a basic stub implementation
+                // Followed by another 64-bit word with texture coordinates:
+                // word2: S(16) | T(16)
+                // word3: DSDX(16) | DTDY(16)
                 let xh = ((word0 >> 12) & 0xFFF) / 4;
                 let yh = (word0 & 0xFFF) / 4;
                 let xl = ((word1 >> 12) & 0xFFF) / 4;
                 let yl = (word1 & 0xFFF) / 4;
-                let tile = (word1 >> 24) & 0x07;
+                let tile = ((word1 >> 24) & 0x07) as usize;
 
                 log(LogCategory::Stubs, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE stub - rendering as solid fill (xl={}, yl={}, xh={}, yh={}, tile={})",
+                        "N64 RDP: TEXTURE_RECTANGLE - rendering textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
                         xl, yl, xh, yh, tile
                     )
                 });
@@ -1026,8 +1027,38 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
-                // Stub: render as solid rectangle with current fill color
-                self.fill_rect(xl, yl, width, height);
+                // Check if tile has valid texture data in TMEM
+                let has_texture = if tile < 8 {
+                    let tmem_addr = self.tiles[tile].tmem_addr as usize;
+                    tmem_addr < self.tmem.len() && self.tmem[tmem_addr] != 0
+                } else {
+                    false
+                };
+
+                // Render textured rectangle if texture data is available
+                if has_texture && width > 0 && height > 0 {
+                    for y in 0..height {
+                        for x in 0..width {
+                            let px = xl + x;
+                            let py = yl + y;
+                            
+                            if px < self.width && py < self.height {
+                                // Calculate texture coordinates (simple mapping)
+                                let s = ((x as u32 * 64) / width.max(1)) & 0x3F; // Map to 0-63
+                                let t = ((y as u32 * 64) / height.max(1)) & 0x3F;
+                                
+                                // Sample texture
+                                let color = self.sample_texture(tile, s, t);
+                                
+                                // Draw pixel using renderer
+                                self.renderer.set_pixel(px, py, color);
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to solid fill if texture is not available
+                    self.fill_rect(xl, yl, width, height);
+                }
             }
             // SET_OTHER_MODES (0x2F - full 64-bit command)
             0x2F => {
@@ -1110,6 +1141,47 @@ impl Rdp {
 
                 // Load texture data from RDRAM to TMEM
                 self.load_texture_to_tmem(rdram, tile, uls, ult, lrs, lrt);
+            }
+            // LOAD_TLUT (0x30) - Load Texture Look-Up Table
+            0x30 => {
+                // Load palette data for CI (Color Index) textures
+                // word0: cmd | uls(12) | ult(12)
+                // word1: tile(3) | lrs(12) | lrt(12)
+                let uls = (word0 >> 12) & 0xFFF;
+                let ult = word0 & 0xFFF;
+                let tile = ((word1 >> 24) & 0x07) as usize;
+                let lrs = (word1 >> 12) & 0xFFF;
+                let _lrt = word1 & 0xFFF;
+
+                // Calculate number of palette entries to load
+                // Each palette entry is 16 bits (RGBA5551)
+                let count = ((lrs - uls) + 1) as usize;
+                
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: LOAD_TLUT - Loading {} palette entries to tile {} (addr=0x{:08X})",
+                        count, tile, self.texture_image_addr
+                    )
+                });
+
+                // Load palette data from texture_image_addr to upper half of TMEM
+                // Palettes are stored at TMEM offset 0x800 (upper 2KB of 4KB TMEM)
+                let palette_base = 0x800;
+                let src_addr = self.texture_image_addr as usize;
+                
+                for i in 0..count.min(256) {
+                    let tmem_offset = palette_base + (i * 2);
+                    if tmem_offset + 1 < self.tmem.len() && src_addr + (i * 2) + 1 < rdram.len() {
+                        // Copy 16-bit palette entry (RGBA5551)
+                        self.tmem[tmem_offset] = rdram[src_addr + (i * 2)];
+                        self.tmem[tmem_offset + 1] = rdram[src_addr + (i * 2) + 1];
+                    }
+                }
+
+                // Update the tile descriptor to reference this palette
+                if tile < 8 {
+                    self.tiles[tile].palette = (ult >> 6) & 0xF; // Palette index from ult parameter
+                }
             }
             // SYNC_FULL (0x29)
             0x29 => {
