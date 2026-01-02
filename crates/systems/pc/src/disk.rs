@@ -382,9 +382,9 @@ pub fn create_blank_floppy(format: FloppyFormat) -> Vec<u8> {
 }
 
 /// Create a blank hard drive image
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if the requested disk size exceeds the platform's address space (usize::MAX).
 /// On 32-bit systems, this limits disk sizes to approximately 4GB.
 pub fn create_blank_hard_drive(format: HardDriveFormat) -> Vec<u8> {
