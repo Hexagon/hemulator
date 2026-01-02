@@ -13,11 +13,11 @@ pub enum InputConfigSource {
 /// Actions that can be triggered from the property pane
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyAction {
-    SaveState(u8),                    // Slot number 1-5
-    LoadState(u8),                    // Slot number 1-5
-    MountFile(String),                // Mount point ID
-    EjectFile(String),                // Mount point ID
-    ConfigureInput,                   // Open input configuration dialog
+    SaveState(u8),                     // Slot number 1-5
+    LoadState(u8),                     // Slot number 1-5
+    MountFile(String),                 // Mount point ID
+    EjectFile(String),                 // Mount point ID
+    ConfigureInput,                    // Open input configuration dialog
     SetInputSource(InputConfigSource), // Switch between global/project input config
 }
 
@@ -43,7 +43,7 @@ pub struct PropertyPane {
     // Settings
     pub display_filter: DisplayFilter,
     pub emulation_speed_percent: i32, // 0-400
-    
+
     // Input configuration (can be global or project-specific)
     pub input_config_source: InputConfigSource, // Global or Project
     pub player1_enabled: bool,
@@ -462,43 +462,45 @@ impl PropertyPane {
                                 self.emulation_speed_percent = 400;
                             }
                         });
-                        
+
                         // Input Configuration section
                         ui.add_space(10.0);
                         ui.separator();
                         ui.label(egui::RichText::new("Input Configuration").strong());
-                        
+
                         // Input source selection (Global vs Project)
                         ui.horizontal(|ui| {
                             ui.label("Config Source:");
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Global,
-                                    "Global"
+                                    "Global",
                                 )
                                 .on_hover_text("Use global config.json settings for all projects")
                                 .clicked()
                             {
                                 if self.input_config_source != InputConfigSource::Global {
-                                    self.pending_action =
-                                        Some(PropertyAction::SetInputSource(InputConfigSource::Global));
+                                    self.pending_action = Some(PropertyAction::SetInputSource(
+                                        InputConfigSource::Global,
+                                    ));
                                 }
                             }
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Project,
-                                    "Project"
+                                    "Project",
                                 )
                                 .on_hover_text("Use project-specific .hemu file settings")
                                 .clicked()
                             {
                                 if self.input_config_source != InputConfigSource::Project {
-                                    self.pending_action =
-                                        Some(PropertyAction::SetInputSource(InputConfigSource::Project));
+                                    self.pending_action = Some(PropertyAction::SetInputSource(
+                                        InputConfigSource::Project,
+                                    ));
                                 }
                             }
                         });
-                        
+
                         // Input device status
                         ui.add_space(5.0);
                         ui.horizontal(|ui| {
@@ -509,12 +511,12 @@ impl PropertyPane {
                             ui.label("Joysticks:");
                             ui.label(format!("{} detected", self.num_joysticks_detected));
                         });
-                        
+
                         // Player configuration
                         ui.add_space(5.0);
                         ui.checkbox(&mut self.player1_enabled, "Player 1 Enabled");
                         ui.checkbox(&mut self.player2_enabled, "Player 2 Enabled");
-                        
+
                         // Mouse configuration
                         ui.add_space(5.0);
                         ui.checkbox(&mut self.mouse_enabled, "Mouse Input Enabled");
@@ -528,7 +530,7 @@ impl PropertyPane {
                                 );
                             });
                         }
-                        
+
                         // Configure button
                         ui.add_space(5.0);
                         if ui

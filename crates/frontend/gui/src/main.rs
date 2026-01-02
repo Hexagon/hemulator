@@ -1994,15 +1994,15 @@ fn main() {
         egui_app.property_pane.speed = settings.emulation_speed as f32;
         egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
         egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
-        
+
         // Update input device counts from backend
         egui_app.property_pane.num_gamepads_detected = egui_backend.num_gamepads();
         egui_app.property_pane.num_joysticks_detected = egui_backend.num_joysticks();
-        
+
         // Update input configuration from settings
         egui_app.property_pane.mouse_enabled = settings.input.mouse_enabled;
         egui_app.property_pane.mouse_sensitivity = settings.input.mouse_sensitivity;
-        
+
         // Determine input config source
         if runtime_state.input_override.is_some() {
             egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Project;
@@ -2629,8 +2629,7 @@ fn main() {
                             if runtime_state.input_override.is_none() {
                                 runtime_state.input_override = Some(settings.input.clone());
                             }
-                            egui_app.property_pane.input_config_source =
-                                InputConfigSource::Project;
+                            egui_app.property_pane.input_config_source = InputConfigSource::Project;
                             egui_app
                                 .status_bar
                                 .set_message("Using project-specific input config".to_string());
