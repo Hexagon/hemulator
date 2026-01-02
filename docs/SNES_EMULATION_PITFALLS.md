@@ -118,7 +118,7 @@ Our SNES emulator implements:
 **Games Affected**: Any game using transparency effects, fades, or HUD windows
 
 **Recommendation**:
-- Document as not supported in MANUAL.md
+- ✅ Already documented as not supported in MANUAL.md
 - Consider as future enhancement
 
 ### 6. Enhancement Chips
@@ -135,7 +135,7 @@ Our SNES emulator implements:
 **Current Status**: ❌ Not implemented
 
 **Recommendation**:
-- Document as not supported
+- ✅ Already documented as not supported
 - Games requiring enhancement chips will not work
 
 ### 7. Audio (SPC700/DSP)
@@ -151,7 +151,7 @@ Our SNES emulator implements:
 - Echo effects, pitch modulation, noise generation
 
 **Recommendation**:
-- Document as not supported
+- ✅ Already documented as not supported
 - Consider as major future enhancement
 
 ## Testing Recommendations
@@ -182,11 +182,7 @@ Our SNES emulator implements:
 - Frame-based rendering (not cycle-accurate)
 
 ### Should Be Added to MANUAL.md
-- No PAL support (NTSC only)
-- No VRAM access protection
-- No sprite-per-scanline limits
-- No priority bit handling
-- Mouse/multitap not supported
+- ✅ All key limitations are already documented in MANUAL.md (PAL support, VRAM access protection, sprite-per-scanline limits, priority bit handling, mouse/multitap)
 
 ## Action Items
 
