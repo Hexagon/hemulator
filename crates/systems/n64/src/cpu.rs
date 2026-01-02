@@ -4,6 +4,16 @@ use crate::bus::N64Bus;
 use emu_core::cpu_mips_r4300i::CpuMips;
 use emu_core::logging::{log, LogCategory, LogLevel};
 
+/// CP0_STATUS register value for commercial ROM boot
+/// CU0=1 (Coprocessor 0 usable), CU1=1 (FPU usable), BEV=0 (use normal exception vectors)
+#[allow(dead_code)] // Used in tests
+pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000000;
+
+/// CP0_CONFIG register value for commercial ROM boot
+/// Standard configuration used by IPL3 bootloader
+#[allow(dead_code)] // Used in tests
+pub const CP0_CONFIG_COMMERCIAL_BOOT: u64 = 0x0006E463;
+
 /// N64 CPU wrapper
 pub struct N64Cpu {
     pub cpu: CpuMips<N64Bus>,
@@ -36,8 +46,8 @@ impl N64Cpu {
 
             // Initialize CP0 registers for commercial ROM boot
             // These values are set by the real IPL3 bootloader
-            self.cpu.cp0[12] = 0x34000000; // CP0_STATUS: CU0=1, CU1=1, BEV=0
-            self.cpu.cp0[16] = 0x0006E463; // CP0_CONFIG: Typical configuration
+            self.cpu.cp0[12] = CP0_STATUS_COMMERCIAL_BOOT;
+            self.cpu.cp0[16] = CP0_CONFIG_COMMERCIAL_BOOT;
 
             // Set PC to entry point (typically 0x80000400)
             self.cpu.pc = entry_point;

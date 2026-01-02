@@ -46,6 +46,16 @@
 //! - No EEPROM support (yet)
 //! - Minimal boot ROM (just enough to start games)
 
+/// Physical address of the exception vector in RDRAM
+const EXCEPTION_VECTOR_ADDR: usize = 0x0180;
+
+/// Exception vector code: j 0x80000180; nop
+/// Instruction encoding for an infinite loop at the exception vector
+const EXCEPTION_VECTOR_CODE: [u8; 8] = [
+    0x08, 0x00, 0x00, 0x60, // j 0x80000180 (jump to self)
+    0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+];
+
 /// N64 controller button flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControllerButtons {
@@ -244,19 +254,10 @@ impl Pif {
 
         // Step 4: Set up exception vectors in RDRAM
         // Exception handler entry point at 0x80000180 (physical 0x00000180)
-        // For now, we just put a simple infinite loop (j 0x80000180)
-        let exception_vec_addr = 0x0180_usize;
-        if exception_vec_addr + 7 < rdram.len() {
-            // j 0x80000180 (0x08000060 in instruction encoding)
-            rdram[exception_vec_addr] = 0x08;
-            rdram[exception_vec_addr + 1] = 0x00;
-            rdram[exception_vec_addr + 2] = 0x00;
-            rdram[exception_vec_addr + 3] = 0x60;
-            // nop (delay slot)
-            rdram[exception_vec_addr + 4] = 0x00;
-            rdram[exception_vec_addr + 5] = 0x00;
-            rdram[exception_vec_addr + 6] = 0x00;
-            rdram[exception_vec_addr + 7] = 0x00;
+        // Set up infinite loop as a placeholder exception handler
+        if EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len() <= rdram.len() {
+            rdram[EXCEPTION_VECTOR_ADDR..EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len()]
+                .copy_from_slice(&EXCEPTION_VECTOR_CODE);
         }
 
         entry_point

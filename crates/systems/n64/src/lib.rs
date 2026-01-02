@@ -28,6 +28,10 @@ mod vi;
 
 use bus::N64Bus;
 use cpu::N64Cpu;
+#[cfg(test)]
+use cpu::{CP0_CONFIG_COMMERCIAL_BOOT, CP0_STATUS_COMMERCIAL_BOOT};
+#[cfg(test)]
+use cartridge::N64_ROM_MAGIC;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use thiserror::Error;
@@ -586,11 +590,7 @@ mod tests {
 
         // 1. ROM header copied to RDRAM (first 0x1000 bytes)
         let rdram = sys.cpu.bus().rdram();
-        assert_eq!(
-            &rdram[0..4],
-            &[0x80, 0x37, 0x12, 0x40],
-            "ROM magic in RDRAM"
-        );
+        assert_eq!(&rdram[0..4], &N64_ROM_MAGIC, "ROM magic in RDRAM");
 
         // Check entry point in header (offset 0x08)
         let entry_in_rdram =
@@ -609,8 +609,14 @@ mod tests {
         assert_eq!(exception_vec, 0x08000060, "Exception vector set up");
 
         // 4. CP0 registers initialized
-        assert_eq!(sys.cpu.cpu.cp0[12], 0x34000000, "CP0_STATUS initialized");
-        assert_eq!(sys.cpu.cpu.cp0[16], 0x0006E463, "CP0_CONFIG initialized");
+        assert_eq!(
+            sys.cpu.cpu.cp0[12], CP0_STATUS_COMMERCIAL_BOOT,
+            "CP0_STATUS initialized"
+        );
+        assert_eq!(
+            sys.cpu.cpu.cp0[16], CP0_CONFIG_COMMERCIAL_BOOT,
+            "CP0_CONFIG initialized"
+        );
 
         // 5. PC set to entry point
         assert_eq!(sys.cpu.cpu.pc, 0x80000400, "PC at entry point");
