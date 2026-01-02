@@ -741,7 +741,7 @@ The emulator supports the following cartridge banking schemes:
   - VRAM access not restricted (hardware only allows during VBlank/force blank)
 - **Input**:
   - Standard controllers only (no mouse, multitap, or special peripherals)
-  - No auto-joypad read ($4200 bit 0) - manual serial read only
+  - Auto-joypad read registers ($4218-$421F) implemented, but $4200 bit 0 control not implemented (always enabled)
 - **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio). Games requiring enhancement chips or advanced PPU features will not work.
 
 **Recommended Test Games**:
