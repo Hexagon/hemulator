@@ -17,6 +17,8 @@ mod cpu;
 mod ppu;
 pub mod ppu_renderer;
 
+use emu_core::logging::{log, LogCategory, LogLevel};
+
 /// SNES controller button constants
 pub mod controller {
     /// SNES controller button bit positions (for 16-bit button state)
@@ -121,6 +123,9 @@ impl System for SnesSystem {
     type Error = SnesError;
 
     fn reset(&mut self) {
+        log(LogCategory::CPU, LogLevel::Info, || {
+            "SNES: System reset".to_string()
+        });
         self.cpu.reset();
         self.current_cycles = 0;
     }
@@ -133,6 +138,9 @@ impl System for SnesSystem {
 
         // Clear VBlank at start of frame
         self.cpu.bus_mut().ppu_mut().set_vblank(false);
+        log(LogCategory::PPU, LogLevel::Trace, || {
+            "SNES: Frame start, VBlank cleared".to_string()
+        });
 
         // Execute CPU cycles for visible portion
         while self.current_cycles < SNES_VISIBLE_CYCLES {
@@ -147,9 +155,19 @@ impl System for SnesSystem {
 
         // Enter VBlank and trigger NMI if enabled
         self.cpu.bus_mut().ppu_mut().set_vblank(true);
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "SNES: VBlank started (cycle {}), NMI enabled: {}",
+                self.current_cycles,
+                self.cpu.bus_mut().ppu_mut().nmi_enable
+            )
+        });
 
         // Check for NMI and trigger it on the 65C816
         if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+            log(LogCategory::Interrupts, LogLevel::Debug, || {
+                "SNES: NMI triggered".to_string()
+            });
             self.cpu.cpu.trigger_nmi();
         }
 
@@ -161,12 +179,18 @@ impl System for SnesSystem {
 
             // Check for additional NMI requests during VBlank
             if self.cpu.bus_mut().ppu_mut().take_nmi_pending() {
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "SNES: Additional NMI triggered during VBlank".to_string()
+                });
                 self.cpu.cpu.trigger_nmi();
             }
         }
 
         // Clear VBlank at end of frame
         self.cpu.bus_mut().ppu_mut().set_vblank(false);
+        log(LogCategory::PPU, LogLevel::Trace, || {
+            "SNES: Frame end, VBlank cleared".to_string()
+        });
 
         Ok(self.renderer.get_frame().clone())
     }
@@ -222,9 +246,15 @@ impl System for SnesSystem {
 
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
+            log(LogCategory::Bus, LogLevel::Warn, || {
+                format!("SNES: Invalid mount point: {}", mount_point_id)
+            });
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
         }
 
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!("SNES: Mounting cartridge ({} bytes)", data.len())
+        });
         self.cpu.bus_mut().load_cartridge(data)?;
         self.reset();
         Ok(())
@@ -232,9 +262,15 @@ impl System for SnesSystem {
 
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id != "Cartridge" {
+            log(LogCategory::Bus, LogLevel::Warn, || {
+                format!("SNES: Invalid mount point for unmount: {}", mount_point_id)
+            });
             return Err(SnesError::InvalidMountPoint(mount_point_id.to_string()));
         }
 
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "SNES: Unmounting cartridge".to_string()
+        });
         self.cpu.bus_mut().unload_cartridge();
         Ok(())
     }

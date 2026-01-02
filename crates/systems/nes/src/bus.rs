@@ -2,7 +2,7 @@ use crate::apu::APU;
 use crate::cartridge::Cartridge;
 use crate::mappers::Mapper;
 use crate::ppu::Ppu;
-use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
@@ -199,21 +199,21 @@ impl Bus for NesBus {
             }
             0x2000..=0x3FFF => {
                 let reg = 0x2000 + (addr - 0x2000) % 8;
-                // Log writes to PPU registers (0x2000..0x2007 and specifically 0x2006/0x2007)
-                if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
-                    && reg >= 0x2000
-                    && reg <= 0x2007
-                {
-                    eprintln!(
+                // Log writes to PPU registers
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
                         "PPU WRITE: addr=0x{:04X} reg=0x{:04X} val=0x{:02X}",
                         addr, reg, val
-                    );
-                }
+                    )
+                });
                 // Forward writes to PPU registers
                 self.ppu.write_register(reg, val);
             }
             0x4014 => {
                 // OAM DMA: copy page (val * 0x100) into PPU OAM
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("OAM DMA: copying page 0x{:02X}00", val)
+                });
                 // Read the page into a temporary buffer first to avoid borrowing self immutably
                 // while also mutably borrowing `ppu`.
                 let base = (val as u16) << 8;
@@ -226,6 +226,9 @@ impl Bus for NesBus {
             0x4000..=0x4017 => {
                 // APU registers and controller strobe
                 if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 || addr == 0x4017 {
+                    log(LogCategory::APU, LogLevel::Debug, || {
+                        format!("APU WRITE: addr=0x{:04X} val=0x{:02X}", addr, val)
+                    });
                     self.apu.write_register(addr, val);
                 }
 
