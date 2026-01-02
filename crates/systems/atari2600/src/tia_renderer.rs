@@ -25,6 +25,9 @@ use emu_core::types::Frame;
 
 use crate::tia::Tia;
 
+/// Maximum TIA scanline index (0-261, total 262 scanlines)
+const MAX_SCANLINE: u16 = 261;
+
 /// Trait for TIA rendering backends
 ///
 /// This trait follows the common `Renderer` pattern with Atari 2600-specific extensions.
@@ -110,11 +113,11 @@ impl TiaRenderer for SoftwareTiaRenderer {
     fn render_frame(&mut self, tia: &Tia, visible_start: u16) {
         // Render 192 visible scanlines
         // Note: We clamp instead of using modulo to prevent wraparound.
-        // If visible_start + visible_line exceeds 261, we clamp to 261.
+        // If visible_start + visible_line exceeds MAX_SCANLINE, we clamp to MAX_SCANLINE.
         // This prevents rendering VBLANK scanlines at the bottom of the frame,
         // which causes vertical glitching and duplicate rendering.
         for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line as u16).min(261);
+            let tia_scanline = (visible_start + visible_line as u16).min(MAX_SCANLINE);
             self.render_scanline(tia, visible_line, tia_scanline);
         }
     }
@@ -123,6 +126,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tia::Tia;
 
     #[test]
     fn test_software_renderer_creation() {
@@ -166,26 +170,24 @@ mod tests {
     fn test_render_frame_no_wraparound() {
         // This test verifies the fix for vertical glitching bug
         // The bug was caused by modulo operation wrapping scanlines when
-        // (visible_start + visible_line) exceeded 261
-        use crate::tia::Tia;
-
+        // (visible_start + visible_line) exceeded MAX_SCANLINE
         let mut renderer = SoftwareTiaRenderer::new();
         let mut tia = Tia::new();
 
-        // Set up a simple pattern on scanline 261 (last valid scanline)
+        // Set up a simple pattern on scanline MAX_SCANLINE (last valid scanline)
         tia.write(0x0D, 0xFF); // PF0 - all bits set
         tia.write(0x08, 0x0E); // COLUPF - white
 
         // Simulate a late visible_start that would cause wraparound with the old code
         // Old code: (261 + 1) % 262 = 0 (wraps to VBLANK area)
-        // New code: (261 + 1).min(261) = 261 (clamps to last valid scanline)
-        let visible_start = 261;
+        // New code: (261 + 1).min(MAX_SCANLINE) = 261 (clamps to last valid scanline)
+        let visible_start = MAX_SCANLINE;
 
         // Render the frame
         renderer.render_frame(&tia, visible_start);
 
-        // With the fix, all scanlines should use scanline 261's state
-        // (clamped to 261) instead of wrapping around to scanline 0
+        // With the fix, all scanlines should use scanline MAX_SCANLINE's state
+        // (clamped to MAX_SCANLINE) instead of wrapping around to scanline 0
         // This prevents the vertical glitching and duplication
         let frame = renderer.get_frame();
 
@@ -197,8 +199,6 @@ mod tests {
     #[test]
     fn test_render_frame_normal_visible_start() {
         // Test normal case with typical visible_start value
-        use crate::tia::Tia;
-
         let mut renderer = SoftwareTiaRenderer::new();
         let tia = Tia::new();
 
@@ -212,6 +212,6 @@ mod tests {
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 192);
 
-        // In normal case, no clamping should occur since 40 + 191 = 231 < 261
+        // In normal case, no clamping should occur since 40 + 191 = 231 < MAX_SCANLINE
     }
 }
