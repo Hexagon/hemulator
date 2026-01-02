@@ -29,19 +29,19 @@
 
 - **Agent tasks**:
   - Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` on PRs.
-  - Build the workspace (`cargo build --workspace`).
+  - Build the workspace (`cargo build --profile release-quick`).
   - Run unit/integration tests (`cargo test --workspace`).
   - Optionally run benchmarks in a separate job.
 
 - **Pre-commit checks** (REQUIRED before committing any code):
   1. **Formatting**: `cargo fmt --all -- --check` - Must pass with no diff
   2. **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` - Must pass with no warnings
-  3. **Build**: `cargo build --workspace` - Must compile successfully
+  3. **Build**: `cargo build --profile release-quick` - Must compile successfully
   4. **Tests**: `cargo test --workspace` - All tests must pass
   - Run these checks in order and fix any issues before committing
   - If any check fails, fix the issues and re-run all checks
   - These same checks run in CI, so ensuring they pass locally prevents CI failures
-  - **Tip**: Use `cargo build --profile release-quick` for faster iteration during development (18x faster incremental builds than `--release`)
+  - **Build Performance**: Always use `--profile release-quick` for development builds (18x faster incremental builds than `--release`, optimized for fast iteration)
 
 - **Implementation philosophy**:
   - **Always prefer full, tested implementations** of each module/component, even if all parts aren't immediately used

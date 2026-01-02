@@ -81,7 +81,7 @@ impl VideoInterface {
             status: 0,
             origin: 0,
             width: 320,
-            intr: 0,
+            intr: 0x3FF, // Default to max scanline to avoid spurious interrupts until game sets it
             current: 0,
             burst: 0x03E52239, // NTSC burst
             v_sync: 0x020D,    // NTSC vertical sync (525 lines)

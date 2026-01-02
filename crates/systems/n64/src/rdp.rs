@@ -175,8 +175,12 @@ impl Rdp {
 
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
+        let mut renderer = Box::new(SoftwareRdpRenderer::new(width, height));
+        // Initialize framebuffer to dark blue (common N64 default)
+        renderer.clear(0xFF000040);
+        
         Self {
-            renderer: Box::new(SoftwareRdpRenderer::new(width, height)),
+            renderer,
             width,
             height,
             color_format: ColorFormat::RGBA5551,
@@ -210,6 +214,9 @@ impl Rdp {
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.renderer.reset();
+        // Clear framebuffer to a dark blue (common default for N64 games before rendering)
+        // Use a visible color with full alpha to ensure the frame is displayable
+        self.renderer.clear(0xFF000040); // Dark blue with full alpha
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
