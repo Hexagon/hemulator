@@ -198,19 +198,23 @@ impl Ppu {
             return frame;
         }
 
+        // Track background color indices for sprite priority
+        // Each pixel stores the background/window color index (0-3)
+        let mut bg_color_indices = vec![0u8; 160 * 144];
+
         // Render background if enabled
         if (self.lcdc & LCDC_BG_WIN_ENABLE) != 0 {
-            self.render_background(&mut frame);
+            self.render_background(&mut frame, &mut bg_color_indices);
         }
 
         // Render window if enabled
         if (self.lcdc & LCDC_WIN_ENABLE) != 0 {
-            self.render_window(&mut frame);
+            self.render_window(&mut frame, &mut bg_color_indices);
         }
 
         // Render sprites if enabled
         if (self.lcdc & LCDC_OBJ_ENABLE) != 0 {
-            self.render_sprites(&mut frame);
+            self.render_sprites(&mut frame, &bg_color_indices);
         }
 
         frame
@@ -222,7 +226,7 @@ impl Ppu {
         base + ((tile_index as i8 as i16 + 128) as u16 * 16)
     }
 
-    fn render_background(&self, frame: &mut Frame) {
+    fn render_background(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
         let tile_data_base = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
             0x0000 // $8000-$8FFF
         } else {
@@ -269,6 +273,10 @@ impl Ppu {
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
+                // Store color index for sprite priority
+                let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                bg_color_indices[pixel_idx] = color_index;
+
                 // Apply palette
                 let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
 
@@ -281,12 +289,12 @@ impl Ppu {
                     _ => unreachable!(),
                 };
 
-                frame.pixels[(screen_y as usize * 160) + screen_x as usize] = rgb;
+                frame.pixels[pixel_idx] = rgb;
             }
         }
     }
 
-    fn render_window(&self, frame: &mut Frame) {
+    fn render_window(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
         // Window rendering - similar to background but positioned at WX-7, WY
         if self.wx >= 167 || self.wy >= 144 {
             return; // Window not visible
@@ -350,6 +358,10 @@ impl Ppu {
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
+                // Store color index for sprite priority
+                let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                bg_color_indices[pixel_idx] = color_index;
+
                 // Apply palette
                 let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
 
@@ -362,12 +374,12 @@ impl Ppu {
                     _ => unreachable!(),
                 };
 
-                frame.pixels[(screen_y as usize * 160) + screen_x as usize] = rgb;
+                frame.pixels[pixel_idx] = rgb;
             }
         }
     }
 
-    fn render_sprites(&self, frame: &mut Frame) {
+    fn render_sprites(&self, frame: &mut Frame, bg_color_indices: &[u8]) {
         // Sprite rendering - Game Boy supports 40 sprites, max 10 per scanline
         let sprite_height = if (self.lcdc & LCDC_OBJ_SIZE) != 0 {
             16
@@ -446,10 +458,11 @@ impl Ppu {
                     // Check background priority
                     if bg_priority {
                         // Sprite is behind background colors 1-3
+                        // Check the actual color index from the background, not the RGB value
                         let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
-                        let current = frame.pixels[pixel_idx];
-                        // If background pixel is not white (color 0), skip sprite
-                        if current != 0xFFFFFFFF {
+                        let bg_color_index = bg_color_indices[pixel_idx];
+                        // If background pixel has color index 1-3, sprite is behind it
+                        if bg_color_index != 0 {
                             continue;
                         }
                     }
