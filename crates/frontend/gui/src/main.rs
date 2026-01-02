@@ -2430,7 +2430,175 @@ fn main() {
                 MenuAction::ShowDebug => {
                     egui_app.tab_manager.show_debug_tab();
                 }
-                _ => {}
+                MenuAction::OpenProject => {
+                    // Open .hemu project file dialog
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Hemulator Project", &["hemu"])
+                        .add_filter("All Files", &["*"])
+                        .pick_file()
+                    {
+                        let path_str = path.to_string_lossy().to_string();
+                        match HemuProject::load(&path_str) {
+                            Ok(project) => {
+                                if project.system != "pc" {
+                                    egui_app.status_bar.set_message(format!(
+                                        "Currently only PC system .hemu projects are supported. Project is for: {}",
+                                        project.system
+                                    ));
+                                } else {
+                                    // Parse configuration from project
+                                    let cpu_model = if let Some(cpu_str) = project.get_cpu_model() {
+                                        match cpu_str.as_str() {
+                                            "Intel8086" => emu_core::cpu_8086::CpuModel::Intel8086,
+                                            "Intel8088" => emu_core::cpu_8086::CpuModel::Intel8088,
+                                            "Intel80186" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80186
+                                            }
+                                            "Intel80188" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80188
+                                            }
+                                            "Intel80286" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80286
+                                            }
+                                            "Intel80386" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80386
+                                            }
+                                            "Intel80486" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80486
+                                            }
+                                            "Intel80486SX" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80486SX
+                                            }
+                                            "Intel80486DX2" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80486DX2
+                                            }
+                                            "Intel80486SX2" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80486SX2
+                                            }
+                                            "Intel80486DX4" => {
+                                                emu_core::cpu_8086::CpuModel::Intel80486DX4
+                                            }
+                                            "IntelPentium" => {
+                                                emu_core::cpu_8086::CpuModel::IntelPentium
+                                            }
+                                            "IntelPentiumMMX" => {
+                                                emu_core::cpu_8086::CpuModel::IntelPentiumMMX
+                                            }
+                                            _ => {
+                                                eprintln!("Unknown CPU model: {}, using default Intel8086", cpu_str);
+                                                emu_core::cpu_8086::CpuModel::Intel8086
+                                            }
+                                        }
+                                    } else {
+                                        emu_core::cpu_8086::CpuModel::Intel8086
+                                    };
+
+                                    let memory_kb = project.get_memory_kb().unwrap_or(640);
+
+                                    // Create video adapter based on project configuration
+                                    let video_adapter: Box<dyn emu_pc::VideoAdapter> =
+                                        if let Some(video_str) = project.get_video_mode() {
+                                            match video_str.as_str() {
+                                                "EGA" => {
+                                                    Box::new(emu_pc::SoftwareEgaAdapter::new())
+                                                }
+                                                "VGA" => {
+                                                    Box::new(emu_pc::SoftwareVgaAdapter::new())
+                                                }
+                                                "CGA" => {
+                                                    Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                                }
+                                                _ => Box::new(emu_pc::SoftwareCgaAdapter::new()),
+                                            }
+                                        } else {
+                                            Box::new(emu_pc::SoftwareCgaAdapter::new())
+                                        };
+
+                                    // Create PC system with configuration
+                                    let mut pc_sys = emu_pc::PcSystem::with_config(
+                                        cpu_model,
+                                        memory_kb,
+                                        video_adapter,
+                                    );
+
+                                    // Load boot priority if specified
+                                    if let Some(priority_str) = project.boot_priority.as_ref() {
+                                        let priority = match priority_str.as_str() {
+                                            "FloppyFirst" => emu_pc::BootPriority::FloppyFirst,
+                                            "HardDriveFirst" => {
+                                                emu_pc::BootPriority::HardDriveFirst
+                                            }
+                                            "FloppyOnly" => emu_pc::BootPriority::FloppyOnly,
+                                            "HardDriveOnly" => emu_pc::BootPriority::HardDriveOnly,
+                                            _ => emu_pc::BootPriority::FloppyFirst,
+                                        };
+                                        pc_sys.set_boot_priority(priority);
+                                    }
+
+                                    // Mount all files from the project
+                                    let project_dir = std::path::Path::new(&path_str)
+                                        .parent()
+                                        .unwrap_or(std::path::Path::new("."));
+                                    for (mount_id, relative_path) in &project.mounts {
+                                        let full_path = project_dir.join(relative_path);
+                                        match fs::read(&full_path) {
+                                            Ok(data) => {
+                                                if let Err(e) = pc_sys.mount(mount_id, &data) {
+                                                    eprintln!(
+                                                        "Failed to mount {}: {}",
+                                                        mount_id, e
+                                                    );
+                                                } else {
+                                                    runtime_state.set_mount(
+                                                        mount_id.clone(),
+                                                        full_path.to_string_lossy().to_string(),
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Failed to read {}: {}",
+                                                    relative_path, e
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Update POST screen with mount status
+                                    pc_sys.update_post_screen();
+
+                                    sys = EmulatorSystem::PC(Box::new(pc_sys));
+                                    rom_loaded = true;
+                                    egui_app.property_pane.system_name = "PC".to_string();
+                                    egui_app.status_bar.set_message(format!(
+                                        "Project loaded: {}",
+                                        path.file_name().unwrap_or_default().to_string_lossy()
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                egui_app
+                                    .status_bar
+                                    .set_message(format!("Failed to load project: {}", e));
+                            }
+                        }
+                    }
+                }
+                MenuAction::SaveProject => {
+                    // Save current emulation state to a .hemu project file
+                    if rom_loaded {
+                        save_project(&sys, &runtime_state, &settings, &mut status_message);
+                        egui_app.status_bar.set_message(status_message.clone());
+                    } else {
+                        egui_app
+                            .status_bar
+                            .set_message("No system loaded to save".to_string());
+                    }
+                }
+                MenuAction::Exit => {
+                    // Exit the application by breaking out of the main loop
+                    break;
+                }
             }
         }
 

@@ -377,7 +377,8 @@ impl PropertyPane {
 
                         // Display filter
                         ui.horizontal(|ui| {
-                            ui.label("Display Filter:");
+                            ui.label("Display Filter:")
+                                .on_hover_text("Apply CRT/LCD display simulation effects");
                         });
                         egui::ComboBox::from_id_salt("display_filter")
                             .selected_text(self.display_filter.name())
@@ -386,54 +387,66 @@ impl PropertyPane {
                                     &mut self.display_filter,
                                     DisplayFilter::None,
                                     "None",
-                                );
+                                )
+                                .on_hover_text("No filter, pure pixels");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SonyTrinitron,
                                     "Sony Trinitron",
-                                );
+                                )
+                                .on_hover_text("Simulates Sony Trinitron CRT display");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Ibm5151,
                                     "IBM 5151",
-                                );
+                                )
+                                .on_hover_text("Simulates IBM 5151 monochrome monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Commodore1702,
                                     "Commodore 1702",
-                                );
+                                )
+                                .on_hover_text("Simulates Commodore 1702 color monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SharpLcd,
                                     "Sharp LCD",
-                                );
+                                )
+                                .on_hover_text("Simulates Game Boy Sharp LCD screen");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::RcaVictor,
                                     "RCA Victor",
-                                );
+                                )
+                                .on_hover_text("Simulates RCA Victor CRT television");
                             });
 
                         ui.horizontal(|ui| {
-                            ui.label("Emulation Speed:");
+                            ui.label("Emulation Speed:").on_hover_text(
+                                "Control emulation speed (affects both gameplay and audio)",
+                            );
                             ui.label(format!("{}%", self.emulation_speed_percent));
                         });
 
-                        // Removed slider per requirements, only showing buttons
+                        // Speed preset buttons
                         ui.horizontal(|ui| {
-                            if ui.button("25%").clicked() {
+                            if ui
+                                .button("25%")
+                                .on_hover_text("Slow motion (quarter speed)")
+                                .clicked()
+                            {
                                 self.emulation_speed_percent = 25;
                             }
-                            if ui.button("50%").clicked() {
+                            if ui.button("50%").on_hover_text("Half speed").clicked() {
                                 self.emulation_speed_percent = 50;
                             }
-                            if ui.button("100%").clicked() {
+                            if ui.button("100%").on_hover_text("Normal speed").clicked() {
                                 self.emulation_speed_percent = 100;
                             }
-                            if ui.button("200%").clicked() {
+                            if ui.button("200%").on_hover_text("Double speed").clicked() {
                                 self.emulation_speed_percent = 200;
                             }
-                            if ui.button("400%").clicked() {
+                            if ui.button("400%").on_hover_text("Quad speed").clicked() {
                                 self.emulation_speed_percent = 400;
                             }
                         });
@@ -447,17 +460,38 @@ impl PropertyPane {
                     .show(ui, |ui| {
                         if self.mount_points.is_empty() {
                             ui.label("No mount points available");
+                            ui.label(
+                                egui::RichText::new(
+                                    "Create a system or load a ROM to see mount points",
+                                )
+                                .small()
+                                .italics(),
+                            );
                         } else {
                             for mount in &self.mount_points {
                                 ui.horizontal(|ui| {
                                     ui.label(format!("{}:", mount.name));
                                     if let Some(ref file) = mount.mounted_file {
                                         ui.label(file);
-                                        if ui.button("Eject").clicked() {
+                                        if ui
+                                            .button("Eject")
+                                            .on_hover_text(format!(
+                                                "Unmount {} from {}",
+                                                file, mount.name
+                                            ))
+                                            .clicked()
+                                        {
                                             self.pending_action =
                                                 Some(PropertyAction::EjectFile(mount.id.clone()));
                                         }
-                                    } else if ui.button("Mount...").clicked() {
+                                    } else if ui
+                                        .button("Mount...")
+                                        .on_hover_text(format!(
+                                            "Load a file to mount in {}",
+                                            mount.name
+                                        ))
+                                        .clicked()
+                                    {
                                         self.pending_action =
                                             Some(PropertyAction::MountFile(mount.id.clone()));
                                     }
