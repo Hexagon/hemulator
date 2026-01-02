@@ -30,6 +30,37 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 **Important**: These same checks run in CI, so ensuring they pass locally prevents CI failures and speeds up the review process.
 
+## Build Profiles
+
+Hemulator provides three build profiles optimized for different use cases:
+
+### Development (`dev`)
+- **Use case**: Quick iteration during initial development
+- **Build command**: `cargo build`
+- **Performance**: ~60 FPS (usable for development and testing)
+- **Build time**: Moderate (~2m50s clean, very fast incremental)
+- **Incremental**: Very fast (seconds)
+- **Optimizations**: Level 1 with debug info
+
+### Release-Quick (`release-quick`)
+- **Use case**: Iterative development and testing
+- **Build command**: `cargo build --profile release-quick`
+- **Performance**: 150-250 FPS (excellent for development, ~70% of release)
+- **Build time**: Fast (~2m18s clean, ~8s incremental)
+- **Incremental**: **18x faster** than release profile
+- **Optimizations**: Level 2, no LTO, parallel codegen
+- **Recommended**: Use this profile for day-to-day development and testing
+
+### Release (`release`)
+- **Use case**: Final testing and distribution builds
+- **Build command**: `cargo build --release`
+- **Performance**: 300+ FPS on modern hardware (maximum performance)
+- **Build time**: Slowest (~2m32s clean, ~2m30s incremental)
+- **Incremental**: Slow due to Link Time Optimization (LTO)
+- **Optimizations**: Level 3, fat LTO, single codegen unit
+
+**Recommendation**: Use `release-quick` for most development work to get good performance with fast iteration times. Only use `release` for final testing before merging or creating distribution builds.
+
 ## Additional Guidelines
 
 - **Documentation**: 
