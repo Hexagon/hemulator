@@ -1,6 +1,7 @@
 //! SNES cartridge implementation
 
 use crate::SnesError;
+use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// SNES cartridge
 pub struct Cartridge {
@@ -15,6 +16,12 @@ pub struct Cartridge {
 impl Cartridge {
     pub fn load(data: &[u8]) -> Result<Self, SnesError> {
         if data.len() < 0x8000 {
+            log(LogCategory::Bus, LogLevel::Error, || {
+                format!(
+                    "SNES Cartridge: ROM too small ({} bytes, minimum 32KB)",
+                    data.len()
+                )
+            });
             return Err(SnesError::InvalidRom(
                 "ROM too small (minimum 32KB)".to_string(),
             ));
@@ -27,10 +34,24 @@ impl Cartridge {
 
         // Validate minimum ROM size
         if rom_data.len() < 0x8000 {
+            log(LogCategory::Bus, LogLevel::Error, || {
+                format!(
+                    "SNES Cartridge: ROM data too small after header ({} bytes)",
+                    rom_data.len()
+                )
+            });
             return Err(SnesError::InvalidRom(
                 "ROM data too small after header".to_string(),
             ));
         }
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "SNES Cartridge: Loaded ROM - Size: {} KB, SMC Header: {}",
+                rom_data.len() / 1024,
+                if header_offset > 0 { "Yes" } else { "No" }
+            )
+        });
 
         Ok(Self {
             rom: rom_data.to_vec(),
@@ -76,6 +97,9 @@ impl Cartridge {
         if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset < 0x8000 {
             let ram_offset = offset as usize;
             if ram_offset < self.ram.len() {
+                log(LogCategory::Bus, LogLevel::Trace, || {
+                    format!("SNES Cartridge: SRAM Write ${:06X} = ${:02X}", addr, val)
+                });
                 self.ram[ram_offset] = val;
             }
         }

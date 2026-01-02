@@ -36,6 +36,7 @@ jobs:
         run: |
           mkdir -p release-package
           cp target/${{ matrix.target.rust_target }}/release/hemu.exe release-package/
+          cp target/${{ matrix.target.rust_target }}/SDL2.dll release-package/
           cp LICENSE release-package/
           cp docs/MANUAL.md release-package/
 
@@ -82,7 +83,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib libasound2-dev:i386
+          sudo apt-get install -y gcc-multilib g++-multilib libasound2-dev:i386
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1

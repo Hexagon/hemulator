@@ -195,7 +195,23 @@ impl Ppu {
         match addr {
             // $2100 - INIDISP - Screen Display Register
             0x2100 => {
+                let old_forced_blank = self.screen_display & 0x80;
+                let new_forced_blank = val & 0x80;
                 self.screen_display = val;
+
+                if old_forced_blank != new_forced_blank {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "SNES PPU: Screen {} (brightness: {})",
+                            if new_forced_blank != 0 {
+                                "blanked"
+                            } else {
+                                "enabled"
+                            },
+                            val & 0x0F
+                        )
+                    });
+                }
             }
 
             // $2101 - OBSEL - Object Size and Base Address
@@ -227,7 +243,15 @@ impl Ppu {
 
             // $2105 - BGMODE - BG Mode and Character Size
             0x2105 => {
+                let old_mode = self.bgmode & 0x07;
+                let new_mode = val & 0x07;
                 self.bgmode = val;
+
+                if old_mode != new_mode {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SNES PPU: BG Mode changed to {}", new_mode)
+                    });
+                }
             }
 
             // $2107 - BG1SC - BG1 Tilemap Address and Size
@@ -367,6 +391,9 @@ impl Ppu {
             0x2118 => {
                 let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                });
                 // Auto-increment VRAM address if VMAIN bit 7 is set (increment on low byte)
                 if self.vmain & 0x80 != 0 {
                     self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
@@ -384,6 +411,13 @@ impl Ppu {
                     (self.vram_addr as usize) % (VRAM_SIZE / 2)
                 };
                 self.vram[addr * 2 + 1] = val;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!(
+                        "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
+                        addr * 2 + 1,
+                        val
+                    )
+                });
                 // Auto-increment VRAM address if VMAIN bit 7 is clear (increment on high byte)
                 if self.vmain & 0x80 == 0 {
                     self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
@@ -407,6 +441,26 @@ impl Ppu {
                 };
 
                 self.cgram[addr] = val;
+
+                // Log complete palette entry write (after high byte)
+                // Note: This happens BEFORE cgram_addr is incremented below,
+                // so color_addr correctly points to the color entry we just completed
+                if self.cgram_write_latch {
+                    let color_addr = self.cgram_addr as usize;
+                    let low = self.cgram[(color_addr * 2) % CGRAM_SIZE] as u16;
+                    let high = self.cgram[(color_addr * 2 + 1) % CGRAM_SIZE] as u16;
+                    let color = low | (high << 8);
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "SNES PPU: CGRAM[{}] = ${:04X} (R:{} G:{} B:{})",
+                            color_addr,
+                            color,
+                            color & 0x1F,
+                            (color >> 5) & 0x1F,
+                            (color >> 10) & 0x1F
+                        )
+                    });
+                }
 
                 // Toggle latch and increment address after high byte
                 if self.cgram_write_latch {
