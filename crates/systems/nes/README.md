@@ -6,14 +6,14 @@ This crate implements Nintendo Entertainment System emulation for the Hemulator 
 
 ## Current Status
 
-The NES emulator is **fully working** with ~90% game coverage through 14 mapper implementations.
+The NES emulator is **fully working** with ~90%+ game coverage through 14 mapper implementations.
 
 ### What Works
 
 - ✅ **CPU (6502)** - Complete instruction set from `emu_core::cpu_6502`
 - ✅ **PPU (2C02)** - Full PPU emulation with background, sprites, scrolling
 - ✅ **APU (RP2A03)** - Complete audio with all 5 channels
-- ✅ **Mappers** - 14 mappers covering ~90% of games
+- ✅ **Mappers** - 14 mappers covering ~90%+ of games
 - ✅ **Controllers** - Full input support
 - ✅ **Save States** - Complete state serialization
 - ✅ **PAL/NTSC** - Auto-detection and timing support
