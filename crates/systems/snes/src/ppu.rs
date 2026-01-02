@@ -195,7 +195,23 @@ impl Ppu {
         match addr {
             // $2100 - INIDISP - Screen Display Register
             0x2100 => {
+                let old_forced_blank = self.screen_display & 0x80;
+                let new_forced_blank = val & 0x80;
                 self.screen_display = val;
+
+                if old_forced_blank != new_forced_blank {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!(
+                            "SNES PPU: Screen {} (brightness: {})",
+                            if new_forced_blank != 0 {
+                                "blanked"
+                            } else {
+                                "enabled"
+                            },
+                            val & 0x0F
+                        )
+                    });
+                }
             }
 
             // $2101 - OBSEL - Object Size and Base Address
@@ -227,7 +243,15 @@ impl Ppu {
 
             // $2105 - BGMODE - BG Mode and Character Size
             0x2105 => {
+                let old_mode = self.bgmode & 0x07;
+                let new_mode = val & 0x07;
                 self.bgmode = val;
+
+                if old_mode != new_mode {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SNES PPU: BG Mode changed to {}", new_mode)
+                    });
+                }
             }
 
             // $2107 - BG1SC - BG1 Tilemap Address and Size
@@ -367,6 +391,9 @@ impl Ppu {
             0x2118 => {
                 let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!("SNES PPU: VRAM Write L ${:04X} = ${:02X}", addr * 2, val)
+                });
                 // Auto-increment VRAM address if VMAIN bit 7 is set (increment on low byte)
                 if self.vmain & 0x80 != 0 {
                     self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
@@ -384,6 +411,13 @@ impl Ppu {
                     (self.vram_addr as usize) % (VRAM_SIZE / 2)
                 };
                 self.vram[addr * 2 + 1] = val;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    format!(
+                        "SNES PPU: VRAM Write H ${:04X} = ${:02X}",
+                        addr * 2 + 1,
+                        val
+                    )
+                });
                 // Auto-increment VRAM address if VMAIN bit 7 is clear (increment on high byte)
                 if self.vmain & 0x80 == 0 {
                     self.vram_addr = self.vram_addr.wrapping_add(self.get_vram_increment());
@@ -407,6 +441,26 @@ impl Ppu {
                 };
 
                 self.cgram[addr] = val;
+
+                // Log complete palette entry write (after high byte)
+                // Note: This happens BEFORE cgram_addr is incremented below,
+                // so color_addr correctly points to the color entry we just completed
+                if self.cgram_write_latch {
+                    let color_addr = self.cgram_addr as usize;
+                    let low = self.cgram[(color_addr * 2) % CGRAM_SIZE] as u16;
+                    let high = self.cgram[(color_addr * 2 + 1) % CGRAM_SIZE] as u16;
+                    let color = low | (high << 8);
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        format!(
+                            "SNES PPU: CGRAM[{}] = ${:04X} (R:{} G:{} B:{})",
+                            color_addr,
+                            color,
+                            color & 0x1F,
+                            (color >> 5) & 0x1F,
+                            (color >> 10) & 0x1F
+                        )
+                    });
+                }
 
                 // Toggle latch and increment address after high byte
                 if self.cgram_write_latch {
@@ -1995,5 +2049,73 @@ mod tests {
         // Block 3: (32-63, 32-63)
         assert_eq!(ppu.get_tilemap_offset(32, 32, 64), 6144);
         assert_eq!(ppu.get_tilemap_offset(63, 63, 64), 8190);
+    }
+
+    #[test]
+    fn test_mode1_typical_commercial_pattern() {
+        let mut ppu = Ppu::new();
+
+        // Simulate typical commercial ROM initialization
+        // Most commercial games use Mode 1
+        ppu.write_register(0x2105, 0x01); // Mode 1
+
+        // Typical settings: BG1 tilemap at $0000, CHR at $4000
+        ppu.write_register(0x2107, 0x00); // BG1 tilemap at $0000
+        ppu.write_register(0x210B, 0x02); // BG1 CHR at $4000 (0x02 << 13 = $4000)
+
+        // Enable BG1 and sprites
+        ppu.write_register(0x212C, 0x11); // BG1 + sprites
+
+        // Set up a typical 4bpp palette
+        ppu.write_register(0x2121, 0x00);
+        // Color 0: transparent (black)
+        ppu.write_register(0x2122, 0x00);
+        ppu.write_register(0x2122, 0x00);
+        // Color 1: white
+        ppu.write_register(0x2122, 0xFF);
+        ppu.write_register(0x2122, 0x7F);
+        // Color 2: red
+        ppu.write_register(0x2122, 0x1F);
+        ppu.write_register(0x2122, 0x00);
+
+        // Upload tile to CHR at $4000 (word address $2000)
+        ppu.write_register(0x2115, 0x80); // Increment on low byte
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x20); // Word address $2000 = byte $4000
+
+        // Create a simple 4bpp tile (color 1 = white)
+        for _ in 0..8 {
+            ppu.write_register(0x2118, 0xFF); // Bitplane 0
+            ppu.write_register(0x2119, 0x00); // Bitplane 1
+        }
+        for _ in 0..24 {
+            ppu.write_register(0x2118, 0x00); // Bitplanes 2, 3
+            ppu.write_register(0x2119, 0x00);
+        }
+
+        // Set tilemap entry at position (0,0)
+        ppu.write_register(0x2116, 0x00);
+        ppu.write_register(0x2117, 0x00);
+        ppu.write_register(0x2118, 0x00); // Tile 0
+        ppu.write_register(0x2119, 0x00); // No flip, palette 0
+
+        // Render frame
+        let frame = ppu.render_frame();
+
+        // Check that top-left tile has visible pixels
+        let mut has_visible = false;
+        for y in 0..8 {
+            for x in 0..8 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    has_visible = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            has_visible,
+            "Mode 1 with typical commercial settings should produce visible output"
+        );
     }
 }

@@ -45,6 +45,7 @@
 use emu_core::apu::{
     Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
 };
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::Cell;
 
 /// NES-specific sweep unit for pulse channels.
@@ -408,6 +409,16 @@ impl APU {
                 self.triangle.enabled = (val & 0x04) != 0;
                 self.noise.enabled = (val & 0x08) != 0;
                 // DMC enable at bit 4 (not yet implemented)
+
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!(
+                        "APU Channel enable: Pulse1={} Pulse2={} Triangle={} Noise={}",
+                        self.pulse1.enabled,
+                        self.pulse2.enabled,
+                        self.triangle.enabled,
+                        self.noise.enabled
+                    )
+                });
             }
 
             // Frame Counter register
@@ -416,6 +427,18 @@ impl APU {
                 // Bit 6: IRQ inhibit flag
                 self.frame_counter_mode = (val & 0x80) != 0;
                 self.irq_inhibit = (val & 0x40) != 0;
+
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!(
+                        "APU Frame counter: mode={}-step IRQ={}",
+                        if self.frame_counter_mode { 5 } else { 4 },
+                        if self.irq_inhibit {
+                            "inhibit"
+                        } else {
+                            "enabled"
+                        }
+                    )
+                });
 
                 if self.irq_inhibit {
                     self.irq_pending.set(false);

@@ -12,6 +12,12 @@ pub trait MemoryLr35902 {
 
     /// Write a byte to memory
     fn write(&mut self, addr: u16, val: u8);
+
+    /// Check if system is in Game Boy Color mode
+    /// Returns true for CGB mode, false for DMG (original Game Boy) mode
+    fn is_cgb_mode(&self) -> bool {
+        false // Default: DMG mode
+    }
 }
 
 /// Sharp LR35902 CPU state
@@ -76,8 +82,13 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
     /// Reset the CPU to post-boot-ROM state
     /// These are the register values after the Game Boy boot ROM completes
     pub fn reset(&mut self) {
-        // Post-boot ROM register values for DMG (original Game Boy)
-        self.a = 0x01; // 0x11 for CGB, 0xFF for Game Boy Pocket
+        // Post-boot ROM register values
+        // A register indicates system type: 0x01=DMG, 0x11=CGB, 0xFF=MGB (Game Boy Pocket)
+        self.a = if self.memory.is_cgb_mode() {
+            0x11 // Game Boy Color
+        } else {
+            0x01 // Original Game Boy (DMG)
+        };
         self.f = 0xB0; // Flags: Z=1, N=0, H=1, C=1
         self.b = 0x00;
         self.c = 0x13;
@@ -95,12 +106,77 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
 
     /// Execute one instruction
     pub fn step(&mut self) -> u32 {
+        // Check and handle interrupts first
+        let interrupt_cycles = self.check_and_handle_interrupts();
+        if interrupt_cycles > 0 {
+            return interrupt_cycles;
+        }
+
         if self.halted || self.stopped {
             return 4;
         }
 
         let opcode = self.read_pc();
         self.execute(opcode)
+    }
+
+    /// Check for pending interrupts and handle them if enabled
+    /// Returns the number of cycles consumed (20 if an interrupt was handled, 0 otherwise)
+    fn check_and_handle_interrupts(&mut self) -> u32 {
+        // Read interrupt enable (IE) and interrupt flag (IF) registers
+        let ie = self.memory.read(0xFFFF);
+        let if_reg = self.memory.read(0xFF0F);
+
+        // Check if any enabled interrupts are pending
+        let pending = ie & if_reg;
+
+        // If there are pending interrupts, wake from HALT even if IME is false
+        if pending != 0 && self.halted {
+            self.halted = false;
+        }
+
+        // Only service interrupts if IME is enabled
+        if !self.ime || pending == 0 {
+            return 0;
+        }
+
+        // Determine which interrupt to handle (priority order: VBlank > LCD > Timer > Serial > Joypad)
+        // Interrupt vectors:
+        // Bit 0: VBlank   -> 0x0040
+        // Bit 1: LCD STAT -> 0x0048
+        // Bit 2: Timer    -> 0x0050
+        // Bit 3: Serial   -> 0x0058
+        // Bit 4: Joypad   -> 0x0060
+
+        let (interrupt_bit, vector) = if pending & 0x01 != 0 {
+            (0x01, 0x0040) // VBlank
+        } else if pending & 0x02 != 0 {
+            (0x02, 0x0048) // LCD STAT
+        } else if pending & 0x04 != 0 {
+            (0x04, 0x0050) // Timer
+        } else if pending & 0x08 != 0 {
+            (0x08, 0x0058) // Serial
+        } else if pending & 0x10 != 0 {
+            (0x10, 0x0060) // Joypad
+        } else {
+            return 0;
+        };
+
+        // Service the interrupt:
+        // 1. Clear IME flag (disable interrupts)
+        self.ime = false;
+
+        // 2. Clear the interrupt flag bit
+        self.memory.write(0xFF0F, if_reg & !interrupt_bit);
+
+        // 3. Push PC onto stack
+        self.push_u16(self.pc);
+
+        // 4. Jump to interrupt vector
+        self.pc = vector;
+
+        // Interrupt handling takes 20 cycles (5 machine cycles)
+        20
     }
 
     fn read_pc(&mut self) -> u8 {
