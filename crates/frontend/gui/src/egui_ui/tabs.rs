@@ -120,16 +120,17 @@ impl TabManager {
         emulator_texture: &Option<TextureHandle>,
         scaling_mode: ScalingMode,
     ) {
-        // Tab bar
+        // Tab bar with improved visual styling
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active_tab, Tab::Emulator, "Emulator");
+            ui.selectable_value(&mut self.active_tab, Tab::Emulator, "🎮 Emulator");
 
             if self.new_project_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::NewProject, "New Project");
+                ui.selectable_value(&mut self.active_tab, Tab::NewProject, "➕ New Project");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
                     egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                );
+                )
+                .small();
                 if ui
                     .add(close_button)
                     .on_hover_text("Close New Project tab")
@@ -143,14 +144,15 @@ impl TabManager {
             }
 
             // Log tab is always clickable
-            ui.selectable_value(&mut self.active_tab, Tab::Log, "Log");
+            ui.selectable_value(&mut self.active_tab, Tab::Log, "📋 Log");
 
             if self.help_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::Help, "Help");
+                ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
                     egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                );
+                )
+                .small();
                 if ui
                     .add(close_button)
                     .on_hover_text("Close Help tab")
@@ -164,11 +166,12 @@ impl TabManager {
             }
 
             if self.debug_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::Debug, "Debug");
+                ui.selectable_value(&mut self.active_tab, Tab::Debug, "🔧 Debug");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
                     egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                );
+                )
+                .small();
                 if ui
                     .add(close_button)
                     .on_hover_text("Close Debug tab")
@@ -182,11 +185,12 @@ impl TabManager {
             }
 
             if self.about_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::About, "About");
+                ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ️ About");
                 // Use a colored button for the close icon to ensure visibility
                 let close_button = egui::Button::new(
                     egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                );
+                )
+                .small();
                 if ui
                     .add(close_button)
                     .on_hover_text("Close About tab")

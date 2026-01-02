@@ -110,6 +110,8 @@ impl EguiApp {
             });
 
         // Bottom status bar - VS Code lighter area RGB(31,31,31)
+        // Update status bar with current FPS from property pane
+        self.status_bar.set_fps(self.property_pane.fps);
         TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(color_from_rgb(31, 31, 31)))
             .show(ctx, |ui| {
