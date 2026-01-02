@@ -20,18 +20,47 @@ impl N64Cpu {
         log(LogCategory::CPU, LogLevel::Info, || {
             format!("N64 CPU: Reset to PC=0x{:016X}", self.cpu.pc)
         });
+
+        // Reset CPU to initial state
         self.cpu.reset();
+
+        // Check if we have a commercial ROM loaded with an entry point
+        if let Some(entry_point) = self.cpu.memory.get_entry_point() {
+            log(LogCategory::CPU, LogLevel::Info, || {
+                format!(
+                    "N64 CPU: Commercial ROM detected, initializing CP0 and jumping to entry point 0x{:016X}",
+                    entry_point
+                )
+            });
+
+            // Initialize CP0 registers for commercial ROM boot
+            // These values are set by the real IPL3 bootloader
+            self.cpu.cp0[12] = 0x34000000; // CP0_STATUS: CU0=1, CU1=1, BEV=0
+            self.cpu.cp0[16] = 0x0006E463; // CP0_CONFIG: Typical configuration
+
+            // Set PC to entry point (typically 0x80000400)
+            self.cpu.pc = entry_point;
+
+            log(LogCategory::CPU, LogLevel::Info, || {
+                format!("N64 CPU: Initialized CP0, PC now at 0x{:016X}", self.cpu.pc)
+            });
+        } else {
+            // Test ROM or no ROM - use default PIF boot sequence
+            log(LogCategory::CPU, LogLevel::Info, || {
+                "N64 CPU: Test ROM mode, booting from PIF at 0xBFC00000".to_string()
+            });
+        }
     }
 
     pub fn step(&mut self) -> u32 {
         let old_pc = self.cpu.pc;
-        
+
         log(LogCategory::CPU, LogLevel::Trace, || {
             format!("N64 CPU: PC=0x{:016X}", old_pc)
         });
-        
+
         let cycles = self.cpu.step();
-        
+
         // Log if we jumped to a new location (not just PC+4)
         if self.cpu.pc != old_pc.wrapping_add(4) {
             log(LogCategory::CPU, LogLevel::Debug, || {
@@ -41,7 +70,7 @@ impl N64Cpu {
                 )
             });
         }
-        
+
         cycles
     }
 

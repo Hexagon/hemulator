@@ -392,9 +392,12 @@ impl Rdp {
     /// Write to RDP register
     pub fn write_register(&mut self, offset: u32, value: u32) {
         log(LogCategory::PPU, LogLevel::Debug, || {
-            format!("N64 RDP: Write register offset=0x{:02X} value=0x{:08X}", offset, value)
+            format!(
+                "N64 RDP: Write register offset=0x{:02X} value=0x{:08X}",
+                offset, value
+            )
         });
-        
+
         match offset {
             DPC_START => {
                 self.dpc_start = value & 0x00FFFFFF;
@@ -459,7 +462,7 @@ impl Rdp {
                 self.dpc_start, self.dpc_end
             )
         });
-        
+
         // Set DMA busy flag
         self.dpc_status |= DPC_STATUS_DMA_BUSY;
         self.dpc_status &= !DPC_STATUS_CBUF_READY;
@@ -485,7 +488,7 @@ impl Rdp {
 
             // Extract command ID from top 6 bits of first word
             let cmd_id = (cmd_word0 >> 24) & 0x3F;
-            
+
             log(LogCategory::PPU, LogLevel::Trace, || {
                 format!(
                     "N64 RDP: Command 0x{:02X} at 0x{:08X}: word0=0x{:08X} word1=0x{:08X}",
@@ -504,7 +507,7 @@ impl Rdp {
         self.dpc_current = self.dpc_end;
         self.dpc_status |= DPC_STATUS_CBUF_READY;
         self.dpc_status &= !DPC_STATUS_DMA_BUSY;
-        
+
         log(LogCategory::PPU, LogLevel::Debug, || {
             "N64 RDP: Display list processing completed".to_string()
         });

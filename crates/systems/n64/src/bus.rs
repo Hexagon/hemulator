@@ -26,6 +26,8 @@ pub struct N64Bus {
     vi: VideoInterface,
     /// MI (MIPS Interface - interrupt controller)
     mi: MipsInterface,
+    /// Entry point from ROM header (set during cartridge load)
+    entry_point: Option<u64>,
 }
 
 impl N64Bus {
@@ -38,6 +40,7 @@ impl N64Bus {
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
             mi: MipsInterface::new(),
+            entry_point: None,
         };
 
         // Initialize PIF ROM
@@ -67,11 +70,40 @@ impl N64Bus {
         log(LogCategory::Bus, LogLevel::Info, || {
             format!("N64 Bus: Loading cartridge, size={} bytes", data.len())
         });
-        self.cartridge = Some(Cartridge::load(data)?);
+
+        // Load the cartridge
+        let cart = Cartridge::load(data)?;
+
+        // Perform IPL3 boot sequence - copy ROM to RDRAM and get entry point
+        let rom_data = cart.read_range(0, cart.size());
+        let entry_point = self.pif.perform_ipl3_boot(&mut self.rdram, &rom_data);
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "N64 Bus: IPL3 boot complete, entry point=0x{:016X}",
+                entry_point
+            )
+        });
+
+        // Store the entry point for CPU reset
+        self.cartridge = Some(cart);
+        self.entry_point = Some(entry_point);
+
         log(LogCategory::Bus, LogLevel::Info, || {
             "N64 Bus: Cartridge loaded successfully".to_string()
         });
         Ok(())
+    }
+
+    /// Get the entry point from the loaded cartridge (for CPU initialization)
+    pub fn get_entry_point(&self) -> Option<u64> {
+        self.entry_point
+    }
+
+    /// Get a reference to RDRAM (for testing)
+    #[cfg(test)]
+    pub fn rdram(&self) -> &[u8] {
+        &self.rdram
     }
 
     pub fn unload_cartridge(&mut self) {
@@ -153,7 +185,10 @@ impl MemoryMips for N64Bus {
         let phys_addr = self.translate_address(addr);
 
         log(LogCategory::Bus, LogLevel::Trace, || {
-            format!("N64 Bus: Read byte from 0x{:08X} (phys: 0x{:08X})", addr, phys_addr)
+            format!(
+                "N64 Bus: Read byte from 0x{:08X} (phys: 0x{:08X})",
+                addr, phys_addr
+            )
         });
 
         match phys_addr {
@@ -196,7 +231,10 @@ impl MemoryMips for N64Bus {
         let phys_addr = self.translate_address(addr);
 
         log(LogCategory::Bus, LogLevel::Trace, || {
-            format!("N64 Bus: Read word from 0x{:08X} (phys: 0x{:08X})", addr, phys_addr)
+            format!(
+                "N64 Bus: Read word from 0x{:08X} (phys: 0x{:08X})",
+                addr, phys_addr
+            )
         });
 
         match phys_addr {
@@ -264,7 +302,10 @@ impl MemoryMips for N64Bus {
         let phys_addr = self.translate_address(addr);
 
         log(LogCategory::Bus, LogLevel::Trace, || {
-            format!("N64 Bus: Write byte 0x{:02X} to 0x{:08X} (phys: 0x{:08X})", val, addr, phys_addr)
+            format!(
+                "N64 Bus: Write byte 0x{:02X} to 0x{:08X} (phys: 0x{:08X})",
+                val, addr, phys_addr
+            )
         });
 
         match phys_addr {
@@ -301,7 +342,10 @@ impl MemoryMips for N64Bus {
         let phys_addr = self.translate_address(addr);
 
         log(LogCategory::Bus, LogLevel::Trace, || {
-            format!("N64 Bus: Write word 0x{:08X} to 0x{:08X} (phys: 0x{:08X})", val, addr, phys_addr)
+            format!(
+                "N64 Bus: Write word 0x{:08X} to 0x{:08X} (phys: 0x{:08X})",
+                val, addr, phys_addr
+            )
         });
 
         match phys_addr {
