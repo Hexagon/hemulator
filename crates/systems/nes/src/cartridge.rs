@@ -1,4 +1,5 @@
 use emu_core::apu::TimingMode;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -110,6 +111,17 @@ impl Cartridge {
         } else {
             vec![]
         };
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "NES: Loaded cartridge - Mapper {} ({} KB PRG, {} KB CHR, {:?}, {:?})",
+                mapper,
+                prg_size / 1024,
+                chr_size / 1024,
+                mirroring,
+                timing
+            )
+        });
 
         Ok(Self {
             prg_rom,

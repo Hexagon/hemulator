@@ -356,31 +356,6 @@ impl TabManager {
 
                 ui.add_space(10.0);
 
-                // Current configuration summary
-                ui.heading("Current Configuration");
-                ui.add_space(5.0);
-
-                egui::Grid::new("log_status_grid")
-                    .num_columns(2)
-                    .spacing([20.0, 4.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("Global Level:");
-                        ui.label(format!("{:?}", log_config.get_global_level()));
-                        ui.end_row();
-
-                        for (category, name) in &categories {
-                            let cat_level = log_config.get_level(*category);
-                            ui.label(format!("{} Level:", name));
-                            if cat_level == LogLevel::Off {
-                                ui.label(format!("{:?} (using global)", cat_level));
-                            } else {
-                                ui.label(format!("{:?}", cat_level));
-                            }
-                            ui.end_row();
-                        }
-                    });
-
                 // Legacy log messages section (kept for backward compatibility)
                 if !self.log_messages.is_empty() {
                     ui.add_space(15.0);

@@ -82,7 +82,7 @@ use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
-use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
 use ppu_renderer::{NesPpuRenderer, SoftwareNesPpuRenderer};
@@ -363,12 +363,8 @@ impl System for NesSystem {
         let mut mmc3_a12_edges: u32 = 0;
         let mut rendering_happened: bool = false;
 
-        let mut pc_hist: Option<HashMap<u16, u16>> =
-            if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
-                Some(HashMap::with_capacity(1024))
-            } else {
-                None
-            };
+        // Track PC histogram for trace logging
+        let mut pc_hist: Option<HashMap<u16, u16>> = Some(HashMap::with_capacity(1024));
 
         // Prepare an output frame and render scanlines incrementally during visible time.
         let mut rendered_scanlines: u32 = 0;
@@ -436,13 +432,16 @@ impl System for NesSystem {
             }
 
             if irq_to_fire {
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Info) {
-                    eprintln!("System: Firing IRQ! Mapper/APU pending.");
-                }
+                log(LogCategory::Interrupts, LogLevel::Info, || {
+                    "System: Firing IRQ! Mapper/APU pending.".to_string()
+                });
                 self.cpu.trigger_irq();
                 irqs = irqs.wrapping_add(1);
             }
             if nmi_to_fire {
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    "System: Firing NMI".to_string()
+                });
                 self.cpu.trigger_nmi();
                 nmis = nmis.wrapping_add(1);
             }
@@ -581,10 +580,11 @@ impl System for NesSystem {
             pc_hotspots: hotspots,
         };
 
-        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
-            // Log occasionally to avoid overwhelming the GUI.
+        // Log frame statistics at trace level
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            // Log occasionally to avoid overwhelming the output
             if self.frame_index.is_multiple_of(60) {
-                eprintln!(
+                format!(
                     "NES TRACE: frame={} pc=0x{:04X} steps={} cycles={} irq={} nmi={} a12_edges={} ppu_ctrl=0x{:02X} ppu_mask=0x{:02X} vec_reset=0x{:04X} vec_nmi=0x{:04X} vec_irq=0x{:04X}",
                     self.last_stats.frame_index,
                     self.last_stats.pc,
@@ -598,21 +598,26 @@ impl System for NesSystem {
                     self.last_stats.vec_reset,
                     self.last_stats.vec_nmi,
                     self.last_stats.vec_irq
-                );
+                )
+            } else {
+                String::new()
             }
-        }
+        });
 
-        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace)
-            && self.frame_index.is_multiple_of(60)
-        {
-            let h0 = self.last_stats.pc_hotspots[0];
-            let h1 = self.last_stats.pc_hotspots[1];
-            let h2 = self.last_stats.pc_hotspots[2];
-            eprintln!(
-                "NES PC HOT: frame={} [0x{:04X} x{}] [0x{:04X} x{}] [0x{:04X} x{}]",
-                self.last_stats.frame_index, h0.pc, h0.count, h1.pc, h1.count, h2.pc, h2.count
-            );
-        }
+        // Log PC hotspots at trace level
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            if self.frame_index.is_multiple_of(60) {
+                let h0 = self.last_stats.pc_hotspots[0];
+                let h1 = self.last_stats.pc_hotspots[1];
+                let h2 = self.last_stats.pc_hotspots[2];
+                format!(
+                    "NES PC HOT: frame={} [0x{:04X} x{}] [0x{:04X} x{}] [0x{:04X} x{}]",
+                    self.last_stats.frame_index, h0.pc, h0.count, h1.pc, h1.count, h2.pc, h2.count
+                )
+            } else {
+                String::new()
+            }
+        });
 
         // Return the rendered frame from the renderer by taking ownership
         // This avoids cloning 61,440 pixels (245KB) every frame (60 times/second)
