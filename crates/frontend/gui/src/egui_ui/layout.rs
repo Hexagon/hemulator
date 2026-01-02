@@ -7,17 +7,23 @@ use super::tabs::TabManager;
 use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
 
-/// Convert a single sRGB color component (0-255) to linear color space (0-255)
-/// This implements the sRGB to linear conversion formula
+/// Convert linear color component (0-255) to sRGB color space (0-255)
+/// This compensates for GL_FRAMEBUFFER_SRGB incorrectly treating texture colors as linear
 #[inline]
-fn srgb_to_linear(srgb: u8) -> u8 {
-    let srgb_f = srgb as f32 / 255.0;
-    let linear_f = if srgb_f <= 0.04045 {
-        srgb_f / 12.92
+fn linear_to_srgb(linear: u8) -> u8 {
+    let linear_f = linear as f32 / 255.0;
+    let srgb_f = if linear_f <= 0.0031308 {
+        linear_f * 12.92
     } else {
-        ((srgb_f + 0.055) / 1.055).powf(2.4)
+        1.055 * linear_f.powf(1.0 / 2.4) - 0.055
     };
-    (linear_f * 255.0).round().min(255.0) as u8
+    (srgb_f * 255.0).round().min(255.0) as u8
+}
+
+/// Helper to create egui Color32, applying inverse gamma to compensate for GL_FRAMEBUFFER_SRGB
+#[inline]
+fn color_from_rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
+    egui::Color32::from_rgb(linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(b))
 }
 
 /// Main egui application state
@@ -51,9 +57,9 @@ impl EguiApp {
         height: usize,
     ) {
         // Convert ARGB to RGBA for egui
-        // Also apply gamma correction to convert from sRGB to linear color space
-        // This is needed because egui uses GL_RGBA textures (linear) but enables
-        // GL_FRAMEBUFFER_SRGB when rendering to the screen
+        // Apply inverse gamma to compensate for GL_FRAMEBUFFER_SRGB
+        // GL_FRAMEBUFFER_SRGB treats all colors as linear and converts to sRGB,
+        // so we pre-apply gamma to cancel out that conversion
         let rgba_pixels: Vec<u8> = pixels
             .iter()
             .flat_map(|&pixel| {
@@ -62,13 +68,12 @@ impl EguiApp {
                 let g = ((pixel >> 8) & 0xFF) as u8;
                 let b = (pixel & 0xFF) as u8;
 
-                // Convert sRGB to linear color space
-                // This prevents the dark tint issue when GL_FRAMEBUFFER_SRGB is enabled
-                let r_linear = srgb_to_linear(r);
-                let g_linear = srgb_to_linear(g);
-                let b_linear = srgb_to_linear(b);
+                // Apply inverse gamma (linear→sRGB) to compensate for GL_FRAMEBUFFER_SRGB
+                let r_corrected = linear_to_srgb(r);
+                let g_corrected = linear_to_srgb(g);
+                let b_corrected = linear_to_srgb(b);
 
-                [r_linear, g_linear, b_linear, a]
+                [r_corrected, g_corrected, b_corrected, a]
             })
             .collect();
 
@@ -87,31 +92,48 @@ impl EguiApp {
 
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
-        // Top menu bar
-        TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            self.menu_bar.ui(ui);
-        });
+        // Set brighter text color globally
+        let mut style = (*ctx.style()).clone();
+        style.visuals.override_text_color = Some(color_from_rgb(204, 204, 204));
+        // Brighter widget text colors
+        style.visuals.widgets.noninteractive.fg_stroke.color = color_from_rgb(204, 204, 204);
+        style.visuals.widgets.inactive.fg_stroke.color = color_from_rgb(204, 204, 204);
+        style.visuals.widgets.hovered.fg_stroke.color = color_from_rgb(255, 255, 255);
+        style.visuals.widgets.active.fg_stroke.color = color_from_rgb(255, 255, 255);
+        ctx.set_style(style);
 
-        // Bottom status bar
-        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            self.status_bar.ui(ui);
-        });
+        // Top menu bar - VS Code menu bar color RGB(24,24,24)
+        TopBottomPanel::top("menu_bar")
+            .frame(egui::Frame::none().fill(color_from_rgb(24, 24, 24)))
+            .show(ctx, |ui| {
+                self.menu_bar.ui(ui);
+            });
 
-        // Right property pane
+        // Bottom status bar - VS Code lighter area RGB(31,31,31)
+        TopBottomPanel::bottom("status_bar")
+            .frame(egui::Frame::none().fill(color_from_rgb(31, 31, 31)))
+            .show(ctx, |ui| {
+                self.status_bar.ui(ui);
+            });
+
+        // Right property pane - RGB(12,12,12)
         SidePanel::right("property_pane")
             .default_width(300.0)
             .min_width(200.0)
             .max_width(500.0)
             .resizable(true)
+            .frame(egui::Frame::none().fill(color_from_rgb(12, 12, 12)))
             .show(ctx, |ui| {
                 self.property_pane.ui(ui);
             });
 
-        // Central tabbed interface
-        CentralPanel::default().show(ctx, |ui| {
-            self.tab_manager
-                .ui(ui, &self.emulator_texture, scaling_mode);
-        });
+        // Central tabbed interface - pitch black for emulator display
+        CentralPanel::default()
+            .frame(egui::Frame::none().fill(color_from_rgb(0, 0, 0)))
+            .show(ctx, |ui| {
+                self.tab_manager
+                    .ui(ui, &self.emulator_texture, scaling_mode);
+            });
     }
 }
 
