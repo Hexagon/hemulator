@@ -46,6 +46,16 @@
 //! - No EEPROM support (yet)
 //! - Minimal boot ROM (just enough to start games)
 
+/// Physical address of the exception vector in RDRAM
+const EXCEPTION_VECTOR_ADDR: usize = 0x0180;
+
+/// Exception vector code: j 0x80000180; nop
+/// Instruction encoding for an infinite loop at the exception vector
+const EXCEPTION_VECTOR_CODE: [u8; 8] = [
+    0x08, 0x00, 0x00, 0x60, // j 0x80000180 (jump to self)
+    0x00, 0x00, 0x00, 0x00, // nop (delay slot)
+];
+
 /// N64 controller button flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ControllerButtons {
@@ -180,7 +190,14 @@ impl Pif {
     /// Initialize PIF ROM in RAM
     pub fn init_rom(&mut self) {
         // PIF ROM starts at offset 0 in PIF RAM
-        // Simplified boot: Jump to cartridge code at 0x10001000 (cached 0x90001000)
+        // The IPL3 bootloader will:
+        // 1. Copy ROM header (0x1000 bytes) to RDRAM 0x00000000
+        // 2. Initialize CP0 registers
+        // 3. Copy ROM segments to RDRAM
+        // 4. Jump to ROM entry point (usually 0x80000400)
+
+        // For now, we implement a minimal boot sequence that jumps to cartridge code
+        // Commercial ROMs will need full IPL3 emulation (implemented in bus.rs)
 
         let pif_rom: Vec<u32> = vec![
             // Jump to test ROM code at 0x10001000 (cartridge ROM + 0x1000)
@@ -202,6 +219,48 @@ impl Pif {
                 self.ram[offset + 3] = bytes[3];
             }
         }
+    }
+
+    /// Perform IPL3 boot sequence for commercial ROMs
+    /// This copies the ROM header and code segments to RDRAM and sets up the CPU
+    /// Returns the entry point address to jump to
+    pub fn perform_ipl3_boot(&self, rdram: &mut [u8], rom_data: &[u8]) -> u64 {
+        // Step 1: Copy ROM header (first 0x1000 bytes) to RDRAM at 0x00000000
+        let header_size = 0x1000_usize.min(rom_data.len());
+        rdram[0..header_size].copy_from_slice(&rom_data[0..header_size]);
+
+        // Step 2: Extract entry point from ROM header
+        // Entry point is at offset 0x08 in the ROM header (4 bytes, big-endian)
+        let entry_point = if rom_data.len() >= 0x0C {
+            u32::from_be_bytes([
+                rom_data[0x08],
+                rom_data[0x09],
+                rom_data[0x0A],
+                rom_data[0x0B],
+            ]) as u64
+        } else {
+            0x80000400 // Default entry point
+        };
+
+        // Step 3: Copy ROM code segments to RDRAM
+        // Most N64 games expect their code to be loaded starting at 0x00001000 in RDRAM
+        // We copy from ROM offset 0x1000 to RDRAM offset 0x1000
+        let code_start = 0x1000_usize;
+        if rom_data.len() > code_start {
+            let code_size = (rom_data.len() - code_start).min(rdram.len() - code_start);
+            rdram[code_start..code_start + code_size]
+                .copy_from_slice(&rom_data[code_start..code_start + code_size]);
+        }
+
+        // Step 4: Set up exception vectors in RDRAM
+        // Exception handler entry point at 0x80000180 (physical 0x00000180)
+        // Set up infinite loop as a placeholder exception handler
+        if EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len() <= rdram.len() {
+            rdram[EXCEPTION_VECTOR_ADDR..EXCEPTION_VECTOR_ADDR + EXCEPTION_VECTOR_CODE.len()]
+                .copy_from_slice(&EXCEPTION_VECTOR_CODE);
+        }
+
+        entry_point
     }
 
     /// Read from PIF RAM
