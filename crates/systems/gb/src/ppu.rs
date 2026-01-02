@@ -383,11 +383,6 @@ impl Ppu {
             let tile_index = self.oam[oam_addr + 2];
             let flags = self.oam[oam_addr + 3];
 
-            // Check if sprite is visible
-            if x_pos >= 160 {
-                continue; // Off screen
-            }
-
             let palette = if (flags & 0x10) != 0 {
                 self.obp1
             } else {
@@ -637,5 +632,47 @@ mod tests {
         ppu.step(456);
         assert_eq!(ppu.ly, 11);
         assert!(ppu.stat & 0x04 != 0); // Coincidence flag should be set
+    }
+
+    #[test]
+    fn test_sprite_at_left_edge() {
+        // Regression test for sprite visibility bug
+        // Sprites with OAM X position 0-7 should be partially visible on left edge
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x93; // Enable LCD, sprites, and background
+        ppu.obp0 = 0xE4; // Set sprite palette (11 10 01 00)
+
+        // Set up sprite at X=4 (partially visible on left edge)
+        ppu.write_oam(0, 16); // Y position (screen Y = 0)
+        ppu.write_oam(1, 4); // X position (after -8 offset, rightmost 4 pixels visible at screen X=0-3)
+        ppu.write_oam(2, 0); // Tile index
+        ppu.write_oam(3, 0); // Flags (no flip, palette 0, above BG)
+
+        // Set up a visible tile in VRAM
+        // Create a solid tile with color index 3 (non-transparent)
+        ppu.write_vram(0x0000, 0xFF); // Bitplane 0: all 1s
+        ppu.write_vram(0x0001, 0xFF); // Bitplane 1: all 1s (color index = 3)
+
+        let frame = ppu.render_frame();
+
+        // Verify sprite is rendered: the rightmost 4 pixels should be visible (X = 0-3)
+        // Color index 3 with palette 0xE4: (0xE4 >> (3 * 2)) & 0x03 = (0xE4 >> 6) & 0x03 = 3 (darkest/black)
+        let expected_color = 0xFF000000; // Black
+
+        // Check that at least one pixel from the sprite is visible on screen
+        // The sprite at X=4 means screen positions 0-3 should show the sprite (last 4 pixels)
+        let screen_y = 0;
+        let mut found_sprite_pixel = false;
+        for screen_x in 0..4 {
+            let pixel = frame.pixels[screen_y * 160 + screen_x];
+            if pixel == expected_color {
+                found_sprite_pixel = true;
+                break;
+            }
+        }
+        assert!(
+            found_sprite_pixel,
+            "Sprite at X=4 should be partially visible on left edge"
+        );
     }
 }

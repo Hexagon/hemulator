@@ -342,4 +342,8 @@ impl MemoryLr35902 for GbBus {
             0xFFFF => self.ie = val,
         }
     }
+
+    fn is_cgb_mode(&self) -> bool {
+        self.cgb_mode
+    }
 }

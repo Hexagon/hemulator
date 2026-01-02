@@ -12,6 +12,12 @@ pub trait MemoryLr35902 {
 
     /// Write a byte to memory
     fn write(&mut self, addr: u16, val: u8);
+
+    /// Check if system is in Game Boy Color mode
+    /// Returns true for CGB mode, false for DMG (original Game Boy) mode
+    fn is_cgb_mode(&self) -> bool {
+        false // Default: DMG mode
+    }
 }
 
 /// Sharp LR35902 CPU state
@@ -76,8 +82,13 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
     /// Reset the CPU to post-boot-ROM state
     /// These are the register values after the Game Boy boot ROM completes
     pub fn reset(&mut self) {
-        // Post-boot ROM register values for DMG (original Game Boy)
-        self.a = 0x01; // 0x11 for CGB, 0xFF for Game Boy Pocket
+        // Post-boot ROM register values
+        // A register indicates system type: 0x01=DMG, 0x11=CGB, 0xFF=MGB (Game Boy Pocket)
+        self.a = if self.memory.is_cgb_mode() {
+            0x11 // Game Boy Color
+        } else {
+            0x01 // Original Game Boy (DMG)
+        };
         self.f = 0xB0; // Flags: Z=1, N=0, H=1, C=1
         self.b = 0x00;
         self.c = 0x13;
