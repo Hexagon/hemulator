@@ -26,7 +26,7 @@ start:
     ; Coordinates in 10.2 fixed point: 50*4=200(0xC8), 150*4=600(0x258)
     li      $t1, 0x36258258          ; FILL_RECTANGLE cmd + X2,Y2 = 150,150
     sw      $t1, 8($t0)              ; Store command word 0
-    li      $t1, 0x00C800C8          ; X1,Y1 = 50,50
+    li      $t1, 0x000C80C8          ; X1,Y1 = 50,50 (fixed: was 0x00C800C8)
     sw      $t1, 12($t0)             ; Store command word 1
     
     ; Command 3: SET_FILL_COLOR (0x37) - Green (0xFF00FF00)
@@ -39,7 +39,7 @@ start:
     ; 160*4=640(0x280), 210*4=840(0x348), 90*4=360(0x168), 140*4=560(0x230)
     li      $t1, 0x36348230          ; X2,Y2 = 210,140
     sw      $t1, 24($t0)
-    li      $t1, 0x02800168          ; X1,Y1 = 160,90
+    li      $t1, 0x00280168          ; X1,Y1 = 160,90 (fixed: was 0x02800168)
     sw      $t1, 28($t0)
     
     ; Command 5: SYNC_FULL (0x29) - Synchronize

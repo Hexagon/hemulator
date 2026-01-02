@@ -468,7 +468,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Test ROM execution requires further CPU debugging - manual tests work
     fn test_n64_smoke_test_rom() {
         // Load the test ROM which displays colored rectangles
         let test_rom = include_bytes!("../../../../test_roms/n64/test.z64");
