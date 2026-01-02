@@ -30,3 +30,19 @@ panic = "abort"
 # Use optimization level 1 for dev builds to improve performance
 # This makes debug builds usable (~60fps) while keeping compile times fast
 opt-level = 1
+
+# Fast iteration profile - balances compile time and runtime performance
+# Use with: cargo build --profile release-quick
+[profile.release-quick]
+# Inherits from release profile
+inherits = "release"
+# Optimization level 2 provides good runtime performance with faster compile times
+opt-level = 2
+# Disable LTO for much faster compilation (biggest compile-time win)
+lto = false
+# More codegen units for parallel compilation (faster builds)
+codegen-units = 16
+# Keep stripping symbols for smaller binary
+strip = true
+# Keep abort for consistency with release
+panic = "abort"

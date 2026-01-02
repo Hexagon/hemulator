@@ -41,6 +41,7 @@
   - Run these checks in order and fix any issues before committing
   - If any check fails, fix the issues and re-run all checks
   - These same checks run in CI, so ensuring they pass locally prevents CI failures
+  - **Tip**: Use `cargo build --profile release-quick` for faster iteration during development (18x faster incremental builds than `--release`)
 
 - **Implementation philosophy**:
   - **Always prefer full, tested implementations** of each module/component, even if all parts aren't immediately used
