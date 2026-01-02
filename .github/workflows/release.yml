@@ -36,6 +36,7 @@ jobs:
         run: |
           mkdir -p release-package
           cp target/${{ matrix.target.rust_target }}/release/hemu.exe release-package/
+          cp target/${{ matrix.target.rust_target }}/SDL2.dll release-package/
           cp LICENSE release-package/
           cp docs/MANUAL.md release-package/
 
