@@ -431,4 +431,62 @@ mod tests {
         );
         assert_eq!(snes.cpu.bus().controller_state[1], 0x4070);
     }
+
+    #[test]
+    fn test_enhanced_rom() {
+        // Load the enhanced test ROM
+        let test_rom = include_bytes!("../../../../test_roms/snes/test_enhanced.sfc");
+
+        let mut sys = SnesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run multiple frames to allow the ROM to initialize
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+        assert_eq!(frame.pixels.len(), 256 * 224);
+
+        // Check that we have visible output (non-black pixels)
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+
+        assert!(
+            non_black_pixels > 1000,
+            "Enhanced ROM should produce visible output, got {} non-black pixels",
+            non_black_pixels
+        );
+
+        // Verify specific features:
+        // 1. BG1 should have horizontal stripes (white, red, blue)
+        // 2. Check top area (should be white or red or blue, not black)
+        let sample_pixel = frame.pixels[64 * 256 + 128]; // Middle of screen
+        assert_ne!(
+            sample_pixel, 0xFF000000,
+            "Middle of screen should not be black"
+        );
+
+        // 3. Sprites should be visible at positions (64, 64) and (128, 64)
+        // Check area around sprite position
+        let mut sprite_area_pixels = 0;
+        for y in 60..72 {
+            for x in 60..72 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    sprite_area_pixels += 1;
+                }
+            }
+        }
+
+        assert!(
+            sprite_area_pixels > 10,
+            "Sprite at (64, 64) should be visible, got {} non-black pixels in area",
+            sprite_area_pixels
+        );
+    }
 }
