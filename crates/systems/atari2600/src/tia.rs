@@ -559,7 +559,7 @@ impl Tia {
                     0x01 => 2,
                     0x02 => 4,
                     0x03 => 8,
-                    _ => 1,
+                    _ => unreachable!(), // Only 2 bits, so only 0-3 possible
                 };
             }
 

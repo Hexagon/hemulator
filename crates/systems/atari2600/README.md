@@ -113,11 +113,12 @@ cargo run --release -p emu_gui -- path/to/game.bin
 
 The Atari 2600 crate includes comprehensive tests:
 
-- **45 total tests**:
-  - TIA tests (rendering, registers, playfield)
+- **73 total tests** (all passing):
+  - TIA tests (rendering, registers, playfield, ball sizing)
   - RIOT tests (RAM, timer, I/O)
   - Cartridge tests (banking schemes)
   - System integration tests
+  - Bus address mapping tests (including dual-write behavior at 0x40-0x7F)
 
 - **Test ROMs**: Multiple test ROMs in `test_roms/atari2600/`:
   - `test.bin`: Basic playfield pattern
@@ -364,6 +365,15 @@ TIA has 8 collision registers (CXM0P, CXM1P, CXM0FB, etc.) that set bits when sp
 - **Collision registers**: All 8 collision registers implemented ✅
 - **CXCLR**: Clear collision registers supported ✅
 - **Impact**: High - enables proper gameplay for many games (Asteroids, Breakout, Combat)
+
+#### Ball Sizing
+
+✅ **Implemented**
+
+CTRLPF bits 4-5 control ball size (1, 2, 4, or 8 pixels):
+- **Size modes**: 1px, 2px, 4px, 8px ✅
+- **Impact**: Medium - improves visual accuracy for ball-based games (Pong, Breakout)
+- **Implementation**: Hardware-accurate sizing based on CTRLPF register bits 4-5
 
 #### Delayed Graphics Registers (VDELPx)
 

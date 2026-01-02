@@ -92,10 +92,10 @@ impl Memory6502 for Atari2600Bus {
 
             // TIA mirrors (0x0100-0x012F) - write-only TIA registers mirror
             0x0100..=0x012F => 0, // TIA write mirrors (read=0)
-            
+
             // TIA read mirrors (0x0130-0x013F) - collision detection registers
             0x0130..=0x013F => self.tia.read((addr & 0x0F) as u8),
-            
+
             // TIA + RAM mirrors (0x0140-0x017F) - mirrors the dual read/write region at 0x40-0x7F
             0x0140..=0x017F => self.riot.read(addr),
 

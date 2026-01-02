@@ -638,6 +638,7 @@ The emulator supports the following cartridge banking schemes:
 **Features**:
 - TIA (Television Interface Adapter) video emulation with playfield rendering
 - **Player/Missile Sizing (NUSIZ)**: Full support for sprite sizing (1x, 2x, 4x) and duplication modes
+- **Ball Sizing**: Full support for ball sizing (1, 2, 4, or 8 pixels) via CTRLPF bits 4-5
 - **Collision Detection**: All 8 collision registers implemented with pixel-perfect detection
 - **Delayed Graphics (VDELP0/VDELP1)**: Player graphics can be delayed by one scanline
 - TIA audio emulation with 2 channels (polynomial waveform synthesis)
@@ -654,6 +655,8 @@ The emulator supports the following cartridge banking schemes:
 **Recent Fixes**:
 - **Vertical Stability**: Fixed vertical jumping issue by caching the visible window start position across frames
 - **Frame Consistency**: Enhanced test ROMs to catch timing-related rendering issues
+- **Bus Address Mapping**: Fixed address range 0x40-0x7F to write to both TIA and RIOT RAM (hardware-accurate dual-write behavior)
+- **Ball Sizing**: Implemented variable ball sizing (1, 2, 4, or 8 pixels) via CTRLPF bits 4-5
 
 **Controls**: The Atari 2600 joystick is mapped to the same keyboard layout as NES:
 - Arrow keys = Joystick directions
