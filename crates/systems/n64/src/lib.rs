@@ -27,7 +27,12 @@ mod rsp_hle;
 mod vi;
 
 use bus::N64Bus;
+#[cfg(test)]
+use cartridge::N64_ROM_MAGIC;
 use cpu::N64Cpu;
+#[cfg(test)]
+use cpu::{CP0_CONFIG_COMMERCIAL_BOOT, CP0_STATUS_COMMERCIAL_BOOT};
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use thiserror::Error;
 
@@ -194,6 +199,10 @@ impl System for N64System {
             if bus.vi_mut().update_scanline(scanline) {
                 // VI interrupt triggered - set interrupt in MI
                 bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+
+                log(LogCategory::Interrupts, LogLevel::Info, || {
+                    format!("N64: VI interrupt triggered at scanline {}", scanline)
+                });
 
                 // Set interrupt pending bit in CPU's Cause register
                 // VI interrupt is typically mapped to hardware interrupt 3 (bit 11 in Cause)
@@ -523,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_n64_cpu_boot_sequence() {
-        // Test that CPU boots from PIF ROM and executes cartridge code
+        // Test that CPU boots properly with commercial ROM boot sequence
         let test_rom = include_bytes!("../../../../test_roms/n64/test.z64");
         let mut sys = N64System::default();
 
@@ -533,24 +542,84 @@ mod tests {
         // Mount ROM
         assert!(sys.mount("Cartridge", test_rom).is_ok());
 
-        // After reset, PC should still be at PIF ROM
-        assert_eq!(sys.cpu.cpu.pc, 0xBFC00000);
+        // After reset with commercial ROM, PC should be at entry point (0x80000400)
+        // The IPL3 bootloader has copied the ROM to RDRAM and initialized the CPU
+        assert_eq!(
+            sys.cpu.cpu.pc, 0x80000400,
+            "PC should be at ROM entry point after IPL3 boot, got 0x{:016X}",
+            sys.cpu.cpu.pc
+        );
 
-        // Execute a few instructions to complete PIF ROM boot sequence
-        // PIF ROM now just has 4 instructions (lui, ori, jr, nop)
+        // Verify ROM was copied to RDRAM
+        // Check that the first 4 bytes of RDRAM match the ROM header magic
+        let rdram = sys.cpu.bus().rdram();
+        assert_eq!(
+            &rdram[0..4],
+            &[0x80, 0x37, 0x12, 0x40],
+            "ROM header should be copied to RDRAM"
+        );
+
+        // Verify code was copied to RDRAM at offset 0x1000
+        // The test ROM has code starting at offset 0x1000
+        let code_at_1000 =
+            u32::from_be_bytes([rdram[0x1000], rdram[0x1001], rdram[0x1002], rdram[0x1003]]);
+        assert_ne!(code_at_1000, 0, "Code should be copied to RDRAM at 0x1000");
+
+        // Execute a few instructions from the entry point
         for _ in 0..10 {
             sys.cpu.step();
         }
 
-        // Verify we're now executing code from cartridge ROM
-        // PC should be in range 0x90001000+ (possibly sign-extended to 0xFFFFFFFF90001000+)
-        let pc_low = (sys.cpu.cpu.pc & 0xFFFFFFFF) as u32;
-        assert!(
-            (0x90001000..0x90002000).contains(&pc_low),
-            "CPU should be in cartridge ROM after boot, but PC is 0x{:016X} (low 32 bits: 0x{:08X})",
-            sys.cpu.cpu.pc,
-            pc_low
+        // Verify CPU is executing (PC should have changed)
+        assert_ne!(
+            sys.cpu.cpu.pc, 0x80000400,
+            "CPU should have executed instructions and PC should have changed"
         );
+    }
+
+    #[test]
+    fn test_ipl3_boot_complete() {
+        // Comprehensive test for IPL3 bootloader functionality
+        let test_rom = include_bytes!("../../../../test_roms/n64/test.z64");
+        let mut sys = N64System::default();
+
+        // Mount the ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+
+        // Verify IPL3 completed all steps:
+
+        // 1. ROM header copied to RDRAM (first 0x1000 bytes)
+        let rdram = sys.cpu.bus().rdram();
+        assert_eq!(&rdram[0..4], &N64_ROM_MAGIC, "ROM magic in RDRAM");
+
+        // Check entry point in header (offset 0x08)
+        let entry_in_rdram =
+            u32::from_be_bytes([rdram[0x08], rdram[0x09], rdram[0x0A], rdram[0x0B]]);
+        assert_eq!(entry_in_rdram, 0x80000400, "Entry point in RDRAM header");
+
+        // 2. ROM code copied to RDRAM (from 0x1000 onwards)
+        // Verify some code exists at 0x1000
+        let has_code = rdram[0x1000..0x1100].iter().any(|&byte| byte != 0);
+        assert!(has_code, "Code should be present in RDRAM at 0x1000+");
+
+        // 3. Exception vector set up at 0x0180
+        let exception_vec =
+            u32::from_be_bytes([rdram[0x0180], rdram[0x0181], rdram[0x0182], rdram[0x0183]]);
+        // Should be j 0x80000180 (0x08000060)
+        assert_eq!(exception_vec, 0x08000060, "Exception vector set up");
+
+        // 4. CP0 registers initialized
+        assert_eq!(
+            sys.cpu.cpu.cp0[12], CP0_STATUS_COMMERCIAL_BOOT,
+            "CP0_STATUS initialized"
+        );
+        assert_eq!(
+            sys.cpu.cpu.cp0[16], CP0_CONFIG_COMMERCIAL_BOOT,
+            "CP0_CONFIG initialized"
+        );
+
+        // 5. PC set to entry point
+        assert_eq!(sys.cpu.cpu.pc, 0x80000400, "PC at entry point");
     }
 
     #[test]
