@@ -455,11 +455,7 @@ mod tests {
         assert_eq!(frame.pixels.len(), 256 * 224);
 
         // Check that we have visible output (non-black pixels)
-        let non_black_pixels = frame
-            .pixels
-            .iter()
-            .filter(|&&p| p != 0xFF000000)
-            .count();
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
         assert!(
             non_black_pixels > 1000,
@@ -494,4 +490,3 @@ mod tests {
         );
     }
 }
-

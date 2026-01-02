@@ -2071,7 +2071,7 @@ mod tests {
         // Color 0: transparent (black)
         ppu.write_register(0x2122, 0x00);
         ppu.write_register(0x2122, 0x00);
-        // Color 1: white  
+        // Color 1: white
         ppu.write_register(0x2122, 0xFF);
         ppu.write_register(0x2122, 0x7F);
         // Color 2: red
@@ -2119,4 +2119,3 @@ mod tests {
         );
     }
 }
-
