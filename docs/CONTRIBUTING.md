@@ -30,6 +30,42 @@ Before committing any code, run these checks in order and ensure they all pass:
 
 **Important**: These same checks run in CI, so ensuring they pass locally prevents CI failures and speeds up the review process.
 
+## Build Dependencies
+
+### Linux Development Dependencies
+
+On Ubuntu/Debian, install these packages before building:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libasound2-dev pkg-config
+```
+
+**Required packages:**
+- `libasound2-dev` - Required for audio support (ALSA)
+- `pkg-config` - Required for library detection during build
+
+### 32-bit Linux Builds (i686)
+
+For building 32-bit binaries on 64-bit Linux (e.g., for release packaging):
+
+```bash
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install -y gcc-multilib g++-multilib libasound2-dev:i386
+```
+
+**Required packages:**
+- `gcc-multilib` - 32-bit C compiler support and libraries
+- `g++-multilib` - 32-bit C++ compiler and standard library (required for SDL2 bundled build)
+- `libasound2-dev:i386` - 32-bit ALSA audio library
+
+**Note**: The `g++-multilib` package is essential because SDL2's bundled build compiles C++ code from source using CMake. Without the 32-bit C++ standard library, the build will fail with linker errors like `cannot find -lstdc++`.
+
+### Windows and macOS
+
+No additional system dependencies are required beyond the Rust toolchain. All required libraries are either bundled or managed through Cargo.
+
 ## Additional Guidelines
 
 - **Documentation**: 
