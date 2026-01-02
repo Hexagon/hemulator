@@ -37,7 +37,7 @@ Hemulator provides three build profiles optimized for different use cases:
 ### Development (`dev`)
 - **Use case**: Quick iteration during initial development
 - **Build command**: `cargo build`
-- **Performance**: ~60fps (usable but not full speed due to opt-level 1)
+- **Performance**: ~60 FPS (usable for development and testing)
 - **Build time**: Moderate (~2m50s clean, very fast incremental)
 - **Incremental**: Very fast (seconds)
 - **Optimizations**: Level 1 with debug info
@@ -45,7 +45,7 @@ Hemulator provides three build profiles optimized for different use cases:
 ### Release-Quick (`release-quick`)
 - **Use case**: Iterative development and testing
 - **Build command**: `cargo build --profile release-quick`
-- **Performance**: Near full speed (~60fps, close to release)
+- **Performance**: 150-250 FPS (excellent for development, ~70% of release)
 - **Build time**: Fast (~2m18s clean, ~8s incremental)
 - **Incremental**: **18x faster** than release profile
 - **Optimizations**: Level 2, no LTO, parallel codegen
@@ -54,7 +54,7 @@ Hemulator provides three build profiles optimized for different use cases:
 ### Release (`release`)
 - **Use case**: Final testing and distribution builds
 - **Build command**: `cargo build --release`
-- **Performance**: Full speed (60fps+)
+- **Performance**: 300+ FPS on modern hardware (maximum performance)
 - **Build time**: Slowest (~2m32s clean, ~2m30s incremental)
 - **Incremental**: Slow due to Link Time Optimization (LTO)
 - **Optimizations**: Level 3, fat LTO, single codegen unit
