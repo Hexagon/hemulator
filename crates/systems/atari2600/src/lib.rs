@@ -386,14 +386,9 @@ impl System for Atari2600System {
 
             if let Some(bus) = self.cpu.bus_mut() {
                 let visible_start = bus.tia.visible_window_start_scanline();
-                final_colors = Some((
-                    bus.tia.get_scanline(),
-                    visible_start,
-                ));
+                final_colors = Some((bus.tia.get_scanline(), visible_start));
 
-                let (pf, grp) = bus
-                    .tia
-                    .debug_visible_scanline_activity(visible_start);
+                let (pf, grp) = bus.tia.debug_visible_scanline_activity(visible_start);
                 scanlines_with_pf = pf;
                 scanlines_with_grp = grp;
 
@@ -1185,21 +1180,9 @@ mod tests {
         let frame3 = sys.step_frame().unwrap();
 
         // Count non-black pixels in each frame
-        let count1 = frame1
-            .pixels
-            .iter()
-            .filter(|&&p| p != 0xFF000000)
-            .count();
-        let count2 = frame2
-            .pixels
-            .iter()
-            .filter(|&&p| p != 0xFF000000)
-            .count();
-        let count3 = frame3
-            .pixels
-            .iter()
-            .filter(|&&p| p != 0xFF000000)
-            .count();
+        let count1 = frame1.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+        let count2 = frame2.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+        let count3 = frame3.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
         // The non-black pixel count should be relatively stable across frames
         // (sprites move, so it won't be identical, but should be close)
@@ -1221,7 +1204,7 @@ mod tests {
 
         // Verify the color bar section is stable
         // Sample the top 64 scanlines across frames
-        for y in 0..64.min(192) {
+        for y in 0..64 {
             for x in [0, 80, 159].iter() {
                 let idx = y * 160 + x;
                 let color1 = frame1.pixels[idx];
@@ -1264,6 +1247,54 @@ mod tests {
                     start, first_start,
                     "visible_window_start changed from {} to {} at frame {}. This causes vertical jumping!",
                     first_start, start, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_color_stability() {
+        // This test checks that colors remain stable within and across frames
+        // The game_test ROM sets specific colors in different sections
+        let test_rom = include_bytes!("../../../../test_roms/atari2600/game_test.bin");
+
+        let mut sys = Atari2600System::new();
+        sys.mount("Cartridge", test_rom).unwrap();
+
+        // Run several frames
+        for _ in 0..10 {
+            sys.step_frame().unwrap();
+        }
+
+        // Capture several consecutive frames
+        let frame1 = sys.step_frame().unwrap();
+        let frame2 = sys.step_frame().unwrap();
+        let frame3 = sys.step_frame().unwrap();
+
+        // The color bar section (top 64 scanlines) should have stable colors
+        // Sample a few pixels from the first scanline of each color bar
+        for bar in 0..8 {
+            let scanline = bar * 8;
+            if scanline >= 64 {
+                break;
+            }
+
+            // Sample pixel in the middle of the scanline
+            let pixel_idx = scanline * 160 + 80;
+
+            if pixel_idx < frame1.pixels.len() {
+                let color1 = frame1.pixels[pixel_idx];
+                let color2 = frame2.pixels[pixel_idx];
+                let color3 = frame3.pixels[pixel_idx];
+
+                // Due to sprite movement, colors might vary, but check for drastic changes
+                // If all three are different, that's a flickering issue
+                let all_different = color1 != color2 && color2 != color3 && color1 != color3;
+
+                assert!(
+                    !all_different,
+                    "Color flickering detected at scanline {}, bar {}: colors vary across 3 frames ({:08X}, {:08X}, {:08X})",
+                    scanline, bar, color1, color2, color3
                 );
             }
         }

@@ -760,7 +760,7 @@ impl Tia {
     }
 
     /// Try to infer the start of the visible picture area based on VBLANK timing
-    /// 
+    ///
     /// This method caches the first detected visible start to prevent vertical jumping
     /// between frames. Once a valid VBLANK transition is detected, that value is used
     /// for all subsequent frames to ensure stable rendering.
@@ -786,13 +786,16 @@ impl Tia {
 
             if prev.vblank && !cur.vblank {
                 if debug {
-                    eprintln!("[VISIBLE] Found transition at scanline {}, caching for stability", i);
+                    eprintln!(
+                        "[VISIBLE] Found transition at scanline {}, caching for stability",
+                        i
+                    );
                 }
                 self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
         }
-        
+
         // Fallback: common NTSC visible start is around scanline ~37-40
         if debug {
             eprintln!("[VISIBLE] No transition found, using fallback 40");
