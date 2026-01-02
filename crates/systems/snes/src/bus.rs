@@ -44,11 +44,17 @@ impl SnesBus {
     }
 
     pub fn load_cartridge(&mut self, data: &[u8]) -> Result<(), SnesError> {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!("SNES Bus: Loading cartridge ({} bytes)", data.len())
+        });
         self.cartridge = Some(Cartridge::load(data)?);
         Ok(())
     }
 
     pub fn unload_cartridge(&mut self) {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "SNES Bus: Unloading cartridge".to_string()
+        });
         self.cartridge = None;
     }
 
@@ -88,6 +94,13 @@ impl SnesBus {
     /// Button layout: B Y Select Start Up Down Left Right A X L R 0 0 0 0
     pub fn set_controller(&mut self, idx: usize, state: u16) {
         if idx < 2 {
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                format!(
+                    "SNES Bus: Controller {} state set to 0x{:04X}",
+                    idx + 1,
+                    state
+                )
+            });
             self.controller_state[idx] = state;
         }
     }
@@ -239,7 +252,20 @@ impl Memory65c816 for SnesBus {
                         // Bit 7: NMI enable
                         // Bit 4: Joypad auto-read enable (not implemented)
                         // Other bits: H/V timer interrupt enable (not implemented)
+                        let old_nmi_enable = self.ppu.nmi_enable;
                         self.ppu.nmi_enable = (val & 0x80) != 0;
+                        if old_nmi_enable != self.ppu.nmi_enable {
+                            log(LogCategory::Interrupts, LogLevel::Debug, || {
+                                format!(
+                                    "SNES Bus: NMI {}",
+                                    if self.ppu.nmi_enable {
+                                        "enabled"
+                                    } else {
+                                        "disabled"
+                                    }
+                                )
+                            });
+                        }
                     }
                     // $4016 - JOYWR - Controller Strobe
                     0x4016 => {
@@ -249,6 +275,12 @@ impl Memory65c816 for SnesBus {
 
                         // On falling edge (1 -> 0), latch the controller state
                         if old_strobe && !self.controller_strobe {
+                            log(LogCategory::Bus, LogLevel::Trace, || {
+                                format!(
+                                    "SNES Bus: Controller latch - P1: 0x{:04X}, P2: 0x{:04X}",
+                                    self.controller_state[0], self.controller_state[1]
+                                )
+                            });
                             self.controller_shift[0].set(self.controller_state[0]);
                             self.controller_shift[1].set(self.controller_state[1]);
                         }
