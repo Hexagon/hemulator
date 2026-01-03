@@ -778,6 +778,16 @@ impl Ppu {
             }
         }
 
+        // Fill backdrop color for all pixels that weren't rendered
+        // SNES backdrop is CGRAM color 0 (not transparent)
+        let backdrop_color = self.get_color(0);
+        for i in 0..frame.pixels.len() {
+            if priority_buffer[i] == 255 {
+                // No layer rendered here - use backdrop color
+                frame.pixels[i] = backdrop_color;
+            }
+        }
+
         frame
     }
 
@@ -1602,9 +1612,11 @@ mod tests {
         let frame = ppu.render_frame();
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 224);
-        // With no layers enabled, frame should be all zeros (transparent black)
-        // Frame::new() initializes all pixels to 0x00000000
-        assert!(frame.pixels.iter().all(|&p| p == 0x00000000));
+        // With no layers enabled, frame should show backdrop color (CGRAM[0])
+        // Default backdrop color is black (0xFF000000) since CGRAM starts at 0
+        let backdrop_color = ppu.get_color(0);
+        assert_eq!(backdrop_color, 0xFF000000);
+        assert!(frame.pixels.iter().all(|&p| p == backdrop_color));
 
         // Enable screen and BG1
         ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
@@ -1768,16 +1780,21 @@ mod tests {
         // Enable BG1
         ppu.write_register(0x212C, 0x01);
 
-        // Set up palette (color 1 = red, color 2 = blue)
+        // Set up backdrop color (CGRAM[0]) to blue so we can distinguish it
+        ppu.write_register(0x2121, 0x00);
+        ppu.write_register(0x2122, 0x00); // Blue low (bits 10-14 = 0)
+        ppu.write_register(0x2122, 0x7C); // Blue high (bits 10-14 = 11111 = max blue)
+
+        // Set up palette colors (color 1 = red, color 2 = green)
         ppu.write_register(0x2121, 0x01);
         ppu.write_register(0x2122, 0x1F); // Red low
         ppu.write_register(0x2122, 0x00); // Red high
 
-        ppu.write_register(0x2122, 0x00); // Blue low
-        ppu.write_register(0x2122, 0x7C); // Blue high
+        ppu.write_register(0x2122, 0xE0); // Green low
+        ppu.write_register(0x2122, 0x03); // Green high
 
         // Create a simple test pattern in VRAM
-        // Two different tiles: tile 0 uses color 1 (red), tile 1 uses color 2 (blue)
+        // Two different tiles: tile 0 uses color 1 (red), tile 1 uses color 2 (green)
         ppu.write_register(0x2116, 0x00);
         ppu.write_register(0x2117, 0x10); // CHR at word $1000 (byte $2000)
 
@@ -1790,6 +1807,9 @@ mod tests {
             ppu.write_register(0x2118, 0x00);
             ppu.write_register(0x2119, 0x00);
         }
+
+        // Verify VRAM was written (check first byte of tile data)
+        assert_eq!(ppu.vram[0x2000], 0xFF, "VRAM should be writable in force blank mode");
 
         // Tile 1: bitplane 0 = $00, bitplane 1 = $FF (color 2 for all pixels)
         for _ in 0..8 {
@@ -1820,8 +1840,14 @@ mod tests {
         let frame2 = ppu.render_frame();
         let pixel_0_0_scrolled = frame2.pixels[0]; // Should now show tile 1
 
-        // The pixel should be different after scrolling
-        assert_ne!(pixel_0_0, pixel_0_0_scrolled);
+        // The pixel should be different after scrolling (was tile 0, now tile 1)
+        // Print actual values for debugging
+        println!("Pixel before scrolling: 0x{:08X}", pixel_0_0);
+        println!("Pixel after scrolling: 0x{:08X}", pixel_0_0_scrolled);
+        println!("Red color (expected for tile 0): 0x{:08X}", ppu.get_color(1));
+        println!("Green color (expected for tile 1): 0x{:08X}", ppu.get_color(2));
+        println!("Backdrop color: 0x{:08X}", ppu.get_color(0));
+        assert_ne!(pixel_0_0, pixel_0_0_scrolled, "Pixels should be different after scrolling");
 
         // Verify both frames rendered successfully
         assert_eq!(frame1.width, 256);
