@@ -151,11 +151,17 @@ impl RspHle {
         result
     }
 
+    /// Convert N64 virtual address to physical RDRAM address
+    /// KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF) map to physical 0x00000000-0x1FFFFFFF
+    fn virt_to_phys(addr: u32) -> usize {
+        (addr & 0x1FFFFFFF) as usize
+    }
+
     /// Load a 4x4 matrix from RDRAM
     /// N64 matrices are stored as 16 signed 16.16 fixed-point values (32 bits each)
     fn load_matrix_from_rdram(&self, rdram: &[u8], addr: u32) -> [f32; 16] {
         let mut matrix = [0.0f32; 16];
-        let addr = addr as usize;
+        let addr = Self::virt_to_phys(addr);
 
         // Safety check
         if addr + 63 >= rdram.len() {
@@ -289,6 +295,13 @@ impl RspHle {
         let mut output_buff = self.read_u32(dmem, 0x28);
         let mut output_buff_size = self.read_u32(dmem, 0x2C);
 
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "RSP HLE: DMEM task structure: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
+                data_ptr, data_size, output_buff, output_buff_size
+            )
+        });
+
         // If DMEM task structure is empty/invalid, try reading from common RDRAM locations
         // Many test ROMs store task structure at 0x00200000 without DMA to DMEM
         if data_ptr == 0 || data_ptr >= 0x00800000 {
@@ -316,7 +329,8 @@ impl RspHle {
                     // assume F3DEX (most common graphics microcode)
                     if self.microcode == MicrocodeType::Unknown {
                         log(LogCategory::PPU, LogLevel::Info, || {
-                            "RSP HLE: Detected graphics task with Unknown microcode, assuming F3DEX".to_string()
+                            "RSP HLE: Detected graphics task with Unknown microcode, assuming F3DEX"
+                                .to_string()
                         });
                         self.microcode = MicrocodeType::F3DEX;
                     }
@@ -326,12 +340,31 @@ impl RspHle {
 
         // Parse F3DEX display list if data_ptr is provided
         if data_ptr > 0 && data_size > 0 {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!(
+                    "RSP HLE: Calling parse_f3dex_display_list with data_ptr=0x{:08X}, data_size=0x{:X}",
+                    data_ptr, data_size
+                )
+            });
             self.parse_f3dex_display_list(rdram, data_ptr, data_size, rdp);
+        } else {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                format!(
+                    "RSP HLE: No display list to parse (data_ptr=0x{:08X}, data_size=0x{:X})",
+                    data_ptr, data_size
+                )
+            });
         }
 
         // If there's an output buffer with data (pre-generated RDP commands),
         // forward it directly to the RDP for processing
         if output_buff > 0 && output_buff_size > 0 {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!(
+                    "RSP HLE: Processing RDP output buffer at 0x{:08X}, size=0x{:X}",
+                    output_buff, output_buff_size
+                )
+            });
             rdp.set_dpc_start(output_buff);
             rdp.set_dpc_end(output_buff + output_buff_size);
             rdp.process_display_list(rdram);
@@ -348,9 +381,17 @@ impl RspHle {
         _size: u32,
         rdp: &mut Rdp,
     ) {
-        let mut addr = start_addr as usize;
+        // Convert virtual address to physical address
+        let mut addr = Self::virt_to_phys(start_addr);
         let max_commands = 1000; // Safety limit to prevent infinite loops
         let mut commands_processed = 0;
+
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "RSP HLE: Parsing F3DEX display list at virt:0x{:08X} phys:0x{:08X}",
+                start_addr, addr
+            )
+        });
 
         while addr + 7 < rdram.len() && commands_processed < max_commands {
             // Read 64-bit F3DEX command
@@ -771,7 +812,8 @@ impl RspHle {
             return;
         }
 
-        let addr = addr as usize;
+        // Convert virtual address to physical address
+        let addr = Self::virt_to_phys(addr);
         if addr + 15 >= rdram.len() {
             return;
         }
