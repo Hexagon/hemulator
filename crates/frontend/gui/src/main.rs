@@ -2192,7 +2192,9 @@ fn main() {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
                                     let mut nes_sys = emu_nes::NesSystem::default();
                                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_error(format!("Failed to load NES ROM: {}", e));
                                         rom_hash = None;
                                     } else {
                                         rom_loaded = true;
@@ -2211,7 +2213,7 @@ fn main() {
                                         );
                                         egui_app
                                             .status_bar
-                                            .set_message("NES ROM loaded".to_string());
+                                            .set_success("NES ROM loaded successfully".to_string());
                                         // Update resolution
                                         let _ = sys.resolution();
                                         // Load save states for this ROM
@@ -2354,13 +2356,13 @@ fn main() {
                                 Err(e) => {
                                     egui_app
                                         .status_bar
-                                        .set_message(format!("Error detecting ROM type: {}", e));
+                                        .set_error(format!("Failed to detect ROM type: {}", e));
                                 }
                             },
                             Err(e) => {
                                 egui_app
                                     .status_bar
-                                    .set_message(format!("Error reading file: {}", e));
+                                    .set_error(format!("Failed to read file: {}", e));
                             }
                         }
                     }
