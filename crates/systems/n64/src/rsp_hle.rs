@@ -681,10 +681,10 @@ impl RspHle {
                 // 0x80 = G_MV_VIEWPORT (8 bytes)
                 // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
                 // 0x82 = G_MV_LIGHT (16 bytes per light)
-                
+
                 // Check if this is a viewport load (offset 0x80)
                 const G_MV_VIEWPORT: usize = 0x80;
-                
+
                 if offset == G_MV_VIEWPORT && size >= 8 {
                     // Load viewport data from RDRAM
                     // Viewport format (8 words = 16 bytes in 16.16 fixed point):
@@ -698,14 +698,16 @@ impl RspHle {
                             rdram[addr + 1],
                             rdram[addr + 2],
                             rdram[addr + 3],
-                        ]) as f32 / 65536.0;
-                        
+                        ]) as f32
+                            / 65536.0;
+
                         let vscale_y = i32::from_be_bytes([
                             rdram[addr + 4],
                             rdram[addr + 5],
                             rdram[addr + 6],
                             rdram[addr + 7],
-                        ]) as f32 / 65536.0;
+                        ]) as f32
+                            / 65536.0;
 
                         // Read translation values (vtrans[0], vtrans[1])
                         let vtrans_x = i32::from_be_bytes([
@@ -713,14 +715,16 @@ impl RspHle {
                             rdram[addr + 9],
                             rdram[addr + 10],
                             rdram[addr + 11],
-                        ]) as f32 / 65536.0;
-                        
+                        ]) as f32
+                            / 65536.0;
+
                         let vtrans_y = i32::from_be_bytes([
                             rdram[addr + 12],
                             rdram[addr + 13],
                             rdram[addr + 14],
                             rdram[addr + 15],
-                        ]) as f32 / 65536.0;
+                        ]) as f32
+                            / 65536.0;
 
                         // Calculate viewport bounds
                         // x = vtrans_x - vscale_x, y = vtrans_y - vscale_y
@@ -729,7 +733,7 @@ impl RspHle {
                         let vp_y = vtrans_y - vscale_y;
                         let vp_width = vscale_x * 2.0;
                         let vp_height = vscale_y * 2.0;
-                        
+
                         self.viewport = (vp_x, vp_y, vp_width, vp_height, vscale_x, vscale_y);
 
                         log(LogCategory::PPU, LogLevel::Debug, || {
@@ -838,15 +842,6 @@ impl RspHle {
                 // word1: data (second word for RDP command)
                 log(LogCategory::Stubs, LogLevel::Debug, || {
                     format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}", word1)
-                });
-                true
-            }
-            // G_RDPHALF_CONT (0xB3) - Continue RDP half command
-            0xB3 => {
-                // word0: cmd_id | padding
-                // word1: data
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 RSP HLE: G_RDPHALF_CONT - data=0x{:08X}", word1)
                 });
                 true
             }
