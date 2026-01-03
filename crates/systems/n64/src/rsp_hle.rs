@@ -153,8 +153,23 @@ impl RspHle {
 
     /// Convert N64 virtual address to physical RDRAM address
     /// KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF) map to physical 0x00000000-0x1FFFFFFF
+    /// Also handles already-physical addresses (0x00000000-0x1FFFFFFF) by passing them through
     fn virt_to_phys(addr: u32) -> usize {
-        (addr & 0x1FFFFFFF) as usize
+        // Check if address is in KSEG0 or KSEG1 (virtual address ranges)
+        // KSEG0: 0x80000000-0x9FFFFFFF (cached)
+        // KSEG1: 0xA0000000-0xBFFFFFFF (uncached)
+        // KSEG2: 0xC0000000-0xDFFFFFFF (kernel)
+        // KSEG3: 0xE0000000-0xFFFFFFFF (kernel)
+        let is_virtual = addr >= 0x80000000;
+
+        if is_virtual {
+            // Virtual address - mask to get physical address
+            (addr & 0x1FFFFFFF) as usize
+        } else {
+            // Already a physical address - pass through
+            // This handles cases where ROM data uses physical addresses directly
+            addr as usize
+        }
     }
 
     /// Load a 4x4 matrix from RDRAM
@@ -314,10 +329,7 @@ impl RspHle {
                 output_buff_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x2C);
 
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!(
-                        "RSP HLE: Read from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
-                        TASK_STRUCT_ADDR, data_ptr, data_size, output_buff, output_buff_size
-                    )
+                    format!("RSP HLE: Read from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}", TASK_STRUCT_ADDR, data_ptr, data_size, output_buff, output_buff_size)
                 });
 
                 if data_ptr > 0 && data_ptr < 0x00800000 {
