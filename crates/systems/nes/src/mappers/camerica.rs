@@ -28,7 +28,7 @@ pub struct Camerica {
     /// Track the previous value of bit 4 to detect mirroring changes
     /// This helps distinguish between boards with mapper-controlled mirroring
     /// and those with fixed mirroring from the cartridge header
-    previous_bit4: bool,
+    previous_bit4: Option<bool>,
     /// Count how many times bit 4 has changed
     /// If this stays at 0, the game likely uses fixed mirroring
     mirroring_change_count: u8,
@@ -42,7 +42,7 @@ impl Camerica {
         Self {
             prg_rom: cart.prg_rom,
             bank_select: 0,
-            previous_bit4: false,
+            previous_bit4: None, // Will be set on first write
             mirroring_change_count: 0,
         }
     }
@@ -81,16 +81,18 @@ impl Camerica {
             // - If bit 4 toggles, the game uses mapper-controlled mirroring
             // - If bit 4 never changes, the game uses fixed mirroring from the header
             //
-            // We only update mirroring if we've detected at least one bit 4 change,
-            // or if this is the first write where bit 4 differs from the initial state.
+            // We only update mirroring after detecting at least one bit 4 transition.
             let current_bit4 = (val & 0x10) != 0;
 
             // Check if bit 4 has changed since the last write
-            if current_bit4 != self.previous_bit4 {
-                // Bit 4 changed - increment change counter
-                self.mirroring_change_count = self.mirroring_change_count.saturating_add(1);
-                self.previous_bit4 = current_bit4;
+            if let Some(prev) = self.previous_bit4 {
+                if current_bit4 != prev {
+                    // Bit 4 changed - increment change counter
+                    self.mirroring_change_count = self.mirroring_change_count.saturating_add(1);
+                }
             }
+            // Always update previous_bit4 to track the current value
+            self.previous_bit4 = Some(current_bit4);
 
             // Only update mirroring if we've detected bit 4 changes (mapper-controlled mirroring)
             // This prevents unwanted mirroring updates on games with fixed mirroring
