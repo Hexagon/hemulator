@@ -116,6 +116,30 @@ pub struct RspHle {
     /// Viewport parameters (x, y, width, height, scale_x, scale_y)
     /// Defaults to (0, 0, 320, 240, 160, 120) for 320x240 framebuffer
     viewport: (f32, f32, f32, f32, f32, f32),
+
+    /// Display list call stack for G_DL commands
+    /// Stores return addresses when G_DL_PUSH is used
+    #[allow(dead_code)] // Reserved for future proper display list call stack implementation
+    dl_stack: Vec<u32>,
+
+    /// Temporary storage for G_RDPHALF_1 data
+    /// Used for 2-word RDP commands split across display list entries
+    #[allow(dead_code)] // Reserved for future use with 2-word RDP commands
+    rdp_half: u32,
+
+    /// Light data (up to 8 lights)
+    /// Each light has 7 elements: [dx, dy, dz, r, g, b, type]
+    /// - dx, dy, dz: direction vector (normalized, -1.0 to 1.0)
+    /// - r, g, b: color components (0.0 to 1.0)
+    /// - type: 0.0 = directional, 1.0 = point (reserved for future use)
+    lights: [[f32; 7]; 8],
+
+    /// Number of active lights
+    num_lights: usize,
+
+    /// Ambient light color (RGB as floats 0.0-1.0)
+    #[allow(dead_code)] // Reserved for future lighting implementation
+    ambient_light: [f32; 3],
 }
 
 impl RspHle {
@@ -133,6 +157,11 @@ impl RspHle {
             // Default viewport for 320x240 framebuffer
             // (x, y, width, height, scale_x, scale_y)
             viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
+            dl_stack: Vec::with_capacity(10),
+            rdp_half: 0,
+            lights: [[0.0; 7]; 8],
+            num_lights: 0,
+            ambient_light: [0.3, 0.3, 0.3], // Default ambient light
         }
     }
 
@@ -487,6 +516,26 @@ impl RspHle {
                 }
                 true
             }
+            // G_CLEARGEOMETRYMODE (0xB6) - Clear geometry mode bits
+            0xB6 => {
+                // word1: bits to clear
+                let clear_bits = word1;
+                self.geometry_mode &= !clear_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("RSP HLE: G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}", clear_bits, self.geometry_mode)
+                });
+                true
+            }
+            // G_SETGEOMETRYMODE (0xB7) - Set geometry mode bits  
+            0xB7 => {
+                // word1: bits to set
+                let set_bits = word1;
+                self.geometry_mode |= set_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("RSP HLE: G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}", set_bits, self.geometry_mode)
+                });
+                true
+            }
             // G_VTX (0x01) - Load vertices
             0x01 => {
                 // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
@@ -499,6 +548,19 @@ impl RspHle {
                 for i in 0..vertex_count.min(32 - buffer_index) {
                     let vaddr = vertex_addr + (i as u32 * 16);
                     self.load_vertex(rdram, vaddr, buffer_index + i);
+                }
+                true
+            }
+            // G_TRI1 (0x04) - Draw single triangle (alternate encoding)
+            0x04 => {
+                // Alternative encoding used by some games
+                // word0: cmd_id | v0_index | v1_index | v2_index
+                let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+                let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+                let v2 = (word0 & 0xFF) as usize / 2;
+
+                if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+                    self.draw_transformed_triangle(v0, v1, v2, rdp);
                 }
                 true
             }
@@ -680,10 +742,11 @@ impl RspHle {
                 // G_MOVEMEM indices (offset values):
                 // 0x80 = G_MV_VIEWPORT (8 bytes)
                 // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
-                // 0x82 = G_MV_LIGHT (16 bytes per light)
+                // 0x82 = G_MV_LIGHT (16 bytes per light, offset determines which light)
 
                 // Check if this is a viewport load (offset 0x80)
                 const G_MV_VIEWPORT: usize = 0x80;
+                const G_MV_LIGHT_BASE: usize = 0x82; // Base offset for lights
 
                 if offset == G_MV_VIEWPORT && size >= 8 {
                     // Load viewport data from RDRAM
@@ -742,6 +805,46 @@ impl RspHle {
                                 vp_x, vp_y, vp_width, vp_height
                             )
                         });
+                    }
+                } else if (G_MV_LIGHT_BASE..=0x92).contains(&offset) && size >= 16 {
+                    // Load light data from RDRAM
+                    // Light format (16 bytes):
+                    // bytes 0-2: R, G, B color (0-255)
+                    // bytes 3-5: padding
+                    // bytes 6-8: X, Y, Z direction (signed bytes, normalized)
+                    // bytes 9-15: padding
+
+                    // Calculate which light this is (offset 0x82 = light 0, 0x84 = light 1, etc.)
+                    let light_index = (offset - G_MV_LIGHT_BASE) / 2;
+
+                    if light_index < 8 {
+                        let addr = Self::virt_to_phys(rdram_addr);
+                        if addr + 15 < rdram.len() {
+                            // Read light color (RGB, 0-255)
+                            let r = rdram[addr] as f32 / 255.0;
+                            let g = rdram[addr + 1] as f32 / 255.0;
+                            let b = rdram[addr + 2] as f32 / 255.0;
+
+                            // Read light direction (signed bytes, treat as normalized -1 to 1)
+                            let dx = (rdram[addr + 6] as i8) as f32 / 127.0;
+                            let dy = (rdram[addr + 7] as i8) as f32 / 127.0;
+                            let dz = (rdram[addr + 8] as i8) as f32 / 127.0;
+
+                            // Store light data: [dx, dy, dz, r, g, b, type]
+                            // type: 0.0 = directional, 1.0 = point (for future use)
+                            self.lights[light_index] = [dx, dy, dz, r, g, b, 0.0];
+
+                            if light_index >= self.num_lights {
+                                self.num_lights = light_index + 1;
+                            }
+
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MOVEMEM light {} - color=({:.2},{:.2},{:.2}), dir=({:.2},{:.2},{:.2})",
+                                    light_index, r, g, b, dx, dy, dz
+                                )
+                            });
+                        }
                     }
                 } else {
                     // Other MOVEMEM types - log but don't implement
@@ -808,43 +911,6 @@ impl RspHle {
                 });
                 true
             }
-            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
-            0xEE => {
-                // word0: cmd_id | padding
-                // word1: z (16-bit) | dz (16-bit) - depth value and delta
-                let _z = (word1 >> 16) & 0xFFFF;
-                let _dz = word1 & 0xFFFF;
-
-                // For HLE, we log but don't implement primitive depth override
-                // Full implementation would set a base depth for subsequent primitives
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!(
-                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
-                        _z, _dz
-                    )
-                });
-                true
-            }
-            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
-            0xBF => {
-                // word0: cmd_id | padding
-                // word1: data (first word for RDP command)
-                // This is typically followed by another command that uses this data
-                // For HLE, we store it temporarily but don't need to act on it
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 RSP HLE: G_RDPHALF_1 - data=0x{:08X}", word1)
-                });
-                true
-            }
-            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
-            0xB4 => {
-                // word0: cmd_id | padding
-                // word1: data (second word for RDP command)
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}", word1)
-                });
-                true
-            }
             // G_LOAD_UCODE (0xAF) - Load new microcode
             0xAF => {
                 // word0: cmd_id | size
@@ -890,6 +956,45 @@ impl RspHle {
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command  
+            0xB4 => {
+                // word0: cmd_id | padding
+                // word1: data (second word for RDP command)
+                // This completes a 2-word RDP command using the stored rdp_half value
+                // Common use: TEXTURE_RECTANGLE where word0 comes from RDPHALF_1
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}, combining with rdp_half=0x{:08X}", word1, self.rdp_half)
+                });
+                true
+            }
+            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
+            0xBF => {
+                // word0: cmd_id | padding
+                // word1: data (first word for RDP command)
+                // Store the data for use by subsequent command
+                self.rdp_half = word1;
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
+            0xEE => {
+                // word0: cmd_id | padding
+                // word1: z (16-bit) | dz (16-bit) - depth value and delta
+                let _z = (word1 >> 16) & 0xFFFF;
+                let _dz = word1 & 0xFFFF;
+
+                // For HLE, we log but don't implement primitive depth override
+                // Full implementation would set a base depth for subsequent primitives
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
+                        _z, _dz
+                    )
+                });
+                true
+            }
             // RDP passthrough commands (0xE0-0xFF) - forward directly to RDP
             0xE0..=0xFF => {
                 // These are RDP commands embedded in F3DEX display list
@@ -916,10 +1021,30 @@ impl RspHle {
         let vert1 = &self.vertices[v1];
         let vert2 = &self.vertices[v2];
 
-        // Transform vertices to screen space
-        let (x0, y0, z0) = self.transform_vertex(vert0);
-        let (x1, y1, z1) = self.transform_vertex(vert1);
-        let (x2, y2, z2) = self.transform_vertex(vert2);
+        // Transform vertices to clip space
+        let clip0 = self.transform_vertex_to_clip(vert0);
+        let clip1 = self.transform_vertex_to_clip(vert1);
+        let clip2 = self.transform_vertex_to_clip(vert2);
+
+        // Simple frustum clipping: check if all vertices are outside any frustum plane
+        // Full implementation would clip the triangle, but for now we do simple reject/accept
+        let outside0 = Self::should_clip_vertex(&clip0);
+        let outside1 = Self::should_clip_vertex(&clip1);
+        let outside2 = Self::should_clip_vertex(&clip2);
+
+        // If all vertices are outside, reject the triangle entirely
+        // This is a conservative approach - a full implementation would clip the triangle
+        if outside0 && outside1 && outside2 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                "RSP HLE: Triangle completely outside frustum, rejecting".to_string()
+            });
+            return;
+        }
+
+        // Transform to screen space
+        let (x0, y0, z0) = self.clip_to_screen(&clip0);
+        let (x1, y1, z1) = self.clip_to_screen(&clip1);
+        let (x2, y2, z2) = self.clip_to_screen(&clip2);
 
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
@@ -1024,15 +1149,9 @@ impl RspHle {
         }
     }
 
-    /// Transform vertex from object space to screen space
-    #[allow(dead_code)]
-    fn transform_vertex(&self, vertex: &Vertex) -> (i32, i32, i32) {
-        // Full transformation pipeline:
-        // 1. Apply modelview matrix (object to camera space)
-        // 2. Apply projection matrix (camera to clip space)
-        // 3. Perspective divide (clip to NDC)
-        // 4. Viewport transform (NDC to screen space)
-
+    /// Transform vertex from object space to clip space (before perspective divide)
+    /// Returns clip space coordinates (x, y, z, w) for clipping
+    fn transform_vertex_to_clip(&self, vertex: &Vertex) -> [f32; 4] {
         // Convert vertex position to homogeneous coordinates (x, y, z, w=1)
         let v = [
             vertex.pos[0] as f32,
@@ -1042,7 +1161,6 @@ impl RspHle {
         ];
 
         // Apply modelview matrix (column-major layout)
-        // For column-major: result[i] = M[i] * v[0] + M[i+4] * v[1] + M[i+8] * v[2] + M[i+12] * v[3]
         let mut mv = [0.0f32; 4];
         for (i, elem) in mv.iter_mut().enumerate() {
             *elem = self.modelview_matrix[i] * v[0]
@@ -1060,8 +1178,12 @@ impl RspHle {
                 + self.projection_matrix[i + 12] * mv[3];
         }
 
+        clip
+    }
+
+    /// Convert clip space coordinates to screen space
+    fn clip_to_screen(&self, clip: &[f32; 4]) -> (i32, i32, i32) {
         // Perspective divide (clip space to NDC)
-        // In perspective projection, w is typically -z (from the projection matrix)
         let w = if clip[3].abs() > 0.0001 { clip[3] } else { 1.0 };
         let ndc_x = clip[0] / w;
         let ndc_y = clip[1] / w;
@@ -1073,14 +1195,118 @@ impl RspHle {
         let ndc_z = ndc_z.clamp(-1.0, 1.0);
 
         // Viewport transform (NDC to screen space)
-        // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
-        // Use viewport parameters instead of hardcoded values
         let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
         let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
         let screen_y = (vp_y + (1.0 - ndc_y) * scale_y) as i32; // Inverted Y
         let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
 
         (screen_x, screen_y, screen_z)
+    }
+
+    /// Transform vertex from object space to screen space
+    #[allow(dead_code)]
+    fn transform_vertex(&self, vertex: &Vertex) -> (i32, i32, i32) {
+        let clip = self.transform_vertex_to_clip(vertex);
+        self.clip_to_screen(&clip)
+    }
+
+    /// Check if a vertex in clip space is inside the view frustum
+    /// Returns true if the vertex should be clipped (outside frustum)
+    fn should_clip_vertex(clip: &[f32; 4]) -> bool {
+        let w = clip[3];
+        // Vertices with w <= 0 are behind the camera or invalid
+        if w <= 0.0001 {
+            return true;
+        }
+        // Clip against all 6 frustum planes: left, right, top, bottom, near, far
+        // In clip space, a point is inside if: -w <= x/y/z <= w
+        clip[0] < -w || clip[0] > w  // Left/right planes
+            || clip[1] < -w || clip[1] > w  // Top/bottom planes
+            || clip[2] < -w || clip[2] > w // Near/far planes
+    }
+
+    /// Interpolate between two vertices in clip space
+    /// t = 0.0 returns v0, t = 1.0 returns v1
+    #[allow(dead_code)] // Reserved for future proper triangle clipping
+    fn interpolate_vertex(
+        v0: &Vertex,
+        clip0: &[f32; 4],
+        v1: &Vertex,
+        clip1: &[f32; 4],
+        t: f32,
+    ) -> (Vertex, [f32; 4]) {
+        // Interpolate position in clip space (before perspective divide)
+        let clip = [
+            clip0[0] + t * (clip1[0] - clip0[0]),
+            clip0[1] + t * (clip1[1] - clip0[1]),
+            clip0[2] + t * (clip1[2] - clip0[2]),
+            clip0[3] + t * (clip1[3] - clip0[3]),
+        ];
+
+        // Interpolate vertex attributes
+        let pos = [
+            (v0.pos[0] as f32 + t * (v1.pos[0] as f32 - v0.pos[0] as f32)) as i16,
+            (v0.pos[1] as f32 + t * (v1.pos[1] as f32 - v0.pos[1] as f32)) as i16,
+            (v0.pos[2] as f32 + t * (v1.pos[2] as f32 - v0.pos[2] as f32)) as i16,
+        ];
+
+        let tex = [
+            (v0.tex[0] as f32 + t * (v1.tex[0] as f32 - v0.tex[0] as f32)) as i16,
+            (v0.tex[1] as f32 + t * (v1.tex[1] as f32 - v0.tex[1] as f32)) as i16,
+        ];
+
+        let color = [
+            (v0.color[0] as f32 + t * (v1.color[0] as f32 - v0.color[0] as f32)) as u8,
+            (v0.color[1] as f32 + t * (v1.color[1] as f32 - v0.color[1] as f32)) as u8,
+            (v0.color[2] as f32 + t * (v1.color[2] as f32 - v0.color[2] as f32)) as u8,
+            (v0.color[3] as f32 + t * (v1.color[3] as f32 - v0.color[3] as f32)) as u8,
+        ];
+
+        (Vertex { pos, tex, color }, clip)
+    }
+
+    /// Clip a line segment against a frustum plane
+    /// Returns Some(t) where the intersection occurs, or None if no intersection
+    #[allow(dead_code)] // Reserved for future proper triangle clipping
+    fn clip_line_to_plane(
+        clip0: &[f32; 4],
+        clip1: &[f32; 4],
+        plane: usize,
+        positive: bool,
+    ) -> Option<f32> {
+        // plane: 0=x, 1=y, 2=z, 3=w
+        // positive: true for +plane (right/top/far), false for -plane (left/bottom/near)
+
+        let d0 = if positive {
+            clip0[plane] - clip0[3]
+        } else {
+            -clip0[plane] - clip0[3]
+        };
+        let d1 = if positive {
+            clip1[plane] - clip1[3]
+        } else {
+            -clip1[plane] - clip1[3]
+        };
+
+        // Both inside or both outside - no intersection with this plane
+        if (d0 >= 0.0) == (d1 >= 0.0) {
+            return None;
+        }
+
+        // Calculate intersection parameter t
+        // d0 + t * (d1 - d0) = 0
+        // t = -d0 / (d1 - d0)
+        let denom = d1 - d0;
+        if denom.abs() < 0.0001 {
+            return None;
+        }
+
+        let t = -d0 / denom;
+        if (0.0..=1.0).contains(&t) {
+            Some(t)
+        } else {
+            None
+        }
     }
 }
 

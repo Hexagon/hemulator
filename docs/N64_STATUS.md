@@ -39,7 +39,62 @@
 - **Texture Operations**: More texture formats and operations needed
 - **Viewport Configuration**: Using hardcoded 320x240, needs dynamic viewport from G_MOVEMEM commands
 
-## Recent Changes (January 3, 2026)
+## Recent Changes (January 3, 2026 - Session 2)
+
+### 1. Frustum Clipping Improvements
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Changes**:
+- Split vertex transformation into separate clip space and screen space steps
+- Added `transform_vertex_to_clip()` for transforming to clip space coordinates
+- Added `should_clip_vertex()` to check if vertex is outside view frustum
+- Added `clip_to_screen()` for converting clip space to screen coordinates
+- Improved `draw_transformed_triangle()` to reject triangles completely outside frustum
+- Added foundation for future per-edge triangle clipping with `interpolate_vertex()` and `clip_line_to_plane()`
+
+**Result**:
+- Better handling of off-screen geometry
+- Foundation ready for proper triangle clipping against frustum planes
+- All 126 tests still pass
+
+---
+
+### 2. Additional F3DEX Display List Commands
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**New Commands Implemented**:
+- **G_TRI1 (0x04)**: Alternate triangle encoding used by some games
+- **G_CLEARGEOMETRYMODE (0xB6)**: Clear specific geometry mode bits
+- **G_SETGEOMETRYMODE (0xB7)**: Set specific geometry mode bits
+- **G_RDPHALF_1 (0xBF)**: Store first half of 2-word RDP commands
+- **G_RDPHALF_2 (0xB4)**: Complete 2-word RDP commands
+- **G_SETPRIMDEPTH (0xEE)**: Set primitive depth value
+
+**Result**:
+- Better compatibility with commercial ROM display lists
+- More granular geometry mode control for games
+- Support for complex RDP commands split across multiple display list entries
+
+---
+
+### 3. Lighting System Foundation
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Changes**:
+- Added light storage array (up to 8 lights with direction and color)
+- Added `num_lights` counter and `ambient_light` RGB values
+- Enhanced G_MOVEMEM (0xDC) to load light data from RDRAM
+- Light format: direction (3 floats), color (RGB, 3 floats), type (directional/point)
+- Ambient light default: (0.3, 0.3, 0.3) RGB
+
+**Result**:
+- Infrastructure ready for per-vertex lighting calculations
+- Games can now set up lighting environments
+- Foundation for N64's complete lighting model
+
+---
+
+## Previous Changes (January 3, 2026 - Session 1)
 
 ### 1. Matrix Transformation Fix - Column-Major Support
 **Files**: `crates/systems/n64/src/rsp_hle.rs`
@@ -293,22 +348,26 @@ Commercial ROMs (e.g., Super Mario 64) still don't progress past initialization 
 
 ## Next Session Priorities
 
-1. **Improve Frustum Clipping**: Replace simple NDC clamping with proper view frustum clipping
-   - Clip triangles against near/far planes before rasterization
-   - Prevent artifacts from vertices behind the camera
-   - Generate new vertices at clip plane intersections
-2. **Add More F3DEX Commands**: Implement missing display list commands for commercial ROM support
-   - G_RDPHALF_2, G_RDPHALF_CONT for split RDP commands
-   - G_LOAD_UCODE for dynamic microcode switching
-   - G_CLEARGEOMETRYMODE, G_SETGEOMETRYMODE improvements
-3. **Implement Lighting**: Add support for N64's lighting system
-   - G_MOVEMEM for loading light data
-   - Ambient, directional, and point lights
-   - Per-vertex lighting calculations
-4. **Add More RDP Commands**: SET_COMBINE_MODE for blending, SET_Z_IMAGE, more texture formats
-5. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
+1. **Bilinear Texture Filtering**: Add bilinear interpolation for smoother textures
+   - Sample 4 neighboring texels and interpolate
+   - Apply fractional texture coordinates properly
+2. **Mipmapping Support**: Implement LOD selection for textures
+   - Calculate appropriate mipmap level based on screen space derivatives
+   - Load and sample from multiple mipmap levels
+3. **Per-Vertex Lighting**: Implement N64's lighting calculations
+   - Use loaded light data to calculate per-vertex illumination
+   - Support ambient + directional lights (up to 8)
+   - Apply lighting before vertex color output
+4. **Display List Call Stack**: Implement proper G_DL call/return mechanism
+   - Push/pop display list addresses on call stack
+   - Support nested display list calls
+   - Handle G_DL_PUSH and G_DL_NOPUSH correctly
+5. **Triangle Clipping**: Full per-edge clipping against frustum planes
+   - Use `clip_line_to_plane()` for edge-plane intersections
+   - Generate new vertices at clip boundaries
+   - Handle polygon subdivision for clipped triangles
 6. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
-7. **Display List Branching**: Full support for G_DL with proper call stack
+7. **Backface Culling**: Implement proper backface culling based on geometry mode
 
 ## Reference Documentation
 
