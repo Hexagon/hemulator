@@ -488,6 +488,55 @@ impl EmulatorSystem {
     fn requires_host_key_for_function_keys(&self) -> bool {
         matches!(self, EmulatorSystem::PC(_))
     }
+
+    /// Get the name of the currently active renderer
+    fn get_current_renderer_name(&self) -> String {
+        match self {
+            EmulatorSystem::NES(_) => {
+                // NES uses software renderer by default
+                "Software".to_string()
+            }
+            EmulatorSystem::GameBoy(_) => "Software".to_string(),
+            EmulatorSystem::Atari2600(_) => "Software".to_string(),
+            EmulatorSystem::PC(sys) => {
+                // PC can use different video adapters
+                let adapter_name = sys.video_adapter_name();
+                if adapter_name.contains("Hardware") {
+                    "Hardware".to_string()
+                } else {
+                    "Software".to_string()
+                }
+            }
+            EmulatorSystem::SNES(_) => "Software".to_string(),
+            EmulatorSystem::N64(_) => {
+                // N64 uses software renderer by default
+                // Note: OpenGL renderer would need to be exposed via debug info or separate method
+                "Software".to_string()
+            }
+        }
+    }
+
+    /// Get the list of available renderers for this system
+    /// Returns a vector of renderer names that are available
+    fn get_available_renderers(&self) -> Vec<String> {
+        match self {
+            EmulatorSystem::NES(_) => {
+                // OpenGL renderer exists but requires GL context to enable
+                vec!["Software".to_string()]
+            }
+            EmulatorSystem::GameBoy(_) => vec!["Software".to_string()],
+            EmulatorSystem::Atari2600(_) => vec!["Software".to_string()],
+            EmulatorSystem::PC(_) => {
+                // PC has both software and hardware video adapters available
+                vec!["Software".to_string(), "Hardware".to_string()]
+            }
+            EmulatorSystem::SNES(_) => vec!["Software".to_string()],
+            EmulatorSystem::N64(_) => {
+                // OpenGL renderer exists but requires GL context to enable
+                vec!["Software".to_string()]
+            }
+        }
+    }
 }
 
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
@@ -1906,7 +1955,8 @@ fn main() {
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
-    egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
+    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+    egui_app.property_pane.available_renderers = sys.get_available_renderers();
     egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
     // Initialize recent files menu
@@ -2225,6 +2275,10 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::NES(Box::new(nes_sys));
                                         egui_app.property_pane.system_name = "NES".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2257,6 +2311,10 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
                                         egui_app.property_pane.system_name = "Game Boy".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2284,6 +2342,10 @@ fn main() {
                                         sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
                                         egui_app.property_pane.system_name =
                                             "Atari 2600".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2310,6 +2372,10 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::PC(Box::new(pc_sys));
                                         egui_app.property_pane.system_name = "PC".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Disk".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2336,6 +2402,10 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::SNES(Box::new(snes_sys));
                                         egui_app.property_pane.system_name = "SNES".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2362,6 +2432,10 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::N64(Box::new(n64_sys));
                                         egui_app.property_pane.system_name = "N64".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
@@ -2654,6 +2728,10 @@ fn main() {
                                     sys = EmulatorSystem::PC(Box::new(pc_sys));
                                     rom_loaded = true;
                                     egui_app.property_pane.system_name = "PC".to_string();
+                                    egui_app.property_pane.rendering_backend =
+                                        sys.get_current_renderer_name();
+                                    egui_app.property_pane.available_renderers =
+                                        sys.get_available_renderers();
                                     egui_app.status_bar.set_message(format!(
                                         "Project loaded: {}",
                                         path.file_name().unwrap_or_default().to_string_lossy()
@@ -2881,6 +2959,21 @@ fn main() {
                         }
                     }
                 }
+                PropertyAction::SetRenderer(renderer_name) => {
+                    // Note: Actual renderer switching would require recreating the system
+                    // with the new renderer, which is complex for systems like NES/N64
+                    // that need OpenGL context. For now, just inform the user.
+                    egui_app.status_bar.set_message(format!(
+                        "Renderer switching to '{}' requires restart. Feature coming soon.",
+                        renderer_name
+                    ));
+                    egui_app.tab_manager.add_log(format!(
+                        "Renderer switch requested: {} (requires restart - feature in development)",
+                        renderer_name
+                    ));
+                    // Revert the UI selection back to current renderer
+                    egui_app.property_pane.rendering_backend = sys.get_current_renderer_name();
+                }
             }
         }
 
@@ -2952,6 +3045,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "NES".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new NES system".to_string());
@@ -2962,6 +3059,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "Game Boy".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new Game Boy system".to_string());
@@ -2974,6 +3075,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "Atari 2600".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new Atari 2600 system".to_string());
@@ -2984,6 +3089,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "PC".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new PC system".to_string());
@@ -2994,6 +3103,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "SNES".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new SNES system".to_string());
@@ -3004,6 +3117,10 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "N64".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
                             egui_app
                                 .status_bar
                                 .set_message("Created new N64 system".to_string());
