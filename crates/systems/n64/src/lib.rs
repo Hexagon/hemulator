@@ -109,6 +109,13 @@ impl N64System {
         self.cpu.bus_mut().set_controller4(state);
     }
 
+    /// Enable OpenGL hardware rendering (requires OpenGL feature)
+    /// This should be called from the frontend after obtaining a GL context
+    #[cfg(feature = "opengl")]
+    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
+        self.cpu.bus_mut().enable_opengl_renderer(gl)
+    }
+
     /// Get debug information for the GUI overlay
     pub fn get_debug_info(&self) -> DebugInfo {
         let bus = self.cpu.bus();

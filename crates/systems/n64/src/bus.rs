@@ -154,6 +154,12 @@ impl N64Bus {
         &mut self.mi
     }
 
+    /// Enable OpenGL hardware rendering for RDP (requires OpenGL feature)
+    #[cfg(feature = "opengl")]
+    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
+        self.rdp.enable_opengl_renderer(gl)
+    }
+
     /// Execute pending RSP task if RSP is not halted
     /// Returns true if an SP interrupt should be triggered
     pub fn process_rsp_task(&mut self) -> bool {

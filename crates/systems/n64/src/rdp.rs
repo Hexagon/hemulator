@@ -82,6 +82,8 @@
 
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
 use super::rdp_renderer_software::SoftwareRdpRenderer;
+#[cfg(feature = "opengl")]
+use super::rdp_renderer_opengl::OpenGLRdpRenderer;
 use emu_core::graphics::ColorOps;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -189,6 +191,10 @@ impl Rdp {
         // Initialize framebuffer to black (transparent)
         renderer.clear(0x00000000);
 
+        log(LogCategory::Stubs, LogLevel::Info, || {
+            "N64 RDP initialized with Software renderer (320x240)".to_string()
+        });
+
         Self {
             renderer,
             width,
@@ -225,6 +231,25 @@ impl Rdp {
             dpc_current: 0,
             dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
         }
+    }
+
+    /// Enable OpenGL hardware rendering (requires OpenGL feature)
+    /// This should be called from the frontend after obtaining a GL context
+    #[cfg(feature = "opengl")]
+    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
+        let mut new_renderer = Box::new(OpenGLRdpRenderer::new(gl, self.width, self.height)?);
+        
+        // Initialize to black
+        new_renderer.clear(0x00000000);
+        
+        // Replace the software renderer with OpenGL renderer
+        self.renderer = new_renderer;
+        
+        log(LogCategory::Stubs, LogLevel::Info, || {
+            format!("N64 RDP switched to OpenGL hardware renderer ({}x{})", self.width, self.height)
+        });
+        
+        Ok(())
     }
 
     /// Reset RDP to initial state
