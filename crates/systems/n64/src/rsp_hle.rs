@@ -137,15 +137,20 @@ impl RspHle {
     }
 
     /// Multiply two 4x4 matrices: result = a * b
-    /// Matrices are in row-major order
+    /// Matrices are in column-major order (N64 format)
     fn multiply_matrix(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
         let mut result = [0.0f32; 16];
-        for i in 0..4 {
-            for j in 0..4 {
-                result[i * 4 + j] = a[i * 4] * b[j]
-                    + a[i * 4 + 1] * b[4 + j]
-                    + a[i * 4 + 2] * b[8 + j]
-                    + a[i * 4 + 3] * b[12 + j];
+        // Column-major multiplication: C[col][row] = sum(A[k][row] * B[col][k])
+        for col in 0..4 {
+            for row in 0..4 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    // A[k][row] is at index row + k*4 (column-major)
+                    // B[col][k] is at index k + col*4 (column-major)
+                    sum += a[row + k * 4] * b[k + col * 4];
+                }
+                // C[col][row] is at index row + col*4 (column-major)
+                result[row + col * 4] = sum;
             }
         }
         result
@@ -577,6 +582,16 @@ impl RspHle {
                 // Load matrix from RDRAM
                 let matrix = self.load_matrix_from_rdram(rdram, matrix_addr);
 
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_MTX addr=0x{:08X} type={} mode={} push={}",
+                        matrix_addr,
+                        if projection { "PROJ" } else { "MV" },
+                        if load { "LOAD" } else { "MUL" },
+                        push
+                    )
+                });
+
                 // Apply matrix based on type
                 if projection {
                     // Projection matrix
@@ -780,6 +795,16 @@ impl RspHle {
         let (x1, y1, z1) = self.transform_vertex(vert1);
         let (x2, y2, z2) = self.transform_vertex(vert2);
 
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE: Triangle v{}({},{},{}) v{}({},{},{}) v{}({},{},{}) -> screen ({},{},{}) ({},{},{}) ({},{},{})",
+                v0, vert0.pos[0], vert0.pos[1], vert0.pos[2],
+                v1, vert1.pos[0], vert1.pos[1], vert1.pos[2],
+                v2, vert2.pos[0], vert2.pos[1], vert2.pos[2],
+                x0, y0, z0, x1, y1, z1, x2, y2, z2
+            )
+        });
+
         // Convert vertex colors to ARGB format
         let c0 = u32::from_be_bytes([0xFF, vert0.color[0], vert0.color[1], vert0.color[2]]);
         let c1 = u32::from_be_bytes([0xFF, vert1.color[0], vert1.color[1], vert1.color[2]]);
@@ -890,29 +915,36 @@ impl RspHle {
             1.0,
         ];
 
-        // Apply modelview matrix
+        // Apply modelview matrix (column-major layout)
+        // For column-major: result[i] = M[i] * v[0] + M[i+4] * v[1] + M[i+8] * v[2] + M[i+12] * v[3]
         let mut mv = [0.0f32; 4];
         for (i, elem) in mv.iter_mut().enumerate() {
-            *elem = self.modelview_matrix[i * 4] * v[0]
-                + self.modelview_matrix[i * 4 + 1] * v[1]
-                + self.modelview_matrix[i * 4 + 2] * v[2]
-                + self.modelview_matrix[i * 4 + 3] * v[3];
+            *elem = self.modelview_matrix[i] * v[0]
+                + self.modelview_matrix[i + 4] * v[1]
+                + self.modelview_matrix[i + 8] * v[2]
+                + self.modelview_matrix[i + 12] * v[3];
         }
 
-        // Apply projection matrix
+        // Apply projection matrix (column-major layout)
         let mut clip = [0.0f32; 4];
         for (i, elem) in clip.iter_mut().enumerate() {
-            *elem = self.projection_matrix[i * 4] * mv[0]
-                + self.projection_matrix[i * 4 + 1] * mv[1]
-                + self.projection_matrix[i * 4 + 2] * mv[2]
-                + self.projection_matrix[i * 4 + 3] * mv[3];
+            *elem = self.projection_matrix[i] * mv[0]
+                + self.projection_matrix[i + 4] * mv[1]
+                + self.projection_matrix[i + 8] * mv[2]
+                + self.projection_matrix[i + 12] * mv[3];
         }
 
         // Perspective divide (clip space to NDC)
+        // In perspective projection, w is typically -z (from the projection matrix)
         let w = if clip[3].abs() > 0.0001 { clip[3] } else { 1.0 };
         let ndc_x = clip[0] / w;
         let ndc_y = clip[1] / w;
         let ndc_z = clip[2] / w;
+
+        // Clamp NDC coordinates to reasonable range to prevent overflow
+        let ndc_x = ndc_x.clamp(-10.0, 10.0);
+        let ndc_y = ndc_y.clamp(-10.0, 10.0);
+        let ndc_z = ndc_z.clamp(-1.0, 1.0);
 
         // Viewport transform (NDC to screen space)
         // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
@@ -1020,13 +1052,17 @@ mod tests {
         // Modelview: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // Projection: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // NDC: divide by w=1 gives (50, 60, 100)
+        // Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 50.0)
+        //   ndc_y = 10.0 (clamped from 60.0)
+        //   ndc_z = 1.0 (clamped from 100.0)
         // Screen space:
-        //   x = (50 + 1) * 160 = 51 * 160 = 8160
-        //   y = (1 - 60) * 120 = -59 * 120 = -7080
-        //   z = (100 + 1) * 32767.5 = 3309517.5
-        assert_eq!(x, 8160);
-        assert_eq!(y, -7080);
-        assert!(z > 3000000);
+        //   x = (10.0 + 1.0) * 160 = 1760
+        //   y = (1.0 - 10.0) * 120 = -1080
+        //   z = (1.0 + 1.0) * 32767.5 = 65535
+        assert_eq!(x, 1760);
+        assert_eq!(y, -1080);
+        assert_eq!(z, 65535);
     }
 
     #[test]
@@ -1404,7 +1440,8 @@ mod tests {
     fn test_vertex_transform_with_matrices() {
         let mut hle = RspHle::new();
 
-        // Set up a simple scaling matrix (scale by 2)
+        // Set up a simple scaling matrix (scale by 2) in column-major format
+        // Diagonal elements [0, 5, 10, 15] contain the scale factors
         hle.modelview_matrix = [
             2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
@@ -1421,10 +1458,14 @@ mod tests {
         // - Modelview transforms (10,10,10) to (20,20,20)
         // - Projection (identity) keeps it (20,20,20)
         // - NDC: divide by w=1 gives (20,20,20)
-        // - Screen: ((20+1)*160, (1-20)*120, (20+1)*32767.5)
-        //         = (3360, -2280, 688318.5)
-        assert!(x > 1000); // Should be scaled up significantly
-        assert!(z > 10); // Z should also be transformed
+        // - Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 20.0)
+        //   ndc_y = 10.0 (clamped from 20.0)
+        //   ndc_z = 1.0 (clamped from 20.0)
+        // - Screen: ((10.0+1)*160, (1-10.0)*120, (1.0+1)*32767.5)
+        //         = (1760, -1080, 65535)
+        assert_eq!(x, 1760);
+        assert!(z > 10); // Z should be transformed (will be clamped to max)
     }
 
     #[test]
