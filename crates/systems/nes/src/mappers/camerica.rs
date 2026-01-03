@@ -29,8 +29,8 @@ pub struct Camerica {
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // Camerica uses fixed mirroring from the header
-        // (Fire Hawk variant supports 1-screen mirroring via mapper, but most use fixed)
+        // Initialize mirroring from the cartridge header.
+        // This will be overridden by mapper writes if the game uses dynamic mirroring control.
         ppu.set_mirroring(cart.mirroring);
         Self {
             prg_rom: cart.prg_rom,
@@ -61,11 +61,15 @@ impl Camerica {
             // Only lower 4 bits are used for bank selection
             self.bank_select = val & 0x0F;
 
-            // Some boards (Fire Hawk, Micro Machines) use bit 4 for mirroring control:
+            // Mapper-controlled mirroring via bit 4:
             // - Bit 4 = 0: One-screen lower
             // - Bit 4 = 1: One-screen upper
-            // This is board-specific: some games use fixed mirroring from the header,
-            // while others dynamically control it via this bit.
+            //
+            // Some Camerica boards (Fire Hawk, Micro Machines) use this feature for dynamic
+            // mirroring control, while others use fixed mirroring from the cartridge header.
+            // Since we can't distinguish board variants at runtime, we always apply bit 4.
+            // This works because games using fixed mirroring typically don't toggle bit 4,
+            // so they maintain consistent mirroring behavior.
             let mirroring = if (val & 0x10) != 0 {
                 Mirroring::SingleScreenUpper
             } else {
