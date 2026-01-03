@@ -300,7 +300,7 @@ impl Tia {
     const HBLANK_COLOR_CLOCKS: i16 = 68;
 
     /// Get current visible x position (accounting for horizontal blank)
-    /// 
+    ///
     /// Real Atari 2600 hardware has a ~5 color clock latching delay when writing to
     /// position reset strobes (RESP0/RESP1/RESM0/RESM1/RESBL). The sprite/ball appears
     /// approximately 5 pixels to the right of the current beam position.
