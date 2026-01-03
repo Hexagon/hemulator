@@ -522,7 +522,14 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => {
                 // OpenGL renderer exists but requires GL context to enable
-                vec!["Software".to_string()]
+                #[cfg(feature = "opengl")]
+                {
+                    vec!["Software".to_string(), "OpenGL".to_string()]
+                }
+                #[cfg(not(feature = "opengl"))]
+                {
+                    vec!["Software".to_string()]
+                }
             }
             EmulatorSystem::GameBoy(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari2600(_) => vec!["Software".to_string()],
@@ -532,8 +539,15 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SNES(_) => vec!["Software".to_string()],
             EmulatorSystem::N64(_) => {
-                // OpenGL renderer exists but requires GL context to enable
-                vec!["Software".to_string()]
+                // OpenGL renderer is available when opengl feature is enabled
+                #[cfg(feature = "opengl")]
+                {
+                    vec!["Software".to_string(), "OpenGL".to_string()]
+                }
+                #[cfg(not(feature = "opengl"))]
+                {
+                    vec!["Software".to_string()]
+                }
             }
         }
     }
