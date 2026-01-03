@@ -55,17 +55,24 @@ impl Camerica {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select 16KB bank for $8000-$BFFF
             // Only lower 4 bits are used for bank selection
             self.bank_select = val & 0x0F;
 
-            // Note: Fire Hawk board uses bit 4 for mirroring control:
+            // Some boards (Fire Hawk, Micro Machines) use bit 4 for mirroring control:
             // - Bit 4 = 0: One-screen lower
             // - Bit 4 = 1: One-screen upper
-            // However, this is board-specific and most games use fixed mirroring.
-            // For now, we handle only fixed mirroring as specified in the cartridge header.
+            // This is board-specific: some games use fixed mirroring from the header,
+            // while others dynamically control it via this bit.
+            use crate::cartridge::Mirroring;
+            let mirroring = if (val & 0x10) != 0 {
+                Mirroring::SingleScreenUpper
+            } else {
+                Mirroring::SingleScreenLower
+            };
+            ppu.set_mirroring(mirroring);
         }
     }
 
@@ -178,5 +185,37 @@ mod tests {
             assert_eq!(camerica.read_prg(0x8000), 0x11 * (i as u8 + 1));
             assert_eq!(camerica.read_prg(0xC000), 0x88); // Last bank always fixed
         }
+    }
+
+    #[test]
+    fn camerica_mirroring_control() {
+        let prg = vec![0; 0x8000]; // 2 banks
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical, // Initial mirroring (will be overridden)
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Write with bit 4 = 0: should select single-screen lower
+        camerica.write_prg(0x8000, 0x00, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Write with bit 4 = 1: should select single-screen upper
+        camerica.write_prg(0x8000, 0x10, &mut ppu);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        // Write bank select with bit 4 = 0: should select single-screen lower
+        camerica.write_prg(0xC000, 0x03, &mut ppu); // Bank 3, bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Write bank select with bit 4 = 1: should select single-screen upper
+        camerica.write_prg(0xC000, 0x15, &mut ppu); // Bank 5, bit 4 = 1
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
     }
 }
