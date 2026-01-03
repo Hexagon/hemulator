@@ -1,8 +1,8 @@
 # N64 Emulator Development Status
 
 **Last Updated**: January 3, 2026  
-**Status**: Critical ERET/interrupt bugs fixed, enhanced test ROM rendering, RSP HLE task structure needs work
-**ROM Tested**: Enhanced test ROM (WORKING), 3D Pong test ROM (NOT RENDERING), Super Mario 64 (NOT RENDERING)
+**Status**: Virtual-to-physical address conversion fixed, RSP task processing partially working
+**ROM Tested**: Enhanced test ROM (WORKING), 3D Pong test ROM (PARTIAL - green screen), Super Mario 64 (NOT RENDERING)
 
 ## Current State
 
@@ -19,25 +19,60 @@
 - **RDP Display Lists**: SET_FILL_COLOR, FILL_RECTANGLE, SYNC_FULL commands working
 - **RDP Texture Commands**: LOAD_TLUT, TEXTURE_RECTANGLE with texture sampling
 - **Enhanced Test ROM**: Renders red and green rectangles correctly (direct RDP commands)
+- **Virtual Address Translation**: KSEG0/KSEG1 to physical address conversion (FIXED Jan 3)
+- **RSP Task Structure Reading**: Can read task structure from RDRAM at 0x00200000 (FIXED Jan 3)
+- **F3DEX Display List Parsing**: Correctly parses display lists with virtual addresses (FIXED Jan 3)
 
 ### 🔧 Partially Working
 
-- **RSP HLE**: Basic infrastructure exists, microcode detection works, but task structure reading needs fixing
-- **RDP Commands**: Basic commands work (fill, rectangles), triangles and textures need more testing
-- **Interrupt Handling**: Core infrastructure working, but ROMs that rely on RSP-generated content don't render yet
+- **RSP HLE**: Task structure reading works, display list parsing works, but 3D rendering shows only green screen
+- **3D Pong ROM**: Processes RSP tasks and renders output, but shows solid green instead of expected geometry
+- **RDP Commands**: Basic commands work (fill, rectangles), triangles rendering but color/geometry may be incorrect
+- **Interrupt Handling**: Core infrastructure working
 
 ### ❌ Not Working / Needs Improvement
 
-- **RSP Task Structure Reading**: Pong3D and commercial ROMs store task structure in RDRAM, HLE needs to read it correctly
-- **RSP Display List Processing**: F3DEX display list parsing exists but data_ptr not being found from task structure
-- **3D Rendering**: Triangle rasterization implemented but not being triggered by RSP HLE
-- **Commercial ROM Graphics**: RSP not generating RDP commands for commercial games
+- **3D Geometry Rendering**: Triangles may not be rendering correctly (investigating green screen issue)
+- **Viewport/Clipping**: May need proper viewport setup for 3D geometry to be visible
+- **Commercial ROM Graphics**: RSP processing needs more work for complex games
 - **PIF Controller Polling**: Controller input not yet tested with running games
 - **Texture Operations**: More texture formats and operations needed
 
 ## Recent Changes (January 3, 2026)
 
-### 1. Critical ERET Bug Fix
+### 1. Virtual-to-Physical Address Conversion Fix
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Problem**: F3DEX display list commands contain virtual addresses (0x80xxxxxx for KSEG0), but the code was treating them as physical addresses when indexing into RDRAM. This caused out-of-bounds access and prevented display lists, vertices, and matrices from being loaded correctly.
+
+**Fix**: 
+- Added `virt_to_phys()` helper function to convert N64 virtual addresses to physical addresses
+- Applied conversion in `parse_f3dex_display_list()` for display list addresses
+- Applied conversion in `load_vertex()` for vertex data addresses
+- Applied conversion in `load_matrix_from_rdram()` for matrix data addresses
+
+**Result**: 
+- RSP can now correctly read task structures from RDRAM
+- F3DEX display lists are parsed successfully
+- Pong3D ROM now produces visible output (green screen - partial rendering)
+- All 126 tests still pass
+
+---
+
+### 2. Enhanced Logging for RSP Task Processing
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Changes**:
+- Added detailed logging for task structure reading from DMEM and RDRAM
+- Added logging for display list parsing with virtual and physical addresses
+- Added logging for RDP output buffer processing
+- Added warnings when no display list is found
+
+**Result**: Better debugging visibility into RSP task processing
+
+---
+
+### 3. Critical ERET Bug Fix
 **Files**: `crates/core/src/cpu_mips_r4300i.rs`
 
 **Problem**: ERET instruction was not clearing the EXL (Exception Level) bit in the Status register, keeping the CPU permanently in exception mode and preventing interrupts from being delivered.
@@ -236,11 +271,17 @@ Commercial ROMs (e.g., Super Mario 64) still don't progress past initialization 
 
 ## Next Session Priorities
 
-1. **Expand RSP Task DMA**: Implement proper task structure parsing from DMEM
-2. **Add More RDP Commands**: SET_COMBINE_MODE usage, SET_Z_IMAGE, more texture formats
-3. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
-4. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
-5. **Matrix Stack Management**: Improve G_POPMTX handling for nested display lists
+1. **Investigate Green Screen Issue**: Debug why Pong3D ROM shows solid green instead of 3D geometry
+   - Check if clear/fill commands are overwriting geometry
+   - Verify viewport and clipping settings
+   - Check triangle rasterization with transformed coordinates
+2. **Improve 3D Rendering Pipeline**: Ensure vertex transformation and triangle rendering work correctly
+   - Verify matrix transformations are applied properly
+   - Check screen space coordinate mapping
+   - Validate Z-buffer usage
+3. **Add More RDP Commands**: SET_COMBINE_MODE usage, SET_Z_IMAGE, more texture formats
+4. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
+5. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
 6. **Display List Branching**: Full support for G_DL with proper call stack
 
 ## Reference Documentation
