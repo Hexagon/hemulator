@@ -3805,14 +3805,15 @@ fn main() {
             let time_diff_secs = (desired_emulated_time_secs - current_emulated_time_secs).max(0.0);
 
             // Determine how many frames to step based on time difference
-            // For stable display, always step exactly 0 or 1 frame per iteration
-            // to avoid visual artifacts from frame skipping
-            let frames_to_step = if time_diff_secs >= target_frame_duration.as_secs_f64() {
-                // We're behind - step ONE frame to maintain visual consistency
-                // Stepping multiple frames causes visible "jumping" artifacts
-                1
+            // Calculate the actual number of frames we need to catch up
+            // We step all necessary frames but only render the last one for smooth visuals
+            let frames_behind =
+                (time_diff_secs / target_frame_duration.as_secs_f64()).floor() as u32;
+            let frames_to_step = if frames_behind > 0 {
+                // Cap at a reasonable maximum to avoid spiral of death
+                // If we're more than 5 frames behind, just step 5 to try to recover
+                frames_behind.min(5)
             } else {
-                // We're ahead - don't step any frames this iteration
                 0
             };
 
@@ -3840,7 +3841,7 @@ fn main() {
             }
 
             // Accumulate emulated time outside the loop (based on frames actually stepped)
-            total_emulated_time += target_frame_duration * frames_to_step as u32;
+            total_emulated_time += target_frame_duration * frames_to_step;
 
             // Render only the last frame to the display (always update client screen - requirement 3.2)
             if let Some(mut frame) = last_frame_opt {
