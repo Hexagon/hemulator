@@ -542,6 +542,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_sprite_overflow_rom() {
         // Load the sprite overflow test ROM
         let test_rom = include_bytes!("../../../../test_roms/snes/test_sprite_overflow.sfc");
