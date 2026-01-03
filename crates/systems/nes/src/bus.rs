@@ -44,6 +44,7 @@ pub struct NesBus {
     // Simple controller state: each u8 is 8-button shift register (bit0 first)
     pub controller_state: [u8; 2],
     controller_shift: [Cell<u8>; 2],
+    controller_read_count: [Cell<u8>; 2],
     strobe: Cell<bool>,
 }
 
@@ -57,6 +58,7 @@ impl NesBus {
             mapper: None,
             controller_state: [0; 2],
             controller_shift: [Cell::new(0), Cell::new(0)],
+            controller_read_count: [Cell::new(0), Cell::new(0)],
             strobe: Cell::new(false),
         }
     }
@@ -159,20 +161,36 @@ impl Bus for NesBus {
                         if self.strobe.get() {
                             self.controller_state[0] & 1
                         } else {
-                            let cur = self.controller_shift[0].get();
-                            let v = cur & 1;
-                            self.controller_shift[0].set(cur >> 1);
-                            v
+                            let count = self.controller_read_count[0].get();
+                            self.controller_read_count[0].set(count.saturating_add(1));
+
+                            // After 8 reads, return 1 (open bus behavior)
+                            if count >= 8 {
+                                1
+                            } else {
+                                let cur = self.controller_shift[0].get();
+                                let v = cur & 1;
+                                self.controller_shift[0].set(cur >> 1);
+                                v
+                            }
                         }
                     }
                     0x4017 => {
                         if self.strobe.get() {
                             self.controller_state[1] & 1
                         } else {
-                            let cur = self.controller_shift[1].get();
-                            let v = cur & 1;
-                            self.controller_shift[1].set(cur >> 1);
-                            v
+                            let count = self.controller_read_count[1].get();
+                            self.controller_read_count[1].set(count.saturating_add(1));
+
+                            // After 8 reads, return 1 (open bus behavior)
+                            if count >= 8 {
+                                1
+                            } else {
+                                let cur = self.controller_shift[1].get();
+                                let v = cur & 1;
+                                self.controller_shift[1].set(cur >> 1);
+                                v
+                            }
                         }
                     }
                     _ => 0,
@@ -239,6 +257,10 @@ impl Bus for NesBus {
                     if st {
                         self.controller_shift[0].set(self.controller_state[0]);
                         self.controller_shift[1].set(self.controller_state[1]);
+                    } else {
+                        // Reset read counters when strobe goes low
+                        self.controller_read_count[0].set(0);
+                        self.controller_read_count[1].set(0);
                     }
                 }
             }

@@ -796,7 +796,6 @@ mod tests {
     fn test_nes_controller_reads_beyond_8_bits() {
         // Edge case: Reading beyond the standard 8 button bits
         // Hardware behavior: After 8 reads, subsequent reads should return 1 (open bus)
-        // Current implementation returns 0, which is acceptable for most games
         use crate::bus::Bus;
 
         let mut sys = NesSystem::default();
@@ -815,13 +814,14 @@ mod tests {
                 assert_eq!(bus.read(0x4016) & 1, expected, "Bit {} mismatch", i);
             }
 
-            // Read beyond 8 bits - implementation returns 0 (shift register empty)
-            // Hardware would return 1 (open bus), but 0 is acceptable
+            // Read beyond 8 bits - should return 1 (open bus behavior)
             for i in 8..16 {
                 let val = bus.read(0x4016) & 1;
-                // Document that we return 0, not hardware-accurate 1
-                // This is acceptable as most games don't read beyond 8 bits
-                assert_eq!(val, 0, "Bit {} beyond valid range should return 0", i);
+                assert_eq!(
+                    val, 1,
+                    "Bit {} beyond valid range should return 1 (open bus)",
+                    i
+                );
             }
         }
     }
@@ -945,7 +945,11 @@ mod tests {
 
             // Write through mirror
             bus.write(0x1543, 0x55);
-            assert_eq!(bus.read(0x0543), 0x55, "Write through mirror should affect base");
+            assert_eq!(
+                bus.read(0x0543),
+                0x55,
+                "Write through mirror should affect base"
+            );
             assert_eq!(bus.read(0x0D43), 0x55, "Mirror should be consistent");
         }
     }

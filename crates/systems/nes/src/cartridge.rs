@@ -362,8 +362,7 @@ mod tests {
             0x01, 0x01, // 16KB PRG, 8KB CHR
             0x00, // Flags 6
             0x08, // Flags 7: NES 2.0 format (bits 2-3 = 10)
-            0x00, 0x00, 0x00, 0x00,
-            0x01, // Byte 12: PAL timing (bits 0-1 = 01)
+            0x00, 0x00, 0x00, 0x00, 0x01, // Byte 12: PAL timing (bits 0-1 = 01)
             0x00, 0x00, 0x00,
         ];
         data.extend(vec![0; 16 * 1024 + 8 * 1024]);

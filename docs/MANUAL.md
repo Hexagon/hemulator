@@ -622,7 +622,6 @@ The emulator supports the following NES mappers:
 
 **Known Limitations**:
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but may not handle edge cases requiring precise PPU timing
-- **Controller Edge Cases**: Reading controller ports beyond 8 bits returns 0 instead of hardware-accurate 1 (open bus), but this is acceptable as most games don't read beyond 8 bits
 - **DMC Channel**: Delta modulation channel not yet implemented - games using DMC samples may have incomplete audio
 - **Unsupported Mappers**: Games using mappers beyond the supported 14 will not work (affects ~10% of games)
 
