@@ -305,7 +305,14 @@ impl Tia {
     fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
         let p = pos as i16;
         let m = motion as i16;
-        (p + m).clamp(0, 159) as u8
+        let result = p + m;
+        // Wrap around the 160-pixel screen width
+        // The TIA hardware wraps positions, not clamps them
+        if result < 0 {
+            ((result % 160) + 160) as u8
+        } else {
+            (result % 160) as u8
+        }
     }
 
     /// Create a new TIA chip
@@ -441,6 +448,18 @@ impl Tia {
     /// Get a monotonically increasing scanline counter (increments once per scanline)
     pub fn get_scanline_counter(&self) -> u64 {
         self.scanline_counter
+    }
+
+    /// Latch the current scanline's state immediately (public wrapper for render timing)
+    pub fn latch_current_scanline_state(&mut self) {
+        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            eprintln!(
+                "[TIA LATCH] Explicitly latching scanline {} state",
+                self.scanline
+            );
+        }
+        self.latch_scanline_state(self.scanline);
     }
 
     /// Latch current TIA state for a scanline (for later rendering)
@@ -784,8 +803,13 @@ impl Tia {
             }
 
             // Debug logging
-            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Trace) {
-                eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+                && (old_scanline == 261 || self.scanline <= 1)
+            {
+                eprintln!(
+                    "[TIA CLOCK] Scanline {} -> {} (latched {})",
+                    old_scanline, self.scanline, old_scanline
+                );
             }
         }
     }
@@ -809,16 +833,84 @@ impl Tia {
         self.scanline
     }
 
+    /// Get current VSYNC state
+    pub fn vsync(&self) -> bool {
+        self.vsync
+    }
+
+    /// Prepare for a new frame capture.
+    ///
+    /// The Atari 2600 can generate frames with slightly varying scanline counts;
+    /// for stable host-side rendering we treat VSYNC boundaries as frame delimiters.
+    /// Clearing latched scanline state here ensures the renderer uses a coherent
+    /// set of scanlines from a single frame.
+    pub fn begin_new_frame(&mut self) {
+        for state in &mut self.scanline_states {
+            *state = ScanlineState::default();
+        }
+        self.cached_visible_start = None;
+
+        // DO NOT reset scanline or pixel counters here!
+        // The TIA continues to run with consistent timing across frame boundaries.
+        // Resetting these counters creates timing discontinuities that break horizontal
+        // positioning (current_visible_x() becomes incorrect for sprite RESPx/RESMx/RESBL).
+        // Instead, the frame boundary is tracked externally and rendering uses modulo
+        // arithmetic to map TIA scanlines to framebuffer rows.
+    }
+
+    /// Determine the first visible scanline in *absolute* TIA scanline coordinates,
+    /// searching in frame order starting from a caller-provided frame boundary.
+    ///
+    /// This avoids the classic "rolling" symptom when the host renders 192 lines
+    /// from a drifting reference point.
+    pub fn visible_window_start_scanline_from(&self, frame_start_scanline: u16) -> u16 {
+        let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
+
+        for offset in 1..262u16 {
+            let prev_idx = (frame_start_scanline + offset - 1) % 262;
+            let cur_idx = (frame_start_scanline + offset) % 262;
+
+            let prev = self
+                .scanline_states
+                .get(prev_idx as usize)
+                .copied()
+                .unwrap_or_default();
+            let cur = self
+                .scanline_states
+                .get(cur_idx as usize)
+                .copied()
+                .unwrap_or_default();
+
+            if debug && offset < 100 {
+                eprintln!(
+                    "[VISIBLE] abs_prev={} abs_cur={} prev.vblank={} cur.vblank={}",
+                    prev_idx, cur_idx, prev.vblank, cur.vblank
+                );
+            }
+
+            if prev.vblank && !cur.vblank {
+                if debug {
+                    eprintln!(
+                        "[VISIBLE] Found transition at abs scanline {} (frame_start={})",
+                        cur_idx, frame_start_scanline
+                    );
+                }
+                return cur_idx;
+            }
+        }
+
+        // Fallback: common NTSC visible start is around scanline ~37-40 *after* VSYNC.
+        (frame_start_scanline + 40) % 262
+    }
+
     /// Try to infer the start of the visible picture area based on VBLANK timing
     ///
     /// This method caches the first detected visible start to prevent vertical jumping
     /// between frames. Once a valid VBLANK transition is detected, that value is used
     /// for all subsequent frames to ensure stable rendering.
     pub fn visible_window_start_scanline(&mut self) -> u16 {
-        // If we have a cached value, use it for stability
-        if let Some(cached) = self.cached_visible_start {
-            return cached;
-        }
+        // If we don't find a transition this frame, fall back to the last known value.
+        let fallback_cached = self.cached_visible_start;
 
         // Find where VBLANK transitions from true to false
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
@@ -844,6 +936,14 @@ impl Tia {
                 self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
+        }
+
+        // If a previous frame gave us a valid start, reuse it.
+        if let Some(cached) = fallback_cached {
+            if debug {
+                eprintln!("[VISIBLE] No transition found, reusing cached {}", cached);
+            }
+            return cached;
         }
 
         // Fallback: common NTSC visible start is around scanline ~37-40

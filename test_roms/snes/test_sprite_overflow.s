@@ -90,7 +90,8 @@ RESET:
     
     ; Configure sprite settings
     ; Object size: 8x8 and 16x16
-    lda #$02                ; Small = 8x8, Large = 16x16, Name base = 0, Name select = 0
+    ; Sprite tile data will be at VRAM $0000, so name_base=0
+    lda #$00                ; Small = 8x8, Large = 16x16, Name base = 0, Name select = 0
     sta $2101               ; OBSEL register
     
     ; Set VRAM address to $0000 (sprite CHR data)

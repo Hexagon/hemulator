@@ -264,38 +264,31 @@ impl System for Atari2600System {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // Atari 2600 NTSC: 262 scanlines per frame
-        // Instead of running for a fixed cycle count, run until we've completed 262 scanlines
+        // Atari 2600 frames are software-timed and can vary slightly in scanline count.
+        // To avoid vertical rolling/scrolling, delimit host frames using VSYNC edges.
 
         // Clear per-frame debug stats
         if let Some(bus) = self.cpu.bus_mut() {
             bus.tia.reset_write_stats();
         }
 
-        let start_scanline = self
-            .cpu
-            .bus()
-            .map(|bus| bus.tia.get_scanline())
-            .unwrap_or(0);
-
-        let mut scanlines_completed = 0u16;
-        let mut last_scanline = start_scanline;
+        let mut scanlines_seen = 0u16;
+        let mut last_scanline = self.cpu.bus().map(|b| b.tia.get_scanline()).unwrap_or(0);
         let mut cpu_steps = 0u64;
         const MAX_CPU_STEPS: u64 = 50_000; // Safety limit
 
-        // Run until we've advanced exactly 262 scanlines (one full NTSC frame)
-        while scanlines_completed < 262 {
+        // VSYNC edge tracking
+        let mut prev_vsync = self.cpu.bus().map(|b| b.tia.vsync()).unwrap_or(false);
+        let mut saw_vsync_rise = false;
+        let mut started_frame_capture = false;
+
+        let debug_vsync = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
+
+        // Drive the emulation until we reach the next VSYNC rising edge after a VSYNC pulse.
+        // If VSYNC is never observed (homebrew / unusual ROM), fall back to 262 scanlines.
+        while cpu_steps < MAX_CPU_STEPS {
             let cycles = self.cpu.step();
             cpu_steps += 1;
-
-            // Safety check to prevent infinite loops
-            if cpu_steps > MAX_CPU_STEPS {
-                eprintln!(
-                    "[ATARI] Warning: Exceeded max CPU steps ({}) while waiting for 262 scanlines. Completed: {}, Current scanline: {}",
-                    MAX_CPU_STEPS, scanlines_completed, last_scanline
-                );
-                break;
-            }
 
             // Clock the TIA and RIOT
             if let Some(bus) = self.cpu.bus_mut() {
@@ -308,24 +301,84 @@ impl System for Atari2600System {
                     self.cycles += extra as u64;
                 }
 
-                let scanline = bus.tia.get_scanline();
+                let mut current_scanline = bus.tia.get_scanline();
 
-                // Count scanline advances (including wraps from 261 to 0)
-                if scanline != last_scanline {
-                    if scanline < last_scanline {
-                        // Wrapped from 261 to 0
-                        scanlines_completed += (262 - last_scanline) + scanline;
-                    } else {
-                        scanlines_completed += scanline - last_scanline;
+                // VSYNC framing:
+                // - Wait for a VSYNC rising edge (start of sync)
+                // - Then wait for VSYNC falling edge (end of sync) and treat that as the start
+                //   of the frame we will render
+                // - Then capture until the next VSYNC rising edge
+                let current_vsync = bus.tia.vsync();
+                if !saw_vsync_rise {
+                    if !prev_vsync && current_vsync {
+                        saw_vsync_rise = true;
+                        if debug_vsync {
+                            eprintln!("[ATARI VSYNC] Saw rising edge (sync start)");
+                        }
+                    }
+                } else if !started_frame_capture {
+                    if prev_vsync && !current_vsync {
+                        // Start of a new frame (immediately after VSYNC pulse)
+                        bus.tia.begin_new_frame();
+                        scanlines_seen = 0;
+                        last_scanline = bus.tia.get_scanline();
+                        current_scanline = last_scanline;
+                        started_frame_capture = true;
+                        if debug_vsync {
+                            eprintln!("[ATARI VSYNC] Saw falling edge (frame start)");
+                        }
+                    }
+                } else {
+                    // End the frame at the next VSYNC rising edge
+                    if !prev_vsync && current_vsync {
+                        if debug_vsync {
+                            eprintln!("[ATARI VSYNC] Saw rising edge (frame end)");
+                        }
+                        break;
                     }
                 }
-                last_scanline = scanline;
+                prev_vsync = current_vsync;
+
+                // Count scanline advances
+                if current_scanline != last_scanline {
+                    let advance = if current_scanline < last_scanline {
+                        // Wrapped from 261 to 0 or similar
+                        (262 - last_scanline) + current_scanline
+                    } else {
+                        current_scanline - last_scanline
+                    };
+                    scanlines_seen += advance;
+                    last_scanline = current_scanline;
+                }
             } else {
                 // No bus -> can't advance time; bail rather than spinning forever
                 break;
             }
 
             self.cycles += cycles as u64;
+
+            // Fallback behavior if VSYNC isn't being generated: approximate 262 scanlines.
+            if !started_frame_capture && scanlines_seen >= 262 {
+                break;
+            }
+            if started_frame_capture && scanlines_seen >= 320 {
+                // Some ROMs don't VSYNC cleanly; avoid runaway frames.
+                if debug_vsync {
+                    eprintln!(
+                        "[ATARI VSYNC] No end-of-frame VSYNC seen; bailing at {} scanlines",
+                        scanlines_seen
+                    );
+                }
+                break;
+            }
+        }
+
+        if cpu_steps >= MAX_CPU_STEPS {
+            let current = self.cpu.bus().map(|b| b.tia.get_scanline()).unwrap_or(0);
+            eprintln!(
+                "[ATARI] Warning: Exceeded max CPU steps ({}) after {} scanlines. Current: {}",
+                MAX_CPU_STEPS, scanlines_seen, current
+            );
         }
 
         // Debug: log frame completion
@@ -337,9 +390,9 @@ impl System for Atari2600System {
                 .map(|b| b.tia.write_stats())
                 .unwrap_or_default();
             eprintln!(
-                "[ATARI FRAME] Completed: {} scanlines, {} CPU steps, final scanline: {} | TIA writes: total={} vsync={} vblank={} pf={} grp0={} grp1={} colors={} | nonzero: pf={} grp0={} grp1={} colors={}",
-                scanlines_completed,
+                "[ATARI FRAME] Completed frame, {} CPU steps, scanlines_seen={} end scanline: {} | TIA writes: total={} vsync={} vblank={} pf={} grp0={} grp1={} colors={} | nonzero: pf={} grp0={} grp1={} colors={}",
                 cpu_steps,
+                scanlines_seen,
                 final_scanline,
                 tia_stats.0,
                 tia_stats.1,
@@ -357,15 +410,39 @@ impl System for Atari2600System {
 
         // Render the frame using the renderer
         if let Some(bus) = self.cpu.bus_mut() {
-            // Dynamically determine visible window based on VBLANK timing
+            let current_scanline = bus.tia.get_scanline();
+
+            // CRITICAL: We end the frame at scanline 0, but scanline 0's state
+            // won't be latched until we LEAVE scanline 0 (move to scanline 1).
+            // So we must explicitly latch it now before rendering.
+            if current_scanline == 0 {
+                bus.tia.latch_current_scanline_state();
+            }
+
+            // Determine visible window based on VBLANK timing within the current frame.
             let visible_start = bus.tia.visible_window_start_scanline();
 
             if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
-                eprintln!("[ATARI RENDER] visible_start={}", visible_start);
+                eprintln!(
+                    "[ATARI RENDER] visible_start={} current_scanline={} scanlines_seen={} (will render TIA scanlines {}-{})",
+                    visible_start, current_scanline, scanlines_seen,
+                    visible_start,
+                    (visible_start + 191) % 262
+                );
             }
 
             // Use renderer to render the frame
             self.renderer.render_frame(&bus.tia, visible_start);
+
+            // Debug: Check if framebuffer is stable
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                self.renderer.get_frame().pixels.hash(&mut hasher);
+                let frame_hash = hasher.finish();
+                eprintln!("[ATARI RENDER] Frame hash: {:016x}", frame_hash);
+            }
         }
 
         // Detect collisions for the frame (must be done after rendering)
