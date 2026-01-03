@@ -163,6 +163,16 @@ impl Sdl2EguiBackend {
         &self.egui_ctx
     }
 
+    /// Get the OpenGL context for custom rendering
+    pub fn gl_context(&self) -> std::rc::Rc<glow::Context> {
+        // Load GL function pointers via SDL2
+        unsafe {
+            std::rc::Rc::new(glow::Context::from_loader_function(|s| {
+                self.window.subsystem().gl_get_proc_address(s) as *const _
+            }))
+        }
+    }
+
     /// Begin an egui frame
     pub fn begin_frame(&mut self) {
         let raw_input = self.egui_state.input.take();

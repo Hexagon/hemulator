@@ -176,6 +176,11 @@ impl NesSystem {
         }
     }
 
+    /// Set the PPU renderer
+    pub fn set_renderer(&mut self, renderer: Box<dyn NesPpuRenderer>) {
+        self.renderer = renderer;
+    }
+
     /// Get audio samples from the APU
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         if let Some(b) = self.cpu.bus_mut() {
