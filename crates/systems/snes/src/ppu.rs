@@ -389,6 +389,17 @@ impl Ppu {
 
             // $2118 - VMDATAL - VRAM Data Write (low byte)
             0x2118 => {
+                // VRAM can only be written during VBlank or when screen is force blanked
+                if !self.is_vram_accessible() {
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!(
+                            "SNES PPU: VRAM Write L attempted during active display (ignored) - addr ${:04X}",
+                            self.vram_addr
+                        )
+                    });
+                    return; // Ignore write during active display
+                }
+
                 let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
@@ -402,6 +413,17 @@ impl Ppu {
 
             // $2119 - VMDATAH - VRAM Data Write (high byte)
             0x2119 => {
+                // VRAM can only be written during VBlank or when screen is force blanked
+                if !self.is_vram_accessible() {
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!(
+                            "SNES PPU: VRAM Write H attempted during active display (ignored) - addr ${:04X}",
+                            self.vram_addr
+                        )
+                    });
+                    return; // Ignore write during active display
+                }
+
                 let addr = if self.vmain & 0x80 != 0 {
                     // If incrementing on low byte, high byte write uses current address
                     (self.vram_addr.wrapping_sub(self.get_vram_increment()) as usize)
@@ -801,6 +823,17 @@ impl Ppu {
     /// Clear NMI flag (called when $213F is read)
     pub fn clear_nmi_flag(&mut self) {
         self.nmi_flag = false;
+    }
+
+    /// Check if VRAM is accessible (during VBlank or force blank)
+    /// SNES hardware only allows VRAM access during VBlank or when screen is force blanked
+    fn is_vram_accessible(&self) -> bool {
+        // Force blank: bit 7 of screen_display register ($2100)
+        let force_blank = (self.screen_display & 0x80) != 0;
+        // VBlank: bit 7 of HVBJOY register ($4212)
+        let in_vblank = (self.hvbjoy & 0x80) != 0;
+
+        force_blank || in_vblank
     }
 
     /// Get tilemap and CHR base addresses for a BG layer
