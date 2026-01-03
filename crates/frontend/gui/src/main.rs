@@ -1909,6 +1909,8 @@ fn main() {
     egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
     egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
+    // Initialize recent files menu
+    egui_app.update_recent_files(settings.get_recent_files().to_vec());
 
     // Show New Project tab on startup if no ROM/project was loaded
     if !rom_loaded {
@@ -2199,9 +2201,14 @@ fn main() {
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
+                                        // Add to recent files
+                                        settings.add_recent_file(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
                                         egui_app
                                             .status_bar
                                             .set_message("NES ROM loaded".to_string());
@@ -2357,6 +2364,22 @@ fn main() {
                             }
                         }
                     }
+                }
+                MenuAction::OpenRecentFile(file_path) => {
+                    // Open recent file (stub for now - would need full ROM loading logic)
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Opening recent file: {}", file_path));
+                }
+                MenuAction::ClearRecentFiles => {
+                    settings.clear_recent_files();
+                    if let Err(e) = settings.save() {
+                        eprintln!("Warning: Failed to save settings: {}", e);
+                    }
+                    egui_app.update_recent_files(Vec::new());
+                    egui_app
+                        .status_bar
+                        .set_message("Recent files cleared".to_string());
                 }
                 MenuAction::Reset => {
                     sys.reset();

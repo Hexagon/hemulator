@@ -204,6 +204,8 @@ pub struct Settings {
     #[serde(default, skip_serializing)]
     pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
+    pub recent_files: Vec<String>, // List of recently opened ROM files (max 10)
+    #[serde(default)]
     pub display_filter: DisplayFilter,
     #[serde(default = "default_emulation_speed", skip_serializing)] // Runtime only, not saved
     pub emulation_speed: f64, // Speed multiplier: 0.0 (pause), 0.25, 0.5, 1.0, 2.0, 10.0
@@ -249,6 +251,7 @@ impl Default for Settings {
             window_width: 512,  // 256 * 2 (default 2x scale)
             window_height: 480, // 240 * 2 (default 2x scale)
             last_rom_path: None,
+            recent_files: Vec::new(),
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
             video_backend: "software".to_string(),
@@ -302,6 +305,31 @@ impl Settings {
         let contents = serde_json::to_string_pretty(self)?;
         fs::write(&path, contents)?;
         Ok(())
+    }
+
+    /// Add a file to the recent files list
+    /// Keeps only the most recent 10 files
+    pub fn add_recent_file(&mut self, file_path: String) {
+        // Remove the file if it already exists (to move it to the front)
+        self.recent_files.retain(|f| f != &file_path);
+
+        // Add to the front
+        self.recent_files.insert(0, file_path);
+
+        // Keep only the most recent 10
+        if self.recent_files.len() > 10 {
+            self.recent_files.truncate(10);
+        }
+    }
+
+    /// Get the list of recent files
+    pub fn get_recent_files(&self) -> &[String] {
+        &self.recent_files
+    }
+
+    /// Clear all recent files
+    pub fn clear_recent_files(&mut self) {
+        self.recent_files.clear();
     }
 }
 

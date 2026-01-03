@@ -8,6 +8,8 @@ pub enum MenuAction {
     // File menu
     NewProject,
     OpenRom,
+    OpenRecentFile(String), // Path to recent file
+    ClearRecentFiles,
     OpenProject,
     SaveProject,
     Exit,
@@ -34,13 +36,20 @@ pub enum MenuAction {
 
 pub struct MenuBar {
     pub pending_action: Option<MenuAction>,
+    pub recent_files: Vec<String>, // List of recent files to display
 }
 
 impl MenuBar {
     pub fn new() -> Self {
         Self {
             pending_action: None,
+            recent_files: Vec::new(),
         }
+    }
+
+    /// Update the recent files list
+    pub fn set_recent_files(&mut self, files: Vec<String>) {
+        self.recent_files = files;
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -64,6 +73,38 @@ impl MenuBar {
                     self.pending_action = Some(MenuAction::OpenRom);
                     ui.close();
                 }
+
+                // Recent Files submenu
+                ui.menu_button("🕒 Recent Files", |ui| {
+                    if self.recent_files.is_empty() {
+                        ui.label(egui::RichText::new("No recent files").weak());
+                    } else {
+                        for file_path in &self.recent_files.clone() {
+                            // Extract filename from path
+                            let display_name = std::path::Path::new(file_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(file_path);
+
+                            if ui.button(display_name).on_hover_text(file_path).clicked() {
+                                self.pending_action =
+                                    Some(MenuAction::OpenRecentFile(file_path.clone()));
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        if ui
+                            .button("🗑️ Clear Recent Files")
+                            .on_hover_text("Remove all recent files from the list")
+                            .clicked()
+                        {
+                            self.pending_action = Some(MenuAction::ClearRecentFiles);
+                            ui.close();
+                        }
+                    }
+                });
+
+                ui.separator();
                 if ui
                     .button("📁 Open Project...")
                     .on_hover_text("Load a saved .hemu project file")

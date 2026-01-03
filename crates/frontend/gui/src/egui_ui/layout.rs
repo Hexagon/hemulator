@@ -90,6 +90,11 @@ impl EguiApp {
         }
     }
 
+    /// Update recent files list for the menu
+    pub fn update_recent_files(&mut self, recent_files: Vec<String>) {
+        self.menu_bar.set_recent_files(recent_files);
+    }
+
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
         // Set brighter text color globally
