@@ -1957,6 +1957,7 @@ fn main() {
 
     // Track emulation speed changes to reset timing
     let mut previous_emulation_speed = settings.emulation_speed;
+    const SPEED_CHANGE_THRESHOLD: f64 = 0.001; // Minimum change to detect speed adjustment
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
@@ -3056,7 +3057,8 @@ fn main() {
         if rom_loaded && settings.emulation_speed > 0.0 {
             // Reset timing when emulation becomes active or speed changes
             let is_emulation_active = true;
-            let speed_changed = (settings.emulation_speed - previous_emulation_speed).abs() > 0.001;
+            let speed_changed = (settings.emulation_speed - previous_emulation_speed).abs()
+                > SPEED_CHANGE_THRESHOLD;
 
             if (!was_emulation_active && is_emulation_active) || speed_changed {
                 emulation_start_time = Instant::now();
