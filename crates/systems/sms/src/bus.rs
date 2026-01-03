@@ -74,16 +74,14 @@ impl SmsMemory {
     /// Update banking configuration
     fn update_banking(&mut self) {
         // Banking registers are at 0xFFFC, 0xFFFD, 0xFFFE in RAM
-        if self.ram.len() >= 0x2000 {
-            let frame_0 = self.ram[0x1FFC] as usize;
-            let frame_1 = self.ram[0x1FFD] as usize;
-            let frame_2 = self.ram[0x1FFE] as usize;
+        let frame_0 = self.ram[0x1FFC] as usize;
+        let frame_1 = self.ram[0x1FFD] as usize;
+        let frame_2 = self.ram[0x1FFE] as usize;
 
-            // Map banks with wraparound
-            self.rom_bank_0 = frame_0 % self.num_banks.max(1);
-            self.rom_bank_1 = frame_1 % self.num_banks.max(1);
-            self.rom_bank_2 = frame_2 % self.num_banks.max(1);
-        }
+        // Map banks with wraparound
+        self.rom_bank_0 = frame_0 % self.num_banks.max(1);
+        self.rom_bank_1 = frame_1 % self.num_banks.max(1);
+        self.rom_bank_2 = frame_2 % self.num_banks.max(1);
     }
 
     /// Set controller 1 state
@@ -143,7 +141,7 @@ impl MemoryZ80 for SmsMemory {
     fn io_read(&mut self, port: u8) -> u8 {
         match port {
             0x7E | 0x7F => {
-                // VDP vertical counter
+                // V-counter (0x7E) / H-counter (0x7F) - both read VDP vcounter for now
                 self.vdp.borrow().read_vcounter()
             }
             0xBE => {

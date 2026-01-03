@@ -19,7 +19,7 @@ pub enum SmsError {
     InvalidMountPoint,
 }
 
-    /// Sega Master System emulator
+/// Sega Master System emulator
 pub struct SmsSystem {
     // CPU
     cpu: CpuZ80<SmsMemory>,

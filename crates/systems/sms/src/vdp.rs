@@ -289,23 +289,23 @@ impl Vdp {
             // Calculate sprite row
             let sprite_y = line - y_pos;
 
+            // Read tile pattern (once per sprite row, not per pixel)
+            let tile_addr = (tile_num as u16) * 32 + (sprite_y as u16) * 4;
+            if tile_addr >= 0x3FFC {
+                continue;
+            }
+
+            let byte0 = self.vram[tile_addr as usize];
+            let byte1 = self.vram[(tile_addr + 1) as usize];
+            let byte2 = self.vram[(tile_addr + 2) as usize];
+            let byte3 = self.vram[(tile_addr + 3) as usize];
+
             // Render sprite pixels
             for px in 0..8u8 {
                 let x = x_pos.wrapping_add(px);
                 if x as u16 >= 256 {
                     continue;
                 }
-
-                // Read tile pattern
-                let tile_addr = (tile_num as u16) * 32 + (sprite_y as u16) * 4;
-                if tile_addr >= 0x3FFC {
-                    continue;
-                }
-
-                let byte0 = self.vram[tile_addr as usize];
-                let byte1 = self.vram[(tile_addr + 1) as usize];
-                let byte2 = self.vram[(tile_addr + 2) as usize];
-                let byte3 = self.vram[(tile_addr + 3) as usize];
 
                 let shift = 7 - px;
                 let pixel = ((byte0 >> shift) & 1)
