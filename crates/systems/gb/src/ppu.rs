@@ -276,30 +276,40 @@ impl Ppu {
 
     /// Read from OAM (0xFE00-0xFE9F)
     pub fn read_oam(&self, addr: u16) -> u8 {
-        self.oam[(addr & 0x9F) as usize]
+        if addr >= 0xA0 {
+            return 0xFF; // Out of bounds
+        }
+        self.oam[addr as usize]
     }
 
     /// Write to OAM (0xFE00-0xFE9F)
     pub fn write_oam(&mut self, addr: u16, val: u8) {
-        static mut WRITE_COUNT: u32 = 0;
-        unsafe {
-            WRITE_COUNT += 1;
-            if WRITE_COUNT % 1000 == 0 && addr < 4 {
-                eprintln!("[write_oam] Call #{}, writing OAM[{:02X}] = {:02X}", WRITE_COUNT, addr, val);
-            }
+        if addr >= 0xA0 {
+            return; // Out of bounds
         }
-        self.oam[(addr & 0x9F) as usize] = val;
-        
-        unsafe {
-            if WRITE_COUNT % 1000 == 0 && addr < 4 {
-                eprintln!("[write_oam] Verified: OAM[{:02X}] is now {:02X}", addr, self.oam[addr as usize]);
-            }
+        let index = addr as usize;
+        if index < 4 {
+            eprintln!("[write_oam] addr={:04X}, val={:02X}, index={}, BEFORE: oam[{}]={:02X}",
+                addr, val, index, index, self.oam[index]);
+        }
+        self.oam[index] = val;
+        if index < 4 {
+            eprintln!("[write_oam] AFTER: oam[{}]={:02X}", index, self.oam[index]);
         }
     }
 
     /// Read from OAM for debugging
     pub fn read_oam_debug(&self, addr: u16) -> u8 {
-        self.oam[(addr & 0x9F) as usize]
+        if addr >= 0xA0 {
+            return 0xFF; // Out of bounds
+        }
+        let index = addr as usize;
+        let val = self.oam[index];
+        if addr < 4 {
+            eprintln!("[read_oam_debug] PPU at {:p}, OAM array at {:p}, index {}, reading OAM[{:02X}] = {:02X}",
+                self as *const _, self.oam.as_ptr(), index, addr, val);
+        }
+        val
     }
 
     /// Read background palette index register (0xFF68)
