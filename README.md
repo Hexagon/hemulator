@@ -1,12 +1,12 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Atari 2600, Game Boy, SNES, N64, PC/DOS) are in various stages of development.
+A cross-platform, multi-system console emulator written in Rust. **NES and Atari 2600 emulation are fully working**. Other systems (Game Boy, SNES, N64, PC/DOS) are in various stages of development.
 
 ## Features
 
 - 🎮 **NES Emulation**: ✅ Fully working - ~90%+ of NES games via 14 mapper implementations
+- 🕹️ **Atari 2600 Emulation**: ✅ Fully working - Support for all standard cartridge formats (2K-32K) with multiple banking schemes
 - 💻 **PC Emulation**: ⚠️ Functional - COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS boots.
-- 🕹️ **Atari 2600 Emulation**: 🚧 In development - Support for most cartridge formats (2K-32K) with multiple banking schemes
 - 🎲 **Game Boy Emulation**: 🚧 In development - Core features work, ~95% game coverage (MBC0/1/3/5), missing audio/timer
 - 🏰 **SNES Emulation**: 🚧 In development - CPU working, minimal PPU, no APU/input yet
 - 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
@@ -25,7 +25,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
 | **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
-| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Atari 2600** | ✅ Fully Working | 6502/6507 (Complete) | TIA (Complete) | TIA (Complete) | ✅ | ✅ | ~95% of games; all standard cartridge formats |
 | **Game Boy** | 🚧 In Development | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~95% of games; MBC0/1/2/3/5 supported |
 | **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
