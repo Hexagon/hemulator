@@ -2026,7 +2026,7 @@ fn main() {
 
     // Upgrade renderer to OpenGL if settings request it and system was loaded
     if rom_loaded && settings.video_backend == "opengl" {
-        let gl_ctx = Some(egui_backend.gl_context());
+        let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed - OpenGL support disabled for now
         match &mut sys {
             EmulatorSystem::NES(nes_sys) => {
                 #[cfg(feature = "opengl")]
@@ -2388,7 +2388,7 @@ fn main() {
                             Ok(data) => match detect_rom_type(&data) {
                                 Ok(SystemType::NES) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let gl_ctx = Some(egui_backend.gl_context());
+                                    let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
                                     let mut nes_sys =
                                         create_nes_system(&settings.video_backend, gl_ctx);
                                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
@@ -2574,7 +2574,7 @@ fn main() {
                                 }
                                 Ok(SystemType::N64) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let gl_ctx = Some(egui_backend.gl_context());
+                                    let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
                                     let mut n64_sys =
                                         create_n64_system(&settings.video_backend, gl_ctx);
                                     if let Err(e) = n64_sys.mount("Cartridge", &data) {
