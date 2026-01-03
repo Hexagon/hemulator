@@ -25,6 +25,15 @@ use emu_core::apu::TimingMode;
 pub struct Camerica {
     prg_rom: Vec<u8>,
     bank_select: u8,
+    /// Track the previous value of bit 4 to detect mirroring changes.
+    /// This helps distinguish between boards with mapper-controlled mirroring
+    /// and those with fixed mirroring from the cartridge header.
+    /// Uses Option<bool> to differentiate between "no writes yet" (None)
+    /// and actual bit 4 values, preventing false positives on the first write.
+    previous_bit4: Option<bool>,
+    /// Count how many times bit 4 has changed
+    /// If this stays at 0, the game likely uses fixed mirroring
+    mirroring_change_count: u8,
 }
 
 impl Camerica {
@@ -35,6 +44,8 @@ impl Camerica {
         Self {
             prg_rom: cart.prg_rom,
             bank_select: 0,
+            previous_bit4: None, // Will be set on first write
+            mirroring_change_count: 0,
         }
     }
 
@@ -65,17 +76,36 @@ impl Camerica {
             // - Bit 4 = 0: One-screen lower
             // - Bit 4 = 1: One-screen upper
             //
-            // Some Camerica boards (Fire Hawk, Micro Machines) use this feature for dynamic
-            // mirroring control, while others use fixed mirroring from the cartridge header.
-            // Since we can't distinguish board variants at runtime, we always apply bit 4.
-            // This works because games using fixed mirroring typically don't toggle bit 4,
-            // so they maintain consistent mirroring behavior.
-            let mirroring = if (val & 0x10) != 0 {
-                Mirroring::SingleScreenUpper
-            } else {
-                Mirroring::SingleScreenLower
-            };
-            ppu.set_mirroring(mirroring);
+            // Some Camerica boards (Fire Hawk) use this feature for dynamic mirroring control,
+            // while others (some Micro Machines variants) use fixed mirroring from the cartridge header.
+            //
+            // To distinguish board variants at runtime, we track if bit 4 changes:
+            // - If bit 4 toggles, the game uses mapper-controlled mirroring
+            // - If bit 4 never changes, the game uses fixed mirroring from the header
+            //
+            // We only update mirroring after detecting at least one bit 4 transition.
+            let current_bit4 = (val & 0x10) != 0;
+
+            // Check if bit 4 has changed since the last write
+            if let Some(prev) = self.previous_bit4 {
+                if current_bit4 != prev {
+                    // Bit 4 changed - increment change counter
+                    self.mirroring_change_count = self.mirroring_change_count.saturating_add(1);
+                }
+            }
+            // Always update previous_bit4 to track the current value
+            self.previous_bit4 = Some(current_bit4);
+
+            // Only update mirroring if we've detected bit 4 changes (mapper-controlled mirroring)
+            // This prevents unwanted mirroring updates on games with fixed mirroring
+            if self.mirroring_change_count > 0 {
+                let mirroring = if current_bit4 {
+                    Mirroring::SingleScreenUpper
+                } else {
+                    Mirroring::SingleScreenLower
+                };
+                ppu.set_mirroring(mirroring);
+            }
         }
     }
 
@@ -199,26 +229,55 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical, // Initial mirroring (will be overridden)
+            mirroring: Mirroring::Vertical, // Initial mirroring (stays unless bit 4 toggles)
         };
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Write with bit 4 = 0: should select single-screen lower
+        // First write with bit 4 = 0: should NOT change mirroring yet (no toggle detected)
         camerica.write_prg(0x8000, 0x00, &mut ppu);
-        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays as initial
 
-        // Write with bit 4 = 1: should select single-screen upper
+        // Write with bit 4 = 1: should detect toggle and change to single-screen upper
         camerica.write_prg(0x8000, 0x10, &mut ppu);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
-        // Write bank select with bit 4 = 0: should select single-screen lower
+        // Write bank select with bit 4 = 0: should change to single-screen lower
         camerica.write_prg(0xC000, 0x03, &mut ppu); // Bank 3, bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
 
-        // Write bank select with bit 4 = 1: should select single-screen upper
+        // Write bank select with bit 4 = 1: should change to single-screen upper
         camerica.write_prg(0xC000, 0x15, &mut ppu); // Bank 5, bit 4 = 1
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+    }
+
+    #[test]
+    fn camerica_fixed_mirroring() {
+        // Test that games not using mapper-controlled mirroring keep their header mirroring
+        let prg = vec![0; 0x8000]; // 2 banks
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal, // Fixed mirroring from header
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Write multiple times with same bit 4 value (no toggle)
+        camerica.write_prg(0x8000, 0x00, &mut ppu); // bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
+
+        camerica.write_prg(0x8000, 0x01, &mut ppu); // bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+
+        camerica.write_prg(0xC000, 0x02, &mut ppu); // bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+
+        // Since bit 4 never toggled, mirroring should remain as the header value
     }
 }
