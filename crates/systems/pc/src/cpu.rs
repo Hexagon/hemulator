@@ -225,26 +225,28 @@ impl PcCpu {
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
 
-        // Enable PC tracing with EMU_TRACE_PC=1
-        // Only log if we're in the boot sector region or low memory (not ROM)
-        // BUT: Always log F000 and FFFF segments to see BIOS execution
-        let in_bios = cs == 0xF000 || cs == 0xFFFF;
-        if physical_addr < 0xF0000 || in_bios {
-            // Extra logging for suspicious addresses
-            if physical_addr < 0x100 || (0x7D70..=0x7D80).contains(&physical_addr) || in_bios {
-                log(LogCategory::CPU, LogLevel::Trace, || {
-                    format!(
-                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
-                        cs, ip, physical_addr, opcode, self.cpu.sp
-                    )
-                });
-            } else {
-                log(LogCategory::CPU, LogLevel::Trace, || {
-                    format!(
-                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
-                        cs, ip, physical_addr, opcode
-                    )
-                });
+        // Enable PC tracing - only compute logging conditions if trace logging is enabled
+        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
+            // Only log if we're in the boot sector region or low memory (not ROM)
+            // BUT: Always log F000 and FFFF segments to see BIOS execution
+            let in_bios = cs == 0xF000 || cs == 0xFFFF;
+            if physical_addr < 0xF0000 || in_bios {
+                // Extra logging for suspicious addresses
+                if physical_addr < 0x100 || (0x7D70..=0x7D80).contains(&physical_addr) || in_bios {
+                    log(LogCategory::CPU, LogLevel::Trace, || {
+                        format!(
+                            "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
+                            cs, ip, physical_addr, opcode, self.cpu.sp
+                        )
+                    });
+                } else {
+                    log(LogCategory::CPU, LogLevel::Trace, || {
+                        format!(
+                            "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
+                            cs, ip, physical_addr, opcode
+                        )
+                    });
+                }
             }
         }
 
