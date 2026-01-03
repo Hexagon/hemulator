@@ -93,7 +93,7 @@ impl Mmc1 {
 
     fn update_chr_mapping(&self, ppu: &mut Ppu) {
         if ppu.chr.len() < 0x2000 {
-            ppu.chr.resize(0x2000, 1);
+            ppu.chr.resize(0x2000, 0);
         }
 
         // CHR RAM carts skip copying since PPU owns the RAM view.
@@ -117,8 +117,9 @@ impl Mmc1 {
     }
 
     fn latch_write(&mut self, addr: u16, val: u8, ppu: &mut Ppu, cpu_cycles: u64) {
-        // MMC1 hardware ignores writes on consecutive CPU cycles
-        // This prevents issues with RMW instructions and rapid writes
+        // MMC1 hardware ignores writes on consecutive CPU cycles.
+        // This prevents issues with RMW instructions (INC, DEC, ASL, etc.) and rapid writes.
+        // Cycle counter overflow is handled naturally since we only check for exact equality.
         if cpu_cycles == self.last_write_cycle {
             return;
         }

@@ -136,7 +136,9 @@ impl NesBus {
         }
     }
 
-    /// Add CPU cycles to the bus cycle counter (for mapper timing)
+    /// Add CPU cycles to the bus cycle counter (for mapper timing).
+    /// The counter wraps on overflow, which is expected and handled correctly
+    /// by mappers that check for consecutive writes.
     pub fn add_cycles(&self, cycles: u32) {
         let current = self.cpu_cycles.get();
         self.cpu_cycles.set(current.wrapping_add(cycles as u64));
