@@ -720,6 +720,10 @@ The emulator supports the following cartridge banking schemes:
 - **PPU with Mode 0 & Mode 1 support**:
   - **Mode 0**: 4 background layers with 2bpp tiles (4 colors per tile)
   - **Mode 1**: 2 background layers with 4bpp tiles (16 colors) + 1 layer with 2bpp
+  - **Priority bit handling**: Tiles render in correct priority order (high/low priority)
+  - **BG3 priority toggle**: In Mode 1, BG3 can render above all sprites (for HUDs)
+  - **Sprite priority**: 4 priority levels (0-3) with correct rendering order
+  - **Sprite limits**: Hardware-accurate 32 sprites/scanline and 34 tile slots/scanline limits
   - **Scrolling**: Full horizontal and vertical scrolling on all BG layers
   - **Sprites (OAM)**: 128 sprites with 4bpp (16 colors), multiple size modes
   - 8 palettes per layer
@@ -733,12 +737,9 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **Graphics**: 
   - Modes 2-7 not implemented (only Mode 0 and Mode 1 supported)
-  - No priority bit handling for backgrounds and sprites
-  - No sprite-per-scanline limits (hardware has 32 sprite/34 8x8 tile limit)
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-  - BG3 priority toggle (Mode 1, $2105 bit 3) not implemented
 - **Audio**: SPC700 APU not implemented - silent gameplay
 - **Cartridge**: 
   - Only basic LoROM mapping - no HiROM, ExHiROM, or special chips

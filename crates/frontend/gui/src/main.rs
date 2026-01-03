@@ -1909,6 +1909,8 @@ fn main() {
     egui_app.property_pane.rendering_backend = "OpenGL (egui)".to_string();
     egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
+    // Initialize recent files menu
+    egui_app.update_recent_files(settings.get_recent_files().to_vec());
 
     // Show New Project tab on startup if no ROM/project was loaded
     if !rom_loaded {
@@ -2190,7 +2192,9 @@ fn main() {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
                                     let mut nes_sys = emu_nes::NesSystem::default();
                                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        egui_app
+                                            .status_bar
+                                            .set_error(format!("Failed to load NES ROM: {}", e));
                                         rom_hash = None;
                                     } else {
                                         rom_loaded = true;
@@ -2199,12 +2203,17 @@ fn main() {
                                         runtime_state
                                             .set_mount("Cartridge".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
+                                        // Add to recent files
+                                        settings.add_recent_file(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
                                         egui_app
                                             .status_bar
-                                            .set_message("NES ROM loaded".to_string());
+                                            .set_success("NES ROM loaded successfully".to_string());
                                         // Update resolution
                                         let _ = sys.resolution();
                                         // Load save states for this ROM
@@ -2347,16 +2356,32 @@ fn main() {
                                 Err(e) => {
                                     egui_app
                                         .status_bar
-                                        .set_message(format!("Error detecting ROM type: {}", e));
+                                        .set_error(format!("Failed to detect ROM type: {}", e));
                                 }
                             },
                             Err(e) => {
                                 egui_app
                                     .status_bar
-                                    .set_message(format!("Error reading file: {}", e));
+                                    .set_error(format!("Failed to read file: {}", e));
                             }
                         }
                     }
+                }
+                MenuAction::OpenRecentFile(file_path) => {
+                    // Open recent file (stub for now - would need full ROM loading logic)
+                    egui_app
+                        .status_bar
+                        .set_message(format!("Opening recent file: {}", file_path));
+                }
+                MenuAction::ClearRecentFiles => {
+                    settings.clear_recent_files();
+                    if let Err(e) = settings.save() {
+                        eprintln!("Warning: Failed to save settings: {}", e);
+                    }
+                    egui_app.update_recent_files(Vec::new());
+                    egui_app
+                        .status_bar
+                        .set_message("Recent files cleared".to_string());
                 }
                 MenuAction::Reset => {
                     sys.reset();
