@@ -2343,7 +2343,6 @@ mod tests {
         assert_eq!(ppu.get_tilemap_offset(63, 63, 64), 8190);
     }
 
-    
     #[test]
     #[ignore]
     fn test_mode1_typical_commercial_pattern() {
