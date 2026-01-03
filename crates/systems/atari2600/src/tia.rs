@@ -283,6 +283,10 @@ pub struct Tia {
     // Cached visible window start (to prevent vertical jumping)
     #[serde(skip)]
     cached_visible_start: Option<u16>,
+
+    // History of recent visible window starts for stabilization
+    #[serde(skip)]
+    visible_start_history: Vec<u16>,
 }
 
 impl Default for Tia {
@@ -398,6 +402,7 @@ impl Tia {
             writes_colors_nonzero: 0,
 
             cached_visible_start: None,
+            visible_start_history: Vec::new(),
         }
     }
 
@@ -848,7 +853,9 @@ impl Tia {
         for state in &mut self.scanline_states {
             *state = ScanlineState::default();
         }
-        self.cached_visible_start = None;
+        // DO NOT reset cached_visible_start here!
+        // It's intentionally cached across frames to prevent vertical jumping.
+        // The cache provides stability even when VBLANK timing varies slightly.
 
         // DO NOT reset scanline or pixel counters here!
         // The TIA continues to run with consistent timing across frame boundaries.
@@ -905,14 +912,15 @@ impl Tia {
 
     /// Try to infer the start of the visible picture area based on VBLANK timing
     ///
-    /// This method caches the first detected visible start to prevent vertical jumping
-    /// between frames. Once a valid VBLANK transition is detected, that value is used
-    /// for all subsequent frames to ensure stable rendering.
+    /// This method caches the visible start from the first stable frame to prevent
+    /// vertical jumping. The first detected value is used for all subsequent frames.
     pub fn visible_window_start_scanline(&mut self) -> u16 {
-        // If we don't find a transition this frame, fall back to the last known value.
-        let fallback_cached = self.cached_visible_start;
+        // If already cached, use that value for stability
+        if let Some(cached) = self.cached_visible_start {
+            return cached;
+        }
 
-        // Find where VBLANK transitions from true to false
+        // Find where VBLANK transitions from true to false in this frame
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
         for i in 1..262 {
@@ -927,30 +935,51 @@ impl Tia {
             }
 
             if prev.vblank && !cur.vblank {
+                // Add to history to detect stability (limit to last 10 values)
+                self.visible_start_history.push(i as u16);
+                if self.visible_start_history.len() > 10 {
+                    self.visible_start_history.remove(0);
+                }
+
+                // Cache after we have at least 3 frames of history to ensure ROM is initialized
+                if self.visible_start_history.len() >= 3 {
+                    // Use the median of recent history for best stability
+                    let mut sorted = self.visible_start_history.clone();
+                    sorted.sort_unstable();
+                    let median = sorted[sorted.len() / 2];
+
+                    if debug {
+                        eprintln!(
+                            "[VISIBLE] Caching median value {} from history {:?}",
+                            median, self.visible_start_history
+                        );
+                    }
+                    self.cached_visible_start = Some(median);
+                    return median;
+                }
+
                 if debug {
                     eprintln!(
-                        "[VISIBLE] Found transition at scanline {}, caching for stability",
-                        i
+                        "[VISIBLE] Found transition at scanline {} (history: {:?})",
+                        i, self.visible_start_history
                     );
                 }
-                self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
         }
 
-        // If a previous frame gave us a valid start, reuse it.
-        if let Some(cached) = fallback_cached {
+        // If no transition found but we have history, use the last known value
+        if let Some(&last) = self.visible_start_history.last() {
             if debug {
-                eprintln!("[VISIBLE] No transition found, reusing cached {}", cached);
+                eprintln!("[VISIBLE] No transition found, using last known {}", last);
             }
-            return cached;
+            return last;
         }
 
-        // Fallback: common NTSC visible start is around scanline ~37-40
+        // Ultimate fallback: common NTSC visible start
         if debug {
             eprintln!("[VISIBLE] No transition found, using fallback 40");
         }
-        self.cached_visible_start = Some(40);
         40
     }
 
