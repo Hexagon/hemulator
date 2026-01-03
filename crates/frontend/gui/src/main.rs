@@ -3058,6 +3058,7 @@ fn main() {
                 .unwrap_or(Duration::ZERO);
 
             // Determine how many frames to step based on time difference
+            // No upper limit - allows stepping many frames to catch up when behind
             let frames_to_step = if time_diff >= target_frame_duration {
                 // We're behind - step enough frames to catch up
                 let frames =
@@ -3173,8 +3174,8 @@ fn main() {
 
         // Frame timing - skip sleep in benchmark mode
         if !cli_args.benchmark {
-            // Target 60 FPS for display refresh
-            let target_display_time = Duration::from_secs_f64(1.0 / 60.0);
+            // Target 120 FPS for display refresh (allows quicker catch-up)
+            let target_display_time = Duration::from_secs_f64(1.0 / 120.0);
 
             // Sleep to maintain consistent display frame rate
             if frame_dt < target_display_time {
