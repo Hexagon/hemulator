@@ -113,8 +113,8 @@ cargo run --release -p emu_gui -- path/to/game.bin
 
 The Atari 2600 crate includes comprehensive tests:
 
-- **73 total tests** (all passing):
-  - TIA tests (rendering, registers, playfield, ball sizing)
+- **75 total tests** (all passing):
+  - TIA tests (rendering, registers, playfield, ball sizing, delayed graphics, RESMP)
   - RIOT tests (RAM, timer, I/O)
   - Cartridge tests (banking schemes)
   - System integration tests
@@ -374,6 +374,25 @@ CTRLPF bits 4-5 control ball size (1, 2, 4, or 8 pixels):
 - **Size modes**: 1px, 2px, 4px, 8px ✅
 - **Impact**: Medium - improves visual accuracy for ball-based games (Pong, Breakout)
 - **Implementation**: Hardware-accurate sizing based on CTRLPF register bits 4-5
+
+#### Delayed Ball Graphics (VDELBL)
+
+✅ **Implemented**
+
+VDELBL delays ball enable/disable by one scanline, similar to VDELP for players:
+- **VDELBL register**: Implemented at 0x27 ✅
+- **Impact**: Low-Medium - Used by some games for flicker reduction
+- **Implementation**: Ball uses previous ENABL state when VDELBL is enabled
+
+#### Reset Missile to Player (RESMP0/RESMP1)
+
+✅ **Implemented**
+
+RESMP0/RESMP1 lock missiles to their associated player positions:
+- **RESMP0/RESMP1 registers**: Implemented at 0x28/0x29 ✅
+- **Positioning**: Missile locked to center of player (player_x + 4) ✅
+- **Impact**: Medium - Used by some games for synchronized player/missile graphics
+- **Implementation**: Missiles automatically follow players when RESMP is enabled
 
 #### Delayed Graphics Registers (VDELPx)
 
