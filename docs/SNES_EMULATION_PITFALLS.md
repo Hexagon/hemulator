@@ -75,34 +75,34 @@ Our SNES emulator implements:
 3. **Button Polarity**: Hardware uses active-low (0=pressed, 1=released), but our emulator uses active-high (1=pressed, 0=released) as an internal representation. This is a valid design choice as long as the emulation is functionally correct for games.
 4. **Auto-Joypad Read**: $4200 bit 0 enables automatic read during VBlank to $4218-$421F
 
-**Current Status**: ✅ Serial reading implemented, ✅ Auto-joypad read implemented ($4218-$421F registers)
+**Current Status**: ✅ Serial reading implemented, ✅ Auto-joypad read implemented with enable/disable control
+
+**Implementation**:
+- $4200 bit 0 controls auto-joypad read enable/disable
+- When disabled, $4218-$421F registers return 0
+- When enabled, registers provide controller state during VBlank
 
 **Potential Issues**:
 - No support for extended controllers (mouse, multitap)
-- No $4200 bit 0 control (auto-read is always enabled)
 
 **Recommendation**:
 - Document that mouse/multitap are not supported
-- Consider implementing $4200 auto-read enable/disable for accuracy
 
 ### 4. VRAM Access Timing
 
 **Issue**: VRAM can only be safely accessed during VBlank or when rendering is disabled
 
-**Current Status**: ⚠️ No VRAM access protection
+**Current Status**: ✅ VRAM access protection implemented
 
 **Edge Cases**:
 1. **Force Blank**: When $2100 bit 7 is set, screen is blanked and VRAM is always accessible
-2. **During Rendering**: VRAM writes during active display may be ignored or cause glitches
+2. **During Rendering**: VRAM writes during active display are ignored (matches hardware)
 3. **VRAM Increment Modes**: $2115 controls auto-increment on low/high byte access
 
-**Potential Issues**:
-- VRAM writes during active display are not blocked
-- May allow impossible writes that hardware would ignore
-
-**Recommendation**:
-- Add VRAM access protection (only allow when in VBlank or force blank)
-- Log/warn when VRAM access attempted during active display
+**Implementation**:
+- VRAM writes are only allowed during VBlank or force blank
+- Writes during active display are ignored and logged as warnings
+- Matches SNES hardware behavior for better accuracy
 
 ### 5. Color Math and Windows
 
@@ -190,14 +190,14 @@ Our SNES emulator implements:
 1. ✅ ~~Fix controller input (implemented in recent commits)~~
 2. ✅ ~~Fix VBlank/NMI timing (implemented in recent commits)~~
 3. ✅ ~~Implement auto-joypad read support ($4218-$421F registers)~~
-4. Implement priority bit handling in BG rendering
-5. Add sprite-per-scanline limits
+4. ✅ ~~Implement priority bit handling in BG rendering~~
+5. ✅ ~~Add sprite-per-scanline limits~~
 
 ### Medium Priority
-6. Add VRAM access protection
-7. Add BG3 priority toggle for Mode 1
+6. ✅ ~~Add VRAM access protection~~
+7. ✅ ~~Add BG3 priority toggle for Mode 1~~
 8. Create test ROMs for priority and sprite overflow
-9. Implement $4200 auto-read enable/disable control
+9. ✅ ~~Implement $4200 auto-read enable/disable control~~
 
 ### Low Priority
 10. Add PAL timing support
