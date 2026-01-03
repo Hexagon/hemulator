@@ -128,7 +128,10 @@ pub struct RspHle {
     rdp_half: u32,
 
     /// Light data (up to 8 lights)
-    /// Each light has: direction (3 floats), color (RGB, 3 bytes), padding
+    /// Each light has 7 elements: [dx, dy, dz, r, g, b, type]
+    /// - dx, dy, dz: direction vector (normalized, -1.0 to 1.0)
+    /// - r, g, b: color components (0.0 to 1.0)
+    /// - type: 0.0 = directional, 1.0 = point (reserved for future use)
     lights: [[f32; 7]; 8],
 
     /// Number of active lights
@@ -1211,6 +1214,10 @@ impl RspHle {
     /// Returns true if the vertex should be clipped (outside frustum)
     fn should_clip_vertex(clip: &[f32; 4]) -> bool {
         let w = clip[3];
+        // Vertices with w <= 0 are behind the camera or invalid
+        if w <= 0.0001 {
+            return true;
+        }
         // Clip against all 6 frustum planes: left, right, top, bottom, near, far
         // In clip space, a point is inside if: -w <= x/y/z <= w
         clip[0] < -w || clip[0] > w  // Left/right planes
