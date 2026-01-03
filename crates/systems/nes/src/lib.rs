@@ -827,6 +827,45 @@ mod tests {
     }
 
     #[test]
+    fn test_nes_controller_ninth_read_is_open_bus() {
+        // Specific test for the 9th read to verify off-by-one handling
+        // When all buttons are released (0), first 8 reads return 0, 9th returns 1
+        use crate::bus::Bus;
+
+        let mut sys = NesSystem::default();
+        sys.set_controller(0, 0); // No buttons pressed
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            bus.write(0x4016, 1);
+            bus.write(0x4016, 0);
+
+            // First 8 reads should return 0 (no buttons pressed)
+            for i in 0..8 {
+                assert_eq!(
+                    bus.read(0x4016) & 1,
+                    0,
+                    "Read {} should return 0 (button not pressed)",
+                    i + 1
+                );
+            }
+
+            // 9th read should return 1 (open bus), not 0
+            assert_eq!(
+                bus.read(0x4016) & 1,
+                1,
+                "9th read should return 1 (open bus)"
+            );
+
+            // 10th read should also return 1 (open bus)
+            assert_eq!(
+                bus.read(0x4016) & 1,
+                1,
+                "10th read should return 1 (open bus)"
+            );
+        }
+    }
+
+    #[test]
     fn test_nes_controller_strobe_during_reads() {
         // Edge case: Strobing controller during reads should reset the shift register
         use crate::bus::Bus;
