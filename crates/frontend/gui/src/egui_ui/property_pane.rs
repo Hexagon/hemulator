@@ -19,6 +19,7 @@ pub enum PropertyAction {
     EjectFile(String),                 // Mount point ID
     ConfigureInput,                    // Open input configuration dialog
     SetInputSource(InputConfigSource), // Switch between global/project input config
+    SetRenderer(String),               // Switch to specified renderer
 }
 
 pub struct PropertyPane {
@@ -30,6 +31,7 @@ pub struct PropertyPane {
     pub cpu_freq_target: Option<f64>,
     pub cpu_freq_actual: Option<f64>,
     pub rendering_backend: String,
+    pub available_renderers: Vec<String>, // List of available renderers for current system
 
     // FPS sparkline data (last 60 frames)
     fps_history: Vec<f32>,
@@ -99,6 +101,7 @@ impl PropertyPane {
             cpu_freq_target: None,
             cpu_freq_actual: None,
             rendering_backend: "Software".to_string(),
+            available_renderers: vec!["Software".to_string()],
             fps_history: Vec::with_capacity(60),
             target_fps: 60.0,
             pc_bda_values: None,
@@ -295,21 +298,30 @@ impl PropertyPane {
                     .default_open(self.settings_open)
                     .show(ui, |ui| {
                         ui.add_space(3.0);
-                        // Renderer selection (moved from Machine Metrics)
+                        // Renderer selection
                         ui.horizontal(|ui| {
                             ui.label("Renderer:");
                         });
-                        let backend_clone = self.rendering_backend.clone();
+                        let current_renderer = self.rendering_backend.clone();
                         egui::ComboBox::from_id_salt("renderer_select")
                             .selected_text(&self.rendering_backend)
                             .show_ui(ui, |ui| {
-                                // Note: This is currently display-only as renderer switching
-                                // would require significant refactoring. For now, just show current value.
-                                ui.selectable_value(
-                                    &mut self.rendering_backend,
-                                    backend_clone.clone(),
-                                    &backend_clone,
-                                );
+                                // Show all available renderers for the current system
+                                for renderer in &self.available_renderers {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.rendering_backend,
+                                            renderer.clone(),
+                                            renderer,
+                                        )
+                                        .clicked()
+                                        && renderer != &current_renderer
+                                    {
+                                        // Trigger renderer switch action
+                                        self.pending_action =
+                                            Some(PropertyAction::SetRenderer(renderer.clone()));
+                                    }
+                                }
                             });
 
                         // PC-specific settings: CPU Model
