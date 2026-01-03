@@ -1155,33 +1155,39 @@ fn create_nes_system(
     video_backend: &str,
     gl_context: Option<std::rc::Rc<glow::Context>>,
 ) -> emu_nes::NesSystem {
-    let mut nes_sys = emu_nes::NesSystem::default();
+    let nes_sys = emu_nes::NesSystem::default();
 
     // Replace renderer if OpenGL is requested and context is available
     if video_backend == "opengl" {
+        #[cfg(feature = "opengl")]
         if let Some(gl) = gl_context {
-            #[cfg(feature = "opengl")]
-            {
-                use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
+            use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
 
-                match OpenGLNesPpuRenderer::new(gl) {
-                    Ok(opengl_renderer) => {
-                        nes_sys.set_renderer(Box::new(opengl_renderer));
-                        eprintln!("NES: Using OpenGL (hardware) renderer");
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to create OpenGL NES renderer: {}, falling back to software",
-                            e
-                        );
-                    }
+            match OpenGLNesPpuRenderer::new(gl) {
+                Ok(opengl_renderer) => {
+                    nes_sys.set_renderer(Box::new(opengl_renderer));
+                    eprintln!("NES: Using OpenGL (hardware) renderer");
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Failed to create OpenGL NES renderer: {}, falling back to software",
+                        e
+                    );
                 }
             }
-            #[cfg(not(feature = "opengl"))]
-            {
-                eprintln!("Warning: OpenGL feature not enabled - using software renderer");
-            }
-        } else {
+        }
+        #[cfg(not(feature = "opengl"))]
+        if gl_context.is_some() {
+            eprintln!("Warning: OpenGL feature not enabled - using software renderer");
+        }
+        #[cfg(feature = "opengl")]
+        if gl_context.is_none() {
+            eprintln!(
+                "Warning: OpenGL renderer requested but GL context not available - using software"
+            );
+        }
+        #[cfg(not(feature = "opengl"))]
+        if gl_context.is_none() {
             eprintln!(
                 "Warning: OpenGL renderer requested but GL context not available - using software"
             );
@@ -2025,34 +2031,10 @@ fn main() {
     egui_app.property_pane.system_name = sys.system_name().to_string();
 
     // Upgrade renderer to OpenGL if settings request it and system was loaded
-    if rom_loaded && settings.video_backend == "opengl" {
-        let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed - OpenGL support disabled for now
-        match &mut sys {
-            EmulatorSystem::NES(nes_sys) => {
-                #[cfg(feature = "opengl")]
-                {
-                    use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
-                    match OpenGLNesPpuRenderer::new(gl_ctx.clone().unwrap()) {
-                        Ok(opengl_renderer) => {
-                            nes_sys.set_renderer(Box::new(opengl_renderer));
-                            eprintln!("NES: Upgraded to OpenGL (hardware) renderer");
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "Failed to create OpenGL NES renderer: {}, using software",
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-            EmulatorSystem::N64(_n64_sys) => {
-                // N64 OpenGL renderer upgrade would go here
-                eprintln!("N64: OpenGL renderer upgrade not yet implemented");
-            }
-            _ => {}
-        }
-    }
+    // Note: OpenGL renderer upgrade temporarily disabled due to GL context refactoring
+    // if rom_loaded && settings.video_backend == "opengl" {
+    //     // GL context handling needs to be restored
+    // }
 
     // Set property pane renderer display based on settings preference, not current renderer
     egui_app.property_pane.rendering_backend = if settings.video_backend == "opengl" {
