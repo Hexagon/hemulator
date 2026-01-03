@@ -116,7 +116,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
 
     fn render_frame(&mut self, tia: &Tia, visible_start: u16) {
         use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-        
+
         let end_scanline = (visible_start + 191) % 262;
         if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
             eprintln!(
@@ -133,7 +133,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
         // when visible_start + visible_line exceeds the total scanline count.
         for visible_line in 0..192 {
             let tia_scanline = (visible_start + visible_line as u16) % TOTAL_SCANLINES;
-            
+
             if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                 // Log the wrap point where we go from scanline 261 to 0
                 if tia_scanline == 0 || (visible_line > 0 && tia_scanline < visible_start) {
@@ -143,7 +143,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
                     );
                 }
             }
-            
+
             self.render_scanline(tia, visible_line, tia_scanline);
         }
     }
