@@ -112,6 +112,10 @@ pub struct RspHle {
 
     /// Geometry mode flags
     geometry_mode: u32,
+
+    /// Viewport parameters (x, y, width, height, scale_x, scale_y)
+    /// Defaults to (0, 0, 320, 240, 160, 120) for 320x240 framebuffer
+    viewport: (f32, f32, f32, f32, f32, f32),
 }
 
 impl RspHle {
@@ -126,6 +130,9 @@ impl RspHle {
             projection_matrix: Self::identity_matrix(),
             modelview_matrix: Self::identity_matrix(),
             geometry_mode: 0,
+            // Default viewport for 320x240 framebuffer
+            // (x, y, width, height, scale_x, scale_y)
+            viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
         }
     }
 
@@ -666,21 +673,81 @@ impl RspHle {
             0xDC => {
                 // word0: cmd_id | size | offset
                 // word1: RDRAM address to load from
-                let _size = ((word0 >> 16) & 0xFF) as usize;
-                let _offset = (word0 & 0xFFFF) as usize;
-                let _rdram_addr = word1;
+                let size = ((word0 >> 16) & 0xFF) as usize;
+                let offset = (word0 & 0xFFFF) as usize;
+                let rdram_addr = word1;
 
-                // Common uses:
-                // - Load viewport settings
-                // - Load light data
-                // - Load matrix data
-                // For HLE, we log but don't fully implement
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!(
-                        "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
-                        _size, _offset, _rdram_addr
-                    )
-                });
+                // G_MOVEMEM indices (offset values):
+                // 0x80 = G_MV_VIEWPORT (8 bytes)
+                // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
+                // 0x82 = G_MV_LIGHT (16 bytes per light)
+                
+                // Check if this is a viewport load (offset 0x80)
+                const G_MV_VIEWPORT: usize = 0x80;
+                
+                if offset == G_MV_VIEWPORT && size >= 8 {
+                    // Load viewport data from RDRAM
+                    // Viewport format (8 words = 16 bytes in 16.16 fixed point):
+                    // vscale[0] = width/2, vscale[1] = height/2
+                    // vtrans[0] = x + width/2, vtrans[1] = y + height/2
+                    let addr = Self::virt_to_phys(rdram_addr);
+                    if addr + 15 < rdram.len() {
+                        // Read scale values (vscale[0], vscale[1])
+                        let vscale_x = i32::from_be_bytes([
+                            rdram[addr],
+                            rdram[addr + 1],
+                            rdram[addr + 2],
+                            rdram[addr + 3],
+                        ]) as f32 / 65536.0;
+                        
+                        let vscale_y = i32::from_be_bytes([
+                            rdram[addr + 4],
+                            rdram[addr + 5],
+                            rdram[addr + 6],
+                            rdram[addr + 7],
+                        ]) as f32 / 65536.0;
+
+                        // Read translation values (vtrans[0], vtrans[1])
+                        let vtrans_x = i32::from_be_bytes([
+                            rdram[addr + 8],
+                            rdram[addr + 9],
+                            rdram[addr + 10],
+                            rdram[addr + 11],
+                        ]) as f32 / 65536.0;
+                        
+                        let vtrans_y = i32::from_be_bytes([
+                            rdram[addr + 12],
+                            rdram[addr + 13],
+                            rdram[addr + 14],
+                            rdram[addr + 15],
+                        ]) as f32 / 65536.0;
+
+                        // Calculate viewport bounds
+                        // x = vtrans_x - vscale_x, y = vtrans_y - vscale_y
+                        // width = vscale_x * 2, height = vscale_y * 2
+                        let vp_x = vtrans_x - vscale_x;
+                        let vp_y = vtrans_y - vscale_y;
+                        let vp_width = vscale_x * 2.0;
+                        let vp_height = vscale_y * 2.0;
+                        
+                        self.viewport = (vp_x, vp_y, vp_width, vp_height, vscale_x, vscale_y);
+
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            format!(
+                                "RSP HLE: G_MOVEMEM viewport - x={:.1}, y={:.1}, w={:.1}, h={:.1}",
+                                vp_x, vp_y, vp_width, vp_height
+                            )
+                        });
+                    }
+                } else {
+                    // Other MOVEMEM types - log but don't implement
+                    log(LogCategory::Stubs, LogLevel::Debug, || {
+                        format!(
+                            "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
+                            size, offset, rdram_addr
+                        )
+                    });
+                }
                 true
             }
             // G_TEXTURE (0xD7) - Configure texture settings
@@ -733,6 +800,70 @@ impl RspHle {
                     format!(
                         "N64 RSP HLE: G_SETOTHERMODE_H stub - shift={}, len={}, data=0x{:08X}",
                         _shift, _length, _data
+                    )
+                });
+                true
+            }
+            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
+            0xEE => {
+                // word0: cmd_id | padding
+                // word1: z (16-bit) | dz (16-bit) - depth value and delta
+                let _z = (word1 >> 16) & 0xFFFF;
+                let _dz = word1 & 0xFFFF;
+
+                // For HLE, we log but don't implement primitive depth override
+                // Full implementation would set a base depth for subsequent primitives
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
+                        _z, _dz
+                    )
+                });
+                true
+            }
+            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
+            0xBF => {
+                // word0: cmd_id | padding
+                // word1: data (first word for RDP command)
+                // This is typically followed by another command that uses this data
+                // For HLE, we store it temporarily but don't need to act on it
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_1 - data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
+            0xB4 => {
+                // word0: cmd_id | padding
+                // word1: data (second word for RDP command)
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_RDPHALF_CONT (0xB3) - Continue RDP half command
+            0xB3 => {
+                // word0: cmd_id | padding
+                // word1: data
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_CONT - data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_LOAD_UCODE (0xAF) - Load new microcode
+            0xAF => {
+                // word0: cmd_id | size
+                // word1: RDRAM address of microcode
+                let _size = (word0 & 0xFFFF) as usize;
+                let _ucode_addr = word1;
+
+                // For HLE, we don't actually load and execute microcode
+                // Instead, we detect the microcode type by signature
+                // A full LLE implementation would copy from RDRAM to IMEM
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_LOAD_UCODE - size=0x{:04X}, addr=0x{:08X}",
+                        _size, _ucode_addr
                     )
                 });
                 true
@@ -948,9 +1079,10 @@ impl RspHle {
 
         // Viewport transform (NDC to screen space)
         // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
-        // Assuming 320x240 resolution
-        let screen_x = ((ndc_x + 1.0) * 160.0) as i32; // 320/2 = 160
-        let screen_y = ((1.0 - ndc_y) * 120.0) as i32; // 240/2 = 120, inverted Y
+        // Use viewport parameters instead of hardcoded values
+        let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
+        let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
+        let screen_y = (vp_y + (1.0 - ndc_y) * scale_y) as i32; // Inverted Y
         let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
 
         (screen_x, screen_y, screen_z)
