@@ -1153,14 +1153,14 @@ impl CliArgs {
 /// Create a NES system with the appropriate renderer based on settings
 fn create_nes_system(
     video_backend: &str,
-    gl_context: Option<std::rc::Rc<glow::Context>>,
+    _gl_context: Option<std::rc::Rc<glow::Context>>,
 ) -> emu_nes::NesSystem {
     let nes_sys = emu_nes::NesSystem::default();
 
     // Replace renderer if OpenGL is requested and context is available
     if video_backend == "opengl" {
         #[cfg(feature = "opengl")]
-        if let Some(gl) = gl_context {
+        if let Some(gl) = _gl_context {
             #[cfg(feature = "opengl")]
             {
                 use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;

@@ -454,7 +454,10 @@ impl Tia {
     pub fn latch_current_scanline_state(&mut self) {
         use emu_core::logging::{LogCategory, LogConfig, LogLevel};
         if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-            eprintln!("[TIA LATCH] Explicitly latching scanline {} state", self.scanline);
+            eprintln!(
+                "[TIA LATCH] Explicitly latching scanline {} state",
+                self.scanline
+            );
         }
         self.latch_scanline_state(self.scanline);
     }
@@ -800,10 +803,13 @@ impl Tia {
             }
 
             // Debug logging
-            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                if old_scanline == 261 || self.scanline <= 1 {
-                    eprintln!("[TIA CLOCK] Scanline {} -> {} (latched {})", old_scanline, self.scanline, old_scanline);
-                }
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+                && (old_scanline == 261 || self.scanline <= 1)
+            {
+                eprintln!(
+                    "[TIA CLOCK] Scanline {} -> {} (latched {})",
+                    old_scanline, self.scanline, old_scanline
+                );
             }
         }
     }
@@ -843,7 +849,7 @@ impl Tia {
             *state = ScanlineState::default();
         }
         self.cached_visible_start = None;
-        
+
         // DO NOT reset scanline or pixel counters here!
         // The TIA continues to run with consistent timing across frame boundaries.
         // Resetting these counters creates timing discontinuities that break horizontal
@@ -878,10 +884,7 @@ impl Tia {
             if debug && offset < 100 {
                 eprintln!(
                     "[VISIBLE] abs_prev={} abs_cur={} prev.vblank={} cur.vblank={}",
-                    prev_idx,
-                    cur_idx,
-                    prev.vblank,
-                    cur.vblank
+                    prev_idx, cur_idx, prev.vblank, cur.vblank
                 );
             }
 

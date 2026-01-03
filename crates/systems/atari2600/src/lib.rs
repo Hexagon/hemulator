@@ -364,7 +364,10 @@ impl System for Atari2600System {
             if started_frame_capture && scanlines_seen >= 320 {
                 // Some ROMs don't VSYNC cleanly; avoid runaway frames.
                 if debug_vsync {
-                    eprintln!("[ATARI VSYNC] No end-of-frame VSYNC seen; bailing at {} scanlines", scanlines_seen);
+                    eprintln!(
+                        "[ATARI VSYNC] No end-of-frame VSYNC seen; bailing at {} scanlines",
+                        scanlines_seen
+                    );
                 }
                 break;
             }
@@ -408,14 +411,14 @@ impl System for Atari2600System {
         // Render the frame using the renderer
         if let Some(bus) = self.cpu.bus_mut() {
             let current_scanline = bus.tia.get_scanline();
-            
+
             // CRITICAL: We end the frame at scanline 0, but scanline 0's state
             // won't be latched until we LEAVE scanline 0 (move to scanline 1).
             // So we must explicitly latch it now before rendering.
             if current_scanline == 0 {
                 bus.tia.latch_current_scanline_state();
             }
-            
+
             // Determine visible window based on VBLANK timing within the current frame.
             let visible_start = bus.tia.visible_window_start_scanline();
 
@@ -430,7 +433,7 @@ impl System for Atari2600System {
 
             // Use renderer to render the frame
             self.renderer.render_frame(&bus.tia, visible_start);
-            
+
             // Debug: Check if framebuffer is stable
             if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
                 use std::collections::hash_map::DefaultHasher;
