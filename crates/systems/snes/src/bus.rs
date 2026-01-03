@@ -27,6 +27,8 @@ pub struct SnesBus {
     controller_shift: [Cell<u16>; 2],
     /// Controller strobe state
     controller_strobe: bool,
+    /// Auto-joypad read enable ($4200 bit 0)
+    auto_joypad_enable: bool,
 }
 
 impl SnesBus {
@@ -40,6 +42,7 @@ impl SnesBus {
             controller_state: [0; 2],
             controller_shift: [Cell::new(0), Cell::new(0)],
             controller_strobe: false,
+            auto_joypad_enable: true, // Default to enabled
         }
     }
 
@@ -179,15 +182,39 @@ impl Memory65c816 for SnesBus {
                             bit
                         }
                     }
-                    // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (set during VBlank)
-                    0x4218 => (self.controller_state[0] & 0xFF) as u8, // JOY1L
-                    0x4219 => ((self.controller_state[0] >> 8) & 0xFF) as u8, // JOY1H
-                    0x421A => (self.controller_state[1] & 0xFF) as u8, // JOY2L
-                    0x421B => ((self.controller_state[1] >> 8) & 0xFF) as u8, // JOY2H
-                    0x421C => 0,                                       // JOY3L (not implemented)
-                    0x421D => 0,                                       // JOY3H (not implemented)
-                    0x421E => 0,                                       // JOY4L (not implemented)
-                    0x421F => 0,                                       // JOY4H (not implemented)
+                    // $4218-$421F - JOYxL/JOYxH - Auto-joypad read (only valid when auto-read enabled)
+                    0x4218 => {
+                        if self.auto_joypad_enable {
+                            (self.controller_state[0] & 0xFF) as u8 // JOY1L
+                        } else {
+                            0 // Return 0 when auto-read disabled
+                        }
+                    }
+                    0x4219 => {
+                        if self.auto_joypad_enable {
+                            ((self.controller_state[0] >> 8) & 0xFF) as u8 // JOY1H
+                        } else {
+                            0
+                        }
+                    }
+                    0x421A => {
+                        if self.auto_joypad_enable {
+                            (self.controller_state[1] & 0xFF) as u8 // JOY2L
+                        } else {
+                            0
+                        }
+                    }
+                    0x421B => {
+                        if self.auto_joypad_enable {
+                            ((self.controller_state[1] >> 8) & 0xFF) as u8 // JOY2H
+                        } else {
+                            0
+                        }
+                    }
+                    0x421C => 0, // JOY3L (not implemented)
+                    0x421D => 0, // JOY3H (not implemented)
+                    0x421E => 0, // JOY4L (not implemented)
+                    0x421F => 0, // JOY4H (not implemented)
                     // $4212 - HVBJOY - H/V Blank and Joypad Status
                     0x4212 => {
                         // Bit 7: VBlank flag (set during VBlank period)
@@ -250,7 +277,7 @@ impl Memory65c816 for SnesBus {
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
                         // Bit 7: NMI enable
-                        // Bit 4: Joypad auto-read enable (not implemented)
+                        // Bit 0: Joypad auto-read enable
                         // Other bits: H/V timer interrupt enable (not implemented)
                         let old_nmi_enable = self.ppu.nmi_enable;
                         self.ppu.nmi_enable = (val & 0x80) != 0;
@@ -259,6 +286,22 @@ impl Memory65c816 for SnesBus {
                                 format!(
                                     "SNES Bus: NMI {}",
                                     if self.ppu.nmi_enable {
+                                        "enabled"
+                                    } else {
+                                        "disabled"
+                                    }
+                                )
+                            });
+                        }
+
+                        // Bit 0: Auto-joypad read enable
+                        let old_auto_joypad = self.auto_joypad_enable;
+                        self.auto_joypad_enable = (val & 0x01) != 0;
+                        if old_auto_joypad != self.auto_joypad_enable {
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                format!(
+                                    "SNES Bus: Auto-joypad read {}",
+                                    if self.auto_joypad_enable {
                                         "enabled"
                                     } else {
                                         "disabled"

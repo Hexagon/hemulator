@@ -155,6 +155,7 @@ struct ScanlineState {
     missile1_x: u8,
     enabl: bool,
     ball_x: u8,
+    ball_size: u8, // Ball size (1, 2, 4, or 8 pixels)
 }
 
 /// TIA chip state
@@ -197,10 +198,15 @@ pub struct Tia {
     enam1: bool, // Missile 1 enable
     missile0_x: u8,
     missile1_x: u8,
+    resmp0: bool, // Reset missile 0 to player 0 position
+    resmp1: bool, // Reset missile 1 to player 1 position
 
     // Ball
-    enabl: bool, // Ball enable
+    enabl: bool,   // Ball enable
+    enabl_old: u8, // Previous ENABL value for delayed graphics
     ball_x: u8,
+    ball_size: u8, // Ball size (1, 2, 4, or 8 pixels) from CTRLPF bits 4-5
+    vdelbl: bool,  // Ball delayed graphics enable
 
     // Collision detection registers (CXM0P, CXM1P, CXP0FB, CXP1FB, CXM0FB, CXM1FB, CXBLPF, CXPPMM)
     cxm0p: u8,  // Missile 0 to Player collisions
@@ -333,8 +339,13 @@ impl Tia {
             enam1: false,
             missile0_x: 0,
             missile1_x: 0,
+            resmp0: false,
+            resmp1: false,
             enabl: false,
+            enabl_old: 0,
             ball_x: 0,
+            ball_size: 1, // Default to 1 pixel
+            vdelbl: false,
             cxm0p: 0,
             cxm1p: 0,
             cxp0fb: 0,
@@ -434,6 +445,14 @@ impl Tia {
 
     /// Latch current TIA state for a scanline (for later rendering)
     fn latch_scanline_state(&mut self, scanline: u16) {
+        // Apply RESMP: lock missiles to player positions if enabled
+        if self.resmp0 {
+            self.missile0_x = self.player0_x.saturating_add(4); // Center of 8-pixel player
+        }
+        if self.resmp1 {
+            self.missile1_x = self.player1_x.saturating_add(4); // Center of 8-pixel player
+        }
+
         let idx = (scanline as usize).min(261);
         self.scanline_states[idx] = ScanlineState {
             vblank: self.vblank,
@@ -470,8 +489,13 @@ impl Tia {
             enam1: self.enam1,
             missile0_x: self.missile0_x,
             missile1_x: self.missile1_x,
-            enabl: self.enabl,
+            enabl: if self.vdelbl {
+                (self.enabl_old & 0x02) != 0
+            } else {
+                self.enabl
+            },
             ball_x: self.ball_x,
+            ball_size: self.ball_size,
         };
     }
 
@@ -549,6 +573,14 @@ impl Tia {
                 self.playfield_reflect = (val & 0x01) != 0;
                 self.playfield_score_mode = (val & 0x02) != 0;
                 self.playfield_priority = (val & 0x04) != 0;
+                // Bits 4-5 control ball size: 00=1px, 01=2px, 10=4px, 11=8px
+                self.ball_size = match (val >> 4) & 0x03 {
+                    0x00 => 1,
+                    0x01 => 2,
+                    0x02 => 4,
+                    0x03 => 8,
+                    _ => unreachable!(), // Only 2 bits, so only 0-3 possible
+                };
             }
 
             // Player reflect
@@ -585,8 +617,18 @@ impl Tia {
             // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
             0x10 => self.player0_x = self.current_visible_x(),
             0x11 => self.player1_x = self.current_visible_x(),
-            0x12 => self.missile0_x = self.current_visible_x(),
-            0x13 => self.missile1_x = self.current_visible_x(),
+            0x12 => {
+                if !self.resmp0 {
+                    // Only set position if not locked to player
+                    self.missile0_x = self.current_visible_x();
+                }
+            }
+            0x13 => {
+                if !self.resmp1 {
+                    // Only set position if not locked to player
+                    self.missile1_x = self.current_visible_x();
+                }
+            }
             0x14 => self.ball_x = self.current_visible_x(),
 
             // Audio
@@ -642,7 +684,10 @@ impl Tia {
             // Enable missiles and ball
             0x1D => self.enam0 = (val & 0x02) != 0,
             0x1E => self.enam1 = (val & 0x02) != 0,
-            0x1F => self.enabl = (val & 0x02) != 0,
+            0x1F => {
+                self.enabl_old = if self.enabl { 0x02 } else { 0x00 }; // Save old value
+                self.enabl = (val & 0x02) != 0;
+            }
 
             // Horizontal motion
             0x20 => self.hmp0 = (val as i8) >> 4,
@@ -654,6 +699,11 @@ impl Tia {
             // Delayed graphics enable
             0x25 => self.vdelp0 = (val & 0x01) != 0, // VDELP0
             0x26 => self.vdelp1 = (val & 0x01) != 0, // VDELP1
+            0x27 => self.vdelbl = (val & 0x01) != 0, // VDELBL
+
+            // Reset missile to player
+            0x28 => self.resmp0 = (val & 0x02) != 0, // RESMP0
+            0x29 => self.resmp1 = (val & 0x02) != 0, // RESMP1
 
             // Apply horizontal motion (HMOVE)
             0x2A => {
@@ -1169,9 +1219,9 @@ impl Tia {
             return false;
         }
 
-        // Ball is 1 pixel wide by default
+        // Ball size is controlled by CTRLPF bits 4-5 (1, 2, 4, or 8 pixels)
         let offset = x.wrapping_sub(state.ball_x as usize);
-        offset < 1
+        offset < state.ball_size as usize
     }
 
     /// Check if a pixel is part of the playfield
@@ -1466,6 +1516,124 @@ mod tests {
 
         // Ball should be visible at x=100
         assert_ne!(frame[100], ntsc_to_rgb(0));
+    }
+
+    #[test]
+    fn test_tia_ball_size() {
+        let mut tia = Tia::new();
+
+        tia.write(0x14, 0x00); // RESBL - position ball at x=0
+        tia.write(0x1F, 0x02); // ENABL - enable ball
+
+        // Test 1-pixel ball (CTRLPF bits 4-5 = 00)
+        tia.write(0x0A, 0x00);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 1);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(!Tia::is_ball_pixel(&state, 1));
+
+        // Test 2-pixel ball (CTRLPF bits 4-5 = 01)
+        tia.write(0x0A, 0x10);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 2);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 1));
+        assert!(!Tia::is_ball_pixel(&state, 2));
+
+        // Test 4-pixel ball (CTRLPF bits 4-5 = 10)
+        tia.write(0x0A, 0x20);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 4);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 3));
+        assert!(!Tia::is_ball_pixel(&state, 4));
+
+        // Test 8-pixel ball (CTRLPF bits 4-5 = 11)
+        tia.write(0x0A, 0x30);
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        assert_eq!(state.ball_size, 8);
+        assert!(Tia::is_ball_pixel(&state, 0));
+        assert!(Tia::is_ball_pixel(&state, 7));
+        assert!(!Tia::is_ball_pixel(&state, 8));
+    }
+
+    #[test]
+    fn test_vdelbl_delayed_ball_graphics() {
+        let mut tia = Tia::new();
+
+        tia.write(0x14, 0x00); // RESBL - position ball at x=0
+        tia.write(0x08, 0x0E); // COLUPF - set color
+
+        // Enable delayed ball graphics
+        tia.write(0x27, 0x01); // VDELBL
+
+        // Enable ball first
+        tia.write(0x1F, 0x02); // ENABL = 1
+        tia.latch_scanline_state(0);
+        let state = tia.scanline_states[0];
+        // With VDELBL, should still be using old value (which was 0 at start)
+        assert!(!state.enabl);
+
+        // Write again to trigger the delay
+        tia.write(0x1F, 0x02); // ENABL = 1 again
+        tia.latch_scanline_state(1);
+        let state = tia.scanline_states[1];
+        // Now it should show the previous write's enabled state
+        assert!(state.enabl);
+
+        // Disable ball
+        tia.write(0x1F, 0x00); // ENABL = 0
+        tia.latch_scanline_state(2);
+        let state = tia.scanline_states[2];
+        // Should still be enabled (showing previous state)
+        assert!(state.enabl);
+
+        // Write again to update the delay
+        tia.write(0x1F, 0x00); // ENABL = 0 again
+        tia.latch_scanline_state(3);
+        let state = tia.scanline_states[3];
+        // Now it should be disabled
+        assert!(!state.enabl);
+    }
+
+    #[test]
+    fn test_resmp_missile_to_player() {
+        let mut tia = Tia::new();
+
+        // Position player 0 at x=50 (pixel is in color clocks, not screen pixels)
+        tia.pixel = 68 + 50; // HBLANK + 50 color clocks
+        tia.write(0x10, 0x00); // RESP0
+
+        // Enable missile 0
+        tia.write(0x1D, 0x02); // ENAM0
+
+        // Position missile 0 at x=10 initially (without RESMP)
+        tia.pixel = 68 + 10;
+        tia.write(0x12, 0x00); // RESM0
+        assert_eq!(tia.missile0_x, 10);
+
+        // Enable RESMP0 - lock missile to player
+        tia.write(0x28, 0x02); // RESMP0
+        tia.latch_scanline_state(0);
+
+        // Missile should now be at player position + 4 (center of 8-pixel player)
+        assert_eq!(tia.missile0_x, 54); // 50 + 4
+
+        // Try to move missile - should be ignored when RESMP is on
+        tia.pixel = 68 + 100;
+        tia.write(0x12, 0x00); // RESM0 - should be ignored
+        tia.latch_scanline_state(1);
+        assert_eq!(tia.missile0_x, 54); // Still locked to player
+
+        // Disable RESMP0
+        tia.write(0x28, 0x00); // RESMP0 = 0
+        tia.pixel = 68 + 20;
+        tia.write(0x12, 0x00); // RESM0 - should work now
+        assert_eq!(tia.missile0_x, 20); // Free to move again
     }
 
     #[test]
