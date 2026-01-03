@@ -513,6 +513,26 @@ impl RspHle {
                 }
                 true
             }
+            // G_CLEARGEOMETRYMODE (0xB6) - Clear geometry mode bits
+            0xB6 => {
+                // word1: bits to clear
+                let clear_bits = word1;
+                self.geometry_mode &= !clear_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("RSP HLE: G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}", clear_bits, self.geometry_mode)
+                });
+                true
+            }
+            // G_SETGEOMETRYMODE (0xB7) - Set geometry mode bits  
+            0xB7 => {
+                // word1: bits to set
+                let set_bits = word1;
+                self.geometry_mode |= set_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("RSP HLE: G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}", set_bits, self.geometry_mode)
+                });
+                true
+            }
             // G_VTX (0x01) - Load vertices
             0x01 => {
                 // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
@@ -525,6 +545,19 @@ impl RspHle {
                 for i in 0..vertex_count.min(32 - buffer_index) {
                     let vaddr = vertex_addr + (i as u32 * 16);
                     self.load_vertex(rdram, vaddr, buffer_index + i);
+                }
+                true
+            }
+            // G_TRI1 (0x04) - Draw single triangle (alternate encoding)
+            0x04 => {
+                // Alternative encoding used by some games
+                // word0: cmd_id | v0_index | v1_index | v2_index
+                let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+                let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+                let v2 = (word0 & 0xFF) as usize / 2;
+
+                if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+                    self.draw_transformed_triangle(v0, v1, v2, rdp);
                 }
                 true
             }
@@ -920,6 +953,45 @@ impl RspHle {
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command  
+            0xB4 => {
+                // word0: cmd_id | padding
+                // word1: data (second word for RDP command)
+                // This completes a 2-word RDP command using the stored rdp_half value
+                // Common use: TEXTURE_RECTANGLE where word0 comes from RDPHALF_1
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}, combining with rdp_half=0x{:08X}", word1, self.rdp_half)
+                });
+                true
+            }
+            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
+            0xBF => {
+                // word0: cmd_id | padding
+                // word1: data (first word for RDP command)
+                // Store the data for use by subsequent command
+                self.rdp_half = word1;
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
+            0xEE => {
+                // word0: cmd_id | padding
+                // word1: z (16-bit) | dz (16-bit) - depth value and delta
+                let _z = (word1 >> 16) & 0xFFFF;
+                let _dz = word1 & 0xFFFF;
+
+                // For HLE, we log but don't implement primitive depth override
+                // Full implementation would set a base depth for subsequent primitives
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
+                        _z, _dz
+                    )
+                });
+                true
+            }
             // RDP passthrough commands (0xE0-0xFF) - forward directly to RDP
             0xE0..=0xFF => {
                 // These are RDP commands embedded in F3DEX display list
