@@ -90,6 +90,11 @@ impl EguiApp {
         }
     }
 
+    /// Update recent files list for the menu
+    pub fn update_recent_files(&mut self, recent_files: Vec<String>) {
+        self.menu_bar.set_recent_files(recent_files);
+    }
+
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
         // Set brighter text color globally
@@ -110,6 +115,8 @@ impl EguiApp {
             });
 
         // Bottom status bar - VS Code lighter area RGB(31,31,31)
+        // Update status bar with current FPS from property pane
+        self.status_bar.set_fps(self.property_pane.fps);
         TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame::new().fill(color_from_rgb(31, 31, 31)))
             .show(ctx, |ui| {

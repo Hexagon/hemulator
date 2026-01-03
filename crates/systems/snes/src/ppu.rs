@@ -389,6 +389,17 @@ impl Ppu {
 
             // $2118 - VMDATAL - VRAM Data Write (low byte)
             0x2118 => {
+                // VRAM can only be written during VBlank or when screen is force blanked
+                if !self.is_vram_accessible() {
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!(
+                            "SNES PPU: VRAM Write L attempted during active display (ignored) - addr ${:04X}",
+                            self.vram_addr
+                        )
+                    });
+                    return; // Ignore write during active display
+                }
+
                 let addr = (self.vram_addr as usize) % (VRAM_SIZE / 2);
                 self.vram[addr * 2] = val;
                 log(LogCategory::PPU, LogLevel::Trace, || {
@@ -402,6 +413,17 @@ impl Ppu {
 
             // $2119 - VMDATAH - VRAM Data Write (high byte)
             0x2119 => {
+                // VRAM can only be written during VBlank or when screen is force blanked
+                if !self.is_vram_accessible() {
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        format!(
+                            "SNES PPU: VRAM Write H attempted during active display (ignored) - addr ${:04X}",
+                            self.vram_addr
+                        )
+                    });
+                    return; // Ignore write during active display
+                }
+
                 let addr = if self.vmain & 0x80 != 0 {
                     // If incrementing on low byte, high byte write uses current address
                     (self.vram_addr.wrapping_sub(self.get_vram_increment()) as usize)
@@ -610,6 +632,11 @@ impl Ppu {
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(256, 224); // SNES resolution
 
+        // Priority buffer: tracks the priority level of each pixel
+        // Priority levels: 0 (backdrop) to 7 (highest sprite priority)
+        // We use 255 as "unset" since it's higher than any valid priority
+        let mut priority_buffer = vec![255u8; 256 * 224];
+
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
         // something during boot sequences before they unblank the screen
@@ -620,42 +647,130 @@ impl Ppu {
         match bg_mode {
             // Mode 0: 4 BG layers, 2bpp each (4 colors per layer)
             0 => {
-                // Render BG layers from back to front (BG4 -> BG3 -> BG2 -> BG1)
-                // Each layer is only rendered if enabled in TM register
+                // Priority-based rendering order:
+                // 1. BG layers with priority=0 (back to front: BG4->BG3->BG2->BG1)
+                // 2. Sprites with priority=0-1
+                // 3. BG layers with priority=1 (back to front: BG4->BG3->BG2->BG1)
+                // 4. Sprites with priority=2-3
+
+                // Render priority 0 BG layers
                 if self.tm & 0x08 != 0 {
-                    self.render_bg_layer_2bpp(&mut frame, 3); // BG4
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 0);
                 }
                 if self.tm & 0x04 != 0 {
-                    self.render_bg_layer_2bpp(&mut frame, 2); // BG3
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 0);
                 }
                 if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp(&mut frame, 1); // BG2
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
                 }
                 if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_2bpp(&mut frame, 0); // BG1
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
                 }
 
-                // Render sprites if enabled
+                // Render sprites with priority 0-1
                 if self.tm & 0x10 != 0 {
-                    self.render_sprites(&mut frame);
+                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
+                }
+
+                // Render priority 1 BG layers
+                if self.tm & 0x08 != 0 {
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 3, 1);
+                }
+                if self.tm & 0x04 != 0 {
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 1);
+                }
+                if self.tm & 0x02 != 0 {
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
+                }
+                if self.tm & 0x01 != 0 {
+                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
+                }
+
+                // Render sprites with priority 2-3
+                if self.tm & 0x10 != 0 {
+                    self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
                 }
             }
             // Mode 1: 2 BG layers (4bpp) + 1 BG layer (2bpp)
             1 => {
-                // BG3 is 2bpp, BG1 and BG2 are 4bpp
-                if self.tm & 0x04 != 0 {
-                    self.render_bg_layer_2bpp(&mut frame, 2); // BG3 (2bpp)
-                }
-                if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_4bpp(&mut frame, 1); // BG2 (4bpp)
-                }
-                if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp(&mut frame, 0); // BG1 (4bpp)
-                }
+                // Check BG3 priority toggle (bit 3 of BGMODE)
+                let bg3_priority_high = (self.bgmode & 0x08) != 0;
 
-                // Render sprites if enabled
-                if self.tm & 0x10 != 0 {
-                    self.render_sprites(&mut frame);
+                // Priority-based rendering order for Mode 1:
+                // If BG3 priority toggle is off:
+                //   1. BG layers with priority=0 (BG3->BG2->BG1)
+                //   2. Sprites with priority=0-1
+                //   3. BG layers with priority=1 (BG3->BG2->BG1)
+                //   4. Sprites with priority=2-3
+                // If BG3 priority toggle is on:
+                //   BG3 renders above ALL sprites (last)
+
+                if !bg3_priority_high {
+                    // Normal priority mode
+                    // Render priority 0 BG layers
+                    if self.tm & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 0);
+                    }
+                    if self.tm & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
+                    }
+                    if self.tm & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
+                    }
+
+                    // Render sprites with priority 0-1
+                    if self.tm & 0x10 != 0 {
+                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    }
+
+                    // Render priority 1 BG layers
+                    if self.tm & 0x04 != 0 {
+                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 1);
+                    }
+                    if self.tm & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
+                    }
+                    if self.tm & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    }
+
+                    // Render sprites with priority 2-3
+                    if self.tm & 0x10 != 0 {
+                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
+                    }
+                } else {
+                    // BG3 priority toggle mode: BG3 renders above all sprites
+                    // Render priority 0 BG1 and BG2
+                    if self.tm & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
+                    }
+                    if self.tm & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
+                    }
+
+                    // Render sprites with priority 0-1
+                    if self.tm & 0x10 != 0 {
+                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    }
+
+                    // Render priority 1 BG1 and BG2
+                    if self.tm & 0x02 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
+                    }
+                    if self.tm & 0x01 != 0 {
+                        self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    }
+
+                    // Render sprites with priority 2-3
+                    if self.tm & 0x10 != 0 {
+                        self.render_sprites_priority(&mut frame, &mut priority_buffer, 2, 3);
+                    }
+
+                    // Render BG3 last (above all sprites)
+                    if self.tm & 0x04 != 0 {
+                        // Use a very high priority value to ensure BG3 is always on top
+                        self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 2, 7);
+                    }
                 }
             }
             _ => {
@@ -710,79 +825,15 @@ impl Ppu {
         self.nmi_flag = false;
     }
 
-    /// Render a single BG layer in 2bpp mode (4 colors)
-    fn render_bg_layer_2bpp(&self, frame: &mut Frame, bg_index: usize) {
-        // Get tilemap and CHR base addresses for this BG
-        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+    /// Check if VRAM is accessible (during VBlank or force blank)
+    /// SNES hardware only allows VRAM access during VBlank or when screen is force blanked
+    fn is_vram_accessible(&self) -> bool {
+        // Force blank: bit 7 of screen_display register ($2100)
+        let force_blank = (self.screen_display & 0x80) != 0;
+        // VBlank: bit 7 of HVBJOY register ($4212)
+        let in_vblank = (self.hvbjoy & 0x80) != 0;
 
-        // Get tilemap size for this layer
-        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
-
-        // Get scroll offsets for this layer
-        let (hofs, vofs) = match bg_index {
-            0 => (self.bg1_hofs, self.bg1_vofs),
-            1 => (self.bg2_hofs, self.bg2_vofs),
-            2 => (self.bg3_hofs, self.bg3_vofs),
-            3 => (self.bg4_hofs, self.bg4_vofs),
-            _ => (0, 0),
-        };
-
-        // Render all visible tiles accounting for scrolling
-        // The visible area is 256x224 pixels
-        for screen_y in 0..224 {
-            for screen_x in 0..256 {
-                // Calculate world coordinates with scrolling
-                // Wrap based on tilemap size (not hardcoded to 256)
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
-
-                // Calculate tile coordinates
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
-
-                // Read tile entry from tilemap (2 bytes per entry)
-                // Tilemap layout for larger sizes uses a specific memory organization
-                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
-                let tilemap_addr = tilemap_base + tilemap_offset;
-
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
-                // Read tile entry (format: cccccccc YXpppttt tttttttt)
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
-
-                let tile_index = tile_low;
-                let palette = ((tile_high >> 2) & 0x07) as usize;
-                let flip_x = (tile_high & 0x40) != 0;
-                let flip_y = (tile_high & 0x80) != 0;
-
-                // Get pixel color from tile
-                let color = self.get_tile_pixel_mode0(
-                    tile_index,
-                    chr_base,
-                    pixel_x_in_tile,
-                    pixel_y_in_tile,
-                    palette,
-                    flip_x,
-                    flip_y,
-                );
-
-                // Skip transparent pixels (color 0)
-                if color == 0 {
-                    continue;
-                }
-
-                // Draw pixel
-                let frame_offset = screen_y * 256 + screen_x;
-                frame.pixels[frame_offset] = self.get_color(color);
-            }
-        }
+        force_blank || in_vblank
     }
 
     /// Get tilemap and CHR base addresses for a BG layer
@@ -963,79 +1014,6 @@ impl Ppu {
         }
     }
 
-    /// Render a single BG layer in 4bpp mode (16 colors) - for Mode 1
-    fn render_bg_layer_4bpp(&self, frame: &mut Frame, bg_index: usize) {
-        // Get tilemap and CHR base addresses for this BG
-        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
-
-        // Get tilemap size for this layer
-        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
-        let tilemap_pixel_width = tilemap_width * 8;
-        let tilemap_pixel_height = tilemap_height * 8;
-
-        // Get scroll offsets for this layer
-        let (hofs, vofs) = match bg_index {
-            0 => (self.bg1_hofs, self.bg1_vofs),
-            1 => (self.bg2_hofs, self.bg2_vofs),
-            2 => (self.bg3_hofs, self.bg3_vofs),
-            3 => (self.bg4_hofs, self.bg4_vofs),
-            _ => (0, 0),
-        };
-
-        // Render all visible tiles accounting for scrolling
-        for screen_y in 0..224 {
-            for screen_x in 0..256 {
-                // Calculate world coordinates with scrolling
-                // Wrap based on tilemap size (not hardcoded to 256)
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
-
-                // Calculate tile coordinates
-                let tile_x = world_x / 8;
-                let tile_y = world_y / 8;
-                let pixel_x_in_tile = world_x % 8;
-                let pixel_y_in_tile = world_y % 8;
-
-                // Read tile entry from tilemap (2 bytes per entry)
-                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
-                let tilemap_addr = tilemap_base + tilemap_offset;
-
-                if tilemap_addr + 1 >= VRAM_SIZE {
-                    continue;
-                }
-
-                // Read tile entry
-                let tile_low = self.vram[tilemap_addr];
-                let tile_high = self.vram[tilemap_addr + 1];
-
-                let tile_index = tile_low;
-                let palette = ((tile_high >> 2) & 0x07) as usize;
-                let flip_x = (tile_high & 0x40) != 0;
-                let flip_y = (tile_high & 0x80) != 0;
-
-                // Get pixel color from tile (4bpp)
-                let color = self.get_tile_pixel_4bpp(
-                    tile_index,
-                    chr_base,
-                    pixel_x_in_tile,
-                    pixel_y_in_tile,
-                    palette,
-                    flip_x,
-                    flip_y,
-                );
-
-                // Skip transparent pixels (color 0)
-                if color == 0 {
-                    continue;
-                }
-
-                // Draw pixel
-                let frame_offset = screen_y * 256 + screen_x;
-                frame.pixels[frame_offset] = self.get_color(color);
-            }
-        }
-    }
-
     /// Get a single pixel color index from a tile in 4bpp mode (16 colors)
     #[allow(clippy::too_many_arguments)]
     fn get_tile_pixel_4bpp(
@@ -1095,13 +1073,246 @@ impl Ppu {
         (palette * 16 + color_index as usize) as u8
     }
 
-    /// Render sprites (OAM objects)
-    fn render_sprites(&self, frame: &mut Frame) {
+    /// Get sprite sizes based on OBSEL register
+    fn get_sprite_sizes(&self) -> ((usize, usize), (usize, usize)) {
+        // Bits 5-7 of OBSEL determine sprite sizes
+        let size_select = (self.obsel >> 5) & 0x07;
+        match size_select {
+            0 => ((8, 8), (16, 16)),
+            1 => ((8, 8), (32, 32)),
+            2 => ((8, 8), (64, 64)),
+            3 => ((16, 16), (32, 32)),
+            4 => ((16, 16), (64, 64)),
+            5 => ((32, 32), (64, 64)),
+            6 => ((16, 32), (32, 64)),
+            7 => ((16, 32), (32, 32)),
+            _ => ((8, 8), (16, 16)),
+        }
+    }
+
+    /// Get OBJ base address in VRAM
+    fn get_obj_base_address(&self) -> usize {
+        // Bits 0-2: Name base (in 8KB units, offset from $6000 in VRAM word address)
+        // Bits 3-4: Name select (4KB offset)
+        let name_base = (self.obsel & 0x07) as usize;
+        let name_select = ((self.obsel >> 3) & 0x03) as usize;
+
+        // Base address: (name_base * 8192) + $6000 (word address) = byte address
+        // In byte addressing: (name_base * 16384) + $C000
+        (name_base * 0x4000) + 0xC000 + (name_select * 0x1000)
+    }
+
+    /// Render a single BG layer in 2bpp mode with priority handling
+    fn render_bg_layer_2bpp_priority(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        bg_index: usize,
+        filter_priority: u8,
+    ) {
+        // Get tilemap and CHR base addresses for this BG
+        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            2 => (self.bg3_hofs, self.bg3_vofs),
+            3 => (self.bg4_hofs, self.bg4_vofs),
+            _ => (0, 0),
+        };
+
+        // Render all visible tiles
+        for screen_y in 0..224 {
+            for screen_x in 0..256 {
+                // Calculate world position with scrolling
+                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+
+                // Get tile and pixel position
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
+
+                // Get tilemap entry
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
+                let tilemap_addr = tilemap_base + tilemap_offset;
+
+                if tilemap_addr + 1 >= VRAM_SIZE {
+                    continue;
+                }
+
+                // Read tile entry (format: vhopppcc cccccccc)
+                // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
+                // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
+                // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
+                // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
+                // cccccccccc = tile number (bits 9-0)
+                let tile_low = self.vram[tilemap_addr];
+                let tile_high = self.vram[tilemap_addr + 1];
+
+                let tile_index = tile_low;
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+                let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
+
+                // Skip if this tile doesn't match the priority we're rendering
+                if priority != filter_priority {
+                    continue;
+                }
+
+                // Get pixel color from tile
+                let color = self.get_tile_pixel_mode0(
+                    tile_index,
+                    chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
+                    palette,
+                    flip_x,
+                    flip_y,
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Calculate rendering priority (0-7 scale)
+                // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
+                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Draw pixel if it has equal or higher priority
+                let frame_offset = screen_y * 256 + screen_x;
+                if render_priority <= priority_buffer[frame_offset] {
+                    frame.pixels[frame_offset] = self.get_color(color);
+                    priority_buffer[frame_offset] = render_priority;
+                }
+            }
+        }
+    }
+
+    /// Render a single BG layer in 4bpp mode with priority handling
+    fn render_bg_layer_4bpp_priority(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        bg_index: usize,
+        filter_priority: u8,
+    ) {
+        // Get tilemap and CHR base addresses for this BG
+        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            2 => (self.bg3_hofs, self.bg3_vofs),
+            3 => (self.bg4_hofs, self.bg4_vofs),
+            _ => (0, 0),
+        };
+
+        // Render all visible tiles
+        for screen_y in 0..224 {
+            for screen_x in 0..256 {
+                // Calculate world position with scrolling
+                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
+                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+
+                // Get tile and pixel position
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
+
+                // Get tilemap entry
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
+                let tilemap_addr = tilemap_base + tilemap_offset;
+
+                if tilemap_addr + 1 >= VRAM_SIZE {
+                    continue;
+                }
+
+                // Read tile entry (format: vhopppcc cccccccc)
+                // v = vertical flip (bit 15 of 16-bit entry, bit 7 of tile_high)
+                // h = horizontal flip (bit 14 of 16-bit entry, bit 6 of tile_high)
+                // o = priority (bit 13 of 16-bit entry, bit 5 of tile_high)
+                // ppp = palette (bits 12-10 of 16-bit entry, bits 4-2 of tile_high)
+                // cccccccccc = tile number (bits 9-0)
+                let tile_low = self.vram[tilemap_addr];
+                let tile_high = self.vram[tilemap_addr + 1];
+
+                let tile_index = tile_low;
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+                let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
+
+                // Skip if this tile doesn't match the priority we're rendering
+                if priority != filter_priority {
+                    continue;
+                }
+
+                // Get pixel color from tile (4bpp)
+                let color = self.get_tile_pixel_4bpp(
+                    tile_index,
+                    chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
+                    palette,
+                    flip_x,
+                    flip_y,
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Calculate rendering priority (0-7 scale)
+                // Priority 0 BG = priority level 1, Priority 1 BG = priority level 3
+                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Draw pixel if it has equal or higher priority
+                let frame_offset = screen_y * 256 + screen_x;
+                if render_priority <= priority_buffer[frame_offset] {
+                    frame.pixels[frame_offset] = self.get_color(color);
+                    priority_buffer[frame_offset] = render_priority;
+                }
+            }
+        }
+    }
+
+    /// Render sprites with priority filtering
+    fn render_sprites_priority(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        min_priority: u8,
+        max_priority: u8,
+    ) {
         // Get sprite size configuration from OBSEL register
         let (small_size, large_size) = self.get_sprite_sizes();
 
         // Get OBJ base address
         let obj_base = self.get_obj_base_address();
+
+        // Track sprites and tiles per scanline (SNES hardware limits)
+        // - Maximum 32 sprites per scanline
+        // - Maximum 34 8x8 tile slots per scanline
+        let mut sprites_per_scanline = vec![0u8; 224];
+        let mut tiles_per_scanline = vec![0u8; 224];
 
         // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
         for sprite_index in (0..128).rev() {
@@ -1136,61 +1347,81 @@ impl Ppu {
 
             // Parse attributes
             let palette = ((attr >> 1) & 0x07) as usize;
-            let _priority = (attr >> 4) & 0x03;
+            let sprite_priority = (attr >> 4) & 0x03;
             let flip_x = (attr & 0x40) != 0;
             let flip_y = (attr & 0x80) != 0;
+
+            // Filter by priority range
+            if sprite_priority < min_priority || sprite_priority > max_priority {
+                continue;
+            }
 
             // Skip offscreen sprites (basic culling)
             if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
                 continue;
             }
 
-            // Render sprite pixels
-            self.render_sprite(
-                frame, x, y, tile, obj_base, palette, width, height, flip_x, flip_y,
+            // Check scanline limits for this sprite
+            // Calculate which scanlines this sprite occupies
+            let start_y = y.max(0) as usize;
+            let end_y = (y + height as i16).min(224) as usize;
+            let tiles_wide = (width / 8) as u8;
+
+            // Check if rendering this sprite would exceed scanline limits
+            let mut can_render = true;
+            for scanline in start_y..end_y {
+                if sprites_per_scanline[scanline] >= 32 {
+                    can_render = false;
+                    break;
+                }
+                // Each row of the sprite adds tiles_wide to the scanline
+                if tiles_per_scanline[scanline] + tiles_wide > 34 {
+                    can_render = false;
+                    break;
+                }
+            }
+
+            // Skip if limits exceeded
+            if !can_render {
+                continue;
+            }
+
+            // Update scanline counters
+            for scanline in start_y..end_y {
+                sprites_per_scanline[scanline] += 1;
+                tiles_per_scanline[scanline] += tiles_wide;
+            }
+
+            // Render sprite pixels with priority
+            self.render_sprite_priority(
+                frame,
+                priority_buffer,
+                x,
+                y,
+                tile,
+                obj_base,
+                palette,
+                sprite_priority,
+                width,
+                height,
+                flip_x,
+                flip_y,
             );
         }
     }
 
-    /// Get sprite sizes based on OBSEL register
-    fn get_sprite_sizes(&self) -> ((usize, usize), (usize, usize)) {
-        // Bits 5-7 of OBSEL determine sprite sizes
-        let size_select = (self.obsel >> 5) & 0x07;
-        match size_select {
-            0 => ((8, 8), (16, 16)),
-            1 => ((8, 8), (32, 32)),
-            2 => ((8, 8), (64, 64)),
-            3 => ((16, 16), (32, 32)),
-            4 => ((16, 16), (64, 64)),
-            5 => ((32, 32), (64, 64)),
-            6 => ((16, 32), (32, 64)),
-            7 => ((16, 32), (32, 32)),
-            _ => ((8, 8), (16, 16)),
-        }
-    }
-
-    /// Get OBJ base address in VRAM
-    fn get_obj_base_address(&self) -> usize {
-        // Bits 0-2: Name base (in 8KB units, offset from $6000 in VRAM word address)
-        // Bits 3-4: Name select (4KB offset)
-        let name_base = (self.obsel & 0x07) as usize;
-        let name_select = ((self.obsel >> 3) & 0x03) as usize;
-
-        // Base address: (name_base * 8192) + $6000 (word address) = byte address
-        // In byte addressing: (name_base * 16384) + $C000
-        (name_base * 0x4000) + 0xC000 + (name_select * 0x1000)
-    }
-
-    /// Render a single sprite
+    /// Render a single sprite with priority handling
     #[allow(clippy::too_many_arguments)]
-    fn render_sprite(
+    fn render_sprite_priority(
         &self,
         frame: &mut Frame,
+        priority_buffer: &mut [u8],
         x: i16,
         y: i16,
         tile: u8,
         obj_base: usize,
         palette: usize,
+        sprite_priority: u8,
         width: usize,
         height: usize,
         flip_x: bool,
@@ -1200,6 +1431,10 @@ impl Ppu {
         // Each 8x8 tile is 32 bytes (8 rows * 4 bytes per row)
         let tiles_wide = width / 8;
         let tiles_high = height / 8;
+
+        // Calculate rendering priority (0-7 scale)
+        // Sprite priority 0-1 = priority level 2, Sprite priority 2-3 = priority level 4
+        let render_priority = if sprite_priority < 2 { 2 } else { 4 };
 
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
@@ -1252,8 +1487,8 @@ impl Ppu {
                             0
                         };
 
-                        // Extract color index (4 bits)
-                        let bit = 7 - actual_px;
+                        // Extract color index from bitplanes
+                        let bit = actual_px;
                         let bit0 = (bp0 >> bit) & 1;
                         let bit1 = (bp1 >> bit) & 1;
                         let bit2 = (bp2 >> bit) & 1;
@@ -1269,10 +1504,13 @@ impl Ppu {
                         let cgram_index = (128 + palette * 16 + color_index as usize) as u8;
                         let color = self.get_color(cgram_index);
 
-                        // Draw pixel
+                        // Draw pixel if it has equal or higher priority
                         let frame_offset = screen_y as usize * 256 + screen_x as usize;
-                        if frame_offset < frame.pixels.len() {
+                        if frame_offset < frame.pixels.len()
+                            && render_priority <= priority_buffer[frame_offset]
+                        {
                             frame.pixels[frame_offset] = color;
+                            priority_buffer[frame_offset] = render_priority;
                         }
                     }
                 }

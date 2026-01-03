@@ -141,16 +141,27 @@ impl PropertyPane {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 // Machine Metrics section
-                egui::CollapsingHeader::new("Machine Metrics")
+                egui::CollapsingHeader::new(egui::RichText::new("📊 Machine Metrics").strong())
                     .default_open(self.metrics_open)
                     .show(ui, |ui| {
+                        ui.add_space(3.0);
+
+                        // FPS display with visual indicator
                         ui.horizontal(|ui| {
                             ui.label("FPS:");
-                            ui.label(format!("{:.1}", self.fps));
+                            let fps_color = if self.fps >= self.target_fps * 0.95 {
+                                egui::Color32::from_rgb(0, 200, 0) // Green
+                            } else if self.fps >= self.target_fps * 0.8 {
+                                egui::Color32::from_rgb(255, 200, 0) // Yellow
+                            } else {
+                                egui::Color32::from_rgb(200, 0, 0) // Red
+                            };
+                            ui.colored_label(fps_color, format!("{:.1}", self.fps));
                         });
 
                         // FPS sparkline (last 60 frames)
                         if !self.fps_history.is_empty() {
+                            ui.add_space(3.0);
                             let max_fps = self
                                 .fps_history
                                 .iter()
@@ -159,7 +170,7 @@ impl PropertyPane {
                             let min_fps = 0.0f32;
 
                             use egui::*;
-                            let desired_size = vec2(ui.available_width(), 30.0);
+                            let desired_size = vec2(ui.available_width(), 35.0);
                             let (rect, _response) =
                                 ui.allocate_exact_size(desired_size, Sense::hover());
 
@@ -167,7 +178,7 @@ impl PropertyPane {
                                 let painter = ui.painter();
 
                                 // Draw background
-                                painter.rect_filled(rect, 2.0, Color32::from_rgb(30, 30, 30));
+                                painter.rect_filled(rect, 2.0, Color32::from_rgb(20, 20, 20));
 
                                 // Draw sparkline
                                 let _points_per_pixel =
@@ -183,11 +194,11 @@ impl PropertyPane {
                                     points.push(pos2(x, y));
                                 }
 
-                                // Draw line
+                                // Draw line with gradient effect
                                 if points.len() >= 2 {
                                     painter.add(epaint::PathShape::line(
                                         points,
-                                        Stroke::new(1.5, Color32::from_rgb(0, 200, 0)),
+                                        Stroke::new(2.0, Color32::from_rgb(0, 220, 0)),
                                     ));
                                 }
 
@@ -199,22 +210,26 @@ impl PropertyPane {
                                         rect.bottom() - normalized_target * rect.height();
                                     painter.line_segment(
                                         [pos2(rect.left(), y_target), pos2(rect.right(), y_target)],
-                                        Stroke::new(0.5, Color32::from_rgb(100, 100, 100)),
+                                        Stroke::new(1.0, Color32::from_rgb(120, 120, 120)),
                                     );
                                 }
                             }
                         }
 
+                        ui.add_space(5.0);
+
                         if !self.system_name.is_empty() {
                             ui.horizontal(|ui| {
                                 ui.label("System:");
-                                ui.label(&self.system_name);
+                                ui.label(egui::RichText::new(&self.system_name).strong());
                             });
                         }
 
                         if self.paused {
+                            ui.add_space(3.0);
                             ui.colored_label(egui::Color32::YELLOW, "⏸ PAUSED");
                         } else if self.speed != 1.0 {
+                            ui.add_space(3.0);
                             ui.colored_label(
                                 egui::Color32::YELLOW,
                                 format!("⏩ {}%", (self.speed * 100.0) as u32),
@@ -222,6 +237,7 @@ impl PropertyPane {
                         }
 
                         if let Some(target_freq) = self.cpu_freq_target {
+                            ui.add_space(3.0);
                             ui.horizontal(|ui| {
                                 ui.label("CPU Target:");
                                 ui.label(format!("{:.2} MHz", target_freq));
@@ -230,53 +246,55 @@ impl PropertyPane {
 
                         // Display PC-specific BDA values if available
                         if let Some(ref bda) = self.pc_bda_values {
-                            ui.add_space(5.0);
+                            ui.add_space(8.0);
                             ui.separator();
-                            ui.label(egui::RichText::new("BIOS Data Area").strong());
+                            ui.add_space(5.0);
+                            ui.label(egui::RichText::new("💾 BIOS Data Area").strong());
+                            ui.add_space(3.0);
 
-                            ui.horizontal(|ui| {
-                                ui.label("Video Mode:");
-                                ui.label(format!("{:02X}h", bda.video_mode));
-                            });
+                            egui::Grid::new("bda_grid")
+                                .num_columns(2)
+                                .spacing([8.0, 3.0])
+                                .striped(false)
+                                .show(ui, |ui| {
+                                    ui.label("Video Mode:");
+                                    ui.label(format!("{:02X}h", bda.video_mode));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Video Columns:");
-                                ui.label(format!("{}", bda.video_columns));
-                            });
+                                    ui.label("Video Columns:");
+                                    ui.label(format!("{}", bda.video_columns));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Memory (BDA):");
-                                ui.label(format!("{} KB", bda.memory_size_kb));
-                            });
+                                    ui.label("Memory (BDA):");
+                                    ui.label(format!("{} KB", bda.memory_size_kb));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Serial Ports:");
-                                ui.label(format!("{}", bda.num_serial_ports));
-                            });
+                                    ui.label("Serial Ports:");
+                                    ui.label(format!("{}", bda.num_serial_ports));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Parallel Ports:");
-                                ui.label(format!("{}", bda.num_parallel_ports));
-                            });
+                                    ui.label("Parallel Ports:");
+                                    ui.label(format!("{}", bda.num_parallel_ports));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Hard Drives:");
-                                ui.label(format!("{}", bda.num_hard_drives));
-                            });
+                                    ui.label("Hard Drives:");
+                                    ui.label(format!("{}", bda.num_hard_drives));
+                                    ui.end_row();
 
-                            ui.horizontal(|ui| {
-                                ui.label("Equipment:");
-                                ui.label(format!("{:04X}h", bda.equipment_word));
-                            });
+                                    ui.label("Equipment:");
+                                    ui.label(format!("{:04X}h", bda.equipment_word));
+                                    ui.end_row();
+                                });
                         }
                     });
 
                 ui.add_space(5.0);
 
                 // Project Settings section
-                egui::CollapsingHeader::new("Project Settings")
+                egui::CollapsingHeader::new(egui::RichText::new("⚙️ Project Settings").strong())
                     .default_open(self.settings_open)
                     .show(ui, |ui| {
+                        ui.add_space(3.0);
                         // Renderer selection (moved from Machine Metrics)
                         ui.horizontal(|ui| {
                             ui.label("Renderer:");
@@ -398,13 +416,13 @@ impl PropertyPane {
 
                             ui.add_space(5.0);
                             ui.separator();
+                            ui.add_space(3.0);
                         }
 
-                        // Display filter
-                        ui.horizontal(|ui| {
-                            ui.label("Display Filter:")
-                                .on_hover_text("Apply CRT/LCD display simulation effects");
-                        });
+                        // Display filter section
+                        ui.label(egui::RichText::new("🎨 Display Filter").strong())
+                            .on_hover_text("Apply CRT/LCD display simulation effects");
+                        ui.add_space(3.0);
                         egui::ComboBox::from_id_salt("display_filter")
                             .selected_text(self.display_filter.name())
                             .show_ui(ui, |ui| {
@@ -417,42 +435,59 @@ impl PropertyPane {
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SonyTrinitron,
-                                    "Sony Trinitron",
+                                    "📺 Sony Trinitron",
                                 )
                                 .on_hover_text("Simulates Sony Trinitron CRT display");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Ibm5151,
-                                    "IBM 5151",
+                                    "🖥️ IBM 5151",
                                 )
                                 .on_hover_text("Simulates IBM 5151 monochrome monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Commodore1702,
-                                    "Commodore 1702",
+                                    "📺 Commodore 1702",
                                 )
                                 .on_hover_text("Simulates Commodore 1702 color monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SharpLcd,
-                                    "Sharp LCD",
+                                    "📱 Sharp LCD",
                                 )
                                 .on_hover_text("Simulates Game Boy Sharp LCD screen");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::RcaVictor,
-                                    "RCA Victor",
+                                    "📺 RCA Victor",
                                 )
                                 .on_hover_text("Simulates RCA Victor CRT television");
                             });
 
-                        ui.horizontal(|ui| {
-                            ui.label("Emulation Speed:").on_hover_text(
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("⚡ Emulation Speed").strong())
+                            .on_hover_text(
                                 "Control emulation speed (affects both gameplay and audio)",
                             );
-                            ui.label(format!("{}%", self.emulation_speed_percent));
+                        ui.add_space(3.0);
+
+                        // Current speed display
+                        ui.horizontal(|ui| {
+                            ui.label("Current:");
+                            let speed_color = if self.emulation_speed_percent == 100 {
+                                egui::Color32::from_rgb(0, 200, 0)
+                            } else if self.emulation_speed_percent < 100 {
+                                egui::Color32::from_rgb(255, 200, 0)
+                            } else {
+                                egui::Color32::from_rgb(200, 100, 255)
+                            };
+                            ui.colored_label(
+                                speed_color,
+                                format!("{}%", self.emulation_speed_percent),
+                            );
                         });
 
+                        ui.add_space(3.0);
                         // Speed preset buttons
                         ui.horizontal(|ui| {
                             if ui
@@ -479,15 +514,18 @@ impl PropertyPane {
                         // Input Configuration section
                         ui.add_space(10.0);
                         ui.separator();
-                        ui.label(egui::RichText::new("Input Configuration").strong());
+                        ui.add_space(5.0);
+                        ui.label(egui::RichText::new("🎮 Input Configuration").strong());
+                        ui.add_space(3.0);
 
                         // Input source selection (Global vs Project)
                         ui.horizontal(|ui| {
                             ui.label("Config Source:");
+                            ui.add_space(5.0);
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Global,
-                                    "Global",
+                                    "🌐 Global",
                                 )
                                 .on_hover_text("Use global config.json settings for all projects")
                                 .clicked()
@@ -499,7 +537,7 @@ impl PropertyPane {
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Project,
-                                    "Project",
+                                    "📁 Project",
                                 )
                                 .on_hover_text("Use project-specific .hemu file settings")
                                 .clicked()
@@ -512,25 +550,30 @@ impl PropertyPane {
                         });
 
                         // Input device status
-                        ui.add_space(5.0);
-                        ui.horizontal(|ui| {
-                            ui.label("Gamepads:");
-                            ui.label(format!("{} detected", self.num_gamepads_detected));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Joysticks:");
-                            ui.label(format!("{} detected", self.num_joysticks_detected));
-                        });
+                        ui.add_space(8.0);
+                        egui::Grid::new("input_devices")
+                            .num_columns(2)
+                            .spacing([8.0, 3.0])
+                            .show(ui, |ui| {
+                                ui.label("🎮 Gamepads:");
+                                ui.label(format!("{} detected", self.num_gamepads_detected));
+                                ui.end_row();
+
+                                ui.label("🕹️ Joysticks:");
+                                ui.label(format!("{} detected", self.num_joysticks_detected));
+                                ui.end_row();
+                            });
 
                         // Player configuration
-                        ui.add_space(5.0);
-                        ui.checkbox(&mut self.player1_enabled, "Player 1 Enabled");
-                        ui.checkbox(&mut self.player2_enabled, "Player 2 Enabled");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.player1_enabled, "✓ Player 1 Enabled");
+                        ui.checkbox(&mut self.player2_enabled, "✓ Player 2 Enabled");
 
                         // Mouse configuration
-                        ui.add_space(5.0);
-                        ui.checkbox(&mut self.mouse_enabled, "Mouse Input Enabled");
+                        ui.add_space(8.0);
+                        ui.checkbox(&mut self.mouse_enabled, "🖱️ Mouse Input Enabled");
                         if self.mouse_enabled {
+                            ui.add_space(3.0);
                             ui.horizontal(|ui| {
                                 ui.label("Sensitivity:");
                                 ui.add(
@@ -555,29 +598,39 @@ impl PropertyPane {
                 ui.add_space(5.0);
 
                 // Mount Points section
-                egui::CollapsingHeader::new("Mount Points")
+                egui::CollapsingHeader::new(egui::RichText::new("💿 Mount Points").strong())
                     .default_open(self.mounts_open)
                     .show(ui, |ui| {
+                        ui.add_space(3.0);
                         if self.mount_points.is_empty() {
-                            ui.label("No mount points available");
+                            ui.label(egui::RichText::new("No mount points available").italics());
+                            ui.add_space(3.0);
                             ui.label(
                                 egui::RichText::new(
                                     "Create a system or load a ROM to see mount points",
                                 )
                                 .small()
-                                .italics(),
+                                .italics()
+                                .weak(),
                             );
                         } else {
                             for mount in &self.mount_points {
                                 ui.horizontal(|ui| {
-                                    ui.label(format!("{}:", mount.name));
+                                    ui.label(
+                                        egui::RichText::new(format!("{}:", mount.name)).strong(),
+                                    );
                                     if let Some(ref file) = mount.mounted_file {
-                                        ui.label(file);
+                                        // Extract filename from path
+                                        let filename = std::path::Path::new(file)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or(file);
+                                        ui.label(filename).on_hover_text(file);
                                         if ui
-                                            .button("Eject")
+                                            .button("⏏ Eject")
                                             .on_hover_text(format!(
                                                 "Unmount {} from {}",
-                                                file, mount.name
+                                                filename, mount.name
                                             ))
                                             .clicked()
                                         {
@@ -585,7 +638,7 @@ impl PropertyPane {
                                                 Some(PropertyAction::EjectFile(mount.id.clone()));
                                         }
                                     } else if ui
-                                        .button("Mount...")
+                                        .button("📁 Mount...")
                                         .on_hover_text(format!(
                                             "Load a file to mount in {}",
                                             mount.name
@@ -596,6 +649,7 @@ impl PropertyPane {
                                             Some(PropertyAction::MountFile(mount.id.clone()));
                                     }
                                 });
+                                ui.add_space(2.0);
                             }
                         }
                     });
@@ -603,14 +657,16 @@ impl PropertyPane {
                 ui.add_space(5.0);
 
                 // Save States section
-                egui::CollapsingHeader::new("Save States")
+                egui::CollapsingHeader::new(egui::RichText::new("💾 Save States").strong())
                     .default_open(self.save_states_open)
                     .show(ui, |ui| {
-                        ui.label("Quick Save/Load:");
+                        ui.add_space(3.0);
+                        ui.label(egui::RichText::new("Quick Save:").strong());
+                        ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui
-                                    .button(format!("S{}", i))
+                                    .button(format!("💾 S{}", i))
                                     .on_hover_text(format!("Save to slot {} (F{})", i, i + 4))
                                     .clicked()
                                 {
@@ -618,10 +674,13 @@ impl PropertyPane {
                                 }
                             }
                         });
+                        ui.add_space(5.0);
+                        ui.label(egui::RichText::new("Quick Load:").strong());
+                        ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui
-                                    .button(format!("L{}", i))
+                                    .button(format!("📂 L{}", i))
                                     .on_hover_text(format!(
                                         "Load from slot {} (Shift+F{})",
                                         i,
