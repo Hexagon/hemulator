@@ -1970,6 +1970,25 @@ fn main() {
         egui_app.tab_manager.show_new_project_tab();
     }
 
+    // Enable OpenGL rendering for N64 if the system is N64
+    #[cfg(feature = "opengl")]
+    if let EmulatorSystem::N64(n64_sys) = &mut sys {
+        // Get GL context from the backend
+        let gl = unsafe {
+            glow::Context::from_loader_function(|s| {
+                egui_backend.video_subsystem().gl_get_proc_address(s) as *const _
+            })
+        };
+
+        if let Err(e) = n64_sys.enable_opengl_renderer(gl) {
+            eprintln!("Warning: Failed to enable OpenGL renderer for N64: {}", e);
+            eprintln!("Falling back to software renderer");
+        } else {
+            println!("N64 OpenGL hardware renderer enabled");
+            egui_app.property_pane.rendering_backend = "OpenGL".to_string();
+        }
+    }
+
     // Initialize audio output
     let (_stream, stream_handle) = match OutputStream::try_default() {
         Ok(s) => s,

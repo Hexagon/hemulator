@@ -158,6 +158,13 @@ impl Sdl2EguiBackend {
         })
     }
 
+    /// Get SDL2 video subsystem (for GL context access)
+    pub fn video_subsystem(&self) -> sdl2::VideoSubsystem {
+        self.sdl_context
+            .video()
+            .expect("Video subsystem should be available")
+    }
+
     /// Get the egui context for rendering UI
     pub fn egui_ctx(&self) -> &egui::Context {
         &self.egui_ctx
