@@ -870,6 +870,7 @@ name = "emu_n64"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "crc32fast",
  "emu_core",
  "glow 0.13.1",
  "serde",

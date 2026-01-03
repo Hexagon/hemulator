@@ -158,19 +158,16 @@ impl Sdl2EguiBackend {
         })
     }
 
+    /// Get SDL2 video subsystem (for GL context access)
+    pub fn video_subsystem(&self) -> sdl2::VideoSubsystem {
+        self.sdl_context
+            .video()
+            .expect("Video subsystem should be available")
+    }
+
     /// Get the egui context for rendering UI
     pub fn egui_ctx(&self) -> &egui::Context {
         &self.egui_ctx
-    }
-
-    /// Get the OpenGL context for custom rendering
-    pub fn gl_context(&self) -> std::rc::Rc<glow::Context> {
-        // Load GL function pointers via SDL2
-        unsafe {
-            std::rc::Rc::new(glow::Context::from_loader_function(|s| {
-                self.window.subsystem().gl_get_proc_address(s) as *const _
-            }))
-        }
     }
 
     /// Begin an egui frame

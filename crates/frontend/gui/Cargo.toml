@@ -40,3 +40,4 @@ egui_sdl2_gl = "0.32"
 
 [features]
 default = []
+opengl = []

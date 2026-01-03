@@ -81,6 +81,8 @@
 //! - Accurate timing and synchronization
 
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
+#[cfg(feature = "opengl")]
+use super::rdp_renderer_opengl::OpenGLRdpRenderer;
 use super::rdp_renderer_software::SoftwareRdpRenderer;
 use emu_core::graphics::ColorOps;
 use emu_core::logging::{log, LogCategory, LogLevel};
@@ -160,6 +162,16 @@ pub struct Rdp {
     /// Current texture image address in RDRAM
     texture_image_addr: u32,
 
+    /// Color registers for RDP rendering modes
+    blend_color: u32, // RGBA8888 - used in blending operations
+    prim_color: u32,   // RGBA8888 - primitive color
+    env_color: u32,    // RGBA8888 - environment color
+    fog_color: u32,    // RGBA8888 - fog color
+    combine_mode: u64, // 64-bit combine mode setting
+
+    /// Z-buffer image address in RDRAM
+    z_image_addr: u32,
+
     /// DPC registers
     dpc_start: u32,
     dpc_end: u32,
@@ -175,8 +187,16 @@ impl Rdp {
 
     /// Create a new RDP with specified resolution
     pub fn with_resolution(width: u32, height: u32) -> Self {
+        let mut renderer = Box::new(SoftwareRdpRenderer::new(width, height));
+        // Initialize framebuffer to black (transparent)
+        renderer.clear(0x00000000);
+
+        log(LogCategory::Stubs, LogLevel::Info, || {
+            "N64 RDP initialized with Software renderer (320x240)".to_string()
+        });
+
         Self {
-            renderer: Box::new(SoftwareRdpRenderer::new(width, height)),
+            renderer,
             width,
             height,
             color_format: ColorFormat::RGBA5551,
@@ -200,6 +220,12 @@ impl Rdp {
                 t_shift: 0,
             }; 8],
             texture_image_addr: 0,
+            blend_color: 0xFF000000, // Black
+            prim_color: 0xFFFFFFFF,  // White
+            env_color: 0xFF000000,   // Black
+            fog_color: 0xFF000000,   // Black
+            combine_mode: 0,         // No combine mode
+            z_image_addr: 0,
             dpc_start: 0,
             dpc_end: 0,
             dpc_current: 0,
@@ -207,9 +233,33 @@ impl Rdp {
         }
     }
 
+    /// Enable OpenGL hardware rendering (requires OpenGL feature)
+    /// This should be called from the frontend after obtaining a GL context
+    #[cfg(feature = "opengl")]
+    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
+        let mut new_renderer = Box::new(OpenGLRdpRenderer::new(gl, self.width, self.height)?);
+
+        // Initialize to black
+        new_renderer.clear(0x00000000);
+
+        // Replace the software renderer with OpenGL renderer
+        self.renderer = new_renderer;
+
+        log(LogCategory::Stubs, LogLevel::Info, || {
+            format!(
+                "N64 RDP switched to OpenGL hardware renderer ({}x{})",
+                self.width, self.height
+            )
+        });
+
+        Ok(())
+    }
+
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.renderer.reset();
+        // Clear to black (transparent)
+        self.renderer.clear(0x00000000);
         self.fill_color = 0xFF000000;
         self.scissor = ScissorBox {
             x_min: 0,
@@ -230,6 +280,12 @@ impl Rdp {
             t_shift: 0,
         }; 8];
         self.texture_image_addr = 0;
+        self.blend_color = 0xFF000000;
+        self.prim_color = 0xFFFFFFFF;
+        self.env_color = 0xFF000000;
+        self.fog_color = 0xFF000000;
+        self.combine_mode = 0;
+        self.z_image_addr = 0;
         self.dpc_start = 0;
         self.dpc_end = 0;
         self.dpc_current = 0;
@@ -648,6 +704,109 @@ impl Rdp {
                     0xFFFF00FF
                 }
             }
+            // CI (Color Index) 8-bit (format=2, size=1)
+            (2, 1) => {
+                // Color index format - lookup in palette
+                let index = self.tmem[addr] as usize;
+                // Palette is stored in upper half of TMEM (0x800-0xFFF)
+                let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
+                let color_addr = palette_offset + (index * 2);
+
+                if color_addr + 1 < self.tmem.len() {
+                    let texel =
+                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                    let r = ((texel >> 11) & 0x1F) as u32;
+                    let g = ((texel >> 6) & 0x1F) as u32;
+                    let b = ((texel >> 1) & 0x1F) as u32;
+                    let a = (texel & 0x01) as u32;
+                    let r8 = (r * 255 / 31) & 0xFF;
+                    let g8 = (g * 255 / 31) & 0xFF;
+                    let b8 = (b * 255 / 31) & 0xFF;
+                    let a8 = if a != 0 { 0xFF } else { 0x00 };
+                    (a8 << 24) | (r8 << 16) | (g8 << 8) | b8
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // CI (Color Index) 4-bit (format=2, size=0)
+            (2, 0) => {
+                // 4-bit color index - two texels per byte
+                let byte = self.tmem[addr];
+                let index = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F // High nibble
+                } else {
+                    byte & 0x0F // Low nibble
+                } as usize;
+
+                let palette_offset = 0x800 + (tile_desc.palette as usize * 16 * 2);
+                let color_addr = palette_offset + (index * 2);
+
+                if color_addr + 1 < self.tmem.len() {
+                    let texel =
+                        u16::from_be_bytes([self.tmem[color_addr], self.tmem[color_addr + 1]]);
+                    let r = ((texel >> 11) & 0x1F) as u32;
+                    let g = ((texel >> 6) & 0x1F) as u32;
+                    let b = ((texel >> 1) & 0x1F) as u32;
+                    let a = (texel & 0x01) as u32;
+                    let r8 = (r * 255 / 31) & 0xFF;
+                    let g8 = (g * 255 / 31) & 0xFF;
+                    let b8 = (b * 255 / 31) & 0xFF;
+                    let a8 = if a != 0 { 0xFF } else { 0x00 };
+                    (a8 << 24) | (r8 << 16) | (g8 << 8) | b8
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // IA (Intensity + Alpha) 16-bit (format=3, size=2)
+            (3, 2) => {
+                if addr + 1 < self.tmem.len() {
+                    let texel = u16::from_be_bytes([self.tmem[addr], self.tmem[addr + 1]]);
+                    let intensity = ((texel >> 8) & 0xFF) as u32;
+                    let alpha = (texel & 0xFF) as u32;
+                    (alpha << 24) | (intensity << 16) | (intensity << 8) | intensity
+                } else {
+                    0xFFFF00FF
+                }
+            }
+            // IA (Intensity + Alpha) 8-bit (format=3, size=1)
+            (3, 1) => {
+                let texel = self.tmem[addr];
+                let intensity = ((texel >> 4) & 0x0F) as u32;
+                let alpha = (texel & 0x0F) as u32;
+                let i8 = (intensity * 255 / 15) & 0xFF;
+                let a8 = (alpha * 255 / 15) & 0xFF;
+                (a8 << 24) | (i8 << 16) | (i8 << 8) | i8
+            }
+            // IA (Intensity + Alpha) 4-bit (format=3, size=0)
+            (3, 0) => {
+                let byte = self.tmem[addr];
+                let texel = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F
+                } else {
+                    byte & 0x0F
+                };
+                let intensity = ((texel >> 1) & 0x07) as u32;
+                let alpha = (texel & 0x01) as u32;
+                let i8 = (intensity * 255 / 7) & 0xFF;
+                let a8 = if alpha != 0 { 0xFF } else { 0x00 };
+                (a8 << 24) | (i8 << 16) | (i8 << 8) | i8
+            }
+            // I (Intensity) 8-bit (format=4, size=1)
+            (4, 1) => {
+                let intensity = self.tmem[addr] as u32;
+                0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
+            }
+            // I (Intensity) 4-bit (format=4, size=0)
+            (4, 0) => {
+                let byte = self.tmem[addr];
+                let nibble = if s & 1 == 0 {
+                    (byte >> 4) & 0x0F
+                } else {
+                    byte & 0x0F
+                };
+                let intensity = (nibble * 255 / 15) as u32;
+                0xFF000000 | (intensity << 16) | (intensity << 8) | intensity
+            }
             // Other formats not yet implemented - return white
             _ => 0xFFFFFFFF,
         }
@@ -874,20 +1033,21 @@ impl Rdp {
             }
             // TEXTURE_RECTANGLE (0x24)
             0x24 => {
-                // Texture rectangle command - for now, just fill with fill color
-                // Real implementation would load and sample texture from TMEM
+                // Texture rectangle command - renders a textured rectangle
                 // word0: cmd | XH(12) | YH(12)
                 // word1: tile(3) | XL(12) | YL(12)
-                // This is a basic stub implementation
+                // Followed by another 64-bit word with texture coordinates:
+                // word2: S(16) | T(16)
+                // word3: DSDX(16) | DTDY(16)
                 let xh = ((word0 >> 12) & 0xFFF) / 4;
                 let yh = (word0 & 0xFFF) / 4;
                 let xl = ((word1 >> 12) & 0xFFF) / 4;
                 let yl = (word1 & 0xFFF) / 4;
-                let tile = (word1 >> 24) & 0x07;
+                let tile = ((word1 >> 24) & 0x07) as usize;
 
                 log(LogCategory::Stubs, LogLevel::Debug, || {
                     format!(
-                        "N64 RDP: TEXTURE_RECTANGLE stub - rendering as solid fill (xl={}, yl={}, xh={}, yh={}, tile={})",
+                        "N64 RDP: TEXTURE_RECTANGLE - rendering textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
                         xl, yl, xh, yh, tile
                     )
                 });
@@ -895,8 +1055,38 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
-                // Stub: render as solid rectangle with current fill color
-                self.fill_rect(xl, yl, width, height);
+                // Check if tile has valid texture data in TMEM
+                let has_texture = if tile < 8 {
+                    let tmem_addr = self.tiles[tile].tmem_addr as usize;
+                    tmem_addr < self.tmem.len() && self.tmem[tmem_addr] != 0
+                } else {
+                    false
+                };
+
+                // Render textured rectangle if texture data is available
+                if has_texture && width > 0 && height > 0 {
+                    for y in 0..height {
+                        for x in 0..width {
+                            let px = xl + x;
+                            let py = yl + y;
+
+                            if px < self.width && py < self.height {
+                                // Calculate texture coordinates (simple mapping)
+                                let s = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63
+                                let t = ((y * 64) / height.max(1)) & 0x3F;
+
+                                // Sample texture
+                                let color = self.sample_texture(tile, s, t);
+
+                                // Draw pixel using renderer
+                                self.renderer.set_pixel(px, py, color);
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to solid fill if texture is not available
+                    self.fill_rect(xl, yl, width, height);
+                }
             }
             // SET_OTHER_MODES (0x2F - full 64-bit command)
             0x2F => {
@@ -980,10 +1170,101 @@ impl Rdp {
                 // Load texture data from RDRAM to TMEM
                 self.load_texture_to_tmem(rdram, tile, uls, ult, lrs, lrt);
             }
+            // LOAD_TLUT (0x30) - Load Texture Look-Up Table
+            0x30 => {
+                // Load palette data for CI (Color Index) textures
+                // word0: cmd | uls(12) | ult(12)
+                // word1: tile(3) | lrs(12) | lrt(12)
+                let uls = (word0 >> 12) & 0xFFF;
+                let ult = word0 & 0xFFF;
+                let tile = ((word1 >> 24) & 0x07) as usize;
+                let lrs = (word1 >> 12) & 0xFFF;
+                let _lrt = word1 & 0xFFF;
+
+                // Calculate number of palette entries to load
+                // Each palette entry is 16 bits (RGBA5551)
+                let count = ((lrs - uls) + 1) as usize;
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: LOAD_TLUT - Loading {} palette entries to tile {} (addr=0x{:08X})",
+                        count, tile, self.texture_image_addr
+                    )
+                });
+
+                // Load palette data from texture_image_addr to upper half of TMEM
+                // Palettes are stored at TMEM offset 0x800 (upper 2KB of 4KB TMEM)
+                let palette_base = 0x800;
+                let src_addr = self.texture_image_addr as usize;
+
+                for i in 0..count.min(256) {
+                    let tmem_offset = palette_base + (i * 2);
+                    if tmem_offset + 1 < self.tmem.len() && src_addr + (i * 2) + 1 < rdram.len() {
+                        // Copy 16-bit palette entry (RGBA5551)
+                        self.tmem[tmem_offset] = rdram[src_addr + (i * 2)];
+                        self.tmem[tmem_offset + 1] = rdram[src_addr + (i * 2) + 1];
+                    }
+                }
+
+                // Update the tile descriptor to reference this palette
+                if tile < 8 {
+                    self.tiles[tile].palette = (ult >> 6) & 0xF; // Palette index from ult parameter
+                }
+            }
             // SYNC_FULL (0x29)
             0x29 => {
                 // Full synchronization - wait for all rendering to complete
                 // In frame-based implementation, this is a no-op
+            }
+            // SET_FOG_COLOR (0x38)
+            0x38 => {
+                // word1 contains the fog color (RGBA8888)
+                self.fog_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_FOG_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_BLEND_COLOR (0x39)
+            0x39 => {
+                // word1 contains the blend color (RGBA8888)
+                self.blend_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_BLEND_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_PRIM_COLOR (0x3A)
+            0x3A => {
+                // word0: cmd | min_level(8) | prim_level(8)
+                // word1: primitive color (RGBA8888)
+                self.prim_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_PRIM_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_ENV_COLOR (0x3B)
+            0x3B => {
+                // word1 contains the environment color (RGBA8888)
+                self.env_color = word1;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_ENV_COLOR = 0x{:08X}", word1)
+                });
+            }
+            // SET_COMBINE_MODE (0x3C)
+            0x3C => {
+                // 64-bit combine mode command
+                // word0 and word1 together form the combine mode settings
+                self.combine_mode = ((word0 as u64) << 32) | (word1 as u64);
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_COMBINE_MODE = 0x{:08X}{:08X}", word0, word1)
+                });
+            }
+            // SET_Z_IMAGE (0x3E)
+            0x3E => {
+                // word1: DRAM address of Z-buffer
+                self.z_image_addr = word1 & 0x00FFFFFF;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!("N64 RDP: SET_Z_IMAGE = 0x{:08X}", self.z_image_addr)
+                });
             }
             // SET_COLOR_IMAGE (0x3F)
             0x3F => {
