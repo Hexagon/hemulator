@@ -25,6 +25,9 @@ use emu_core::types::Frame;
 
 use crate::tia::Tia;
 
+/// Total number of scanlines per frame (NTSC)
+const TOTAL_SCANLINES: u16 = 262;
+
 /// Maximum TIA scanline index (0-261, total 262 scanlines)
 #[cfg(test)]
 const MAX_SCANLINE: u16 = 261;
@@ -117,7 +120,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
         // This matches the collision detection logic and prevents rendering artifacts
         // when visible_start + visible_line exceeds the total scanline count.
         for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line as u16) % 262;
+            let tia_scanline = (visible_start + visible_line as u16) % TOTAL_SCANLINES;
             self.render_scanline(tia, visible_line, tia_scanline);
         }
     }
