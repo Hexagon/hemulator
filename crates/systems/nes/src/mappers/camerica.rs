@@ -25,9 +25,11 @@ use emu_core::apu::TimingMode;
 pub struct Camerica {
     prg_rom: Vec<u8>,
     bank_select: u8,
-    /// Track the previous value of bit 4 to detect mirroring changes
+    /// Track the previous value of bit 4 to detect mirroring changes.
     /// This helps distinguish between boards with mapper-controlled mirroring
-    /// and those with fixed mirroring from the cartridge header
+    /// and those with fixed mirroring from the cartridge header.
+    /// Uses Option<bool> to differentiate between "no writes yet" (None)
+    /// and actual bit 4 values, preventing false positives on the first write.
     previous_bit4: Option<bool>,
     /// Count how many times bit 4 has changed
     /// If this stays at 0, the game likely uses fixed mirroring
