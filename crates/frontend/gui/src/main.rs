@@ -1939,21 +1939,21 @@ fn main() {
         eprintln!("Warning: Failed to start audio playback: {}", e);
     }
 
-    // Timing trackers
-    let emulation_start_time = Instant::now(); // Time when emulation started
+    // Timing trackers - reset when ROM is loaded
+    let mut emulation_start_time = Instant::now(); // Time when emulation started
     let mut total_emulated_time = Duration::ZERO; // Total time emulated so far
     let mut last_frame = Instant::now();
 
-    // FPS tracking - separate for display and emulation
+    // FPS tracking - display FPS only
     let mut display_frame_times: Vec<Duration> = Vec::with_capacity(60);
-    let mut emulation_frame_count: u64 = 0;
-    let mut last_emulation_fps_calc = Instant::now();
     let mut current_fps = 60.0; // Display FPS
-    let mut _emulation_fps = 60.0; // Emulation FPS (tracked for future use)
 
     // GUI update throttling
     let mut frame_counter: u64 = 0;
     const GUI_UPDATE_INTERVAL: u64 = 15; // Update GUI every 15th frame
+
+    // Track when emulation becomes active to reset timing
+    let mut was_emulation_active = false;
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
@@ -2003,8 +2003,16 @@ fn main() {
 
     // Main event loop with egui
     loop {
-        frame_counter += 1;
-        let should_update_gui = frame_counter.is_multiple_of(GUI_UPDATE_INTERVAL);
+        // Only increment frame counter when emulation is active
+        if rom_loaded && settings.emulation_speed > 0.0 {
+            frame_counter = frame_counter.wrapping_add(1);
+        }
+        // Update GUI more frequently when paused or no ROM loaded
+        let should_update_gui = if rom_loaded && settings.emulation_speed > 0.0 {
+            frame_counter.is_multiple_of(GUI_UPDATE_INTERVAL)
+        } else {
+            true // Always update when paused or no ROM
+        };
         // Handle SDL2 events and update egui input
         if !egui_backend.handle_events() {
             break; // Window closed
@@ -3043,6 +3051,14 @@ fn main() {
 
         // Step emulation frame if ROM is loaded and not paused
         if rom_loaded && settings.emulation_speed > 0.0 {
+            // Reset timing when emulation becomes active
+            let is_emulation_active = true;
+            if !was_emulation_active && is_emulation_active {
+                emulation_start_time = Instant::now();
+                total_emulated_time = Duration::ZERO;
+            }
+            was_emulation_active = is_emulation_active;
+
             // Calculate time since emulation started
             let time_since_start = emulation_start_time.elapsed();
 
@@ -3052,20 +3068,20 @@ fn main() {
             let target_frame_duration = Duration::from_secs_f64(1.0 / frame_rate);
 
             // Calculate how many frames we need to emulate to catch up
-            // This implements requirement 3.1: advance emulation if diff > frame length
-            let time_diff = time_since_start
-                .checked_sub(total_emulated_time)
-                .unwrap_or(Duration::ZERO);
+            // Emulation speed affects the target emulated time, not the frame count
+            let emulation_speed = settings.emulation_speed;
+            let desired_emulated_time_secs = time_since_start.as_secs_f64() * emulation_speed;
+            let current_emulated_time_secs = total_emulated_time.as_secs_f64();
+            let time_diff_secs = (desired_emulated_time_secs - current_emulated_time_secs).max(0.0);
 
             // Determine how many frames to step based on time difference
-            // No upper limit - allows stepping many frames to catch up when behind
-            let frames_to_step = if time_diff >= target_frame_duration {
-                // We're behind - step enough frames to catch up
-                let frames =
-                    (time_diff.as_secs_f64() / target_frame_duration.as_secs_f64()) as usize;
-                // Apply emulation speed multiplier
-                let adjusted_frames = ((frames as f64) * settings.emulation_speed) as usize;
-                adjusted_frames.max(1) // Step at least 1 frame
+            // Apply an upper limit to avoid UI/audio freezes when far behind
+            let frames_to_step = if time_diff_secs >= target_frame_duration.as_secs_f64() {
+                // We're behind - step enough frames to catch up, but cap per iteration
+                let frames = (time_diff_secs / target_frame_duration.as_secs_f64()) as usize;
+                // Cap frames per iteration to prevent pathological catch-up behavior
+                let max_frames_per_iteration: usize = 30;
+                frames.clamp(1, max_frames_per_iteration)
             } else {
                 // We're ahead - don't step any frames this iteration
                 0
@@ -3079,7 +3095,6 @@ fn main() {
                 match sys.step_frame() {
                     Ok(frame) => {
                         last_frame_opt = Some(frame);
-                        emulation_frame_count += 1;
 
                         // Handle audio for each stepped frame
                         let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
@@ -3087,9 +3102,6 @@ fn main() {
                         for sample in audio_samples {
                             let _ = audio_tx.try_send(sample);
                         }
-
-                        // Accumulate emulated time
-                        total_emulated_time += target_frame_duration;
                     }
                     Err(e) => {
                         eprintln!("Emulation error: {}", e);
@@ -3098,13 +3110,8 @@ fn main() {
                 }
             }
 
-            // Calculate emulation FPS (frames actually emulated per second)
-            if last_emulation_fps_calc.elapsed() >= Duration::from_secs(1) {
-                let elapsed = last_emulation_fps_calc.elapsed().as_secs_f64();
-                _emulation_fps = (emulation_frame_count as f64 / elapsed) as f32;
-                emulation_frame_count = 0;
-                last_emulation_fps_calc = Instant::now();
-            }
+            // Accumulate emulated time outside the loop (based on frames actually stepped)
+            total_emulated_time += target_frame_duration * frames_to_step as u32;
 
             // Render only the last frame to the display (always update client screen - requirement 3.2)
             if let Some(mut frame) = last_frame_opt {
@@ -3153,6 +3160,9 @@ fn main() {
                     }
                 }
             }
+        } else {
+            // Emulation is not active
+            was_emulation_active = false;
         }
 
         // End egui frame and render
