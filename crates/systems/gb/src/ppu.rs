@@ -214,8 +214,8 @@ impl Ppu {
             ly: 0,
             lyc: 0,
             bgp: 0xFC,
-            obp0: 0xFF,
-            obp1: 0xFF,
+            obp0: 0xE4,
+            obp1: 0xE4,
             wy: 0,
             wx: 0,
             cycle_counter: 0,
@@ -281,7 +281,25 @@ impl Ppu {
 
     /// Write to OAM (0xFE00-0xFE9F)
     pub fn write_oam(&mut self, addr: u16, val: u8) {
+        static mut WRITE_COUNT: u32 = 0;
+        unsafe {
+            WRITE_COUNT += 1;
+            if WRITE_COUNT % 1000 == 0 && addr < 4 {
+                eprintln!("[write_oam] Call #{}, writing OAM[{:02X}] = {:02X}", WRITE_COUNT, addr, val);
+            }
+        }
         self.oam[(addr & 0x9F) as usize] = val;
+        
+        unsafe {
+            if WRITE_COUNT % 1000 == 0 && addr < 4 {
+                eprintln!("[write_oam] Verified: OAM[{:02X}] is now {:02X}", addr, self.oam[addr as usize]);
+            }
+        }
+    }
+
+    /// Read from OAM for debugging
+    pub fn read_oam_debug(&self, addr: u16) -> u8 {
+        self.oam[(addr & 0x9F) as usize]
     }
 
     /// Read background palette index register (0xFF68)
@@ -363,13 +381,20 @@ impl Ppu {
         // Each byte stores: [bit 7: BG priority, bits 1-0: color index (0-3)]
         let mut bg_color_indices = vec![0u8; 160 * 144];
 
-        // Render background if enabled
-        if (self.lcdc & LCDC_BG_WIN_ENABLE) != 0 {
+        // BG/Window rendering behavior depends on mode:
+        // - DMG: LCDC.0 = 0 disables BG/Window (blank/white)
+        // - CGB: LCDC.0 = 0 removes BG/Window priority (still renders, sprites always on top)
+        let bg_win_enabled = (self.lcdc & LCDC_BG_WIN_ENABLE) != 0;
+
+        // Render background
+        if bg_win_enabled || self.cgb_mode {
+            // CGB: always render BG even if LCDC.0 is 0
+            // DMG: only render if LCDC.0 is 1
             self.render_background(&mut frame, &mut bg_color_indices);
         }
 
-        // Render window if enabled
-        if (self.lcdc & LCDC_WIN_ENABLE) != 0 {
+        // Render window
+        if (self.lcdc & LCDC_WIN_ENABLE) != 0 && (bg_win_enabled || self.cgb_mode) {
             self.render_window(&mut frame, &mut bg_color_indices);
         }
 
@@ -627,6 +652,26 @@ impl Ppu {
             8
         };
 
+        static mut DEBUG_FRAME: u32 = 0;
+        unsafe {
+            DEBUG_FRAME += 1;
+            if DEBUG_FRAME % 60 == 0 && DEBUG_FRAME >= 120 && DEBUG_FRAME <= 240 {
+                eprintln!("[SPRITE DEBUG] Frame {}:", DEBUG_FRAME);
+                eprintln!("  OAM[0-3]: {:02X} {:02X} {:02X} {:02X}",
+                    self.oam[0], self.oam[1], self.oam[2], self.oam[3]);
+                eprintln!("  OAM[4-7]: {:02X} {:02X} {:02X} {:02X}",
+                    self.oam[4], self.oam[5], self.oam[6], self.oam[7]);
+                
+                // Count non-zero sprites
+                let non_zero_sprites = (0..40).filter(|i| {
+                    let y = self.oam[i * 4];
+                    y != 0
+                }).count();
+                eprintln!("  Non-zero sprites: {}/40", non_zero_sprites);
+                eprintln!("  LCDC={:02X}, OBP0={:02X}, OBP1={:02X}", self.lcdc, self.obp0, self.obp1);
+            }
+        }
+
         // Process sprites scanline by scanline to enforce 10-sprite limit
         for screen_y in 0u8..144 {
             // Collect all sprites that intersect this scanline
@@ -634,16 +679,34 @@ impl Ppu {
 
             for sprite_idx in 0u8..40 {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let y_pos = self.oam[oam_addr].wrapping_sub(16);
-                let x_pos = self.oam[oam_addr + 1].wrapping_sub(8);
+                let oam_y = self.oam[oam_addr];
+                let oam_x = self.oam[oam_addr + 1];
 
-                // Check if sprite intersects this scanline
-                let sprite_top = y_pos;
-                let sprite_bottom = y_pos.wrapping_add(sprite_height - 1);
+                // OAM Y/X are offset by 16/8 respectively
+                // Sprites are visible when: 0 < Y < 160 and 0 < X < 168
+                // Screen position = OAM position - offset
 
-                if screen_y >= sprite_top && screen_y <= sprite_bottom {
-                    // Store (x_pos, sprite_idx) for sorting
+                // Check if sprite intersects this scanline (Y check)
+                // screen_y is in range [sprite_top, sprite_bottom]
+                // where sprite_top = oam_y - 16, sprite_bottom = oam_y - 16 + sprite_height - 1
+                // Rewritten: oam_y - 16 <= screen_y <= oam_y - 16 + sprite_height - 1
+                // Which is: oam_y <= screen_y + 16 <= oam_y + sprite_height - 1
+                // Simplified: screen_y + 16 >= oam_y && screen_y + 16 < oam_y + sprite_height
+                let screen_y_offset = screen_y.wrapping_add(16);
+                if oam_y > 0
+                    && screen_y_offset >= oam_y
+                    && screen_y_offset < oam_y.wrapping_add(sprite_height)
+                {
+                    // Sprite intersects this scanline, store X position for sorting
+                    let x_pos = oam_x.wrapping_sub(8);
                     sprites_on_line.push((x_pos, sprite_idx));
+                    
+                    unsafe {
+                        if DEBUG_FRAME == 60 && sprites_on_line.len() == 1 {
+                            eprintln!("  Found sprite #{} on scanline {}: Y={:02X} X={:02X}", 
+                                sprite_idx, screen_y, oam_y, oam_x);
+                        }
+                    }
                 }
             }
 
@@ -658,7 +721,7 @@ impl Ppu {
             // (sprites with higher OAM index appear behind sprites with lower OAM index)
             for &(x_pos, sprite_idx) in sprites_on_line.iter().rev() {
                 let oam_addr = (sprite_idx as usize) * 4;
-                let y_pos = self.oam[oam_addr].wrapping_sub(16);
+                let oam_y = self.oam[oam_addr];
                 let tile_index = self.oam[oam_addr + 2];
                 let flags = self.oam[oam_addr + 3];
 
@@ -680,7 +743,8 @@ impl Ppu {
                 };
 
                 // Calculate which row of the sprite we're rendering
-                let sy = screen_y.wrapping_sub(y_pos);
+                // sy = screen_y - (oam_y - 16) = screen_y - oam_y + 16
+                let sy = screen_y.wrapping_add(16).wrapping_sub(oam_y);
                 let pixel_y = if flip_y { sprite_height - 1 - sy } else { sy };
 
                 // For 8x16 sprites, use tile_index & 0xFE for top, tile_index | 0x01 for bottom
@@ -716,7 +780,12 @@ impl Ppu {
                 };
 
                 for sx in 0..8u8 {
+                    // Calculate actual screen X position
                     let screen_x = x_pos.wrapping_add(sx);
+
+                    // Skip pixels that are off-screen
+                    // Screen X must be in range [0, 159]
+                    // But due to wrapping, values >= 160 could be either off right edge or off left edge
                     if screen_x >= 160 {
                         continue;
                     }
@@ -739,19 +808,24 @@ impl Ppu {
                     let bg_color_index = bg_data & 0x03; // Bits 1-0: color index
                     let bg_has_priority = (bg_data & 0x80) != 0; // Bit 7: BG priority flag
 
-                    // CGB priority rules:
-                    // 1. If BG color is 0, sprite always shows
-                    // 2. If BG tile has priority flag set, BG is above sprite
-                    // 3. If sprite OBJ priority flag is set, sprite is behind BG colors 1-3
-                    // 4. Otherwise, sprite is above BG
+                    // Sprite priority rules:
+                    // 1. If LCDC.0 is 0 in CGB mode, sprites are always on top
+                    // 2. If BG color is 0, sprite always shows
+                    // 3. If BG tile has priority flag set (CGB only), BG is above sprite
+                    // 4. If sprite OBJ priority flag is set, sprite is behind BG colors 1-3
+                    // 5. Otherwise, sprite is above BG
 
-                    if bg_color_index == 0 {
+                    let bg_win_master_priority = (self.lcdc & LCDC_BG_WIN_ENABLE) != 0;
+
+                    if self.cgb_mode && !bg_win_master_priority {
+                        // CGB mode with LCDC.0 = 0: sprites always on top
+                    } else if bg_color_index == 0 {
                         // BG is transparent, sprite always shows
                     } else if self.cgb_mode && bg_has_priority {
                         // CGB: BG tile has priority, sprite is behind
                         continue;
                     } else if bg_priority {
-                        // Sprite has priority flag set, behind BG colors 1-3
+                        // Sprite has priority flag set, behind BG colors 1-3 (but not 0)
                         continue;
                     }
                     // Otherwise, sprite is above BG
