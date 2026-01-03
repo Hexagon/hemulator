@@ -300,13 +300,8 @@ impl Tia {
     const HBLANK_COLOR_CLOCKS: i16 = 68;
 
     /// Get current visible x position (accounting for horizontal blank)
-    ///
-    /// Real Atari 2600 hardware has a ~5 color clock latching delay when writing to
-    /// position reset strobes (RESP0/RESP1/RESM0/RESM1/RESBL). The sprite/ball appears
-    /// approximately 5 pixels to the right of the current beam position.
     fn current_visible_x(&self) -> u8 {
-        const POSITION_LATCH_DELAY: i16 = 5; // Color clocks
-        let x = (self.pixel as i16) - Self::HBLANK_COLOR_CLOCKS + POSITION_LATCH_DELAY;
+        let x = (self.pixel as i16) - Self::HBLANK_COLOR_CLOCKS;
         x.clamp(0, 159) as u8
     }
 
@@ -1739,16 +1734,14 @@ mod tests {
         let mut tia = Tia::new();
 
         // Position player 0 at x=50 (pixel is in color clocks, not screen pixels)
-        // With 5-clock latch delay, writing at pixel 68+45 positions at x=50
-        tia.pixel = 68 + 45; // HBLANK + 45 color clocks -> x=50
+        tia.pixel = 68 + 50; // HBLANK + 50 color clocks
         tia.write(0x10, 0x00); // RESP0
 
         // Enable missile 0
         tia.write(0x1D, 0x02); // ENAM0
 
         // Position missile 0 at x=10 initially (without RESMP)
-        // With 5-clock latch delay, writing at pixel 68+5 positions at x=10
-        tia.pixel = 68 + 5;
+        tia.pixel = 68 + 10;
         tia.write(0x12, 0x00); // RESM0
         assert_eq!(tia.missile0_x, 10);
 
@@ -1760,14 +1753,14 @@ mod tests {
         assert_eq!(tia.missile0_x, 54); // 50 + 4
 
         // Try to move missile - should be ignored when RESMP is on
-        tia.pixel = 68 + 95; // Any position
+        tia.pixel = 68 + 100;
         tia.write(0x12, 0x00); // RESM0 - should be ignored
         tia.latch_scanline_state(1);
         assert_eq!(tia.missile0_x, 54); // Still locked to player
 
         // Disable RESMP0
         tia.write(0x28, 0x00); // RESMP0 = 0
-        tia.pixel = 68 + 15; // Writing at 68+15 -> x=20
+        tia.pixel = 68 + 20;
         tia.write(0x12, 0x00); // RESM0 - should work now
         assert_eq!(tia.missile0_x, 20); // Free to move again
     }
