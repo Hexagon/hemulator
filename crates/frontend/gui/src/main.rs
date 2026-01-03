@@ -229,6 +229,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.supports_save_states(),
             EmulatorSystem::SNES(sys) => sys.supports_save_states(),
             EmulatorSystem::N64(sys) => sys.supports_save_states(),
+            EmulatorSystem::SMS(sys) => sys.supports_save_states(),
         }
     }
 
@@ -311,6 +312,15 @@ impl EmulatorSystem {
                     2 => sys.set_controller3(n64_state),
                     3 => sys.set_controller4(n64_state),
                     _ => {}
+                }
+            }
+            EmulatorSystem::SMS(sys) => {
+                // SMS has 2 controller ports
+                // Map standard button layout to SMS controller
+                if port == 0 {
+                    sys.set_controller_1(state);
+                } else if port == 1 {
+                    sys.set_controller_2(state);
                 }
             }
         }
@@ -399,6 +409,10 @@ impl EmulatorSystem {
                 // N64 PC is 64-bit, truncate to 32-bit for display
                 Some(debug.pc as u32)
             }
+            EmulatorSystem::SMS(_) => {
+                // Z80 CPU not yet implemented
+                None
+            }
         }
     }
 
@@ -411,6 +425,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => Some(sys.cpu_speed_mhz()), // Variable based on CPU model
             EmulatorSystem::SNES(_) => Some(3.58), // SNES 65C816 (3.58 MHz)
             EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
+            EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
         }
     }
 
@@ -430,6 +445,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SNES(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::N64(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::SMS(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -441,6 +457,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::N64(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::SMS(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -452,6 +469,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
+            EmulatorSystem::SMS(_) => vec![0; count], // TODO: Wire up SMS audio once Z80 is implemented
         }
     }
 
@@ -463,6 +481,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => (640, 400),
             EmulatorSystem::SNES(_) => (256, 224),
             EmulatorSystem::N64(_) => (320, 240),
+            EmulatorSystem::SMS(_) => (256, 192),
         }
     }
 
@@ -474,6 +493,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => "pc",
             EmulatorSystem::SNES(_) => "snes",
             EmulatorSystem::N64(_) => "n64",
+            EmulatorSystem::SMS(_) => "sms",
         }
     }
 
@@ -1795,6 +1815,25 @@ fn main() {
                             println!("Loaded N64 ROM: {}", p);
                         }
                     }
+                    Ok(SystemType::SMS) => {
+                        rom_hash = Some(GameSaves::rom_hash(&data));
+                        let mut sms_sys = emu_sms::SmsSystem::new();
+                        if let Err(e) = sms_sys.mount("cartridge", &data) {
+                            eprintln!("Failed to load SMS ROM: {}", e);
+                            status_message = format!("Error: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                            runtime_state.set_mount("cartridge".to_string(), p.clone());
+                            settings.last_rom_path = Some(p.clone());
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
+                            status_message = "SMS ROM loaded".to_string();
+                            println!("Loaded SMS ROM: {}", p);
+                        }
+                    }
                     Err(e) => {
                         eprintln!("Unsupported ROM: {}", e);
                         status_message = format!("Unsupported ROM: {}", e);
@@ -2173,6 +2212,10 @@ fn main() {
                 EmulatorSystem::PC(s) => SystemDebugInfo::from_pc(&s.debug_info()),
                 EmulatorSystem::SNES(s) => SystemDebugInfo::from_snes(&s.get_debug_info()),
                 EmulatorSystem::N64(s) => SystemDebugInfo::from_n64(&s.get_debug_info()),
+                EmulatorSystem::SMS(_) => {
+                    // Z80 CPU not yet implemented
+                    SystemDebugInfo::new("Sega Master System".to_string())
+                }
             };
             egui_app.tab_manager.update_debug_info(debug_info);
         }
@@ -2194,7 +2237,7 @@ fn main() {
                             "ROM Files",
                             &[
                                 "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
-                                "com", "exe",
+                                "com", "exe", "sms",
                             ],
                         )
                         .add_filter("All Files", &["*"])
@@ -2361,6 +2404,32 @@ fn main() {
                                         egui_app
                                             .status_bar
                                             .set_message("N64 ROM loaded".to_string());
+                                        let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                }
+                                Ok(SystemType::SMS) => {
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    let mut sms_sys = emu_sms::SmsSystem::new();
+                                    if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                                        egui_app.property_pane.system_name = "SMS".to_string();
+                                        runtime_state
+                                            .set_mount("cartridge".to_string(), path_str.clone());
+                                        settings.last_rom_path = Some(path_str.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app
+                                            .status_bar
+                                            .set_message("SMS ROM loaded".to_string());
                                         let _ = sys.resolution();
                                         // Load save states for this ROM
                                         if let Some(ref hash) = rom_hash {
