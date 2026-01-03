@@ -81,7 +81,7 @@ impl VideoInterface {
             status: 0,
             origin: 0,
             width: 320,
-            intr: 0,
+            intr: 0x200, // Default to scanline 256 (0x200 >> 1 = 0x100 = 256) for NTSC vblank
             current: 0,
             burst: 0x03E52239, // NTSC burst
             v_sync: 0x020D,    // NTSC vertical sync (525 lines)
@@ -124,11 +124,29 @@ impl VideoInterface {
 
     /// Write to VI register
     pub fn write_register(&mut self, offset: u32, value: u32) {
+        use emu_core::logging::{log, LogCategory, LogLevel};
+
+        // Log significant VI register writes
+        if offset == VI_STATUS || offset == VI_ORIGIN || offset == VI_INTR {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!("VI: Write to offset 0x{:02X} = 0x{:08X}", offset, value)
+            });
+        }
+
         match offset {
             VI_STATUS => self.status = value,
-            VI_ORIGIN => self.origin = value & 0x00FFFFFF,
+            VI_ORIGIN => self.origin = value & 0x00FFFFFF, // 24-bit address
             VI_WIDTH => self.width = value & 0xFFF,
-            VI_INTR => self.intr = value & 0x3FF,
+            VI_INTR => {
+                self.intr = value & 0x3FF;
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "VI: VI_INTR set to 0x{:03X} (scanline {})",
+                        self.intr,
+                        self.intr >> 1
+                    )
+                });
+            }
             VI_CURRENT => {
                 // Writing to VI_CURRENT clears interrupt
                 self.current = 0;
