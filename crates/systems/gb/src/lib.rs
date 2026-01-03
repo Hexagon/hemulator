@@ -106,7 +106,6 @@
 //! - ✅ CGB: Automatic mode detection and activation
 //!
 //! ## Not Yet Implemented
-//! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
 //! - ❌ Serial: Link cable communication
 //!
 //! # Known Limitations

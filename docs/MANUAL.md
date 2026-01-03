@@ -674,7 +674,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: 🚧 In Development  
+**Status**: ✅ Fully Functional  
 **Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
@@ -706,7 +706,7 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Other**: No serial transfer (link cable), OAM DMA, STAT interrupts, or PPU mode transitions
+- **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
 - Arrow keys = D-pad

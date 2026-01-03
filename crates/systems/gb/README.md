@@ -159,7 +159,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 - Frame-based timing (not cycle-accurate)
 - RTC in MBC3 doesn't count time
 - No serial/link cable support
-- No OAM DMA transfer
 - No STAT interrupts or PPU mode transitions
 
 ## Performance
@@ -170,7 +169,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 
 ## Future Improvements
 
-- Game Boy Color support (CGB mode)
 - Cycle-accurate timing
 - Link cable emulation
 - Boot ROM support
