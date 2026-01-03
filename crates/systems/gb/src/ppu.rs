@@ -21,7 +21,9 @@
 //!   - `$9800-$9BFF`: Background/Window tilemap
 //!   - `$9C00-$9FFF`: Background/Window tilemap
 //!
-//! ## Color Palettes (DMG Mode)
+//! ## Color Palettes
+//!
+//! ### DMG Mode (Monochrome)
 //! - BGP ($FF47): Background palette
 //! - OBP0 ($FF48): Object palette 0
 //! - OBP1 ($FF49): Object palette 1
@@ -30,6 +32,27 @@
 //!   - 1: Light gray (0xAAAAAA)
 //!   - 2: Dark gray (0x555555)
 //!   - 3: Black (0x000000)
+//!
+//! ### CGB Mode (Color)
+//! - BCPS/BGPI ($FF68): Background palette index/specification
+//! - BCPD/BGPD ($FF69): Background palette data
+//! - OCPS/OBPI ($FF6A): Object palette index/specification
+//! - OCPD/OBPD ($FF6B): Object palette data
+//! - 8 background palettes, 8 object palettes
+//! - Each palette has 4 colors
+//! - Each color is 15-bit RGB (5 bits per channel)
+//! - Color format: gggrrrrr 0bbbbbgg (little-endian)
+//! - Auto-increment on palette data write when bit 7 of index register is set
+//!
+//! ## VRAM Banking (CGB)
+//! - VBK ($FF4F): VRAM bank select (bit 0)
+//! - Bank 0: Tile pixel data (compatible with DMG)
+//! - Bank 1: Tile attributes (CGB only)
+//!   - Bit 7: BG-to-OAM priority
+//!   - Bit 6: Vertical flip
+//!   - Bit 5: Horizontal flip
+//!   - Bit 3: Tile VRAM bank (0 or 1)
+//!   - Bits 2-0: Background palette number (0-7)
 //!
 //! # LCD Control Register (LCDC - $FF40)
 //!
@@ -58,11 +81,18 @@
 //! - Byte 1: X position (actual position - 8)
 //! - Byte 2: Tile index
 //! - Byte 3: Flags
-//!   - Bit 7: BG/Window priority (0=above BG, 1=behind BG colors 1-3)
-//!   - Bit 6: Y flip
-//!   - Bit 5: X flip
-//!   - Bit 4: Palette (0=OBP0, 1=OBP1)
-//!   - Bits 3-0: Unused (CGB palette in CGB mode)
+//!   - **DMG Mode:**
+//!     - Bit 7: BG/Window priority (0=above BG, 1=behind BG colors 1-3)
+//!     - Bit 6: Y flip
+//!     - Bit 5: X flip
+//!     - Bit 4: Palette (0=OBP0, 1=OBP1)
+//!     - Bits 3-0: Unused
+//!   - **CGB Mode:**
+//!     - Bit 7: BG/Window priority
+//!     - Bit 6: Y flip
+//!     - Bit 5: X flip
+//!     - Bit 3: Tile VRAM bank (0 or 1)
+//!     - Bits 2-0: CGB palette number (0-7)
 //!
 //! # Timing Model
 //!
@@ -87,9 +117,14 @@
 //! - ✅ Sprite rendering (8x8 and 8x16)
 //! - ✅ Sprite flipping (horizontal and vertical)
 //! - ✅ Sprite priority (above/behind background)
-//! - ✅ Palette support (BGP, OBP0, OBP1)
+//! - ✅ DMG palette support (BGP, OBP0, OBP1)
+//! - ✅ CGB color palettes (8 BG, 8 OBJ, 15-bit RGB)
+//! - ✅ CGB VRAM banking (2 banks of 8KB)
+//! - ✅ CGB tile attributes (palette, VRAM bank, flip)
+//! - ✅ CGB sprite attributes (palette, VRAM bank)
 //! - ✅ LYC=LY coincidence detection
 //! - ✅ Frame-based timing with scanline counter
+//! - ✅ Automatic CGB mode detection and activation
 //!
 //! ## Not Implemented
 //! - ❌ Cycle-accurate PPU timing
@@ -98,14 +133,17 @@
 //! - ❌ PPU mode transitions (Mode 0-3)
 //! - ❌ STAT interrupts
 //! - ❌ OAM DMA transfer
-//! - ❌ Game Boy Color features (color palettes, VRAM banking)
 
 use emu_core::types::Frame;
 
 /// Game Boy PPU state
 pub struct Ppu {
-    /// VRAM (8KB)
-    vram: [u8; 0x2000],
+    /// VRAM Bank 0 (8KB)
+    vram_bank0: [u8; 0x2000],
+    /// VRAM Bank 1 (8KB, CGB only - contains tile attributes)
+    vram_bank1: [u8; 0x2000],
+    /// Current VRAM bank (0 or 1, CGB only)
+    vram_bank: u8,
     /// OAM (Object Attribute Memory - 160 bytes)
     oam: [u8; 0xA0],
 
@@ -121,11 +159,11 @@ pub struct Ppu {
     pub ly: u8,
     /// LY Compare (0xFF45)
     pub lyc: u8,
-    /// BG Palette (0xFF47)
+    /// BG Palette (0xFF47) - DMG only
     pub bgp: u8,
-    /// OBJ Palette 0 (0xFF48)
+    /// OBJ Palette 0 (0xFF48) - DMG only
     pub obp0: u8,
-    /// OBJ Palette 1 (0xFF49)
+    /// OBJ Palette 1 (0xFF49) - DMG only
     pub obp1: u8,
     /// Window Y (0xFF4A)
     pub wy: u8,
@@ -133,6 +171,19 @@ pub struct Ppu {
     pub wx: u8,
     /// Cycle accumulator for scanline timing
     cycle_counter: u32,
+
+    // CGB-specific registers and state
+    /// Background palette index/specification (0xFF68)
+    bgpi: u8,
+    /// Object palette index/specification (0xFF6A)
+    obpi: u8,
+    /// Background palette data (8 palettes × 4 colors × 2 bytes = 64 bytes)
+    /// Each color is 15-bit RGB (2 bytes): gggrrrrr 0bbbbbgg
+    bg_palette_data: [u8; 64],
+    /// Object palette data (8 palettes × 4 colors × 2 bytes = 64 bytes)
+    obj_palette_data: [u8; 64],
+    /// CGB mode enabled flag
+    cgb_mode: bool,
 }
 
 // LCDC bits
@@ -152,7 +203,9 @@ const LCDC_BG_WIN_ENABLE: u8 = 0x01;
 impl Ppu {
     pub fn new() -> Self {
         Self {
-            vram: [0; 0x2000],
+            vram_bank0: [0; 0x2000],
+            vram_bank1: [0; 0x2000],
+            vram_bank: 0,
             oam: [0; 0xA0],
             lcdc: 0x91,
             stat: 0x00,
@@ -166,17 +219,59 @@ impl Ppu {
             wy: 0,
             wx: 0,
             cycle_counter: 0,
+            bgpi: 0,
+            obpi: 0,
+            bg_palette_data: [0; 64],
+            obj_palette_data: [0; 64],
+            cgb_mode: false,
         }
+    }
+
+    /// Enable CGB mode
+    pub fn enable_cgb_mode(&mut self) {
+        self.cgb_mode = true;
+        // Initialize CGB palettes with default values
+        // Default: white palette (all colors set to white = 0x7FFF)
+        for i in 0..64 {
+            self.bg_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+            self.obj_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+        }
+    }
+
+    /// Check if CGB mode is enabled
+    pub fn is_cgb_mode(&self) -> bool {
+        self.cgb_mode
     }
 
     /// Read from VRAM (0x8000-0x9FFF)
     pub fn read_vram(&self, addr: u16) -> u8 {
-        self.vram[(addr & 0x1FFF) as usize]
+        let offset = (addr & 0x1FFF) as usize;
+        if self.vram_bank == 0 {
+            self.vram_bank0[offset]
+        } else {
+            self.vram_bank1[offset]
+        }
     }
 
     /// Write to VRAM (0x8000-0x9FFF)
     pub fn write_vram(&mut self, addr: u16, val: u8) {
-        self.vram[(addr & 0x1FFF) as usize] = val;
+        let offset = (addr & 0x1FFF) as usize;
+        if self.vram_bank == 0 {
+            self.vram_bank0[offset] = val;
+        } else {
+            self.vram_bank1[offset] = val;
+        }
+    }
+
+    /// Set VRAM bank (VBK register at 0xFF4F)
+    pub fn set_vram_bank(&mut self, val: u8) {
+        // Only bit 0 matters, bit 1-7 are unused
+        self.vram_bank = val & 0x01;
+    }
+
+    /// Get VRAM bank
+    pub fn get_vram_bank(&self) -> u8 {
+        self.vram_bank | 0xFE // Bits 1-7 return 1
     }
 
     /// Read from OAM (0xFE00-0xFE9F)
@@ -189,6 +284,72 @@ impl Ppu {
         self.oam[(addr & 0x9F) as usize] = val;
     }
 
+    /// Read background palette index register (0xFF68)
+    pub fn read_bgpi(&self) -> u8 {
+        self.bgpi
+    }
+
+    /// Write background palette index register (0xFF68)
+    pub fn write_bgpi(&mut self, val: u8) {
+        self.bgpi = val;
+    }
+
+    /// Read background palette data register (0xFF69)
+    pub fn read_bgpd(&self) -> u8 {
+        let index = (self.bgpi & 0x3F) as usize;
+        self.bg_palette_data[index]
+    }
+
+    /// Write background palette data register (0xFF69)
+    pub fn write_bgpd(&mut self, val: u8) {
+        let index = (self.bgpi & 0x3F) as usize;
+        self.bg_palette_data[index] = val;
+        // Auto-increment if bit 7 is set
+        if (self.bgpi & 0x80) != 0 {
+            self.bgpi = (self.bgpi & 0x80) | ((self.bgpi + 1) & 0x3F);
+        }
+    }
+
+    /// Read object palette index register (0xFF6A)
+    pub fn read_obpi(&self) -> u8 {
+        self.obpi
+    }
+
+    /// Write object palette index register (0xFF6A)
+    pub fn write_obpi(&mut self, val: u8) {
+        self.obpi = val;
+    }
+
+    /// Read object palette data register (0xFF6B)
+    pub fn read_obpd(&self) -> u8 {
+        let index = (self.obpi & 0x3F) as usize;
+        self.obj_palette_data[index]
+    }
+
+    /// Write object palette data register (0xFF6B)
+    pub fn write_obpd(&mut self, val: u8) {
+        let index = (self.obpi & 0x3F) as usize;
+        self.obj_palette_data[index] = val;
+        // Auto-increment if bit 7 is set
+        if (self.obpi & 0x80) != 0 {
+            self.obpi = (self.obpi & 0x80) | ((self.obpi + 1) & 0x3F);
+        }
+    }
+
+    /// Convert CGB 15-bit color to 32-bit ARGB
+    /// CGB color format: gggrrrrr 0bbbbbgg (little-endian)
+    fn cgb_color_to_rgb(&self, color_low: u8, color_high: u8) -> u32 {
+        let color = (color_high as u16) << 8 | color_low as u16;
+        let r = ((color & 0x1F) as u32) << 3;
+        let g = (((color >> 5) & 0x1F) as u32) << 3;
+        let b = (((color >> 10) & 0x1F) as u32) << 3;
+        // Expand 5-bit to 8-bit by copying top bits to bottom
+        let r = r | (r >> 5);
+        let g = g | (g >> 5);
+        let b = b | (b >> 5);
+        0xFF000000 | (r << 16) | (g << 8) | b
+    }
+
     /// Render a complete frame (160x144)
     pub fn render_frame(&self) -> Frame {
         let mut frame = Frame::new(160, 144);
@@ -198,19 +359,23 @@ impl Ppu {
             return frame;
         }
 
+        // Track background color indices and priority for sprite rendering
+        // Each byte stores: [bit 7: BG priority, bits 1-0: color index (0-3)]
+        let mut bg_color_indices = vec![0u8; 160 * 144];
+
         // Render background if enabled
         if (self.lcdc & LCDC_BG_WIN_ENABLE) != 0 {
-            self.render_background(&mut frame);
+            self.render_background(&mut frame, &mut bg_color_indices);
         }
 
         // Render window if enabled
         if (self.lcdc & LCDC_WIN_ENABLE) != 0 {
-            self.render_window(&mut frame);
+            self.render_window(&mut frame, &mut bg_color_indices);
         }
 
         // Render sprites if enabled
         if (self.lcdc & LCDC_OBJ_ENABLE) != 0 {
-            self.render_sprites(&mut frame);
+            self.render_sprites(&mut frame, &bg_color_indices);
         }
 
         frame
@@ -222,7 +387,7 @@ impl Ppu {
         base + ((tile_index as i8 as i16 + 128) as u16 * 16)
     }
 
-    fn render_background(&self, frame: &mut Frame) {
+    fn render_background(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
         let tile_data_base = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
             0x0000 // $8000-$8FFF
         } else {
@@ -237,7 +402,7 @@ impl Ppu {
 
         for screen_y in 0u8..144 {
             let y = screen_y.wrapping_add(self.scy);
-            let tile_y = (y / 8) as u16;
+            let tile_y = ((y / 8) & 31) as u16;
             let pixel_y = (y % 8) as u16;
 
             for screen_x in 0u8..160 {
@@ -245,9 +410,29 @@ impl Ppu {
                 let tile_x = ((x / 8) & 31) as u16;
                 let pixel_x = (x % 8) as u16;
 
-                // Get tile index from tilemap
+                // Get tile index from tilemap (always from VRAM bank 0)
                 let tilemap_addr = tilemap_base + (tile_y * 32) + tile_x;
-                let tile_index = self.vram[tilemap_addr as usize];
+                let tile_index = self.vram_bank0[tilemap_addr as usize];
+
+                // Get tile attributes from VRAM bank 1 (CGB only)
+                let tile_attr = if self.cgb_mode {
+                    self.vram_bank1[tilemap_addr as usize]
+                } else {
+                    0
+                };
+
+                // CGB tile attributes (from VRAM bank 1):
+                // Bit 7: BG-to-OAM Priority (0=use OAM priority, 1=BG priority)
+                // Bit 6: Vertical flip
+                // Bit 5: Horizontal flip
+                // Bit 4: Not used
+                // Bit 3: VRAM bank (0=bank 0, 1=bank 1) for tile data
+                // Bits 2-0: Background palette number (0-7)
+                let bg_palette_num = tile_attr & 0x07;
+                let tile_vram_bank = (tile_attr >> 3) & 0x01;
+                let flip_x = (tile_attr & 0x20) != 0;
+                let flip_y = (tile_attr & 0x40) != 0;
+                let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
                 let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
@@ -258,35 +443,62 @@ impl Ppu {
                     self.calculate_signed_tile_address(tile_data_base, tile_index)
                 };
 
-                // Get tile data (2 bytes per row)
-                let tile_row_addr = tile_addr + (pixel_y * 2);
-                let byte1 = self.vram[tile_row_addr as usize];
-                let byte2 = self.vram[(tile_row_addr + 1) as usize];
+                // Apply vertical flip to pixel_y
+                let actual_pixel_y = if flip_y { 7 - pixel_y } else { pixel_y };
+
+                // Get tile data (2 bytes per row) from appropriate VRAM bank
+                let tile_row_addr = tile_addr + (actual_pixel_y * 2);
+                let (byte1, byte2) = if self.cgb_mode && tile_vram_bank == 1 {
+                    (
+                        self.vram_bank1[tile_row_addr as usize],
+                        self.vram_bank1[(tile_row_addr + 1) as usize],
+                    )
+                } else {
+                    (
+                        self.vram_bank0[tile_row_addr as usize],
+                        self.vram_bank0[(tile_row_addr + 1) as usize],
+                    )
+                };
+
+                // Apply horizontal flip to pixel_x
+                let actual_pixel_x = if flip_x { 7 - pixel_x } else { pixel_x };
 
                 // Get pixel color (2-bit value)
-                let bit = 7 - pixel_x;
+                let bit = 7 - actual_pixel_x;
                 let color_bit_0 = (byte1 >> bit) & 1;
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
-                // Apply palette
-                let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                // Store color index and priority flag for sprite rendering
+                // Format: [bit 7: BG priority flag, bits 1-0: color index]
+                let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                bg_color_indices[pixel_idx] = if bg_priority { 0x80 } else { 0 } | color_index;
 
-                // Convert to RGB (DMG palette: 0=white, 1=light gray, 2=dark gray, 3=black)
-                let rgb = match palette_color {
-                    0 => 0xFFFFFFFF, // White
-                    1 => 0xFFAAAAAA, // Light gray
-                    2 => 0xFF555555, // Dark gray
-                    3 => 0xFF000000, // Black
-                    _ => unreachable!(),
+                // Apply palette and convert to RGB
+                let rgb = if self.cgb_mode {
+                    // CGB mode: use color palettes
+                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                    let color_low = self.bg_palette_data[palette_index as usize];
+                    let color_high = self.bg_palette_data[(palette_index + 1) as usize];
+                    self.cgb_color_to_rgb(color_low, color_high)
+                } else {
+                    // DMG mode: use monochrome palette
+                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    match palette_color {
+                        0 => 0xFFFFFFFF, // White
+                        1 => 0xFFAAAAAA, // Light gray
+                        2 => 0xFF555555, // Dark gray
+                        3 => 0xFF000000, // Black
+                        _ => unreachable!(),
+                    }
                 };
 
-                frame.pixels[(screen_y as usize * 160) + screen_x as usize] = rgb;
+                frame.pixels[pixel_idx] = rgb;
             }
         }
     }
 
-    fn render_window(&self, frame: &mut Frame) {
+    fn render_window(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
         // Window rendering - similar to background but positioned at WX-7, WY
         if self.wx >= 167 || self.wy >= 144 {
             return; // Window not visible
@@ -322,9 +534,22 @@ impl Ppu {
 
                 let pixel_x = (win_x % 8) as u16;
 
-                // Get tile index from tilemap
+                // Get tile index from tilemap (always from VRAM bank 0)
                 let tilemap_addr = tilemap_base + (tile_y * 32) + tile_x;
-                let tile_index = self.vram[tilemap_addr as usize];
+                let tile_index = self.vram_bank0[tilemap_addr as usize];
+
+                // Get tile attributes from VRAM bank 1 (CGB only)
+                let tile_attr = if self.cgb_mode {
+                    self.vram_bank1[tilemap_addr as usize]
+                } else {
+                    0
+                };
+
+                let bg_palette_num = tile_attr & 0x07;
+                let tile_vram_bank = (tile_attr >> 3) & 0x01;
+                let flip_x = (tile_attr & 0x20) != 0;
+                let flip_y = (tile_attr & 0x40) != 0;
+                let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
                 let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
@@ -333,41 +558,68 @@ impl Ppu {
                     self.calculate_signed_tile_address(tile_data_base, tile_index)
                 };
 
+                // Apply vertical flip to pixel_y
+                let actual_pixel_y = if flip_y { 7 - pixel_y } else { pixel_y };
+
                 // Get tile data (2 bytes per row)
-                let tile_row_addr = tile_addr + (pixel_y * 2);
+                let tile_row_addr = tile_addr + (actual_pixel_y * 2);
 
                 // Ensure we don't exceed VRAM bounds
-                if (tile_row_addr + 1) as usize >= self.vram.len() {
+                if (tile_row_addr + 1) as usize >= 0x2000 {
                     continue;
                 }
 
-                let byte1 = self.vram[tile_row_addr as usize];
-                let byte2 = self.vram[(tile_row_addr + 1) as usize];
+                let (byte1, byte2) = if self.cgb_mode && tile_vram_bank == 1 {
+                    (
+                        self.vram_bank1[tile_row_addr as usize],
+                        self.vram_bank1[(tile_row_addr + 1) as usize],
+                    )
+                } else {
+                    (
+                        self.vram_bank0[tile_row_addr as usize],
+                        self.vram_bank0[(tile_row_addr + 1) as usize],
+                    )
+                };
+
+                // Apply horizontal flip to pixel_x
+                let actual_pixel_x = if flip_x { 7 - pixel_x } else { pixel_x };
 
                 // Get pixel color (2-bit value)
-                let bit = 7 - pixel_x;
+                let bit = 7 - actual_pixel_x;
                 let color_bit_0 = (byte1 >> bit) & 1;
                 let color_bit_1 = (byte2 >> bit) & 1;
                 let color_index = (color_bit_1 << 1) | color_bit_0;
 
-                // Apply palette
-                let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                // Store color index and priority flag for sprite rendering
+                // Format: [bit 7: BG priority flag, bits 1-0: color index]
+                let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                bg_color_indices[pixel_idx] = if bg_priority { 0x80 } else { 0 } | color_index;
 
-                // Convert to RGB
-                let rgb = match palette_color {
-                    0 => 0xFFFFFFFF, // White
-                    1 => 0xFFAAAAAA, // Light gray
-                    2 => 0xFF555555, // Dark gray
-                    3 => 0xFF000000, // Black
-                    _ => unreachable!(),
+                // Apply palette and convert to RGB
+                let rgb = if self.cgb_mode {
+                    // CGB mode: use color palettes
+                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                    let color_low = self.bg_palette_data[palette_index as usize];
+                    let color_high = self.bg_palette_data[(palette_index + 1) as usize];
+                    self.cgb_color_to_rgb(color_low, color_high)
+                } else {
+                    // DMG mode: use monochrome palette
+                    let palette_color = (self.bgp >> (color_index * 2)) & 0x03;
+                    match palette_color {
+                        0 => 0xFFFFFFFF, // White
+                        1 => 0xFFAAAAAA, // Light gray
+                        2 => 0xFF555555, // Dark gray
+                        3 => 0xFF000000, // Black
+                        _ => unreachable!(),
+                    }
                 };
 
-                frame.pixels[(screen_y as usize * 160) + screen_x as usize] = rgb;
+                frame.pixels[pixel_idx] = rgb;
             }
         }
     }
 
-    fn render_sprites(&self, frame: &mut Frame) {
+    fn render_sprites(&self, frame: &mut Frame, bg_color_indices: &[u8]) {
         // Sprite rendering - Game Boy supports 40 sprites, max 10 per scanline
         let sprite_height = if (self.lcdc & LCDC_OBJ_SIZE) != 0 {
             16
@@ -383,14 +635,22 @@ impl Ppu {
             let tile_index = self.oam[oam_addr + 2];
             let flags = self.oam[oam_addr + 3];
 
-            let palette = if (flags & 0x10) != 0 {
-                self.obp1
-            } else {
-                self.obp0
-            };
+            // OAM flags interpretation differs between DMG and CGB
+            // Bit 7: BG/Window priority
+            // Bit 6: Y flip
+            // Bit 5: X flip
+            // Bit 4: Palette number (DMG: 0=OBP0, 1=OBP1; CGB: not used)
+            // Bits 3: VRAM bank (CGB only)
+            // Bits 2-0: CGB palette number (0-7, CGB only)
             let flip_x = (flags & 0x20) != 0;
             let flip_y = (flags & 0x40) != 0;
             let bg_priority = (flags & 0x80) != 0;
+
+            let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) = if self.cgb_mode {
+                (0, flags & 0x07, (flags >> 3) & 0x01)
+            } else {
+                ((flags >> 4) & 0x01, 0, 0)
+            };
 
             // Render sprite pixels
             for sy in 0..sprite_height {
@@ -416,12 +676,22 @@ impl Ppu {
                 let row_offset = (pixel_y % 8) * 2;
 
                 // Ensure we don't exceed VRAM bounds
-                if (tile_addr + row_offset as u16 + 1) as usize >= self.vram.len() {
+                if (tile_addr + row_offset as u16 + 1) as usize >= 0x2000 {
                     continue;
                 }
 
-                let byte1 = self.vram[(tile_addr + row_offset as u16) as usize];
-                let byte2 = self.vram[(tile_addr + row_offset as u16 + 1) as usize];
+                // Get tile data from appropriate VRAM bank (CGB sprites can use bank 1)
+                let (byte1, byte2) = if self.cgb_mode && sprite_vram_bank == 1 {
+                    (
+                        self.vram_bank1[(tile_addr + row_offset as u16) as usize],
+                        self.vram_bank1[(tile_addr + row_offset as u16 + 1) as usize],
+                    )
+                } else {
+                    (
+                        self.vram_bank0[(tile_addr + row_offset as u16) as usize],
+                        self.vram_bank0[(tile_addr + row_offset as u16 + 1) as usize],
+                    )
+                };
 
                 for sx in 0..8u8 {
                     let screen_x = x_pos.wrapping_add(sx);
@@ -440,27 +710,52 @@ impl Ppu {
                         continue;
                     }
 
-                    // Apply palette
-                    let palette_color = (palette >> (color_index * 2)) & 0x03;
-
                     // Check background priority
-                    if bg_priority {
-                        // Sprite is behind background colors 1-3
-                        let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
-                        let current = frame.pixels[pixel_idx];
-                        // If background pixel is not white (color 0), skip sprite
-                        if current != 0xFFFFFFFF {
-                            continue;
-                        }
-                    }
+                    // Extract color index and priority flag from bg_color_indices
+                    let pixel_idx = (screen_y as usize * 160) + screen_x as usize;
+                    let bg_data = bg_color_indices[pixel_idx];
+                    let bg_color_index = bg_data & 0x03; // Bits 1-0: color index
+                    let bg_has_priority = (bg_data & 0x80) != 0; // Bit 7: BG priority flag
 
-                    // Convert to RGB
-                    let rgb = match palette_color {
-                        0 => 0xFFFFFFFF, // White (transparent, but palette maps it)
-                        1 => 0xFFAAAAAA, // Light gray
-                        2 => 0xFF555555, // Dark gray
-                        3 => 0xFF000000, // Black
-                        _ => unreachable!(),
+                    // CGB priority rules:
+                    // 1. If BG color is 0, sprite always shows
+                    // 2. If BG tile has priority flag set, BG is above sprite
+                    // 3. If sprite OBJ priority flag is set, sprite is behind BG colors 1-3
+                    // 4. Otherwise, sprite is above BG
+
+                    if bg_color_index == 0 {
+                        // BG is transparent, sprite always shows
+                    } else if self.cgb_mode && bg_has_priority {
+                        // CGB: BG tile has priority, sprite is behind
+                        continue;
+                    } else if bg_priority {
+                        // Sprite has priority flag set, behind BG colors 1-3
+                        continue;
+                    }
+                    // Otherwise, sprite is above BG
+
+                    // Apply palette and convert to RGB
+                    let rgb = if self.cgb_mode {
+                        // CGB mode: use color palettes
+                        let palette_index = (cgb_palette_num * 4 + color_index) * 2;
+                        let color_low = self.obj_palette_data[palette_index as usize];
+                        let color_high = self.obj_palette_data[(palette_index + 1) as usize];
+                        self.cgb_color_to_rgb(color_low, color_high)
+                    } else {
+                        // DMG mode: use monochrome palettes
+                        let palette = if dmg_palette_num == 1 {
+                            self.obp1
+                        } else {
+                            self.obp0
+                        };
+                        let palette_color = (palette >> (color_index * 2)) & 0x03;
+                        match palette_color {
+                            0 => 0xFFFFFFFF, // White (transparent, but palette maps it)
+                            1 => 0xFFAAAAAA, // Light gray
+                            2 => 0xFF555555, // Dark gray
+                            3 => 0xFF000000, // Black
+                            _ => unreachable!(),
+                        }
                     };
 
                     let pixel_idx = (screen_y as usize * 160) + screen_x as usize;

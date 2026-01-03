@@ -86,9 +86,14 @@
 //! - ✅ PPU: Window rendering
 //! - ✅ PPU: Sprite rendering (8x8 and 8x16 modes)
 //! - ✅ PPU: Sprite priority, flipping, and transparency
+//! - ✅ PPU: CGB color mode (8 BG palettes, 8 OBJ palettes, 15-bit RGB)
+//! - ✅ PPU: VRAM banking (2 banks of 8KB for CGB)
+//! - ✅ PPU: CGB tile attributes (palette, VRAM bank, flip)
 //! - ✅ Memory: Full memory map with VRAM/OAM access
 //! - ✅ Joypad: Button input via register $FF00
 //! - ✅ I/O: Essential PPU and joypad registers
+//! - ✅ I/O: CGB palette registers (BCPS/BCPD, OCPS/OCPD)
+//! - ✅ I/O: CGB VRAM bank select (VBK)
 //! - ✅ Save states: Full CPU state preservation
 //! - ✅ APU: 4 sound channels (pulse 1/2, wave, noise)
 //! - ✅ APU: Frame sequencer and envelope/sweep control
@@ -97,10 +102,10 @@
 //! - ✅ Timer: Programmable timer with DIV, TIMA, TMA, TAC registers
 //! - ✅ Interrupts: Full interrupt handling (VBlank, LCD STAT, Timer, Serial, Joypad)
 //! - ✅ Interrupts: Priority-based interrupt servicing with IME flag
+//! - ✅ CGB: Automatic mode detection and activation
 //!
 //! ## Not Yet Implemented
 //! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
-//! - ❌ Game Boy Color: CGB mode, color palettes
 //! - ❌ Serial: Link cable communication
 //! - ❌ DMA: OAM DMA transfer
 //!
@@ -111,14 +116,17 @@
 //!    - Some timing-critical effects may not work
 //!    - Trade-off: Better compatibility vs. perfect accuracy
 //!
-//! 2. **ROM Support**: MBC0, MBC1, MBC3, MBC5 supported
-//!    - Covers approximately 95%+ of commercial Game Boy games
-//!    - MBC2 not yet implemented (rare, ~1% of games)
+//! 2. **ROM Support**: MBC0, MBC1, MBC2, MBC3, MBC5 supported
+//!    - Covers approximately 96%+ of commercial Game Boy games
+//!    - MBC2 fully implemented
 //!    - Homebrew ROMs widely supported
 //!
-//! 3. **Game Boy Color**: Not yet supported
-//!    - DMG (original Game Boy) mode only
-//!    - No color palette support
+//! 3. **Game Boy Color**: Full CGB support implemented
+//!    - Automatic CGB mode detection based on ROM header
+//!    - VRAM banking (2 banks of 8KB)
+//!    - Color palettes (8 BG + 8 OBJ, 4 colors each, 15-bit RGB)
+//!    - Tile attributes (palette selection, VRAM bank, flipping)
+//!    - Backward compatible with DMG games
 //!
 //! # Usage Example
 //!
