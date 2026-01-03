@@ -432,6 +432,14 @@ impl RspHle {
         rdram: &[u8],
         rdp: &mut Rdp,
     ) -> bool {
+        // Log F3DEX commands for debugging
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "F3DEX cmd: 0x{:02X} w0:0x{:08X} w1:0x{:08X}",
+                cmd_id, word0, word1
+            )
+        });
+
         match cmd_id {
             // G_BRANCH_Z (0xB0) - Conditional branch based on Z-buffer
             0xB0 => {
