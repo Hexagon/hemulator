@@ -1161,33 +1161,28 @@ fn create_nes_system(
     if video_backend == "opengl" {
         #[cfg(feature = "opengl")]
         if let Some(gl) = gl_context {
-            use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
+            #[cfg(feature = "opengl")]
+            {
+                use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
 
-            match OpenGLNesPpuRenderer::new(gl) {
-                Ok(opengl_renderer) => {
-                    nes_sys.set_renderer(Box::new(opengl_renderer));
-                    eprintln!("NES: Using OpenGL (hardware) renderer");
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Failed to create OpenGL NES renderer: {}, falling back to software",
-                        e
-                    );
+                match OpenGLNesPpuRenderer::new(gl) {
+                    Ok(opengl_renderer) => {
+                        nes_sys.set_renderer(Box::new(opengl_renderer));
+                        eprintln!("NES: Using OpenGL (hardware) renderer");
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to create OpenGL NES renderer: {}, falling back to software",
+                            e
+                        );
+                    }
                 }
             }
-        }
-        #[cfg(not(feature = "opengl"))]
-        if gl_context.is_some() {
-            eprintln!("Warning: OpenGL feature not enabled - using software renderer");
-        }
-        #[cfg(feature = "opengl")]
-        if gl_context.is_none() {
-            eprintln!(
-                "Warning: OpenGL renderer requested but GL context not available - using software"
-            );
-        }
-        #[cfg(not(feature = "opengl"))]
-        if gl_context.is_none() {
+            #[cfg(not(feature = "opengl"))]
+            {
+                eprintln!("Warning: OpenGL feature not enabled - using software renderer");
+            }
+        } else {
             eprintln!(
                 "Warning: OpenGL renderer requested but GL context not available - using software"
             );
@@ -3749,13 +3744,12 @@ fn main() {
             let time_diff_secs = (desired_emulated_time_secs - current_emulated_time_secs).max(0.0);
 
             // Determine how many frames to step based on time difference
-            // Apply an upper limit to avoid UI/audio freezes when far behind
+            // For stable display, always step exactly 0 or 1 frame per iteration
+            // to avoid visual artifacts from frame skipping
             let frames_to_step = if time_diff_secs >= target_frame_duration.as_secs_f64() {
-                // We're behind - step enough frames to catch up, but cap per iteration
-                let frames = (time_diff_secs / target_frame_duration.as_secs_f64()) as usize;
-                // Cap frames per iteration to prevent pathological catch-up behavior
-                let max_frames_per_iteration: usize = 30;
-                frames.clamp(1, max_frames_per_iteration)
+                // We're behind - step ONE frame to maintain visual consistency
+                // Stepping multiple frames causes visible "jumping" artifacts
+                1
             } else {
                 // We're ahead - don't step any frames this iteration
                 0
