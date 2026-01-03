@@ -1,17 +1,20 @@
 # Game Boy Emulation
 
-This crate implements Game Boy and Game Boy Color (in DMG mode) emulation for the Hemulator project.
+This crate implements Game Boy (DMG) and Game Boy Color (CGB) emulation for the Hemulator project.
 
 **For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
 ## Current Status
 
-The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/1/2/3/5 support.
+The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/1/2/3/5 support and full CGB color support.
 
 ### What Works
 
 - ✅ **CPU (LR35902)** - Complete Sharp LR35902 CPU from `emu_core::cpu_lr35902`
-- ✅ **PPU** - Full DMG PPU with background, window, sprites
+- ✅ **PPU** - Full DMG and CGB PPU with background, window, sprites
+- ✅ **CGB Color** - 15-bit RGB color palettes (8 BG + 8 OBJ)
+- ✅ **VRAM Banking** - 2 banks of 8KB for CGB mode
+- ✅ **Tile Attributes** - CGB palette selection, VRAM banking, flipping
 - ✅ **APU** - Complete audio with all 4 channels
 - ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5 (~96% coverage)
 - ✅ **Joypad** - Full input support
@@ -63,13 +66,14 @@ GbSystem
 
 **Location**: `src/ppu.rs`, `src/ppu_renderer.rs`
 
-Implements DMG (original Game Boy) mode with a flexible renderer architecture:
+Implements DMG (original Game Boy) and CGB (Game Boy Color) modes with a flexible renderer architecture:
 
 - **Resolution**: 160x144 pixels
 - **Tile System**:
   - 8x8 pixel tiles, 2 bits per pixel (4 colors)
   - Two tile data areas (unsigned $8000-$8FFF, signed $8800-$97FF)
   - Two tilemap areas ($9800-$9BFF, $9C00-$9FFF)
+  - CGB: VRAM banking (2 banks of 8KB)
 - **Layers**:
   - Background with scrolling (SCX, SCY)
   - Window layer (WX, WY)
@@ -77,8 +81,11 @@ Implements DMG (original Game Boy) mode with a flexible renderer architecture:
 - **Features**:
   - Sprite flipping (horizontal/vertical)
   - Sprite priority (BG priority flag)
-  - Palette support (BGP, OBP0, OBP1)
-  - DMG color mode (4 shades of gray)
+  - DMG: Monochrome palettes (BGP, OBP0, OBP1)
+  - CGB: 15-bit RGB color palettes (8 BG, 8 OBJ)
+  - CGB: Tile attributes (palette, VRAM bank, flip)
+  - CGB: Sprite attributes (palette, VRAM bank)
+  - Automatic mode detection (DMG vs CGB)
 - **Rendering**:
   - **Software Renderer**: CPU-based tile/sprite rendering (default)
   - **Hardware Renderer**: GPU-accelerated rendering (future work)
