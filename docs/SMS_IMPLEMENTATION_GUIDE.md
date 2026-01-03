@@ -66,13 +66,35 @@ Follow this order to minimize dependencies and enable incremental testing:
 mod tests {
     use super::*;
     
+    // Simple test memory for CPU testing
+    struct TestMemory {
+        ram: Vec<u8>,
+    }
+    
+    impl TestMemory {
+        fn new() -> Self {
+            Self { ram: vec![0; 0x10000] }
+        }
+    }
+    
+    impl MemoryZ80 for TestMemory {
+        fn read(&self, addr: u16) -> u8 {
+            self.ram[addr as usize]
+        }
+        
+        fn write(&mut self, addr: u16, val: u8) {
+            self.ram[addr as usize] = val;
+        }
+    }
+    
     #[test]
     fn test_z80_ld_r_n() {
-        let mem = TestMemory::new();
-        let mut cpu = CpuZ80::new(mem);
+        let mut mem = TestMemory::new();
         // Load 0x42 into register A
-        cpu.memory.write(0x0000, 0x3E); // LD A, n
-        cpu.memory.write(0x0001, 0x42);
+        mem.ram[0x0000] = 0x3E; // LD A, n opcode
+        mem.ram[0x0001] = 0x42; // immediate value
+        
+        let mut cpu = CpuZ80::new(mem);
         cpu.step();
         assert_eq!(cpu.a, 0x42);
     }
@@ -92,11 +114,15 @@ mod tests {
 
 1. **Define PSG state**:
 ```rust
+// Note: PulseChannel and NoiseChannel are reusable components from
+// crates/core/src/apu/ - see existing NES and Atari 2600 implementations
+use emu_core::apu::{PulseChannel, NoiseChannel};
+
 pub struct Sn76489Psg {
-    // Tone generators (3 channels)
+    // Tone generators (3 channels) - reuses existing PulseChannel component
     tone_channels: [PulseChannel; 3],
     
-    // Noise generator
+    // Noise generator - reuses existing NoiseChannel component
     noise_channel: NoiseChannel,
     
     // Volume registers (4-bit, 0=max, 15=min/mute)
@@ -407,14 +433,19 @@ fn test_vdp_register_write() {
 
 1. **Create system structure**:
 ```rust
-pub struct SmsSystem {
-    cpu: CpuZ80<SmsMemory>,
-    vdp: Vdp,
-    psg: Sn76489Psg,
-    
-    // Memory
+// SmsMemory wraps the system state for Z80 memory access
+pub struct SmsMemory {
     rom: Vec<u8>,
     ram: [u8; 0x2000], // 8KB
+    vdp: Rc<RefCell<Vdp>>,
+    psg: Rc<RefCell<Sn76489Psg>>,
+    // ... other shared state
+}
+
+pub struct SmsSystem {
+    cpu: CpuZ80<SmsMemory>,
+    vdp: Rc<RefCell<Vdp>>,
+    psg: Rc<RefCell<Sn76489Psg>>,
     
     // I/O
     io_control: u8,
@@ -426,6 +457,7 @@ pub struct SmsSystem {
 
 2. **Implement memory map**:
 ```rust
+// SmsMemory implements MemoryZ80 trait to provide CPU access to system resources
 impl MemoryZ80 for SmsMemory {
     fn read(&self, addr: u16) -> u8 {
         match addr {
@@ -571,11 +603,12 @@ SMS uses simple paging for ROMs > 48KB:
 impl SmsMemory {
     fn update_banking(&mut self) {
         // Paging registers at 0xFFFC, 0xFFFD, 0xFFFE
-        let frame_0 = self.ram[0x1FFC] as usize;
+        // Note: In production code, validate indices are within RAM bounds
+        let frame_0 = self.ram[0x1FFC] as usize; // Safe: 0x1FFC < 0x2000 (8KB RAM)
         let frame_1 = self.ram[0x1FFD] as usize;
         let frame_2 = self.ram[0x1FFE] as usize;
         
-        // Map 16KB banks
+        // Map 16KB banks (modulo ensures within valid range)
         self.rom_bank_0 = frame_0 % self.num_banks;
         self.rom_bank_1 = frame_1 % self.num_banks;
         self.rom_bank_2 = frame_2 % self.num_banks;
