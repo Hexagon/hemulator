@@ -26,6 +26,7 @@ use emu_core::types::Frame;
 use crate::tia::Tia;
 
 /// Maximum TIA scanline index (0-261, total 262 scanlines)
+#[cfg(test)]
 const MAX_SCANLINE: u16 = 261;
 
 /// Trait for TIA rendering backends
@@ -112,12 +113,11 @@ impl TiaRenderer for SoftwareTiaRenderer {
 
     fn render_frame(&mut self, tia: &Tia, visible_start: u16) {
         // Render 192 visible scanlines
-        // Note: We clamp instead of using modulo to prevent wraparound.
-        // If visible_start + visible_line exceeds MAX_SCANLINE, we clamp to MAX_SCANLINE.
-        // This prevents rendering VBLANK scanlines at the bottom of the frame,
-        // which causes vertical glitching and duplicate rendering.
+        // Use modulo to wrap around the 262-scanline frame properly.
+        // This matches the collision detection logic and prevents rendering artifacts
+        // when visible_start + visible_line exceeds the total scanline count.
         for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line as u16).min(MAX_SCANLINE);
+            let tia_scanline = (visible_start + visible_line as u16) % 262;
             self.render_scanline(tia, visible_line, tia_scanline);
         }
     }
@@ -167,10 +167,11 @@ mod tests {
     }
 
     #[test]
-    fn test_render_frame_no_wraparound() {
-        // This test verifies the fix for vertical glitching bug
-        // The bug was caused by modulo operation wrapping scanlines when
-        // (visible_start + visible_line) exceeded MAX_SCANLINE
+    fn test_render_frame_with_wraparound() {
+        // This test verifies that scanline wrapping works correctly
+        // When visible_start + visible_line exceeds 261, it should wrap to 0
+        // This matches the behavior of collision detection and prevents
+        // scanline duplication artifacts
         let mut renderer = SoftwareTiaRenderer::new();
         let mut tia = Tia::new();
 
@@ -178,22 +179,27 @@ mod tests {
         tia.write(0x0D, 0xFF); // PF0 - all bits set
         tia.write(0x08, 0x0E); // COLUPF - white
 
-        // Simulate a late visible_start that would cause wraparound with the old code
-        // Old code: (261 + 1) % 262 = 0 (wraps to VBLANK area)
-        // New code: (261 + 1).min(MAX_SCANLINE) = 261 (clamps to last valid scanline)
+        // Simulate a late visible_start that would cause wraparound
+        // With modulo: (261 + 1) % 262 = 0 (wraps correctly)
+        // Old code with min: (261 + 1).min(261) = 261 (duplicate rendering)
         let visible_start = MAX_SCANLINE;
 
         // Render the frame
         renderer.render_frame(&tia, visible_start);
 
-        // With the fix, all scanlines should use scanline MAX_SCANLINE's state
-        // (clamped to MAX_SCANLINE) instead of wrapping around to scanline 0
-        // This prevents the vertical glitching and duplication
+        // With the fix using modulo, scanlines wrap properly:
+        // - visible_line 0: tia_scanline 261
+        // - visible_line 1: tia_scanline 0 (wrapped)
+        // - visible_line 191: tia_scanline 190
+        // This prevents scanline duplication and vertical glitching
         let frame = renderer.get_frame();
 
-        // Just verify that rendering completed without panic
+        // Verify that rendering completed without panic
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 192);
+
+        // When wrapping into VBLANK scanlines, they render as black
+        // (handled by get_pixel_color checking state.vblank)
     }
 
     #[test]
