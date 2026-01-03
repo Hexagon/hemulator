@@ -35,6 +35,7 @@
 //! - 0xE0-0xFF: Various RDP passthrough commands
 
 use super::rdp::Rdp;
+use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// RSP microcode types (detected by analyzing IMEM signature)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +112,34 @@ pub struct RspHle {
 
     /// Geometry mode flags
     geometry_mode: u32,
+
+    /// Viewport parameters (x, y, width, height, scale_x, scale_y)
+    /// Defaults to (0, 0, 320, 240, 160, 120) for 320x240 framebuffer
+    viewport: (f32, f32, f32, f32, f32, f32),
+
+    /// Display list call stack for G_DL commands
+    /// Stores return addresses when G_DL_PUSH is used
+    #[allow(dead_code)] // Reserved for future proper display list call stack implementation
+    dl_stack: Vec<u32>,
+
+    /// Temporary storage for G_RDPHALF_1 data
+    /// Used for 2-word RDP commands split across display list entries
+    #[allow(dead_code)] // Reserved for future use with 2-word RDP commands
+    rdp_half: u32,
+
+    /// Light data (up to 8 lights)
+    /// Each light has 7 elements: [dx, dy, dz, r, g, b, type]
+    /// - dx, dy, dz: direction vector (normalized, -1.0 to 1.0)
+    /// - r, g, b: color components (0.0 to 1.0)
+    /// - type: 0.0 = directional, 1.0 = point (reserved for future use)
+    lights: [[f32; 7]; 8],
+
+    /// Number of active lights
+    num_lights: usize,
+
+    /// Ambient light color (RGB as floats 0.0-1.0)
+    #[allow(dead_code)] // Reserved for future lighting implementation
+    ambient_light: [f32; 3],
 }
 
 impl RspHle {
@@ -125,6 +154,14 @@ impl RspHle {
             projection_matrix: Self::identity_matrix(),
             modelview_matrix: Self::identity_matrix(),
             geometry_mode: 0,
+            // Default viewport for 320x240 framebuffer
+            // (x, y, width, height, scale_x, scale_y)
+            viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
+            dl_stack: Vec::with_capacity(10),
+            rdp_half: 0,
+            lights: [[0.0; 7]; 8],
+            num_lights: 0,
+            ambient_light: [0.3, 0.3, 0.3], // Default ambient light
         }
     }
 
@@ -136,25 +173,51 @@ impl RspHle {
     }
 
     /// Multiply two 4x4 matrices: result = a * b
-    /// Matrices are in row-major order
+    /// Matrices are in column-major order (N64 format)
     fn multiply_matrix(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
         let mut result = [0.0f32; 16];
-        for i in 0..4 {
-            for j in 0..4 {
-                result[i * 4 + j] = a[i * 4] * b[j]
-                    + a[i * 4 + 1] * b[4 + j]
-                    + a[i * 4 + 2] * b[8 + j]
-                    + a[i * 4 + 3] * b[12 + j];
+        // Column-major multiplication: C[col][row] = sum(A[k][row] * B[col][k])
+        for col in 0..4 {
+            for row in 0..4 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    // A[k][row] is at index row + k*4 (column-major)
+                    // B[col][k] is at index k + col*4 (column-major)
+                    sum += a[row + k * 4] * b[k + col * 4];
+                }
+                // C[col][row] is at index row + col*4 (column-major)
+                result[row + col * 4] = sum;
             }
         }
         result
+    }
+
+    /// Convert N64 virtual address to physical RDRAM address
+    /// KSEG0 (0x80000000-0x9FFFFFFF) and KSEG1 (0xA0000000-0xBFFFFFFF) map to physical 0x00000000-0x1FFFFFFF
+    /// Also handles already-physical addresses (0x00000000-0x1FFFFFFF) by passing them through
+    fn virt_to_phys(addr: u32) -> usize {
+        // Check if address is in KSEG0 or KSEG1 (virtual address ranges)
+        // KSEG0: 0x80000000-0x9FFFFFFF (cached)
+        // KSEG1: 0xA0000000-0xBFFFFFFF (uncached)
+        // KSEG2: 0xC0000000-0xDFFFFFFF (kernel)
+        // KSEG3: 0xE0000000-0xFFFFFFFF (kernel)
+        let is_virtual = addr >= 0x80000000;
+
+        if is_virtual {
+            // Virtual address - mask to get physical address
+            (addr & 0x1FFFFFFF) as usize
+        } else {
+            // Already a physical address - pass through
+            // This handles cases where ROM data uses physical addresses directly
+            addr as usize
+        }
     }
 
     /// Load a 4x4 matrix from RDRAM
     /// N64 matrices are stored as 16 signed 16.16 fixed-point values (32 bits each)
     fn load_matrix_from_rdram(&self, rdram: &[u8], addr: u32) -> [f32; 16] {
         let mut matrix = [0.0f32; 16];
-        let addr = addr as usize;
+        let addr = Self::virt_to_phys(addr);
 
         // Safety check
         if addr + 63 >= rdram.len() {
@@ -178,18 +241,78 @@ impl RspHle {
         matrix
     }
 
-    /// Detect microcode type from IMEM data
+    /// Detect microcode type from IMEM data using CRC32 signatures
     pub fn detect_microcode(&mut self, imem: &[u8; 4096]) {
-        // Simple detection: look for known patterns in microcode
-        // Real implementation would use CRC32 or signature matching
-
-        // For now, assume F3DEX if IMEM is non-zero
+        // Check if IMEM has any code
         let has_code = imem.iter().any(|&b| b != 0);
-        if has_code {
-            self.microcode = MicrocodeType::F3DEX;
-        } else {
+        if !has_code {
             self.microcode = MicrocodeType::Unknown;
+            return;
         }
+
+        // Calculate CRC32 of the first 4KB of IMEM
+        let crc = crc32fast::hash(imem);
+
+        // Known microcode CRC32 signatures
+        // These are common F3DEX/F3DEX2 variants from various games
+        self.microcode = match crc {
+            // F3DEX2 variants (most common in later N64 games)
+            0xB545B679 | 0x9F0B2B0E | 0x3A1C2B34 | 0x4AED6B3A => MicrocodeType::F3DEX2,
+
+            // F3DEX variants (common in earlier N64 games)
+            0xBF0DA4E5 | 0xE9C86D0F | 0xD7C3B8B5 | 0x5EC6E85F => MicrocodeType::F3DEX,
+
+            // Audio microcodes
+            0x1A7DDD1E | 0x3E3E0CA2 => MicrocodeType::Audio,
+
+            // If CRC doesn't match known signatures, try pattern matching
+            _ => {
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "RSP: Unknown microcode CRC 0x{:08X}, using heuristic detection",
+                        crc
+                    )
+                });
+
+                // Heuristic: Look for common instruction patterns
+                // F3DEX/F3DEX2 microcodes have distinctive patterns in their code
+
+                // Check for F3DEX2 patterns (more optimized)
+                // F3DEX2 typically has more vector operations (LQV/SQV) early in code
+                let has_f3dex2_pattern = (0..256).step_by(4).any(|i| {
+                    let word = u32::from_be_bytes([imem[i], imem[i + 1], imem[i + 2], imem[i + 3]]);
+                    // LQV instruction opcode pattern
+                    (word & 0xFC000000) == 0xC8000000
+                });
+
+                // Check for F3DEX patterns (older, more general)
+                // F3DEX typically has more branching and scalar operations
+                let has_f3dex_pattern = (0..256).step_by(4).any(|i| {
+                    let word = u32::from_be_bytes([imem[i], imem[i + 1], imem[i + 2], imem[i + 3]]);
+                    // BGEZ/BLTZ instruction opcodes (common in F3DEX control flow)
+                    (word & 0xFC1F0000) == 0x04010000 || (word & 0xFC1F0000) == 0x04000000
+                });
+
+                if has_f3dex2_pattern {
+                    MicrocodeType::F3DEX2
+                } else if has_f3dex_pattern {
+                    MicrocodeType::F3DEX
+                } else {
+                    // Default to F3DEX for unknown graphics microcodes
+                    log(LogCategory::PPU, LogLevel::Warn, || {
+                        "RSP: Microcode detection failed, defaulting to F3DEX".to_string()
+                    });
+                    MicrocodeType::F3DEX
+                }
+            }
+        };
+
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "RSP: Detected microcode: {:?} (CRC: 0x{:08X})",
+                self.microcode, crc
+            )
+        });
     }
 
     /// Get current microcode type
@@ -222,35 +345,79 @@ impl RspHle {
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
     fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], rdp: &mut Rdp) -> u32 {
-        // Parse task structure from DMEM
-        // In real F3DEX, the display list address is passed via DMEM at a known offset
+        // Try to read task structure from DMEM first
+        let mut data_ptr = self.read_u32(dmem, 0x30);
+        let mut data_size = self.read_u32(dmem, 0x34);
+        let mut output_buff = self.read_u32(dmem, 0x28);
+        let mut output_buff_size = self.read_u32(dmem, 0x2C);
 
-        // Read task structure from DMEM (typical offset is 0x0000)
-        let _task_type = self.read_u32(dmem, 0x00);
-        let _task_flags = self.read_u32(dmem, 0x04);
-        let _ucode_boot = self.read_u32(dmem, 0x08); // Boot microcode address
-        let _ucode_boot_size = self.read_u32(dmem, 0x0C);
-        let _ucode = self.read_u32(dmem, 0x10); // Main microcode address
-        let _ucode_size = self.read_u32(dmem, 0x14);
-        let _ucode_data = self.read_u32(dmem, 0x18); // Microcode data address
-        let _ucode_data_size = self.read_u32(dmem, 0x1C);
-        let _dram_stack = self.read_u32(dmem, 0x20); // Stack in RDRAM
-        let _dram_stack_size = self.read_u32(dmem, 0x24);
-        let output_buff = self.read_u32(dmem, 0x28); // Output buffer (RDP display list)
-        let output_buff_size = self.read_u32(dmem, 0x2C);
-        let data_ptr = self.read_u32(dmem, 0x30); // Data pointer (F3DEX display list input)
-        let data_size = self.read_u32(dmem, 0x34);
-        let _yield_data_ptr = self.read_u32(dmem, 0x38);
-        let _yield_data_size = self.read_u32(dmem, 0x3C);
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "RSP HLE: DMEM task structure: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
+                data_ptr, data_size, output_buff, output_buff_size
+            )
+        });
+
+        // If DMEM task structure is empty/invalid, try reading from common RDRAM locations
+        // Many test ROMs store task structure at 0x00200000 without DMA to DMEM
+        if data_ptr == 0 || data_ptr >= 0x00800000 {
+            // Try reading from RDRAM at 0x00200000 (common task structure location)
+            const TASK_STRUCT_ADDR: usize = 0x00200000;
+            if TASK_STRUCT_ADDR + 0x40 <= rdram.len() {
+                data_ptr = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x30);
+                data_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x34);
+                output_buff = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x28);
+                output_buff_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x2C);
+
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("RSP HLE: Read from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}", TASK_STRUCT_ADDR, data_ptr, data_size, output_buff, output_buff_size)
+                });
+
+                if data_ptr > 0 && data_ptr < 0x00800000 {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        "RSP HLE: Valid display list found in RDRAM task structure".to_string()
+                    });
+
+                    // If we found a valid display list but microcode is Unknown,
+                    // assume F3DEX (most common graphics microcode)
+                    if self.microcode == MicrocodeType::Unknown {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "RSP HLE: Detected graphics task with Unknown microcode, assuming F3DEX"
+                                .to_string()
+                        });
+                        self.microcode = MicrocodeType::F3DEX;
+                    }
+                }
+            }
+        }
 
         // Parse F3DEX display list if data_ptr is provided
         if data_ptr > 0 && data_size > 0 {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!(
+                    "RSP HLE: Calling parse_f3dex_display_list with data_ptr=0x{:08X}, data_size=0x{:X}",
+                    data_ptr, data_size
+                )
+            });
             self.parse_f3dex_display_list(rdram, data_ptr, data_size, rdp);
+        } else {
+            log(LogCategory::PPU, LogLevel::Warn, || {
+                format!(
+                    "RSP HLE: No display list to parse (data_ptr=0x{:08X}, data_size=0x{:X})",
+                    data_ptr, data_size
+                )
+            });
         }
 
         // If there's an output buffer with data (pre-generated RDP commands),
         // forward it directly to the RDP for processing
         if output_buff > 0 && output_buff_size > 0 {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!(
+                    "RSP HLE: Processing RDP output buffer at 0x{:08X}, size=0x{:X}",
+                    output_buff, output_buff_size
+                )
+            });
             rdp.set_dpc_start(output_buff);
             rdp.set_dpc_end(output_buff + output_buff_size);
             rdp.process_display_list(rdram);
@@ -267,9 +434,17 @@ impl RspHle {
         _size: u32,
         rdp: &mut Rdp,
     ) {
-        let mut addr = start_addr as usize;
+        // Convert virtual address to physical address
+        let mut addr = Self::virt_to_phys(start_addr);
         let max_commands = 1000; // Safety limit to prevent infinite loops
         let mut commands_processed = 0;
+
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "RSP HLE: Parsing F3DEX display list at virt:0x{:08X} phys:0x{:08X}",
+                start_addr, addr
+            )
+        });
 
         while addr + 7 < rdram.len() && commands_processed < max_commands {
             // Read 64-bit F3DEX command
@@ -310,6 +485,14 @@ impl RspHle {
         rdram: &[u8],
         rdp: &mut Rdp,
     ) -> bool {
+        // Log F3DEX commands for debugging
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "F3DEX cmd: 0x{:02X} w0:0x{:08X} w1:0x{:08X}",
+                cmd_id, word0, word1
+            )
+        });
+
         match cmd_id {
             // G_BRANCH_Z (0xB0) - Conditional branch based on Z-buffer
             0xB0 => {
@@ -333,6 +516,32 @@ impl RspHle {
                 }
                 true
             }
+            // G_CLEARGEOMETRYMODE (0xB6) - Clear geometry mode bits
+            0xB6 => {
+                // word1: bits to clear
+                let clear_bits = word1;
+                self.geometry_mode &= !clear_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}",
+                        clear_bits, self.geometry_mode
+                    )
+                });
+                true
+            }
+            // G_SETGEOMETRYMODE (0xB7) - Set geometry mode bits
+            0xB7 => {
+                // word1: bits to set
+                let set_bits = word1;
+                self.geometry_mode |= set_bits;
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}",
+                        set_bits, self.geometry_mode
+                    )
+                });
+                true
+            }
             // G_VTX (0x01) - Load vertices
             0x01 => {
                 // word0: cmd_id | vn (vertex count, bits 20-11) | v0 (buffer index, bits 16-1)
@@ -345,6 +554,19 @@ impl RspHle {
                 for i in 0..vertex_count.min(32 - buffer_index) {
                     let vaddr = vertex_addr + (i as u32 * 16);
                     self.load_vertex(rdram, vaddr, buffer_index + i);
+                }
+                true
+            }
+            // G_TRI1 (0x04) - Draw single triangle (alternate encoding)
+            0x04 => {
+                // Alternative encoding used by some games
+                // word0: cmd_id | v0_index | v1_index | v2_index
+                let v0 = ((word0 >> 16) & 0xFF) as usize / 2;
+                let v1 = ((word0 >> 8) & 0xFF) as usize / 2;
+                let v2 = (word0 & 0xFF) as usize / 2;
+
+                if v0 < self.vertex_count && v1 < self.vertex_count && v2 < self.vertex_count {
+                    self.draw_transformed_triangle(v0, v1, v2, rdp);
                 }
                 true
             }
@@ -435,6 +657,16 @@ impl RspHle {
                 // Load matrix from RDRAM
                 let matrix = self.load_matrix_from_rdram(rdram, matrix_addr);
 
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_MTX addr=0x{:08X} type={} mode={} push={}",
+                        matrix_addr,
+                        if projection { "PROJ" } else { "MV" },
+                        if load { "LOAD" } else { "MUL" },
+                        push
+                    )
+                });
+
                 // Apply matrix based on type
                 if projection {
                     // Projection matrix
@@ -477,6 +709,232 @@ impl RspHle {
                 self.geometry_mode = (self.geometry_mode & !clear_bits) | set_bits;
                 true
             }
+            // G_MOVEWORD (0xDB) - Modify internal state word
+            0xDB => {
+                // word0: cmd_id | index (which word to modify) | offset (within that word)
+                // word1: value to write
+                let index = (word0 >> 16) & 0xFF;
+                let _offset = word0 & 0xFFFF;
+                let _value = word1;
+
+                // Common indices:
+                // 0x00: G_MW_MATRIX - Modify current matrix
+                // 0x02: G_MW_NUMLIGHT - Set number of lights
+                // 0x04: G_MW_CLIP - Modify clipping planes
+                // 0x06: G_MW_SEGMENT - Set segment address
+                // 0x08: G_MW_FOG - Fog parameters
+                // 0x0A: G_MW_LIGHTCOL - Light color
+                // 0x0C: G_MW_POINTS - Point rendering params
+                // 0x0E: G_MW_PERSPNORM - Perspective normalization
+
+                // For HLE, we log but don't implement most of these
+                // Full LLE would modify RSP internal state
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_MOVEWORD stub - index=0x{:02X}, offset=0x{:04X}, value=0x{:08X}",
+                        index, _offset, _value
+                    )
+                });
+                true
+            }
+            // G_MOVEMEM (0xDC) - Load memory segment
+            0xDC => {
+                // word0: cmd_id | size | offset
+                // word1: RDRAM address to load from
+                let size = ((word0 >> 16) & 0xFF) as usize;
+                let offset = (word0 & 0xFFFF) as usize;
+                let rdram_addr = word1;
+
+                // G_MOVEMEM indices (offset values):
+                // 0x80 = G_MV_VIEWPORT (8 bytes)
+                // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
+                // 0x82 = G_MV_LIGHT (16 bytes per light, offset determines which light)
+
+                // Check if this is a viewport load (offset 0x80)
+                const G_MV_VIEWPORT: usize = 0x80;
+                const G_MV_LIGHT_BASE: usize = 0x82; // Base offset for lights
+
+                if offset == G_MV_VIEWPORT && size >= 8 {
+                    // Load viewport data from RDRAM
+                    // Viewport format (8 words = 16 bytes in 16.16 fixed point):
+                    // vscale[0] = width/2, vscale[1] = height/2
+                    // vtrans[0] = x + width/2, vtrans[1] = y + height/2
+                    let addr = Self::virt_to_phys(rdram_addr);
+                    if addr + 15 < rdram.len() {
+                        // Read scale values (vscale[0], vscale[1])
+                        let vscale_x = i32::from_be_bytes([
+                            rdram[addr],
+                            rdram[addr + 1],
+                            rdram[addr + 2],
+                            rdram[addr + 3],
+                        ]) as f32
+                            / 65536.0;
+
+                        let vscale_y = i32::from_be_bytes([
+                            rdram[addr + 4],
+                            rdram[addr + 5],
+                            rdram[addr + 6],
+                            rdram[addr + 7],
+                        ]) as f32
+                            / 65536.0;
+
+                        // Read translation values (vtrans[0], vtrans[1])
+                        let vtrans_x = i32::from_be_bytes([
+                            rdram[addr + 8],
+                            rdram[addr + 9],
+                            rdram[addr + 10],
+                            rdram[addr + 11],
+                        ]) as f32
+                            / 65536.0;
+
+                        let vtrans_y = i32::from_be_bytes([
+                            rdram[addr + 12],
+                            rdram[addr + 13],
+                            rdram[addr + 14],
+                            rdram[addr + 15],
+                        ]) as f32
+                            / 65536.0;
+
+                        // Calculate viewport bounds
+                        // x = vtrans_x - vscale_x, y = vtrans_y - vscale_y
+                        // width = vscale_x * 2, height = vscale_y * 2
+                        let vp_x = vtrans_x - vscale_x;
+                        let vp_y = vtrans_y - vscale_y;
+                        let vp_width = vscale_x * 2.0;
+                        let vp_height = vscale_y * 2.0;
+
+                        self.viewport = (vp_x, vp_y, vp_width, vp_height, vscale_x, vscale_y);
+
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            format!(
+                                "RSP HLE: G_MOVEMEM viewport - x={:.1}, y={:.1}, w={:.1}, h={:.1}",
+                                vp_x, vp_y, vp_width, vp_height
+                            )
+                        });
+                    }
+                } else if (G_MV_LIGHT_BASE..=0x92).contains(&offset) && size >= 16 {
+                    // Load light data from RDRAM
+                    // Light format (16 bytes):
+                    // bytes 0-2: R, G, B color (0-255)
+                    // bytes 3-5: padding
+                    // bytes 6-8: X, Y, Z direction (signed bytes, normalized)
+                    // bytes 9-15: padding
+
+                    // Calculate which light this is (offset 0x82 = light 0, 0x84 = light 1, etc.)
+                    let light_index = (offset - G_MV_LIGHT_BASE) / 2;
+
+                    if light_index < 8 {
+                        let addr = Self::virt_to_phys(rdram_addr);
+                        if addr + 15 < rdram.len() {
+                            // Read light color (RGB, 0-255)
+                            let r = rdram[addr] as f32 / 255.0;
+                            let g = rdram[addr + 1] as f32 / 255.0;
+                            let b = rdram[addr + 2] as f32 / 255.0;
+
+                            // Read light direction (signed bytes, treat as normalized -1 to 1)
+                            let dx = (rdram[addr + 6] as i8) as f32 / 127.0;
+                            let dy = (rdram[addr + 7] as i8) as f32 / 127.0;
+                            let dz = (rdram[addr + 8] as i8) as f32 / 127.0;
+
+                            // Store light data: [dx, dy, dz, r, g, b, type]
+                            // type: 0.0 = directional, 1.0 = point (for future use)
+                            self.lights[light_index] = [dx, dy, dz, r, g, b, 0.0];
+
+                            if light_index >= self.num_lights {
+                                self.num_lights = light_index + 1;
+                            }
+
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!(
+                                    "RSP HLE: G_MOVEMEM light {} - color=({:.2},{:.2},{:.2}), dir=({:.2},{:.2},{:.2})",
+                                    light_index, r, g, b, dx, dy, dz
+                                )
+                            });
+                        }
+                    }
+                } else {
+                    // Other MOVEMEM types - log but don't implement
+                    log(LogCategory::Stubs, LogLevel::Debug, || {
+                        format!(
+                            "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
+                            size, offset, rdram_addr
+                        )
+                    });
+                }
+                true
+            }
+            // G_TEXTURE (0xD7) - Configure texture settings
+            0xD7 => {
+                // word0: cmd_id | level (mipmap level) | tile | on (enable/disable)
+                // word1: scaleS(16) | scaleT(16) - texture coordinate scaling
+                let _level = (word0 >> 11) & 0x07;
+                let _tile = (word0 >> 8) & 0x07;
+                let _on = (word0 >> 1) & 0x7F; // Non-zero = texture on
+                let _scale_s = (word1 >> 16) & 0xFFFF;
+                let _scale_t = word1 & 0xFFFF;
+
+                // For HLE, we could update geometry mode or pass to RDP
+                // For now, log and continue
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_TEXTURE - tile={}, on={}, scaleS=0x{:04X}, scaleT=0x{:04X}",
+                        _tile, _on, _scale_s, _scale_t
+                    )
+                });
+                true
+            }
+            // G_SETOTHERMODE_L (0xB2) - Set lower other modes
+            0xB2 => {
+                // word0: cmd_id | shift | length
+                // word1: data to set
+                let _shift = (word0 >> 8) & 0xFF;
+                let _length = word0 & 0xFF;
+                let _data = word1;
+
+                // Other modes control rendering pipeline settings (alpha blend, Z-mode, etc.)
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETOTHERMODE_L stub - shift={}, len={}, data=0x{:08X}",
+                        _shift, _length, _data
+                    )
+                });
+                true
+            }
+            // G_SETOTHERMODE_H (0xB3) - Set upper other modes
+            0xB3 => {
+                // word0: cmd_id | shift | length
+                // word1: data to set
+                let _shift = (word0 >> 8) & 0xFF;
+                let _length = word0 & 0xFF;
+                let _data = word1;
+
+                // Other modes control rendering pipeline settings
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETOTHERMODE_H stub - shift={}, len={}, data=0x{:08X}",
+                        _shift, _length, _data
+                    )
+                });
+                true
+            }
+            // G_LOAD_UCODE (0xAF) - Load new microcode
+            0xAF => {
+                // word0: cmd_id | size
+                // word1: RDRAM address of microcode
+                let _size = (word0 & 0xFFFF) as usize;
+                let _ucode_addr = word1;
+
+                // For HLE, we don't actually load and execute microcode
+                // Instead, we detect the microcode type by signature
+                // A full LLE implementation would copy from RDRAM to IMEM
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_LOAD_UCODE - size=0x{:04X}, addr=0x{:08X}",
+                        _size, _ucode_addr
+                    )
+                });
+                true
+            }
             // G_DL (0xDE) - Display list branch/call
             0xDE => {
                 // word0: cmd_id | branch_type (0 = call with return, 1 = branch no return)
@@ -504,6 +962,45 @@ impl RspHle {
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
+            0xB4 => {
+                // word0: cmd_id | padding
+                // word1: data (second word for RDP command)
+                // This completes a 2-word RDP command using the stored rdp_half value
+                // Common use: TEXTURE_RECTANGLE where word0 comes from RDPHALF_1
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}, combining with rdp_half=0x{:08X}", word1, self.rdp_half)
+                });
+                true
+            }
+            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
+            0xBF => {
+                // word0: cmd_id | padding
+                // word1: data (first word for RDP command)
+                // Store the data for use by subsequent command
+                self.rdp_half = word1;
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_1 - stored data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
+            0xEE => {
+                // word0: cmd_id | padding
+                // word1: z (16-bit) | dz (16-bit) - depth value and delta
+                let _z = (word1 >> 16) & 0xFFFF;
+                let _dz = word1 & 0xFFFF;
+
+                // For HLE, we log but don't implement primitive depth override
+                // Full implementation would set a base depth for subsequent primitives
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
+                        _z, _dz
+                    )
+                });
+                true
+            }
             // RDP passthrough commands (0xE0-0xFF) - forward directly to RDP
             0xE0..=0xFF => {
                 // These are RDP commands embedded in F3DEX display list
@@ -530,10 +1027,40 @@ impl RspHle {
         let vert1 = &self.vertices[v1];
         let vert2 = &self.vertices[v2];
 
-        // Transform vertices to screen space
-        let (x0, y0, z0) = self.transform_vertex(vert0);
-        let (x1, y1, z1) = self.transform_vertex(vert1);
-        let (x2, y2, z2) = self.transform_vertex(vert2);
+        // Transform vertices to clip space
+        let clip0 = self.transform_vertex_to_clip(vert0);
+        let clip1 = self.transform_vertex_to_clip(vert1);
+        let clip2 = self.transform_vertex_to_clip(vert2);
+
+        // Simple frustum clipping: check if all vertices are outside any frustum plane
+        // Full implementation would clip the triangle, but for now we do simple reject/accept
+        let outside0 = Self::should_clip_vertex(&clip0);
+        let outside1 = Self::should_clip_vertex(&clip1);
+        let outside2 = Self::should_clip_vertex(&clip2);
+
+        // If all vertices are outside, reject the triangle entirely
+        // This is a conservative approach - a full implementation would clip the triangle
+        if outside0 && outside1 && outside2 {
+            log(LogCategory::PPU, LogLevel::Debug, || {
+                "RSP HLE: Triangle completely outside frustum, rejecting".to_string()
+            });
+            return;
+        }
+
+        // Transform to screen space
+        let (x0, y0, z0) = self.clip_to_screen(&clip0);
+        let (x1, y1, z1) = self.clip_to_screen(&clip1);
+        let (x2, y2, z2) = self.clip_to_screen(&clip2);
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE: Triangle v{}({},{},{}) v{}({},{},{}) v{}({},{},{}) -> screen ({},{},{}) ({},{},{}) ({},{},{})",
+                v0, vert0.pos[0], vert0.pos[1], vert0.pos[2],
+                v1, vert1.pos[0], vert1.pos[1], vert1.pos[2],
+                v2, vert2.pos[0], vert2.pos[1], vert2.pos[2],
+                x0, y0, z0, x1, y1, z1, x2, y2, z2
+            )
+        });
 
         // Convert vertex colors to ARGB format
         let c0 = u32::from_be_bytes([0xFF, vert0.color[0], vert0.color[1], vert0.color[2]]);
@@ -564,6 +1091,22 @@ impl RspHle {
         }
     }
 
+    /// Read 32-bit big-endian value from RDRAM with physical address masking
+    fn read_u32_rdram(&self, rdram: &[u8], addr: usize) -> u32 {
+        // Mask to physical RDRAM range (4MB = 0x400000)
+        let phys_addr = addr & 0x003FFFFF;
+        if phys_addr + 3 < rdram.len() {
+            u32::from_be_bytes([
+                rdram[phys_addr],
+                rdram[phys_addr + 1],
+                rdram[phys_addr + 2],
+                rdram[phys_addr + 3],
+            ])
+        } else {
+            0
+        }
+    }
+
     /// Load vertex from RDRAM address
     #[allow(dead_code)]
     fn load_vertex(&mut self, rdram: &[u8], addr: u32, index: usize) {
@@ -571,7 +1114,8 @@ impl RspHle {
             return;
         }
 
-        let addr = addr as usize;
+        // Convert virtual address to physical address
+        let addr = Self::virt_to_phys(addr);
         if addr + 15 >= rdram.len() {
             return;
         }
@@ -611,15 +1155,9 @@ impl RspHle {
         }
     }
 
-    /// Transform vertex from object space to screen space
-    #[allow(dead_code)]
-    fn transform_vertex(&self, vertex: &Vertex) -> (i32, i32, i32) {
-        // Full transformation pipeline:
-        // 1. Apply modelview matrix (object to camera space)
-        // 2. Apply projection matrix (camera to clip space)
-        // 3. Perspective divide (clip to NDC)
-        // 4. Viewport transform (NDC to screen space)
-
+    /// Transform vertex from object space to clip space (before perspective divide)
+    /// Returns clip space coordinates (x, y, z, w) for clipping
+    fn transform_vertex_to_clip(&self, vertex: &Vertex) -> [f32; 4] {
         // Convert vertex position to homogeneous coordinates (x, y, z, w=1)
         let v = [
             vertex.pos[0] as f32,
@@ -628,38 +1166,153 @@ impl RspHle {
             1.0,
         ];
 
-        // Apply modelview matrix
+        // Apply modelview matrix (column-major layout)
         let mut mv = [0.0f32; 4];
         for (i, elem) in mv.iter_mut().enumerate() {
-            *elem = self.modelview_matrix[i * 4] * v[0]
-                + self.modelview_matrix[i * 4 + 1] * v[1]
-                + self.modelview_matrix[i * 4 + 2] * v[2]
-                + self.modelview_matrix[i * 4 + 3] * v[3];
+            *elem = self.modelview_matrix[i] * v[0]
+                + self.modelview_matrix[i + 4] * v[1]
+                + self.modelview_matrix[i + 8] * v[2]
+                + self.modelview_matrix[i + 12] * v[3];
         }
 
-        // Apply projection matrix
+        // Apply projection matrix (column-major layout)
         let mut clip = [0.0f32; 4];
         for (i, elem) in clip.iter_mut().enumerate() {
-            *elem = self.projection_matrix[i * 4] * mv[0]
-                + self.projection_matrix[i * 4 + 1] * mv[1]
-                + self.projection_matrix[i * 4 + 2] * mv[2]
-                + self.projection_matrix[i * 4 + 3] * mv[3];
+            *elem = self.projection_matrix[i] * mv[0]
+                + self.projection_matrix[i + 4] * mv[1]
+                + self.projection_matrix[i + 8] * mv[2]
+                + self.projection_matrix[i + 12] * mv[3];
         }
 
+        clip
+    }
+
+    /// Convert clip space coordinates to screen space
+    fn clip_to_screen(&self, clip: &[f32; 4]) -> (i32, i32, i32) {
         // Perspective divide (clip space to NDC)
         let w = if clip[3].abs() > 0.0001 { clip[3] } else { 1.0 };
         let ndc_x = clip[0] / w;
         let ndc_y = clip[1] / w;
         let ndc_z = clip[2] / w;
 
+        // Clamp NDC coordinates to reasonable range to prevent overflow
+        let ndc_x = ndc_x.clamp(-10.0, 10.0);
+        let ndc_y = ndc_y.clamp(-10.0, 10.0);
+        let ndc_z = ndc_z.clamp(-1.0, 1.0);
+
         // Viewport transform (NDC to screen space)
-        // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
-        // Assuming 320x240 resolution
-        let screen_x = ((ndc_x + 1.0) * 160.0) as i32; // 320/2 = 160
-        let screen_y = ((1.0 - ndc_y) * 120.0) as i32; // 240/2 = 120, inverted Y
+        let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
+        let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
+        let screen_y = (vp_y + (1.0 - ndc_y) * scale_y) as i32; // Inverted Y
         let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
 
         (screen_x, screen_y, screen_z)
+    }
+
+    /// Transform vertex from object space to screen space
+    #[allow(dead_code)]
+    fn transform_vertex(&self, vertex: &Vertex) -> (i32, i32, i32) {
+        let clip = self.transform_vertex_to_clip(vertex);
+        self.clip_to_screen(&clip)
+    }
+
+    /// Check if a vertex in clip space is inside the view frustum
+    /// Returns true if the vertex should be clipped (outside frustum)
+    fn should_clip_vertex(clip: &[f32; 4]) -> bool {
+        let w = clip[3];
+        // Vertices with w <= 0 are behind the camera or invalid
+        if w <= 0.0001 {
+            return true;
+        }
+        // Clip against all 6 frustum planes: left, right, top, bottom, near, far
+        // In clip space, a point is inside if: -w <= x/y/z <= w
+        clip[0] < -w || clip[0] > w  // Left/right planes
+            || clip[1] < -w || clip[1] > w  // Top/bottom planes
+            || clip[2] < -w || clip[2] > w // Near/far planes
+    }
+
+    /// Interpolate between two vertices in clip space
+    /// t = 0.0 returns v0, t = 1.0 returns v1
+    #[allow(dead_code)] // Reserved for future proper triangle clipping
+    fn interpolate_vertex(
+        v0: &Vertex,
+        clip0: &[f32; 4],
+        v1: &Vertex,
+        clip1: &[f32; 4],
+        t: f32,
+    ) -> (Vertex, [f32; 4]) {
+        // Interpolate position in clip space (before perspective divide)
+        let clip = [
+            clip0[0] + t * (clip1[0] - clip0[0]),
+            clip0[1] + t * (clip1[1] - clip0[1]),
+            clip0[2] + t * (clip1[2] - clip0[2]),
+            clip0[3] + t * (clip1[3] - clip0[3]),
+        ];
+
+        // Interpolate vertex attributes
+        let pos = [
+            (v0.pos[0] as f32 + t * (v1.pos[0] as f32 - v0.pos[0] as f32)) as i16,
+            (v0.pos[1] as f32 + t * (v1.pos[1] as f32 - v0.pos[1] as f32)) as i16,
+            (v0.pos[2] as f32 + t * (v1.pos[2] as f32 - v0.pos[2] as f32)) as i16,
+        ];
+
+        let tex = [
+            (v0.tex[0] as f32 + t * (v1.tex[0] as f32 - v0.tex[0] as f32)) as i16,
+            (v0.tex[1] as f32 + t * (v1.tex[1] as f32 - v0.tex[1] as f32)) as i16,
+        ];
+
+        let color = [
+            (v0.color[0] as f32 + t * (v1.color[0] as f32 - v0.color[0] as f32)) as u8,
+            (v0.color[1] as f32 + t * (v1.color[1] as f32 - v0.color[1] as f32)) as u8,
+            (v0.color[2] as f32 + t * (v1.color[2] as f32 - v0.color[2] as f32)) as u8,
+            (v0.color[3] as f32 + t * (v1.color[3] as f32 - v0.color[3] as f32)) as u8,
+        ];
+
+        (Vertex { pos, tex, color }, clip)
+    }
+
+    /// Clip a line segment against a frustum plane
+    /// Returns Some(t) where the intersection occurs, or None if no intersection
+    #[allow(dead_code)] // Reserved for future proper triangle clipping
+    fn clip_line_to_plane(
+        clip0: &[f32; 4],
+        clip1: &[f32; 4],
+        plane: usize,
+        positive: bool,
+    ) -> Option<f32> {
+        // plane: 0=x, 1=y, 2=z, 3=w
+        // positive: true for +plane (right/top/far), false for -plane (left/bottom/near)
+
+        let d0 = if positive {
+            clip0[plane] - clip0[3]
+        } else {
+            -clip0[plane] - clip0[3]
+        };
+        let d1 = if positive {
+            clip1[plane] - clip1[3]
+        } else {
+            -clip1[plane] - clip1[3]
+        };
+
+        // Both inside or both outside - no intersection with this plane
+        if (d0 >= 0.0) == (d1 >= 0.0) {
+            return None;
+        }
+
+        // Calculate intersection parameter t
+        // d0 + t * (d1 - d0) = 0
+        // t = -d0 / (d1 - d0)
+        let denom = d1 - d0;
+        if denom.abs() < 0.0001 {
+            return None;
+        }
+
+        let t = -d0 / denom;
+        if (0.0..=1.0).contains(&t) {
+            Some(t)
+        } else {
+            None
+        }
     }
 }
 
@@ -758,13 +1411,17 @@ mod tests {
         // Modelview: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // Projection: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // NDC: divide by w=1 gives (50, 60, 100)
+        // Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 50.0)
+        //   ndc_y = 10.0 (clamped from 60.0)
+        //   ndc_z = 1.0 (clamped from 100.0)
         // Screen space:
-        //   x = (50 + 1) * 160 = 51 * 160 = 8160
-        //   y = (1 - 60) * 120 = -59 * 120 = -7080
-        //   z = (100 + 1) * 32767.5 = 3309517.5
-        assert_eq!(x, 8160);
-        assert_eq!(y, -7080);
-        assert!(z > 3000000);
+        //   x = (10.0 + 1.0) * 160 = 1760
+        //   y = (1.0 - 10.0) * 120 = -1080
+        //   z = (1.0 + 1.0) * 32767.5 = 65535
+        assert_eq!(x, 1760);
+        assert_eq!(y, -1080);
+        assert_eq!(z, 65535);
     }
 
     #[test]
@@ -1142,7 +1799,8 @@ mod tests {
     fn test_vertex_transform_with_matrices() {
         let mut hle = RspHle::new();
 
-        // Set up a simple scaling matrix (scale by 2)
+        // Set up a simple scaling matrix (scale by 2) in column-major format
+        // Diagonal elements [0, 5, 10, 15] contain the scale factors
         hle.modelview_matrix = [
             2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
@@ -1159,10 +1817,14 @@ mod tests {
         // - Modelview transforms (10,10,10) to (20,20,20)
         // - Projection (identity) keeps it (20,20,20)
         // - NDC: divide by w=1 gives (20,20,20)
-        // - Screen: ((20+1)*160, (1-20)*120, (20+1)*32767.5)
-        //         = (3360, -2280, 688318.5)
-        assert!(x > 1000); // Should be scaled up significantly
-        assert!(z > 10); // Z should also be transformed
+        // - Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 20.0)
+        //   ndc_y = 10.0 (clamped from 20.0)
+        //   ndc_z = 1.0 (clamped from 20.0)
+        // - Screen: ((10.0+1)*160, (1-10.0)*120, (1.0+1)*32767.5)
+        //         = (1760, -1080, 65535)
+        assert_eq!(x, 1760);
+        assert!(z > 10); // Z should be transformed (will be clamped to max)
     }
 
     #[test]

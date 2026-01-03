@@ -6,8 +6,13 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// CP0_STATUS register value for commercial ROM boot
 /// CU0=1 (Coprocessor 0 usable), CU1=1 (FPU usable), BEV=0 (use normal exception vectors)
+/// IE=1 (Interrupts Enabled), IM3=1 (VI interrupt enabled on line 3)
+/// Bit breakdown:
+/// - Bit 0 (IE): 1 = Interrupts enabled
+/// - Bit 11 (IM3): 1 = Allow interrupt line 3 (VI interrupt)
+/// - Bits 28-29 (CU0, CU1): 1 = Coprocessors enabled
 #[allow(dead_code)] // Used in tests
-pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000000;
+pub const CP0_STATUS_COMMERCIAL_BOOT: u64 = 0x34000801; // 0x34000000 | 0x01 (IE) | 0x800 (IM3)
 
 /// CP0_CONFIG register value for commercial ROM boot
 /// Standard configuration used by IPL3 bootloader
@@ -49,11 +54,22 @@ impl N64Cpu {
             self.cpu.cp0[12] = CP0_STATUS_COMMERCIAL_BOOT;
             self.cpu.cp0[16] = CP0_CONFIG_COMMERCIAL_BOOT;
 
-            // Set PC to entry point (typically 0x80000400)
+            // Initialize GPRs that are expected by commercial ROMs
+            // Based on real N64 IPL3 boot sequence
+            self.cpu.gpr[11] = 0xFFFFFFFF_A4000040; // $t3 = cart domain 1 config address
+            self.cpu.gpr[20] = 0x0000000000000001; // $s4 = 1
+            self.cpu.gpr[22] = 0x000000000000003F; // $s6 = 0x3F
+            self.cpu.gpr[29] = 0xFFFFFFFF_A4001FF0; // $sp = stack pointer (end of RDRAM - 0x10)
+            self.cpu.gpr[31] = 0xFFFFFFFF_A4001550; // $ra = return address placeholder
+
+            // Set PC to entry point (typically 0x80000400 or game-specific address)
             self.cpu.pc = entry_point;
 
             log(LogCategory::CPU, LogLevel::Info, || {
-                format!("N64 CPU: Initialized CP0, PC now at 0x{:016X}", self.cpu.pc)
+                format!(
+                    "N64 CPU: Initialized CP0 and GPRs, PC now at 0x{:016X}",
+                    self.cpu.pc
+                )
             });
         } else {
             // Test ROM or no ROM - use default PIF boot sequence

@@ -229,6 +229,20 @@ impl<M: MemoryMips> CpuMips<M> {
 
         // Interrupts are enabled if IE=1 and EXL=0 and ERL=0
         if ie == 0 || exl != 0 || erl != 0 {
+            // Log once every 600 checks (~10 seconds at 60fps) if interrupts are disabled
+            static mut CHECK_COUNTER: u32 = 0;
+            unsafe {
+                CHECK_COUNTER += 1;
+                if CHECK_COUNTER.is_multiple_of(600) {
+                    use crate::logging::{log, LogCategory, LogLevel};
+                    log(LogCategory::Interrupts, LogLevel::Info, || {
+                        format!(
+                            "CPU: Interrupts disabled (IE={}, EXL={}, ERL={}, Status=0x{:016X})",
+                            ie, exl, erl, status
+                        )
+                    });
+                }
+            }
             return false;
         }
 
@@ -1190,7 +1204,10 @@ impl<M: MemoryMips> CpuMips<M> {
                     }
                     0x18 => {
                         // ERET - Exception Return (basic implementation)
+                        // Restore PC from EPC
                         self.pc = self.cp0[CP0_EPC];
+                        // Clear EXL bit to re-enable interrupts
+                        self.cp0[CP0_STATUS] &= !0x02;
                         self.cycles += 1;
                     }
                     _ => {
