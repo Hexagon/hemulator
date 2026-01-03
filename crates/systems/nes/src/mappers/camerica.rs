@@ -62,7 +62,7 @@ impl Camerica {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select 16KB bank for $8000-$BFFF
             // Only lower 4 bits are used for bank selection
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(camerica.read_prg(0xC000), 0x22);
 
         // Switch to bank 1 at $8000
-        camerica.write_prg(0x8000, 1, &mut ppu);
+        camerica.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(camerica.read_prg(0x8000), 0x22);
         assert_eq!(camerica.read_prg(0xC000), 0x22); // Last bank stays fixed
     }
@@ -170,7 +170,7 @@ mod tests {
 
         // Write 0x12 (bank 2, but only 4 bits used, so wraps)
         // 0x12 & 0x0F = 0x02, which wraps to bank 0 (2 % 2 = 0)
-        camerica.write_prg(0x8000, 0x12, &mut ppu);
+        camerica.write_prg(0x8000, 0x12, &mut ppu, 0);
         assert_eq!(camerica.read_prg(0x8000), 0x11); // Wraps to bank 0
     }
 
@@ -197,7 +197,7 @@ mod tests {
 
         // Test switching through first few banks
         for i in 0..8 {
-            camerica.write_prg(0x8000, i, &mut ppu);
+            camerica.write_prg(0x8000, i, &mut ppu, 0);
             assert_eq!(camerica.read_prg(0x8000), 0x11 * (i as u8 + 1));
             assert_eq!(camerica.read_prg(0xC000), 0x88); // Last bank always fixed
         }
@@ -219,27 +219,27 @@ mod tests {
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Write to $8000: should NOT change mirroring (only bank select)
-        camerica.write_prg(0x8000, 0x10, &mut ppu); // bit 4 = 1
+        camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
         assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
 
         // Write to $9000 with bit 4 = 1: should change to single-screen upper
-        camerica.write_prg(0x9000, 0x10, &mut ppu);
+        camerica.write_prg(0x9000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
         // Write to $9000 with bit 4 = 0: should change to single-screen lower
-        camerica.write_prg(0x9000, 0x03, &mut ppu);
+        camerica.write_prg(0x9000, 0x03, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
 
         // Write to $8FFF: should NOT change mirroring (outside $9000-$9FFF range)
-        camerica.write_prg(0x8FFF, 0x10, &mut ppu);
+        camerica.write_prg(0x8FFF, 0x10, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower); // Unchanged
 
         // Write to $A000: should NOT change mirroring (outside $9000-$9FFF range)
-        camerica.write_prg(0xA000, 0x10, &mut ppu);
+        camerica.write_prg(0xA000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower); // Unchanged
 
         // Write to $9FFF with bit 4 = 1: should change to single-screen upper
-        camerica.write_prg(0x9FFF, 0x15, &mut ppu);
+        camerica.write_prg(0x9FFF, 0x15, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
     }
 
@@ -261,16 +261,16 @@ mod tests {
         let mut camerica = Camerica::new(cart, &mut ppu);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
-        camerica.write_prg(0x8000, 0x00, &mut ppu); // bit 4 = 0
+        camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
 
-        camerica.write_prg(0x8000, 0x01, &mut ppu); // bit 4 = 0
+        camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        camerica.write_prg(0x8000, 0x10, &mut ppu); // bit 4 = 1
+        camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        camerica.write_prg(0xC000, 0x02, &mut ppu); // bit 4 = 0
+        camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         // Since all writes were to $8000-$8FFF and $C000-$FFFF,

@@ -135,7 +135,7 @@ impl Namco118 {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         match addr {
             0x8000..=0x9FFF => {
                 if addr & 1 == 0 {
@@ -197,10 +197,10 @@ mod tests {
 
         // Mode 0 (default): R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
         // Set R6 = 5, R7 = 7
-        n118.write_prg(0x8000, 6, &mut ppu); // Select register 6
-        n118.write_prg(0x8001, 5, &mut ppu); // R6 = 5
-        n118.write_prg(0x8000, 7, &mut ppu); // Select register 7
-        n118.write_prg(0x8001, 7, &mut ppu); // R7 = 7
+        n118.write_prg(0x8000, 6, &mut ppu, 0); // Select register 6
+        n118.write_prg(0x8001, 5, &mut ppu, 0); // R6 = 5
+        n118.write_prg(0x8000, 7, &mut ppu, 0); // Select register 7
+        n118.write_prg(0x8001, 7, &mut ppu, 0); // R7 = 7
 
         assert_eq!(n118.read_prg(0x8000), 6); // R6 (bank 5)
         assert_eq!(n118.read_prg(0xA000), 15); // (-2) = bank 14
@@ -227,10 +227,10 @@ mod tests {
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Enable PRG mode 1 (bit 6 = 1)
-        n118.write_prg(0x8000, 0x46, &mut ppu); // Select R6, enable PRG mode 1
-        n118.write_prg(0x8001, 5, &mut ppu);
-        n118.write_prg(0x8000, 0x47, &mut ppu); // Select R7
-        n118.write_prg(0x8001, 7, &mut ppu);
+        n118.write_prg(0x8000, 0x46, &mut ppu, 0); // Select R6, enable PRG mode 1
+        n118.write_prg(0x8001, 5, &mut ppu, 0);
+        n118.write_prg(0x8000, 0x47, &mut ppu, 0); // Select R7
+        n118.write_prg(0x8001, 7, &mut ppu, 0);
 
         // Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
         assert_eq!(n118.read_prg(0x8000), 15); // (-2) = bank 14
@@ -259,10 +259,10 @@ mod tests {
 
         // Mode 0 (default): two 2KB banks at $0000/$0800, four 1KB banks at $1000-$1FFF
         // R0/R1 are 2KB (ignore LSB), R2-R5 are 1KB
-        n118.write_prg(0x8000, 0, &mut ppu); // Select R0
-        n118.write_prg(0x8001, 2, &mut ppu); // R0 = 2 (2KB at banks 2-3)
-        n118.write_prg(0x8000, 1, &mut ppu); // Select R1
-        n118.write_prg(0x8001, 4, &mut ppu); // R1 = 4 (2KB at banks 4-5)
+        n118.write_prg(0x8000, 0, &mut ppu, 0); // Select R0
+        n118.write_prg(0x8001, 2, &mut ppu, 0); // R0 = 2 (2KB at banks 2-3)
+        n118.write_prg(0x8000, 1, &mut ppu, 0); // Select R1
+        n118.write_prg(0x8001, 4, &mut ppu, 0); // R1 = 4 (2KB at banks 4-5)
 
         assert_eq!(ppu.chr[0x0000], 3); // Bank 2 (R0, LSB cleared)
         assert_eq!(ppu.chr[0x0400], 4); // Bank 3 (R0+1)
@@ -287,11 +287,11 @@ mod tests {
         assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Switch to horizontal
-        n118.write_prg(0xA000, 1, &mut ppu);
+        n118.write_prg(0xA000, 1, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
 
         // Switch back to vertical
-        n118.write_prg(0xA000, 0, &mut ppu);
+        n118.write_prg(0xA000, 0, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
     }
 
@@ -310,8 +310,8 @@ mod tests {
         let mut n118 = Namco118::new(cart, &mut ppu);
 
         // Try to select bank 5, should wrap (5 % 2 = 1)
-        n118.write_prg(0x8000, 6, &mut ppu);
-        n118.write_prg(0x8001, 5, &mut ppu);
+        n118.write_prg(0x8000, 6, &mut ppu, 0);
+        n118.write_prg(0x8001, 5, &mut ppu, 0);
 
         // Should read from bank 1 (wrapped)
         assert_eq!(n118.read_prg(0x8000), 0x42);
