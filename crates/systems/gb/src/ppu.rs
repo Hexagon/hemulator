@@ -287,15 +287,7 @@ impl Ppu {
         if addr >= 0xA0 {
             return; // Out of bounds
         }
-        let index = addr as usize;
-        if index < 4 {
-            eprintln!("[write_oam] addr={:04X}, val={:02X}, index={}, BEFORE: oam[{}]={:02X}",
-                addr, val, index, index, self.oam[index]);
-        }
-        self.oam[index] = val;
-        if index < 4 {
-            eprintln!("[write_oam] AFTER: oam[{}]={:02X}", index, self.oam[index]);
-        }
+        self.oam[addr as usize] = val;
     }
 
     /// Read from OAM for debugging
@@ -303,13 +295,7 @@ impl Ppu {
         if addr >= 0xA0 {
             return 0xFF; // Out of bounds
         }
-        let index = addr as usize;
-        let val = self.oam[index];
-        if addr < 4 {
-            eprintln!("[read_oam_debug] PPU at {:p}, OAM array at {:p}, index {}, reading OAM[{:02X}] = {:02X}",
-                self as *const _, self.oam.as_ptr(), index, addr, val);
-        }
-        val
+        self.oam[addr as usize]
     }
 
     /// Read background palette index register (0xFF68)
@@ -662,26 +648,6 @@ impl Ppu {
             8
         };
 
-        static mut DEBUG_FRAME: u32 = 0;
-        unsafe {
-            DEBUG_FRAME += 1;
-            if DEBUG_FRAME % 60 == 0 && DEBUG_FRAME >= 120 && DEBUG_FRAME <= 240 {
-                eprintln!("[SPRITE DEBUG] Frame {}:", DEBUG_FRAME);
-                eprintln!("  OAM[0-3]: {:02X} {:02X} {:02X} {:02X}",
-                    self.oam[0], self.oam[1], self.oam[2], self.oam[3]);
-                eprintln!("  OAM[4-7]: {:02X} {:02X} {:02X} {:02X}",
-                    self.oam[4], self.oam[5], self.oam[6], self.oam[7]);
-                
-                // Count non-zero sprites
-                let non_zero_sprites = (0..40).filter(|i| {
-                    let y = self.oam[i * 4];
-                    y != 0
-                }).count();
-                eprintln!("  Non-zero sprites: {}/40", non_zero_sprites);
-                eprintln!("  LCDC={:02X}, OBP0={:02X}, OBP1={:02X}", self.lcdc, self.obp0, self.obp1);
-            }
-        }
-
         // Process sprites scanline by scanline to enforce 10-sprite limit
         for screen_y in 0u8..144 {
             // Collect all sprites that intersect this scanline
@@ -710,13 +676,6 @@ impl Ppu {
                     // Sprite intersects this scanline, store X position for sorting
                     let x_pos = oam_x.wrapping_sub(8);
                     sprites_on_line.push((x_pos, sprite_idx));
-                    
-                    unsafe {
-                        if DEBUG_FRAME == 60 && sprites_on_line.len() == 1 {
-                            eprintln!("  Found sprite #{} on scanline {}: Y={:02X} X={:02X}", 
-                                sprite_idx, screen_y, oam_y, oam_x);
-                        }
-                    }
                 }
             }
 
