@@ -580,13 +580,13 @@ saves/
 
 ## Supported Systems
 
-This emulator supports 6 different retro gaming systems. Here's a quick overview:
+This emulator supports 6 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
-| **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
-| **Game Boy** | ✅ Fully Working | Everything | - | Playing GB games |
+| **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Some edge cases, stability | Testing/development |
+| **Game Boy** | 🚧 In Development | Core features, MBC0/1/2/3/5 | Some edge cases, audio refinement | Testing/development |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
@@ -627,7 +627,7 @@ The emulator supports the following NES mappers:
 
 ### Atari 2600
 
-**Status**: ✅ Fully Working  
+**Status**: 🚧 In Development  
 **Coverage**: Most common cartridge formats (2K, 4K, 8K, 12K, 16K, 32K)
 
 The emulator supports the following cartridge banking schemes:
@@ -674,7 +674,7 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: ✅ Fully Working  
+**Status**: 🚧 In Development  
 **Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
