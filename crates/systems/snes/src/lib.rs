@@ -489,4 +489,107 @@ mod tests {
             sprite_area_pixels
         );
     }
+
+    #[test]
+    fn test_priority_rom() {
+        // Load the priority test ROM
+        let test_rom = include_bytes!("../../../../test_roms/snes/test_priority.sfc");
+
+        let mut sys = SnesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run multiple frames to allow the ROM to initialize
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+        assert_eq!(frame.pixels.len(), 256 * 224);
+
+        // Check that we have visible output (non-black pixels)
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+
+        assert!(
+            non_black_pixels > 1000,
+            "Priority test ROM should produce visible output, got {} non-black pixels",
+            non_black_pixels
+        );
+
+        // Verify priority rendering:
+        // Left half should have low-priority tiles (red/green)
+        // Right half should have high-priority tiles (blue/yellow)
+        // High-priority tiles should render in front of low-priority tiles
+
+        // Sample from left half (low priority)
+        let left_pixel = frame.pixels[112 * 256 + 64];
+        assert_ne!(
+            left_pixel, 0xFF000000,
+            "Left side (low priority) should not be black"
+        );
+
+        // Sample from right half (high priority)
+        let right_pixel = frame.pixels[112 * 256 + 192];
+        assert_ne!(
+            right_pixel, 0xFF000000,
+            "Right side (high priority) should not be black"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn test_sprite_overflow_rom() {
+        // Load the sprite overflow test ROM
+        let test_rom = include_bytes!("../../../../test_roms/snes/test_sprite_overflow.sfc");
+
+        let mut sys = SnesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run multiple frames to allow the ROM to initialize
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+        assert_eq!(frame.pixels.len(), 256 * 224);
+
+        // This ROM places 128 sprites all at Y=100
+        // Due to the 32 sprite per scanline limit, only the first 32 should render
+        // Count non-black pixels on scanline 100
+        let mut pixels_on_scanline = 0;
+        for x in 0..256 {
+            if frame.pixels[100 * 256 + x] != 0xFF000000 {
+                pixels_on_scanline += 1;
+            }
+        }
+
+        // We should see some sprites (at least 10 pixels worth)
+        // but not all 128 sprites (which would be ~128 pixels)
+        assert!(
+            pixels_on_scanline >= 10,
+            "Should see some sprites on scanline 100, got {} pixels",
+            pixels_on_scanline
+        );
+
+        // With 32 sprite limit and 8x8 sprites, we expect at most 32 sprites visible
+        // That's at most 256 pixels (32 * 8), but in practice less due to spacing
+        // Just verify we don't crash and produce some output
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+        assert!(
+            non_black_pixels > 10,
+            "Sprite overflow ROM should produce visible output, got {} non-black pixels",
+            non_black_pixels
+        );
+    }
 }

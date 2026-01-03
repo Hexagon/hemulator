@@ -580,13 +580,13 @@ saves/
 
 ## Supported Systems
 
-This emulator supports 6 different retro gaming systems. Here's a quick overview:
+This emulator supports 6 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
-| **Atari 2600** | ✅ Fully Working | Everything | - | Playing Atari games |
-| **Game Boy** | ✅ Fully Working | Everything | - | Playing GB games |
+| **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Some edge cases, stability | Testing/development |
+| **Game Boy** | 🚧 In Development | Core features, MBC0/1/2/3/5 | Some edge cases, audio refinement | Testing/development |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
@@ -627,7 +627,7 @@ The emulator supports the following NES mappers:
 
 ### Atari 2600
 
-**Status**: ✅ Fully Working  
+**Status**: 🚧 In Development  
 **Coverage**: Most common cartridge formats (2K, 4K, 8K, 12K, 16K, 32K)
 
 The emulator supports the following cartridge banking schemes:
@@ -674,15 +674,21 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: ✅ Fully Working  
+**Status**: 🚧 In Development  
 **Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
 **Features**:
 - Full PPU (Picture Processing Unit) rendering: background, window, sprites
-- Resolution: 160x144 pixels (DMG mode)
-- Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority
+- Resolution: 160x144 pixels
+- Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority, 10-per-scanline limit
+- **Game Boy Color (CGB) Support**:
+  - Automatic CGB mode detection
+  - 15-bit RGB color palettes (8 BG + 8 OBJ palettes)
+  - VRAM banking (2 banks of 8KB)
+  - Tile attributes (palette selection, VRAM banking, flipping)
+  - Backward compatible with DMG games
 - **MBC (Memory Bank Controller) Support**:
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
@@ -698,10 +704,9 @@ The emulator supports the following cartridge banking schemes:
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit
+- **Other**: No serial transfer (link cable), OAM DMA, STAT interrupts, or PPU mode transitions
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
 - Arrow keys = D-pad
@@ -754,10 +759,8 @@ The emulator supports the following cartridge banking schemes:
   - Frame-based rendering - not cycle-accurate
   - NTSC timing only (no PAL support)
   - No mid-scanline effects
-  - VRAM access not restricted (hardware only allows during VBlank/force blank)
 - **Input**:
   - Standard controllers only (no mouse, multitap, or special peripherals)
-  - Auto-joypad read registers ($4218-$421F) implemented, but $4200 bit 0 control not implemented (always enabled)
 - **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio). Games requiring enhancement chips or advanced PPU features will not work.
 
 **Recommended Test Games**:

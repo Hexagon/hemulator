@@ -90,6 +90,7 @@
 //! - ✅ PPU: VRAM banking (2 banks of 8KB for CGB)
 //! - ✅ PPU: CGB tile attributes (palette, VRAM bank, flip)
 //! - ✅ Memory: Full memory map with VRAM/OAM access
+//! - ✅ DMA: OAM DMA transfer (register $FF46)
 //! - ✅ Joypad: Button input via register $FF00
 //! - ✅ I/O: Essential PPU and joypad registers
 //! - ✅ I/O: CGB palette registers (BCPS/BCPD, OCPS/OCPD)
@@ -107,7 +108,6 @@
 //! ## Not Yet Implemented
 //! - ❌ MBC2 (Memory Bank Controller 2 with built-in RAM)
 //! - ❌ Serial: Link cable communication
-//! - ❌ DMA: OAM DMA transfer
 //!
 //! # Known Limitations
 //!
@@ -417,6 +417,7 @@ impl System for GbSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use emu_core::cpu_lr35902::MemoryLr35902;
 
     #[test]
     fn test_gb_system_creation() {
@@ -822,5 +823,96 @@ mod tests {
         }
 
         // If we got here without hanging, interrupts are working!
+    }
+
+    #[test]
+    fn test_oam_direct_write() {
+        // Test direct OAM writes to verify write_oam() function works
+        use crate::ppu::Ppu;
+
+        let mut ppu = Ppu::new();
+
+        ppu.write_oam(0, 0x80);
+        ppu.write_oam(1, 0x10);
+        ppu.write_oam(2, 0x58);
+        ppu.write_oam(3, 0x00);
+
+        assert_eq!(ppu.read_oam_debug(0), 0x80, "OAM[0] should be 0x80");
+        assert_eq!(ppu.read_oam_debug(1), 0x10, "OAM[1] should be 0x10");
+        assert_eq!(ppu.read_oam_debug(2), 0x58, "OAM[2] should be 0x58");
+        assert_eq!(ppu.read_oam_debug(3), 0x00, "OAM[3] should be 0x00");
+    }
+
+    #[test]
+    fn test_oam_dma_basic() {
+        // Test basic DMA operation with 4 bytes of sprite data
+        let mut sys = GbSystem::new();
+
+        // Create a minimal ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x100] = 0x00; // NOP at entry point
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Write sprite data to WRAM at $C000
+        sys.cpu.memory.write(0xC000, 0x80); // Y position
+        sys.cpu.memory.write(0xC001, 0x10); // X position
+        sys.cpu.memory.write(0xC002, 0x58); // Tile index
+        sys.cpu.memory.write(0xC003, 0x00); // Flags
+
+        // Trigger DMA from $C000 to OAM
+        sys.cpu.memory.write(0xFF46, 0xC0);
+
+        // Verify OAM was updated
+        assert_eq!(
+            sys.cpu.memory.ppu.read_oam_debug(0),
+            0x80,
+            "OAM[0] should be 0x80"
+        );
+        assert_eq!(
+            sys.cpu.memory.ppu.read_oam_debug(1),
+            0x10,
+            "OAM[1] should be 0x10"
+        );
+        assert_eq!(
+            sys.cpu.memory.ppu.read_oam_debug(2),
+            0x58,
+            "OAM[2] should be 0x58"
+        );
+        assert_eq!(
+            sys.cpu.memory.ppu.read_oam_debug(3),
+            0x00,
+            "OAM[3] should be 0x00"
+        );
+    }
+
+    #[test]
+    fn test_oam_dma_full_copy() {
+        // Test full 160-byte DMA transfer
+        let mut sys = GbSystem::new();
+
+        // Create a minimal ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x100] = 0x00; // NOP at entry point
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Fill WRAM with test pattern (160 bytes)
+        for i in 0..160 {
+            let test_value = (i as u8) ^ 0xAA;
+            sys.cpu.memory.write(0xC000 + i as u16, test_value);
+        }
+
+        // Trigger DMA from $C000 to OAM
+        sys.cpu.memory.write(0xFF46, 0xC0);
+
+        // Verify all 160 bytes copied correctly
+        for i in 0..160 {
+            let expected = (i as u8) ^ 0xAA;
+            let actual = sys.cpu.memory.ppu.read_oam_debug(i);
+            assert_eq!(
+                actual, expected,
+                "OAM[{}] mismatch: expected {:02X}, got {:02X}",
+                i, expected, actual
+            );
+        }
     }
 }

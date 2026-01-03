@@ -305,7 +305,14 @@ impl Tia {
     fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
         let p = pos as i16;
         let m = motion as i16;
-        (p + m).clamp(0, 159) as u8
+        let result = p + m;
+        // Wrap around the 160-pixel screen width
+        // The TIA hardware wraps positions, not clamps them
+        if result < 0 {
+            ((result % 160) + 160) as u8
+        } else {
+            (result % 160) as u8
+        }
     }
 
     /// Create a new TIA chip
@@ -441,6 +448,18 @@ impl Tia {
     /// Get a monotonically increasing scanline counter (increments once per scanline)
     pub fn get_scanline_counter(&self) -> u64 {
         self.scanline_counter
+    }
+
+    /// Latch the current scanline's state immediately (public wrapper for render timing)
+    pub fn latch_current_scanline_state(&mut self) {
+        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            eprintln!(
+                "[TIA LATCH] Explicitly latching scanline {} state",
+                self.scanline
+            );
+        }
+        self.latch_scanline_state(self.scanline);
     }
 
     /// Latch current TIA state for a scanline (for later rendering)
@@ -784,8 +803,13 @@ impl Tia {
             }
 
             // Debug logging
-            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Trace) {
-                eprintln!("[TIA CLOCK] Scanline {} -> {}", old_scanline, self.scanline);
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+                && (old_scanline == 261 || self.scanline <= 1)
+            {
+                eprintln!(
+                    "[TIA CLOCK] Scanline {} -> {} (latched {})",
+                    old_scanline, self.scanline, old_scanline
+                );
             }
         }
     }
@@ -809,47 +833,102 @@ impl Tia {
         self.scanline
     }
 
-    /// Try to infer the start of the visible picture area based on VBLANK timing
-    ///
-    /// This method caches the first detected visible start to prevent vertical jumping
-    /// between frames. Once a valid VBLANK transition is detected, that value is used
-    /// for all subsequent frames to ensure stable rendering.
-    pub fn visible_window_start_scanline(&mut self) -> u16 {
-        // If we have a cached value, use it for stability
-        if let Some(cached) = self.cached_visible_start {
-            return cached;
-        }
+    /// Get current VSYNC state
+    pub fn vsync(&self) -> bool {
+        self.vsync
+    }
 
-        // Find where VBLANK transitions from true to false
+    /// Prepare for a new frame capture.
+    ///
+    /// The Atari 2600 can generate frames with slightly varying scanline counts;
+    /// for stable host-side rendering we treat VSYNC boundaries as frame delimiters.
+    /// Clearing latched scanline state here ensures the renderer uses a coherent
+    /// set of scanlines from a single frame.
+    pub fn begin_new_frame(&mut self) {
+        for state in &mut self.scanline_states {
+            *state = ScanlineState::default();
+        }
+        // DO NOT clear cached_visible_start here - it must persist across frames
+        // to prevent vertical jumping (as documented in visible_window_start_scanline)
+
+        // DO NOT reset scanline or pixel counters here!
+        // The TIA continues to run with consistent timing across frame boundaries.
+        // Resetting these counters creates timing discontinuities that break horizontal
+        // positioning (current_visible_x() becomes incorrect for sprite RESPx/RESMx/RESBL).
+        // Instead, the frame boundary is tracked externally and rendering uses modulo
+        // arithmetic to map TIA scanlines to framebuffer rows.
+    }
+
+    /// Determine the first visible scanline in *absolute* TIA scanline coordinates,
+    /// searching in frame order starting from a caller-provided frame boundary.
+    ///
+    /// This avoids the classic "rolling" symptom when the host renders 192 lines
+    /// from a drifting reference point.
+    pub fn visible_window_start_scanline_from(&self, frame_start_scanline: u16) -> u16 {
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
-        for i in 1..262 {
-            let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
-            let cur = self.scanline_states.get(i).copied().unwrap_or_default();
+        for offset in 1..262u16 {
+            let prev_idx = (frame_start_scanline + offset - 1) % 262;
+            let cur_idx = (frame_start_scanline + offset) % 262;
 
-            if debug && i < 100 {
+            let prev = self
+                .scanline_states
+                .get(prev_idx as usize)
+                .copied()
+                .unwrap_or_default();
+            let cur = self
+                .scanline_states
+                .get(cur_idx as usize)
+                .copied()
+                .unwrap_or_default();
+
+            if debug && offset < 100 {
                 eprintln!(
-                    "[VISIBLE] scanline {} prev.vblank={} cur.vblank={}",
-                    i, prev.vblank, cur.vblank
+                    "[VISIBLE] abs_prev={} abs_cur={} prev.vblank={} cur.vblank={}",
+                    prev_idx, cur_idx, prev.vblank, cur.vblank
                 );
             }
 
             if prev.vblank && !cur.vblank {
                 if debug {
                     eprintln!(
-                        "[VISIBLE] Found transition at scanline {}, caching for stability",
-                        i
+                        "[VISIBLE] Found transition at abs scanline {} (frame_start={})",
+                        cur_idx, frame_start_scanline
                     );
                 }
+                return cur_idx;
+            }
+        }
+
+        // Fallback: common NTSC visible start is around scanline ~37-40 *after* VSYNC.
+        (frame_start_scanline + 40) % 262
+    }
+
+    /// Try to infer the start of the visible picture area based on VBLANK timing
+    ///
+    /// This method caches the first detected visible start to prevent vertical jumping
+    /// between frames. Once a valid VBLANK transition is detected, that value is used
+    /// for all subsequent frames to ensure stable rendering.
+    pub fn visible_window_start_scanline(&mut self) -> u16 {
+        // If we already have a cached value, always use it for stability
+        // This prevents vertical jumping even if VBLANK timing varies slightly
+        if let Some(cached) = self.cached_visible_start {
+            return cached;
+        }
+
+        // First detection: find where VBLANK transitions from true to false
+        for i in 1..262 {
+            let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
+            let cur = self.scanline_states.get(i).copied().unwrap_or_default();
+
+            if prev.vblank && !cur.vblank {
+                // Cache and return the first detected transition
                 self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
         }
 
         // Fallback: common NTSC visible start is around scanline ~37-40
-        if debug {
-            eprintln!("[VISIBLE] No transition found, using fallback 40");
-        }
         self.cached_visible_start = Some(40);
         40
     }

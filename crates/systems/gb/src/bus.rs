@@ -338,6 +338,15 @@ impl MemoryLr35902 for GbBus {
                     0xFF43 => self.ppu.scx = val,
                     0xFF44 => {} // LY is read-only
                     0xFF45 => self.ppu.lyc = val,
+                    0xFF46 => {
+                        // OAM DMA: Copy 160 bytes from XX00-XX9F to OAM
+                        let source_base = (val as u16) << 8;
+
+                        for i in 0..0xA0u16 {
+                            let byte = self.read(source_base + i);
+                            self.ppu.write_oam(i, byte);
+                        }
+                    }
                     0xFF47 => self.ppu.bgp = val,
                     0xFF48 => self.ppu.obp0 = val,
                     0xFF49 => self.ppu.obp1 = val,

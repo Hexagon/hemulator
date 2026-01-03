@@ -75,7 +75,7 @@ impl Gxrom {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Bits 0-1: PRG bank (32KB)
             // Bits 4-5: CHR bank (8KB)
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(gxrom.read_prg(0xFFFF), 0x00);
 
         // Switch to bank 1 (write value with bits 0-1 = 01)
-        gxrom.write_prg(0x8000, 0x01, &mut ppu);
+        gxrom.write_prg(0x8000, 0x01, &mut ppu, 0);
         assert_eq!(gxrom.read_prg(0x8000), 0x22);
     }
 
@@ -144,7 +144,7 @@ mod tests {
         assert_eq!(ppu.chr[0], 0x33);
 
         // Switch to bank 1 (write value with bits 4-5 = 01, so value 0x10)
-        gxrom.write_prg(0x8000, 0x10, &mut ppu);
+        gxrom.write_prg(0x8000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x44);
     }
 
@@ -177,12 +177,12 @@ mod tests {
         // Test switching both PRG and CHR
         // PRG bank 2, CHR bank 3: bits 0-1 = 10 (2), bits 4-5 = 11 (3)
         // Value = 0b00110010 = 0x32
-        gxrom.write_prg(0x8000, 0x32, &mut ppu);
+        gxrom.write_prg(0x8000, 0x32, &mut ppu, 0);
         assert_eq!(gxrom.read_prg(0x8000), 0x33); // PRG bank 2
         assert_eq!(ppu.chr[0], 0xDD); // CHR bank 3
 
         // PRG bank 1, CHR bank 1
-        gxrom.write_prg(0x8000, 0x11, &mut ppu);
+        gxrom.write_prg(0x8000, 0x11, &mut ppu, 0);
         assert_eq!(gxrom.read_prg(0x8000), 0x22); // PRG bank 1
         assert_eq!(ppu.chr[0], 0xBB); // CHR bank 1
     }
@@ -211,7 +211,7 @@ mod tests {
 
         // Try to select bank 3, should wrap to bank 1 (3 % 2 = 1)
         // PRG bank 3, CHR bank 3: 0x33
-        gxrom.write_prg(0x8000, 0x33, &mut ppu);
+        gxrom.write_prg(0x8000, 0x33, &mut ppu, 0);
         assert_eq!(gxrom.read_prg(0x8000), 0x22); // Wraps to bank 1
         assert_eq!(ppu.chr[0], 0xBB); // Wraps to bank 1
     }

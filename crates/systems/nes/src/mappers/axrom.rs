@@ -35,7 +35,7 @@ impl Axrom {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Bits 0-2: PRG bank select (32KB banks)
             self.prg_bank = val & 0x07;
@@ -104,15 +104,15 @@ mod tests {
         assert_eq!(axrom.read_prg(0x8000), 0x11);
 
         // Switch to bank 1
-        axrom.write_prg(0x8000, 1, &mut ppu);
+        axrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
 
         // Switch to bank 2
-        axrom.write_prg(0x8000, 2, &mut ppu);
+        axrom.write_prg(0x8000, 2, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x33);
 
         // Switch to bank 3
-        axrom.write_prg(0x8000, 3, &mut ppu);
+        axrom.write_prg(0x8000, 3, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x44);
     }
 
@@ -133,13 +133,13 @@ mod tests {
         // (We can't directly test PPU mirroring here, but we verify the write logic)
 
         // Write with bit 4 clear - selects lower screen
-        axrom.write_prg(0x8000, 0x00, &mut ppu);
+        axrom.write_prg(0x8000, 0x00, &mut ppu, 0);
 
         // Write with bit 4 set - selects upper screen
-        axrom.write_prg(0x8000, 0x10, &mut ppu);
+        axrom.write_prg(0x8000, 0x10, &mut ppu, 0);
 
         // Combined: bank 2 + upper screen
-        axrom.write_prg(0x8000, 0x12, &mut ppu);
+        axrom.write_prg(0x8000, 0x12, &mut ppu, 0);
         assert_eq!(axrom.prg_bank, 2);
     }
 
@@ -162,19 +162,19 @@ mod tests {
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Bank 0
-        axrom.write_prg(0x8000, 0, &mut ppu);
+        axrom.write_prg(0x8000, 0, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x11);
 
         // Bank 1
-        axrom.write_prg(0x8000, 1, &mut ppu);
+        axrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
 
         // Bank 2 should wrap to 0 (modulo)
-        axrom.write_prg(0x8000, 2, &mut ppu);
+        axrom.write_prg(0x8000, 2, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x11);
 
         // Bank 3 should wrap to 1 (modulo)
-        axrom.write_prg(0x8000, 3, &mut ppu);
+        axrom.write_prg(0x8000, 3, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
     }
 
@@ -197,11 +197,11 @@ mod tests {
 
         // AxROM uses bits 0-2 for bank select (3 bits = 8 banks max)
         // Upper bits (except bit 4 for mirroring) should be ignored
-        axrom.write_prg(0x8000, 0xF1, &mut ppu); // 0xF1 & 0x07 = 1
+        axrom.write_prg(0x8000, 0xF1, &mut ppu, 0); // 0xF1 & 0x07 = 1
         assert_eq!(axrom.read_prg(0x8000), 0x22, "Should select bank 1");
 
         // Bit 3 should be ignored for banking
-        axrom.write_prg(0x8000, 0x08, &mut ppu); // 0x08 & 0x07 = 0
+        axrom.write_prg(0x8000, 0x08, &mut ppu, 0); // 0x08 & 0x07 = 0
         assert_eq!(
             axrom.read_prg(0x8000),
             0x11,
@@ -227,13 +227,13 @@ mod tests {
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // AxROM should respond to writes anywhere in $8000-$FFFF
-        axrom.write_prg(0x8000, 1, &mut ppu);
+        axrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
 
-        axrom.write_prg(0xFFFF, 0, &mut ppu);
+        axrom.write_prg(0xFFFF, 0, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x11);
 
-        axrom.write_prg(0xC123, 1, &mut ppu);
+        axrom.write_prg(0xC123, 1, &mut ppu, 0);
         assert_eq!(axrom.read_prg(0x8000), 0x22);
     }
 
@@ -251,19 +251,19 @@ mod tests {
         let mut axrom = Axrom::new(cart, &mut ppu);
 
         // Test lower screen (bit 4 = 0)
-        axrom.write_prg(0x8000, 0x00, &mut ppu);
+        axrom.write_prg(0x8000, 0x00, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
 
         // Test upper screen (bit 4 = 1)
-        axrom.write_prg(0x8000, 0x10, &mut ppu);
+        axrom.write_prg(0x8000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
         // Test that banking and mirroring work together
-        axrom.write_prg(0x8000, 0x12, &mut ppu); // Bank 2 + upper screen
+        axrom.write_prg(0x8000, 0x12, &mut ppu, 0); // Bank 2 + upper screen
         assert_eq!(axrom.prg_bank, 2);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
-        axrom.write_prg(0x8000, 0x03, &mut ppu); // Bank 3 + lower screen
+        axrom.write_prg(0x8000, 0x03, &mut ppu, 0); // Bank 3 + lower screen
         assert_eq!(axrom.prg_bank, 3);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
     }

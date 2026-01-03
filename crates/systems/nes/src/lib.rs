@@ -176,6 +176,11 @@ impl NesSystem {
         }
     }
 
+    /// Set the PPU renderer
+    pub fn set_renderer(&mut self, renderer: Box<dyn NesPpuRenderer>) {
+        self.renderer = renderer;
+    }
+
     /// Get audio samples from the APU
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         if let Some(b) = self.cpu.bus_mut() {
@@ -386,6 +391,11 @@ impl System for NesSystem {
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
 
+            // Update bus cycle counter for mapper timing
+            if let Some(b) = self.cpu.bus_mut() {
+                b.add_cycles(used);
+            }
+
             // Clock APU IRQ counter
             if let Some(b) = self.cpu.bus_mut() {
                 b.apu.clock_irq(used);
@@ -481,6 +491,11 @@ impl System for NesSystem {
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // Update bus cycle counter for mapper timing
+            if let Some(b) = self.cpu.bus_mut() {
+                b.add_cycles(used);
+            }
 
             // Check for mapper IRQs during VBlank as well.
             let mut irq_to_fire = false;

@@ -70,7 +70,7 @@ impl Cnrom {
         prg[off]
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select CHR bank (typically 2 bits for 4 banks, but we support up to 8 bits)
             // This allows compatibility with larger CNROM variants
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(ppu.chr[0x1000], 0x00); // Later in bank 0
 
         // Switch to bank 1
-        cnrom.write_prg(0x8000, 1, &mut ppu);
+        cnrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x22);
     }
 
@@ -179,7 +179,7 @@ mod tests {
 
         // Test all 4 banks
         for bank in 0..4 {
-            cnrom.write_prg(0x8000, bank, &mut ppu);
+            cnrom.write_prg(0x8000, bank, &mut ppu, 0);
             let expected = 0x11 + (bank * 0x11);
             assert_eq!(ppu.chr[0], expected);
         }
@@ -203,11 +203,11 @@ mod tests {
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Select bank 5 (should wrap to 5 % 2 = 1)
-        cnrom.write_prg(0x8000, 5, &mut ppu);
+        cnrom.write_prg(0x8000, 5, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xBB, "Bank 5 should wrap to bank 1");
 
         // Select bank 10 (should wrap to 10 % 2 = 0)
-        cnrom.write_prg(0x8000, 10, &mut ppu);
+        cnrom.write_prg(0x8000, 10, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xAA, "Bank 10 should wrap to bank 0");
     }
 
@@ -229,13 +229,13 @@ mod tests {
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // CNROM responds to writes anywhere in $8000-$FFFF
-        cnrom.write_prg(0x8000, 1, &mut ppu);
+        cnrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x22);
 
-        cnrom.write_prg(0xFFFF, 0, &mut ppu);
+        cnrom.write_prg(0xFFFF, 0, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x11);
 
-        cnrom.write_prg(0xC456, 1, &mut ppu);
+        cnrom.write_prg(0xC456, 1, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x22);
     }
 
@@ -259,11 +259,11 @@ mod tests {
         let mut cnrom = Cnrom::new(cart, &mut ppu);
 
         // Test selecting high bank numbers
-        cnrom.write_prg(0x8000, 15, &mut ppu);
+        cnrom.write_prg(0x8000, 15, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0x1F, "Should support 8-bit bank select");
 
         // Test with value larger than available banks
-        cnrom.write_prg(0x8000, 200, &mut ppu);
+        cnrom.write_prg(0x8000, 200, &mut ppu, 0);
         assert_eq!(
             ppu.chr[0],
             (0x10 + (200 % 16)) as u8,

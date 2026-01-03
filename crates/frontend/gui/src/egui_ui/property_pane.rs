@@ -19,6 +19,7 @@ pub enum PropertyAction {
     EjectFile(String),                 // Mount point ID
     ConfigureInput,                    // Open input configuration dialog
     SetInputSource(InputConfigSource), // Switch between global/project input config
+    SetRenderer(String),               // Switch to specified renderer
 }
 
 pub struct PropertyPane {
@@ -30,6 +31,7 @@ pub struct PropertyPane {
     pub cpu_freq_target: Option<f64>,
     pub cpu_freq_actual: Option<f64>,
     pub rendering_backend: String,
+    pub available_renderers: Vec<String>, // List of available renderers for current system
 
     // FPS sparkline data (last 60 frames)
     fps_history: Vec<f32>,
@@ -99,6 +101,7 @@ impl PropertyPane {
             cpu_freq_target: None,
             cpu_freq_actual: None,
             rendering_backend: "Software".to_string(),
+            available_renderers: vec!["Software".to_string()],
             fps_history: Vec::with_capacity(60),
             target_fps: 60.0,
             pc_bda_values: None,
@@ -295,21 +298,30 @@ impl PropertyPane {
                     .default_open(self.settings_open)
                     .show(ui, |ui| {
                         ui.add_space(3.0);
-                        // Renderer selection (moved from Machine Metrics)
+                        // Renderer selection
                         ui.horizontal(|ui| {
                             ui.label("Renderer:");
                         });
-                        let backend_clone = self.rendering_backend.clone();
+                        let current_renderer = self.rendering_backend.clone();
                         egui::ComboBox::from_id_salt("renderer_select")
                             .selected_text(&self.rendering_backend)
                             .show_ui(ui, |ui| {
-                                // Note: This is currently display-only as renderer switching
-                                // would require significant refactoring. For now, just show current value.
-                                ui.selectable_value(
-                                    &mut self.rendering_backend,
-                                    backend_clone.clone(),
-                                    &backend_clone,
-                                );
+                                // Show all available renderers for the current system
+                                for renderer in &self.available_renderers {
+                                    if ui
+                                        .selectable_value(
+                                            &mut self.rendering_backend,
+                                            renderer.clone(),
+                                            renderer,
+                                        )
+                                        .clicked()
+                                        && renderer != &current_renderer
+                                    {
+                                        // Trigger renderer switch action
+                                        self.pending_action =
+                                            Some(PropertyAction::SetRenderer(renderer.clone()));
+                                    }
+                                }
                             });
 
                         // PC-specific settings: CPU Model
@@ -420,7 +432,7 @@ impl PropertyPane {
                         }
 
                         // Display filter section
-                        ui.label(egui::RichText::new("🎨 Display Filter").strong())
+                        ui.label(egui::RichText::new("Display Filter").strong())
                             .on_hover_text("Apply CRT/LCD display simulation effects");
                         ui.add_space(3.0);
                         egui::ComboBox::from_id_salt("display_filter")
@@ -435,37 +447,37 @@ impl PropertyPane {
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SonyTrinitron,
-                                    "📺 Sony Trinitron",
+                                    "Sony Trinitron",
                                 )
                                 .on_hover_text("Simulates Sony Trinitron CRT display");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Ibm5151,
-                                    "🖥️ IBM 5151",
+                                    "IBM 5151",
                                 )
                                 .on_hover_text("Simulates IBM 5151 monochrome monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::Commodore1702,
-                                    "📺 Commodore 1702",
+                                    "Commodore 1702",
                                 )
                                 .on_hover_text("Simulates Commodore 1702 color monitor");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::SharpLcd,
-                                    "📱 Sharp LCD",
+                                    "Sharp LCD",
                                 )
                                 .on_hover_text("Simulates Game Boy Sharp LCD screen");
                                 ui.selectable_value(
                                     &mut self.display_filter,
                                     DisplayFilter::RcaVictor,
-                                    "📺 RCA Victor",
+                                    "RCA Victor",
                                 )
                                 .on_hover_text("Simulates RCA Victor CRT television");
                             });
 
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new("⚡ Emulation Speed").strong())
+                        ui.label(egui::RichText::new("Emulation Speed").strong())
                             .on_hover_text(
                                 "Control emulation speed (affects both gameplay and audio)",
                             );
@@ -515,7 +527,7 @@ impl PropertyPane {
                         ui.add_space(10.0);
                         ui.separator();
                         ui.add_space(5.0);
-                        ui.label(egui::RichText::new("🎮 Input Configuration").strong());
+                        ui.label(egui::RichText::new("Input Configuration").strong());
                         ui.add_space(3.0);
 
                         // Input source selection (Global vs Project)
@@ -525,7 +537,7 @@ impl PropertyPane {
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Global,
-                                    "🌐 Global",
+                                    "Global",
                                 )
                                 .on_hover_text("Use global config.json settings for all projects")
                                 .clicked()
@@ -537,7 +549,7 @@ impl PropertyPane {
                             if ui
                                 .selectable_label(
                                     self.input_config_source == InputConfigSource::Project,
-                                    "📁 Project",
+                                    "Project",
                                 )
                                 .on_hover_text("Use project-specific .hemu file settings")
                                 .clicked()
@@ -555,23 +567,23 @@ impl PropertyPane {
                             .num_columns(2)
                             .spacing([8.0, 3.0])
                             .show(ui, |ui| {
-                                ui.label("🎮 Gamepads:");
+                                ui.label("Gamepads:");
                                 ui.label(format!("{} detected", self.num_gamepads_detected));
                                 ui.end_row();
 
-                                ui.label("🕹️ Joysticks:");
+                                ui.label("Joysticks:");
                                 ui.label(format!("{} detected", self.num_joysticks_detected));
                                 ui.end_row();
                             });
 
                         // Player configuration
                         ui.add_space(8.0);
-                        ui.checkbox(&mut self.player1_enabled, "✓ Player 1 Enabled");
-                        ui.checkbox(&mut self.player2_enabled, "✓ Player 2 Enabled");
+                        ui.checkbox(&mut self.player1_enabled, "Player 1 Enabled");
+                        ui.checkbox(&mut self.player2_enabled, "Player 2 Enabled");
 
                         // Mouse configuration
                         ui.add_space(8.0);
-                        ui.checkbox(&mut self.mouse_enabled, "🖱️ Mouse Input Enabled");
+                        ui.checkbox(&mut self.mouse_enabled, "Mouse Input Enabled");
                         if self.mouse_enabled {
                             ui.add_space(3.0);
                             ui.horizontal(|ui| {
@@ -627,7 +639,7 @@ impl PropertyPane {
                                             .unwrap_or(file);
                                         ui.label(filename).on_hover_text(file);
                                         if ui
-                                            .button("⏏ Eject")
+                                            .button("Eject")
                                             .on_hover_text(format!(
                                                 "Unmount {} from {}",
                                                 filename, mount.name
@@ -638,7 +650,7 @@ impl PropertyPane {
                                                 Some(PropertyAction::EjectFile(mount.id.clone()));
                                         }
                                     } else if ui
-                                        .button("📁 Mount...")
+                                        .button("Mount...")
                                         .on_hover_text(format!(
                                             "Load a file to mount in {}",
                                             mount.name
@@ -666,7 +678,7 @@ impl PropertyPane {
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui
-                                    .button(format!("💾 S{}", i))
+                                    .button(format!("S{}", i))
                                     .on_hover_text(format!("Save to slot {} (F{})", i, i + 4))
                                     .clicked()
                                 {
@@ -680,7 +692,7 @@ impl PropertyPane {
                         ui.horizontal(|ui| {
                             for i in 1..=5 {
                                 if ui
-                                    .button(format!("📂 L{}", i))
+                                    .button(format!("L{}", i))
                                     .on_hover_text(format!(
                                         "Load from slot {} (Shift+F{})",
                                         i,

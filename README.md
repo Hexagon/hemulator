@@ -1,6 +1,6 @@
 # Hemulator — Multi-System Console Emulator
 
-A cross-platform, multi-system console emulator written in Rust, supporting NES, Atari 2600, Game Boy, SNES, N64, and PC emulation with comprehensive save state management and customizable controls.
+A cross-platform, multi-system console emulator written in Rust. **NES emulation is fully working** with ~90% game coverage. Other systems (Atari 2600, Game Boy, SNES, N64, PC/DOS) are in various stages of development.
 
 ## Features
 
@@ -49,11 +49,12 @@ See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for development workflow and con
 
 See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
 
-**Analysis Documents**:
-- [PC_INTERRUPT_ANALYSIS.md](docs/PC_INTERRUPT_ANALYSIS.md) - PC BIOS interrupt handling evaluation
-- [CPU_ANALYSIS.md](docs/CPU_ANALYSIS.md) - CPU implementation analysis
+**Planning and Reference Documents**:
+- [N64_STATUS.md](docs/N64_STATUS.md) - Active development status for Nintendo 64 emulation
 - [NEXT_EMULATOR_RECOMMENDATION.md](docs/NEXT_EMULATOR_RECOMMENDATION.md) - Recommendation for next emulator to implement
 - [SMS_IMPLEMENTATION_GUIDE.md](docs/SMS_IMPLEMENTATION_GUIDE.md) - Practical guide for implementing Sega Master System
+- [SNES_EMULATION_PITFALLS.md](docs/SNES_EMULATION_PITFALLS.md) - Technical reference for SNES emulation edge cases
+- [REFERENCE.md](docs/REFERENCE.md) - General technical references
 
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
