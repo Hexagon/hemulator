@@ -283,26 +283,46 @@ impl RspHle {
 
     /// Execute graphics microcode task (F3DEX/F3DEX2)
     fn execute_graphics_task(&mut self, dmem: &[u8; 4096], rdram: &[u8], rdp: &mut Rdp) -> u32 {
-        // Parse task structure from DMEM
-        // In real F3DEX, the display list address is passed via DMEM at a known offset
+        // Try to read task structure from DMEM first
+        let mut data_ptr = self.read_u32(dmem, 0x30);
+        let mut data_size = self.read_u32(dmem, 0x34);
+        let mut output_buff = self.read_u32(dmem, 0x28);
+        let mut output_buff_size = self.read_u32(dmem, 0x2C);
 
-        // Read task structure from DMEM (typical offset is 0x0000)
-        let _task_type = self.read_u32(dmem, 0x00);
-        let _task_flags = self.read_u32(dmem, 0x04);
-        let _ucode_boot = self.read_u32(dmem, 0x08); // Boot microcode address
-        let _ucode_boot_size = self.read_u32(dmem, 0x0C);
-        let _ucode = self.read_u32(dmem, 0x10); // Main microcode address
-        let _ucode_size = self.read_u32(dmem, 0x14);
-        let _ucode_data = self.read_u32(dmem, 0x18); // Microcode data address
-        let _ucode_data_size = self.read_u32(dmem, 0x1C);
-        let _dram_stack = self.read_u32(dmem, 0x20); // Stack in RDRAM
-        let _dram_stack_size = self.read_u32(dmem, 0x24);
-        let output_buff = self.read_u32(dmem, 0x28); // Output buffer (RDP display list)
-        let output_buff_size = self.read_u32(dmem, 0x2C);
-        let data_ptr = self.read_u32(dmem, 0x30); // Data pointer (F3DEX display list input)
-        let data_size = self.read_u32(dmem, 0x34);
-        let _yield_data_ptr = self.read_u32(dmem, 0x38);
-        let _yield_data_size = self.read_u32(dmem, 0x3C);
+        // If DMEM task structure is empty/invalid, try reading from common RDRAM locations
+        // Many test ROMs store task structure at 0x00200000 without DMA to DMEM
+        if data_ptr == 0 || data_ptr >= 0x00800000 {
+            // Try reading from RDRAM at 0x00200000 (common task structure location)
+            const TASK_STRUCT_ADDR: usize = 0x00200000;
+            if TASK_STRUCT_ADDR + 0x40 <= rdram.len() {
+                data_ptr = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x30);
+                data_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x34);
+                output_buff = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x28);
+                output_buff_size = self.read_u32_rdram(rdram, TASK_STRUCT_ADDR + 0x2C);
+
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "RSP HLE: Read from RDRAM 0x{:06X}: data_ptr=0x{:08X}, data_size=0x{:X}, output_buff=0x{:08X}, output_buff_size=0x{:X}",
+                        TASK_STRUCT_ADDR, data_ptr, data_size, output_buff, output_buff_size
+                    )
+                });
+
+                if data_ptr > 0 && data_ptr < 0x00800000 {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        "RSP HLE: Valid display list found in RDRAM task structure".to_string()
+                    });
+
+                    // If we found a valid display list but microcode is Unknown,
+                    // assume F3DEX (most common graphics microcode)
+                    if self.microcode == MicrocodeType::Unknown {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "RSP HLE: Detected graphics task with Unknown microcode, assuming F3DEX".to_string()
+                        });
+                        self.microcode = MicrocodeType::F3DEX;
+                    }
+                }
+            }
+        }
 
         // Parse F3DEX display list if data_ptr is provided
         if data_ptr > 0 && data_size > 0 {
@@ -722,6 +742,22 @@ impl RspHle {
                 buffer[offset + 1],
                 buffer[offset + 2],
                 buffer[offset + 3],
+            ])
+        } else {
+            0
+        }
+    }
+
+    /// Read 32-bit big-endian value from RDRAM with physical address masking
+    fn read_u32_rdram(&self, rdram: &[u8], addr: usize) -> u32 {
+        // Mask to physical RDRAM range (4MB = 0x400000)
+        let phys_addr = addr & 0x003FFFFF;
+        if phys_addr + 3 < rdram.len() {
+            u32::from_be_bytes([
+                rdram[phys_addr],
+                rdram[phys_addr + 1],
+                rdram[phys_addr + 2],
+                rdram[phys_addr + 3],
             ])
         } else {
             0

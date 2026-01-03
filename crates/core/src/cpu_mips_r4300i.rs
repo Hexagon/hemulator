@@ -1204,7 +1204,10 @@ impl<M: MemoryMips> CpuMips<M> {
                     }
                     0x18 => {
                         // ERET - Exception Return (basic implementation)
+                        // Restore PC from EPC
                         self.pc = self.cp0[CP0_EPC];
+                        // Clear EXL bit to re-enable interrupts
+                        self.cp0[CP0_STATUS] &= !0x02;
                         self.cycles += 1;
                     }
                     _ => {

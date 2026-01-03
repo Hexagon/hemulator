@@ -1,40 +1,105 @@
 # N64 Emulator Development Status
 
-**Last Updated**: January 2, 2026  
-**Status**: RSP microcode detection improved, texture commands added, 3D Pong test ROM created
-**ROM Tested**: Enhanced test ROM with interrupt handling, 3D Pong test ROM, Super Mario 64 (8MB)
+**Last Updated**: January 3, 2026  
+**Status**: Critical ERET/interrupt bugs fixed, enhanced test ROM rendering, RSP HLE task structure needs work
+**ROM Tested**: Enhanced test ROM (WORKING), 3D Pong test ROM (NOT RENDERING), Super Mario 64 (NOT RENDERING)
 
 ## Current State
 
 ### ✅ Working Components
 
 - **ROM Loading**: Successfully loads 8MB commercial ROMs
-- **IPL3 Boot**: Executes boot sequence, jumps to entry point (0x80000400)
+- **IPL3 Boot**: Executes boot sequence, jumps to entry point (0x80000400), writes ERET exception handler
 - **CPU Execution**: MIPS R4300i core executes instructions correctly
+- **ERET Instruction**: Properly clears EXL bit to re-enable interrupts (FIXED Jan 3)
 - **GPR Initialization**: Stack pointer, return address, and other registers properly set
-- **VI System**: Video Interface generates interrupts at scanline 256 every frame
-- **Interrupt System**: IE bit enabled, IM3 configured for VI interrupts, exception handler uses ERET
-- **Framebuffer**: Rendering pipeline functional (black background by default)
-- **RDP Display Lists**: SET_FILL_COLOR and FILL_RECTANGLE commands working
+- **VI System**: Video Interface generates interrupts at configured scanline
+- **Interrupt System**: Proper MI-based interrupt routing, interrupts only set once until acknowledged (FIXED Jan 3)
+- **Framebuffer**: Rendering pipeline functional
+- **RDP Display Lists**: SET_FILL_COLOR, FILL_RECTANGLE, SYNC_FULL commands working
 - **RDP Texture Commands**: LOAD_TLUT, TEXTURE_RECTANGLE with texture sampling
-- **RSP Microcode Detection**: CRC32-based signature matching for F3DEX/F3DEX2/Audio
-- **Test ROMs**: Enhanced test ROM and 3D Pong test ROM both working
+- **Enhanced Test ROM**: Renders red and green rectangles correctly (direct RDP commands)
 
 ### 🔧 Partially Working
 
-- **RSP Activity**: Basic HLE support exists, but microcode processing needs expansion
-- **RDP Commands**: Basic commands work (fill, rectangles, triangles), textures need more work
-- **Interrupt Handling**: Infrastructure in place, commercial ROMs may need tuning
+- **RSP HLE**: Basic infrastructure exists, microcode detection works, but task structure reading needs fixing
+- **RDP Commands**: Basic commands work (fill, rectangles), triangles and textures need more testing
+- **Interrupt Handling**: Core infrastructure working, but ROMs that rely on RSP-generated content don't render yet
 
 ### ❌ Not Working / Needs Improvement
 
-- **RSP Microcode**: F3DEX/F3DEX2 detection and processing incomplete
-- **PIF Controller Polling**: Commercial games may not poll controllers correctly
-- **VI Configuration**: Commercial games may not fully configure VI registers
+- **RSP Task Structure Reading**: Pong3D and commercial ROMs store task structure in RDRAM, HLE needs to read it correctly
+- **RSP Display List Processing**: F3DEX display list parsing exists but data_ptr not being found from task structure
+- **3D Rendering**: Triangle rasterization implemented but not being triggered by RSP HLE
+- **Commercial ROM Graphics**: RSP not generating RDP commands for commercial games
+- **PIF Controller Polling**: Controller input not yet tested with running games
 - **Texture Operations**: More texture formats and operations needed
-- **Commercial ROM Progress**: Games still stuck in initialization (need RSP microcode)
 
-## Recent Changes (January 2, 2026)
+## Recent Changes (January 3, 2026)
+
+### 1. Critical ERET Bug Fix
+**Files**: `crates/core/src/cpu_mips_r4300i.rs`
+
+**Problem**: ERET instruction was not clearing the EXL (Exception Level) bit in the Status register, keeping the CPU permanently in exception mode and preventing interrupts from being delivered.
+
+**Fix**: Modified ERET to clear EXL bit (bit 1) when returning from exception:
+```rust
+// Clear EXL bit to re-enable interrupts
+self.cp0[CP0_STATUS] &= !0x02;
+```
+
+**Result**: CPU can now properly return from exception handlers and re-enable interrupts.
+
+---
+
+### 2. VI Interrupt Loop Fix
+**Files**: `crates/systems/n64/src/lib.rs`, `crates/systems/n64/src/mi.rs`
+
+**Problem**: VI interrupt was being set directly in CPU Cause register every frame, bypassing MI interrupt controller. Once set, it was never cleared, causing infinite exception loops after ERET.
+
+**Fix**: 
+- Changed to only set interrupt in MI (not CPU directly)
+- Only set interrupt once per occurrence (check if already pending)
+- Let MI masking logic handle delivery to CPU
+- Added `get_interrupt_status()` helper method to MI
+
+**Result**: Interrupts now work correctly - set once, handled once, cleared properly.
+
+---
+
+### 3. Enhanced Test ROM Rendering Success
+**Status**: ✅ WORKING
+
+The enhanced test ROM (test_enhanced.z64) now renders correctly:
+- Red rectangle at (50,50) to (150,150)
+- Green rectangle at (160,90) to (210,140)
+- Confirms RDP command processing works
+- Confirms interrupt handling works
+- ROM writes RDP commands directly to RDRAM, bypassing RSP
+
+---
+
+### 4. RSP HLE Task Structure Issue (IN PROGRESS)
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Problem**: Pong3D and commercial ROMs don't produce output. RSP HLE reads task structure from DMEM, but test ROMs write it to RDRAM (0x00200000) without DMA transfer.
+
+**Investigation**:
+- Pong3D ROM sets up task structure at physical address 0x00200000
+- HLE tries to read from DMEM (expecting DMA to have copied it there)
+- Added fallback to read directly from RDRAM at 0x00200000
+- Added logging to debug what's actually in memory
+- Need to verify task structure is actually being written and read correctly
+
+**Next Steps**:
+- Verify ROM actually executes task structure setup code
+- Check if data_ptr values are correct
+- Ensure F3DEX display list processing triggers correctly
+- May need to add automatic microcode detection when valid display list found
+
+---
+
+## Previous Changes (January 2, 2026)
 
 ### 1. RSP Microcode Detection Enhancement
 **Files**: `crates/systems/n64/src/rsp_hle.rs`

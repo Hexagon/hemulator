@@ -160,6 +160,11 @@ impl MipsInterface {
     pub fn get_pending_interrupts(&self) -> u32 {
         self.intr & self.intr_mask
     }
+
+    /// Get the raw interrupt status (unmasked)
+    pub fn get_interrupt_status(&self) -> u32 {
+        self.intr
+    }
 }
 
 impl Default for MipsInterface {

@@ -228,16 +228,15 @@ impl System for N64System {
             // Update VI scanline and check for interrupt
             let bus = self.cpu.bus_mut();
             if bus.vi_mut().update_scanline(scanline) {
-                // VI interrupt triggered - set interrupt in MI
-                bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
+                // VI interrupt triggered - set interrupt in MI (only if not already set)
+                let mi_status = bus.mi().get_interrupt_status();
+                if (mi_status & crate::mi::MI_INTR_VI) == 0 {
+                    bus.mi_mut().set_interrupt(crate::mi::MI_INTR_VI);
 
-                log(LogCategory::Interrupts, LogLevel::Info, || {
-                    format!("N64: VI interrupt triggered at scanline {}", scanline)
-                });
-
-                // Set interrupt pending bit in CPU's Cause register
-                // VI interrupt is typically mapped to hardware interrupt 3 (bit 11 in Cause)
-                self.cpu.cpu.set_interrupt(3);
+                    log(LogCategory::Interrupts, LogLevel::Info, || {
+                        format!("N64: VI interrupt triggered at scanline {}", scanline)
+                    });
+                }
             }
         }
 
