@@ -4,7 +4,7 @@
 
 use crate::bus::PcBus;
 use emu_core::cpu_8086::{Cpu8086, CpuModel, Memory8086};
-use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+use emu_core::logging::{log, LogCategory, LogConfig, LogLevel};
 
 /// BIOS video interrupt (INT 10h) - excluded from interrupt logging to reduce noise
 #[allow(dead_code)]
@@ -225,7 +225,7 @@ impl PcCpu {
         // Peek at the instruction without advancing IP
         let opcode = self.cpu.memory.read(physical_addr);
 
-        // Enable PC tracing with EMU_TRACE_PC=1
+        // Enable PC tracing - only compute logging conditions if trace logging is enabled
         if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
             // Only log if we're in the boot sector region or low memory (not ROM)
             // BUT: Always log F000 and FFFF segments to see BIOS execution
@@ -233,15 +233,19 @@ impl PcCpu {
             if physical_addr < 0xF0000 || in_bios {
                 // Extra logging for suspicious addresses
                 if physical_addr < 0x100 || (0x7D70..=0x7D80).contains(&physical_addr) || in_bios {
-                    eprintln!(
-                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
-                        cs, ip, physical_addr, opcode, self.cpu.sp
-                    );
+                    log(LogCategory::CPU, LogLevel::Trace, || {
+                        format!(
+                            "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X} SP={:04X}",
+                            cs, ip, physical_addr, opcode, self.cpu.sp
+                        )
+                    });
                 } else {
-                    eprintln!(
-                        "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
-                        cs, ip, physical_addr, opcode
-                    );
+                    log(LogCategory::CPU, LogLevel::Trace, || {
+                        format!(
+                            "[PC] {:04X}:{:04X} -> {:08X} opcode={:02X}",
+                            cs, ip, physical_addr, opcode
+                        )
+                    });
                 }
             }
         }
@@ -340,20 +344,20 @@ impl PcCpu {
 
             if is_high_frequency {
                 // Only log these at trace level to avoid spam
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
-                    eprintln!(
+                log(LogCategory::Interrupts, LogLevel::Trace, || {
+                    format!(
                         "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
                         int_num, ah, cs, ip
-                    );
-                }
+                    )
+                });
             } else {
                 // Log all other interrupts at debug level
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                    eprintln!(
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
                         "INT 0x{:02X} AH=0x{:02X} called from {:04X}:{:04X}",
                         int_num, ah, cs, ip
-                    );
-                }
+                    )
+                });
             }
 
             // Determine interrupt handling priority based on interrupt range
@@ -1267,8 +1271,8 @@ impl PcCpu {
         );
 
         // Log at trace level for debugging
-        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
-            eprintln!(
+        log(LogCategory::Interrupts, LogLevel::Trace, || {
+            format!(
                 "INT 16h AH=00h: Read scancode=0x{:02X} ascii=0x{:02X} '{}'",
                 scancode,
                 ascii,
@@ -1277,8 +1281,8 @@ impl PcCpu {
                 } else {
                     '?'
                 }
-            );
-        }
+            )
+        });
 
         // AH = scan code, AL = ASCII character
         self.cpu.ax = ((scancode as u32) << 8) | (ascii as u32);
@@ -2186,12 +2190,12 @@ impl PcCpu {
 
         self.cpu.ax = equipment_flags as u32;
 
-        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!(
                 "INT 11h: Returning equipment word 0x{:04X} (floppy={}, video={:?})",
                 equipment_flags, floppy_count, video_type
-            );
-        }
+            )
+        });
 
         51
     }
@@ -2315,20 +2319,22 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         // Count INT 13h calls for debugging
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            static mut INT13H_CALL_COUNT: u32 = 0;
-            unsafe {
-                INT13H_CALL_COUNT += 1;
-                let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
-                if count % 10 == 1 {
-                    eprintln!("INT 13h call #{}", count);
-                }
-                if count > 1000 {
-                    eprintln!("!!! INT 13h called over 1000 times! Stopping...");
-                    self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
-                    self.set_carry_flag(true);
-                    return 51;
-                }
+        static mut INT13H_CALL_COUNT: u32 = 0;
+        unsafe {
+            INT13H_CALL_COUNT += 1;
+            let count = INT13H_CALL_COUNT; // Copy value to avoid shared reference
+            if count % 10 == 1 {
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!("INT 13h call #{}", count)
+                });
+            }
+            if count > 1000 {
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    "!!! INT 13h called over 1000 times! Stopping...".to_string()
+                });
+                self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Error
+                self.set_carry_flag(true);
+                return 51;
             }
         }
 
@@ -2356,7 +2362,9 @@ impl PcCpu {
             0x48 => self.int13h_get_extended_params(),
             0x4E => self.int13h_get_media_status(), // CD-ROM: Get media status
             _ => {
-                eprintln!("!!! UNSUPPORTED INT 13h function: AH=0x{:02X} !!!", ah);
+                log(LogCategory::Stubs, LogLevel::Warn, || {
+                    format!("!!! UNSUPPORTED INT 13h function: AH=0x{:02X} !!!", ah)
+                });
                 // Unsupported function - set error in AH
                 self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid function
                 self.set_carry_flag(true);
@@ -2401,7 +2409,9 @@ impl PcCpu {
         // Validate count: must be < 128
         // NOTE: count=0 is valid and means "do nothing successfully" (used by DOS to test disk readiness)
         if count >= 128 {
-            eprintln!("INT 13h AH=02h: Invalid sector count={}", count);
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                format!("INT 13h AH=02h: Invalid sector count={}", count)
+            });
             self.cpu.ax = (self.cpu.ax & 0x00FF) | (0x01 << 8); // Invalid parameter
             self.set_carry_flag(true);
             return 51;
@@ -2434,12 +2444,12 @@ impl PcCpu {
         // Check for 64KB boundary crossing and handle it by splitting the read
         let bytes_needed = (count as u32) * 512;
         if buffer_offset + bytes_needed > 0x10000 {
-            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                eprintln!(
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                format!(
                     "INT 13h AH=02h: Handling 64KB boundary crossing at ES:BX={:04X}:{:04X}, count={}",
                     buffer_seg, buffer_offset, count
-                );
-            }
+                )
+            });
 
             // Read data to temporary buffer
             let request = DiskRequest {
@@ -2472,12 +2482,12 @@ impl PcCpu {
             return 51;
         }
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 13h AH=02h: count={}, C={}, H={}, S={}, drive=0x{:02X}, ES:BX={:04X}:{:04X}",
                 count, cylinder, head, sector, drive, buffer_seg, buffer_offset
-            );
-        }
+            )
+        });
 
         // Create disk request
         let request = DiskRequest {
@@ -2495,50 +2505,50 @@ impl PcCpu {
         // Perform read using bus helper method
         let status = self.cpu.memory.disk_read(&request, &mut buffer);
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 13h AH=02h: Status=0x{:02X}, C={}, H={}, S={}, count={}, drive=0x{:02X}",
                 status, cylinder, head, sector, count, drive
-            );
-        }
+            )
+        });
         // Copy buffer to memory at ES:BX
         if status == 0x00 {
-            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                eprintln!(
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                format!(
                     "INT 13h AH=02h: Starting to write {} bytes to memory...",
                     buffer.len()
-                );
-            }
-            let should_log_progress =
-                LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug);
+                )
+            });
             for (i, &byte) in buffer.iter().enumerate() {
-                if should_log_progress && i % 128 == 0 {
-                    eprintln!("  Written {} / {} bytes...", i, buffer.len());
+                if i % 128 == 0 {
+                    log(LogCategory::Bus, LogLevel::Debug, || {
+                        format!("  Written {} / {} bytes...", i, buffer.len())
+                    });
                 }
                 let offset = (buffer_offset as u16).wrapping_add(i as u16);
                 self.cpu.write_byte(buffer_seg, offset, byte);
             }
-            if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                eprintln!(
-                    "INT 13h AH=02h: Finished writing all {} bytes",
+            log(LogCategory::Bus, LogLevel::Debug, || {
+                let mut result = format!(
+                    "INT 13h AH=02h: Finished writing all {} bytes\n",
                     buffer.len()
                 );
 
                 // Verify the write by reading back the first 32 bytes
-                eprint!(
+                result.push_str(&format!(
                     "INT 13h AH=02h: Verifying first 32 bytes at {:04X}:{:04X}:",
                     buffer_seg, buffer_offset
-                );
+                ));
                 for i in 0..32.min(buffer.len()) {
                     if i % 16 == 0 {
-                        eprint!("\n  {:04X}:", i);
+                        result.push_str(&format!("\n  {:04X}:", i));
                     }
                     let offset = (buffer_offset as u16).wrapping_add(i as u16);
                     let byte = self.cpu.read_byte(buffer_seg, offset);
-                    eprint!(" {:02X}", byte);
+                    result.push_str(&format!(" {:02X}", byte));
                 }
-                eprintln!();
-            }
+                result
+            });
         }
 
         // Set AH = status
@@ -2899,12 +2909,12 @@ impl PcCpu {
         //   03h = high-capacity floppy (2.88MB)
         let al = (self.cpu.ax & 0xFF) as u8;
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 13h AH=17h: Set disk type for drive 0x{:02X}, type=0x{:02X}",
                 drive, al
-            );
-        }
+            )
+        });
 
         // Only valid for floppy drives (0x00-0x7F)
         if drive >= 0x80 {
@@ -2937,9 +2947,9 @@ impl PcCpu {
         // Clear carry flag (success)
         self.set_carry_flag(false);
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!("INT 13h AH=17h: Success - disk type set");
-        }
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            "INT 13h AH=17h: Success - disk type set".to_string()
+        });
 
         51
     }
@@ -2958,12 +2968,12 @@ impl PcCpu {
         // CL = sectors per track
         let cl = (self.cpu.cx & 0xFF) as u8;
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 13h AH=18h: Set media type for drive 0x{:02X}, tracks={}, sectors={}",
                 drive, ch, cl
-            );
-        }
+            )
+        });
 
         // Only valid for floppy drives (0x00-0x7F)
         if drive >= 0x80 {
@@ -3011,12 +3021,12 @@ impl PcCpu {
         // Clear carry flag (success)
         self.set_carry_flag(false);
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 13h AH=18h: Success - returning DBT pointer ES:DI = {:04X}:{:04X}",
                 self.cpu.es, self.cpu.di
-            );
-        }
+            )
+        });
 
         51
     }
@@ -4089,12 +4099,12 @@ impl PcCpu {
         // Copy CX words (CX * 2 bytes)
         let byte_count = cx * 2;
 
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Bus, LogLevel::Debug, || {
+            format!(
                 "INT 15h AH=87h: Move {} words ({} bytes) from 0x{:08X} to 0x{:08X}",
                 cx, byte_count, src_addr, dst_addr
-            );
-        }
+            )
+        });
 
         for i in 0..byte_count {
             let byte = self.cpu.memory.read(src_addr + i);
@@ -4222,47 +4232,38 @@ impl PcCpu {
         // AH = 0 (success)
         self.cpu.ax &= 0x00FF;
 
-        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
+        log(LogCategory::Interrupts, LogLevel::Debug, || {
             // Read and display the actual table contents
             let table_addr = ((table_seg as u32) << 4) + table_offset;
             let byte_count = self.cpu.memory.read(table_addr) as u16
                 | ((self.cpu.memory.read(table_addr + 1) as u16) << 8);
-            eprintln!(
-                "INT 15h AH=C0h: Returning ES={:04X} BX={:04X} (table at {:08X})",
-                self.cpu.es, self.cpu.bx, table_addr
-            );
-            eprintln!("  Table contents:");
-            eprintln!("    Byte count: {} (0x{:04X})", byte_count, byte_count);
-            eprintln!("    Model: 0x{:02X}", self.cpu.memory.read(table_addr + 2));
-            eprintln!(
-                "    Submodel: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 3)
-            );
-            eprintln!(
-                "    BIOS rev: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 4)
-            );
-            eprintln!(
-                "    Feature 1: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 5)
-            );
-            eprintln!(
-                "    Feature 2: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 6)
-            );
-            eprintln!(
-                "    Feature 3: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 7)
-            );
-            eprintln!(
-                "    Feature 4: 0x{:02X}",
-                self.cpu.memory.read(table_addr + 8)
-            );
-            eprintln!(
-                "    Feature 5: 0x{:02X}",
+            format!(
+                "INT 15h AH=C0h: Returning ES={:04X} BX={:04X} (table at {:08X})\n\
+                  Table contents:\n\
+                    Byte count: {} (0x{:04X})\n\
+                    Model: 0x{:02X}\n\
+                    Submodel: 0x{:02X}\n\
+                    BIOS rev: 0x{:02X}\n\
+                    Feature 1: 0x{:02X}\n\
+                    Feature 2: 0x{:02X}\n\
+                    Feature 3: 0x{:02X}\n\
+                    Feature 4: 0x{:02X}\n\
+                    Feature 5: 0x{:02X}",
+                self.cpu.es,
+                self.cpu.bx,
+                table_addr,
+                byte_count,
+                byte_count,
+                self.cpu.memory.read(table_addr + 2),
+                self.cpu.memory.read(table_addr + 3),
+                self.cpu.memory.read(table_addr + 4),
+                self.cpu.memory.read(table_addr + 5),
+                self.cpu.memory.read(table_addr + 6),
+                self.cpu.memory.read(table_addr + 7),
+                self.cpu.memory.read(table_addr + 8),
                 self.cpu.memory.read(table_addr + 9)
-            );
-        }
+            )
+        });
 
         51
     }
@@ -4781,14 +4782,14 @@ impl PcCpu {
         let ah = ((self.cpu.ax >> 8) & 0xFF) as u8;
 
         // Log the call for debugging
-        if LogConfig::global().should_log(LogCategory::Stubs, LogLevel::Debug) {
-            eprintln!(
+        log(LogCategory::Stubs, LogLevel::Debug, || {
+            format!(
                 "INT 0x2A AH=0x{:02X} called from {:04X}:{:04X}",
                 ah,
                 self.cpu.cs,
                 self.cpu.ip.wrapping_sub(2)
-            );
-        }
+            )
+        });
 
         // Network Installation API stub
         // All functions return AL=0 (not installed/not supported)
