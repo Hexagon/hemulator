@@ -781,8 +781,8 @@ impl Ppu {
         // Fill backdrop color for all pixels that weren't rendered
         // SNES backdrop is CGRAM color 0 (not transparent)
         let backdrop_color = self.get_color(0);
-        for i in 0..frame.pixels.len() {
-            if priority_buffer[i] == 255 {
+        for (i, &priority) in priority_buffer.iter().enumerate() {
+            if priority == 255 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
             }
@@ -1811,7 +1811,10 @@ mod tests {
         }
 
         // Verify VRAM was written (check first byte of tile data)
-        assert_eq!(ppu.vram[0x2000], 0xFF, "VRAM should be writable in force blank mode");
+        assert_eq!(
+            ppu.vram[0x2000], 0xFF,
+            "VRAM should be writable in force blank mode"
+        );
 
         // Tile 1: bitplane 0 = $00, bitplane 1 = $FF (color 2 for all pixels)
         for _ in 0..8 {
@@ -1846,10 +1849,19 @@ mod tests {
         // Print actual values for debugging
         println!("Pixel before scrolling: 0x{:08X}", pixel_0_0);
         println!("Pixel after scrolling: 0x{:08X}", pixel_0_0_scrolled);
-        println!("Red color (expected for tile 0): 0x{:08X}", ppu.get_color(1));
-        println!("Green color (expected for tile 1): 0x{:08X}", ppu.get_color(2));
+        println!(
+            "Red color (expected for tile 0): 0x{:08X}",
+            ppu.get_color(1)
+        );
+        println!(
+            "Green color (expected for tile 1): 0x{:08X}",
+            ppu.get_color(2)
+        );
         println!("Backdrop color: 0x{:08X}", ppu.get_color(0));
-        assert_ne!(pixel_0_0, pixel_0_0_scrolled, "Pixels should be different after scrolling");
+        assert_ne!(
+            pixel_0_0, pixel_0_0_scrolled,
+            "Pixels should be different after scrolling"
+        );
 
         // Verify both frames rendered successfully
         assert_eq!(frame1.width, 256);
@@ -1911,17 +1923,26 @@ mod tests {
         // Name base = 0, name select = 0
         ppu.obsel = 0x00;
         let base = ppu.get_obj_base_address();
-        assert_eq!(base, 0x0000, "OBSEL=0x00: name_base=0, name_select=0 -> 0*0x2000 + 0*0x1000 = 0x0000");
+        assert_eq!(
+            base, 0x0000,
+            "OBSEL=0x00: name_base=0, name_select=0 -> 0*0x2000 + 0*0x1000 = 0x0000"
+        );
 
         // Name base = 2, name select = 1
         ppu.obsel = 0x0A; // Bits 0-2 = 2 (0b010), Bits 3-4 = 1 (0b01)
         let base = ppu.get_obj_base_address();
-        assert_eq!(base, 2 * 0x2000 + 1 * 0x1000, "OBSEL=0x0A: name_base=2, name_select=1 -> 2*0x2000 + 1*0x1000 = 0x5000");
-        
+        assert_eq!(
+            base, 0x5000,
+            "OBSEL=0x0A: name_base=2, name_select=1 -> 2*0x2000 + 1*0x1000 = 0x5000"
+        );
+
         // Name base = 0, name select = 1
         ppu.obsel = 0x08; // Bits 0-2 = 0, Bits 3-4 = 1
         let base = ppu.get_obj_base_address();
-        assert_eq!(base, 0 * 0x2000 + 1 * 0x1000, "OBSEL=0x08: name_base=0, name_select=1 -> 0x1000");
+        assert_eq!(
+            base, 0x1000,
+            "OBSEL=0x08: name_base=0, name_select=1 -> 0x1000"
+        );
     }
 
     #[test]
