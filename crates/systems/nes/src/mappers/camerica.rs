@@ -1,4 +1,4 @@
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Cartridge, Mirroring};
 use crate::ppu::Ppu;
 #[cfg(test)]
 use emu_core::apu::TimingMode;
@@ -66,7 +66,6 @@ impl Camerica {
             // - Bit 4 = 1: One-screen upper
             // This is board-specific: some games use fixed mirroring from the header,
             // while others dynamically control it via this bit.
-            use crate::cartridge::Mirroring;
             let mirroring = if (val & 0x10) != 0 {
                 Mirroring::SingleScreenUpper
             } else {
