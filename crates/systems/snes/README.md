@@ -115,13 +115,18 @@ cargo run --release -p emu_gui -- path/to/game.sfc
 
 The SNES crate includes comprehensive tests:
 
-- **34 total tests**:
+- **51 total tests**:
   - Cartridge tests (loading, SMC header)
-  - PPU tests (Modes 0 & 1, scrolling, sprites, OAM registers)
+  - PPU tests (Modes 0 & 1, scrolling, sprites, OAM registers, priority)
   - Controller tests (serial I/O, auto-read, button mapping)
   - System tests (state management)
+  - Smoke tests with 4 test ROMs (basic, enhanced, priority, sprite overflow)
 
-- **Smoke Test**: Uses `test_roms/snes/test.sfc` to verify basic functionality
+- **Test ROMs**: 
+  - `test.sfc` - Basic Mode 0 rendering
+  - `test_enhanced.sfc` - Mode 1 with sprites and scrolling
+  - `test_priority.sfc` - Priority bit handling
+  - `test_sprite_overflow.sfc` - Sprite-per-scanline limits
 
 ## Usage Example
 

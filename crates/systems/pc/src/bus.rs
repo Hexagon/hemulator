@@ -15,6 +15,7 @@ use crate::mouse::Mouse;
 use crate::pit::Pit;
 use crate::xms::XmsDriver;
 use emu_core::cpu_8086::Memory8086;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::Cell;
 
 /// Video adapter type for equipment configuration
@@ -714,13 +715,12 @@ impl PcBus {
             0x60 => {
                 // When command is 0xD0 (Read Output Port), return output port value
                 if self.kb_controller_command == 0xD0 {
-                    use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                        eprintln!(
+                    log(LogCategory::Interrupts, LogLevel::Debug, || {
+                        format!(
                             "KB controller read output port: 0x{:02X}",
                             self.kb_controller_output_port
-                        );
-                    }
+                        )
+                    });
                     self.kb_controller_output_port
                 } else {
                     // Normal keyboard data - return last scancode or 0
@@ -747,15 +747,14 @@ impl PcBus {
                 }
 
                 // Debug: Log status reads during HIMEM execution
-                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Trace) {
-                    eprintln!(
+                log(LogCategory::Interrupts, LogLevel::Trace, || {
+                    format!(
                         "KB status read: 0x{:02X} (input_buffer_full={}, last_was_cmd={})",
                         status,
                         self.kb_input_buffer_full.get(),
                         self.kb_last_was_command.get()
-                    );
-                }
+                    )
+                });
 
                 // Simulate controller processing: clear buffer after one status read
                 // This allows software to see buffer full briefly after write
@@ -893,10 +892,9 @@ impl PcBus {
         };
 
         // Log I/O reads for debugging
-        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-        if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Trace) {
-            eprintln!("I/O read port 0x{:04X} = 0x{:02X}", port, value);
-        }
+        log(LogCategory::Bus, LogLevel::Trace, || {
+            format!("I/O read port 0x{:04X} = 0x{:02X}", port, value)
+        });
 
         value
     }
@@ -929,13 +927,12 @@ impl PcBus {
             // Port 0x60 - Keyboard controller data port
             0x60 => {
                 // Log data writes for debugging
-                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                    eprintln!(
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!(
                         "KB controller data write: 0x{:02X} (command was 0x{:02X})",
                         val, self.kb_controller_command
-                    );
-                }
+                    )
+                });
 
                 self.kb_last_was_command.set(false); // Data write to port 60h
                 self.kb_input_buffer_full.set(true); // Buffer becomes full when data written
@@ -946,12 +943,12 @@ impl PcBus {
                     // Bit 1 controls A20 gate
                     let a20_enabled = (val & 0x02) != 0;
                     self.xms.set_a20_enabled(a20_enabled);
-                    if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                        eprintln!(
+                    log(LogCategory::Interrupts, LogLevel::Debug, || {
+                        format!(
                             "A20 gate set to: {}",
                             if a20_enabled { "enabled" } else { "disabled" }
-                        );
-                    }
+                        )
+                    });
                     self.kb_controller_command = 0; // Clear command
                 }
             }
@@ -963,10 +960,9 @@ impl PcBus {
                 self.kb_last_was_command.set(true); // Command write to port 64h
 
                 // Log keyboard controller commands for debugging HIMEM.SYS
-                use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-                if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug) {
-                    eprintln!("KB controller command: 0x{:02X}", val);
-                }
+                log(LogCategory::Interrupts, LogLevel::Debug, || {
+                    format!("KB controller command: 0x{:02X}", val)
+                });
 
                 // Handle immediate commands that don't need data port access
                 match val {
@@ -976,15 +972,14 @@ impl PcBus {
                         // Only reset the command register
                         self.kb_controller_command = 0;
                         self.kb_input_buffer_full.set(false); // Reset clears buffer
-                        if LogConfig::global().should_log(LogCategory::Interrupts, LogLevel::Debug)
-                        {
+                        log(LogCategory::Interrupts, LogLevel::Debug, || {
                             let a20_state = if self.xms.is_a20_enabled() {
                                 "enabled"
                             } else {
                                 "disabled"
                             };
-                            eprintln!("KB controller reset - A20 state preserved ({})", a20_state);
-                        }
+                            format!("KB controller reset - A20 state preserved ({})", a20_state)
+                        });
                     }
                     0xD0 => {
                         // Read Output Port - next read from 0x60 returns output port
@@ -1191,15 +1186,14 @@ impl Memory8086 for PcBus {
                     self.ram[offset] = val;
                 } else {
                     // Debug: log when write is out of bounds
-                    use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-                    if LogConfig::global().should_log(LogCategory::Bus, LogLevel::Debug) {
-                        eprintln!(
+                    log(LogCategory::Bus, LogLevel::Debug, || {
+                        format!(
                             "!!! RAM write out of bounds: addr=0x{:08X}, offset={}, ram.len()={}",
                             addr,
                             offset,
                             self.ram.len()
-                        );
-                    }
+                        )
+                    });
                 }
             }
             // Video memory (128KB) - writable
