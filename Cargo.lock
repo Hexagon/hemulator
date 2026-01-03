@@ -899,6 +899,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu_sms"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "glow 0.13.1",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "emu_snes"
 version = "0.1.0"
 dependencies = [

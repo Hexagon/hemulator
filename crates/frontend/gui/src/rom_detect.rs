@@ -11,6 +11,7 @@ pub enum SystemType {
     PC,
     SNES,
     N64,
+    SMS,
 }
 
 #[derive(Debug)]
@@ -96,6 +97,33 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         return Ok(SystemType::Atari2600);
     }
 
+    // Check for Sega Master System
+    // SMS ROMs can have optional TMR SEGA header at 0x7FF0
+    // Common sizes: 8KB to 512KB (power of 2, or with 512-byte header)
+    if data.len() >= 0x7FF0 + 16 {
+        // Check for TMR SEGA header
+        let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
+        let sig_offset = header_offset + 0x7FF0;
+        
+        if sig_offset + 8 <= data.len() {
+            let signature = &data[sig_offset..sig_offset + 8];
+            if signature == b"TMR SEGA" {
+                return Ok(SystemType::SMS);
+            }
+        }
+    }
+    
+    // Also check common SMS ROM sizes (headerless)
+    if matches!(
+        data.len(),
+        8192 | 16384 | 32768 | 49152 | 65536 | 131072 | 262144 | 524288
+    ) && data.len() != 8192 && data.len() != 32768 {
+        // Exclude sizes that conflict with Atari 2600
+        // This is a heuristic - could be SMS
+        // TODO: Improve detection with checksum validation
+        return Ok(SystemType::SMS);
+    }
+
     // If it's small enough and not another format, assume COM file
     if data.len() <= 0xFF00 && data.len() >= 16 {
         return Ok(SystemType::PC);
@@ -111,12 +139,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms)"
             .to_string(),
     })
 }
@@ -218,5 +246,25 @@ mod tests {
         let mut data = vec![0u8; 0x100000]; // 1MB ROM
         data[0..4].copy_from_slice(&[0x37, 0x80, 0x40, 0x12]);
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::N64);
+    }
+
+    #[test]
+    fn test_detect_sms_with_header() {
+        // SMS ROM with TMR SEGA header
+        let mut data = vec![0u8; 0x10000]; // 64KB
+        // Add TMR SEGA signature at 0x7FF0
+        data[0x7FF0..0x7FF8].copy_from_slice(b"TMR SEGA");
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
+    }
+
+    #[test]
+    fn test_detect_sms_headerless() {
+        // 128KB SMS ROM (common size)
+        let data = vec![0u8; 131072];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
+
+        // 256KB SMS ROM
+        let data = vec![0u8; 262144];
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
     }
 }

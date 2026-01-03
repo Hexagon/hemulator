@@ -8,6 +8,7 @@ members = [
   "crates/systems/pc",
   "crates/systems/snes",
   "crates/systems/n64",
+  "crates/systems/sms",
   "crates/frontend/gui",
 ]
 
