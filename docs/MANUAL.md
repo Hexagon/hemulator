@@ -620,6 +620,11 @@ The emulator supports the following NES mappers:
 - NTSC and PAL timing modes (auto-detected)
 - Controller support with customizable key mappings
 
+**Known Limitations**:
+- **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but may not handle edge cases requiring precise PPU timing
+- **DMC Channel**: Delta modulation channel not yet implemented - games using DMC samples may have incomplete audio
+- **Unsupported Mappers**: Games using mappers beyond the supported 14 will not work (affects ~10% of games)
+
 ### Atari 2600
 
 **Status**: ✅ Fully Working  
@@ -749,10 +754,8 @@ The emulator supports the following cartridge banking schemes:
   - Frame-based rendering - not cycle-accurate
   - NTSC timing only (no PAL support)
   - No mid-scanline effects
-  - VRAM access not restricted (hardware only allows during VBlank/force blank)
 - **Input**:
   - Standard controllers only (no mouse, multitap, or special peripherals)
-  - Auto-joypad read registers ($4218-$421F) implemented, but $4200 bit 0 control not implemented (always enabled)
 - **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio). Games requiring enhancement chips or advanced PPU features will not work.
 
 **Recommended Test Games**:

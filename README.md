@@ -52,6 +52,8 @@ See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements
 **Analysis Documents**:
 - [PC_INTERRUPT_ANALYSIS.md](docs/PC_INTERRUPT_ANALYSIS.md) - PC BIOS interrupt handling evaluation
 - [CPU_ANALYSIS.md](docs/CPU_ANALYSIS.md) - CPU implementation analysis
+- [NEXT_EMULATOR_RECOMMENDATION.md](docs/NEXT_EMULATOR_RECOMMENDATION.md) - Recommendation for next emulator to implement
+- [SMS_IMPLEMENTATION_GUIDE.md](docs/SMS_IMPLEMENTATION_GUIDE.md) - Practical guide for implementing Sega Master System
 
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
