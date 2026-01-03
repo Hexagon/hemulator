@@ -522,17 +522,23 @@ impl RspHle {
                 let clear_bits = word1;
                 self.geometry_mode &= !clear_bits;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("RSP HLE: G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}", clear_bits, self.geometry_mode)
+                    format!(
+                        "RSP HLE: G_CLEARGEOMETRYMODE - cleared 0x{:08X}, mode now 0x{:08X}",
+                        clear_bits, self.geometry_mode
+                    )
                 });
                 true
             }
-            // G_SETGEOMETRYMODE (0xB7) - Set geometry mode bits  
+            // G_SETGEOMETRYMODE (0xB7) - Set geometry mode bits
             0xB7 => {
                 // word1: bits to set
                 let set_bits = word1;
                 self.geometry_mode |= set_bits;
                 log(LogCategory::PPU, LogLevel::Debug, || {
-                    format!("RSP HLE: G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}", set_bits, self.geometry_mode)
+                    format!(
+                        "RSP HLE: G_SETGEOMETRYMODE - set 0x{:08X}, mode now 0x{:08X}",
+                        set_bits, self.geometry_mode
+                    )
                 });
                 true
             }
@@ -956,7 +962,7 @@ impl RspHle {
             }
             // G_ENDDL (0xDF) - End display list
             0xDF => false,
-            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command  
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
             0xB4 => {
                 // word0: cmd_id | padding
                 // word1: data (second word for RDP command)

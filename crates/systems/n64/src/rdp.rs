@@ -81,9 +81,9 @@
 //! - Accurate timing and synchronization
 
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
-use super::rdp_renderer_software::SoftwareRdpRenderer;
 #[cfg(feature = "opengl")]
 use super::rdp_renderer_opengl::OpenGLRdpRenderer;
+use super::rdp_renderer_software::SoftwareRdpRenderer;
 use emu_core::graphics::ColorOps;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -238,17 +238,20 @@ impl Rdp {
     #[cfg(feature = "opengl")]
     pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
         let mut new_renderer = Box::new(OpenGLRdpRenderer::new(gl, self.width, self.height)?);
-        
+
         // Initialize to black
         new_renderer.clear(0x00000000);
-        
+
         // Replace the software renderer with OpenGL renderer
         self.renderer = new_renderer;
-        
+
         log(LogCategory::Stubs, LogLevel::Info, || {
-            format!("N64 RDP switched to OpenGL hardware renderer ({}x{})", self.width, self.height)
+            format!(
+                "N64 RDP switched to OpenGL hardware renderer ({}x{})",
+                self.width, self.height
+            )
         });
-        
+
         Ok(())
     }
 

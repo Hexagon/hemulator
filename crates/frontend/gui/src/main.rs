@@ -1976,7 +1976,7 @@ fn main() {
                 egui_backend.video_subsystem().gl_get_proc_address(s) as *const _
             })
         };
-        
+
         if let Err(e) = n64_sys.enable_opengl_renderer(gl) {
             eprintln!("Warning: Failed to enable OpenGL renderer for N64: {}", e);
             eprintln!("Falling back to software renderer");
