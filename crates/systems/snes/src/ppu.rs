@@ -1102,14 +1102,16 @@ impl Ppu {
 
     /// Get OBJ base address in VRAM
     fn get_obj_base_address(&self) -> usize {
-        // Bits 0-2: Name base (in 8KB units, offset from $6000 in VRAM word address)
-        // Bits 3-4: Name select (4KB offset)
+        // Bits 0-2: Name base (in 8KB units, base offset in VRAM)
+        // Bits 3-4: Name select (4KB gap between sprite tables)
         let name_base = (self.obsel & 0x07) as usize;
         let name_select = ((self.obsel >> 3) & 0x03) as usize;
 
-        // Base address: (name_base * 8192) + $6000 (word address) = byte address
-        // In byte addressing: (name_base * 16384) + $C000
-        (name_base * 0x4000) + 0xC000 + (name_select * 0x1000)
+        // SNES sprite tiles can be located at various positions in VRAM
+        // Name base is in 8KB (0x2000 byte) units
+        // Name select adds a 4KB (0x1000 byte) gap
+        // The base calculation should be: name_base * 0x2000 + name_select * 0x1000
+        (name_base * 0x2000) + (name_select * 0x1000)
     }
 
     /// Render a single BG layer in 2bpp mode with priority handling
@@ -1909,12 +1911,17 @@ mod tests {
         // Name base = 0, name select = 0
         ppu.obsel = 0x00;
         let base = ppu.get_obj_base_address();
-        assert_eq!(base, 0xC000);
+        assert_eq!(base, 0x0000, "OBSEL=0x00: name_base=0, name_select=0 -> 0*0x2000 + 0*0x1000 = 0x0000");
 
         // Name base = 2, name select = 1
-        ppu.obsel = 0x0A;
+        ppu.obsel = 0x0A; // Bits 0-2 = 2 (0b010), Bits 3-4 = 1 (0b01)
         let base = ppu.get_obj_base_address();
-        assert_eq!(base, 0xC000 + 2 * 0x4000 + 0x1000);
+        assert_eq!(base, 2 * 0x2000 + 1 * 0x1000, "OBSEL=0x0A: name_base=2, name_select=1 -> 2*0x2000 + 1*0x1000 = 0x5000");
+        
+        // Name base = 0, name select = 1
+        ppu.obsel = 0x08; // Bits 0-2 = 0, Bits 3-4 = 1
+        let base = ppu.get_obj_base_address();
+        assert_eq!(base, 0 * 0x2000 + 1 * 0x1000, "OBSEL=0x08: name_base=0, name_select=1 -> 0x1000");
     }
 
     #[test]
