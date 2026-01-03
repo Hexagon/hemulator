@@ -112,6 +112,10 @@ pub struct RspHle {
 
     /// Geometry mode flags
     geometry_mode: u32,
+
+    /// Viewport parameters (x, y, width, height, scale_x, scale_y)
+    /// Defaults to (0, 0, 320, 240, 160, 120) for 320x240 framebuffer
+    viewport: (f32, f32, f32, f32, f32, f32),
 }
 
 impl RspHle {
@@ -126,6 +130,9 @@ impl RspHle {
             projection_matrix: Self::identity_matrix(),
             modelview_matrix: Self::identity_matrix(),
             geometry_mode: 0,
+            // Default viewport for 320x240 framebuffer
+            // (x, y, width, height, scale_x, scale_y)
+            viewport: (0.0, 0.0, 320.0, 240.0, 160.0, 120.0),
         }
     }
 
@@ -137,15 +144,20 @@ impl RspHle {
     }
 
     /// Multiply two 4x4 matrices: result = a * b
-    /// Matrices are in row-major order
+    /// Matrices are in column-major order (N64 format)
     fn multiply_matrix(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
         let mut result = [0.0f32; 16];
-        for i in 0..4 {
-            for j in 0..4 {
-                result[i * 4 + j] = a[i * 4] * b[j]
-                    + a[i * 4 + 1] * b[4 + j]
-                    + a[i * 4 + 2] * b[8 + j]
-                    + a[i * 4 + 3] * b[12 + j];
+        // Column-major multiplication: C[col][row] = sum(A[k][row] * B[col][k])
+        for col in 0..4 {
+            for row in 0..4 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    // A[k][row] is at index row + k*4 (column-major)
+                    // B[col][k] is at index k + col*4 (column-major)
+                    sum += a[row + k * 4] * b[k + col * 4];
+                }
+                // C[col][row] is at index row + col*4 (column-major)
+                result[row + col * 4] = sum;
             }
         }
         result
@@ -577,6 +589,16 @@ impl RspHle {
                 // Load matrix from RDRAM
                 let matrix = self.load_matrix_from_rdram(rdram, matrix_addr);
 
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "RSP HLE: G_MTX addr=0x{:08X} type={} mode={} push={}",
+                        matrix_addr,
+                        if projection { "PROJ" } else { "MV" },
+                        if load { "LOAD" } else { "MUL" },
+                        push
+                    )
+                });
+
                 // Apply matrix based on type
                 if projection {
                     // Projection matrix
@@ -651,21 +673,85 @@ impl RspHle {
             0xDC => {
                 // word0: cmd_id | size | offset
                 // word1: RDRAM address to load from
-                let _size = ((word0 >> 16) & 0xFF) as usize;
-                let _offset = (word0 & 0xFFFF) as usize;
-                let _rdram_addr = word1;
+                let size = ((word0 >> 16) & 0xFF) as usize;
+                let offset = (word0 & 0xFFFF) as usize;
+                let rdram_addr = word1;
 
-                // Common uses:
-                // - Load viewport settings
-                // - Load light data
-                // - Load matrix data
-                // For HLE, we log but don't fully implement
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!(
-                        "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
-                        _size, _offset, _rdram_addr
-                    )
-                });
+                // G_MOVEMEM indices (offset values):
+                // 0x80 = G_MV_VIEWPORT (8 bytes)
+                // 0x00 = G_MV_MATRIX (64 bytes, not commonly used via MOVEMEM)
+                // 0x82 = G_MV_LIGHT (16 bytes per light)
+
+                // Check if this is a viewport load (offset 0x80)
+                const G_MV_VIEWPORT: usize = 0x80;
+
+                if offset == G_MV_VIEWPORT && size >= 8 {
+                    // Load viewport data from RDRAM
+                    // Viewport format (8 words = 16 bytes in 16.16 fixed point):
+                    // vscale[0] = width/2, vscale[1] = height/2
+                    // vtrans[0] = x + width/2, vtrans[1] = y + height/2
+                    let addr = Self::virt_to_phys(rdram_addr);
+                    if addr + 15 < rdram.len() {
+                        // Read scale values (vscale[0], vscale[1])
+                        let vscale_x = i32::from_be_bytes([
+                            rdram[addr],
+                            rdram[addr + 1],
+                            rdram[addr + 2],
+                            rdram[addr + 3],
+                        ]) as f32
+                            / 65536.0;
+
+                        let vscale_y = i32::from_be_bytes([
+                            rdram[addr + 4],
+                            rdram[addr + 5],
+                            rdram[addr + 6],
+                            rdram[addr + 7],
+                        ]) as f32
+                            / 65536.0;
+
+                        // Read translation values (vtrans[0], vtrans[1])
+                        let vtrans_x = i32::from_be_bytes([
+                            rdram[addr + 8],
+                            rdram[addr + 9],
+                            rdram[addr + 10],
+                            rdram[addr + 11],
+                        ]) as f32
+                            / 65536.0;
+
+                        let vtrans_y = i32::from_be_bytes([
+                            rdram[addr + 12],
+                            rdram[addr + 13],
+                            rdram[addr + 14],
+                            rdram[addr + 15],
+                        ]) as f32
+                            / 65536.0;
+
+                        // Calculate viewport bounds
+                        // x = vtrans_x - vscale_x, y = vtrans_y - vscale_y
+                        // width = vscale_x * 2, height = vscale_y * 2
+                        let vp_x = vtrans_x - vscale_x;
+                        let vp_y = vtrans_y - vscale_y;
+                        let vp_width = vscale_x * 2.0;
+                        let vp_height = vscale_y * 2.0;
+
+                        self.viewport = (vp_x, vp_y, vp_width, vp_height, vscale_x, vscale_y);
+
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            format!(
+                                "RSP HLE: G_MOVEMEM viewport - x={:.1}, y={:.1}, w={:.1}, h={:.1}",
+                                vp_x, vp_y, vp_width, vp_height
+                            )
+                        });
+                    }
+                } else {
+                    // Other MOVEMEM types - log but don't implement
+                    log(LogCategory::Stubs, LogLevel::Debug, || {
+                        format!(
+                            "N64 RSP HLE: G_MOVEMEM stub - size={}, offset=0x{:04X}, addr=0x{:08X}",
+                            size, offset, rdram_addr
+                        )
+                    });
+                }
                 true
             }
             // G_TEXTURE (0xD7) - Configure texture settings
@@ -718,6 +804,61 @@ impl RspHle {
                     format!(
                         "N64 RSP HLE: G_SETOTHERMODE_H stub - shift={}, len={}, data=0x{:08X}",
                         _shift, _length, _data
+                    )
+                });
+                true
+            }
+            // G_SETPRIMDEPTH (0xEE) - Set primitive depth
+            0xEE => {
+                // word0: cmd_id | padding
+                // word1: z (16-bit) | dz (16-bit) - depth value and delta
+                let _z = (word1 >> 16) & 0xFFFF;
+                let _dz = word1 & 0xFFFF;
+
+                // For HLE, we log but don't implement primitive depth override
+                // Full implementation would set a base depth for subsequent primitives
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_SETPRIMDEPTH - z=0x{:04X}, dz=0x{:04X}",
+                        _z, _dz
+                    )
+                });
+                true
+            }
+            // G_RDPHALF_1 (0xBF) - First half of 2-word RDP command
+            0xBF => {
+                // word0: cmd_id | padding
+                // word1: data (first word for RDP command)
+                // This is typically followed by another command that uses this data
+                // For HLE, we store it temporarily but don't need to act on it
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_1 - data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_RDPHALF_2 (0xB4) - Second half of 2-word RDP command
+            0xB4 => {
+                // word0: cmd_id | padding
+                // word1: data (second word for RDP command)
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!("N64 RSP HLE: G_RDPHALF_2 - data=0x{:08X}", word1)
+                });
+                true
+            }
+            // G_LOAD_UCODE (0xAF) - Load new microcode
+            0xAF => {
+                // word0: cmd_id | size
+                // word1: RDRAM address of microcode
+                let _size = (word0 & 0xFFFF) as usize;
+                let _ucode_addr = word1;
+
+                // For HLE, we don't actually load and execute microcode
+                // Instead, we detect the microcode type by signature
+                // A full LLE implementation would copy from RDRAM to IMEM
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RSP HLE: G_LOAD_UCODE - size=0x{:04X}, addr=0x{:08X}",
+                        _size, _ucode_addr
                     )
                 });
                 true
@@ -779,6 +920,16 @@ impl RspHle {
         let (x0, y0, z0) = self.transform_vertex(vert0);
         let (x1, y1, z1) = self.transform_vertex(vert1);
         let (x2, y2, z2) = self.transform_vertex(vert2);
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "RSP HLE: Triangle v{}({},{},{}) v{}({},{},{}) v{}({},{},{}) -> screen ({},{},{}) ({},{},{}) ({},{},{})",
+                v0, vert0.pos[0], vert0.pos[1], vert0.pos[2],
+                v1, vert1.pos[0], vert1.pos[1], vert1.pos[2],
+                v2, vert2.pos[0], vert2.pos[1], vert2.pos[2],
+                x0, y0, z0, x1, y1, z1, x2, y2, z2
+            )
+        });
 
         // Convert vertex colors to ARGB format
         let c0 = u32::from_be_bytes([0xFF, vert0.color[0], vert0.color[1], vert0.color[2]]);
@@ -890,35 +1041,43 @@ impl RspHle {
             1.0,
         ];
 
-        // Apply modelview matrix
+        // Apply modelview matrix (column-major layout)
+        // For column-major: result[i] = M[i] * v[0] + M[i+4] * v[1] + M[i+8] * v[2] + M[i+12] * v[3]
         let mut mv = [0.0f32; 4];
         for (i, elem) in mv.iter_mut().enumerate() {
-            *elem = self.modelview_matrix[i * 4] * v[0]
-                + self.modelview_matrix[i * 4 + 1] * v[1]
-                + self.modelview_matrix[i * 4 + 2] * v[2]
-                + self.modelview_matrix[i * 4 + 3] * v[3];
+            *elem = self.modelview_matrix[i] * v[0]
+                + self.modelview_matrix[i + 4] * v[1]
+                + self.modelview_matrix[i + 8] * v[2]
+                + self.modelview_matrix[i + 12] * v[3];
         }
 
-        // Apply projection matrix
+        // Apply projection matrix (column-major layout)
         let mut clip = [0.0f32; 4];
         for (i, elem) in clip.iter_mut().enumerate() {
-            *elem = self.projection_matrix[i * 4] * mv[0]
-                + self.projection_matrix[i * 4 + 1] * mv[1]
-                + self.projection_matrix[i * 4 + 2] * mv[2]
-                + self.projection_matrix[i * 4 + 3] * mv[3];
+            *elem = self.projection_matrix[i] * mv[0]
+                + self.projection_matrix[i + 4] * mv[1]
+                + self.projection_matrix[i + 8] * mv[2]
+                + self.projection_matrix[i + 12] * mv[3];
         }
 
         // Perspective divide (clip space to NDC)
+        // In perspective projection, w is typically -z (from the projection matrix)
         let w = if clip[3].abs() > 0.0001 { clip[3] } else { 1.0 };
         let ndc_x = clip[0] / w;
         let ndc_y = clip[1] / w;
         let ndc_z = clip[2] / w;
 
+        // Clamp NDC coordinates to reasonable range to prevent overflow
+        let ndc_x = ndc_x.clamp(-10.0, 10.0);
+        let ndc_y = ndc_y.clamp(-10.0, 10.0);
+        let ndc_z = ndc_z.clamp(-1.0, 1.0);
+
         // Viewport transform (NDC to screen space)
         // NDC range is [-1, 1], screen is [0, width-1] and [0, height-1]
-        // Assuming 320x240 resolution
-        let screen_x = ((ndc_x + 1.0) * 160.0) as i32; // 320/2 = 160
-        let screen_y = ((1.0 - ndc_y) * 120.0) as i32; // 240/2 = 120, inverted Y
+        // Use viewport parameters instead of hardcoded values
+        let (vp_x, vp_y, _vp_width, _vp_height, scale_x, scale_y) = self.viewport;
+        let screen_x = (vp_x + (ndc_x + 1.0) * scale_x) as i32;
+        let screen_y = (vp_y + (1.0 - ndc_y) * scale_y) as i32; // Inverted Y
         let screen_z = ((ndc_z + 1.0) * 32767.5) as i32; // Map to 0-65535 range
 
         (screen_x, screen_y, screen_z)
@@ -1020,13 +1179,17 @@ mod tests {
         // Modelview: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // Projection: (50, 60, 100, 1) stays (50, 60, 100, 1)
         // NDC: divide by w=1 gives (50, 60, 100)
+        // Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 50.0)
+        //   ndc_y = 10.0 (clamped from 60.0)
+        //   ndc_z = 1.0 (clamped from 100.0)
         // Screen space:
-        //   x = (50 + 1) * 160 = 51 * 160 = 8160
-        //   y = (1 - 60) * 120 = -59 * 120 = -7080
-        //   z = (100 + 1) * 32767.5 = 3309517.5
-        assert_eq!(x, 8160);
-        assert_eq!(y, -7080);
-        assert!(z > 3000000);
+        //   x = (10.0 + 1.0) * 160 = 1760
+        //   y = (1.0 - 10.0) * 120 = -1080
+        //   z = (1.0 + 1.0) * 32767.5 = 65535
+        assert_eq!(x, 1760);
+        assert_eq!(y, -1080);
+        assert_eq!(z, 65535);
     }
 
     #[test]
@@ -1404,7 +1567,8 @@ mod tests {
     fn test_vertex_transform_with_matrices() {
         let mut hle = RspHle::new();
 
-        // Set up a simple scaling matrix (scale by 2)
+        // Set up a simple scaling matrix (scale by 2) in column-major format
+        // Diagonal elements [0, 5, 10, 15] contain the scale factors
         hle.modelview_matrix = [
             2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
@@ -1421,10 +1585,14 @@ mod tests {
         // - Modelview transforms (10,10,10) to (20,20,20)
         // - Projection (identity) keeps it (20,20,20)
         // - NDC: divide by w=1 gives (20,20,20)
-        // - Screen: ((20+1)*160, (1-20)*120, (20+1)*32767.5)
-        //         = (3360, -2280, 688318.5)
-        assert!(x > 1000); // Should be scaled up significantly
-        assert!(z > 10); // Z should also be transformed
+        // - Clamping: NDC is clamped to (-10, 10) for x/y and (-1, 1) for z
+        //   ndc_x = 10.0 (clamped from 20.0)
+        //   ndc_y = 10.0 (clamped from 20.0)
+        //   ndc_z = 1.0 (clamped from 20.0)
+        // - Screen: ((10.0+1)*160, (1-10.0)*120, (1.0+1)*32767.5)
+        //         = (1760, -1080, 65535)
+        assert_eq!(x, 1760);
+        assert!(z > 10); // Z should be transformed (will be clamped to max)
     }
 
     #[test]

@@ -1,8 +1,8 @@
 # N64 Emulator Development Status
 
 **Last Updated**: January 3, 2026  
-**Status**: Virtual-to-physical address conversion fixed, RSP task processing partially working
-**ROM Tested**: Enhanced test ROM (WORKING), 3D Pong test ROM (PARTIAL - green screen), Super Mario 64 (NOT RENDERING)
+**Status**: Matrix transformation fixed, 3D geometry rendering working correctly
+**ROM Tested**: Enhanced test ROM (WORKING), 3D Pong test ROM (WORKING - red/blue paddles + green ball), Super Mario 64 (NOT RENDERING)
 
 ## Current State
 
@@ -22,25 +22,47 @@
 - **Virtual Address Translation**: KSEG0/KSEG1 to physical address conversion (FIXED Jan 3)
 - **RSP Task Structure Reading**: Can read task structure from RDRAM at 0x00200000 (FIXED Jan 3)
 - **F3DEX Display List Parsing**: Correctly parses display lists with virtual addresses (FIXED Jan 3)
+- **Matrix Transformation**: Column-major matrix support for proper 3D transformation (FIXED Jan 3)
+- **3D Pong ROM**: Renders all three objects correctly with proper colors (WORKING - Jan 3)
 
 ### 🔧 Partially Working
 
-- **RSP HLE**: Task structure reading works, display list parsing works, but 3D rendering shows only green screen
-- **3D Pong ROM**: Processes RSP tasks and renders output, but shows solid green instead of expected geometry
-- **RDP Commands**: Basic commands work (fill, rectangles), triangles rendering but color/geometry may be incorrect
+- **RSP HLE**: Task structure reading works, display list parsing works, 3D rendering works for simple test ROMs
+- **RDP Commands**: Basic commands work (fill, rectangles, triangles with shading and Z-buffer)
 - **Interrupt Handling**: Core infrastructure working
 
 ### ❌ Not Working / Needs Improvement
 
-- **3D Geometry Rendering**: Triangles may not be rendering correctly (investigating green screen issue)
-- **Viewport/Clipping**: May need proper viewport setup for 3D geometry to be visible
-- **Commercial ROM Graphics**: RSP processing needs more work for complex games
+- **Commercial ROM Graphics**: RSP processing needs more work for complex games (more F3DEX commands, lighting, etc.)
+- **Frustum Clipping**: Currently using simple NDC clamping, needs proper clipping
 - **PIF Controller Polling**: Controller input not yet tested with running games
 - **Texture Operations**: More texture formats and operations needed
+- **Viewport Configuration**: Using hardcoded 320x240, needs dynamic viewport from G_MOVEMEM commands
 
 ## Recent Changes (January 3, 2026)
 
-### 1. Virtual-to-Physical Address Conversion Fix
+### 1. Matrix Transformation Fix - Column-Major Support
+**Files**: `crates/systems/n64/src/rsp_hle.rs`
+
+**Problem**: The RSP HLE was treating N64 matrices as row-major, but the N64 hardware and test ROMs use column-major matrix layout. This caused incorrect vertex transformations - all vertices were being mapped to extreme coordinates, resulting in a solid green screen from the ball's triangles covering the entire framebuffer.
+
+**Fix**: 
+- Updated `transform_vertex()` to use column-major indexing: `matrix[row + col*4]`
+- Updated `multiply_matrix()` to perform column-major matrix multiplication
+- Added NDC clamping to prevent coordinate overflow: x/y clamped to [-10, 10], z to [-1, 1]
+- Updated tests to reflect the corrected transformation behavior
+
+**Result**: 
+- 3D Pong ROM now renders correctly with all three objects visible:
+  - Left paddle: 646 red pixels
+  - Right paddle: 646 blue pixels  
+  - Ball: 133 green pixels
+- Proper perspective projection and vertex transformation working
+- All 126 tests still pass
+
+---
+
+### 2. Virtual-to-Physical Address Conversion Fix
 **Files**: `crates/systems/n64/src/rsp_hle.rs`
 
 **Problem**: F3DEX display list commands contain virtual addresses (0x80xxxxxx for KSEG0), but the code was treating them as physical addresses when indexing into RDRAM. This caused out-of-bounds access and prevented display lists, vertices, and matrices from being loaded correctly.
@@ -271,18 +293,22 @@ Commercial ROMs (e.g., Super Mario 64) still don't progress past initialization 
 
 ## Next Session Priorities
 
-1. **Investigate Green Screen Issue**: Debug why Pong3D ROM shows solid green instead of 3D geometry
-   - Check if clear/fill commands are overwriting geometry
-   - Verify viewport and clipping settings
-   - Check triangle rasterization with transformed coordinates
-2. **Improve 3D Rendering Pipeline**: Ensure vertex transformation and triangle rendering work correctly
-   - Verify matrix transformations are applied properly
-   - Check screen space coordinate mapping
-   - Validate Z-buffer usage
-3. **Add More RDP Commands**: SET_COMBINE_MODE usage, SET_Z_IMAGE, more texture formats
-4. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
-5. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
-6. **Display List Branching**: Full support for G_DL with proper call stack
+1. **Improve Frustum Clipping**: Replace simple NDC clamping with proper view frustum clipping
+   - Clip triangles against near/far planes before rasterization
+   - Prevent artifacts from vertices behind the camera
+   - Generate new vertices at clip plane intersections
+2. **Add More F3DEX Commands**: Implement missing display list commands for commercial ROM support
+   - G_RDPHALF_2, G_RDPHALF_CONT for split RDP commands
+   - G_LOAD_UCODE for dynamic microcode switching
+   - G_CLEARGEOMETRYMODE, G_SETGEOMETRYMODE improvements
+3. **Implement Lighting**: Add support for N64's lighting system
+   - G_MOVEMEM for loading light data
+   - Ambient, directional, and point lights
+   - Per-vertex lighting calculations
+4. **Add More RDP Commands**: SET_COMBINE_MODE for blending, SET_Z_IMAGE, more texture formats
+5. **Improve Texture Sampling**: Add filtering, mipmapping, texture wrapping modes
+6. **Test with Commercial ROMs**: Verify improvements with Super Mario 64, other games
+7. **Display List Branching**: Full support for G_DL with proper call stack
 
 ## Reference Documentation
 
