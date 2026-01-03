@@ -1146,23 +1146,29 @@ impl CliArgs {
 }
 
 /// Create a NES system with the appropriate renderer based on settings
-fn create_nes_system(video_backend: &str, gl_context: Option<std::rc::Rc<glow::Context>>) -> emu_nes::NesSystem {
+fn create_nes_system(
+    video_backend: &str,
+    gl_context: Option<std::rc::Rc<glow::Context>>,
+) -> emu_nes::NesSystem {
     let mut nes_sys = emu_nes::NesSystem::default();
-    
+
     // Replace renderer if OpenGL is requested and context is available
     if video_backend == "opengl" {
         if let Some(gl) = gl_context {
             #[cfg(feature = "opengl")]
             {
                 use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
-                
+
                 match OpenGLNesPpuRenderer::new(gl) {
                     Ok(opengl_renderer) => {
                         nes_sys.set_renderer(Box::new(opengl_renderer));
                         eprintln!("NES: Using OpenGL (hardware) renderer");
                     }
                     Err(e) => {
-                        eprintln!("Failed to create OpenGL NES renderer: {}, falling back to software", e);
+                        eprintln!(
+                            "Failed to create OpenGL NES renderer: {}, falling back to software",
+                            e
+                        );
                     }
                 }
             }
@@ -1171,29 +1177,36 @@ fn create_nes_system(video_backend: &str, gl_context: Option<std::rc::Rc<glow::C
                 eprintln!("Warning: OpenGL feature not enabled - using software renderer");
             }
         } else {
-            eprintln!("Warning: OpenGL renderer requested but GL context not available - using software");
+            eprintln!(
+                "Warning: OpenGL renderer requested but GL context not available - using software"
+            );
         }
     }
-    
+
     nes_sys
 }
 
 /// Create an N64 system with the appropriate renderer based on settings
-fn create_n64_system(video_backend: &str, _gl_context: Option<std::rc::Rc<glow::Context>>) -> emu_n64::N64System {
+fn create_n64_system(
+    video_backend: &str,
+    _gl_context: Option<std::rc::Rc<glow::Context>>,
+) -> emu_n64::N64System {
     let n64_sys = emu_n64::N64System::new();
-    
+
     // Note: N64 renderer switching would happen here
     if video_backend == "opengl" {
         #[cfg(feature = "opengl")]
         {
-            eprintln!("Note: N64 OpenGL renderer creation needs RDP access - using software for now");
+            eprintln!(
+                "Note: N64 OpenGL renderer creation needs RDP access - using software for now"
+            );
         }
         #[cfg(not(feature = "opengl"))]
         {
             eprintln!("Warning: OpenGL feature not enabled - using software renderer");
         }
     }
-    
+
     n64_sys
 }
 
@@ -2005,7 +2018,7 @@ fn main() {
     // Initialize egui app
     let mut egui_app = EguiApp::new();
     egui_app.property_pane.system_name = sys.system_name().to_string();
-    
+
     // Upgrade renderer to OpenGL if settings request it and system was loaded
     if rom_loaded && settings.video_backend == "opengl" {
         let gl_ctx = Some(egui_backend.gl_context());
@@ -2020,7 +2033,10 @@ fn main() {
                             eprintln!("NES: Upgraded to OpenGL (hardware) renderer");
                         }
                         Err(e) => {
-                            eprintln!("Failed to create OpenGL NES renderer: {}, using software", e);
+                            eprintln!(
+                                "Failed to create OpenGL NES renderer: {}, using software",
+                                e
+                            );
                         }
                     }
                 }
@@ -2032,14 +2048,13 @@ fn main() {
             _ => {}
         }
     }
-    
+
     // Set property pane renderer display based on settings preference, not current renderer
-    egui_app.property_pane.rendering_backend = 
-        if settings.video_backend == "opengl" {
-            "Hardware".to_string()
-        } else {
-            "Software".to_string()
-        };
+    egui_app.property_pane.rendering_backend = if settings.video_backend == "opengl" {
+        "Hardware".to_string()
+    } else {
+        "Software".to_string()
+    };
     egui_app.property_pane.available_renderers = sys.get_available_renderers();
     egui_app.property_pane.display_filter = settings.display_filter; // Initialize from settings
     egui_app.status_bar.set_message(status_message.clone());
@@ -2350,7 +2365,8 @@ fn main() {
                                 Ok(SystemType::NES) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
                                     let gl_ctx = Some(egui_backend.gl_context());
-                                    let mut nes_sys = create_nes_system(&settings.video_backend, gl_ctx);
+                                    let mut nes_sys =
+                                        create_nes_system(&settings.video_backend, gl_ctx);
                                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
                                         egui_app
                                             .status_bar
@@ -2361,7 +2377,7 @@ fn main() {
                                         sys = EmulatorSystem::NES(Box::new(nes_sys));
                                         egui_app.property_pane.system_name = "NES".to_string();
                                         // Set renderer display based on settings preference
-                                        egui_app.property_pane.rendering_backend = 
+                                        egui_app.property_pane.rendering_backend =
                                             if settings.video_backend == "opengl" {
                                                 "Hardware".to_string()
                                             } else {
@@ -2515,7 +2531,8 @@ fn main() {
                                 Ok(SystemType::N64) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
                                     let gl_ctx = Some(egui_backend.gl_context());
-                                    let mut n64_sys = create_n64_system(&settings.video_backend, gl_ctx);
+                                    let mut n64_sys =
+                                        create_n64_system(&settings.video_backend, gl_ctx);
                                     if let Err(e) = n64_sys.mount("Cartridge", &data) {
                                         egui_app.status_bar.set_message(format!("Error: {}", e));
                                         rom_hash = None;
@@ -2524,7 +2541,7 @@ fn main() {
                                         sys = EmulatorSystem::N64(Box::new(n64_sys));
                                         egui_app.property_pane.system_name = "N64".to_string();
                                         // Set renderer display based on settings preference
-                                        egui_app.property_pane.rendering_backend = 
+                                        egui_app.property_pane.rendering_backend =
                                             if settings.video_backend == "opengl" {
                                                 "Hardware".to_string()
                                             } else {
@@ -3063,14 +3080,13 @@ fn main() {
                         "software"
                     };
                     settings.video_backend = backend_name.to_string();
-                    
+
                     // Save settings immediately
                     if let Err(e) = settings.save() {
                         eprintln!("Failed to save renderer preference: {}", e);
-                        egui_app.status_bar.set_error(format!(
-                            "Failed to save renderer preference: {}",
-                            e
-                        ));
+                        egui_app
+                            .status_bar
+                            .set_error(format!("Failed to save renderer preference: {}", e));
                     } else {
                         egui_app.status_bar.set_message(format!(
                             "Renderer set to '{}'. Please reload the ROM for changes to take effect.",

@@ -681,8 +681,14 @@ The emulator supports the following cartridge banking schemes:
 
 **Features**:
 - Full PPU (Picture Processing Unit) rendering: background, window, sprites
-- Resolution: 160x144 pixels (DMG mode)
-- Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority
+- Resolution: 160x144 pixels
+- Sprite support: 40 sprites with 8x8/8x16 modes, flipping, priority, 10-per-scanline limit
+- **Game Boy Color (CGB) Support**:
+  - Automatic CGB mode detection
+  - 15-bit RGB color palettes (8 BG + 8 OBJ palettes)
+  - VRAM banking (2 banks of 8KB)
+  - Tile attributes (palette selection, VRAM banking, flipping)
+  - Backward compatible with DMG games
 - **MBC (Memory Bank Controller) Support**:
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
@@ -698,10 +704,9 @@ The emulator supports the following cartridge banking schemes:
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **Game Boy Color**: DMG (original Game Boy) mode only - no CGB color palettes or features
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Other**: No serial transfer (link cable), OAM DMA, or sprite-per-scanline limit
+- **Other**: No serial transfer (link cable), OAM DMA, STAT interrupts, or PPU mode transitions
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
 - Arrow keys = D-pad
