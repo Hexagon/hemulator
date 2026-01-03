@@ -341,31 +341,10 @@ impl MemoryLr35902 for GbBus {
                     0xFF46 => {
                         // OAM DMA: Copy 160 bytes from XX00-XX9F to OAM
                         let source_base = (val as u16) << 8;
-                        
-                        static mut DMA_COUNT: u32 = 0;
-                        unsafe {
-                            DMA_COUNT += 1;
-                            if DMA_COUNT % 60 == 0 && DMA_COUNT >= 120 && DMA_COUNT <= 240 {
-                                let s0 = self.read(source_base);
-                                let s1 = self.read(source_base + 1);
-                                let s2 = self.read(source_base + 2);
-                                eprintln!("[DMA #{}] Copying from ${:04X}: {:02X} {:02X} {:02X} {:02X}",
-                                    DMA_COUNT, source_base, s0, s1, s2, self.read(source_base + 3));
-                            }
-                        }
-                        
+
                         for i in 0..0xA0u16 {
                             let byte = self.read(source_base + i);
                             self.ppu.write_oam(i, byte);
-                        }
-                        
-                        unsafe {
-                            if DMA_COUNT % 60 == 0 && DMA_COUNT >= 120 && DMA_COUNT <= 240 {
-                                eprintln!("[DMA #{}] After copy, OAM[0-3]: {:02X} {:02X} {:02X} {:02X}",
-                                    DMA_COUNT,
-                                    self.ppu.read_oam_debug(0), self.ppu.read_oam_debug(1),
-                                    self.ppu.read_oam_debug(2), self.ppu.read_oam_debug(3));
-                            }
                         }
                     }
                     0xFF47 => self.ppu.bgp = val,

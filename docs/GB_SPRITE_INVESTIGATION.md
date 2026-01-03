@@ -1,9 +1,39 @@
 # Game Boy Sprite Rendering Investigation
 
 **Date**: January 3, 2026  
-**Status**: CRITICAL BUG IDENTIFIED - Requires Immediate Investigation  
+**Status**: ✅ **RESOLVED**  
 **Affected System**: Game Boy (DMG/CGB)  
-**Issue**: Sprites not rendering despite correct DMA operation
+**Issue**: Sprites not rendering due to OAM DMA address masking bug
+
+---
+
+## Resolution
+
+**Root Cause Found**: Incorrect bit masking in `write_oam()` and `read_oam()` functions.
+
+The functions used `(addr & 0x9F)` to mask OAM addresses, but this is incorrect because:
+- OAM is 160 bytes (0xA0), not a power of 2
+- The mask 0x9F has bit 5 cleared, causing addresses like 0x20, 0x40, 0x60, 0x80 to incorrectly wrap back to 0x00
+- This caused later DMA iterations to overwrite the first few OAM entries with zeros
+
+**Example of the bug**:
+```
+addr=0x00: writes 0x80 to index 0 ✓
+addr=0x20: writes 0x00 to index 0 ✗ (overwrites!)
+addr=0x40: writes 0x00 to index 0 ✗ (overwrites!)
+addr=0x60: writes 0x00 to index 0 ✗ (overwrites!)
+addr=0x80: writes 0x00 to index 0 ✗ (overwrites!)
+```
+
+**Fix Applied**: 
+- Removed bit masking (`& 0x9F`)
+- Added bounds checking (`if addr >= 0xA0`)
+- All 104 Game Boy tests now pass
+- DMA is now fully functional
+
+**Files Changed**:
+- `crates/systems/gb/src/ppu.rs`: Fixed `read_oam()`, `write_oam()`, `read_oam_debug()`
+- `crates/systems/gb/src/lib.rs`: Added unit tests, updated documentation
 
 ---
 
@@ -246,30 +276,42 @@ eprintln!("Rendering with PPU at: {:p}", self as *const _);
 
 ---
 
-## Immediate Action Items
+## Immediate Action Items ✅ COMPLETE
 
 ### Priority 1: Fix DMA Write
 1. ✅ Add debug output inside `write_oam()` to confirm execution
 2. ✅ Verify OAM array is actually being modified
-3. Check if `self.ppu` is the correct instance
-4. Add unit test for direct OAM writes
-5. Add unit test for DMA operation
+3. ✅ Confirmed `self.ppu` is the correct instance (same pointer throughout)
+4. ✅ Added unit test for direct OAM writes (`test_oam_direct_write`)
+5. ✅ Added unit test for DMA operation (`test_oam_dma_basic`, `test_oam_dma_full_copy`)
 
-### Priority 2: Verify Architecture
-1. Trace PPU ownership through entire codebase
-2. Ensure no cloning/copying of PPU
-3. Verify `&mut self` propagates correctly
-4. Consider making OAM access atomic/volatile if needed
+**Result**: All tests pass! DMA is now fully functional.
+
+### Priority 2: Verify Architecture  
+1. ✅ Traced PPU ownership - single instance owned by GbBus
+2. ✅ Confirmed no cloning/copying of PPU
+3. ✅ Verified `&mut self` propagates correctly in DMA path
+4. ❌ Not needed - issue was bit masking, not atomic access
+
+**Result**: Architecture is sound. Bug was in address masking logic.
 
 ### Priority 3: Sprite Rendering Review
-1. Add comprehensive sprite rendering tests
-2. Test each priority mode independently
-3. Verify palette data is correct (OBP0/OBP1)
-4. Check LCDC sprite enable bit is respected
+❌ Not needed - sprite rendering code was correct all along. Issue was that OAM never received data due to DMA bug.
 
 ---
 
-## Debug Commands
+## Test Results
+
+Added three new unit tests:
+1. `test_oam_direct_write` - Verifies PPU write_oam() works correctly
+2. `test_oam_dma_basic` - Tests DMA with 4 bytes of sprite data
+3. `test_oam_dma_full_copy` - Tests full 160-byte DMA transfer
+
+All tests pass. Total: 104 Game Boy tests passing.
+
+---
+
+## Debug Commands (Historical)
 
 ### Check OAM State
 ```powershell
