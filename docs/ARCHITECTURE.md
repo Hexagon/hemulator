@@ -175,8 +175,8 @@ Each system crate combines core components with system-specific logic.
 | System | Status | Description |
 |--------|--------|-------------|
 | **[NES](crates/systems/nes/README.md)** | ✅ Fully Working | ~90% game coverage, 14 mappers |
-| **[Game Boy](crates/systems/gb/README.md)** | ✅ Fully Working | DMG mode, MBC0/1/3/5 support |
-| **[Atari 2600](crates/systems/atari2600/README.md)** | ✅ Fully Working | Complete TIA/RIOT emulation |
+| **[Game Boy](crates/systems/gb/README.md)** | 🚧 In Development | DMG mode, MBC0/1/2/3/5 support |
+| **[Atari 2600](crates/systems/atari2600/README.md)** | 🚧 In Development | Complete TIA/RIOT emulation |
 | **[SNES](crates/systems/snes/README.md)** | 🚧 Basic | CPU complete, minimal PPU |
 | **[N64](crates/systems/n64/README.md)** | 🚧 In Development | 3D rendering functional |
 | **[PC](crates/systems/pc/README.md)** | 🧪 Experimental | CGA/EGA/VGA modes, basic BIOS |
