@@ -94,6 +94,7 @@ enum EmulatorSystem {
     PC(Box<emu_pc::PcSystem>),
     SNES(Box<emu_snes::SnesSystem>),
     N64(Box<emu_n64::N64System>),
+    SMS(Box<emu_sms::SmsSystem>),
 }
 
 #[allow(dead_code)]
@@ -118,6 +119,9 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SMS(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -129,6 +133,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.reset(),
             EmulatorSystem::SNES(sys) => sys.reset(),
             EmulatorSystem::N64(sys) => sys.reset(),
+            EmulatorSystem::SMS(sys) => sys.reset(),
         }
     }
 
@@ -157,6 +162,9 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SMS(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -169,6 +177,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.mount_points(),
             EmulatorSystem::SNES(sys) => sys.mount_points(),
             EmulatorSystem::N64(sys) => sys.mount_points(),
+            EmulatorSystem::SMS(sys) => sys.mount_points(),
         }
     }
 
@@ -193,6 +202,9 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::SMS(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -205,6 +217,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SNES(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::SMS(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -227,6 +240,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.save_state(),
             EmulatorSystem::SNES(sys) => sys.save_state(),
             EmulatorSystem::N64(sys) => sys.save_state(),
+            EmulatorSystem::SMS(sys) => sys.save_state(),
         }
     }
 
@@ -238,6 +252,7 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => sys.load_state(state),
             EmulatorSystem::SNES(sys) => sys.load_state(state),
             EmulatorSystem::N64(sys) => sys.load_state(state),
+            EmulatorSystem::SMS(sys) => sys.load_state(state),
         }
     }
 

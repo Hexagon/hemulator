@@ -851,6 +851,7 @@ dependencies = [
  "emu_n64",
  "emu_nes",
  "emu_pc",
+ "emu_sms",
  "emu_snes",
  "env_logger",
  "glow 0.13.1",
