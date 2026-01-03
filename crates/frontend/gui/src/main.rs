@@ -1993,13 +1993,25 @@ fn main() {
         eprintln!("Warning: Failed to start audio playback: {}", e);
     }
 
-    // Timing trackers
+    // Timing trackers - reset when ROM is loaded
+    let mut emulation_start_time = Instant::now(); // Time when emulation started
+    let mut total_emulated_time = Duration::ZERO; // Total time emulated so far
     let mut last_frame = Instant::now();
-    let mut accumulated_emulation_time = Duration::ZERO;
 
-    // FPS tracking
-    let mut frame_times: Vec<Duration> = Vec::with_capacity(60);
-    let mut current_fps = 60.0;
+    // FPS tracking - display FPS only
+    let mut display_frame_times: Vec<Duration> = Vec::with_capacity(60);
+    let mut current_fps = 60.0; // Display FPS
+
+    // GUI update throttling
+    let mut frame_counter: u64 = 0;
+    const GUI_UPDATE_INTERVAL: u64 = 15; // Update GUI every 15th frame
+
+    // Track when emulation becomes active to reset timing
+    let mut was_emulation_active = false;
+
+    // Track emulation speed changes to reset timing
+    let mut previous_emulation_speed = settings.emulation_speed;
+    const SPEED_CHANGE_THRESHOLD: f64 = 0.001; // Minimum change to detect speed adjustment
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
@@ -2049,6 +2061,16 @@ fn main() {
 
     // Main event loop with egui
     loop {
+        // Only increment frame counter when emulation is active
+        if rom_loaded && settings.emulation_speed > 0.0 {
+            frame_counter = frame_counter.wrapping_add(1);
+        }
+        // Update GUI more frequently when paused or no ROM loaded
+        let should_update_gui = if rom_loaded && settings.emulation_speed > 0.0 {
+            frame_counter.is_multiple_of(GUI_UPDATE_INTERVAL)
+        } else {
+            true // Always update when paused or no ROM
+        };
         // Handle SDL2 events and update egui input
         if !egui_backend.handle_events() {
             break; // Window closed
@@ -2057,156 +2079,159 @@ fn main() {
         // Begin egui frame
         egui_backend.begin_frame();
 
-        // Update egui app state
-        egui_app.property_pane.update_fps(current_fps);
-        egui_app.property_pane.paused = settings.emulation_speed == 0.0;
-        egui_app.property_pane.speed = settings.emulation_speed as f32;
-        egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
-        egui_app.property_pane.emulation_speed_percent = (settings.emulation_speed * 100.0) as i32;
+        // Update egui app state (only periodically to reduce overhead)
+        if should_update_gui {
+            egui_app.property_pane.update_fps(current_fps);
+            egui_app.property_pane.paused = settings.emulation_speed == 0.0;
+            egui_app.property_pane.speed = settings.emulation_speed as f32;
+            egui_app.property_pane.cpu_freq_target = sys.get_cpu_freq_target();
+            egui_app.property_pane.emulation_speed_percent =
+                (settings.emulation_speed * 100.0) as i32;
 
-        // Update input device counts from backend
-        egui_app.property_pane.num_gamepads_detected = egui_backend.num_gamepads();
-        egui_app.property_pane.num_joysticks_detected = egui_backend.num_joysticks();
+            // Update input device counts from backend
+            egui_app.property_pane.num_gamepads_detected = egui_backend.num_gamepads();
+            egui_app.property_pane.num_joysticks_detected = egui_backend.num_joysticks();
 
-        // Update input configuration from settings
-        egui_app.property_pane.mouse_enabled = settings.input.mouse_enabled;
-        egui_app.property_pane.mouse_sensitivity = settings.input.mouse_sensitivity;
+            // Update input configuration from settings
+            egui_app.property_pane.mouse_enabled = settings.input.mouse_enabled;
+            egui_app.property_pane.mouse_sensitivity = settings.input.mouse_sensitivity;
 
-        // Determine input config source
-        if runtime_state.input_override.is_some() {
-            egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Project;
-        } else {
-            egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Global;
-        }
-
-        // Update target FPS from system timing
-        if rom_loaded {
-            let timing = sys.timing();
-            egui_app.property_pane.target_fps = timing.frame_rate_hz() as f32;
-        }
-
-        // Update mount points from current system
-        if rom_loaded {
-            use egui_ui::property_pane::MountPoint;
-            let mount_points_info = sys.mount_points();
-            egui_app.property_pane.mount_points = mount_points_info
-                .iter()
-                .map(|mp| MountPoint {
-                    id: mp.id.clone(),
-                    name: mp.name.clone(),
-                    mounted_file: runtime_state.get_mount(&mp.id).map(|s| {
-                        // Show just the filename, not the full path
-                        std::path::Path::new(s)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(s)
-                            .to_string()
-                    }),
-                })
-                .collect();
-        } else {
-            egui_app.property_pane.mount_points.clear();
-        }
-
-        // Update PC-specific property pane fields if PC is loaded
-        if rom_loaded {
-            if let EmulatorSystem::PC(pc_sys) = &sys {
-                // Read BDA values
-                use egui_ui::property_pane::PcBdaValues;
-                let bda = pc_sys.read_bda_values();
-                egui_app.property_pane.pc_bda_values = Some(PcBdaValues {
-                    equipment_word: bda.equipment_word,
-                    memory_size_kb: bda.memory_size_kb,
-                    video_mode: bda.video_mode,
-                    video_columns: bda.video_columns,
-                    num_serial_ports: bda.num_serial_ports,
-                    num_parallel_ports: bda.num_parallel_ports,
-                    num_hard_drives: bda.num_hard_drives,
-                });
-
-                // Set PC CPU model for dropdown
-                let cpu_model_str = match pc_sys.cpu_model() {
-                    emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
-                    emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
-                    emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
-                    emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
-                    emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
-                    emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
-                    emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
-                    emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
-                    emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
-                    emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
-                    emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
-                    emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
-                    emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
-                };
-                egui_app.property_pane.pc_cpu_model = Some(cpu_model_str.to_string());
-
-                // Set PC memory for dropdown
-                egui_app.property_pane.pc_memory_kb = Some(pc_sys.memory_kb());
+            // Determine input config source
+            if runtime_state.input_override.is_some() {
+                egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Project;
             } else {
-                // Clear PC-specific fields for non-PC systems
-                egui_app.property_pane.pc_bda_values = None;
-                egui_app.property_pane.pc_cpu_model = None;
-                egui_app.property_pane.pc_memory_kb = None;
+                egui_app.property_pane.input_config_source = egui_ui::InputConfigSource::Global;
             }
-        }
 
-        // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
-        if rom_loaded {
-            if let EmulatorSystem::PC(pc_sys) = &sys {
-                use egui_ui::PcConfigInfo;
-                // Don't show the tab anymore - deprecated
-                // egui_app.tab_manager.show_pc_config_tab();
-
-                let boot_priority_str = match pc_sys.boot_priority() {
-                    emu_pc::BootPriority::FloppyFirst => "Floppy First",
-                    emu_pc::BootPriority::HardDriveFirst => "Hard Drive First",
-                    emu_pc::BootPriority::FloppyOnly => "Floppy Only",
-                    emu_pc::BootPriority::HardDriveOnly => "Hard Drive Only",
-                };
-
-                let cpu_model_str = match pc_sys.cpu_model() {
-                    emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
-                    emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
-                    emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
-                    emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
-                    emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
-                    emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
-                    emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
-                    emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
-                    emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
-                    emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
-                    emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
-                    emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
-                    emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
-                };
-
-                let config = PcConfigInfo {
-                    cpu_model: cpu_model_str.to_string(),
-                    memory_kb: pc_sys.memory_kb(),
-                    video_adapter: pc_sys.video_adapter_name().to_string(),
-                    boot_priority: boot_priority_str.to_string(),
-                    bios_mounted: runtime_state.get_mount("BIOS").is_some(),
-                    floppy_a_mounted: runtime_state.get_mount("FloppyA").is_some(),
-                    floppy_b_mounted: runtime_state.get_mount("FloppyB").is_some(),
-                    hdd_mounted: runtime_state.get_mount("HardDrive").is_some(),
-                };
-                egui_app.tab_manager.update_pc_config_info(config);
+            // Update target FPS from system timing
+            if rom_loaded {
+                let timing = sys.timing();
+                egui_app.property_pane.target_fps = timing.frame_rate_hz() as f32;
             }
-        }
 
-        // Update debug info if debug tab is visible
-        if egui_app.tab_manager.debug_visible {
-            use system_adapter::SystemDebugInfo;
-            let debug_info = match &sys {
-                EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
-                EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
-                EmulatorSystem::Atari2600(s) => {
-                    if let Some(info) = s.debug_info() {
-                        SystemDebugInfo::from_atari2600(&info)
-                    } else {
-                        SystemDebugInfo::new("Atari 2600".to_string())
+            // Update mount points from current system
+            if rom_loaded {
+                use egui_ui::property_pane::MountPoint;
+                let mount_points_info = sys.mount_points();
+                egui_app.property_pane.mount_points = mount_points_info
+                    .iter()
+                    .map(|mp| MountPoint {
+                        id: mp.id.clone(),
+                        name: mp.name.clone(),
+                        mounted_file: runtime_state.get_mount(&mp.id).map(|s| {
+                            // Show just the filename, not the full path
+                            std::path::Path::new(s)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(s)
+                                .to_string()
+                        }),
+                    })
+                    .collect();
+            } else {
+                egui_app.property_pane.mount_points.clear();
+            }
+
+            // Update PC-specific property pane fields if PC is loaded
+            if rom_loaded {
+                if let EmulatorSystem::PC(pc_sys) = &sys {
+                    // Read BDA values
+                    use egui_ui::property_pane::PcBdaValues;
+                    let bda = pc_sys.read_bda_values();
+                    egui_app.property_pane.pc_bda_values = Some(PcBdaValues {
+                        equipment_word: bda.equipment_word,
+                        memory_size_kb: bda.memory_size_kb,
+                        video_mode: bda.video_mode,
+                        video_columns: bda.video_columns,
+                        num_serial_ports: bda.num_serial_ports,
+                        num_parallel_ports: bda.num_parallel_ports,
+                        num_hard_drives: bda.num_hard_drives,
+                    });
+
+                    // Set PC CPU model for dropdown
+                    let cpu_model_str = match pc_sys.cpu_model() {
+                        emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
+                        emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
+                        emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
+                        emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
+                        emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
+                        emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
+                        emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
+                        emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
+                        emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
+                        emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
+                        emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
+                        emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
+                        emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
+                    };
+                    egui_app.property_pane.pc_cpu_model = Some(cpu_model_str.to_string());
+
+                    // Set PC memory for dropdown
+                    egui_app.property_pane.pc_memory_kb = Some(pc_sys.memory_kb());
+                } else {
+                    // Clear PC-specific fields for non-PC systems
+                    egui_app.property_pane.pc_bda_values = None;
+                    egui_app.property_pane.pc_cpu_model = None;
+                    egui_app.property_pane.pc_memory_kb = None;
+                }
+            }
+
+            // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
+            if rom_loaded {
+                if let EmulatorSystem::PC(pc_sys) = &sys {
+                    use egui_ui::PcConfigInfo;
+                    // Don't show the tab anymore - deprecated
+                    // egui_app.tab_manager.show_pc_config_tab();
+
+                    let boot_priority_str = match pc_sys.boot_priority() {
+                        emu_pc::BootPriority::FloppyFirst => "Floppy First",
+                        emu_pc::BootPriority::HardDriveFirst => "Hard Drive First",
+                        emu_pc::BootPriority::FloppyOnly => "Floppy Only",
+                        emu_pc::BootPriority::HardDriveOnly => "Hard Drive Only",
+                    };
+
+                    let cpu_model_str = match pc_sys.cpu_model() {
+                        emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
+                        emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
+                        emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
+                        emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
+                        emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
+                        emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
+                        emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
+                        emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
+                        emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
+                        emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
+                        emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
+                        emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
+                        emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
+                    };
+
+                    let config = PcConfigInfo {
+                        cpu_model: cpu_model_str.to_string(),
+                        memory_kb: pc_sys.memory_kb(),
+                        video_adapter: pc_sys.video_adapter_name().to_string(),
+                        boot_priority: boot_priority_str.to_string(),
+                        bios_mounted: runtime_state.get_mount("BIOS").is_some(),
+                        floppy_a_mounted: runtime_state.get_mount("FloppyA").is_some(),
+                        floppy_b_mounted: runtime_state.get_mount("FloppyB").is_some(),
+                        hdd_mounted: runtime_state.get_mount("HardDrive").is_some(),
+                    };
+                    egui_app.tab_manager.update_pc_config_info(config);
+                }
+            }
+
+            // Update debug info if debug tab is visible
+            if egui_app.tab_manager.debug_visible {
+                use system_adapter::SystemDebugInfo;
+                let debug_info = match &sys {
+                    EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
+                    EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
+                    EmulatorSystem::Atari2600(s) => {
+                        if let Some(info) = s.debug_info() {
+                            SystemDebugInfo::from_atari2600(&info)
+                        } else {
+                            SystemDebugInfo::new("Atari 2600".to_string())
+                        }
                     }
                 }
                 EmulatorSystem::PC(s) => SystemDebugInfo::from_pc(&s.debug_info()),
@@ -3114,19 +3139,49 @@ fn main() {
 
         // Step emulation frame if ROM is loaded and not paused
         if rom_loaded && settings.emulation_speed > 0.0 {
-            // Measure emulation time separately from UI/rendering overhead
-            let emulation_start = Instant::now();
+            // Reset timing when emulation becomes active or speed changes
+            let is_emulation_active = true;
+            let speed_changed = (settings.emulation_speed - previous_emulation_speed).abs()
+                > SPEED_CHANGE_THRESHOLD;
 
-            // For speeds > 1.0, step multiple frames per display iteration
-            // For speeds <= 1.0, step one frame per iteration (timing controlled by sleep below)
-            let frames_to_step = if settings.emulation_speed > 1.0 {
-                settings.emulation_speed.round() as usize
+            if (!was_emulation_active && is_emulation_active) || speed_changed {
+                emulation_start_time = Instant::now();
+                total_emulated_time = Duration::ZERO;
+                previous_emulation_speed = settings.emulation_speed;
+            }
+            was_emulation_active = is_emulation_active;
+
+            // Calculate time since emulation started
+            let time_since_start = emulation_start_time.elapsed();
+
+            // Get target frame time
+            let timing = sys.timing();
+            let frame_rate = timing.frame_rate_hz();
+            let target_frame_duration = Duration::from_secs_f64(1.0 / frame_rate);
+
+            // Calculate how many frames we need to emulate to catch up
+            // Emulation speed affects the target emulated time, not the frame count
+            let emulation_speed = settings.emulation_speed;
+            let desired_emulated_time_secs = time_since_start.as_secs_f64() * emulation_speed;
+            let current_emulated_time_secs = total_emulated_time.as_secs_f64();
+            let time_diff_secs = (desired_emulated_time_secs - current_emulated_time_secs).max(0.0);
+
+            // Determine how many frames to step based on time difference
+            // Apply an upper limit to avoid UI/audio freezes when far behind
+            let frames_to_step = if time_diff_secs >= target_frame_duration.as_secs_f64() {
+                // We're behind - step enough frames to catch up, but cap per iteration
+                let frames = (time_diff_secs / target_frame_duration.as_secs_f64()) as usize;
+                // Cap frames per iteration to prevent pathological catch-up behavior
+                let max_frames_per_iteration: usize = 30;
+                frames.clamp(1, max_frames_per_iteration)
             } else {
-                1
+                // We're ahead - don't step any frames this iteration
+                0
             };
 
             let mut last_frame_opt: Option<emu_core::types::Frame> = None;
 
+            // Step the calculated number of frames
             for _ in 0..frames_to_step {
                 // Step the frame
                 match sys.step_frame() {
@@ -3134,8 +3189,6 @@ fn main() {
                         last_frame_opt = Some(frame);
 
                         // Handle audio for each stepped frame
-                        let timing = sys.timing();
-                        let frame_rate = timing.frame_rate_hz();
                         let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
                         let audio_samples = sys.get_audio_samples(samples_per_frame);
                         for sample in audio_samples {
@@ -3149,10 +3202,10 @@ fn main() {
                 }
             }
 
-            // Track emulation time (excluding UI overhead)
-            accumulated_emulation_time += emulation_start.elapsed();
+            // Accumulate emulated time outside the loop (based on frames actually stepped)
+            total_emulated_time += target_frame_duration * frames_to_step as u32;
 
-            // Render only the last frame to the display
+            // Render only the last frame to the display (always update client screen - requirement 3.2)
             if let Some(mut frame) = last_frame_opt {
                 // Apply display filter to the frame
                 settings.display_filter.apply(
@@ -3199,20 +3252,23 @@ fn main() {
                     }
                 }
             }
+        } else {
+            // Emulation is not active
+            was_emulation_active = false;
         }
 
         // End egui frame and render
         egui_backend.end_frame();
 
-        // FPS tracking
+        // Display FPS tracking (separate from emulation FPS - requirement 3.3)
         let frame_dt = last_frame.elapsed();
-        frame_times.push(frame_dt);
-        if frame_times.len() > 60 {
-            frame_times.remove(0);
+        display_frame_times.push(frame_dt);
+        if display_frame_times.len() > 60 {
+            display_frame_times.remove(0);
         }
-        if !frame_times.is_empty() {
-            let total_time: Duration = frame_times.iter().sum();
-            let avg_frame_time = total_time.as_secs_f64() / frame_times.len() as f64;
+        if !display_frame_times.is_empty() {
+            let total_time: Duration = display_frame_times.iter().sum();
+            let avg_frame_time = total_time.as_secs_f64() / display_frame_times.len() as f64;
             if avg_frame_time > 0.0 {
                 current_fps = (1.0 / avg_frame_time) as f32;
             }
@@ -3220,32 +3276,13 @@ fn main() {
 
         // Frame timing - skip sleep in benchmark mode
         if !cli_args.benchmark {
-            let target_frame_time = if rom_loaded && settings.emulation_speed > 0.0 {
-                let timing = sys.timing();
-                let frame_rate = timing.frame_rate_hz();
+            // Target 120 FPS for display refresh (allows quicker catch-up)
+            let target_display_time = Duration::from_secs_f64(1.0 / 120.0);
 
-                if settings.emulation_speed >= 1.0 {
-                    // For normal speed or faster: maintain native frame rate (60 FPS)
-                    // We step multiple emulated frames above, so display stays at 60 FPS
-                    Duration::from_secs_f64(1.0 / frame_rate)
-                } else {
-                    // For slow motion: slow down both emulation and display
-                    // target_time = (1 / frame_rate) / emulation_speed
-                    // Example: 25% speed = (1/60) / 0.25 = 0.0666s = 15 FPS
-                    Duration::from_secs_f64(1.0 / (frame_rate * settings.emulation_speed))
-                }
-            } else {
-                Duration::from_millis(16) // ~60 FPS when idle
-            };
-
-            // Sleep based on accumulated emulation time, not total frame time
-            // This ensures consistent timing regardless of UI overhead
-            if accumulated_emulation_time < target_frame_time {
-                std::thread::sleep(target_frame_time - accumulated_emulation_time);
+            // Sleep to maintain consistent display frame rate
+            if frame_dt < target_display_time {
+                std::thread::sleep(target_display_time - frame_dt);
             }
-
-            // Reset accumulated time for next frame
-            accumulated_emulation_time = Duration::ZERO;
         }
         last_frame = Instant::now();
     }
