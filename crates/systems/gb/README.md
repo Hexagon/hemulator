@@ -156,10 +156,11 @@ let frame = gb.step_frame()?;
 See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
-- DMG mode only (no Game Boy Color features)
 - Frame-based timing (not cycle-accurate)
 - RTC in MBC3 doesn't count time
 - No serial/link cable support
+- No OAM DMA transfer
+- No STAT interrupts or PPU mode transitions
 
 ## Performance
 
