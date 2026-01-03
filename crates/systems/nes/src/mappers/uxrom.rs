@@ -36,7 +36,7 @@ impl Uxrom {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select 16KB bank for $8000-$BFFF; upper bits ignored beyond available banks.
             self.bank_select = val & 0x0F;
@@ -75,7 +75,7 @@ mod tests {
         assert_eq!(uxrom.read_prg(0xC000), 0x22);
 
         // Switch to bank 1 at $8000
-        uxrom.write_prg(0x8000, 1, &mut ppu);
+        uxrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(uxrom.read_prg(0x8000), 0x22);
         assert_eq!(uxrom.read_prg(0xC000), 0x22); // Last bank stays fixed
     }
@@ -120,7 +120,7 @@ mod tests {
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // Try to select bank beyond available banks (should wrap)
-        uxrom.write_prg(0x8000, 10, &mut ppu); // 10 % 2 = 0
+        uxrom.write_prg(0x8000, 10, &mut ppu, 0); // 10 % 2 = 0
         assert_eq!(
             uxrom.read_prg(0x8000),
             0x11,
@@ -146,7 +146,7 @@ mod tests {
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // Bank select masks to 4 bits (0x0F), upper bits should be ignored
-        uxrom.write_prg(0x8000, 0xF1, &mut ppu); // Should select bank 1
+        uxrom.write_prg(0x8000, 0xF1, &mut ppu, 0); // Should select bank 1
         assert_eq!(
             uxrom.read_prg(0x8000),
             0x22,
@@ -197,13 +197,13 @@ mod tests {
         let mut uxrom = Uxrom::new(cart, &mut ppu);
 
         // UxROM responds to writes anywhere in $8000-$FFFF
-        uxrom.write_prg(0x8000, 1, &mut ppu);
+        uxrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(uxrom.read_prg(0x8000), 0x22);
 
-        uxrom.write_prg(0xFFFF, 0, &mut ppu);
+        uxrom.write_prg(0xFFFF, 0, &mut ppu, 0);
         assert_eq!(uxrom.read_prg(0x8000), 0x11);
 
-        uxrom.write_prg(0xC123, 1, &mut ppu);
+        uxrom.write_prg(0xC123, 1, &mut ppu, 0);
         assert_eq!(uxrom.read_prg(0x8000), 0x22);
     }
 }

@@ -16,6 +16,7 @@ pub struct Mmc1 {
     chr_bank1: u8,
     prg_banks: [usize; 2], // two 16KB banks at $8000 and $C000
     chr_banks: [usize; 2], // two 4KB banks at $0000 and $1000
+    last_write_cycle: u64, // Track last write cycle to prevent consecutive writes
 }
 
 impl Mmc1 {
@@ -31,6 +32,7 @@ impl Mmc1 {
             chr_bank1: 0,
             prg_banks: [0, 0],
             chr_banks: [0, 1],
+            last_write_cycle: 0,
         };
         // Respect header mirroring until mapper writes override it.
         ppu.set_mirroring(cart.mirroring);
@@ -114,7 +116,15 @@ impl Mmc1 {
         }
     }
 
-    fn latch_write(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    fn latch_write(&mut self, addr: u16, val: u8, ppu: &mut Ppu, cpu_cycles: u64) {
+        // MMC1 hardware ignores writes on consecutive CPU cycles.
+        // This prevents issues with RMW instructions (INC, DEC, ASL, etc.) and rapid writes.
+        // Cycle counter overflow is handled naturally since we only check for exact equality.
+        if cpu_cycles == self.last_write_cycle {
+            return;
+        }
+        self.last_write_cycle = cpu_cycles;
+
         if val & 0x80 != 0 {
             // Reset shift register
             self.shift_reg = 0x10;
@@ -155,9 +165,9 @@ impl Mmc1 {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
-            self.latch_write(addr, val, ppu);
+            self.latch_write(addr, val, ppu, cpu_cycles);
         }
     }
 
@@ -185,11 +195,11 @@ mod tests {
 
         // Write 5 bits to control register (address $8000-9FFF)
         // Writing 0x0C (binary 01100) for vertical mirroring + 16KB PRG mode
-        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 0
-        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 1
-        mmc1.write_prg(0x8000, 1, &mut ppu); // bit 2
-        mmc1.write_prg(0x8000, 1, &mut ppu); // bit 3
-        mmc1.write_prg(0x8000, 0, &mut ppu); // bit 4
+        mmc1.write_prg(0x8000, 0, &mut ppu, 2); // bit 0
+        mmc1.write_prg(0x8000, 0, &mut ppu, 3); // bit 1
+        mmc1.write_prg(0x8000, 1, &mut ppu, 4); // bit 2
+        mmc1.write_prg(0x8000, 1, &mut ppu, 5); // bit 3
+        mmc1.write_prg(0x8000, 0, &mut ppu, 6); // bit 4
 
         // Control register should now be 0x0C
         assert_eq!(mmc1.control, 0x0C);
@@ -209,11 +219,11 @@ mod tests {
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Start a write sequence
-        mmc1.write_prg(0x8000, 1, &mut ppu);
-        mmc1.write_prg(0x8000, 1, &mut ppu);
+        mmc1.write_prg(0x8000, 1, &mut ppu, 7);
+        mmc1.write_prg(0x8000, 1, &mut ppu, 8);
 
         // Reset with bit 7 set
-        mmc1.write_prg(0x8000, 0x80, &mut ppu);
+        mmc1.write_prg(0x8000, 0x80, &mut ppu, 9);
 
         // Write count should be reset
         assert_eq!(mmc1.write_count, 0);
@@ -259,9 +269,9 @@ mod tests {
         let mut mmc1 = Mmc1::new(cart, &mut ppu);
 
         // Write only 3 bits (incomplete sequence)
-        mmc1.write_prg(0x8000, 1, &mut ppu);
-        mmc1.write_prg(0x8000, 1, &mut ppu);
-        mmc1.write_prg(0x8000, 1, &mut ppu);
+        mmc1.write_prg(0x8000, 1, &mut ppu, 11);
+        mmc1.write_prg(0x8000, 1, &mut ppu, 12);
+        mmc1.write_prg(0x8000, 1, &mut ppu, 13);
 
         // Control register should not have changed yet
         assert_eq!(
@@ -292,13 +302,13 @@ mod tests {
         // Switch to 32KB mode (control bits [3:2] = 00 or 01)
         // Write 0x00 to control: mirroring=single lower, CHR=8KB, PRG=32KB
         for _i in 0..5 {
-            mmc1.write_prg(0x8000, 0, &mut ppu);
+            mmc1.write_prg(0x8000, 0, &mut ppu, 300 + _i as u64);
         }
         assert_eq!(mmc1.control, 0x00);
 
         // Select bank 2 via PRG register (will select banks 2-3 in 32KB mode)
         for i in 0..5 {
-            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu, 400 + i as u64);
         }
 
         // In 32KB mode, bit 0 is ignored, so bank 2 -> banks 2-3
@@ -327,13 +337,13 @@ mod tests {
         // Switch to "fix first" mode (control bits [3:2] = 10)
         // Write 0x08 to control: mirroring=single lower, CHR=8KB, PRG=fix first
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x08 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0x8000, (0x08 >> i) & 1, &mut ppu, 600 + i as u64);
         }
         assert_eq!(mmc1.control, 0x08);
 
         // Select bank 2 via PRG register
         for i in 0..5 {
-            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xE000, (2 >> i) & 1, &mut ppu, 700 + i as u64);
         }
 
         // In fix-first mode: bank 0 at $8000, selected bank at $C000
@@ -366,18 +376,18 @@ mod tests {
         // Switch to 4KB CHR mode (control bit 4 = 1)
         // Write 0x1C to control: mirroring=horiz, CHR=4KB, PRG=fix last
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu);
+            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu, 900 + i as u64);
         }
         assert_eq!(mmc1.control, 0x1C);
 
         // Select CHR bank 1 for $0000-$0FFF
         for i in 0..5 {
-            mmc1.write_prg(0xA000, (1 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xA000, (1 >> i) & 1, &mut ppu, 1000 + i as u64);
         }
 
         // Select CHR bank 2 for $1000-$1FFF
         for i in 0..5 {
-            mmc1.write_prg(0xC000, (2 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xC000, (2 >> i) & 1, &mut ppu, 1100 + i as u64);
         }
 
         // Verify CHR banks
@@ -407,7 +417,7 @@ mod tests {
         // CHR bank 0 register selects 8KB bank (bit 0 ignored)
         // Select CHR banks 2-3 (write even value 2)
         for i in 0..5 {
-            mmc1.write_prg(0xA000, (2 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xA000, (2 >> i) & 1, &mut ppu, 1300 + i as u64);
         }
 
         assert_eq!(ppu.chr[0], 0x32, "CHR bank 2 at $0000 in 8KB mode");
@@ -429,25 +439,25 @@ mod tests {
 
         // Test single-screen lower (control & 0x03 = 0)
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x0C >> i) & 1, &mut ppu); // 0x0C has bits [1:0] = 00
+            mmc1.write_prg(0x8000, (0x0C >> i) & 1, &mut ppu, 1400 + i as u64); // 0x0C has bits [1:0] = 00
         }
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
 
         // Test single-screen upper (control & 0x03 = 1)
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x0D >> i) & 1, &mut ppu); // 0x0D has bits [1:0] = 01
+            mmc1.write_prg(0x8000, (0x0D >> i) & 1, &mut ppu, 1500 + i as u64); // 0x0D has bits [1:0] = 01
         }
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
         // Test vertical (control & 0x03 = 2)
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x0E >> i) & 1, &mut ppu); // 0x0E has bits [1:0] = 10
+            mmc1.write_prg(0x8000, (0x0E >> i) & 1, &mut ppu, 1600 + i as u64); // 0x0E has bits [1:0] = 10
         }
         assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Test horizontal (control & 0x03 = 3)
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x0F >> i) & 1, &mut ppu); // 0x0F has bits [1:0] = 11
+            mmc1.write_prg(0x8000, (0x0F >> i) & 1, &mut ppu, 1700 + i as u64); // 0x0F has bits [1:0] = 11
         }
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
     }
@@ -471,7 +481,7 @@ mod tests {
 
         // Try to select bank 10 (should wrap to 10 % 2 = 0)
         for i in 0..5 {
-            mmc1.write_prg(0xE000, (10 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xE000, (10 >> i) & 1, &mut ppu, 1800 + i as u64);
         }
 
         assert_eq!(mmc1.read_prg(0x8000), 0x11, "Bank 10 should wrap to bank 0");
@@ -496,12 +506,12 @@ mod tests {
 
         // Switch to 4KB CHR mode
         for i in 0..5 {
-            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu);
+            mmc1.write_prg(0x8000, (0x1C >> i) & 1, &mut ppu, 1900 + i as u64);
         }
 
         // Try to select CHR bank 5 at $0000 (should wrap to 5 % 2 = 1)
         for i in 0..5 {
-            mmc1.write_prg(0xA000, (5 >> i) & 1, &mut ppu);
+            mmc1.write_prg(0xA000, (5 >> i) & 1, &mut ppu, 2000 + i as u64);
         }
 
         assert_eq!(ppu.chr[0], 0xBB, "CHR bank 5 should wrap to bank 1");

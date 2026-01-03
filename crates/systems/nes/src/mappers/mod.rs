@@ -97,25 +97,26 @@ impl Mapper {
     }
 
     /// Write to PRG ROM/RAM address space (for mapper registers)
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    /// `cpu_cycles` is the current CPU cycle count for mappers that need timing (e.g., MMC1)
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, cpu_cycles: u64) {
         match self {
             Mapper::Nrom(_) => {
                 // NROM ignores PRG writes
-                let _ = (addr, val, ppu);
+                let _ = (addr, val, ppu, cpu_cycles);
             }
-            Mapper::Mmc1(m) => m.write_prg(addr, val, ppu),
-            Mapper::Uxrom(m) => m.write_prg(addr, val, ppu),
-            Mapper::Cnrom(m) => m.write_prg(addr, val, ppu),
-            Mapper::Mmc3(m) => m.write_prg(addr, val, ppu),
-            Mapper::Axrom(m) => m.write_prg(addr, val, ppu),
-            Mapper::Mmc2(m) => m.write_prg(addr, val, ppu),
-            Mapper::Mmc4(m) => m.write_prg(addr, val, ppu),
-            Mapper::ColorDreams(m) => m.write_prg(addr, val, ppu),
-            Mapper::Gxrom(m) => m.write_prg(addr, val, ppu),
-            Mapper::Camerica(m) => m.write_prg(addr, val, ppu),
-            Mapper::Namco118(m) => m.write_prg(addr, val, ppu),
-            Mapper::Bnrom(m) => m.write_prg(addr, val, ppu),
-            Mapper::Nina(m) => m.write_prg(addr, val, ppu),
+            Mapper::Mmc1(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Uxrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Cnrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Mmc3(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Axrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Mmc2(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Mmc4(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::ColorDreams(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Gxrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Camerica(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Namco118(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Bnrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Nina(m) => m.write_prg(addr, val, ppu, cpu_cycles),
         }
     }
 

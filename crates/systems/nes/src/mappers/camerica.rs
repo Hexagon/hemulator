@@ -8,7 +8,7 @@ use emu_core::apu::TimingMode;
 /// Similar to UxROM (mapper 2) with switchable 16KB PRG banks and fixed last bank.
 /// Key differences:
 /// - Uses 8KB CHR-RAM instead of CHR-ROM
-/// - Some boards (Fire Hawk) support mapper-controlled 1-screen mirroring
+/// - Some boards (Fire Hawk) support mapper-controlled 1-screen mirroring via writes to $9000
 /// - Includes bus conflict prevention and CIC defeat circuitry
 ///
 /// Bank switching:
@@ -17,35 +17,31 @@ use emu_core::apu::TimingMode;
 /// - PPU $0000-$1FFF: 8KB CHR-RAM
 ///
 /// Register ($8000-$FFFF, write):
-/// - Bits 0-3: Select 16KB PRG bank
-/// - Some boards may use higher bits for mirroring control
+/// - Bits 0-3: Select 16KB PRG bank (any address $8000-$FFFF)
+/// - Bit 4: Mirroring control (only for writes to $9000-$9FFF)
+///   - 0 = One-screen lower
+///   - 1 = One-screen upper
+///
+/// Note: Mirroring control only applies to $9000-$9FFF writes.
+/// This prevents breaking games like Micro Machines that write to $8000
+/// for bank switching without intending to change mirroring.
 ///
 /// Used in games like Fire Hawk, Micro Machines, Dizzy series, etc.
 #[derive(Debug)]
 pub struct Camerica {
     prg_rom: Vec<u8>,
     bank_select: u8,
-    /// Track the previous value of bit 4 to detect mirroring changes.
-    /// This helps distinguish between boards with mapper-controlled mirroring
-    /// and those with fixed mirroring from the cartridge header.
-    /// Uses Option<bool> to differentiate between "no writes yet" (None)
-    /// and actual bit 4 values, preventing false positives on the first write.
-    previous_bit4: Option<bool>,
-    /// Count how many times bit 4 has changed
-    /// If this stays at 0, the game likely uses fixed mirroring
-    mirroring_change_count: u8,
 }
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
         // Initialize mirroring from the cartridge header.
-        // This will be overridden by mapper writes if the game uses dynamic mirroring control.
+        // This will be overridden by mapper writes to $9000-$9FFF if the game
+        // uses dynamic mirroring control (e.g., Fire Hawk).
         ppu.set_mirroring(cart.mirroring);
         Self {
             prg_rom: cart.prg_rom,
             bank_select: 0,
-            previous_bit4: None, // Will be set on first write
-            mirroring_change_count: 0,
         }
     }
 
@@ -66,7 +62,7 @@ impl Camerica {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select 16KB bank for $8000-$BFFF
             // Only lower 4 bits are used for bank selection
@@ -76,30 +72,17 @@ impl Camerica {
             // - Bit 4 = 0: One-screen lower
             // - Bit 4 = 1: One-screen upper
             //
-            // Some Camerica boards (Fire Hawk) use this feature for dynamic mirroring control,
-            // while others (some Micro Machines variants) use fixed mirroring from the cartridge header.
+            // IMPORTANT: Mirroring control only applies to writes to $9000-$9FFF!
+            // This is crucial for compatibility:
+            // - Fire Hawk writes to $9000 to control mirroring
+            // - Micro Machines writes to $8000 for bank switching only
             //
-            // To distinguish board variants at runtime, we track if bit 4 changes:
-            // - If bit 4 toggles, the game uses mapper-controlled mirroring
-            // - If bit 4 never changes, the game uses fixed mirroring from the header
+            // FCEUX and other accurate emulators only apply mirroring control for
+            // writes to $9000-$9FFF to avoid breaking Micro Machines and similar games.
             //
-            // We only update mirroring after detecting at least one bit 4 transition.
-            let current_bit4 = (val & 0x10) != 0;
-
-            // Check if bit 4 has changed since the last write
-            if let Some(prev) = self.previous_bit4 {
-                if current_bit4 != prev {
-                    // Bit 4 changed - increment change counter
-                    self.mirroring_change_count = self.mirroring_change_count.saturating_add(1);
-                }
-            }
-            // Always update previous_bit4 to track the current value
-            self.previous_bit4 = Some(current_bit4);
-
-            // Only update mirroring if we've detected bit 4 changes (mapper-controlled mirroring)
-            // This prevents unwanted mirroring updates on games with fixed mirroring
-            if self.mirroring_change_count > 0 {
-                let mirroring = if current_bit4 {
+            // Reference: https://www.nesdev.org/wiki/INES_Mapper_071
+            if (0x9000..=0x9FFF).contains(&addr) {
+                let mirroring = if (val & 0x10) != 0 {
                     Mirroring::SingleScreenUpper
                 } else {
                     Mirroring::SingleScreenLower
@@ -141,7 +124,7 @@ mod tests {
         assert_eq!(camerica.read_prg(0xC000), 0x22);
 
         // Switch to bank 1 at $8000
-        camerica.write_prg(0x8000, 1, &mut ppu);
+        camerica.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(camerica.read_prg(0x8000), 0x22);
         assert_eq!(camerica.read_prg(0xC000), 0x22); // Last bank stays fixed
     }
@@ -187,7 +170,7 @@ mod tests {
 
         // Write 0x12 (bank 2, but only 4 bits used, so wraps)
         // 0x12 & 0x0F = 0x02, which wraps to bank 0 (2 % 2 = 0)
-        camerica.write_prg(0x8000, 0x12, &mut ppu);
+        camerica.write_prg(0x8000, 0x12, &mut ppu, 0);
         assert_eq!(camerica.read_prg(0x8000), 0x11); // Wraps to bank 0
     }
 
@@ -214,7 +197,7 @@ mod tests {
 
         // Test switching through first few banks
         for i in 0..8 {
-            camerica.write_prg(0x8000, i, &mut ppu);
+            camerica.write_prg(0x8000, i, &mut ppu, 0);
             assert_eq!(camerica.read_prg(0x8000), 0x11 * (i as u8 + 1));
             assert_eq!(camerica.read_prg(0xC000), 0x88); // Last bank always fixed
         }
@@ -229,32 +212,41 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Vertical, // Initial mirroring (stays unless bit 4 toggles)
+            mirroring: Mirroring::Vertical, // Initial mirroring from header
         };
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // First write with bit 4 = 0: should NOT change mirroring yet (no toggle detected)
-        camerica.write_prg(0x8000, 0x00, &mut ppu);
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays as initial
+        // Write to $8000: should NOT change mirroring (only bank select)
+        camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
 
-        // Write with bit 4 = 1: should detect toggle and change to single-screen upper
-        camerica.write_prg(0x8000, 0x10, &mut ppu);
+        // Write to $9000 with bit 4 = 1: should change to single-screen upper
+        camerica.write_prg(0x9000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
 
-        // Write bank select with bit 4 = 0: should change to single-screen lower
-        camerica.write_prg(0xC000, 0x03, &mut ppu); // Bank 3, bit 4 = 0
+        // Write to $9000 with bit 4 = 0: should change to single-screen lower
+        camerica.write_prg(0x9000, 0x03, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
 
-        // Write bank select with bit 4 = 1: should change to single-screen upper
-        camerica.write_prg(0xC000, 0x15, &mut ppu); // Bank 5, bit 4 = 1
+        // Write to $8FFF: should NOT change mirroring (outside $9000-$9FFF range)
+        camerica.write_prg(0x8FFF, 0x10, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower); // Unchanged
+
+        // Write to $A000: should NOT change mirroring (outside $9000-$9FFF range)
+        camerica.write_prg(0xA000, 0x10, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower); // Unchanged
+
+        // Write to $9FFF with bit 4 = 1: should change to single-screen upper
+        camerica.write_prg(0x9FFF, 0x15, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
     }
 
     #[test]
     fn camerica_fixed_mirroring() {
         // Test that games not using mapper-controlled mirroring keep their header mirroring
+        // This simulates Micro Machines behavior: writes to $8000 for bank switching only
         let prg = vec![0; 0x8000]; // 2 banks
 
         let cart = Cartridge {
@@ -268,16 +260,20 @@ mod tests {
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Write multiple times with same bit 4 value (no toggle)
-        camerica.write_prg(0x8000, 0x00, &mut ppu); // bit 4 = 0
+        // Write multiple times to $8000 (typical Micro Machines behavior)
+        camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
 
-        camerica.write_prg(0x8000, 0x01, &mut ppu); // bit 4 = 0
+        camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        camerica.write_prg(0xC000, 0x02, &mut ppu); // bit 4 = 0
+        camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        // Since bit 4 never toggled, mirroring should remain as the header value
+        camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+
+        // Since all writes were to $8000-$8FFF and $C000-$FFFF,
+        // mirroring should remain as the header value (horizontal)
     }
 }

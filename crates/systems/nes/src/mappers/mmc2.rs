@@ -122,7 +122,7 @@ impl Mmc2 {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         match addr {
             0xA000..=0xAFFF => {
                 // PRG ROM bank select
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(mmc2.read_prg(0x8000), 0x11);
 
         // Switch to bank 1
-        mmc2.write_prg(0xA000, 1, &mut ppu);
+        mmc2.write_prg(0xA000, 1, &mut ppu, 0);
         assert_eq!(mmc2.read_prg(0x8000), 0x22);
 
         // $C000-$FFFF should be fixed to last bank
@@ -302,8 +302,8 @@ mod tests {
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
         // Set FD bank to 1 and FE bank to 2 for left pattern table
-        mmc2.write_prg(0xB000, 1, &mut ppu); // FD/0000
-        mmc2.write_prg(0xC000, 2, &mut ppu); // FE/0000
+        mmc2.write_prg(0xB000, 1, &mut ppu, 0); // FD/0000
+        mmc2.write_prg(0xC000, 2, &mut ppu, 0); // FE/0000
 
         // Initially latch is FE, so should see bank 2
         assert_eq!(ppu.chr[0], 0x33);
@@ -331,10 +331,10 @@ mod tests {
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
         // Switch to horizontal mirroring
-        mmc2.write_prg(0xF000, 0x01, &mut ppu);
+        mmc2.write_prg(0xF000, 0x01, &mut ppu, 0);
         // (We can't directly test PPU mirroring state, but we verify the write logic)
 
         // Switch back to vertical
-        mmc2.write_prg(0xF000, 0x00, &mut ppu);
+        mmc2.write_prg(0xF000, 0x00, &mut ppu, 0);
     }
 }

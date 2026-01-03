@@ -87,7 +87,7 @@ impl Nina {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         // NINA-03/06 register is at $4100-$5FFF
         // This unusual range is due to discrete logic implementation
         if (0x4100..=0x5FFF).contains(&addr) {
@@ -130,11 +130,11 @@ mod tests {
         assert_eq!(nina.read_prg(0x8000), 0x11);
 
         // Switch to bank 1 (bit 3 = 1, so value 0x08)
-        nina.write_prg(0x4100, 0x08, &mut ppu);
+        nina.write_prg(0x4100, 0x08, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x22);
 
         // Switch back to bank 0
-        nina.write_prg(0x5000, 0x00, &mut ppu);
+        nina.write_prg(0x5000, 0x00, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x11);
     }
 
@@ -162,15 +162,15 @@ mod tests {
         assert_eq!(ppu.chr[0], 0xAA);
 
         // Switch to bank 1 (bits 0-2 = 001)
-        nina.write_prg(0x4100, 0x01, &mut ppu);
+        nina.write_prg(0x4100, 0x01, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xBB);
 
         // Switch to bank 2
-        nina.write_prg(0x4100, 0x02, &mut ppu);
+        nina.write_prg(0x4100, 0x02, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xCC);
 
         // Switch to bank 3
-        nina.write_prg(0x4100, 0x03, &mut ppu);
+        nina.write_prg(0x4100, 0x03, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xDD);
     }
 
@@ -203,12 +203,12 @@ mod tests {
         // PRG bank 1 = bit 3 = 1 (0x08)
         // CHR bank 1 = bits 0-2 = 1 (0x01)
         // Combined: 0x08 | 0x01 = 0x09
-        nina.write_prg(0x4100, 0x09, &mut ppu);
+        nina.write_prg(0x4100, 0x09, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x22);
         assert_eq!(ppu.chr[0], 0xBB);
 
         // Switch PRG to bank 0, keep CHR at bank 1
-        nina.write_prg(0x4100, 0x01, &mut ppu);
+        nina.write_prg(0x4100, 0x01, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x11);
         assert_eq!(ppu.chr[0], 0xBB);
     }
@@ -232,19 +232,19 @@ mod tests {
 
         // Test different addresses in the register range
         // $4100 should work
-        nina.write_prg(0x4100, 0x08, &mut ppu);
+        nina.write_prg(0x4100, 0x08, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x22);
 
         // $5000 should work
-        nina.write_prg(0x5000, 0x00, &mut ppu);
+        nina.write_prg(0x5000, 0x00, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x11);
 
         // $5FFF should work
-        nina.write_prg(0x5FFF, 0x08, &mut ppu);
+        nina.write_prg(0x5FFF, 0x08, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x22);
 
         // $6000 should NOT work (outside range)
-        nina.write_prg(0x6000, 0x00, &mut ppu);
+        nina.write_prg(0x6000, 0x00, &mut ppu, 0);
         assert_eq!(nina.read_prg(0x8000), 0x22); // Should still be bank 1
     }
 
@@ -267,7 +267,7 @@ mod tests {
         let mut nina = Nina::new(cart, &mut ppu);
 
         // Try to select bank 5 (bits 0-2 = 101), should wrap to bank 1 (5 % 2 = 1)
-        nina.write_prg(0x4100, 0x05, &mut ppu);
+        nina.write_prg(0x4100, 0x05, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xBB);
     }
 }
