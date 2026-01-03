@@ -2658,4 +2658,54 @@ mod boot_output_tests {
         // Note: BDA synchronization happens when INT 16h is called during program execution
         // The sync_bda_keyboard_buffer() function updates both 0x417 and 0x497
     }
+
+    #[test]
+    fn test_cpu_trace_logging_uses_rate_limiter() {
+        // This test verifies that CPU trace logging uses the log() function
+        // which applies rate limiting, preventing the emulator from hanging
+        // when trace logging is enabled.
+        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
+
+        let config = LogConfig::global();
+        // Save current settings
+        let old_level = config.get_level(LogCategory::CPU);
+        let old_rate_limit = config.get_rate_limit();
+
+        // Enable CPU trace logging with a low rate limit to make the test faster
+        config.set_level(LogCategory::CPU, LogLevel::Trace);
+        config.set_rate_limit(10); // 10 logs per second
+
+        let mut sys = PcSystem::new();
+
+        // Load a simple program that executes many instructions
+        // Simple loop: JMP 0x100 (infinite loop)
+        let program = vec![
+            0xEB, 0xFE, // JMP $-2 (infinite loop at 0x100)
+        ];
+        assert!(sys.load_executable(&program).is_ok());
+
+        sys.boot_delay_frames = 0;
+        sys.boot_started = true;
+
+        // Execute multiple frames - this would generate thousands of log messages
+        // Without rate limiting, this would hang the emulator
+        // With rate limiting, this should complete quickly
+        let start = std::time::Instant::now();
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+        let elapsed = start.elapsed();
+
+        // With rate limiting, execution should be fast (< 1 second)
+        // Without rate limiting, it would take much longer or hang
+        assert!(
+            elapsed.as_secs() < 5,
+            "CPU trace logging should use rate limiter to prevent performance degradation. Elapsed: {:?}",
+            elapsed
+        );
+
+        // Restore settings
+        config.set_level(LogCategory::CPU, old_level);
+        config.set_rate_limit(old_rate_limit);
+    }
 }

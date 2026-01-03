@@ -76,12 +76,14 @@ ld65 -C snes.cfg test_enhanced.o -o test_enhanced.sfc
 The test ROMs are automatically included in the unit tests:
 
 ```bash
-# Run all SNES tests (includes smoke tests for both ROMs)
+# Run all SNES tests (includes smoke tests for all ROMs)
 cargo test --package emu_snes
 
 # Run specific smoke test
 cargo test --package emu_snes test_snes_smoke_test_rom
 cargo test --package emu_snes test_enhanced_rom
+cargo test --package emu_snes test_priority_rom
+cargo test --package emu_snes test_sprite_overflow_rom
 ```
 
 ## ROM Format
@@ -122,11 +124,48 @@ Both ROMs use:
 - Verify non-black pixel count
 - Enable SNES logging: `--log-ppu debug --log-cpu debug`
 
+---
+
+### test_priority.sfc
+**Purpose**: Test BG tile priority bit handling
+
+**Features tested**:
+- Mode 0 rendering
+- Priority bit in tile attributes (bit 13)
+- Correct priority ordering (high-priority tiles render in front of low-priority tiles)
+- Alternating low/high priority tiles across screen
+
+**Expected output**:
+- Checkerboard pattern with alternating red (low priority) and blue (high priority) tiles
+- All tiles should be visible (priority system working correctly)
+
+**Why this is important**: Commercial games rely heavily on priority bits for layering effects, HUDs, and text overlays.
+
+---
+
+### test_sprite_overflow.sfc
+**Purpose**: Test sprite-per-scanline limits
+
+**Features tested**:
+- Sprite rendering with overflow conditions
+- 32 sprite per scanline hardware limit
+- Sprite culling when limit exceeded
+- All 128 sprites positioned on same scanline (Y=100)
+
+**Expected output**:
+- Horizontal row of sprites at Y=100
+- Only first 32 sprites should be visible (rest culled)
+- Emulator should not crash or freeze
+
+**Why this is important**: SNES hardware has strict limits that commercial games depend on. Without proper overflow handling, sprite glitches and crashes can occur.
+
+---
+
 ## Future Test ROMs
 
 Potential additions:
-- Priority bit test ROM (test BG tile priority bits)
-- Sprite overflow test (>32 sprites per scanline)
+- ~~Priority bit test ROM (test BG tile priority bits)~~ ✅ Done
+- ~~Sprite overflow test (>32 sprites per scanline)~~ ✅ Done
 - VRAM access timing test (access during/outside VBlank)
 - Controller serial I/O test
 - Mode 2-7 test ROMs (when implemented)
