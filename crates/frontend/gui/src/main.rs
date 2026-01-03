@@ -522,7 +522,14 @@ impl EmulatorSystem {
         match self {
             EmulatorSystem::NES(_) => {
                 // OpenGL renderer exists but requires GL context to enable
-                vec!["Software".to_string()]
+                #[cfg(feature = "opengl")]
+                {
+                    vec!["Software".to_string(), "OpenGL".to_string()]
+                }
+                #[cfg(not(feature = "opengl"))]
+                {
+                    vec!["Software".to_string()]
+                }
             }
             EmulatorSystem::GameBoy(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari2600(_) => vec!["Software".to_string()],
@@ -532,8 +539,15 @@ impl EmulatorSystem {
             }
             EmulatorSystem::SNES(_) => vec!["Software".to_string()],
             EmulatorSystem::N64(_) => {
-                // OpenGL renderer exists but requires GL context to enable
-                vec!["Software".to_string()]
+                // OpenGL renderer is available when opengl feature is enabled
+                #[cfg(feature = "opengl")]
+                {
+                    vec!["Software".to_string(), "OpenGL".to_string()]
+                }
+                #[cfg(not(feature = "opengl"))]
+                {
+                    vec!["Software".to_string()]
+                }
             }
         }
     }
@@ -876,6 +890,46 @@ fn save_screenshot(
     writer.write_image_data(&rgb_data)?;
 
     Ok(filepath.to_string_lossy().to_string())
+}
+
+/// Enable OpenGL renderer for N64 systems if the opengl feature is enabled
+/// This should be called after creating any new N64System instance
+#[cfg(feature = "opengl")]
+fn enable_n64_opengl_renderer(
+    sys: &mut EmulatorSystem,
+    backend: &Sdl2EguiBackend,
+) -> Option<String> {
+    if let EmulatorSystem::N64(n64_sys) = sys {
+        // Get GL context from the backend
+        let gl = unsafe {
+            glow::Context::from_loader_function(|s| {
+                backend.video_subsystem().gl_get_proc_address(s) as *const _
+            })
+        };
+
+        match n64_sys.enable_opengl_renderer(gl) {
+            Ok(()) => {
+                println!("N64 OpenGL hardware renderer enabled");
+                Some("OpenGL".to_string())
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to enable OpenGL renderer for N64: {}", e);
+                eprintln!("Falling back to software renderer");
+                Some("Software".to_string())
+            }
+        }
+    } else {
+        None
+    }
+}
+
+/// Stub for when opengl feature is not enabled
+#[cfg(not(feature = "opengl"))]
+fn enable_n64_opengl_renderer(
+    _sys: &mut EmulatorSystem,
+    _backend: &Sdl2EguiBackend,
+) -> Option<String> {
+    None
 }
 
 /// Create a file dialog with individual filters for each file type plus an "All Files" option
@@ -2049,22 +2103,8 @@ fn main() {
     }
 
     // Enable OpenGL rendering for N64 if the system is N64
-    #[cfg(feature = "opengl")]
-    if let EmulatorSystem::N64(n64_sys) = &mut sys {
-        // Get GL context from the backend
-        let gl = unsafe {
-            glow::Context::from_loader_function(|s| {
-                egui_backend.video_subsystem().gl_get_proc_address(s) as *const _
-            })
-        };
-
-        if let Err(e) = n64_sys.enable_opengl_renderer(gl) {
-            eprintln!("Warning: Failed to enable OpenGL renderer for N64: {}", e);
-            eprintln!("Falling back to software renderer");
-        } else {
-            println!("N64 OpenGL hardware renderer enabled");
-            egui_app.property_pane.rendering_backend = "OpenGL".to_string();
-        }
+    if let Some(renderer_name) = enable_n64_opengl_renderer(&mut sys, &egui_backend) {
+        egui_app.property_pane.rendering_backend = renderer_name;
     }
 
     // Initialize audio output
@@ -2560,6 +2600,18 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::N64(Box::new(n64_sys));
+
+                                        // Enable OpenGL renderer for N64
+                                        if let Some(renderer_name) =
+                                            enable_n64_opengl_renderer(&mut sys, &egui_backend)
+                                        {
+                                            egui_app.property_pane.rendering_backend =
+                                                renderer_name;
+                                        } else {
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                        }
+
                                         egui_app.property_pane.system_name = "N64".to_string();
                                         // Set renderer display based on settings preference
                                         egui_app.property_pane.rendering_backend =
@@ -3661,8 +3713,17 @@ fn main() {
                             rom_hash = None;
                             runtime_state.clear_mounts();
                             egui_app.property_pane.system_name = "N64".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
+
+                            // Enable OpenGL renderer for N64
+                            if let Some(renderer_name) =
+                                enable_n64_opengl_renderer(&mut sys, &egui_backend)
+                            {
+                                egui_app.property_pane.rendering_backend = renderer_name;
+                            } else {
+                                egui_app.property_pane.rendering_backend =
+                                    sys.get_current_renderer_name();
+                            }
+
                             egui_app.property_pane.available_renderers =
                                 sys.get_available_renderers();
                             egui_app
