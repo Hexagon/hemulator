@@ -68,7 +68,7 @@ impl ColorDreams {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Bits 0-1: PRG bank (32KB)
             // Bits 4-7: CHR bank (8KB) - some sources say bits 2-5, we'll use all high bits
@@ -112,15 +112,15 @@ mod tests {
         assert_eq!(cd.read_prg(0x8000), 0x11);
 
         // Switch to bank 1 (bits 0-1 = 01)
-        cd.write_prg(0x8000, 0x01, &mut ppu);
+        cd.write_prg(0x8000, 0x01, &mut ppu, 0);
         assert_eq!(cd.read_prg(0x8000), 0x22);
 
         // Switch to bank 2
-        cd.write_prg(0x8000, 0x02, &mut ppu);
+        cd.write_prg(0x8000, 0x02, &mut ppu, 0);
         assert_eq!(cd.read_prg(0x8000), 0x33);
 
         // Switch to bank 3
-        cd.write_prg(0x8000, 0x03, &mut ppu);
+        cd.write_prg(0x8000, 0x03, &mut ppu, 0);
         assert_eq!(cd.read_prg(0x8000), 0x44);
     }
 
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(ppu.chr[0], 0xAA);
 
         // Switch to CHR bank 1 (bits 4-7, so 0x10)
-        cd.write_prg(0x8000, 0x10, &mut ppu);
+        cd.write_prg(0x8000, 0x10, &mut ppu, 0);
         assert_eq!(ppu.chr[0], 0xBB);
     }
 
@@ -173,7 +173,7 @@ mod tests {
         let mut cd = ColorDreams::new(cart, &mut ppu);
 
         // Switch to PRG bank 1 and CHR bank 1 (0x11)
-        cd.write_prg(0x8000, 0x11, &mut ppu);
+        cd.write_prg(0x8000, 0x11, &mut ppu, 0);
         assert_eq!(cd.read_prg(0x8000), 0x22);
         assert_eq!(ppu.chr[0], 0xBB);
     }

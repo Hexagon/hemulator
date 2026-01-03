@@ -184,7 +184,7 @@ impl Mmc3 {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, ppu: &mut Ppu, _cpu_cycles: u64) {
         match addr {
             0x8000..=0x9FFF => {
                 if addr & 1 == 0 {
@@ -306,8 +306,8 @@ mod tests {
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
 
         // Switch bank 6 to 1
-        mmc3.write_prg(0x8000, 6, &mut ppu); // Select bank register 6
-        mmc3.write_prg(0x8001, 1, &mut ppu); // Set it to 1
+        mmc3.write_prg(0x8000, 6, &mut ppu, 0); // Select bank register 6
+        mmc3.write_prg(0x8001, 1, &mut ppu, 0); // Set it to 1
 
         assert_eq!(mmc3.read_prg(0x8000), 0x22); // Now bank 1
     }
@@ -326,11 +326,11 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 2
-        mmc3.write_prg(0xC000, 2, &mut ppu);
+        mmc3.write_prg(0xC000, 2, &mut ppu, 0);
         // Reload counter (sets flag, actual reload happens on next A12 edge)
-        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
         // Enable IRQ
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // Counter hasn't been reloaded yet (no A12 edge)
         assert_eq!(mmc3.irq_counter, 0);
@@ -365,12 +365,12 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Switch to vertical mirroring
-        mmc3.write_prg(0xA000, 0, &mut ppu);
+        mmc3.write_prg(0xA000, 0, &mut ppu, 0);
         // PPU should now have vertical mirroring set
         // (We can't directly test this without accessing ppu.mirroring)
 
         // Switch to horizontal mirroring
-        mmc3.write_prg(0xA000, 1, &mut ppu);
+        mmc3.write_prg(0xA000, 1, &mut ppu, 0);
     }
 
     #[test]
@@ -387,11 +387,11 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 0
-        mmc3.write_prg(0xC000, 0, &mut ppu);
+        mmc3.write_prg(0xC000, 0, &mut ppu, 0);
         // Reload counter
-        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
         // Enable IRQ
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // First A12 edge should reload counter to 0
         mmc3.notify_a12(false);
@@ -427,11 +427,11 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 1
-        mmc3.write_prg(0xC000, 1, &mut ppu);
+        mmc3.write_prg(0xC000, 1, &mut ppu, 0);
         // Reload counter
-        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
         // Enable IRQ
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // First A12 edge: reload counter to 1
         mmc3.notify_a12(false);
@@ -461,11 +461,11 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 1
-        mmc3.write_prg(0xC000, 1, &mut ppu);
+        mmc3.write_prg(0xC000, 1, &mut ppu, 0);
         // Reload counter
-        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
         // Enable IRQ
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // First A12 edge: reload to 1
         mmc3.notify_a12(false);
@@ -478,8 +478,8 @@ mod tests {
         assert!(mmc3.take_irq_pending());
 
         // Acknowledge IRQ (disable then enable)
-        mmc3.write_prg(0xE000, 0, &mut ppu);
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE000, 0, &mut ppu, 0);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // Third A12 edge: counter is 0, reload to 1
         mmc3.notify_a12(false);
@@ -511,8 +511,8 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R0 to an odd value - should be masked to even
-        mmc3.write_prg(0x8000, 0, &mut ppu); // Select R0
-        mmc3.write_prg(0x8001, 0x05, &mut ppu); // Try to set to 5 (odd)
+        mmc3.write_prg(0x8000, 0, &mut ppu, 0); // Select R0
+        mmc3.write_prg(0x8001, 0x05, &mut ppu, 0); // Try to set to 5 (odd)
 
         // R0 should actually be 4 (0x05 & 0xFE = 0x04)
         assert_eq!(
@@ -525,8 +525,8 @@ mod tests {
         assert_eq!(mmc3.chr_banks[1], expected_bank + 1);
 
         // Set R1 to an odd value
-        mmc3.write_prg(0x8000, 1, &mut ppu); // Select R1
-        mmc3.write_prg(0x8001, 0x07, &mut ppu); // Try to set to 7 (odd)
+        mmc3.write_prg(0x8000, 1, &mut ppu, 0); // Select R1
+        mmc3.write_prg(0x8001, 0x07, &mut ppu, 0); // Try to set to 7 (odd)
 
         let expected_bank = 0x07 & 0xFE;
         assert_eq!(mmc3.chr_banks[2], expected_bank);
@@ -548,15 +548,15 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R0 to 6 (even) - R0+1 would be 7, which is the last valid bank
-        mmc3.write_prg(0x8000, 0, &mut ppu);
-        mmc3.write_prg(0x8001, 6, &mut ppu);
+        mmc3.write_prg(0x8000, 0, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 6, &mut ppu, 0);
 
         // Banks 0 and 1 should be 6 and 7
         assert_eq!(mmc3.chr_banks[0], 6);
         assert_eq!(mmc3.chr_banks[1], 7);
 
         // Set R0 to 8 (which wraps to 0 after modulo)
-        mmc3.write_prg(0x8001, 8, &mut ppu);
+        mmc3.write_prg(0x8001, 8, &mut ppu, 0);
         assert_eq!(mmc3.chr_banks[0], 0); // 8 % 8 = 0
         assert_eq!(mmc3.chr_banks[1], 1); // (8 % 8) + 1 = 1
     }
@@ -580,10 +580,10 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6 to bank 1, R7 to bank 2
-        mmc3.write_prg(0x8000, 6, &mut ppu);
-        mmc3.write_prg(0x8001, 1, &mut ppu);
-        mmc3.write_prg(0x8000, 7, &mut ppu);
-        mmc3.write_prg(0x8001, 2, &mut ppu);
+        mmc3.write_prg(0x8000, 6, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 1, &mut ppu, 0);
+        mmc3.write_prg(0x8000, 7, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 2, &mut ppu, 0);
 
         // Mode 0: R6 at $8000, R7 at $A000, (-2) at $C000, (-1) at $E000
         assert_eq!(mmc3.read_prg(0x8000), 0x22); // Bank 1 (R6)
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(mmc3.read_prg(0xE000), 0x88); // Bank 7 (last)
 
         // Switch to mode 1 by setting bit 6 of bank select
-        mmc3.write_prg(0x8000, 0x40, &mut ppu);
+        mmc3.write_prg(0x8000, 0x40, &mut ppu, 0);
 
         // Mode 1: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
         assert_eq!(mmc3.read_prg(0x8000), 0x77); // Bank 6 (second last)
@@ -620,24 +620,24 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set bank registers
-        mmc3.write_prg(0x8000, 0, &mut ppu);
-        mmc3.write_prg(0x8001, 0, &mut ppu); // R0 = 0 (banks 0-1)
-        mmc3.write_prg(0x8000, 1, &mut ppu);
-        mmc3.write_prg(0x8001, 2, &mut ppu); // R1 = 2 (banks 2-3)
-        mmc3.write_prg(0x8000, 2, &mut ppu);
-        mmc3.write_prg(0x8001, 4, &mut ppu); // R2 = 4
-        mmc3.write_prg(0x8000, 3, &mut ppu);
-        mmc3.write_prg(0x8001, 5, &mut ppu); // R3 = 5
-        mmc3.write_prg(0x8000, 4, &mut ppu);
-        mmc3.write_prg(0x8001, 6, &mut ppu); // R4 = 6
-        mmc3.write_prg(0x8000, 5, &mut ppu);
-        mmc3.write_prg(0x8001, 7, &mut ppu); // R5 = 7
+        mmc3.write_prg(0x8000, 0, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 0, &mut ppu, 0); // R0 = 0 (banks 0-1)
+        mmc3.write_prg(0x8000, 1, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 2, &mut ppu, 0); // R1 = 2 (banks 2-3)
+        mmc3.write_prg(0x8000, 2, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 4, &mut ppu, 0); // R2 = 4
+        mmc3.write_prg(0x8000, 3, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 5, &mut ppu, 0); // R3 = 5
+        mmc3.write_prg(0x8000, 4, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 6, &mut ppu, 0); // R4 = 6
+        mmc3.write_prg(0x8000, 5, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 7, &mut ppu, 0); // R5 = 7
 
         // Mode 0: [R0, R0+1, R1, R1+1, R2, R3, R4, R5]
         assert_eq!(mmc3.chr_banks, [0, 1, 2, 3, 4, 5, 6, 7]);
 
         // Switch to mode 1 by setting bit 7
-        mmc3.write_prg(0x8000, 0x80, &mut ppu);
+        mmc3.write_prg(0x8000, 0x80, &mut ppu, 0);
 
         // Mode 1: [R2, R3, R4, R5, R0, R0+1, R1, R1+1]
         assert_eq!(mmc3.chr_banks, [4, 5, 6, 7, 0, 1, 2, 3]);
@@ -657,9 +657,9 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch and reload
-        mmc3.write_prg(0xC000, 1, &mut ppu);
-        mmc3.write_prg(0xC001, 0, &mut ppu);
-        mmc3.write_prg(0xE001, 0, &mut ppu); // Enable IRQ
+        mmc3.write_prg(0xC000, 1, &mut ppu, 0);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0); // Enable IRQ
 
         // Clock to reload
         mmc3.notify_a12(false);
@@ -672,7 +672,7 @@ mod tests {
         assert!(mmc3.take_irq_pending());
 
         // Disable IRQ
-        mmc3.write_prg(0xE000, 0, &mut ppu);
+        mmc3.write_prg(0xE000, 0, &mut ppu, 0);
         assert!(!mmc3.irq_enabled);
         assert!(!mmc3.irq_pending, "Disabling IRQ should clear pending flag");
 
@@ -682,7 +682,7 @@ mod tests {
         assert!(!mmc3.take_irq_pending());
 
         // Re-enable IRQ
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // Counter is now 1, clock to 0 should fire again
         mmc3.notify_a12(false);
@@ -704,9 +704,9 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set IRQ latch to 3
-        mmc3.write_prg(0xC000, 3, &mut ppu);
-        mmc3.write_prg(0xC001, 0, &mut ppu);
-        mmc3.write_prg(0xE001, 0, &mut ppu);
+        mmc3.write_prg(0xC000, 3, &mut ppu, 0);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0);
 
         // Only rising edges should clock the counter
         mmc3.notify_a12(false);
@@ -746,15 +746,15 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Bank select register should only use lower 3 bits (0-7)
-        mmc3.write_prg(0x8000, 0xFF, &mut ppu); // All bits set
+        mmc3.write_prg(0x8000, 0xFF, &mut ppu, 0); // All bits set
         assert_eq!(mmc3.bank_select, 0x07, "Bank select should mask to 3 bits");
 
         // Verify we can still write to bank register 7
-        mmc3.write_prg(0x8001, 0x42, &mut ppu);
+        mmc3.write_prg(0x8001, 0x42, &mut ppu, 0);
         assert_eq!(mmc3.bank_regs[7], 0x42);
 
         // Try selecting register 8 (should wrap to 0)
-        mmc3.write_prg(0x8000, 0x08, &mut ppu);
+        mmc3.write_prg(0x8000, 0x08, &mut ppu, 0);
         assert_eq!(mmc3.bank_select, 0x00, "Register 8 should wrap to 0");
     }
 
@@ -775,15 +775,15 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Switch to vertical mirroring (bit 0 = 0)
-        mmc3.write_prg(0xA000, 0, &mut ppu);
+        mmc3.write_prg(0xA000, 0, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Switch back to horizontal (bit 0 = 1)
-        mmc3.write_prg(0xA000, 1, &mut ppu);
+        mmc3.write_prg(0xA000, 1, &mut ppu, 0);
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
 
         // Verify other bits are ignored
-        mmc3.write_prg(0xA000, 0xFE, &mut ppu); // All bits except bit 0
+        mmc3.write_prg(0xA000, 0xFE, &mut ppu, 0); // All bits except bit 0
         assert_eq!(
             ppu.get_mirroring(),
             Mirroring::Vertical,
@@ -805,9 +805,9 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set latch to 5
-        mmc3.write_prg(0xC000, 5, &mut ppu);
-        mmc3.write_prg(0xC001, 0, &mut ppu); // Reload
-        mmc3.write_prg(0xE001, 0, &mut ppu); // Enable
+        mmc3.write_prg(0xC000, 5, &mut ppu, 0);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0); // Reload
+        mmc3.write_prg(0xE001, 0, &mut ppu, 0); // Enable
 
         // First A12 edge: reload to 5
         mmc3.notify_a12(false);
@@ -820,7 +820,7 @@ mod tests {
         assert_eq!(mmc3.irq_counter, 4);
 
         // Write to $C001 - should clear counter immediately
-        mmc3.write_prg(0xC001, 0, &mut ppu);
+        mmc3.write_prg(0xC001, 0, &mut ppu, 0);
         assert_eq!(
             mmc3.irq_counter, 0,
             "Writing to $C001 should clear counter immediately"
@@ -854,8 +854,8 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Try to set R6 to bank 10 (should wrap to bank 2)
-        mmc3.write_prg(0x8000, 6, &mut ppu);
-        mmc3.write_prg(0x8001, 10, &mut ppu);
+        mmc3.write_prg(0x8000, 6, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 10, &mut ppu, 0);
 
         // 10 % 4 = 2, so should read bank 2's data
         assert_eq!(mmc3.read_prg(0x8000), 0x12, "Bank should wrap with modulo");
@@ -876,8 +876,8 @@ mod tests {
 
         // Write to all 8 bank registers in sequence
         for i in 0..8 {
-            mmc3.write_prg(0x8000, i, &mut ppu); // Select register i
-            mmc3.write_prg(0x8001, (i * 2) as u8, &mut ppu); // Write value i*2
+            mmc3.write_prg(0x8000, i, &mut ppu, 0); // Select register i
+            mmc3.write_prg(0x8001, (i * 2) as u8, &mut ppu, 0); // Write value i*2
         }
 
         // Verify all registers were set correctly
@@ -910,8 +910,8 @@ mod tests {
         assert_eq!(mmc3.chr_bank_count(), 7);
 
         // Set R0 to 6 (even) - (6 & 0xFE) = 6, 6 % 7 = 6, (6+1) % 7 = 0
-        mmc3.write_prg(0x8000, 0, &mut ppu);
-        mmc3.write_prg(0x8001, 6, &mut ppu);
+        mmc3.write_prg(0x8000, 0, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 6, &mut ppu, 0);
 
         // Banks should be [6, 0, ...] due to wrapping
         assert_eq!(mmc3.chr_banks[0], 6);
@@ -921,15 +921,15 @@ mod tests {
         );
 
         // Set R1 to 4 - (4 & 0xFE) = 4, 4 % 7 = 4, (4+1) % 7 = 5
-        mmc3.write_prg(0x8000, 1, &mut ppu);
-        mmc3.write_prg(0x8001, 4, &mut ppu);
+        mmc3.write_prg(0x8000, 1, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 4, &mut ppu, 0);
 
         assert_eq!(mmc3.chr_banks[2], 4);
         assert_eq!(mmc3.chr_banks[3], 5);
 
         // Try setting R0 to 8 - (8 & 0xFE) = 8, 8 % 7 = 1, (1+1) % 7 = 2
-        mmc3.write_prg(0x8000, 0, &mut ppu);
-        mmc3.write_prg(0x8001, 8, &mut ppu);
+        mmc3.write_prg(0x8000, 0, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 8, &mut ppu, 0);
 
         assert_eq!(mmc3.chr_banks[0], 1, "8 & 0xFE = 8, 8 % 7 = 1");
         assert_eq!(mmc3.chr_banks[1], 2, "(1 + 1) % 7 = 2");
@@ -962,10 +962,10 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6=2, R7=3
-        mmc3.write_prg(0x8000, 6, &mut ppu);
-        mmc3.write_prg(0x8001, 2, &mut ppu);
-        mmc3.write_prg(0x8000, 7, &mut ppu);
-        mmc3.write_prg(0x8001, 3, &mut ppu);
+        mmc3.write_prg(0x8000, 6, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 2, &mut ppu, 0);
+        mmc3.write_prg(0x8000, 7, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 3, &mut ppu, 0);
 
         // Ensure we're in mode 0
         assert!(!mmc3.prg_mode);
@@ -1014,13 +1014,13 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Set R6=2, R7=3
-        mmc3.write_prg(0x8000, 6, &mut ppu);
-        mmc3.write_prg(0x8001, 2, &mut ppu);
-        mmc3.write_prg(0x8000, 7, &mut ppu);
-        mmc3.write_prg(0x8001, 3, &mut ppu);
+        mmc3.write_prg(0x8000, 6, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 2, &mut ppu, 0);
+        mmc3.write_prg(0x8000, 7, &mut ppu, 0);
+        mmc3.write_prg(0x8001, 3, &mut ppu, 0);
 
         // Switch to mode 1
-        mmc3.write_prg(0x8000, 0x40, &mut ppu);
+        mmc3.write_prg(0x8000, 0x40, &mut ppu, 0);
         assert!(mmc3.prg_mode);
 
         // Mode 1 MUST be: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
@@ -1082,19 +1082,19 @@ mod tests {
         let mut mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Disable chip (bit 7 = 0)
-        mmc3.write_prg(0xA001, 0x00, &mut ppu);
+        mmc3.write_prg(0xA001, 0x00, &mut ppu, 0);
         let (enabled, writable) = mmc3.wram_access();
         assert!(!enabled, "PRG RAM should be disabled when bit 7 is 0");
         assert!(!writable, "PRG RAM should not be writable when disabled");
 
         // Enable chip, deny writes (bit 7 = 1, bit 6 = 1)
-        mmc3.write_prg(0xA001, 0xC0, &mut ppu);
+        mmc3.write_prg(0xA001, 0xC0, &mut ppu, 0);
         let (enabled, writable) = mmc3.wram_access();
         assert!(enabled, "PRG RAM should be enabled when bit 7 is 1");
         assert!(!writable, "PRG RAM writes should be denied when bit 6 is 1");
 
         // Enable chip, allow writes (bit 7 = 1, bit 6 = 0)
-        mmc3.write_prg(0xA001, 0x80, &mut ppu);
+        mmc3.write_prg(0xA001, 0x80, &mut ppu, 0);
         let (enabled, writable) = mmc3.wram_access();
         assert!(enabled, "PRG RAM should be enabled when bit 7 is 1");
         assert!(writable, "PRG RAM writes should be allowed when bit 6 is 0");

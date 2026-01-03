@@ -53,7 +53,7 @@ impl Bnrom {
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
-    pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu) {
+    pub fn write_prg(&mut self, addr: u16, val: u8, _ppu: &mut Ppu, _cpu_cycles: u64) {
         if (0x8000..=0xFFFF).contains(&addr) {
             // Select 32KB bank - wrapping handled by modulo in read_prg
             self.bank_select = val;
@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(bnrom.read_prg(0xFFFF), 0x00);
 
         // Switch to bank 1
-        bnrom.write_prg(0x8000, 1, &mut ppu);
+        bnrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(bnrom.read_prg(0x8000), 0x22);
         assert_eq!(bnrom.read_prg(0xFFFF), 0x00);
     }
@@ -139,7 +139,7 @@ mod tests {
 
         // Test switching through all 4 banks
         for i in 0..4 {
-            bnrom.write_prg(0x8000, i, &mut ppu);
+            bnrom.write_prg(0x8000, i, &mut ppu, 0);
             assert_eq!(bnrom.read_prg(0x8000), (i + 1) as u8);
         }
     }
@@ -163,11 +163,11 @@ mod tests {
 
         // Try to select bank 3, should wrap to bank 1 (3 % 2 = 1)
         // With 2 banks, mask is 1, so writing 3 & 1 = 1
-        bnrom.write_prg(0x8000, 3, &mut ppu);
+        bnrom.write_prg(0x8000, 3, &mut ppu, 0);
         assert_eq!(bnrom.read_prg(0x8000), 0x22);
 
         // Writing 0xFF should still wrap
-        bnrom.write_prg(0x8000, 0xFF, &mut ppu);
+        bnrom.write_prg(0x8000, 0xFF, &mut ppu, 0);
         assert_eq!(bnrom.read_prg(0x8000), 0x22); // 0xFF & 1 = 1
     }
 
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(bnrom.read_prg(0xFFFF), 0xBB);
 
         // Switch to bank 1
-        bnrom.write_prg(0x8000, 1, &mut ppu);
+        bnrom.write_prg(0x8000, 1, &mut ppu, 0);
         assert_eq!(bnrom.read_prg(0x8000), 0xCC);
         assert_eq!(bnrom.read_prg(0xFFFF), 0xDD);
     }

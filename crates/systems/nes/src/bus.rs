@@ -46,6 +46,8 @@ pub struct NesBus {
     controller_shift: [Cell<u8>; 2],
     controller_read_count: [Cell<u8>; 2],
     strobe: Cell<bool>,
+    // CPU cycle counter for mapper timing (e.g., MMC1 consecutive write detection)
+    cpu_cycles: Cell<u64>,
 }
 
 impl NesBus {
@@ -60,6 +62,7 @@ impl NesBus {
             controller_shift: [Cell::new(0), Cell::new(0)],
             controller_read_count: [Cell::new(0), Cell::new(0)],
             strobe: Cell::new(false),
+            cpu_cycles: Cell::new(0),
         }
     }
 
@@ -131,6 +134,12 @@ impl NesBus {
         if idx < 2 {
             self.controller_state[idx] = state;
         }
+    }
+
+    /// Add CPU cycles to the bus cycle counter (for mapper timing)
+    pub fn add_cycles(&self, cycles: u32) {
+        let current = self.cpu_cycles.get();
+        self.cpu_cycles.set(current.wrapping_add(cycles as u64));
     }
 }
 
@@ -270,7 +279,8 @@ impl Bus for NesBus {
             }
             0x8000..=0xFFFF => {
                 if let Some(m) = &mut self.mapper {
-                    m.borrow_mut().write_prg(addr, val, &mut self.ppu);
+                    let cycles = self.cpu_cycles.get();
+                    m.borrow_mut().write_prg(addr, val, &mut self.ppu, cycles);
                 }
             }
             _ => {}
