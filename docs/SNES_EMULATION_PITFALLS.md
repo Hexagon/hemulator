@@ -196,7 +196,7 @@ Our SNES emulator implements:
 ### Medium Priority
 6. ✅ ~~Add VRAM access protection~~
 7. ✅ ~~Add BG3 priority toggle for Mode 1~~
-8. Create test ROMs for priority and sprite overflow
+8. ✅ ~~Create test ROMs for priority and sprite overflow~~
 9. ✅ ~~Implement $4200 auto-read enable/disable control~~
 
 ### Low Priority
