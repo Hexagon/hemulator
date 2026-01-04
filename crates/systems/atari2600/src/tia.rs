@@ -227,14 +227,14 @@ pub struct Tia {
     // INPT4/INPT5: Joystick fire buttons (bit 7: 0=pressed, 1=not pressed)
     inpt4: u8, // Player 0 fire button
     inpt5: u8, // Player 1 fire button
-    
+
     // INPT0-INPT3: Paddle controllers (bit 7: 0=charged, 1=not charged)
     // Paddles use capacitor charging time to measure position
     inpt0: u8, // Paddle 0 (Port 0 X)
     inpt1: u8, // Paddle 1 (Port 0 Y)
     inpt2: u8, // Paddle 2 (Port 1 X)
     inpt3: u8, // Paddle 3 (Port 1 Y)
-    
+
     // Paddle state
     paddle_positions: [u8; 4], // 0-255 for each paddle (0 = left/up, 255 = right/down)
     paddle_charge_time: [u32; 4], // Color clocks since capacitor dump
@@ -486,13 +486,13 @@ impl Tia {
             // Capacitors are charging
             for i in 0..4 {
                 self.paddle_charge_time[i] += 1;
-                
+
                 // Calculate charge threshold based on paddle position
                 // Position 0 (left) = fast charge (small threshold)
                 // Position 255 (right) = slow charge (large threshold)
                 // Typical range: ~56000 to ~80000 color clocks for full range
                 let threshold = 56000 + (self.paddle_positions[i] as u32 * 100);
-                
+
                 // Update INPTx bit 7 based on whether capacitor has charged
                 if self.paddle_charge_time[i] >= threshold {
                     // Capacitor charged - bit 7 goes high
@@ -608,10 +608,10 @@ impl Tia {
             0x01 => {
                 self.writes_vblank = self.writes_vblank.saturating_add(1);
                 self.vblank = (val & 0x02) != 0;
-                
+
                 // Bit 6: Latch paddle fire buttons (optional, not commonly used)
                 self.paddle_latch_enabled = (val & 0x40) != 0;
-                
+
                 // Bit 7: Dump paddle capacitors to ground
                 let new_dump = (val & 0x80) != 0;
                 if new_dump && !self.paddle_dump_enabled {
@@ -870,7 +870,7 @@ impl Tia {
     pub fn clock(&mut self) {
         // Update paddle capacitor charging (every color clock)
         self.update_paddle_charging();
-        
+
         // Simplified: just advance pixel counter
         self.pixel += 3; // 3 color clocks per CPU cycle
 
@@ -1303,11 +1303,11 @@ impl Tia {
         // Check each copy
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
-            
+
             // Check if x is within this copy's range
             if x >= copy_pos && x < copy_pos + 8 * player_size {
                 let offset = x - copy_pos;
-                
+
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
 
@@ -1366,7 +1366,7 @@ impl Tia {
         // Check each copy
         for copy in 0..num_copies {
             let copy_pos = (pos as usize + copy * spacing) % 160;
-            
+
             // Check if x is within this copy's range
             if x >= copy_pos && x < copy_pos + missile_size {
                 return true;
@@ -1385,7 +1385,7 @@ impl Tia {
         // Ball size is controlled by CTRLPF bits 4-5 (1, 2, 4, or 8 pixels)
         let ball_pos = state.ball_x as usize;
         let ball_size = state.ball_size as usize;
-        
+
         // Check if x is within ball's range
         x >= ball_pos && x < ball_pos + ball_size
     }
@@ -2371,10 +2371,10 @@ mod tests {
         let mut tia = Tia::new();
 
         // Set paddle positions
-        tia.set_paddle_position(0, 0);     // Fully left
-        tia.set_paddle_position(1, 128);   // Center
-        tia.set_paddle_position(2, 255);   // Fully right
-        tia.set_paddle_position(3, 64);    // Quarter turn
+        tia.set_paddle_position(0, 0); // Fully left
+        tia.set_paddle_position(1, 128); // Center
+        tia.set_paddle_position(2, 255); // Fully right
+        tia.set_paddle_position(3, 64); // Quarter turn
 
         assert_eq!(tia.paddle_positions[0], 0);
         assert_eq!(tia.paddle_positions[1], 128);
@@ -2447,8 +2447,8 @@ mod tests {
         let mut tia2 = Tia::new();
 
         // Set different positions
-        tia1.set_paddle_position(0, 0);     // Fast charge
-        tia2.set_paddle_position(0, 255);   // Slow charge
+        tia1.set_paddle_position(0, 0); // Fast charge
+        tia2.set_paddle_position(0, 255); // Slow charge
 
         // Dump and release
         tia1.write(0x01, 0x80);

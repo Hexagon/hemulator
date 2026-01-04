@@ -266,7 +266,7 @@ impl System for Atari2600System {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Atari 2600 frames are 262 scanlines (NTSC).
         // We detect frame boundaries by watching for scanline wraparound from 261→0.
-        
+
         // Clear per-frame debug stats
         if let Some(bus) = self.cpu.bus_mut() {
             bus.tia.reset_write_stats();
@@ -300,14 +300,17 @@ impl System for Atari2600System {
 
                 // Detect frame completion: scanline wrapped from high (>250) to low (<10)
                 // This indicates we've crossed the 261→0 boundary
-                if current_scanline < last_scanline && last_scanline > 250 && current_scanline < 10 {
+                if current_scanline < last_scanline && last_scanline > 250 && current_scanline < 10
+                {
                     if debug_vsync {
-                        eprintln!("[ATARI] Frame complete: scanline {} -> {} after {} CPU steps", 
-                                  last_scanline, current_scanline, cpu_steps);
+                        eprintln!(
+                            "[ATARI] Frame complete: scanline {} -> {} after {} CPU steps",
+                            last_scanline, current_scanline, cpu_steps
+                        );
                     }
                     break;
                 }
-                
+
                 last_scanline = current_scanline;
             } else {
                 // No bus -> can't advance time; bail rather than spinning forever
