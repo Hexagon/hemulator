@@ -135,13 +135,6 @@
 
 use emu_core::types::Frame;
 
-// Default CGB palette colors (matches CGB boot ROM behavior for DMG game compatibility)
-// These are 15-bit RGB555 values in little-endian format: (low_byte, high_byte)
-const CGB_DEFAULT_WHITE: (u8, u8) = (0xFF, 0x7F); // 0x7FFF - White
-const CGB_DEFAULT_LIGHT_GRAY: (u8, u8) = (0xB5, 0x56); // 0x56B5 - Light Gray (RGB888: 0xAAAAAA)
-const CGB_DEFAULT_DARK_GRAY: (u8, u8) = (0x4A, 0x29); // 0x294A - Dark Gray (RGB888: 0x555555)
-const CGB_DEFAULT_BLACK: (u8, u8) = (0x00, 0x00); // 0x0000 - Black
-
 /// Game Boy PPU state
 pub struct Ppu {
     /// VRAM Bank 0 (8KB)
@@ -190,8 +183,6 @@ pub struct Ppu {
     obj_palette_data: [u8; 64],
     /// CGB mode enabled flag
     cgb_mode: bool,
-    /// CGB compatibility mode flag (DMG game with CGB support)
-    cgb_compat_mode: bool,
 }
 
 // LCDC bits
@@ -232,41 +223,32 @@ impl Ppu {
             bg_palette_data: [0; 64],
             obj_palette_data: [0; 64],
             cgb_mode: false,
-            cgb_compat_mode: false,
         }
     }
 
     /// Enable CGB mode
-    pub fn enable_cgb_mode(&mut self, compat_mode: bool) {
+    pub fn enable_cgb_mode(&mut self) {
         self.cgb_mode = true;
-        self.cgb_compat_mode = compat_mode;
+        // Initialize CGB palettes with a default grayscale palette
+        // Real CGB games will overwrite these via palette registers (0xFF68-0xFF6B)
+        // This default provides sensible colors for test ROMs and DMG games with CGB support
+        // Format: 4 colors per palette, 8 palettes, 2 bytes per color (RGB555 little-endian)
+        let grayscale = [
+            0xFF, 0x7F, // White (0x7FFF)
+            0xB5, 0x56, // Light Gray (0x56B5)
+            0x4A, 0x29, // Dark Gray (0x294A)
+            0x00, 0x00, // Black (0x0000)
+        ];
 
-        // Only initialize palettes for DMG compatibility mode
-        // CGB-only games expect palettes to start at 0 and will set them via registers
-        if compat_mode {
-            // Initialize CGB palettes with default grayscale values
-            // This matches the behavior of the CGB boot ROM for DMG games
-            let default_colors = [
-                CGB_DEFAULT_WHITE,
-                CGB_DEFAULT_LIGHT_GRAY,
-                CGB_DEFAULT_DARK_GRAY,
-                CGB_DEFAULT_BLACK,
-            ];
-
-            // Initialize all 8 background and object palettes with the default grayscale
-            Self::initialize_palette_data(&mut self.bg_palette_data, &default_colors);
-            Self::initialize_palette_data(&mut self.obj_palette_data, &default_colors);
-        }
-        // For CGB-only games, palettes remain at 0 (initialized in new())
-    }
-
-    /// Helper function to initialize a palette data array with default colors
-    fn initialize_palette_data(palette_data: &mut [u8; 64], default_colors: &[(u8, u8); 4]) {
+        // Initialize all 8 palettes with the same grayscale
         for palette_idx in 0..8 {
-            for (color_idx, &(low, high)) in default_colors.iter().enumerate() {
-                let byte_idx = (palette_idx * 8) + (color_idx * 2);
-                palette_data[byte_idx] = low;
-                palette_data[byte_idx + 1] = high;
+            for color_idx in 0..4 {
+                let src_idx = color_idx * 2;
+                let dst_idx = (palette_idx * 8) + (color_idx * 2);
+                self.bg_palette_data[dst_idx] = grayscale[src_idx];
+                self.bg_palette_data[dst_idx + 1] = grayscale[src_idx + 1];
+                self.obj_palette_data[dst_idx] = grayscale[src_idx];
+                self.obj_palette_data[dst_idx + 1] = grayscale[src_idx + 1];
             }
         }
     }
@@ -482,12 +464,7 @@ impl Ppu {
                 // Bit 4: Not used
                 // Bit 3: VRAM bank (0=bank 0, 1=bank 1) for tile data
                 // Bits 2-0: Background palette number (0-7)
-                // In CGB compatibility mode, always use palette 0 (ignore tile attributes)
-                let bg_palette_num = if self.cgb_compat_mode {
-                    0
-                } else {
-                    tile_attr & 0x07
-                };
+                let bg_palette_num = tile_attr & 0x07;
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
@@ -536,14 +513,7 @@ impl Ppu {
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
                     // CGB mode: use color palettes
-                    // In compatibility mode, apply DMG palette first to translate color index
-                    let final_color_index = if self.cgb_compat_mode {
-                        // DMG compatibility mode: apply BGP register to get final color index
-                        (self.bgp >> (color_index * 2)) & 0x03
-                    } else {
-                        color_index
-                    };
-                    let palette_index = (bg_palette_num * 4 + final_color_index) * 2;
+                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
                     let color_low = self.bg_palette_data[palette_index as usize];
                     let color_high = self.bg_palette_data[(palette_index + 1) as usize];
                     self.cgb_color_to_rgb(color_low, color_high)
@@ -611,12 +581,7 @@ impl Ppu {
                     0
                 };
 
-                // In CGB compatibility mode, always use palette 0 (ignore tile attributes)
-                let bg_palette_num = if self.cgb_compat_mode {
-                    0
-                } else {
-                    tile_attr & 0x07
-                };
+                let bg_palette_num = tile_attr & 0x07;
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
@@ -669,14 +634,7 @@ impl Ppu {
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
                     // CGB mode: use color palettes
-                    // In compatibility mode, apply DMG palette first to translate color index
-                    let final_color_index = if self.cgb_compat_mode {
-                        // DMG compatibility mode: apply BGP register to get final color index
-                        (self.bgp >> (color_index * 2)) & 0x03
-                    } else {
-                        color_index
-                    };
-                    let palette_index = (bg_palette_num * 4 + final_color_index) * 2;
+                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
                     let color_low = self.bg_palette_data[palette_index as usize];
                     let color_high = self.bg_palette_data[(palette_index + 1) as usize];
                     self.cgb_color_to_rgb(color_low, color_high)
@@ -762,19 +720,11 @@ impl Ppu {
                 let flip_y = (flags & 0x40) != 0;
                 let bg_priority = (flags & 0x80) != 0;
 
-                // Extract palette numbers based on mode
-                // In CGB compat mode, use DMG palette number (bit 4) for BOTH dmg and cgb palette
-                // In CGB-only mode, use CGB palette number (bits 2-0)
-                let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) =
-                    if self.cgb_mode && !self.cgb_compat_mode {
-                        // CGB-only mode: use CGB palette from bits 2-0
-                        (0, flags & 0x07, (flags >> 3) & 0x01)
-                    } else {
-                        // DMG mode or CGB compat mode: use DMG palette from bit 4
-                        // In compat mode, this palette number is used for BOTH DMG translation and CGB lookup
-                        let dmg_pal = (flags >> 4) & 0x01;
-                        (dmg_pal, dmg_pal, 0)
-                    };
+                let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) = if self.cgb_mode {
+                    (0, flags & 0x07, (flags >> 3) & 0x01)
+                } else {
+                    ((flags >> 4) & 0x01, 0, 0)
+                };
 
                 // Calculate which row of the sprite we're rendering
                 // sy = screen_y - (oam_y - 16) = screen_y - oam_y + 16
@@ -867,19 +817,7 @@ impl Ppu {
                     // Apply palette and convert to RGB
                     let rgb = if self.cgb_mode {
                         // CGB mode: use color palettes
-                        // In compatibility mode, apply DMG palette first to translate color index
-                        let final_color_index = if self.cgb_compat_mode {
-                            // DMG compatibility mode: apply OBP0/OBP1 register to get final color index
-                            let palette = if dmg_palette_num == 1 {
-                                self.obp1
-                            } else {
-                                self.obp0
-                            };
-                            (palette >> (color_index * 2)) & 0x03
-                        } else {
-                            color_index
-                        };
-                        let palette_index = (cgb_palette_num * 4 + final_color_index) * 2;
+                        let palette_index = (cgb_palette_num * 4 + color_index) * 2;
                         let color_low = self.obj_palette_data[palette_index as usize];
                         let color_high = self.obj_palette_data[(palette_index + 1) as usize];
                         self.cgb_color_to_rgb(color_low, color_high)

@@ -130,8 +130,6 @@ pub struct GbBus {
     button_state: u8,
     /// CGB mode flag (true if Game Boy Color features are enabled)
     cgb_mode: bool,
-    /// CGB compatibility mode flag (true for DMG games with CGB support, flag 0x80)
-    cgb_compat_mode: bool,
 }
 
 impl GbBus {
@@ -149,7 +147,6 @@ impl GbBus {
             joypad: 0xFF,
             button_state: 0xFF,
             cgb_mode: false,
-            cgb_compat_mode: false,
         }
     }
 
@@ -175,12 +172,6 @@ impl GbBus {
         self.cgb_mode
     }
 
-    /// Check if in CGB compatibility mode (DMG game with CGB support)
-    #[allow(dead_code)] // Used internally for palette handling
-    pub fn is_cgb_compat_mode(&self) -> bool {
-        self.cgb_compat_mode
-    }
-
     pub fn load_cart(&mut self, data: &[u8]) {
         // Parse cart header
         if data.len() < 0x150 {
@@ -188,7 +179,6 @@ impl GbBus {
             self.mapper = Some(Mapper::from_cart(data.to_vec(), vec![], 0x00));
             self.boot_rom_enabled = false;
             self.cgb_mode = false;
-            self.cgb_compat_mode = false;
             return;
         }
 
@@ -196,15 +186,14 @@ impl GbBus {
         let ram_size_code = data[0x149];
 
         // Check CGB flag at 0x143
-        // 0x80 = Works on both DMG and CGB (compatibility mode)
+        // 0x80 = Works on both DMG and CGB
         // 0xC0 = CGB only
         let cgb_flag = data[0x143];
         self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
-        self.cgb_compat_mode = cgb_flag == 0x80; // DMG game with CGB support
 
         // Enable CGB mode in PPU if CGB ROM
         if self.cgb_mode {
-            self.ppu.enable_cgb_mode(self.cgb_compat_mode);
+            self.ppu.enable_cgb_mode();
         }
 
         let ram_size = match ram_size_code {
