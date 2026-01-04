@@ -26,6 +26,19 @@ struct DmaChannel {
     hdma_line: u8,
 }
 
+/// HDMA channel state (runtime state, not registers)
+#[derive(Clone, Copy, Default)]
+struct HdmaState {
+    /// Current table address
+    table_addr: u32,
+    /// Current line counter
+    line_counter: u8,
+    /// Repeat mode flag
+    repeat: bool,
+    /// Channel is active
+    active: bool,
+}
+
 impl Default for DmaChannel {
     fn default() -> Self {
         Self {
@@ -64,6 +77,10 @@ pub struct SnesBus {
     auto_joypad_enable: bool,
     /// DMA channels (8 channels)
     dma_channels: [DmaChannel; 8],
+    /// HDMA enable register ($420C)
+    hdma_enable: u8,
+    /// HDMA state for each channel
+    hdma_state: [HdmaState; 8],
 }
 
 impl SnesBus {
@@ -79,6 +96,8 @@ impl SnesBus {
             controller_strobe: false,
             auto_joypad_enable: true, // Default to enabled
             dma_channels: [DmaChannel::default(); 8],
+            hdma_enable: 0,
+            hdma_state: [HdmaState::default(); 8],
         }
     }
 
@@ -260,6 +279,126 @@ impl SnesBus {
 
         cycles
     }
+
+    /// Initialize HDMA channels at start of frame
+    pub fn init_hdma(&mut self) {
+        for ch in 0..8 {
+            if (self.hdma_enable & (1 << ch)) != 0 {
+                let dma = self.dma_channels[ch];
+
+                // Initialize HDMA state from registers
+                self.hdma_state[ch].table_addr =
+                    (dma.hdma_table as u32) | ((dma.hdma_bank as u32) << 16);
+                self.hdma_state[ch].line_counter = 0;
+                self.hdma_state[ch].repeat = false;
+                self.hdma_state[ch].active = true;
+
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "HDMA Channel {} initialized: table=${:06X}",
+                        ch, self.hdma_state[ch].table_addr
+                    )
+                });
+            } else {
+                self.hdma_state[ch].active = false;
+            }
+        }
+    }
+
+    /// Execute HDMA for all active channels (called during H-blank of each scanline)
+    pub fn do_hdma(&mut self) -> u32 {
+        let mut cycles = 0u32;
+
+        for ch in 0..8 {
+            if !self.hdma_state[ch].active {
+                continue;
+            }
+
+            let dma = self.dma_channels[ch];
+
+            // Check if we need to fetch a new line count
+            if self.hdma_state[ch].line_counter == 0 {
+                // Read line count byte from table
+                let line_byte = self.read(self.hdma_state[ch].table_addr);
+                self.hdma_state[ch].table_addr += 1;
+
+                // Check for termination (line count = 0)
+                if line_byte == 0 {
+                    self.hdma_state[ch].active = false;
+                    log(LogCategory::Bus, LogLevel::Debug, || {
+                        format!("HDMA Channel {} terminated", ch)
+                    });
+                    continue;
+                }
+
+                // Extract repeat flag and line count
+                self.hdma_state[ch].repeat = (line_byte & 0x80) != 0;
+                self.hdma_state[ch].line_counter = line_byte & 0x7F;
+
+                // For indirect mode, read the indirect address
+                let indirect = (dma.control & 0x40) != 0;
+                if indirect {
+                    // Read 2-byte indirect address
+                    let addr_low = self.read(self.hdma_state[ch].table_addr) as u32;
+                    let addr_high = self.read(self.hdma_state[ch].table_addr + 1) as u32;
+                    self.hdma_state[ch].table_addr += 2;
+
+                    // Store indirect address (will be used for data fetch)
+                    // For now, we'll use the A-bus address field temporarily
+                    self.dma_channels[ch].a_addr =
+                        addr_low | (addr_high << 8) | ((dma.hdma_bank as u32) << 16);
+                }
+            }
+
+            // Perform the transfer
+            let transfer_mode = dma.control & 0x07;
+            let bytes_to_transfer = match transfer_mode {
+                0 | 2 | 6 => 1, // 1 byte
+                1 | 5 => 2,     // 2 bytes
+                3 | 7 => 4,     // 4 bytes
+                4 => 4,         // 4 bytes
+                _ => 1,
+            };
+
+            let indirect = (dma.control & 0x40) != 0;
+            let source_addr = if indirect {
+                // Use indirect address
+                dma.a_addr
+            } else {
+                // Use table address directly
+                self.hdma_state[ch].table_addr
+            };
+
+            // Transfer the bytes
+            for i in 0..bytes_to_transfer {
+                let b_reg = match transfer_mode {
+                    0 | 4 => 0x2100 | (dma.b_addr as u16),
+                    1 | 5 => 0x2100 | ((dma.b_addr as u16) + (i as u16 & 1)),
+                    2 | 6 => 0x2100 | (dma.b_addr as u16),
+                    3 | 7 => 0x2100 | ((dma.b_addr as u16) + ((i as u16 >> 1) & 1)),
+                    _ => 0x2100 | (dma.b_addr as u16),
+                };
+
+                let val = self.read(source_addr + i as u32);
+                self.write(b_reg as u32, val);
+                cycles += 8; // 8 cycles per byte
+            }
+
+            // Update addresses for next scanline
+            if indirect {
+                // Increment indirect address
+                self.dma_channels[ch].a_addr += bytes_to_transfer as u32;
+            } else if !self.hdma_state[ch].repeat {
+                // Increment table address (only if not in repeat mode)
+                self.hdma_state[ch].table_addr += bytes_to_transfer as u32;
+            }
+
+            // Decrement line counter
+            self.hdma_state[ch].line_counter -= 1;
+        }
+
+        cycles
+    }
 }
 
 impl Default for SnesBus {
@@ -291,6 +430,8 @@ impl Memory65c816 for SnesBus {
                             0x00
                         }
                     }
+                    // $420C - HDMAEN - HDMA Enable (read)
+                    0x420C => self.hdma_enable,
                     // $4016 - JOYSER0 - Controller 1 Serial Data
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
@@ -495,6 +636,15 @@ impl Memory65c816 for SnesBus {
                             // and perform the DMA transfer. We'll handle this in the CPU step.
                             // For now, we just trigger it immediately.
                             let _cycles = self.do_dma(val);
+                        }
+                    }
+                    // $420C - HDMAEN - HDMA Enable
+                    0x420C => {
+                        self.hdma_enable = val;
+                        if val != 0 {
+                            log(LogCategory::Bus, LogLevel::Info, || {
+                                format!("SNES Bus: HDMA enabled for channels 0b{:08b}", val)
+                            });
                         }
                     }
                     // $43x0-$43xA - DMA channel registers (write)
@@ -729,5 +879,113 @@ mod tests {
         bus.write(0x420B, 0x03); // Enable channels 0 and 1
 
         // Both channels should complete
+    }
+
+    #[test]
+    fn test_hdma_enable_register() {
+        let mut bus = SnesBus::new();
+
+        // Write to HDMA enable register
+        bus.write(0x420C, 0x05); // Enable channels 0 and 2
+
+        // Read back
+        assert_eq!(bus.read(0x420C), 0x05);
+        assert_eq!(bus.hdma_enable, 0x05);
+    }
+
+    #[test]
+    fn test_hdma_initialization() {
+        let mut bus = SnesBus::new();
+
+        // Configure HDMA channel 0
+        bus.write(0x4300, 0x00); // Mode 0, direct
+        bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP - brightness)
+        bus.write(0x4307, 0x7E); // HDMA bank
+        bus.write(0x4308, 0x00); // HDMA table address low
+        bus.write(0x4309, 0x10); // HDMA table address high ($7E1000)
+
+        // Set up a simple HDMA table in WRAM
+        // Format: [line_count, data, line_count, data, ..., 0]
+        bus.wram[0x1000] = 0x01; // 1 scanline
+        bus.wram[0x1001] = 0x0F; // Full brightness
+        bus.wram[0x1002] = 0x00; // Terminate
+
+        // Enable HDMA
+        bus.write(0x420C, 0x01); // Enable channel 0
+
+        // Initialize HDMA
+        bus.init_hdma();
+
+        // Verify state was initialized
+        assert!(bus.hdma_state[0].active);
+        assert_eq!(bus.hdma_state[0].table_addr, 0x7E1000);
+    }
+
+    #[test]
+    fn test_hdma_execution_simple() {
+        let mut bus = SnesBus::new();
+
+        // Configure HDMA channel 0 for brightness control
+        bus.write(0x4300, 0x00); // Mode 0: 1 byte transfer, direct
+        bus.write(0x4301, 0x00); // B-bus: $2100 (INIDISP)
+        bus.write(0x4307, 0x7E); // HDMA bank
+        bus.write(0x4308, 0x00); // HDMA table low
+        bus.write(0x4309, 0x20); // HDMA table high ($7E2000)
+
+        // Set up HDMA table: 2 scanlines of 0x0F brightness, then terminate
+        bus.wram[0x2000] = 0x02; // 2 scanlines
+        bus.wram[0x2001] = 0x0F; // Brightness value
+        bus.wram[0x2002] = 0x00; // Terminate
+
+        // Enable and initialize HDMA
+        bus.write(0x420C, 0x01);
+        bus.init_hdma();
+
+        // Execute HDMA for first scanline
+        let _cycles = bus.do_hdma();
+
+        // Verify the HDMA executed (line counter should be decremented)
+        assert_eq!(bus.hdma_state[0].line_counter, 1);
+
+        // Execute HDMA for second scanline
+        let _cycles = bus.do_hdma();
+
+        // Line counter should be 0, ready to fetch next entry
+        assert_eq!(bus.hdma_state[0].line_counter, 0);
+
+        // Execute HDMA again - should terminate
+        let _cycles = bus.do_hdma();
+
+        // Channel should be inactive now
+        assert!(!bus.hdma_state[0].active);
+    }
+
+    #[test]
+    fn test_hdma_repeat_mode() {
+        let mut bus = SnesBus::new();
+
+        // Configure HDMA
+        bus.write(0x4300, 0x00); // Mode 0
+        bus.write(0x4301, 0x00); // $2100
+        bus.write(0x4307, 0x7E);
+        bus.write(0x4308, 0x00);
+        bus.write(0x4309, 0x30);
+
+        // HDMA table with repeat flag set (0x80 | line_count)
+        bus.wram[0x3000] = 0x83; // Repeat for 3 scanlines
+        bus.wram[0x3001] = 0x07; // Value
+        bus.wram[0x3002] = 0x00; // Terminate
+
+        bus.write(0x420C, 0x01);
+        bus.init_hdma();
+
+        // Execute HDMA 3 times
+        for _ in 0..3 {
+            let _cycles = bus.do_hdma();
+        }
+
+        // Should still be at same table position (repeat mode)
+        // and line counter should be 0
+        assert_eq!(bus.hdma_state[0].line_counter, 0);
     }
 }

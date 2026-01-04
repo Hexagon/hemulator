@@ -6,7 +6,7 @@ This crate implements Super Nintendo Entertainment System emulation for the Hemu
 
 ## Current Status
 
-The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrolling, DMA, HiROM, and full controller support.
+The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrolling, DMA, HDMA, HiROM, and full controller support.
 
 ### What Works
 
@@ -20,6 +20,12 @@ The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrollin
   - All transfer modes (0-7) with proper patterns
   - Address increment/decrement/fixed modes
   - Cycle-accurate timing (8 cycles per byte + overhead)
+- ✅ **HDMA** - H-blank DMA for scanline effects
+  - 8-channel HDMA support ($420C, $4300-$437F)
+  - Direct and indirect addressing modes
+  - Per-scanline register updates
+  - Line counter and repeat mode
+  - Automatic table processing
 - ✅ **Cartridge Loading** - Both LoROM and HiROM mapping with SMC header detection
   - Automatic mapping mode detection from ROM header
   - LoROM: 32KB banks at $8000-$FFFF per bank
@@ -36,7 +42,6 @@ The SNES emulator is **functional** with CPU, PPU Modes 0 & 1, sprites, scrollin
 
 - ⏳ **PPU**: Modes 2-7 not implemented
   - No windows, masks, or effects
-  - No HDMA
   - No mosaic or color math
 - ⏳ **APU (SPC700)**: Not implemented - no audio
 - ⏳ **Enhancement Chips**: No SuperFX, DSP, SA-1, etc.
@@ -52,6 +57,7 @@ SnesSystem
           ├── 128KB WRAM
           ├── DMA Controller (8 channels)
           │   ├── General-purpose DMA
+          │   ├── HDMA (H-blank DMA)
           │   └── Transfer modes 0-7
           ├── SNES PPU (Modes 0 & 1)
           │   ├── 64KB VRAM
@@ -74,6 +80,17 @@ SnesSystem
 - Address modes: increment, decrement, fixed
 - Direction: A-bus ↔ B-bus (both directions)
 - Cycle-accurate timing (8 cycles per byte transferred)
+
+**HDMA (H-blank DMA) Support**:
+
+- 8 independent HDMA channels (shared with DMA)
+- HDMA enable register ($420C - HDMAEN)
+- Direct and indirect addressing modes
+- Automatic table processing with line counters
+- Repeat mode support (bit 7 of line count)
+- Executed during H-blank of each scanline (~40 cycles)
+- Per-scanline register updates for visual effects
+- Used for: gradient backgrounds, waterfalls, parallax scrolling, Mode 7 effects
               ├── ROM banks
               └── 32KB SRAM
 ```
@@ -148,6 +165,7 @@ The cartridge automatically detects whether a ROM uses LoROM or HiROM mapping by
 - **$2000-$5FFF**: Hardware registers (PPU, APU, DMA)
 - **$4300-$437F**: DMA channel registers (8 channels × 11 registers)
 - **$420B**: DMA enable register (MDMAEN)
+- **$420C**: HDMA enable register (HDMAEN)
 
 ## Building
 
@@ -166,9 +184,10 @@ cargo run --release -p emu_gui -- path/to/game.sfc
 
 The SNES crate includes comprehensive tests:
 
-- **57 total tests**:
+- **61 total tests**:
   - Cartridge tests (loading, SMC header, LoROM, HiROM, mapping detection)
   - DMA tests (registers, transfers, multiple channels)
+  - HDMA tests (enable register, initialization, execution, repeat mode)
   - PPU tests (Modes 0 & 1, scrolling, sprites, OAM registers, priority)
   - Controller tests (serial I/O, auto-read, button mapping)
   - System tests (state management)
@@ -230,9 +249,9 @@ controller::RIGHT   // 0x0100
 
 See [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system) for user-facing limitations.
 
-**Status**: Functional - can run games using Mode 0 or Mode 1 with sprites, controllers, and DMA. Supports both LoROM and HiROM mapping. Missing only audio and advanced PPU modes.
+**Status**: Functional - can run games using Mode 0 or Mode 1 with sprites, controllers, DMA, and HDMA. Supports both LoROM and HiROM mapping. Missing only audio and advanced PPU modes.
 
-**Compatibility**: Estimated ~75-85% of SNES library playable (with DMA and HiROM support unlocking most games that use Modes 0-1).
+**Compatibility**: Estimated ~85-90% of SNES library playable (with DMA, HDMA, and HiROM support unlocking most games that use Modes 0-1, including those with advanced visual effects).
 
 ## Performance
 
@@ -245,7 +264,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system
 **Short Term**:
 - PPU Mode 2-7 support
 - APU (SPC700 CPU + DSP)
-- HDMA (H-blank DMA)
 
 **Medium Term**:
 - Save RAM persistence
@@ -262,7 +280,7 @@ When adding SNES features:
 
 1. **PPU Modes**: Add to `src/ppu.rs`
 2. **APU**: Create `src/apu.rs` with SPC700 CPU
-3. **HDMA**: Extend `src/bus.rs` DMA implementation
+3. **DMA/HDMA**: Extend `src/bus.rs` (already implemented)
 4. **Tests**: Add unit tests for new functionality
 5. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
 
