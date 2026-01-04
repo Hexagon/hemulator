@@ -254,7 +254,7 @@ impl Default for Settings {
             recent_files: Vec::new(),
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
-            video_backend: "opengl".to_string(),
+            video_backend: "software".to_string(),
             scaling_mode: ScalingMode::default(),
             fullscreen: false,
             fullscreen_with_gui: false,
