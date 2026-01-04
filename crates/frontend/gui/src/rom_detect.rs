@@ -12,6 +12,7 @@ pub enum SystemType {
     SNES,
     N64,
     SMS,
+    Chip8,
 }
 
 #[derive(Debug)]
@@ -112,6 +113,16 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // but continue checking other formats
     }
 
+    // Check for CHIP-8 programs
+    // CHIP-8 programs are typically small (up to ~3.5KB, as they load at 0x200 in 4KB memory)
+    // They have no header or magic bytes
+    // We'll detect them by:
+    // 1. Reasonable size (16 bytes to 3584 bytes)
+    // 2. File extension (.ch8 or .c8) - but we can't check that here
+    // 3. If other formats don't match and size is small enough
+    // Note: This check should come after more specific formats but before Atari 2600
+    // since Atari 2600 uses some overlapping sizes
+    
     // Check for Atari 2600
     // Atari 2600 ROMs are typically 2K, 4K, 8K, 12K, 16K, or 32K
     // They have no header, so we detect by size and lack of other formats
@@ -119,6 +130,13 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // If it's a power-of-2 size that matches Atari 2600 cartridge sizes
         // and doesn't match other formats, assume it's Atari 2600
         return Ok(SystemType::Atari2600);
+    }
+    
+    // CHIP-8: Small programs that don't match other formats
+    // Max size is 3584 bytes (4096 - 512 for interpreter space)
+    if data.len() >= 16 && data.len() <= 3584 {
+        // This is our best guess for CHIP-8 if nothing else matched
+        return Ok(SystemType::Chip8);
     }
 
     // If it's small enough and not another format, assume COM file
@@ -136,12 +154,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8)"
             .to_string(),
     })
 }

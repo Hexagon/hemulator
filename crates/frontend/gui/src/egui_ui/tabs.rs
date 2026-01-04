@@ -527,6 +527,11 @@ impl TabManager {
                             "8-bit console with tile-based graphics and Z80 CPU",
                         ),
                         (
+                            "CHIP-8",
+                            "CHIP-8",
+                            "Classic interpreted programming language for vintage computers",
+                        ),
+                        (
                             "SNES",
                             "Super Nintendo Entertainment System",
                             "16-bit console with advanced graphics and sound",

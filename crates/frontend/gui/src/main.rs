@@ -95,6 +95,7 @@ enum EmulatorSystem {
     SNES(Box<emu_snes::SnesSystem>),
     N64(Box<emu_n64::N64System>),
     SMS(Box<emu_sms::SmsSystem>),
+    Chip8(Box<emu_chip8::Chip8System>),
 }
 
 #[allow(dead_code)]
@@ -122,6 +123,9 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Chip8(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -134,6 +138,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.reset(),
             EmulatorSystem::N64(sys) => sys.reset(),
             EmulatorSystem::SMS(sys) => sys.reset(),
+            EmulatorSystem::Chip8(sys) => sys.reset(),
         }
     }
 
@@ -165,6 +170,9 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys
                 .mount(mount_point_id, data)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Chip8(sys) => sys
+                .mount(mount_point_id, data)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -178,6 +186,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.mount_points(),
             EmulatorSystem::N64(sys) => sys.mount_points(),
             EmulatorSystem::SMS(sys) => sys.mount_points(),
+            EmulatorSystem::Chip8(sys) => sys.mount_points(),
         }
     }
 
@@ -205,6 +214,9 @@ impl EmulatorSystem {
             EmulatorSystem::SMS(sys) => sys
                 .unmount(mount_point_id)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::Chip8(sys) => sys
+                .unmount(mount_point_id)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
     }
 
@@ -218,6 +230,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SMS(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::Chip8(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -230,6 +243,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.supports_save_states(),
             EmulatorSystem::N64(sys) => sys.supports_save_states(),
             EmulatorSystem::SMS(sys) => sys.supports_save_states(),
+            EmulatorSystem::Chip8(sys) => sys.supports_save_states(),
         }
     }
 
@@ -242,6 +256,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.save_state(),
             EmulatorSystem::N64(sys) => sys.save_state(),
             EmulatorSystem::SMS(sys) => sys.save_state(),
+            EmulatorSystem::Chip8(sys) => sys.save_state(),
         }
     }
 
@@ -254,6 +269,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(sys) => sys.load_state(state),
             EmulatorSystem::N64(sys) => sys.load_state(state),
             EmulatorSystem::SMS(sys) => sys.load_state(state),
+            EmulatorSystem::Chip8(sys) => sys.load_state(state),
         }
     }
 
@@ -323,6 +339,13 @@ impl EmulatorSystem {
                     sys.set_controller_2(state);
                 }
             }
+            EmulatorSystem::Chip8(sys) => {
+                // CHIP-8 uses 16-key hexadecimal keypad
+                // For now, we'll use the standard 8-bit state and extend to 16-bit
+                // Mapping: Standard buttons map to CHIP-8 keys 0-7, extended keys 8-F need special handling
+                // This will be enhanced when we implement proper keyboard passthrough
+                sys.set_controller(state as u16);
+            }
         }
     }
 
@@ -375,6 +398,13 @@ impl EmulatorSystem {
         }
     }
 
+    fn get_debug_info_chip8(&self) -> Option<emu_chip8::DebugInfo> {
+        match self {
+            EmulatorSystem::Chip8(sys) => Some(sys.debug_info()),
+            _ => None,
+        }
+    }
+
     /// Get instruction pointer (IP/PC) from any system
     fn get_instruction_pointer(&self) -> Option<u32> {
         match self {
@@ -413,6 +443,10 @@ impl EmulatorSystem {
                 // Z80 CPU not yet implemented
                 None
             }
+            EmulatorSystem::Chip8(sys) => {
+                let debug = sys.debug_info();
+                Some(debug.pc as u32)
+            }
         }
     }
 
@@ -425,6 +459,10 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => Some(sys.cpu_speed_mhz()), // Variable based on CPU model
             EmulatorSystem::SNES(_) => Some(3.58), // SNES 65C816 (3.58 MHz)
             EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
+            EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80 (3.58 MHz)
+            EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 ~700 Hz (0.0007 MHz)
+        }
+    }
             EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
         }
     }
@@ -446,6 +484,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::N64(_) => emu_nes::RuntimeStats::default(),
             EmulatorSystem::SMS(_) => emu_nes::RuntimeStats::default(),
+            EmulatorSystem::Chip8(_) => emu_nes::RuntimeStats::default(),
         }
     }
 
@@ -458,6 +497,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::N64(_) => emu_core::apu::TimingMode::Ntsc,
             EmulatorSystem::SMS(_) => emu_core::apu::TimingMode::Ntsc,
+            EmulatorSystem::Chip8(_) => emu_core::apu::TimingMode::Ntsc,
         }
     }
 
@@ -470,6 +510,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
             EmulatorSystem::SMS(_) => vec![0; count], // TODO: Wire up SMS audio once Z80 is implemented
+            EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement beep audio for CHIP-8
         }
     }
 
@@ -482,6 +523,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => (256, 224),
             EmulatorSystem::N64(_) => (320, 240),
             EmulatorSystem::SMS(_) => (256, 192),
+            EmulatorSystem::Chip8(_) => (64, 32),
         }
     }
 
@@ -494,6 +536,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => "snes",
             EmulatorSystem::N64(_) => "n64",
             EmulatorSystem::SMS(_) => "sms",
+            EmulatorSystem::Chip8(_) => "chip8",
         }
     }
 
@@ -554,6 +597,7 @@ impl EmulatorSystem {
                 "Software".to_string()
             }
             EmulatorSystem::SMS(_) => "Software".to_string(),
+            EmulatorSystem::Chip8(_) => "Software".to_string(),
         }
     }
 
@@ -584,6 +628,7 @@ impl EmulatorSystem {
                 }
             }
             EmulatorSystem::SMS(_) => vec!["Software".to_string()],
+            EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
         }
     }
 }
@@ -2003,6 +2048,25 @@ fn main() {
                             println!("Loaded SMS ROM: {}", p);
                         }
                     }
+                    Ok(SystemType::Chip8) => {
+                        rom_hash = Some(GameSaves::rom_hash(&data));
+                        let mut chip8_sys = emu_chip8::Chip8System::new();
+                        if let Err(e) = chip8_sys.mount("Program", &data) {
+                            eprintln!("Failed to load CHIP-8 program: {}", e);
+                            status_message = format!("Error: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                            runtime_state.set_mount("Program".to_string(), p.clone());
+                            settings.last_rom_path = Some(p.clone());
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
+                            }
+                            status_message = "CHIP-8 program loaded".to_string();
+                            println!("Loaded CHIP-8 program: {}", p);
+                        }
+                    }
                     Err(e) => {
                         eprintln!("Unsupported ROM: {}", e);
                         status_message = format!("Unsupported ROM: {}", e);
@@ -2428,6 +2492,7 @@ fn main() {
                     // Z80 CPU not yet implemented
                     SystemDebugInfo::new("Sega Master System".to_string())
                 }
+                EmulatorSystem::Chip8(s) => SystemDebugInfo::from_chip8(&s.debug_info()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
         }
@@ -2449,7 +2514,7 @@ fn main() {
                             "ROM Files",
                             &[
                                 "nes", "gb", "gbc", "bin", "a26", "smc", "sfc", "z64", "n64",
-                                "com", "exe", "sms",
+                                "com", "exe", "sms", "ch8", "c8",
                             ],
                         )
                         .add_filter("All Files", &["*"])
@@ -2712,6 +2777,32 @@ fn main() {
                                         egui_app
                                             .status_bar
                                             .set_message("SMS ROM loaded".to_string());
+                                        let _ = sys.resolution();
+                                        // Load save states for this ROM
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                }
+                                Ok(SystemType::Chip8) => {
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    let mut chip8_sys = emu_chip8::Chip8System::new();
+                                    if let Err(e) = chip8_sys.mount("Program", &data) {
+                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                                        egui_app.property_pane.system_name = "CHIP-8".to_string();
+                                        runtime_state
+                                            .set_mount("Program".to_string(), path_str.clone());
+                                        settings.last_rom_path = Some(path_str.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app
+                                            .status_bar
+                                            .set_message("CHIP-8 program loaded".to_string());
                                         let _ = sys.resolution();
                                         // Load save states for this ROM
                                         if let Some(ref hash) = rom_hash {
@@ -3950,6 +4041,20 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Created new N64 system".to_string());
+                        }
+                        "CHIP-8" => {
+                            sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "CHIP-8".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new CHIP-8 system".to_string());
                         }
                         _ => {
                             egui_app
