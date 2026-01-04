@@ -3,12 +3,14 @@
 //! This module contains implementations of various Game Boy cartridge mappers
 //! that handle ROM/RAM banking and other cartridge hardware features.
 
+mod huc1;
 mod mbc0;
 mod mbc1;
 mod mbc2;
 mod mbc3;
 mod mbc5;
 
+pub use huc1::Huc1;
 pub use mbc0::Mbc0;
 pub use mbc1::Mbc1;
 pub use mbc2::Mbc2;
@@ -18,6 +20,7 @@ pub use mbc5::Mbc5;
 /// Unified mapper enum that dispatches to specific implementations
 #[derive(Debug)]
 pub enum Mapper {
+    Huc1(Huc1),
     Mbc0(Mbc0),
     Mbc1(Mbc1),
     Mbc2(Mbc2),
@@ -46,6 +49,7 @@ impl Mapper {
             0x1C => Mapper::Mbc5(Mbc5::new(rom, ram)), // MBC5+RUMBLE
             0x1D => Mapper::Mbc5(Mbc5::new(rom, ram)), // MBC5+RUMBLE+RAM
             0x1E => Mapper::Mbc5(Mbc5::new(rom, ram)), // MBC5+RUMBLE+RAM+BATTERY
+            0xFF => Mapper::Huc1(Huc1::new(rom, ram)), // HuC1
             _ => Mapper::Mbc0(Mbc0::new(rom, ram)),    // Default to MBC0
         }
     }
@@ -53,6 +57,7 @@ impl Mapper {
     /// Read from ROM address space
     pub fn read_rom(&self, addr: u16) -> u8 {
         match self {
+            Mapper::Huc1(m) => m.read_rom(addr),
             Mapper::Mbc0(m) => m.read_rom(addr),
             Mapper::Mbc1(m) => m.read_rom(addr),
             Mapper::Mbc2(m) => m.read_rom(addr),
@@ -64,6 +69,7 @@ impl Mapper {
     /// Write to ROM address space (for mapper registers)
     pub fn write_rom(&mut self, addr: u16, val: u8) {
         match self {
+            Mapper::Huc1(m) => m.write_rom(addr, val),
             Mapper::Mbc0(m) => m.write_rom(addr, val),
             Mapper::Mbc1(m) => m.write_rom(addr, val),
             Mapper::Mbc2(m) => m.write_rom(addr, val),
@@ -75,6 +81,7 @@ impl Mapper {
     /// Read from RAM address space
     pub fn read_ram(&self, addr: u16) -> u8 {
         match self {
+            Mapper::Huc1(m) => m.read_ram(addr),
             Mapper::Mbc0(m) => m.read_ram(addr),
             Mapper::Mbc1(m) => m.read_ram(addr),
             Mapper::Mbc2(m) => m.read_ram(addr),
@@ -86,6 +93,7 @@ impl Mapper {
     /// Write to RAM address space
     pub fn write_ram(&mut self, addr: u16, val: u8) {
         match self {
+            Mapper::Huc1(m) => m.write_ram(addr, val),
             Mapper::Mbc0(m) => m.write_ram(addr, val),
             Mapper::Mbc1(m) => m.write_ram(addr, val),
             Mapper::Mbc2(m) => m.write_ram(addr, val),
@@ -98,6 +106,7 @@ impl Mapper {
     #[cfg(test)]
     pub fn name(&self) -> &str {
         match self {
+            Mapper::Huc1(_) => "HuC1",
             Mapper::Mbc0(_) => "MBC0",
             Mapper::Mbc1(_) => "MBC1",
             Mapper::Mbc2(_) => "MBC2",
@@ -151,8 +160,12 @@ mod tests {
         let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0x1B);
         assert_eq!(mapper.name(), "MBC5");
 
-        // Unknown type defaults to MBC0
+        // HuC1
         let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0xFF);
+        assert_eq!(mapper.name(), "HuC1");
+
+        // Unknown type defaults to MBC0
+        let mapper = Mapper::from_cart(vec![0; 0x8000], vec![], 0xAA);
         assert_eq!(mapper.name(), "MBC0");
     }
 

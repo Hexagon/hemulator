@@ -132,7 +132,6 @@
 //! - ❌ Mid-scanline effects
 //! - ❌ PPU mode transitions (Mode 0-3)
 //! - ❌ STAT interrupts
-//! - ❌ OAM DMA transfer
 
 use emu_core::types::Frame;
 
