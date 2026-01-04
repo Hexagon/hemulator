@@ -1214,13 +1214,12 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = pos as usize + copy * spacing;
-            if copy_pos >= 160 {
-                continue;
-            }
-            let offset = x.wrapping_sub(copy_pos);
-
-            if offset < 8 * player_size {
+            let copy_pos = (pos as usize + copy * spacing) % 160;
+            
+            // Check if x is within this copy's range
+            if x >= copy_pos && x < copy_pos + 8 * player_size {
+                let offset = x - copy_pos;
+                
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
 
@@ -1278,13 +1277,10 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = pos as usize + copy * spacing;
-            if copy_pos >= 160 {
-                continue;
-            }
-            let offset = x.wrapping_sub(copy_pos);
-
-            if offset < missile_size {
+            let copy_pos = (pos as usize + copy * spacing) % 160;
+            
+            // Check if x is within this copy's range
+            if x >= copy_pos && x < copy_pos + missile_size {
                 return true;
             }
         }
@@ -1299,8 +1295,11 @@ impl Tia {
         }
 
         // Ball size is controlled by CTRLPF bits 4-5 (1, 2, 4, or 8 pixels)
-        let offset = x.wrapping_sub(state.ball_x as usize);
-        offset < state.ball_size as usize
+        let ball_pos = state.ball_x as usize;
+        let ball_size = state.ball_size as usize;
+        
+        // Check if x is within ball's range
+        x >= ball_pos && x < ball_pos + ball_size
     }
 
     /// Check if a pixel is part of the playfield
