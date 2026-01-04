@@ -240,18 +240,24 @@ impl Ppu {
     pub fn enable_cgb_mode(&mut self, compat_mode: bool) {
         self.cgb_mode = true;
         self.cgb_compat_mode = compat_mode;
-        // Initialize CGB palettes with default grayscale values
-        // This matches the behavior of the CGB boot ROM for DMG games
-        let default_colors = [
-            CGB_DEFAULT_WHITE,
-            CGB_DEFAULT_LIGHT_GRAY,
-            CGB_DEFAULT_DARK_GRAY,
-            CGB_DEFAULT_BLACK,
-        ];
 
-        // Initialize all 8 background and object palettes with the default grayscale
-        Self::initialize_palette_data(&mut self.bg_palette_data, &default_colors);
-        Self::initialize_palette_data(&mut self.obj_palette_data, &default_colors);
+        // Only initialize palettes for DMG compatibility mode
+        // CGB-only games expect palettes to start at 0 and will set them via registers
+        if compat_mode {
+            // Initialize CGB palettes with default grayscale values
+            // This matches the behavior of the CGB boot ROM for DMG games
+            let default_colors = [
+                CGB_DEFAULT_WHITE,
+                CGB_DEFAULT_LIGHT_GRAY,
+                CGB_DEFAULT_DARK_GRAY,
+                CGB_DEFAULT_BLACK,
+            ];
+
+            // Initialize all 8 background and object palettes with the default grayscale
+            Self::initialize_palette_data(&mut self.bg_palette_data, &default_colors);
+            Self::initialize_palette_data(&mut self.obj_palette_data, &default_colors);
+        }
+        // For CGB-only games, palettes remain at 0 (initialized in new())
     }
 
     /// Helper function to initialize a palette data array with default colors
