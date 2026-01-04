@@ -709,6 +709,7 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
 - **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
 - **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
