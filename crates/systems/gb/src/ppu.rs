@@ -476,7 +476,12 @@ impl Ppu {
                 // Bit 4: Not used
                 // Bit 3: VRAM bank (0=bank 0, 1=bank 1) for tile data
                 // Bits 2-0: Background palette number (0-7)
-                let bg_palette_num = tile_attr & 0x07;
+                // In CGB compatibility mode, always use palette 0 (ignore tile attributes)
+                let bg_palette_num = if self.cgb_compat_mode {
+                    0
+                } else {
+                    tile_attr & 0x07
+                };
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
@@ -600,7 +605,12 @@ impl Ppu {
                     0
                 };
 
-                let bg_palette_num = tile_attr & 0x07;
+                // In CGB compatibility mode, always use palette 0 (ignore tile attributes)
+                let bg_palette_num = if self.cgb_compat_mode {
+                    0
+                } else {
+                    tile_attr & 0x07
+                };
                 let tile_vram_bank = (tile_attr >> 3) & 0x01;
                 let flip_x = (tile_attr & 0x20) != 0;
                 let flip_y = (tile_attr & 0x40) != 0;
@@ -746,11 +756,17 @@ impl Ppu {
                 let flip_y = (flags & 0x40) != 0;
                 let bg_priority = (flags & 0x80) != 0;
 
-                let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) = if self.cgb_mode {
-                    (0, flags & 0x07, (flags >> 3) & 0x01)
-                } else {
-                    ((flags >> 4) & 0x01, 0, 0)
-                };
+                // Extract palette numbers based on mode
+                // In CGB compat mode, use DMG palette number (bit 4) like DMG mode
+                // In CGB-only mode, use CGB palette number (bits 2-0)
+                let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) =
+                    if self.cgb_mode && !self.cgb_compat_mode {
+                        // CGB-only mode: use CGB palette from bits 2-0
+                        ((flags >> 4) & 0x01, flags & 0x07, (flags >> 3) & 0x01)
+                    } else {
+                        // DMG mode or CGB compat mode: use DMG palette from bit 4
+                        ((flags >> 4) & 0x01, 0, 0)
+                    };
 
                 // Calculate which row of the sprite we're rendering
                 // sy = screen_y - (oam_y - 16) = screen_y - oam_y + 16
