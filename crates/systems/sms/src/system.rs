@@ -196,6 +196,16 @@ impl System for SmsSystem {
     }
 }
 
+impl SmsSystem {
+    /// Get audio samples from the PSG
+    ///
+    /// This method generates the requested number of audio samples by clocking
+    /// the SN76489 PSG audio chip.
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        self.psg.borrow_mut().generate_samples(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
