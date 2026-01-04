@@ -297,10 +297,15 @@ impl System for GbSystem {
                 self.cpu.memory.request_interrupt(0x04);
             }
 
-            // Step PPU and handle VBlank interrupt
-            if self.cpu.memory.ppu.step(cpu_cycles) {
+            // Step PPU and handle VBlank and STAT interrupts
+            let ppu_interrupts = self.cpu.memory.ppu.step(cpu_cycles);
+            if ppu_interrupts.vblank {
                 // V-Blank started - request VBlank interrupt (bit 0)
                 self.cpu.memory.request_interrupt(0x01);
+            }
+            if ppu_interrupts.stat {
+                // STAT interrupt - request STAT interrupt (bit 1)
+                self.cpu.memory.request_interrupt(0x02);
             }
         }
 

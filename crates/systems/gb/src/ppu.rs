@@ -126,14 +126,30 @@
 //! - ✅ LYC=LY coincidence detection
 //! - ✅ Frame-based timing with scanline counter
 //! - ✅ Automatic CGB mode detection and activation
+//! - ✅ STAT interrupts (LYC=LY, Mode 1 VBlank, Mode 2 OAM)
 //!
 //! ## Not Implemented
 //! - ❌ Cycle-accurate PPU timing
 //! - ❌ Mid-scanline effects
-//! - ❌ PPU mode transitions (Mode 0-3)
-//! - ❌ STAT interrupts
+//! - ❌ Full PPU mode transitions (Mode 0 and Mode 3)
 
 use emu_core::types::Frame;
+
+/// PPU interrupt status returned from step()
+#[derive(Debug, Clone, Copy)]
+pub struct PpuInterrupts {
+    pub vblank: bool,
+    pub stat: bool,
+}
+
+impl PpuInterrupts {
+    pub fn none() -> Self {
+        Self {
+            vblank: false,
+            stat: false,
+        }
+    }
+}
 
 /// Game Boy PPU state
 pub struct Ppu {
@@ -829,31 +845,64 @@ impl Ppu {
     }
 
     /// Step the PPU for the given number of cycles
-    pub fn step(&mut self, cycles: u32) -> bool {
+    /// Returns interrupt flags for VBlank and STAT
+    pub fn step(&mut self, cycles: u32) -> PpuInterrupts {
         // Accumulate cycles
         self.cycle_counter += cycles;
 
-        let mut vblank_started = false;
+        let mut interrupts = PpuInterrupts::none();
 
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
+
+            // Save previous LY for edge detection
+            let prev_ly = self.ly;
             self.ly = (self.ly + 1) % 154;
 
-            // Check LYC=LY interrupt
+            // Update PPU mode based on scanline
+            let prev_mode = self.stat & 0x03;
+            let new_mode = if self.ly >= 144 {
+                1 // VBlank (Mode 1)
+            } else {
+                // Simplified mode tracking for visible scanlines
+                // Mode 2 (OAM search) at start of scanline
+                2
+            };
+
+            // Update mode bits in STAT register
+            self.stat = (self.stat & !0x03) | new_mode;
+
+            // Check for mode change interrupts
+            // Mode 1 (VBlank) interrupt
+            if new_mode == 1 && prev_mode != 1 && (self.stat & 0x10) != 0 {
+                interrupts.stat = true;
+            }
+
+            // Mode 2 (OAM) interrupt
+            if new_mode == 2 && prev_mode != 2 && (self.stat & 0x20) != 0 {
+                interrupts.stat = true;
+            }
+
+            // Check LYC=LY coincidence
+            let prev_coincidence = (self.stat & 0x04) != 0;
             if self.ly == self.lyc {
                 self.stat |= 0x04; // Set coincidence flag
+                                   // LYC=LY interrupt (trigger on rising edge)
+                if !prev_coincidence && (self.stat & 0x40) != 0 {
+                    interrupts.stat = true;
+                }
             } else {
                 self.stat &= !0x04;
             }
 
             // V-Blank is lines 144-153
-            if self.ly == 144 {
-                vblank_started = true;
+            if self.ly == 144 && prev_ly != 144 {
+                interrupts.vblank = true;
             }
         }
 
-        vblank_started
+        interrupts
     }
 }
 
@@ -901,8 +950,8 @@ mod tests {
     fn test_vblank_detection() {
         let mut ppu = Ppu::new();
         ppu.ly = 143;
-        let vblank = ppu.step(456);
-        assert!(vblank);
+        let interrupts = ppu.step(456);
+        assert!(interrupts.vblank);
         assert_eq!(ppu.ly, 144);
     }
 
@@ -1069,5 +1118,107 @@ mod tests {
         // and runs without panicking.
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
+    }
+
+    #[test]
+    fn test_stat_interrupt_lyc_ly() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x80; // Enable LCD
+        ppu.stat = 0x40; // Enable LYC=LY interrupt
+        ppu.lyc = 5; // Set LYC to 5
+
+        // Step to LY=4 (no interrupt yet)
+        let interrupts = ppu.step(456 * 4);
+        assert!(!interrupts.stat);
+        assert_eq!(ppu.ly, 4);
+
+        // Step to LY=5 (should trigger STAT interrupt)
+        let interrupts = ppu.step(456);
+        assert!(interrupts.stat, "STAT interrupt should trigger on LYC=LY");
+        assert_eq!(ppu.ly, 5);
+        assert_eq!(ppu.stat & 0x04, 0x04, "Coincidence flag should be set");
+
+        // Step to LY=6 (no interrupt, already past coincidence)
+        let interrupts = ppu.step(456);
+        assert!(!interrupts.stat);
+        assert_eq!(ppu.ly, 6);
+        assert_eq!(ppu.stat & 0x04, 0, "Coincidence flag should be clear");
+    }
+
+    #[test]
+    fn test_stat_interrupt_mode1_vblank() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x80; // Enable LCD
+        ppu.stat = 0x10; // Enable Mode 1 (VBlank) interrupt
+
+        // Step to LY=143 (still in visible area, Mode 2)
+        let interrupts = ppu.step(456 * 143);
+        assert!(!interrupts.stat);
+        assert_eq!(ppu.stat & 0x03, 2, "Should be in Mode 2");
+
+        // Step to LY=144 (enter VBlank, should trigger STAT interrupt)
+        let interrupts = ppu.step(456);
+        assert!(interrupts.vblank, "VBlank interrupt should trigger");
+        assert!(interrupts.stat, "STAT Mode 1 interrupt should trigger");
+        assert_eq!(ppu.ly, 144);
+        assert_eq!(ppu.stat & 0x03, 1, "Should be in Mode 1 (VBlank)");
+    }
+
+    #[test]
+    fn test_stat_interrupt_mode2_oam() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x80; // Enable LCD
+        ppu.stat = 0x20; // Enable Mode 2 (OAM) interrupt
+
+        // Step through first scanline - should enter Mode 2 and trigger interrupt
+        let interrupts = ppu.step(456);
+        assert!(interrupts.stat, "STAT Mode 2 interrupt should trigger");
+        assert_eq!(ppu.stat & 0x03, 2, "Should be in Mode 2");
+    }
+
+    #[test]
+    fn test_stat_interrupt_disabled() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x80; // Enable LCD
+        ppu.stat = 0x00; // All STAT interrupts disabled
+        ppu.lyc = 5;
+
+        // Step to LYC=LY but with interrupts disabled
+        let interrupts = ppu.step(456 * 5);
+        assert!(
+            !interrupts.stat,
+            "STAT interrupt should not trigger when disabled"
+        );
+        assert_eq!(
+            ppu.stat & 0x04,
+            0x04,
+            "Coincidence flag should still be set"
+        );
+
+        // Enter VBlank with interrupts disabled
+        let interrupts = ppu.step(456 * 139);
+        assert!(interrupts.vblank, "VBlank interrupt still triggers");
+        assert!(
+            !interrupts.stat,
+            "STAT interrupt should not trigger when disabled"
+        );
+    }
+
+    #[test]
+    fn test_ppu_mode_transitions() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x80; // Enable LCD
+
+        // Initial state should be Mode 2 (OAM search)
+        ppu.step(456);
+        assert_eq!(ppu.stat & 0x03, 2, "Should start in Mode 2");
+
+        // Step through to VBlank
+        ppu.step(456 * 143);
+        assert_eq!(ppu.stat & 0x03, 1, "Should be in Mode 1 at VBlank");
+
+        // Step through VBlank back to Mode 2
+        ppu.step(456 * 10); // VBlank is 10 scanlines
+        assert_eq!(ppu.stat & 0x03, 2, "Should return to Mode 2 after VBlank");
     }
 }
