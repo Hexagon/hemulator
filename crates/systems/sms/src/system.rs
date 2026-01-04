@@ -301,4 +301,137 @@ mod tests {
             white_percentage
         );
     }
+
+    #[test]
+    fn test_vdp_interrupt_triggers() {
+        let mut system = SmsSystem::new();
+
+        // Load a simple ROM that enables interrupts
+        let mut rom = vec![0; 0x8000];
+
+        // At 0x0000: Enable interrupts and loop
+        rom[0x0000] = 0xFB; // EI - Enable interrupts
+        rom[0x0001] = 0xED; // IM 1 (prefix)
+        rom[0x0002] = 0x56; // IM 1 (opcode)
+        rom[0x0003] = 0x76; // HALT - Wait for interrupt
+
+        // At 0x0038: Interrupt handler (IM 1 jumps here)
+        rom[0x0038] = 0xFB; // EI - Re-enable interrupts
+        rom[0x0039] = 0xED; // RETI (prefix)
+        rom[0x003A] = 0x4D; // RETI (opcode)
+
+        system.load_rom(rom);
+        system.reset();
+
+        // Enable VDP frame interrupts by setting bit 5 of register 1
+        // Use VDP control port to write register 1
+        system.vdp.borrow_mut().write_control(0x20); // First byte: value
+        system.vdp.borrow_mut().write_control(0x81); // Second byte: register 1
+
+        // Execute initial instructions
+        system.cpu.step(); // EI
+        system.cpu.step(); // IM 1 (prefix)
+        system.cpu.step(); // IM 1 (opcode)
+
+        // Verify state after EI and IM 1
+        assert!(system.cpu.iff1, "Interrupts should be enabled after EI");
+        assert_eq!(system.cpu.im, 1, "Should be in interrupt mode 1");
+
+        // CPU should now be in HALT state
+        system.cpu.step(); // HALT
+        assert!(system.cpu.halted, "CPU should be halted");
+
+        let initial_pc = system.cpu.pc;
+
+        // Execute step_frame which should trigger the interrupt via VDP
+        // Set scanline to 192 to trigger frame interrupt
+        system.vdp.borrow_mut().set_scanline(192);
+
+        // Check if interrupt is pending
+        let interrupt_pending = system.vdp.borrow().frame_interrupt_pending();
+        assert!(
+            interrupt_pending,
+            "Frame interrupt should be pending at scanline 192"
+        );
+
+        // Manually trigger the interrupt like step_frame does
+        system.cpu.interrupt(0xFF);
+
+        // Verify interrupt was triggered
+        assert!(!system.cpu.halted, "CPU should exit halt on interrupt");
+        assert_eq!(
+            system.cpu.pc, 0x0038,
+            "PC should jump to IM 1 interrupt vector"
+        );
+        assert!(
+            !system.cpu.iff1,
+            "Interrupts should be disabled during handler"
+        );
+
+        println!(
+            "Interrupt test passed: PC jumped from 0x{:04X} to 0x{:04X}",
+            initial_pc, system.cpu.pc
+        );
+    }
+
+    #[test]
+    fn test_interrupt_with_disabled_iff1() {
+        let mut system = SmsSystem::new();
+
+        // Load a simple ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0] = 0xF3; // DI - Disable interrupts
+        rom[1] = 0x00; // NOP
+
+        system.load_rom(rom);
+        system.reset();
+
+        system.cpu.step(); // DI
+
+        let initial_pc = system.cpu.pc;
+
+        // Try to trigger interrupt
+        system.cpu.interrupt(0xFF);
+
+        // PC should not change because interrupts are disabled
+        assert_eq!(system.cpu.pc, initial_pc);
+        assert!(!system.cpu.iff1, "Interrupts should remain disabled");
+    }
+
+    #[test]
+    fn test_nmi_functionality() {
+        let mut system = SmsSystem::new();
+
+        // Load a simple ROM with NMI handler
+        let mut rom = vec![0; 0x8000];
+
+        // Main program
+        rom[0x0000] = 0xFB; // EI
+        rom[0x0001] = 0x76; // HALT
+
+        // NMI handler at 0x0066
+        rom[0x0066] = 0xED; // RETN
+        rom[0x0067] = 0x45; // RETN
+
+        system.load_rom(rom);
+        system.reset();
+
+        system.cpu.step(); // EI
+        assert!(system.cpu.iff1, "Interrupts should be enabled");
+
+        let initial_pc = system.cpu.pc;
+
+        // Trigger NMI
+        system.cpu.nmi();
+
+        // Verify NMI behavior
+        assert_eq!(system.cpu.pc, 0x0066, "PC should jump to NMI vector");
+        assert!(!system.cpu.iff1, "IFF1 should be disabled");
+        assert!(system.cpu.iff2, "IFF2 should preserve previous IFF1 state");
+
+        println!(
+            "NMI test passed: PC jumped from 0x{:04X} to 0x{:04X}",
+            initial_pc, system.cpu.pc
+        );
+    }
 }
