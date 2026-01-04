@@ -111,15 +111,9 @@ impl System for SmsSystem {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         let target_cycles = 59659; // ~3.58 MHz / 60 Hz
 
-        static mut FRAME_COUNT: u64 = 0;
-        let log_this_frame = unsafe {
-            FRAME_COUNT += 1;
-            FRAME_COUNT <= 5
-        };
-
         while self.cycles < target_cycles {
-            // Log CPU state on first few frames
-            if log_this_frame && self.cycles < 100 {
+            // Log CPU state on first few cycles (using cycles count directly)
+            if self.cycles < 100 {
                 let opcode = self.cpu.memory.read(self.cpu.pc);
                 log(LogCategory::CPU, LogLevel::Debug, || {
                     format!(
@@ -141,12 +135,16 @@ impl System for SmsSystem {
             let current_scanline = (self.cycles / 228) % 262;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
-            // Check for VDP interrupts
+            // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {
                 // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
                 // Data byte doesn't matter in IM 1, but pass 0xFF as default
                 self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_frame_interrupt();
+            } else if self.vdp.borrow().line_interrupt_pending() {
+                // Trigger Z80 interrupt for line interrupt
+                self.cpu.interrupt(0xFF);
+                self.vdp.borrow_mut().clear_line_interrupt();
             }
         }
 
@@ -199,6 +197,16 @@ impl System for SmsSystem {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "cartridge"
+    }
+}
+
+impl SmsSystem {
+    /// Get audio samples from the PSG
+    ///
+    /// This method generates the requested number of audio samples by clocking
+    /// the SN76489 PSG audio chip.
+    pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
+        self.psg.borrow_mut().generate_samples(count)
     }
 }
 
