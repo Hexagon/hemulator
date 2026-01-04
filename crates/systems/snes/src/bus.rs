@@ -103,7 +103,7 @@ impl SnesBus {
             dma_channels: [DmaChannel::default(); 8],
             hdma_enable: 0,
             hdma_state: [HdmaState::default(); 8],
-            apu_ports: [0xAA, 0xBB, 0x00, 0x00], // Initial values for APU ready state
+            apu_ports: [0xBB, 0xAA, 0x00, 0x00], // Initial values for APU ready state (SPC700 IPL sets $2140=0xBB, $2141=0xAA)
         }
     }
 
@@ -871,10 +871,10 @@ mod tests {
     fn test_apu_ports_initial_values() {
         let bus = SnesBus::new();
 
-        // APU ports should have initial ready values
-        // Port 0 and 1 typically have specific values to signal APU ready state
-        assert_eq!(bus.read(0x2140), 0xAA);
-        assert_eq!(bus.read(0x2141), 0xBB);
+        // APU ports should have initial ready values matching SPC700 IPL ROM behavior
+        // SPC700 IPL sets: $2140=0xBB, $2141=0xAA, $2142/$2143=0x00
+        assert_eq!(bus.read(0x2140), 0xBB);
+        assert_eq!(bus.read(0x2141), 0xAA);
         assert_eq!(bus.read(0x2142), 0x00);
         assert_eq!(bus.read(0x2143), 0x00);
     }
