@@ -165,6 +165,19 @@ impl Sdl2EguiBackend {
             .expect("Video subsystem should be available")
     }
 
+    /// Get OpenGL context for renderer initialization
+    /// Returns a new glow::Context for use with renderers
+    pub fn gl_context(&self) -> Option<glow::Context> {
+        // Create a new glow context from SDL2 GL functions
+        // glow::Context internally uses Rc for the function pointers, so this is cheap
+        unsafe {
+            let gl = glow::Context::from_loader_function(|s| {
+                self.video_subsystem().gl_get_proc_address(s) as *const _
+            });
+            Some(gl)
+        }
+    }
+
     /// Get the egui context for rendering UI
     pub fn egui_ctx(&self) -> &egui::Context {
         &self.egui_ctx
