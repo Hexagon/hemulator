@@ -10,6 +10,7 @@
 //! - **Triangle Channel**: Triangle wave generator (NES)
 //! - **Wave Channel**: Programmable waveform playback (Game Boy, potentially other systems)
 //! - **Noise Channel**: Pseudo-random noise generator using LFSR (NES, Game Boy)
+//! - **DMC Channel**: Delta modulation channel for sample playback (NES)
 //! - **Polynomial Counter**: TIA-style waveform generation (Atari 2600)
 //! - **Length Counter**: Automatic note duration control
 //! - **Envelope**: Volume envelope generator with decay
@@ -30,13 +31,14 @@
 //! ## Reusability
 //!
 //! These components are designed for use in:
-//! - **NES (Famicom)**: Uses pulse, triangle, noise, envelope, length counter
+//! - **NES (Famicom)**: Uses pulse, triangle, noise, DMC, envelope, length counter
 //! - **Game Boy**: Uses pulse (with sweep), wave, noise, envelope, length counter
 //! - **Atari 2600 (TIA)**: Uses polynomial counter for waveform generation
 //! - **Future systems**: C64 (SID), ColecoVision (SN76489), Atari 8-bit (POKEY)
 //! - Custom audio synthesizers using similar waveform generation
 
 pub mod audio_chip;
+pub mod dmc;
 pub mod envelope;
 pub mod frame_counter;
 pub mod length_counter;
@@ -51,6 +53,7 @@ pub mod triangle;
 pub mod wave;
 
 pub use audio_chip::AudioChip;
+pub use dmc::DmcChannel;
 pub use envelope::Envelope;
 pub use frame_counter::FrameCounter;
 pub use length_counter::{LengthCounter, LENGTH_TABLE};
