@@ -229,11 +229,33 @@ impl Ppu {
     /// Enable CGB mode
     pub fn enable_cgb_mode(&mut self) {
         self.cgb_mode = true;
-        // Initialize CGB palettes with default values
-        // Default: white palette (all colors set to white = 0x7FFF)
-        for i in 0..64 {
-            self.bg_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
-            self.obj_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+        // Initialize CGB palettes with default grayscale values
+        // This matches the behavior of the CGB boot ROM for DMG games
+        // Each palette has 4 colors (2 bytes per color, 8 bytes per palette)
+        // Default grayscale: White (0x7FFF), Lt Gray (0x56B5), Dk Gray (0x294A), Black (0x0000)
+        let default_colors = [
+            (0xFF, 0x7F), // Color 0: White (0x7FFF)
+            (0xB5, 0x56), // Color 1: Light Gray (0x56B5)
+            (0x4A, 0x29), // Color 2: Dark Gray (0x294A)
+            (0x00, 0x00), // Color 3: Black (0x0000)
+        ];
+
+        // Initialize all 8 background palettes with the default grayscale
+        for palette_idx in 0..8 {
+            for (color_idx, &(low, high)) in default_colors.iter().enumerate() {
+                let byte_idx = (palette_idx * 8) + (color_idx * 2);
+                self.bg_palette_data[byte_idx] = low;
+                self.bg_palette_data[byte_idx + 1] = high;
+            }
+        }
+
+        // Initialize all 8 object palettes with the default grayscale
+        for palette_idx in 0..8 {
+            for (color_idx, &(low, high)) in default_colors.iter().enumerate() {
+                let byte_idx = (palette_idx * 8) + (color_idx * 2);
+                self.obj_palette_data[byte_idx] = low;
+                self.obj_palette_data[byte_idx + 1] = high;
+            }
         }
     }
 
