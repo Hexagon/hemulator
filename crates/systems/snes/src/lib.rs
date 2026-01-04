@@ -72,7 +72,8 @@ pub struct SnesSystem {
 
 // SNES timing constants (NTSC)
 const SNES_FRAME_CYCLES: u32 = 89342; // ~3.58MHz / 60Hz
-const SNES_VISIBLE_CYCLES: u32 = 76400; // ~85.5% of frame before VBlank
+const SNES_SCANLINE_CYCLES: u32 = 341; // Cycles per scanline (~3.58MHz / 262 scanlines / 60Hz)
+const SNES_VISIBLE_SCANLINES: u32 = 224; // Visible scanlines
 
 impl SnesSystem {
     /// Create a new SNES system
@@ -142,12 +143,29 @@ impl System for SnesSystem {
             "SNES: Frame start, VBlank cleared".to_string()
         });
 
-        // Execute CPU cycles for visible portion
-        while self.current_cycles < SNES_VISIBLE_CYCLES {
-            let cycles = self.cpu.step();
-            self.current_cycles += cycles;
-            // Update cycle counter in bus for VBlank timing
-            self.cpu.bus_mut().tick_cycles(cycles);
+        // Initialize HDMA at start of frame
+        self.cpu.bus_mut().init_hdma();
+
+        // Execute CPU cycles for visible scanlines, with HDMA during H-blank
+        for scanline in 0..SNES_VISIBLE_SCANLINES {
+            let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
+
+            // Execute CPU until end of active display portion of scanline
+            while self.current_cycles < scanline_target.saturating_sub(40) {
+                let cycles = self.cpu.step();
+                self.current_cycles += cycles;
+                self.cpu.bus_mut().tick_cycles(cycles);
+            }
+
+            // Execute HDMA during H-blank (approximately 40 cycles)
+            let _hdma_cycles = self.cpu.bus_mut().do_hdma();
+
+            // Complete the scanline
+            while self.current_cycles < scanline_target {
+                let cycles = self.cpu.step();
+                self.current_cycles += cycles;
+                self.cpu.bus_mut().tick_cycles(cycles);
+            }
         }
 
         // Render frame at end of visible scanlines
