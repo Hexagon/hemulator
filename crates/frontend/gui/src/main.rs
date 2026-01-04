@@ -492,9 +492,14 @@ impl EmulatorSystem {
     /// Get the name of the currently active renderer
     fn get_current_renderer_name(&self) -> String {
         match self {
-            EmulatorSystem::NES(_) => {
-                // NES uses software renderer by default
-                "Software".to_string()
+            EmulatorSystem::NES(nes_sys) => {
+                // Get actual renderer name from NES system
+                let name = nes_sys.renderer_name();
+                if name.contains("OpenGL") {
+                    "OpenGL".to_string()
+                } else {
+                    "Software".to_string()
+                }
             }
             EmulatorSystem::GameBoy(_) => "Software".to_string(),
             EmulatorSystem::Atari2600(_) => "Software".to_string(),
@@ -502,7 +507,7 @@ impl EmulatorSystem {
                 // PC can use different video adapters
                 let adapter_name = sys.video_adapter_name();
                 if adapter_name.contains("Hardware") {
-                    "Hardware".to_string()
+                    "OpenGL".to_string()
                 } else {
                     "Software".to_string()
                 }
@@ -521,21 +526,14 @@ impl EmulatorSystem {
     fn get_available_renderers(&self) -> Vec<String> {
         match self {
             EmulatorSystem::NES(_) => {
-                // OpenGL renderer exists but requires GL context to enable
-                #[cfg(feature = "opengl")]
-                {
-                    vec!["Software".to_string(), "OpenGL".to_string()]
-                }
-                #[cfg(not(feature = "opengl"))]
-                {
-                    vec!["Software".to_string()]
-                }
+                // OpenGL renderer disabled for now
+                vec!["Software".to_string()]
             }
             EmulatorSystem::GameBoy(_) => vec!["Software".to_string()],
             EmulatorSystem::Atari2600(_) => vec!["Software".to_string()],
             EmulatorSystem::PC(_) => {
                 // PC has both software and hardware video adapters available
-                vec!["Software".to_string(), "Hardware".to_string()]
+                vec!["Software".to_string(), "OpenGL".to_string()]
             }
             EmulatorSystem::SNES(_) => vec!["Software".to_string()],
             EmulatorSystem::N64(_) => {
@@ -1207,39 +1205,34 @@ impl CliArgs {
 /// Create a NES system with the appropriate renderer based on settings
 fn create_nes_system(
     video_backend: &str,
-    _gl_context: Option<std::rc::Rc<glow::Context>>,
+    _gl_context: Option<glow::Context>,
 ) -> emu_nes::NesSystem {
-    let nes_sys = emu_nes::NesSystem::default();
+    #[allow(unused_mut)] // mut needed when opengl feature is enabled
+    let mut nes_sys = emu_nes::NesSystem::default();
 
-    // Replace renderer if OpenGL is requested and context is available
+    // Enable OpenGL renderer if requested and context is available
     if video_backend == "opengl" {
         #[cfg(feature = "opengl")]
         if let Some(gl) = _gl_context {
-            #[cfg(feature = "opengl")]
-            {
-                use emu_nes::ppu_renderer_opengl::OpenGLNesPpuRenderer;
-
-                match OpenGLNesPpuRenderer::new(gl) {
-                    Ok(opengl_renderer) => {
-                        nes_sys.set_renderer(Box::new(opengl_renderer));
-                        eprintln!("NES: Using OpenGL (hardware) renderer");
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to create OpenGL NES renderer: {}, falling back to software",
-                            e
-                        );
-                    }
+            match nes_sys.enable_opengl_renderer(gl) {
+                Ok(()) => {
+                    eprintln!("NES: Using OpenGL (hardware) renderer");
                 }
-            }
-            #[cfg(not(feature = "opengl"))]
-            {
-                eprintln!("Warning: OpenGL feature not enabled - using software renderer");
+                Err(e) => {
+                    eprintln!(
+                        "Failed to enable OpenGL NES renderer: {}, using software",
+                        e
+                    );
+                }
             }
         } else {
             eprintln!(
                 "Warning: OpenGL renderer requested but GL context not available - using software"
             );
+        }
+        #[cfg(not(feature = "opengl"))]
+        {
+            eprintln!("Warning: OpenGL feature not enabled - using software renderer");
         }
     }
 
@@ -1853,6 +1846,8 @@ fn main() {
                             status_message = format!("Error: {}", e);
                             rom_hash = None;
                         } else {
+                            // Enable OpenGL renderer if requested (note: GL context not available at startup)
+                            // OpenGL can be enabled later when switching renderers
                             rom_loaded = true;
                             sys = EmulatorSystem::NES(Box::new(nes_sys));
                             runtime_state.set_mount("Cartridge".to_string(), p.clone());
@@ -2087,7 +2082,7 @@ fn main() {
 
     // Set property pane renderer display based on settings preference, not current renderer
     egui_app.property_pane.rendering_backend = if settings.video_backend == "opengl" {
-        "Hardware".to_string()
+        "OpenGL".to_string()
     } else {
         "Software".to_string()
     };
@@ -2405,7 +2400,7 @@ fn main() {
                             Ok(data) => match detect_rom_type(&data) {
                                 Ok(SystemType::NES) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
+                                    let gl_ctx = egui_backend.gl_context();
                                     let mut nes_sys =
                                         create_nes_system(&settings.video_backend, gl_ctx);
                                     if let Err(e) = nes_sys.mount("Cartridge", &data) {
@@ -2417,13 +2412,8 @@ fn main() {
                                         rom_loaded = true;
                                         sys = EmulatorSystem::NES(Box::new(nes_sys));
                                         egui_app.property_pane.system_name = "NES".to_string();
-                                        // Set renderer display based on settings preference
                                         egui_app.property_pane.rendering_backend =
-                                            if settings.video_backend == "opengl" {
-                                                "Hardware".to_string()
-                                            } else {
-                                                "Software".to_string()
-                                            };
+                                            sys.get_current_renderer_name();
                                         egui_app.property_pane.available_renderers =
                                             sys.get_available_renderers();
                                         runtime_state
@@ -2833,6 +2823,24 @@ fn main() {
                                         rom_hash = None;
                                     } else {
                                         rom_loaded = true;
+
+                                        // Apply renderer preference if OpenGL is requested
+                                        #[cfg(feature = "opengl")]
+                                        if settings.video_backend == "opengl" {
+                                            if let Some(gl) = egui_backend.gl_context() {
+                                                if let Err(e) = nes_sys.enable_opengl_renderer(gl) {
+                                                    eprintln!(
+                                                        "Failed to enable OpenGL renderer: {}",
+                                                        e
+                                                    );
+                                                    egui_app.tab_manager.add_log(format!(
+                                                        "Failed to enable OpenGL renderer, using Software: {}",
+                                                        e
+                                                    ));
+                                                }
+                                            }
+                                        }
+
                                         sys = EmulatorSystem::NES(Box::new(nes_sys));
                                         egui_app.property_pane.system_name = "NES".to_string();
                                         egui_app.property_pane.rendering_backend =
@@ -3546,7 +3554,7 @@ fn main() {
                 }
                 PropertyAction::SetRenderer(renderer_name) => {
                     // Save renderer preference to settings
-                    let backend_name = if renderer_name == "Hardware" {
+                    let backend_name = if renderer_name == "OpenGL" {
                         "opengl"
                     } else {
                         "software"
@@ -3560,14 +3568,108 @@ fn main() {
                             .status_bar
                             .set_error(format!("Failed to save renderer preference: {}", e));
                     } else {
-                        egui_app.status_bar.set_message(format!(
-                            "Renderer set to '{}'. Please reload the ROM for changes to take effect.",
-                            renderer_name
-                        ));
-                        egui_app.tab_manager.add_log(format!(
-                            "Renderer preference saved: {} (reload ROM to apply)",
-                            renderer_name
-                        ));
+                        // Try to switch renderer immediately
+                        let mut switched = false;
+                        match &mut sys {
+                            #[cfg(feature = "opengl")]
+                            EmulatorSystem::NES(nes_sys) => {
+                                if renderer_name == "OpenGL" {
+                                    // Get GL context from egui backend
+                                    if let Some(gl) = egui_backend.gl_context() {
+                                        match nes_sys.enable_opengl_renderer(gl) {
+                                            Ok(()) => {
+                                                switched = true;
+                                                egui_app.property_pane.rendering_backend =
+                                                    "OpenGL".to_string();
+                                                egui_app.status_bar.set_success(
+                                                    "Switched to OpenGL renderer".to_string(),
+                                                );
+                                                egui_app.tab_manager.add_log(
+                                                    "NES: Switched to OpenGL hardware renderer"
+                                                        .to_string(),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Failed to enable OpenGL renderer: {}",
+                                                    e
+                                                );
+                                                egui_app.status_bar.set_error(format!(
+                                                    "Failed to enable OpenGL renderer: {}",
+                                                    e
+                                                ));
+                                            }
+                                        }
+                                    } else {
+                                        egui_app
+                                            .status_bar
+                                            .set_error("OpenGL context not available".to_string());
+                                    }
+                                } else {
+                                    // Cannot switch back to software without recreating system
+                                    egui_app.status_bar.set_message(
+                                        "Renderer preference saved. Reload ROM to switch to Software renderer.".to_string(),
+                                    );
+                                    egui_app.tab_manager.add_log(
+                                        "Renderer preference saved: Software (reload ROM to apply)"
+                                            .to_string(),
+                                    );
+                                }
+                            }
+                            #[cfg(feature = "opengl")]
+                            EmulatorSystem::N64(n64_sys) => {
+                                if renderer_name == "OpenGL" {
+                                    if let Some(gl) = egui_backend.gl_context() {
+                                        match n64_sys.enable_opengl_renderer(gl) {
+                                            Ok(()) => {
+                                                switched = true;
+                                                egui_app.property_pane.rendering_backend =
+                                                    "OpenGL".to_string();
+                                                egui_app.status_bar.set_success(
+                                                    "Switched to OpenGL renderer".to_string(),
+                                                );
+                                                egui_app.tab_manager.add_log(
+                                                    "N64: Switched to OpenGL hardware renderer"
+                                                        .to_string(),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "Failed to enable OpenGL renderer: {}",
+                                                    e
+                                                );
+                                                egui_app.status_bar.set_error(format!(
+                                                    "Failed to enable OpenGL renderer: {}",
+                                                    e
+                                                ));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    egui_app.status_bar.set_message(
+                                        "Renderer preference saved. Reload ROM to switch to Software renderer.".to_string(),
+                                    );
+                                }
+                            }
+                            _ => {
+                                // System doesn't support renderer switching
+                                egui_app.status_bar.set_message(format!(
+                                    "Renderer preference saved to '{}'",
+                                    renderer_name
+                                ));
+                            }
+                        }
+
+                        if !switched
+                            && !matches!(sys, EmulatorSystem::NES(_) | EmulatorSystem::N64(_))
+                        {
+                            egui_app
+                                .status_bar
+                                .set_message(format!("Renderer set to '{}'", renderer_name));
+                            egui_app
+                                .tab_manager
+                                .add_log(format!("Renderer preference saved: {}", renderer_name));
+                        }
                     }
                 }
             }
@@ -3805,14 +3907,15 @@ fn main() {
             let time_diff_secs = (desired_emulated_time_secs - current_emulated_time_secs).max(0.0);
 
             // Determine how many frames to step based on time difference
-            // For stable display, always step exactly 0 or 1 frame per iteration
-            // to avoid visual artifacts from frame skipping
-            let frames_to_step = if time_diff_secs >= target_frame_duration.as_secs_f64() {
-                // We're behind - step ONE frame to maintain visual consistency
-                // Stepping multiple frames causes visible "jumping" artifacts
-                1
+            // Calculate the actual number of frames we need to catch up
+            // We step all necessary frames but only render the last one for smooth visuals
+            let frames_behind = (time_diff_secs / target_frame_duration.as_secs_f64()) as usize;
+            let frames_to_step = if frames_behind > 0 {
+                // Cap frames per iteration to prevent pathological catch-up behavior
+                // Higher cap (30) allows faster recovery from lag spikes without audio desync
+                let max_frames_per_iteration: usize = 30;
+                frames_behind.min(max_frames_per_iteration)
             } else {
-                // We're ahead - don't step any frames this iteration
                 0
             };
 
