@@ -176,7 +176,9 @@ impl<M: MemoryZ80> CpuZ80<M> {
         match self.im {
             0 => {
                 // IM 0: Execute the provided instruction (usually RST)
-                // For simplicity, treat as RST instruction
+                // Note: Full IM 0 requires executing arbitrary instructions from the data byte.
+                // For simplicity, we assume RST instructions (most common case) and jump to
+                // the RST vector. This works for typical hardware like the SMS.
                 self.pc = (data & 0x38) as u16;
             }
             1 => {

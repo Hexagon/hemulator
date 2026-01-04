@@ -179,6 +179,8 @@ impl Vdp {
         // Render any scanlines that were crossed
         if scanline < old_scanline {
             // Wrapped around to new frame
+            // Render remaining scanlines from old_scanline to 192 (end of visible area)
+            // Note: If old_scanline > 192, this range is empty (which is correct)
             for line in old_scanline..192 {
                 if line < 192 {
                     self.render_scanline(line as u8);
