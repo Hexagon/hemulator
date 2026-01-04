@@ -165,6 +165,12 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 - No serial/link cable support
 - No STAT interrupts or PPU mode transitions
 
+**Missing CGB Features**:
+- WRAM banking (SVBK register at 0xFF70)
+- Speed switching (KEY1 register at 0xFF4D)
+- HDMA - HBlank DMA (registers 0xFF51-0xFF55)
+- Infrared port (RP register at 0xFF56)
+
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)
 - MBC7 (tilt sensor games: Kirby Tilt 'n' Tumble, Command Master)
