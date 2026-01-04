@@ -11,6 +11,8 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_65c816.md`
 
+use crate::logging::{log, LogCategory, LogLevel};
+
 /// Memory interface trait for the 65C816 CPU
 ///
 /// Systems using the 65C816 must implement this trait to provide memory access.
@@ -142,10 +144,16 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
         // WAI instruction is released by any interrupt
         if self.waiting_for_interrupt {
-            eprintln!("65C816: NMI triggered, releasing WAI");
+            log(LogCategory::Interrupts, LogLevel::Info, || {
+                "65C816: NMI triggered, releasing WAI".to_string()
+            });
         }
         self.waiting_for_interrupt = false;
         self.in_nmi = true;
+
+        log(LogCategory::Interrupts, LogLevel::Debug, || {
+            format!("65C816: NMI triggered at ${:02X}:{:04X}", self.pbr, self.pc)
+        });
 
         // Save current state
         if self.emulation {
@@ -220,7 +228,19 @@ impl<M: Memory65c816> Cpu65c816<M> {
             return (self.cycles - start_cycles) as u32;
         }
 
+        // Capture PC before fetch for logging
+        let pc_before_fetch = self.pc;
+        let pbr_before_fetch = self.pbr;
+
         let opcode = self.fetch_byte();
+
+        // Log opcode execution at trace level for debugging stuck games
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            format!(
+                "65C816: Executing opcode 0x{:02X} at ${:02X}:{:04X}",
+                opcode, pbr_before_fetch, pc_before_fetch
+            )
+        });
 
         match opcode {
             // BRK - Force Break
@@ -4208,8 +4228,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
                 // Halt CPU until an interrupt (IRQ or NMI) occurs
                 // PC has already advanced past WAI, so when interrupt occurs, execution continues at next instruction
                 self.waiting_for_interrupt = true;
-                // Log when entering WAI state (for debugging stuck games)
-                eprintln!("65C816: Entering WAI at PC=${:02X}:{:04X}", self.pbr, self.pc.wrapping_sub(1));
+                log(LogCategory::CPU, LogLevel::Info, || {
+                    format!(
+                        "65C816: Entering WAI at ${:02X}:{:04X}",
+                        self.pbr,
+                        self.pc.wrapping_sub(1)
+                    )
+                });
                 self.cycles += 3;
             }
             0xDB => {

@@ -125,14 +125,20 @@ if scanline == 0 && self.current_cycles < 10000 {
 - ✅ `waiting_for_interrupt` flag added to CPU state
 - ✅ NMI trigger clears `waiting_for_interrupt` flag
 - ✅ CPU step function skips execution when waiting for interrupt
-- ✅ Debug logging added to WAI entry and NMI release
+- ✅ Logging module imported in cpu_65c816.rs
+- ✅ Opcode execution logging added at trace level
+- ✅ WAI entry logging using proper logging system (Info level)
+- ✅ NMI trigger logging using proper logging system (Info/Debug level)
+- ✅ Replaced eprintln with proper log() calls
 - ✅ PPU register logging enhanced
 - ✅ Code compiles successfully
+- ✅ All tests pass
 
 ### Verification Status
-- ❌ **NOT VERIFIED**: WAI eprintln messages not appearing in output
-- ❌ **NOT VERIFIED**: Game progression past WAI not confirmed
-- ❌ **NOT VERIFIED**: NMI trigger and release not observed
+- ⏳ **PENDING**: WAI logging messages should now appear with --log-cpu info
+- ⏳ **PENDING**: Opcode trace logging shows what instruction is at $00:8085
+- ⏳ **PENDING**: Game progression past WAI not confirmed
+- ⏳ **PENDING**: NMI trigger and release not observed
 
 ### Test Results
 ```bash
@@ -149,17 +155,22 @@ SNES CPU: PC=$00:8085, A=$BBAA, X=$FFFD, Y=$0000, S=$01FA, P=$85, E=false
 
 ## Potential Issues to Investigate
 
-1. **WAI eprintln not executing**: Either:
-   - WAI instruction not being reached (PC logging happens before execution)
-   - eprintln output being buffered/suppressed
-   - Instruction at $00:8085 is not actually 0xCB (WAI)
+1. **Instruction at $00:8085**: With opcode trace logging enabled:
+   - Run with `--log-cpu trace` to see actual opcode being executed
+   - Verify if it's 0xCB (WAI) or something else (like a branch instruction)
+   - If not WAI, need to understand what the game is actually doing
 
 2. **NMI not triggering**: Game might not be enabling NMI via $4200 register
-   - Check if NMI enable bit is set
+   - Check if NMI enable bit is set (logging should show this)
    - Verify VBlank detection is working
    - Confirm `ppu.take_nmi_pending()` returns true during VBlank
+   - Verify NMI vector points to valid code
 
-3. **Timing issue**: WAI executed once at startup, but logging condition `self.current_cycles < 10000` prevents seeing subsequent frames
+3. **Timing issue**: With proper logging, can see exact sequence of events
+   - When WAI is entered
+   - When VBlank occurs
+   - When NMI fires (if at all)
+   - Where PC goes after NMI
 
 ## Next Steps
 
@@ -171,20 +182,24 @@ SNES CPU: PC=$00:8085, A=$BBAA, X=$FFFD, Y=$0000, S=$01FA, P=$85, E=false
 
 ### Debug Commands
 ```bash
-# Check for WAI/NMI messages
-cargo run --profile release-quick -- "roms\snes\Super Mario World (USA).sfc" 2>&1 | Select-String "WAI|NMI"
+# Check for WAI/NMI messages with proper logging
+cargo run --profile release-quick -- "roms/snes/Super Mario World (USA).sfc" --log-cpu info --log-interrupts info 2>&1 | grep -i "wai\|nmi"
 
-# Full CPU logging
-cargo run --profile release-quick -- "roms\snes\Super Mario World (USA).sfc" --log-cpu debug --log-interrupts debug
+# See what opcode is being executed at $00:8085
+cargo run --profile release-quick -- "roms/snes/Super Mario World (USA).sfc" --log-cpu trace 2>&1 | grep "8085"
+
+# Full CPU and interrupt logging
+cargo run --profile release-quick -- "roms/snes/Super Mario World (USA).sfc" --log-cpu debug --log-interrupts debug
 
 # PPU register logging
-cargo run --profile release-quick -- "roms\snes\Super Mario World (USA).sfc" --log-ppu info
+cargo run --profile release-quick -- "roms/snes/Super Mario World (USA).sfc" --log-ppu info
 ```
 
 ### Code to Add
-1. **Instruction logging**: Add trace-level logging to show actual opcode being executed
-2. **NMI trigger logging**: Add log in `step_frame()` when NMI is triggered
-3. **$4200 write logging**: Already exists but verify it's being called
+1. ✅ **Instruction logging**: Added trace-level logging to show actual opcode being executed
+2. ✅ **NMI trigger logging**: Added debug/info logging in trigger_nmi()
+3. ✅ **WAI logging**: Replaced eprintln with proper logging system
+4. ⏳ **Next**: Test with actual ROM to verify logging appears and reveals the issue
 
 ## Background Context
 

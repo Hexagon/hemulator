@@ -261,7 +261,11 @@ impl Ppu {
             // $2107 - BG1SC - BG1 Tilemap Address and Size
             0x2107 => {
                 log(LogCategory::PPU, LogLevel::Info, || {
-                    format!("SNES PPU: BG1 tilemap base=${:04X} size={:02b}", ((val >> 2) as u16) << 11, val & 0x03)
+                    format!(
+                        "SNES PPU: BG1 tilemap base=${:04X} size={:02b}",
+                        ((val >> 2) as u16) << 11,
+                        val & 0x03
+                    )
                 });
                 self.bg1sc = val;
             }
