@@ -118,6 +118,8 @@ use emu_core::apu::PolynomialCounter;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use serde::{Deserialize, Serialize};
 
+use crate::video_mode::VideoMode;
+
 /// Per-scanline snapshot of TIA state for rendering
 #[derive(Debug, Clone, Copy, Default)]
 struct ScanlineState {
@@ -294,6 +296,9 @@ pub struct Tia {
     // Cached visible window start (to prevent vertical jumping)
     #[serde(skip)]
     cached_visible_start: Option<u16>,
+
+    // Video mode (NTSC/PAL)
+    video_mode: VideoMode,
 }
 
 impl Default for Tia {
@@ -326,8 +331,15 @@ impl Tia {
         }
     }
 
-    /// Create a new TIA chip
+    /// Create a new TIA chip with default NTSC video mode
     pub fn new() -> Self {
+        Self::with_video_mode(VideoMode::default())
+    }
+
+    /// Create a new TIA chip with specified video mode
+    pub fn with_video_mode(video_mode: VideoMode) -> Self {
+        let total_scanlines = video_mode.scanlines_per_frame() as usize;
+
         Self {
             vsync: false,
             vblank: false,
@@ -392,7 +404,7 @@ impl Tia {
 
             scanline_counter: 0,
 
-            scanline_states: vec![ScanlineState::default(); 262],
+            scanline_states: vec![ScanlineState::default(); total_scanlines],
 
             audio0: PolynomialCounter::new(),
             audio1: PolynomialCounter::new(),
@@ -417,6 +429,8 @@ impl Tia {
             writes_colors_nonzero: 0,
 
             cached_visible_start: None,
+
+            video_mode,
         }
     }
 
@@ -511,6 +525,11 @@ impl Tia {
     /// Get a monotonically increasing scanline counter (increments once per scanline)
     pub fn get_scanline_counter(&self) -> u64 {
         self.scanline_counter
+    }
+
+    /// Get the current video mode (NTSC/PAL)
+    pub fn video_mode(&self) -> VideoMode {
+        self.video_mode
     }
 
     /// Latch the current scanline's state immediately (public wrapper for render timing)
@@ -886,7 +905,8 @@ impl Tia {
 
             self.scanline_counter = self.scanline_counter.saturating_add(1);
 
-            if self.scanline >= 262 {
+            let total_scanlines = self.video_mode.scanlines_per_frame();
+            if self.scanline >= total_scanlines {
                 self.scanline = 0;
             }
 
@@ -954,10 +974,11 @@ impl Tia {
     /// from a drifting reference point.
     pub fn visible_window_start_scanline_from(&self, frame_start_scanline: u16) -> u16 {
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
+        let total_scanlines = self.video_mode.scanlines_per_frame();
 
-        for offset in 1..262u16 {
-            let prev_idx = (frame_start_scanline + offset - 1) % 262;
-            let cur_idx = (frame_start_scanline + offset) % 262;
+        for offset in 1..total_scanlines {
+            let prev_idx = (frame_start_scanline + offset - 1) % total_scanlines;
+            let cur_idx = (frame_start_scanline + offset) % total_scanlines;
 
             let prev = self
                 .scanline_states
@@ -988,8 +1009,9 @@ impl Tia {
             }
         }
 
-        // Fallback: common NTSC visible start is around scanline ~37-40 *after* VSYNC.
-        (frame_start_scanline + 40) % 262
+        // Fallback: common visible start is around scanline ~40 after VSYNC (NTSC)
+        // For PAL, this is also reasonable as a fallback
+        (frame_start_scanline + 40) % total_scanlines
     }
 
     /// Try to infer the start of the visible picture area based on VBLANK timing
@@ -1004,8 +1026,10 @@ impl Tia {
             return cached;
         }
 
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
+
         // First detection: find where VBLANK transitions from true to false
-        for i in 1..262 {
+        for i in 1..total_scanlines {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
 
@@ -1016,18 +1040,20 @@ impl Tia {
             }
         }
 
-        // Fallback: common NTSC visible start is around scanline ~37-40
+        // Fallback: common visible start is around scanline ~40
         self.cached_visible_start = Some(40);
         40
     }
 
-    /// Debug helper: count how many of the 192 visible scanlines have any playfield/player bits.
+    /// Debug helper: count how many of the visible scanlines have any playfield/player bits.
     pub fn debug_visible_scanline_activity(&self, visible_start: u16) -> (u32, u32) {
         let mut scanlines_with_pf = 0u32;
         let mut scanlines_with_grp = 0u32;
+        let total_scanlines = self.video_mode.scanlines_per_frame();
+        let visible_lines = self.video_mode.visible_scanlines();
 
-        for visible_line in 0..192u16 {
-            let tia_scanline = (visible_start + visible_line) % 262;
+        for visible_line in 0..visible_lines {
+            let tia_scanline = (visible_start + visible_line) % total_scanlines;
             let state = self
                 .scanline_states
                 .get(tia_scanline as usize)
@@ -1045,12 +1071,13 @@ impl Tia {
         (scanlines_with_pf, scanlines_with_grp)
     }
 
-    /// Debug helper: count PF/GRP activity across all 262 scanlines.
+    /// Debug helper: count PF/GRP activity across all scanlines.
     pub fn debug_all_scanline_activity(&self) -> (u32, u32) {
         let mut scanlines_with_pf = 0u32;
         let mut scanlines_with_grp = 0u32;
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
 
-        for scanline in 0..262usize {
+        for scanline in 0..total_scanlines {
             let state = self
                 .scanline_states
                 .get(scanline)
@@ -1083,7 +1110,7 @@ impl Tia {
 
         // Atari 2600 has 160 pixels per scanline
         for x in 0..160 {
-            let color = Self::get_pixel_color(&state, x);
+            let color = Self::get_pixel_color(&state, x, self.video_mode);
             buffer[visible_line * 160 + x] = color;
         }
     }
@@ -1091,9 +1118,10 @@ impl Tia {
     /// Detect and record collisions for a scanline (called during frame rendering)
     /// This should be called once per scanline to update collision registers
     fn detect_collisions_for_scanline(&mut self, tia_scanline: u16) {
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
         let state = self
             .scanline_states
-            .get((tia_scanline as usize).min(261))
+            .get((tia_scanline as usize).min(total_scanlines - 1))
             .copied()
             .unwrap_or_default();
 
@@ -1172,15 +1200,18 @@ impl Tia {
     /// Detect collisions for the entire frame (should be called after rendering)
     /// This updates the collision registers based on the current frame state
     pub fn detect_collisions_for_frame(&mut self, visible_start: u16) {
-        // Detect collisions for all 192 visible scanlines
-        for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line) % 262;
+        // Detect collisions for all visible scanlines
+        let visible_lines = self.video_mode.visible_scanlines();
+        let total_scanlines = self.video_mode.scanlines_per_frame();
+
+        for visible_line in 0..visible_lines {
+            let tia_scanline = (visible_start + visible_line) % total_scanlines;
             self.detect_collisions_for_scanline(tia_scanline);
         }
     }
 
     /// Get the color of a pixel at the given position using latched state
-    fn get_pixel_color(state: &ScanlineState, x: usize) -> u32 {
+    fn get_pixel_color(state: &ScanlineState, x: usize, video_mode: VideoMode) -> u32 {
         // During VBLANK, all pixels are black (video signal is blanked)
         if state.vblank {
             return 0xFF000000; // Black
@@ -1203,58 +1234,58 @@ impl Tia {
         if !state.playfield_priority {
             // Check Player 0
             if Self::is_player_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
 
             // Check Missile 0
             if Self::is_missile_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
 
             // Check Player 1
             if Self::is_player_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
 
             // Check Missile 1
             if Self::is_missile_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
 
             // Check Ball
             if Self::is_ball_pixel(state, x) {
-                return ntsc_to_rgb(state.colupf);
+                return palette_to_rgb(state.colupf, video_mode);
             }
         }
 
         // Check playfield
         if Self::is_playfield_pixel(state, x) {
-            return ntsc_to_rgb(state.colupf);
+            return palette_to_rgb(state.colupf, video_mode);
         }
 
         // Check Ball (if playfield priority)
         if state.playfield_priority && Self::is_ball_pixel(state, x) {
-            return ntsc_to_rgb(state.colupf);
+            return palette_to_rgb(state.colupf, video_mode);
         }
 
         // Check players and missiles (if playfield priority)
         if state.playfield_priority {
             if Self::is_player_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
             if Self::is_missile_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
             if Self::is_player_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
             if Self::is_missile_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
         }
 
         // Background color
-        ntsc_to_rgb(state.colubk)
+        palette_to_rgb(state.colubk, video_mode)
     }
 
     /// Check if a player pixel is visible at the given x position
@@ -1464,6 +1495,20 @@ impl Tia {
         }
 
         samples
+    }
+}
+
+/// Convert palette value to RGB based on video mode
+/// - NTSC: 128 colors
+/// - PAL: Uses NTSC palette as approximation (proper PAL palette could be added later)
+fn palette_to_rgb(value: u8, video_mode: VideoMode) -> u32 {
+    match video_mode {
+        VideoMode::NTSC => ntsc_to_rgb(value),
+        VideoMode::PAL => {
+            // For now, use NTSC palette for PAL
+            // TODO: Implement proper PAL color palette (104 colors)
+            ntsc_to_rgb(value)
+        }
     }
 }
 

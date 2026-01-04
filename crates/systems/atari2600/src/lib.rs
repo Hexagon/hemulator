@@ -135,6 +135,7 @@ mod cpu;
 mod riot;
 mod tia;
 pub mod tia_renderer;
+mod video_mode;
 
 use bus::Atari2600Bus;
 use cartridge::{Cartridge, CartridgeError};
@@ -143,6 +144,7 @@ use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
 use tia_renderer::{SoftwareTiaRenderer, TiaRenderer};
+pub use video_mode::VideoMode;
 
 #[derive(Debug, Error)]
 pub enum Atari2600Error {
@@ -159,6 +161,7 @@ pub struct Atari2600System {
     cpu: Atari2600Cpu,
     cycles: u64,
     renderer: Box<dyn TiaRenderer>,
+    video_mode: VideoMode,
 }
 
 impl Default for Atari2600System {
@@ -168,15 +171,21 @@ impl Default for Atari2600System {
 }
 
 impl Atari2600System {
-    /// Create a new Atari 2600 system
+    /// Create a new Atari 2600 system with default NTSC video mode
     pub fn new() -> Self {
-        let bus = Atari2600Bus::new();
+        Self::with_video_mode(VideoMode::default())
+    }
+
+    /// Create a new Atari 2600 system with specified video mode
+    pub fn with_video_mode(video_mode: VideoMode) -> Self {
+        let bus = Atari2600Bus::with_video_mode(video_mode);
         let cpu = Atari2600Cpu::new(bus);
 
         Self {
             cpu,
             cycles: 0,
             renderer: Box::new(SoftwareTiaRenderer::new()),
+            video_mode,
         }
     }
 
@@ -264,8 +273,9 @@ impl System for Atari2600System {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        // Atari 2600 frames are 262 scanlines (NTSC).
-        // We detect frame boundaries by watching for scanline wraparound from 261→0.
+        // Atari 2600 frames vary by video mode:
+        // NTSC: 262 scanlines, PAL: 312 scanlines
+        // We detect frame boundaries by watching for scanline wraparound.
 
         // Clear per-frame debug stats
         if let Some(bus) = self.cpu.bus_mut() {
@@ -280,7 +290,11 @@ impl System for Atari2600System {
 
         let debug_vsync = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
-        // Run until scanline wraps around (261 -> 0 or similar), indicating frame completion
+        // Threshold for detecting scanline wraparound (last ~12 scanlines)
+        let total_scanlines = self.video_mode.scanlines_per_frame();
+        let wraparound_threshold = total_scanlines - 12;
+
+        // Run until scanline wraps around, indicating frame completion
         while cpu_steps < MAX_CPU_STEPS {
             let cycles = self.cpu.step();
             cpu_steps += 1;
@@ -298,9 +312,11 @@ impl System for Atari2600System {
 
                 let current_scanline = bus.tia.get_scanline();
 
-                // Detect frame completion: scanline wrapped from high (>250) to low (<10)
-                // This indicates we've crossed the 261→0 boundary
-                if current_scanline < last_scanline && last_scanline > 250 && current_scanline < 10
+                // Detect frame completion: scanline wrapped from high to low
+                // This works for both NTSC (261→0) and PAL (311→0)
+                if current_scanline < last_scanline
+                    && last_scanline > wraparound_threshold
+                    && current_scanline < 10
                 {
                     if debug_vsync {
                         eprintln!(
@@ -370,11 +386,13 @@ impl System for Atari2600System {
             let visible_start = bus.tia.visible_window_start_scanline();
 
             if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
+                let total_scanlines = self.video_mode.scanlines_per_frame();
+                let visible_lines = self.video_mode.visible_scanlines();
                 eprintln!(
                     "[ATARI RENDER] visible_start={} current_scanline={} (will render TIA scanlines {}-{})",
                     visible_start, current_scanline,
                     visible_start,
-                    (visible_start + 191) % 262
+                    (visible_start + visible_lines - 1) % total_scanlines
                 );
             }
 

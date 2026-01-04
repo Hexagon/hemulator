@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::cartridge::Cartridge;
 use crate::riot::Riot;
 use crate::tia::Tia;
+use crate::video_mode::VideoMode;
 
 /// Atari 2600 memory bus
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,10 +33,15 @@ impl Default for Atari2600Bus {
 }
 
 impl Atari2600Bus {
-    /// Create a new bus
+    /// Create a new bus with default NTSC video mode
     pub fn new() -> Self {
+        Self::with_video_mode(VideoMode::default())
+    }
+
+    /// Create a new bus with specified video mode
+    pub fn with_video_mode(video_mode: VideoMode) -> Self {
         Self {
-            tia: Tia::new(),
+            tia: Tia::with_video_mode(video_mode),
             riot: Riot::new(),
             cartridge: None,
             wsync_request: false,

@@ -25,10 +25,8 @@ use emu_core::types::Frame;
 
 use crate::tia::Tia;
 
-/// Total number of scanlines per frame (NTSC)
-const TOTAL_SCANLINES: u16 = 262;
-
-/// Maximum TIA scanline index (0-261, total 262 scanlines)
+/// Maximum TIA scanline index for NTSC (0-261, total 262 scanlines)
+/// Note: For PAL systems, this is higher (0-311, total 312 scanlines)
 #[cfg(test)]
 const MAX_SCANLINE: u16 = 261;
 
@@ -117,22 +115,27 @@ impl TiaRenderer for SoftwareTiaRenderer {
     fn render_frame(&mut self, tia: &Tia, visible_start: u16) {
         use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
-        let end_scanline = (visible_start + 191) % 262;
+        // Get video mode settings from TIA
+        let total_scanlines = tia.video_mode().scanlines_per_frame();
+        let visible_lines = tia.video_mode().visible_scanlines();
+
+        let end_scanline = (visible_start + (visible_lines - 1)) % total_scanlines;
         if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Info) {
             eprintln!(
-                "[TIA RENDERER] render_frame: visible_start={}, will map TIA scanlines {}-{} to FB rows 0-191",
+                "[TIA RENDERER] render_frame: visible_start={}, will map TIA scanlines {}-{} to FB rows 0-{}",
                 visible_start,
                 visible_start,
-                end_scanline
+                end_scanline,
+                visible_lines - 1
             );
         }
 
-        // Render 192 visible scanlines
-        // Use modulo to wrap around the 262-scanline frame properly.
+        // Render visible scanlines (192 for NTSC, 228 for PAL)
+        // Use modulo to wrap around the scanline frame properly.
         // This matches the collision detection logic and prevents rendering artifacts
         // when visible_start + visible_line exceeds the total scanline count.
-        for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line as u16) % TOTAL_SCANLINES;
+        for visible_line in 0..visible_lines {
+            let tia_scanline = (visible_start + visible_line) % total_scanlines;
 
             if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                 // Log the wrap point where we go from scanline 261 to 0
@@ -144,7 +147,7 @@ impl TiaRenderer for SoftwareTiaRenderer {
                 }
             }
 
-            self.render_scanline(tia, visible_line, tia_scanline);
+            self.render_scanline(tia, visible_line as usize, tia_scanline);
         }
     }
 }
