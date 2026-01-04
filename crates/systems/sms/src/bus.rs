@@ -3,6 +3,7 @@
 use crate::vdp::Vdp;
 use emu_core::apu::Sn76489Psg;
 use emu_core::cpu_z80::MemoryZ80;
+use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -135,18 +136,18 @@ impl MemoryZ80 for SmsMemory {
     }
 
     fn io_read(&mut self, port: u8) -> u8 {
-        match port {
+        let value = match port {
             0x7E | 0x7F => {
                 // V-counter (0x7E) / H-counter (0x7F) - both read VDP vcounter for now
                 self.vdp.borrow().read_vcounter()
             }
-            0xBE => {
-                // VDP data port
-                self.vdp.borrow_mut().read_data()
-            }
             0xBF => {
                 // VDP control/status port
                 self.vdp.borrow_mut().read_status()
+            }
+            0xBE => {
+                // VDP data port
+                self.vdp.borrow_mut().read_data()
             }
             0xDC => {
                 // Controller port 1
@@ -157,7 +158,20 @@ impl MemoryZ80 for SmsMemory {
                 self.controller_2
             }
             _ => 0xFF,
+        };
+        
+        // Log I/O reads for debugging
+        static mut READ_COUNT: u64 = 0;
+        unsafe {
+            READ_COUNT += 1;
+            if READ_COUNT <= 10 || (port == 0xBF && READ_COUNT % 100 == 0) {
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!("SMS I/O: Read port ${:02X} = ${:02X}", port, value)
+                });
+            }
         }
+        
+        value
     }
 
     fn io_write(&mut self, port: u8, val: u8) {

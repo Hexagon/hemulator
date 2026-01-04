@@ -3,7 +3,8 @@
 use crate::bus::SmsMemory;
 use crate::vdp::Vdp;
 use emu_core::apu::{AudioChip, Sn76489Psg, TimingMode};
-use emu_core::cpu_z80::CpuZ80;
+use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 use emu_core::{MountPointInfo, System};
@@ -56,6 +57,14 @@ impl SmsSystem {
 
     /// Load a ROM
     pub fn load_rom(&mut self, rom_data: Vec<u8>) {
+        // Log first few bytes for debugging
+        log(LogCategory::CPU, LogLevel::Debug, || {
+            format!(
+                "SMS ROM: First 16 bytes: {:02X?}",
+                &rom_data[0..16.min(rom_data.len())]
+            )
+        });
+        
         // Create new memory with ROM
         let memory = SmsMemory::new(rom_data, Rc::clone(&self.vdp), Rc::clone(&self.psg));
         self.cpu = CpuZ80::new(memory);
@@ -83,33 +92,58 @@ impl System for SmsSystem {
     type Error = SmsError;
 
     fn reset(&mut self) {
+        log(LogCategory::CPU, LogLevel::Info, || "SMS: System reset".to_string());
         self.cpu.reset();
         self.vdp.borrow_mut().reset();
         self.psg.borrow_mut().reset();
         self.cycles = 0;
+        
+        log(LogCategory::CPU, LogLevel::Debug, || {
+            format!(
+                "SMS CPU: PC=${:04X}, SP=${:04X}, A=${:02X}, F=${:02X}",
+                self.cpu.pc, self.cpu.sp, self.cpu.a, self.cpu.f
+            )
+        });
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         let target_cycles = 59659; // ~3.58 MHz / 60 Hz
+        
+        static mut FRAME_COUNT: u64 = 0;
+        let log_this_frame = unsafe {
+            FRAME_COUNT += 1;
+            FRAME_COUNT <= 5
+        };
 
         while self.cycles < target_cycles {
+            // Log CPU state on first few frames
+            if log_this_frame && self.cycles < 100 {
+                let opcode = self.cpu.memory.read(self.cpu.pc);
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!(
+                        "SMS CPU: PC=${:04X} opcode=${:02X}, SP=${:04X}, A=${:02X}, BC=${:04X}, DE=${:04X}, HL=${:04X}",
+                        self.cpu.pc, opcode, self.cpu.sp, self.cpu.a,
+                        ((self.cpu.b as u16) << 8) | self.cpu.c as u16,
+                        ((self.cpu.d as u16) << 8) | self.cpu.e as u16,
+                        ((self.cpu.h as u16) << 8) | self.cpu.l as u16
+                    )
+                });
+            }
+
             // Execute one CPU instruction
             let cpu_cycles = self.cpu.step() as u64;
             self.cycles += cpu_cycles;
 
-            // Clock VDP (simplified - step by scanline instead of pixel)
-            // VDP runs at ~3.58 MHz, renders 262 scanlines per frame
-            // Each scanline takes roughly 228 cycles
-            let scanlines_to_render = cpu_cycles / 228;
-            for _ in 0..scanlines_to_render {
-                self.vdp.borrow_mut().step_scanline();
-            }
+            // Update VDP scanline based on cycles
+            // Each scanline takes approximately 228 cycles (~3.58MHz / 262 scanlines / 60Hz)
+            let current_scanline = (self.cycles / 228) % 262;
+            self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
             // Check for VDP interrupts
-            // TODO: Implement Z80 interrupt handling once CPU is complete
             if self.vdp.borrow().frame_interrupt_pending() {
-                // Would trigger interrupt (IM 1: jump to 0x0038)
-                // self.cpu.interrupt();
+                // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
+                self.cpu.interrupt();
+                self.vdp.borrow_mut().clear_frame_interrupt();
             }
         }
 

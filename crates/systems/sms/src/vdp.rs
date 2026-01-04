@@ -10,6 +10,7 @@
 //! - Scrolling support
 //! - Line and frame interrupts
 
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 
@@ -77,7 +78,11 @@ impl Vdp {
             if self.code_register == 0x02 {
                 let reg = data & 0x0F;
                 if (reg as usize) < self.registers.len() {
-                    self.registers[reg as usize] = (self.address_register & 0xFF) as u8;
+                    let value = (self.address_register & 0xFF) as u8;
+                    self.registers[reg as usize] = value;
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SMS VDP: Register R{} = ${:02X}", reg, value)
+                    });
                 }
             }
         }
@@ -91,7 +96,13 @@ impl Vdp {
         match self.code_register {
             0x03 => {
                 // CRAM write
-                self.cram[(self.address_register & 0x1F) as usize] = data;
+                let addr = self.address_register & 0x1F;
+                self.cram[addr as usize] = data;
+                if addr == 16 {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SMS VDP: Backdrop color = ${:02X}", data)
+                    });
+                }
             }
             _ => {
                 // VRAM write
@@ -158,10 +169,51 @@ impl Vdp {
             self.scanline = 0;
         }
     }
+    
+    /// Set current scanline (for cycle-accurate timing)
+    pub fn set_scanline(&mut self, scanline: u16) {
+        let old_scanline = self.scanline;
+        self.scanline = scanline;
+        
+        // Render any scanlines that were crossed
+        if scanline < old_scanline {
+            // Wrapped around to new frame
+            for line in old_scanline..192.min(262) {
+                if line < 192 {
+                    self.render_scanline(line as u8);
+                }
+            }
+            for line in 0..scanline.min(192) {
+                self.render_scanline(line as u8);
+            }
+            // Check for frame interrupt at scanline 192
+            if old_scanline < 192 && scanline >= 192 {
+                if (self.registers[1] & 0x20) != 0 {
+                    self.frame_interrupt_pending = true;
+                }
+            }
+        } else {
+            // Normal forward progress within same frame
+            for line in old_scanline..scanline.min(192) {
+                self.render_scanline(line as u8);
+            }
+            // Check for frame interrupt at scanline 192
+            if old_scanline < 192 && scanline >= 192 {
+                if (self.registers[1] & 0x20) != 0 {
+                    self.frame_interrupt_pending = true;
+                }
+            }
+        }
+    }
 
     /// Check if frame interrupt is pending
     pub fn frame_interrupt_pending(&self) -> bool {
         self.frame_interrupt_pending
+    }
+
+    /// Clear frame interrupt
+    pub fn clear_frame_interrupt(&mut self) {
+        self.frame_interrupt_pending = false;
     }
 
     /// Render a single scanline
@@ -348,6 +400,22 @@ impl Default for Vdp {
 
 impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
+        // Log every time frame is retrieved
+        let backdrop = self.decode_color(self.cram[16] & 0x3F);
+        let bg_enabled = (self.registers[1] & 0x40) != 0;
+        let sprite_enabled = (self.registers[1] & 0x08) != 0;
+        let mut non_backdrop = 0;
+        for &pixel in &self.frame.pixels {
+            if pixel != backdrop {
+                non_backdrop += 1;
+            }
+        }
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "SMS VDP: get_frame() - BG={} SPR={} R1=${:02X} backdrop=${:08X} non-backdrop={}",
+                bg_enabled, sprite_enabled, self.registers[1], backdrop, non_backdrop
+            )
+        });
         &self.frame
     }
 
