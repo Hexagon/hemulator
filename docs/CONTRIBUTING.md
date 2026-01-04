@@ -102,6 +102,7 @@ Hemulator provides three build profiles optimized for different use cases:
   - Update [MANUAL.md](MANUAL.md) for user-facing changes (controls, features, system limitations)
   - Update [README.md](../README.md) for developer setup info and project overview
   - Update [AGENTS.md](../AGENTS.md) for architecture changes and implementation guidelines
+  - **Update system README.md references**: When implementing or debugging system features, add all technical references (datasheets, wikis, development docs, technical manuals) to the system's README.md "References" section. This creates a valuable resource for future developers and documents the authoritative sources used for implementation decisions. See `crates/systems/pc/README.md` and `crates/systems/sms/README.md` for examples of comprehensive reference sections.
 - **Code Quality**: Write clean, well-documented code with meaningful variable names
 - **Commit Messages**: Use clear, descriptive commit messages
 
@@ -199,9 +200,29 @@ Contributions are welcome in the following areas:
 - **All Systems**: Performance optimizations, UI/UX improvements, bug fixes
 - **Cross-platform**: Additional platform support, testing on macOS
 
-## Performance Optimization
+## System Documentation Guidelines
 
-### Build Profiles
+When working on any emulated system (NES, Game Boy, SNES, N64, PC, Atari 2600, SMS):
+
+### Maintaining Reference Sections
+
+Each system's README.md must include a comprehensive "References" section documenting all technical resources used during development. When implementing or debugging features:
+
+1. **Add all technical references** to the system's README.md "References" section
+2. **Include diverse source types**:
+   - Official datasheets and technical manuals
+   - Development wikis and community documentation
+   - Academic papers or reverse-engineering documents
+   - Architecture analysis articles
+   - Instruction set references
+3. **Use descriptive titles** so developers can identify relevant resources quickly
+4. **Keep references organized** by category when the list grows large
+
+**Good examples**: See `crates/systems/pc/README.md` and `crates/systems/sms/README.md` for well-documented reference sections with multiple source types.
+
+**Why this matters**: Reference sections create a knowledge base for future developers, document authoritative sources for implementation decisions, and help debug issues by pointing to the same sources used during original development.
+
+## Performance Optimization
 
 The project uses optimized Cargo profiles for different build scenarios:
 
