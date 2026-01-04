@@ -403,18 +403,27 @@ VDELP0/VDELP1 delay player graphics update by one scanline for smoother animatio
 - **Impact**: Medium - improves rendering for games using delayed graphics for flicker reduction
 - **Use case**: Multi-sprite games rely on this for smooth animation
 
-### Not Implemented Features
-
-These features are not yet implemented but would improve game compatibility:
+### Implemented Features
 
 #### Paddle Controllers
 
-❌ **Not Implemented**
+✅ **Implemented**
 
-INPT0-INPT3 are used for paddle/driving controller analog input but always return 0. Paddle timing circuits not emulated.
+INPT0-INPT3 analog input with capacitor discharge timing emulation. Paddle positions control discharge time.
 
-- **Impact**: High for paddle games (Breakout, Kaboom!, Warlords)
-- **Games affected**: All paddle-based games are unplayable
+- **Implementation**: Capacitors charge when VBLANK bit 7 is set, discharge at rates proportional to paddle position
+- **Discharge timing**: 100-380 CPU cycles depending on position (0=fast, 255=slow)
+- **Impact**: High - enables all paddle/driving controller games
+- **Games affected**: Breakout, Kaboom!, Warlords, Night Driver, Indy 500
+
+Usage:
+```rust
+system.set_paddle_position(0, 128); // Set paddle 0 to center position (0-255 range)
+```
+
+### Not Implemented Features
+
+These features are not yet implemented but would improve game compatibility:
 
 #### Exotic Banking Schemes
 

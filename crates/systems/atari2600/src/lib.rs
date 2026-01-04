@@ -242,6 +242,25 @@ impl Atari2600System {
             bus.tia.set_fire_button(player as u8, fire);
         }
     }
+
+    /// Set paddle controller position (0-3)
+    ///
+    /// Paddles use analog input with values from 0 (full left/counterclockwise)
+    /// to 255 (full right/clockwise).
+    ///
+    /// - Paddle 0: Left paddle on port 1
+    /// - Paddle 1: Right paddle on port 1
+    /// - Paddle 2: Left paddle on port 2
+    /// - Paddle 3: Right paddle on port 2
+    ///
+    /// The position affects the capacitor discharge time when reading INPT0-INPT3.
+    /// Games charge the capacitors by setting VBLANK bit 7, then measure how long
+    /// it takes for the capacitor to discharge by polling INPT0-INPT3.
+    pub fn set_paddle_position(&mut self, paddle: u8, position: u8) {
+        if let Some(bus) = self.cpu.bus_mut() {
+            bus.tia.set_paddle_position(paddle, position);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1497,5 +1516,154 @@ mod tests {
             "\n✓ game_test ROM distributes content across {} regions",
             non_empty_regions
         );
+    }
+
+    #[test]
+    fn test_paddle_controller_timing() {
+        // Test paddle controller capacitor discharge timing
+        let mut sys = Atari2600System::new();
+
+        // Load a test ROM
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set paddle 0 to minimum position (0 = full left)
+        sys.set_paddle_position(0, 0);
+
+        // Set paddle 1 to maximum position (255 = full right)
+        sys.set_paddle_position(1, 255);
+
+        // Set paddle 2 to center position
+        sys.set_paddle_position(2, 128);
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Initially, paddles should be discharged
+            assert_eq!(
+                bus.tia.read(0x08) & 0x80,
+                0x00,
+                "Paddle 0 should start discharged"
+            );
+            assert_eq!(
+                bus.tia.read(0x09) & 0x80,
+                0x00,
+                "Paddle 1 should start discharged"
+            );
+            assert_eq!(
+                bus.tia.read(0x0A) & 0x80,
+                0x00,
+                "Paddle 2 should start discharged"
+            );
+
+            // Charge the capacitors by setting VBLANK bit 7
+            bus.tia.write(0x01, 0x80);
+
+            // All paddles should now be charged
+            assert_eq!(
+                bus.tia.read(0x08) & 0x80,
+                0x80,
+                "Paddle 0 should be charged after VBLANK"
+            );
+            assert_eq!(
+                bus.tia.read(0x09) & 0x80,
+                0x80,
+                "Paddle 1 should be charged after VBLANK"
+            );
+            assert_eq!(
+                bus.tia.read(0x0A) & 0x80,
+                0x80,
+                "Paddle 2 should be charged after VBLANK"
+            );
+
+            // Clock the TIA to discharge capacitors
+            // Paddle 0 (position 0) should discharge fastest (~100 cycles)
+            // Paddle 1 (position 255) should discharge slowest (~380 cycles)
+            // Paddle 2 (position 128) should discharge at medium speed (~240 cycles)
+
+            // After 110 cycles, paddle 0 should be discharged, others still charged
+            for _ in 0..110 {
+                bus.tia.clock();
+            }
+
+            assert_eq!(
+                bus.tia.read(0x08) & 0x80,
+                0x00,
+                "Paddle 0 should discharge quickly (position 0)"
+            );
+            assert_eq!(
+                bus.tia.read(0x09) & 0x80,
+                0x80,
+                "Paddle 1 should still be charged (position 255)"
+            );
+            assert_eq!(
+                bus.tia.read(0x0A) & 0x80,
+                0x80,
+                "Paddle 2 should still be charged (position 128)"
+            );
+
+            // After 150 more cycles (260 total), paddle 2 should discharge
+            for _ in 0..150 {
+                bus.tia.clock();
+            }
+
+            assert_eq!(
+                bus.tia.read(0x0A) & 0x80,
+                0x00,
+                "Paddle 2 should discharge at medium speed (position 128)"
+            );
+            assert_eq!(
+                bus.tia.read(0x09) & 0x80,
+                0x80,
+                "Paddle 1 should still be charged (position 255)"
+            );
+
+            // After 140 more cycles (400 total), paddle 1 should discharge
+            for _ in 0..140 {
+                bus.tia.clock();
+            }
+
+            assert_eq!(
+                bus.tia.read(0x09) & 0x80,
+                0x00,
+                "Paddle 1 should discharge slowly (position 255)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_paddle_vblank_charging() {
+        // Test that VBLANK bit 7 properly charges paddle capacitors
+        let mut sys = Atari2600System::new();
+
+        let rom = include_bytes!("../../../../test_roms/atari2600/test.bin");
+        sys.mount("Cartridge", rom).unwrap();
+
+        // Set paddle positions
+        sys.set_paddle_position(0, 50);
+        sys.set_paddle_position(1, 200);
+
+        if let Some(bus) = sys.cpu.bus_mut() {
+            // Charge capacitors
+            bus.tia.write(0x01, 0x80);
+
+            // Verify charged
+            assert_eq!(bus.tia.read(0x08) & 0x80, 0x80);
+            assert_eq!(bus.tia.read(0x09) & 0x80, 0x80);
+
+            // Discharge by waiting
+            for _ in 0..500 {
+                bus.tia.clock();
+            }
+
+            // Should be discharged
+            assert_eq!(bus.tia.read(0x08) & 0x80, 0x00);
+            assert_eq!(bus.tia.read(0x09) & 0x80, 0x00);
+
+            // Recharge by setting VBLANK bit 7 again
+            bus.tia.write(0x01, 0x80);
+
+            // Should be charged again
+            assert_eq!(bus.tia.read(0x08) & 0x80, 0x80);
+            assert_eq!(bus.tia.read(0x09) & 0x80, 0x80);
+        }
     }
 }

@@ -654,11 +654,11 @@ The emulator supports the following cartridge banking schemes:
 - 160x192 resolution
 
 **Known Limitations**:
-- **Paddle Controllers**: INPT0-INPT3 always return 0 - paddle games (Breakout, Kaboom!, Warlords) are unplayable
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but some visual effects may differ
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
 
-**Recent Fixes**:
+**Recent Additions**:
+- **Paddle Controllers**: Full paddle controller support with capacitor discharge timing (INPT0-INPT3) - enables paddle games (Breakout, Kaboom!, Warlords)
 - **Vertical Stability**: Fixed vertical jumping issue by caching the visible window start position across frames
 - **Frame Consistency**: Enhanced test ROMs to catch timing-related rendering issues
 - **Bus Address Mapping**: Fixed address range 0x40-0x7F to write to both TIA and RIOT RAM (hardware-accurate dual-write behavior)
