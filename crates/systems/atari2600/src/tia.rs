@@ -106,12 +106,12 @@
 //!
 //! 1. **Player/Missile Sizing (NUSIZ)**: Full support for sprite sizing (1x, 2x, 4x) and duplication modes
 //! 2. **Collision Detection**: All 8 collision registers with pixel-perfect detection
-//! 3. **Delayed Graphics (VDELP0/VDELP1)**: Player graphics can be delayed by one scanline
+//! 3. **Delayed Graphics (VDELP0/VDELP1/VDELBL)**: Player and ball graphics can be delayed by one scanline
+//! 4. **Paddle Controllers**: INPT0-INPT3 analog input with capacitor discharge timing (100-380 CPU cycles)
 //!
 //! ## Known Limitations
 //!
 //! 1. **Frame-based rendering**: Uses scanline state latching rather than cycle-accurate generation
-//! 2. **Paddle controllers**: Not implemented (INPT0-INPT3 always return 0)
 //!
 //! These limitations represent acceptable trade-offs for a functional emulator. Most games
 //! will work correctly with the current implementation.
@@ -229,6 +229,23 @@ pub struct Tia {
     // INPT4/INPT5: Joystick fire buttons (bit 7: 0=pressed, 1=not pressed)
     inpt4: u8, // Player 0 fire button
     inpt5: u8, // Player 1 fire button
+
+    // Paddle controllers (INPT0-INPT3)
+    // Paddles use analog input with capacitor discharge timing
+    // Position range: 0-255 (0 = full left/counterclockwise, 255 = full right/clockwise)
+    paddle0_position: u8, // Left paddle on port 1
+    paddle1_position: u8, // Right paddle on port 1
+    paddle2_position: u8, // Left paddle on port 2
+    paddle3_position: u8, // Right paddle on port 2
+
+    // Paddle capacitor charge state
+    // When VBLANK bit 7 is set, capacitors are charged (INPT bits read as 1)
+    // When VBLANK bit 7 is cleared, capacitors discharge through paddle potentiometers
+    // The discharge time is proportional to paddle position
+    paddle0_charge: u16, // Cycles remaining until discharged
+    paddle1_charge: u16,
+    paddle2_charge: u16,
+    paddle3_charge: u16,
 
     // Current scanline and pixel position
     scanline: u16,
@@ -368,6 +385,17 @@ impl Tia {
             hmbl: 0,
             inpt4: 0x80, // Not pressed (bit 7 = 1)
             inpt5: 0x80, // Not pressed (bit 7 = 1)
+
+            // Paddle controllers - initialize to center position (128)
+            paddle0_position: 128,
+            paddle1_position: 128,
+            paddle2_position: 128,
+            paddle3_position: 128,
+            paddle0_charge: 0,
+            paddle1_charge: 0,
+            paddle2_charge: 0,
+            paddle3_charge: 0,
+
             scanline: 0,
             pixel: 0,
 
@@ -441,6 +469,27 @@ impl Tia {
         match player {
             0 => self.inpt4 = value,
             1 => self.inpt5 = value,
+            _ => {}
+        }
+    }
+
+    /// Set paddle controller position (0-3)
+    ///
+    /// Paddles use analog input with values from 0 (full left/counterclockwise)
+    /// to 255 (full right/clockwise).
+    ///
+    /// - Paddle 0: Left paddle on port 1
+    /// - Paddle 1: Right paddle on port 1
+    /// - Paddle 2: Left paddle on port 2
+    /// - Paddle 3: Right paddle on port 2
+    ///
+    /// Position affects the capacitor discharge time when VBLANK bit 7 is toggled.
+    pub fn set_paddle_position(&mut self, paddle: u8, position: u8) {
+        match paddle {
+            0 => self.paddle0_position = position,
+            1 => self.paddle1_position = position,
+            2 => self.paddle2_position = position,
+            3 => self.paddle3_position = position,
             _ => {}
         }
     }
@@ -545,6 +594,20 @@ impl Tia {
             0x01 => {
                 self.writes_vblank = self.writes_vblank.saturating_add(1);
                 self.vblank = (val & 0x02) != 0;
+
+                // VBLANK bit 7: Paddle charge control
+                // When bit 7 is set to 1, paddle capacitors are charged
+                // When bit 7 is cleared to 0, capacitors discharge through potentiometers
+                if (val & 0x80) != 0 {
+                    // Charge all paddle capacitors
+                    // The discharge time is proportional to paddle position
+                    // Typical discharge time: ~100-380 CPU cycles depending on position
+                    // Using a linear scale: position 0 = 100 cycles, position 255 = 380 cycles
+                    self.paddle0_charge = 100 + ((self.paddle0_position as u32 * 280 / 255) as u16);
+                    self.paddle1_charge = 100 + ((self.paddle1_position as u32 * 280 / 255) as u16);
+                    self.paddle2_charge = 100 + ((self.paddle2_position as u32 * 280 / 255) as u16);
+                    self.paddle3_charge = 100 + ((self.paddle3_position as u32 * 280 / 255) as u16);
+                }
             }
             0x02 => {} // WSYNC - handled by bus
             0x03 => {} // RSYNC
@@ -774,15 +837,48 @@ impl Tia {
             0x05 => self.cxm1fb, // Missile 1 to Playfield/Ball collisions
             0x06 => self.cxblpf, // Ball to Playfield collisions
             0x07 => self.cxppmm, // Player and Missile collisions
-            0x08..=0x0B => 0,    // Input ports 0-3 (paddles, not implemented)
-            0x0C => self.inpt4,  // Input port 4 (Player 0 fire button)
-            0x0D => self.inpt5,  // Input port 5 (Player 1 fire button)
+            0x08..=0x0B => {
+                // Input ports 0-3 (paddle controllers)
+                // Bit 7: 1 = capacitor charged, 0 = capacitor discharged
+                // The capacitor state depends on VBLANK bit 7 and time elapsed
+                let paddle_charge = match addr & 0x0F {
+                    0x08 => self.paddle0_charge,
+                    0x09 => self.paddle1_charge,
+                    0x0A => self.paddle2_charge,
+                    0x0B => self.paddle3_charge,
+                    _ => 0,
+                };
+
+                // If charge counter is still > 0, capacitor is charged (bit 7 = 1)
+                // Otherwise, capacitor is discharged (bit 7 = 0)
+                if paddle_charge > 0 {
+                    0x80 // Capacitor charged
+                } else {
+                    0x00 // Capacitor discharged
+                }
+            }
+            0x0C => self.inpt4, // Input port 4 (Player 0 fire button)
+            0x0D => self.inpt5, // Input port 5 (Player 1 fire button)
             _ => 0,
         }
     }
 
     /// Clock the TIA for one CPU cycle (3 color clocks)
     pub fn clock(&mut self) {
+        // Discharge paddle capacitors (one cycle at a time)
+        if self.paddle0_charge > 0 {
+            self.paddle0_charge -= 1;
+        }
+        if self.paddle1_charge > 0 {
+            self.paddle1_charge -= 1;
+        }
+        if self.paddle2_charge > 0 {
+            self.paddle2_charge -= 1;
+        }
+        if self.paddle3_charge > 0 {
+            self.paddle3_charge -= 1;
+        }
+
         // Simplified: just advance pixel counter
         self.pixel += 3; // 3 color clocks per CPU cycle
 
