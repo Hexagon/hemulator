@@ -17,6 +17,7 @@ The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/
 - ✅ **Tile Attributes** - CGB palette selection, VRAM banking, flipping
 - ✅ **APU** - Complete audio with all 4 channels
 - ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 (~97% coverage)
+- ✅ **Speed Switching** - KEY1 register for CGB double-speed mode
 - ✅ **Joypad** - Full input support
 - ✅ **Timer** - DIV, TIMA, TMA, TAC with interrupts
 - ✅ **Interrupts** - VBlank and Timer interrupts
@@ -167,7 +168,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 
 **Missing CGB Features**:
 - WRAM banking (SVBK register at 0xFF70)
-- Speed switching (KEY1 register at 0xFF4D)
 - HDMA - HBlank DMA (registers 0xFF51-0xFF55)
 - Infrared port (RP register at 0xFF56)
 
