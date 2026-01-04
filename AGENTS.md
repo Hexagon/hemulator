@@ -22,6 +22,8 @@
 
 - **Keep track of known limitations**: Document known limitations and missing features in docs/MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 
+- **Document development references**: All technical references, datasheets, wikis, and documentation used during system development MUST be tracked in each system's README.md "References" section. When implementing or debugging system features, add references to the sources consulted. This helps future developers understand the technical basis for implementation decisions and locate authoritative documentation. See PC and SMS READMEs for examples of well-documented reference sections.
+
 - **Project structure**: workspace with `crates/core`, `crates/systems/*`, and `crates/frontend/gui`.
   - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
   - **CLI removed**: There is no CLI frontend, only the GUI
