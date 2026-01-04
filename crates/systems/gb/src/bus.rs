@@ -89,12 +89,12 @@
 //! - ✅ Cartridge RAM with size detection
 //! - ✅ MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 mappers
 //! - ✅ OAM DMA transfer (0xFF46)
-//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD)
+//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD, KEY1)
+//! - ✅ Speed switching (KEY1 at 0xFF4D, CGB only)
 //!
 //! ## Not Implemented
 //! - ❌ Serial transfer (0xFF01, 0xFF02)
 //! - ❌ WRAM banking (SVBK at 0xFF70, CGB only)
-//! - ❌ Speed switching (KEY1 at 0xFF4D, CGB only)
 //! - ❌ HDMA (0xFF51-0xFF55, CGB only)
 //! - ❌ Infrared port (RP at 0xFF56, CGB only)
 
@@ -130,6 +130,10 @@ pub struct GbBus {
     button_state: u8,
     /// CGB mode flag (true if Game Boy Color features are enabled)
     cgb_mode: bool,
+    /// KEY1 register (0xFF4D) - CGB speed switch
+    /// Bit 7 (read): Current speed (0=normal 4.19 MHz, 1=double 8.39 MHz)
+    /// Bit 0 (write): Speed switch prepare flag
+    key1: u8,
 }
 
 impl GbBus {
@@ -147,6 +151,7 @@ impl GbBus {
             joypad: 0xFF,
             button_state: 0xFF,
             cgb_mode: false,
+            key1: 0, // Start in normal speed mode
         }
     }
 
@@ -170,6 +175,40 @@ impl GbBus {
     #[allow(dead_code)] // Will be used when CGB features are fully implemented
     pub fn is_cgb_mode(&self) -> bool {
         self.cgb_mode
+    }
+
+    /// Get the KEY1 register (0xFF4D) value
+    /// Bit 7 (read): Current speed (0=normal, 1=double)
+    /// Bit 0 (read): Speed switch armed flag
+    pub fn read_key1(&self) -> u8 {
+        // Bit 7: current speed, Bit 0: prepare switch flag
+        // Bits 1-6 always read as 1
+        (self.key1 & 0x81) | 0x7E
+    }
+
+    /// Write to KEY1 register (0xFF4D)
+    /// Only bit 0 is writable - it arms the speed switch
+    pub fn write_key1(&mut self, val: u8) {
+        // Only bit 0 is writable (prepare speed switch)
+        self.key1 = (self.key1 & 0x80) | (val & 0x01);
+    }
+
+    /// Perform CGB speed switch
+    /// Called by STOP instruction when KEY1 bit 0 is set
+    /// Returns true if speed switch was performed
+    pub fn perform_speed_switch(&mut self) -> bool {
+        // Only perform switch if bit 0 is set (switch armed) and in CGB mode
+        if !self.cgb_mode || (self.key1 & 0x01) == 0 {
+            return false;
+        }
+
+        // Toggle speed (bit 7)
+        self.key1 ^= 0x80;
+
+        // Clear prepare flag (bit 0)
+        self.key1 &= 0xFE;
+
+        true
     }
 
     pub fn load_cart(&mut self, data: &[u8]) {
@@ -287,6 +326,7 @@ impl MemoryLr35902 for GbBus {
                 0xFF49 => self.ppu.obp1,
                 0xFF4A => self.ppu.wy,
                 0xFF4B => self.ppu.wx,
+                0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
                 0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
                 0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
@@ -358,6 +398,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF49 => self.ppu.obp1 = val,
                     0xFF4A => self.ppu.wy = val,
                     0xFF4B => self.ppu.wx = val,
+                    0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
                     0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
                     0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
@@ -377,5 +418,9 @@ impl MemoryLr35902 for GbBus {
 
     fn is_cgb_mode(&self) -> bool {
         self.cgb_mode
+    }
+
+    fn perform_speed_switch(&mut self) -> bool {
+        self.perform_speed_switch()
     }
 }

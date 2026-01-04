@@ -104,6 +104,7 @@
 //! - ✅ Interrupts: Full interrupt handling (VBlank, LCD STAT, Timer, Serial, Joypad)
 //! - ✅ Interrupts: Priority-based interrupt servicing with IME flag
 //! - ✅ CGB: Automatic mode detection and activation
+//! - ✅ CGB: Speed switching (KEY1 register, STOP instruction)
 //!
 //! ## Not Yet Implemented
 //! - ❌ Serial: Link cable communication
@@ -114,6 +115,7 @@
 //!    - PPU renders entire frames at once
 //!    - Some timing-critical effects may not work
 //!    - Trade-off: Better compatibility vs. perfect accuracy
+//!    - Note: Speed switching is supported but doesn't affect emulation timing
 //!
 //! 2. **ROM Support**: MBC0, MBC1, MBC2, MBC3, MBC5 supported
 //!    - Covers approximately 96%+ of commercial Game Boy games
@@ -125,6 +127,7 @@
 //!    - VRAM banking (2 banks of 8KB)
 //!    - Color palettes (8 BG + 8 OBJ, 4 colors each, 15-bit RGB)
 //!    - Tile attributes (palette selection, VRAM bank, flipping)
+//!    - Speed switching (normal 4.19 MHz / double 8.39 MHz)
 //!    - Backward compatible with DMG games
 //!
 //! # Usage Example
