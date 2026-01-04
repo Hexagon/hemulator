@@ -135,6 +135,13 @@
 
 use emu_core::types::Frame;
 
+// Default CGB palette colors (matches CGB boot ROM behavior for DMG game compatibility)
+// These are 15-bit RGB555 values in little-endian format: (low_byte, high_byte)
+const CGB_DEFAULT_WHITE: (u8, u8) = (0xFF, 0x7F); // 0x7FFF - White
+const CGB_DEFAULT_LIGHT_GRAY: (u8, u8) = (0xB5, 0x56); // 0x56B5 - Light Gray (RGB888: 0xAAAAAA)
+const CGB_DEFAULT_DARK_GRAY: (u8, u8) = (0x4A, 0x29); // 0x294A - Dark Gray (RGB888: 0x555555)
+const CGB_DEFAULT_BLACK: (u8, u8) = (0x00, 0x00); // 0x0000 - Black
+
 /// Game Boy PPU state
 pub struct Ppu {
     /// VRAM Bank 0 (8KB)
@@ -231,30 +238,25 @@ impl Ppu {
         self.cgb_mode = true;
         // Initialize CGB palettes with default grayscale values
         // This matches the behavior of the CGB boot ROM for DMG games
-        // Each palette has 4 colors (2 bytes per color, 8 bytes per palette)
-        // Default grayscale: White (0x7FFF), Lt Gray (0x56B5), Dk Gray (0x294A), Black (0x0000)
         let default_colors = [
-            (0xFF, 0x7F), // Color 0: White (0x7FFF)
-            (0xB5, 0x56), // Color 1: Light Gray (0x56B5)
-            (0x4A, 0x29), // Color 2: Dark Gray (0x294A)
-            (0x00, 0x00), // Color 3: Black (0x0000)
+            CGB_DEFAULT_WHITE,
+            CGB_DEFAULT_LIGHT_GRAY,
+            CGB_DEFAULT_DARK_GRAY,
+            CGB_DEFAULT_BLACK,
         ];
 
-        // Initialize all 8 background palettes with the default grayscale
-        for palette_idx in 0..8 {
-            for (color_idx, &(low, high)) in default_colors.iter().enumerate() {
-                let byte_idx = (palette_idx * 8) + (color_idx * 2);
-                self.bg_palette_data[byte_idx] = low;
-                self.bg_palette_data[byte_idx + 1] = high;
-            }
-        }
+        // Initialize all 8 background and object palettes with the default grayscale
+        Self::initialize_palette_data(&mut self.bg_palette_data, &default_colors);
+        Self::initialize_palette_data(&mut self.obj_palette_data, &default_colors);
+    }
 
-        // Initialize all 8 object palettes with the default grayscale
+    /// Helper function to initialize a palette data array with default colors
+    fn initialize_palette_data(palette_data: &mut [u8; 64], default_colors: &[(u8, u8); 4]) {
         for palette_idx in 0..8 {
             for (color_idx, &(low, high)) in default_colors.iter().enumerate() {
                 let byte_idx = (palette_idx * 8) + (color_idx * 2);
-                self.obj_palette_data[byte_idx] = low;
-                self.obj_palette_data[byte_idx + 1] = high;
+                palette_data[byte_idx] = low;
+                palette_data[byte_idx + 1] = high;
             }
         }
     }
