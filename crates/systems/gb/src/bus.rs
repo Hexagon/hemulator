@@ -196,7 +196,7 @@ impl GbBus {
     /// Perform CGB speed switch
     /// Called by STOP instruction when KEY1 bit 0 is set
     /// Returns true if speed switch was performed
-    pub fn perform_speed_switch(&mut self) -> bool {
+    fn do_speed_switch(&mut self) -> bool {
         // Only perform switch if bit 0 is set (switch armed) and in CGB mode
         if !self.cgb_mode || (self.key1 & 0x01) == 0 {
             return false;
@@ -421,6 +421,6 @@ impl MemoryLr35902 for GbBus {
     }
 
     fn perform_speed_switch(&mut self) -> bool {
-        self.perform_speed_switch()
+        self.do_speed_switch()
     }
 }

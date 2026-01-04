@@ -141,7 +141,7 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
             self.halted = false;
         }
 
-        // Wake from STOP mode on any interrupt (typically joypad)
+        // Wake from STOP mode on any enabled interrupt (VBlank, LCD, Timer, Serial, or Joypad)
         if pending != 0 && self.stopped {
             self.stopped = false;
         }
