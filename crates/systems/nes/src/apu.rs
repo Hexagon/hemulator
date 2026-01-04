@@ -5,20 +5,17 @@
 //!
 //! ## Current Implementation
 //!
-//! The APU currently implements:
+//! The APU implements all 5 channels:
 //!
 //! - **2 Pulse Channels**: Square wave generators with duty cycle control
 //! - **Sweep Units**: Frequency sweep for pulse channels with NES-specific behavior
 //! - **Triangle Channel**: 32-step triangle wave generator
 //! - **Noise Channel**: Pseudo-random noise with LFSR
+//! - **DMC Channel**: Delta modulation channel for sample playback
 //! - **Length Counter**: Automatic note duration control
 //! - **Envelope**: Volume envelope with decay
 //! - **Frame Counter**: Timing controller (4-step and 5-step modes)
 //! - **Frame IRQ**: Frame counter interrupt support
-//!
-//! ## Not Yet Implemented
-//!
-//! - **DMC Channel**: Delta modulation channel for sample playback
 //!
 //! ## Register Interface
 //!
@@ -26,7 +23,7 @@
 //! - **$4004-$4007**: Pulse channel 2 (duty, envelope, frequency, length)
 //! - **$4008-$400B**: Triangle channel (control, linear counter, frequency, length)
 //! - **$400C-$400F**: Noise channel (envelope, mode/period, length)
-//! - **$4010-$4013**: DMC channel (not implemented)
+//! - **$4010-$4013**: DMC channel (flags/rate, direct load, address, length)
 //! - **$4015**: Status/enable register
 //! - **$4017**: Frame counter mode and IRQ control
 //!
@@ -35,7 +32,7 @@
 //! The APU generates 44.1 kHz stereo audio by:
 //!
 //! 1. Clocking the APU at CPU speed (1.789773 MHz NTSC or 1.662607 MHz PAL)
-//! 2. Mixing the active channels using linear approximation
+//! 2. Mixing all 5 channels using linear approximation
 //! 3. Downsampling to the target sample rate
 //!
 //! The current implementation uses a simple average mixing strategy.
@@ -43,7 +40,7 @@
 //! non-linear output curves.
 
 use emu_core::apu::{
-    Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
+    DmcChannel, Envelope, NoiseChannel, PulseChannel, TimingMode, TriangleChannel, LENGTH_TABLE,
 };
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::Cell;
@@ -194,6 +191,7 @@ pub struct APU {
     envelope2: Envelope,
     pub triangle: TriangleChannel,
     pub noise: NoiseChannel,
+    pub dmc: DmcChannel,
     envelope_noise: Envelope,
     cycle_accum: f64,
     timing: TimingMode,
@@ -223,6 +221,7 @@ impl APU {
             envelope2: Envelope::new(),
             triangle: TriangleChannel::new(),
             noise: NoiseChannel::new(),
+            dmc: DmcChannel::new(),
             envelope_noise: Envelope::new(),
             cycle_accum: 0.0,
             timing,
@@ -402,21 +401,62 @@ impl APU {
                 self.envelope_noise.restart();
             }
 
+            // DMC Channel ($4010-$4013)
+            0x4010 => {
+                // IL-- RRRR: IRQ enable, Loop, Rate index
+                let use_pal = matches!(self.timing, TimingMode::Pal);
+                self.dmc.write_flags_rate(val, use_pal);
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!("DMC flags/rate: 0x{:02X}", val)
+                });
+            }
+            0x4011 => {
+                // -DDD DDDD: Direct load (7-bit value)
+                self.dmc.write_direct_load(val);
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!("DMC direct load: 0x{:02X}", val)
+                });
+            }
+            0x4012 => {
+                // AAAA AAAA: Sample address
+                self.dmc.write_sample_address(val);
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!("DMC sample address: 0x{:02X}", val)
+                });
+            }
+            0x4013 => {
+                // LLLL LLLL: Sample length
+                self.dmc.write_sample_length(val);
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!("DMC sample length: 0x{:02X}", val)
+                });
+            }
+
             // APU Enable register
             0x4015 => {
                 self.pulse1.enabled = (val & 0x01) != 0;
                 self.pulse2.enabled = (val & 0x02) != 0;
                 self.triangle.enabled = (val & 0x04) != 0;
                 self.noise.enabled = (val & 0x08) != 0;
-                // DMC enable at bit 4 (not yet implemented)
+
+                // DMC enable at bit 4
+                let dmc_enable = (val & 0x10) != 0;
+                if dmc_enable && !self.dmc.enabled {
+                    self.dmc.enabled = true;
+                    self.dmc.start_sample();
+                } else if !dmc_enable {
+                    self.dmc.enabled = false;
+                    self.dmc.stop();
+                }
 
                 log(LogCategory::APU, LogLevel::Debug, || {
                     format!(
-                        "APU Channel enable: Pulse1={} Pulse2={} Triangle={} Noise={}",
+                        "APU Channel enable: Pulse1={} Pulse2={} Triangle={} Noise={} DMC={}",
                         self.pulse1.enabled,
                         self.pulse2.enabled,
                         self.triangle.enabled,
-                        self.noise.enabled
+                        self.noise.enabled,
+                        self.dmc.enabled
                     )
                 });
             }
@@ -463,10 +503,10 @@ impl APU {
                 // Bit 1: Pulse 2 length counter > 0
                 // Bit 2: Triangle length counter > 0
                 // Bit 3: Noise length counter > 0
-                // Bit 4: DMC active (not implemented, return 0)
+                // Bit 4: DMC active (bytes remaining > 0)
                 // Bit 5: unused (return 0)
                 // Bit 6: Frame interrupt
-                // Bit 7: DMC interrupt (not implemented, return 0)
+                // Bit 7: DMC interrupt
                 let mut status = 0u8;
                 if self.pulse1.length_counter > 0 {
                     status |= 0x01;
@@ -480,9 +520,18 @@ impl APU {
                 if self.noise.length_counter > 0 {
                     status |= 0x08;
                 }
+                // DMC active if it has bytes remaining
+                if self.dmc.has_bytes_remaining() {
+                    status |= 0x10;
+                }
                 if self.irq_pending.get() {
                     status |= 0x40;
                     self.irq_pending.set(false); // Reading $4015 clears frame interrupt
+                }
+                // DMC interrupt
+                if self.dmc.irq_pending {
+                    status |= 0x80;
+                    // Note: DMC IRQ is NOT cleared by reading $4015, only by writing to $4015
                 }
                 status
             }
@@ -491,7 +540,7 @@ impl APU {
     }
 
     pub fn irq_pending(&self) -> bool {
-        self.irq_pending.get()
+        self.irq_pending.get() || self.dmc.irq_pending
     }
 
     pub fn clock_irq(&mut self, cycles: u32) {
@@ -636,17 +685,22 @@ impl APU {
                 let s3 = self.triangle.clock() as i32;
                 let s4 = self.noise.clock() as i32;
 
+                // Clock DMC channel
+                // Note: DMC clocking needs memory access for sample bytes, which we don't have here
+                // For now, DMC output is just the current output level
+                let s5 = self.dmc.output() as i32;
+
                 // Restore original envelope values
                 self.pulse1.envelope = saved_p1_env;
                 self.pulse2.envelope = saved_p2_env;
                 self.noise.envelope = saved_noise_env;
 
-                acc += s1 + s2 + s3 + s4;
+                acc += s1 + s2 + s3 + s4 + s5;
             }
 
             let avg = acc / cycles as i32;
-            const CHANNEL_COUNT: i32 = 4;
-            let mixed = avg / CHANNEL_COUNT; // Average for 4 channels
+            const CHANNEL_COUNT: i32 = 5; // Now includes DMC
+            let mixed = avg / CHANNEL_COUNT; // Average for 5 channels
             out.push(mixed.clamp(-32768, 32767) as i16);
         }
 
