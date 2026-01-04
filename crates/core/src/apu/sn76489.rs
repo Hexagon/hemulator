@@ -17,15 +17,15 @@ use crate::apu::{AudioChip, TimingMode};
 /// SN76489 PSG state
 pub struct Sn76489Psg {
     // Tone generators
-    tone_freq: [u16; 3],      // 10-bit frequency values
-    tone_counter: [u16; 3],   // Current counter values
-    tone_output: [bool; 3],   // Current output state
+    tone_freq: [u16; 3],    // 10-bit frequency values
+    tone_counter: [u16; 3], // Current counter values
+    tone_output: [bool; 3], // Current output state
 
     // Noise generator
-    noise_control: u8,        // Noise control register
-    noise_lfsr: u16,          // Linear feedback shift register (16-bit for Sega)
-    noise_counter: u16,       // Noise counter
-    noise_output: bool,       // Current noise output
+    noise_control: u8,  // Noise control register
+    noise_lfsr: u16,    // Linear feedback shift register (16-bit for Sega)
+    noise_counter: u16, // Noise counter
+    noise_output: bool, // Current noise output
 
     // Volume control (4-bit, 0=max, 15=min/mute)
     volume: [u8; 4],
@@ -267,8 +267,8 @@ mod tests {
         // Volume 15 should be muted
         assert_eq!(psg.volume_to_amplitude(15), 0.0);
 
-        // Volume 8 should be about half power (-6dB)
-        let half_amp = psg.volume_to_amplitude(8);
-        assert!(half_amp > 0.45 && half_amp < 0.55);
+        // Volume 8 should be approximately -16dB
+        let vol_8 = psg.volume_to_amplitude(8);
+        assert!(vol_8 > 0.15 && vol_8 < 0.17);
     }
 }

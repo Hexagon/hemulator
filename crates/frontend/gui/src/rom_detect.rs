@@ -57,6 +57,30 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         }
     }
 
+    // Check for Sega Master System (check BEFORE SNES due to overlapping size ranges)
+    // SMS ROMs can have optional TMR SEGA header at 0x7FF0
+    // Common sizes: 8KB to 512KB (power of 2, or with 512-byte header)
+    if data.len() >= 0x7FF0 + 16 {
+        // Check for TMR SEGA header
+        let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
+        let sig_offset = header_offset + 0x7FF0;
+
+        if sig_offset + 8 <= data.len() {
+            let signature = &data[sig_offset..sig_offset + 8];
+            if signature == b"TMR SEGA" {
+                return Ok(SystemType::SMS);
+            }
+        }
+    }
+
+    // Also check common SMS ROM sizes (headerless) that don't overlap with common SNES sizes
+    // SMS-specific sizes: 48KB is common for SMS, less so for SNES
+    // We'll be conservative and only auto-detect SMS for sizes that are distinctly SMS
+    if matches!(data.len(), 49152) {
+        // 48KB is a common SMS size but not a standard SNES size
+        return Ok(SystemType::SMS);
+    }
+
     // Check for SNES (SMC header or size-based detection)
     // SNES ROMs are typically multiples of 32KB (with optional 512-byte SMC header)
     if data.len() >= 0x8000 {
@@ -95,33 +119,6 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // If it's a power-of-2 size that matches Atari 2600 cartridge sizes
         // and doesn't match other formats, assume it's Atari 2600
         return Ok(SystemType::Atari2600);
-    }
-
-    // Check for Sega Master System
-    // SMS ROMs can have optional TMR SEGA header at 0x7FF0
-    // Common sizes: 8KB to 512KB (power of 2, or with 512-byte header)
-    if data.len() >= 0x7FF0 + 16 {
-        // Check for TMR SEGA header
-        let header_offset = if data.len() % 1024 == 512 { 512 } else { 0 };
-        let sig_offset = header_offset + 0x7FF0;
-        
-        if sig_offset + 8 <= data.len() {
-            let signature = &data[sig_offset..sig_offset + 8];
-            if signature == b"TMR SEGA" {
-                return Ok(SystemType::SMS);
-            }
-        }
-    }
-    
-    // Also check common SMS ROM sizes (headerless)
-    if matches!(
-        data.len(),
-        8192 | 16384 | 32768 | 49152 | 65536 | 131072 | 262144 | 524288
-    ) && data.len() != 8192 && data.len() != 32768 {
-        // Exclude sizes that conflict with Atari 2600
-        // This is a heuristic - could be SMS
-        // TODO: Improve detection with checksum validation
-        return Ok(SystemType::SMS);
     }
 
     // If it's small enough and not another format, assume COM file
@@ -252,19 +249,15 @@ mod tests {
     fn test_detect_sms_with_header() {
         // SMS ROM with TMR SEGA header
         let mut data = vec![0u8; 0x10000]; // 64KB
-        // Add TMR SEGA signature at 0x7FF0
+                                           // Add TMR SEGA signature at 0x7FF0
         data[0x7FF0..0x7FF8].copy_from_slice(b"TMR SEGA");
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
     }
 
     #[test]
     fn test_detect_sms_headerless() {
-        // 128KB SMS ROM (common size)
-        let data = vec![0u8; 131072];
-        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
-
-        // 256KB SMS ROM
-        let data = vec![0u8; 262144];
+        // 48KB SMS ROM (this size is more distinctly SMS)
+        let data = vec![0u8; 49152];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
     }
 }

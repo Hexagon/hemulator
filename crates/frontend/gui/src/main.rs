@@ -548,6 +548,7 @@ impl EmulatorSystem {
                 // Note: OpenGL renderer would need to be exposed via debug info or separate method
                 "Software".to_string()
             }
+            EmulatorSystem::SMS(_) => "Software".to_string(),
         }
     }
 
@@ -584,6 +585,7 @@ impl EmulatorSystem {
                     vec!["Software".to_string()]
                 }
             }
+            EmulatorSystem::SMS(_) => vec!["Software".to_string()],
         }
     }
 }
@@ -2409,19 +2411,19 @@ fn main() {
                     egui_app.tab_manager.update_pc_config_info(config);
                 }
             }
+        }
 
-            // Update debug info if debug tab is visible
-            if egui_app.tab_manager.debug_visible {
-                use system_adapter::SystemDebugInfo;
-                let debug_info = match &sys {
-                    EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
-                    EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
-                    EmulatorSystem::Atari2600(s) => {
-                        if let Some(info) = s.debug_info() {
-                            SystemDebugInfo::from_atari2600(&info)
-                        } else {
-                            SystemDebugInfo::new("Atari 2600".to_string())
-                        }
+        // Update debug info if debug tab is visible
+        if egui_app.tab_manager.debug_visible {
+            use system_adapter::SystemDebugInfo;
+            let debug_info = match &sys {
+                EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
+                EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
+                EmulatorSystem::Atari2600(s) => {
+                    if let Some(info) = s.debug_info() {
+                        SystemDebugInfo::from_atari2600(&info)
+                    } else {
+                        SystemDebugInfo::new("Atari 2600".to_string())
                     }
                 }
                 EmulatorSystem::PC(s) => SystemDebugInfo::from_pc(&s.debug_info()),
@@ -3103,6 +3105,39 @@ fn main() {
                                         egui_app
                                             .status_bar
                                             .set_message("N64 ROM loaded".to_string());
+                                        let _ = sys.resolution();
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                }
+                                Ok(SystemType::SMS) => {
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    let mut sms_sys = emu_sms::SmsSystem::new();
+                                    if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                                        egui_app.property_pane.system_name = "SMS".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
+                                        runtime_state
+                                            .set_mount("cartridge".to_string(), file_path.clone());
+                                        settings.last_rom_path = Some(file_path.clone());
+                                        settings.add_recent_file(file_path.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
+                                        egui_app
+                                            .status_bar
+                                            .set_message("SMS ROM loaded".to_string());
                                         let _ = sys.resolution();
                                         if let Some(ref hash) = rom_hash {
                                             _game_saves = GameSaves::load(hash);

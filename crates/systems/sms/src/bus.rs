@@ -48,13 +48,9 @@ pub struct SmsMemory {
 
 impl SmsMemory {
     /// Create a new SMS memory bus
-    pub fn new(
-        rom: Vec<u8>,
-        vdp: Rc<RefCell<Vdp>>,
-        psg: Rc<RefCell<Sn76489Psg>>,
-    ) -> Self {
+    pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<Sn76489Psg>>) -> Self {
         // Calculate number of 16KB banks
-        let num_banks = (rom.len() + 0x3FFF) / 0x4000;
+        let num_banks = rom.len().div_ceil(0x4000);
 
         Self {
             rom,
@@ -128,7 +124,7 @@ impl MemoryZ80 for SmsMemory {
                 self.ram[ram_addr] = val;
 
                 // Check if banking registers were updated
-                if matches!(ram_addr, 0x1FFC | 0x1FFD | 0x1FFE) {
+                if matches!(ram_addr, 0x1FFC..=0x1FFE) {
                     self.update_banking();
                 }
             }
@@ -226,7 +222,7 @@ mod tests {
     fn test_banking() {
         let vdp = Rc::new(RefCell::new(Vdp::new()));
         let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
-        
+
         // Create 128KB ROM (8 banks of 16KB)
         let mut rom = vec![0; 0x20000];
         // Mark each bank with its number

@@ -189,7 +189,7 @@ mod tests {
         let mut system = SmsSystem::new();
         let rom = vec![0xAB; 0x8000];
         system.load_rom(rom);
-        
+
         // Verify ROM was loaded
         assert_eq!(system.cpu.memory.read(0x100), 0xAB);
     }
@@ -197,16 +197,16 @@ mod tests {
     #[test]
     fn test_step_frame() {
         let mut system = SmsSystem::new();
-        
+
         // Load a simple ROM that just loops
         let mut rom = vec![0; 0x8000];
         rom[0] = 0x18; // JR opcode (not yet implemented in Z80, but ROM is loaded)
         rom[1] = 0xFE; // -2 (infinite loop)
-        
+
         system.load_rom(rom);
-        
+
         let frame = system.step_frame().unwrap();
-        
+
         // Verify frame dimensions
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 192);
