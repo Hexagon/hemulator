@@ -244,6 +244,7 @@ impl MemoryLr35902 for GbBus {
             // Work RAM (8KB)
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize],
             // Echo RAM (mirror of C000-DDFF)
+            // Echo RAM (mirror of 0xC000-0xDDFF)
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize],
             // OAM (Object Attribute Memory) - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
@@ -270,7 +271,7 @@ impl MemoryLr35902 for GbBus {
                 }
                 // Timer registers
                 0xFF04..=0xFF07 => self.timer.read_register(addr),
-                0xFF0F => self.if_reg,
+                0xFF0F => self.if_reg | 0xE0, // Bits 5-7 unused, always read as 1
                 // APU registers
                 0xFF10..=0xFF26 => self.apu.read_register(addr),
                 0xFF30..=0xFF3F => self.apu.read_register(addr),
@@ -297,7 +298,7 @@ impl MemoryLr35902 for GbBus {
             // High RAM
             0xFF80..=0xFFFE => self.hram[(addr - 0xFF80) as usize],
             // Interrupt Enable
-            0xFFFF => self.ie,
+            0xFFFF => self.ie | 0xE0, // Bits 5-7 unused, always read as 1
         }
     }
 
@@ -320,6 +321,7 @@ impl MemoryLr35902 for GbBus {
             // Work RAM
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize] = val,
             // Echo RAM
+            // Echo RAM (mirror of 0xC000-0xDDFF)
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize] = val,
             // OAM - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
@@ -331,7 +333,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
                     // Timer registers
                     0xFF04..=0xFF07 => self.timer.write_register(addr, val),
-                    0xFF0F => self.if_reg = val,
+                    0xFF0F => self.if_reg = val & 0x1F, // Only bits 0-4 are writable
                     // APU registers
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
                     0xFF30..=0xFF3F => self.apu.write_register(addr, val),
@@ -369,7 +371,7 @@ impl MemoryLr35902 for GbBus {
             // High RAM
             0xFF80..=0xFFFE => self.hram[(addr - 0xFF80) as usize] = val,
             // Interrupt Enable
-            0xFFFF => self.ie = val,
+            0xFFFF => self.ie = val & 0x1F, // Only bits 0-4 are writable
         }
     }
 

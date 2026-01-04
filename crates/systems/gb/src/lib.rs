@@ -989,4 +989,101 @@ mod tests {
             "P1 bits 6-7 should always read as 1 even with selection bits set"
         );
     }
+
+    #[test]
+    fn test_echo_ram_mirror() {
+        // Test that Echo RAM (0xE000-0xFDFF) properly mirrors WRAM (0xC000-0xDDFF)
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        let mut sys = GbSystem::new();
+
+        // Write to WRAM and verify it's readable from Echo RAM
+        sys.cpu.memory.write(0xC000, 0x42);
+        assert_eq!(
+            sys.cpu.memory.read(0xE000),
+            0x42,
+            "Echo RAM should mirror WRAM"
+        );
+
+        sys.cpu.memory.write(0xC123, 0xAB);
+        assert_eq!(
+            sys.cpu.memory.read(0xE123),
+            0xAB,
+            "Echo RAM should mirror WRAM"
+        );
+
+        sys.cpu.memory.write(0xDDFF, 0xCD);
+        assert_eq!(
+            sys.cpu.memory.read(0xFDFF),
+            0xCD,
+            "Echo RAM should mirror up to 0xDDFF/0xFDFF"
+        );
+
+        // Write to Echo RAM and verify it affects WRAM
+        sys.cpu.memory.write(0xE500, 0x55);
+        assert_eq!(
+            sys.cpu.memory.read(0xC500),
+            0x55,
+            "Writing to Echo RAM should affect WRAM"
+        );
+
+        sys.cpu.memory.write(0xFD00, 0x99);
+        assert_eq!(
+            sys.cpu.memory.read(0xDD00),
+            0x99,
+            "Writing to Echo RAM should affect WRAM"
+        );
+    }
+
+    #[test]
+    fn test_interrupt_register_bits() {
+        // Test that IF and IE registers handle unused bits correctly
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        let mut sys = GbSystem::new();
+
+        // Test IF register (0xFF0F) - bits 5-7 should read as 1
+        sys.cpu.memory.write(0xFF0F, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF0F) & 0xE0,
+            0xE0,
+            "IF bits 5-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF0F, 0x1F);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF0F) & 0xE0,
+            0xE0,
+            "IF bits 5-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF0F, 0xFF);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF0F),
+            0xFF,
+            "IF should read 0xFF when all writable bits are set"
+        );
+
+        // Test IE register (0xFFFF) - bits 5-7 should read as 1
+        sys.cpu.memory.write(0xFFFF, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFFFF) & 0xE0,
+            0xE0,
+            "IE bits 5-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFFFF, 0x1F);
+        assert_eq!(
+            sys.cpu.memory.read(0xFFFF) & 0xE0,
+            0xE0,
+            "IE bits 5-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFFFF, 0xFF);
+        assert_eq!(
+            sys.cpu.memory.read(0xFFFF),
+            0xFF,
+            "IE should read 0xFF when all writable bits are set"
+        );
+    }
 }
