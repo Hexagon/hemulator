@@ -30,6 +30,7 @@
 
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
+use std::cell::Cell;
 
 const VRAM_SIZE: usize = 0x10000; // 64KB VRAM
 const CGRAM_SIZE: usize = 512; // 256 colors * 2 bytes per color
@@ -75,8 +76,9 @@ pub struct Ppu {
     /// PPU2 open bus value (last byte read from $2137-$213F)
     ppu2_open_bus: u8,
 
-    /// V-blank NMI flag (cleared on read of $213F)
-    nmi_flag: bool,
+    /// V-blank NMI flag (cleared on read of $4210 or $213F)
+    /// Uses Cell for interior mutability since reading $4210 clears the flag
+    pub nmi_flag: Cell<bool>,
     /// NMI pending flag (consumed by take_nmi_pending)
     nmi_pending: bool,
     /// NMI enable register ($4200 bit 7)
@@ -164,7 +166,7 @@ impl Ppu {
             oam_write_latch: false,
             ppu1_open_bus: 0,
             ppu2_open_bus: 0,
-            nmi_flag: false,
+            nmi_flag: Cell::new(false),
             nmi_pending: false,
             nmi_enable: false,
             hvbjoy: 0,
@@ -625,9 +627,10 @@ impl Ppu {
                 // Bit 7: NMI flag (cleared on read)
                 // Bit 6: Master/slave mode
                 // Bits 0-3: PPU version
-                // Note: In real hardware, reading this clears the NMI flag
-                // But we can't do that in a &self method. The caller should call clear_nmi_flag()
-                (if self.nmi_flag { 0x80 } else { 0x00 }) | 0x01 // Version 1
+                // Note: Reading this register clears the NMI flag
+                let nmi_val = if self.nmi_flag.get() { 0x80 } else { 0x00 };
+                self.nmi_flag.set(false); // Clear NMI flag on read
+                nmi_val | 0x01 // Version 1
             }
 
             // $4212 - HVBJOY - H/V-Blank and Joypad Status
@@ -995,7 +998,7 @@ impl Ppu {
     /// Set V-blank flag (called by system during vertical blanking)
     pub fn set_vblank(&mut self, vblank: bool) {
         if vblank {
-            self.nmi_flag = true;
+            self.nmi_flag.set(true);
             self.hvbjoy |= 0x80; // Set V-blank bit
                                  // Trigger NMI if enabled
             if self.nmi_enable {
@@ -1022,9 +1025,10 @@ impl Ppu {
         pending
     }
 
-    /// Clear NMI flag (called when $213F is read)
-    pub fn clear_nmi_flag(&mut self) {
-        self.nmi_flag = false;
+    /// Clear NMI flag (called when $4210 is read)
+    /// Note: Reading $213F also clears the flag, but that's handled in read_register
+    pub fn clear_nmi_flag(&self) {
+        self.nmi_flag.set(false);
     }
 
     /// Check if VRAM is accessible (during VBlank or force blank)

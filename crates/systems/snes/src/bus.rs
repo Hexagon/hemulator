@@ -439,8 +439,43 @@ impl Memory65c816 for SnesBus {
                             0x00
                         }
                     }
-                    // $420C - HDMAEN - HDMA Enable (read)
-                    0x420C => self.hdma_enable,
+                    // $4210 - RDNMI - NMI Flag (read and clear)
+                    0x4210 => {
+                        // Bit 7: NMI flag (set at start of VBlank if NMI enabled)
+                        // Bits 0-3: CPU version (return 2 for 65C816)
+                        // Reading this register clears the NMI flag
+                        let nmi_flag = if self.ppu.nmi_flag.get() { 0x80 } else { 0x00 };
+                        self.ppu.clear_nmi_flag();
+                        log(LogCategory::Interrupts, LogLevel::Trace, || {
+                            format!(
+                                "SNES Bus: Read $4210 (RDNMI): 0x{:02X} (NMI flag {})",
+                                nmi_flag | 0x02,
+                                if nmi_flag != 0 {
+                                    "set, now cleared"
+                                } else {
+                                    "not set"
+                                }
+                            )
+                        });
+                        nmi_flag | 0x02 // CPU version 2
+                    }
+                    // $4211 - TIMEUP - IRQ Flag (read and clear)
+                    0x4211 => {
+                        // Bit 7: IRQ flag
+                        // We don't implement IRQ yet, always return 0
+                        0x00
+                    }
+                    // $4212 - HVBJOY - H/V Blank and Joypad Status
+                    0x4212 => {
+                        // Bit 7: VBlank flag (set during VBlank period)
+                        // Bit 6: HBlank flag (not implemented)
+                        // Bit 0: Auto-joypad read in progress (0 = finished)
+                        if self.is_in_vblank() {
+                            0x80 // VBlank
+                        } else {
+                            0x00 // Not in VBlank
+                        }
+                    }
                     // $4016 - JOYSER0 - Controller 1 Serial Data
                     0x4016 => {
                         // Bit 0: Serial data for controller 1
@@ -502,17 +537,8 @@ impl Memory65c816 for SnesBus {
                     0x421D => 0, // JOY3H (not implemented)
                     0x421E => 0, // JOY4L (not implemented)
                     0x421F => 0, // JOY4H (not implemented)
-                    // $4212 - HVBJOY - H/V Blank and Joypad Status
-                    0x4212 => {
-                        // Bit 7: VBlank flag (set during VBlank period)
-                        // Bit 6: HBlank flag (not implemented)
-                        // Bit 0: Auto-joypad read in progress (0 = finished)
-                        if self.is_in_vblank() {
-                            0x80 // VBlank
-                        } else {
-                            0x00 // Not in VBlank
-                        }
-                    }
+                    // $420C - HDMAEN - HDMA Enable (read)
+                    0x420C => self.hdma_enable,
                     // $43x0-$43xA - DMA channel registers (read)
                     0x4300..=0x437F => {
                         let ch = ((offset - 0x4300) >> 4) as usize & 7;
