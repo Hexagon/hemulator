@@ -179,15 +179,6 @@ impl SnesBus {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn is_hirom(&self) -> bool {
-        if let Some(ref cart) = self.cartridge {
-            cart.is_hirom()
-        } else {
-            false
-        }
-    }
-
     /// Perform DMA transfer for specified channels
     /// Returns number of cycles consumed
     pub fn do_dma(&mut self, channels: u8) -> u32 {
