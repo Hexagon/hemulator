@@ -151,13 +151,15 @@ Our SNES emulator implements:
 - SPC700 has mirrored ports at $F4-$F7 in its address space
 
 **Boot Sequence Handshake**:
-1. Game waits for APU ready signal by polling ports (typically $2140/$2141)
-2. Game sends initialization data (IPL boot code or audio driver)
-3. APU confirms receipt by echoing values or setting specific response codes
-4. Without proper handshake, games hang at boot and never configure PPU/VRAM
+1. SPC700 IPL ROM initializes ports to $2140=0xBB, $2141=0xAA (ready signal)
+2. Game waits for APU ready signal by polling $2140 for 0xBB and $2141 for 0xAA
+3. Game sends initialization data (IPL boot code or audio driver)
+4. APU confirms receipt by echoing values or setting specific response codes
+5. Without proper handshake, games hang at boot and never configure PPU/VRAM
 
 **Implementation**:
-- ✅ Ports $2140-$2143 implemented with simple echo/passthrough behavior
+- ✅ Ports $2140-$2143 initialized to 0xBB, 0xAA, 0x00, 0x00 (matching SPC700 IPL)
+- ✅ Ports implement simple echo/passthrough behavior for handshake
 - ✅ Games can proceed past APU initialization handshakes
 - ❌ No actual SPC700 CPU emulation
 - ❌ No audio processing or sound output
