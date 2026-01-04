@@ -190,6 +190,8 @@ pub struct Ppu {
     obj_palette_data: [u8; 64],
     /// CGB mode enabled flag
     cgb_mode: bool,
+    /// CGB compatibility mode flag (DMG game with CGB support)
+    cgb_compat_mode: bool,
 }
 
 // LCDC bits
@@ -230,12 +232,14 @@ impl Ppu {
             bg_palette_data: [0; 64],
             obj_palette_data: [0; 64],
             cgb_mode: false,
+            cgb_compat_mode: false,
         }
     }
 
     /// Enable CGB mode
-    pub fn enable_cgb_mode(&mut self) {
+    pub fn enable_cgb_mode(&mut self, compat_mode: bool) {
         self.cgb_mode = true;
+        self.cgb_compat_mode = compat_mode;
         // Initialize CGB palettes with default grayscale values
         // This matches the behavior of the CGB boot ROM for DMG games
         let default_colors = [
@@ -521,7 +525,14 @@ impl Ppu {
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
                     // CGB mode: use color palettes
-                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                    // In compatibility mode, apply DMG palette first to translate color index
+                    let final_color_index = if self.cgb_compat_mode {
+                        // DMG compatibility mode: apply BGP register to get final color index
+                        (self.bgp >> (color_index * 2)) & 0x03
+                    } else {
+                        color_index
+                    };
+                    let palette_index = (bg_palette_num * 4 + final_color_index) * 2;
                     let color_low = self.bg_palette_data[palette_index as usize];
                     let color_high = self.bg_palette_data[(palette_index + 1) as usize];
                     self.cgb_color_to_rgb(color_low, color_high)
@@ -642,7 +653,14 @@ impl Ppu {
                 // Apply palette and convert to RGB
                 let rgb = if self.cgb_mode {
                     // CGB mode: use color palettes
-                    let palette_index = (bg_palette_num * 4 + color_index) * 2;
+                    // In compatibility mode, apply DMG palette first to translate color index
+                    let final_color_index = if self.cgb_compat_mode {
+                        // DMG compatibility mode: apply BGP register to get final color index
+                        (self.bgp >> (color_index * 2)) & 0x03
+                    } else {
+                        color_index
+                    };
+                    let palette_index = (bg_palette_num * 4 + final_color_index) * 2;
                     let color_low = self.bg_palette_data[palette_index as usize];
                     let color_high = self.bg_palette_data[(palette_index + 1) as usize];
                     self.cgb_color_to_rgb(color_low, color_high)
@@ -825,7 +843,19 @@ impl Ppu {
                     // Apply palette and convert to RGB
                     let rgb = if self.cgb_mode {
                         // CGB mode: use color palettes
-                        let palette_index = (cgb_palette_num * 4 + color_index) * 2;
+                        // In compatibility mode, apply DMG palette first to translate color index
+                        let final_color_index = if self.cgb_compat_mode {
+                            // DMG compatibility mode: apply OBP0/OBP1 register to get final color index
+                            let palette = if dmg_palette_num == 1 {
+                                self.obp1
+                            } else {
+                                self.obp0
+                            };
+                            (palette >> (color_index * 2)) & 0x03
+                        } else {
+                            color_index
+                        };
+                        let palette_index = (cgb_palette_num * 4 + final_color_index) * 2;
                         let color_low = self.obj_palette_data[palette_index as usize];
                         let color_high = self.obj_palette_data[(palette_index + 1) as usize];
                         self.cgb_color_to_rgb(color_low, color_high)
