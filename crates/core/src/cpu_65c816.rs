@@ -54,6 +54,8 @@ pub struct Cpu65c816<M: Memory65c816> {
     pub memory: M,
     /// NMI in progress flag
     in_nmi: bool,
+    /// WAI (Wait for Interrupt) state - CPU is halted until interrupt occurs
+    waiting_for_interrupt: bool,
 }
 
 // Status register flags
@@ -88,6 +90,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
             cycles: 0,
             memory,
             in_nmi: false,
+            waiting_for_interrupt: false,
         }
     }
 
@@ -104,6 +107,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
         self.emulation = true;
         self.cycles = 0;
         self.in_nmi = false;
+        self.waiting_for_interrupt = false;
 
         // Load reset vector from $00FFFC-$00FFFD
         let lo = self.memory.read(0xFFFC) as u16;
@@ -135,6 +139,12 @@ impl<M: Memory65c816> Cpu65c816<M> {
         if self.in_nmi {
             return;
         }
+
+        // WAI instruction is released by any interrupt
+        if self.waiting_for_interrupt {
+            eprintln!("65C816: NMI triggered, releasing WAI");
+        }
+        self.waiting_for_interrupt = false;
         self.in_nmi = true;
 
         // Save current state
@@ -203,6 +213,13 @@ impl<M: Memory65c816> Cpu65c816<M> {
     /// Execute a single instruction and return cycles consumed
     pub fn step(&mut self) -> u32 {
         let start_cycles = self.cycles;
+
+        // If CPU is waiting for interrupt (WAI instruction), consume cycles without executing
+        if self.waiting_for_interrupt {
+            self.cycles += 1;
+            return (self.cycles - start_cycles) as u32;
+        }
+
         let opcode = self.fetch_byte();
 
         match opcode {
@@ -4188,7 +4205,11 @@ impl<M: Memory65c816> Cpu65c816<M> {
 
             0xCB => {
                 // WAI - Wait for Interrupt
-                // For now, just consume cycles (proper implementation would halt until interrupt)
+                // Halt CPU until an interrupt (IRQ or NMI) occurs
+                // PC has already advanced past WAI, so when interrupt occurs, execution continues at next instruction
+                self.waiting_for_interrupt = true;
+                // Log when entering WAI state (for debugging stuck games)
+                eprintln!("65C816: Entering WAI at PC=${:02X}:{:04X}", self.pbr, self.pc.wrapping_sub(1));
                 self.cycles += 3;
             }
             0xDB => {

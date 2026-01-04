@@ -201,23 +201,21 @@ impl Ppu {
         match addr {
             // $2100 - INIDISP - Screen Display Register
             0x2100 => {
-                let old_forced_blank = self.screen_display & 0x80;
                 let new_forced_blank = val & 0x80;
                 self.screen_display = val;
 
-                if old_forced_blank != new_forced_blank {
-                    log(LogCategory::PPU, LogLevel::Info, || {
-                        format!(
-                            "SNES PPU: Screen {} (brightness: {})",
-                            if new_forced_blank != 0 {
-                                "blanked"
-                            } else {
-                                "enabled"
-                            },
-                            val & 0x0F
-                        )
-                    });
-                }
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "SNES PPU: Screen Display=${:02X} {} (brightness: {})",
+                        val,
+                        if new_forced_blank != 0 {
+                            "BLANKED"
+                        } else {
+                            "ENABLED"
+                        },
+                        val & 0x0F
+                    )
+                });
             }
 
             // $2101 - OBSEL - Object Size and Base Address
@@ -262,6 +260,9 @@ impl Ppu {
 
             // $2107 - BG1SC - BG1 Tilemap Address and Size
             0x2107 => {
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("SNES PPU: BG1 tilemap base=${:04X} size={:02b}", ((val >> 2) as u16) << 11, val & 0x03)
+                });
                 self.bg1sc = val;
             }
 
@@ -499,6 +500,17 @@ impl Ppu {
 
             // $212C - TM - Main Screen Designation
             0x212C => {
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "SNES PPU: Main screen layers=${:02X} (BG1={} BG2={} BG3={} BG4={} OBJ={})",
+                        val,
+                        if val & 0x01 != 0 { "ON" } else { "OFF" },
+                        if val & 0x02 != 0 { "ON" } else { "OFF" },
+                        if val & 0x04 != 0 { "ON" } else { "OFF" },
+                        if val & 0x08 != 0 { "ON" } else { "OFF" },
+                        if val & 0x10 != 0 { "ON" } else { "OFF" }
+                    )
+                });
                 self.tm = val;
             }
 
@@ -947,12 +959,22 @@ impl Ppu {
         // Fill backdrop color for all pixels that weren't rendered
         // SNES backdrop is CGRAM color 0 (not transparent)
         let backdrop_color = self.get_color(0);
+        let mut non_backdrop_pixels = 0;
         for (i, &priority) in priority_buffer.iter().enumerate() {
             if priority == 255 {
                 // No layer rendered here - use backdrop color
                 frame.pixels[i] = backdrop_color;
+            } else {
+                non_backdrop_pixels += 1;
             }
         }
+
+        log(LogCategory::PPU, LogLevel::Debug, || {
+            format!(
+                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop color=0x{:08X}, first pixel=0x{:08X}",
+                non_backdrop_pixels, backdrop_color, frame.pixels[0]
+            )
+        });
 
         frame
     }
