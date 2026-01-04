@@ -255,19 +255,19 @@ impl NesSystem {
     #[cfg(feature = "opengl")]
     pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
         use crate::ppu_renderer_opengl::OpenGLNesPpuRenderer;
-        
+
         let mut new_renderer = Box::new(OpenGLNesPpuRenderer::new(gl, 256, 240)?);
-        
+
         // Initialize to black
         new_renderer.clear(0x00000000);
-        
+
         // Replace the software renderer with OpenGL renderer
         self.renderer = new_renderer;
-        
+
         log(LogCategory::Stubs, LogLevel::Info, || {
             "NES PPU switched to OpenGL hardware renderer (256x240)".to_string()
         });
-        
+
         Ok(())
     }
 

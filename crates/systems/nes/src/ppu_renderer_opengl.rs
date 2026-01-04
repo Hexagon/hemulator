@@ -727,9 +727,9 @@ void main() {
         unsafe {
             // Clear any previous errors
             while self.gl.get_error() != glow::NO_ERROR {}
-            
+
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
-            
+
             // Check framebuffer status
             let status = self.gl.check_framebuffer_status(glow::FRAMEBUFFER);
             if status != glow::FRAMEBUFFER_COMPLETE {
@@ -737,10 +737,10 @@ void main() {
                 self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
                 return;
             }
-            
+
             // Set pixel pack alignment to 4 bytes (default, but be explicit)
             self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 4);
-            
+
             // Read pixels from framebuffer
             self.gl.read_pixels(
                 0,
@@ -751,14 +751,14 @@ void main() {
                 glow::UNSIGNED_BYTE,
                 glow::PixelPackData::Slice(bytemuck::cast_slice_mut(&mut self.framebuffer.pixels)),
             );
-            
+
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-            
+
             // Check for OpenGL errors after all operations
             if let Some(err) = self.check_gl_error() {
                 eprintln!("OpenGL error in read_pixels: {}", err);
             }
-            
+
             // OpenGL framebuffers are bottom-to-top, but our Frame expects top-to-bottom
             // Flip the image vertically
             let width = self.width as usize;
@@ -1068,7 +1068,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             self.gl
                 .viewport(0, 0, self.width as i32, self.height as i32);
-            
+
             // Set clear color to backdrop color (palette entry 0)
             let backdrop_color = Self::nes_palette_rgb(ppu.palette[0] & 0x3F);
             let r = ((backdrop_color >> 16) & 0xFF) as f32 / 255.0;
@@ -1275,11 +1275,11 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             self.gl.disable(glow::BLEND);
             self.gl.bind_vertex_array(None);
             self.gl.use_program(None);
-            
+
             // Ensure all rendering commands complete before unbinding
             self.gl.flush();
             self.gl.finish();
-            
+
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
             // Check for OpenGL errors during rendering
