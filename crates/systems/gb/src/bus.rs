@@ -87,13 +87,16 @@
 //! - ✅ Boot ROM disable register
 //! - ✅ Cartridge ROM loading (up to size)
 //! - ✅ Cartridge RAM with size detection
-//! - ✅ MBC0, MBC1, MBC3, MBC5 mappers
+//! - ✅ MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 mappers
+//! - ✅ OAM DMA transfer (0xFF46)
+//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD)
 //!
 //! ## Not Implemented
-//! - ❌ MBC2 mapper (built-in 512×4 bits RAM)
-//! - ❌ Serial transfer
-//! - ❌ DMA register
-//! - ❌ CGB-specific registers
+//! - ❌ Serial transfer (0xFF01, 0xFF02)
+//! - ❌ WRAM banking (SVBK at 0xFF70, CGB only)
+//! - ❌ Speed switching (KEY1 at 0xFF4D, CGB only)
+//! - ❌ HDMA (0xFF51-0xFF55, CGB only)
+//! - ❌ Infrared port (RP at 0xFF56, CGB only)
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
@@ -241,6 +244,7 @@ impl MemoryLr35902 for GbBus {
             // Work RAM (8KB)
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize],
             // Echo RAM (mirror of C000-DDFF)
+            // Echo RAM (mirror of 0xC000-0xDDFF)
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize],
             // OAM (Object Attribute Memory) - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
@@ -254,7 +258,8 @@ impl MemoryLr35902 for GbBus {
                     let select_buttons = (self.joypad & 0x20) == 0;
                     let select_dpad = (self.joypad & 0x10) == 0;
 
-                    let mut result = self.joypad & 0xF0;
+                    // Bits 6-7 are unused and always read as 1
+                    let mut result = (self.joypad & 0x30) | 0xC0;
                     if select_buttons {
                         result |= (self.button_state >> 4) & 0x0F;
                     } else if select_dpad {
@@ -266,13 +271,13 @@ impl MemoryLr35902 for GbBus {
                 }
                 // Timer registers
                 0xFF04..=0xFF07 => self.timer.read_register(addr),
-                0xFF0F => self.if_reg,
+                0xFF0F => self.if_reg | 0xE0, // Bits 5-7 unused, always read as 1
                 // APU registers
                 0xFF10..=0xFF26 => self.apu.read_register(addr),
                 0xFF30..=0xFF3F => self.apu.read_register(addr),
                 // PPU registers
                 0xFF40 => self.ppu.lcdc,
-                0xFF41 => self.ppu.stat,
+                0xFF41 => self.ppu.stat | 0x80, // Bit 7 unused, always reads as 1
                 0xFF42 => self.ppu.scy,
                 0xFF43 => self.ppu.scx,
                 0xFF44 => self.ppu.ly,
@@ -293,7 +298,7 @@ impl MemoryLr35902 for GbBus {
             // High RAM
             0xFF80..=0xFFFE => self.hram[(addr - 0xFF80) as usize],
             // Interrupt Enable
-            0xFFFF => self.ie,
+            0xFFFF => self.ie | 0xE0, // Bits 5-7 unused, always read as 1
         }
     }
 
@@ -316,6 +321,7 @@ impl MemoryLr35902 for GbBus {
             // Work RAM
             0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize] = val,
             // Echo RAM
+            // Echo RAM (mirror of 0xC000-0xDDFF)
             0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize] = val,
             // OAM - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
@@ -327,7 +333,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
                     // Timer registers
                     0xFF04..=0xFF07 => self.timer.write_register(addr, val),
-                    0xFF0F => self.if_reg = val,
+                    0xFF0F => self.if_reg = val & 0x1F, // Only bits 0-4 are writable
                     // APU registers
                     0xFF10..=0xFF26 => self.apu.write_register(addr, val),
                     0xFF30..=0xFF3F => self.apu.write_register(addr, val),
@@ -365,7 +371,7 @@ impl MemoryLr35902 for GbBus {
             // High RAM
             0xFF80..=0xFFFE => self.hram[(addr - 0xFF80) as usize] = val,
             // Interrupt Enable
-            0xFFFF => self.ie = val,
+            0xFFFF => self.ie = val & 0x1F, // Only bits 0-4 are writable
         }
     }
 
