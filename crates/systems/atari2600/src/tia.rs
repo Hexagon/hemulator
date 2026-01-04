@@ -1999,4 +1999,282 @@ mod tests {
         let state = tia.scanline_states[0];
         assert_eq!(state.grp0, 0xAA); // Uses old value when VDELP0 is set
     }
+
+    #[test]
+    fn test_color_register_addresses() {
+        // Verify all color registers map to correct addresses per spec
+        let mut tia = Tia::new();
+
+        // COLUP0 = $06
+        tia.write(0x06, 0x42);
+        assert_eq!(tia.colup0, 0x42);
+
+        // COLUP1 = $07
+        tia.write(0x07, 0x84);
+        assert_eq!(tia.colup1, 0x84);
+
+        // COLUPF = $08
+        tia.write(0x08, 0xC6);
+        assert_eq!(tia.colupf, 0xC6);
+
+        // COLUBK = $09
+        tia.write(0x09, 0x00);
+        assert_eq!(tia.colubk, 0x00);
+    }
+
+    #[test]
+    fn test_playfield_register_addresses() {
+        // Verify playfield registers at correct addresses per spec
+        let mut tia = Tia::new();
+
+        // PF0 = $0D (4-bit, reversed)
+        tia.write(0x0D, 0xF0);
+        assert_eq!(tia.pf0, 0xF0);
+
+        // PF1 = $0E (8-bit, MSB first)
+        tia.write(0x0E, 0xAA);
+        assert_eq!(tia.pf1, 0xAA);
+
+        // PF2 = $0F (8-bit)
+        tia.write(0x0F, 0x55);
+        assert_eq!(tia.pf2, 0x55);
+    }
+
+    #[test]
+    fn test_ctrlpf_ball_sizing() {
+        // CTRLPF bits 4-5 control ball size per spec
+        let mut tia = Tia::new();
+
+        // Size 00 = 1 pixel
+        tia.write(0x0A, 0x00);
+        assert_eq!(tia.ball_size, 1);
+
+        // Size 01 = 2 pixels
+        tia.write(0x0A, 0x10);
+        assert_eq!(tia.ball_size, 2);
+
+        // Size 10 = 4 pixels
+        tia.write(0x0A, 0x20);
+        assert_eq!(tia.ball_size, 4);
+
+        // Size 11 = 8 pixels
+        tia.write(0x0A, 0x30);
+        assert_eq!(tia.ball_size, 8);
+    }
+
+    #[test]
+    fn test_ctrlpf_playfield_modes() {
+        // CTRLPF bits 0-2 control playfield behavior per spec
+        let mut tia = Tia::new();
+
+        // Bit 0 = reflection
+        tia.write(0x0A, 0x01);
+        assert!(tia.playfield_reflect);
+        assert!(!tia.playfield_score_mode);
+        assert!(!tia.playfield_priority);
+
+        // Bit 1 = score mode
+        tia.write(0x0A, 0x02);
+        assert!(!tia.playfield_reflect);
+        assert!(tia.playfield_score_mode);
+        assert!(!tia.playfield_priority);
+
+        // Bit 2 = priority
+        tia.write(0x0A, 0x04);
+        assert!(!tia.playfield_reflect);
+        assert!(!tia.playfield_score_mode);
+        assert!(tia.playfield_priority);
+
+        // Multiple bits
+        tia.write(0x0A, 0x07);
+        assert!(tia.playfield_reflect);
+        assert!(tia.playfield_score_mode);
+        assert!(tia.playfield_priority);
+    }
+
+    #[test]
+    fn test_horizontal_motion_signed_values() {
+        // HMxx registers use signed 4-bit values (upper nibble)
+        let mut tia = Tia::new();
+
+        // Positive motion: $10 = +1
+        tia.write(0x20, 0x10);
+        assert_eq!(tia.hmp0, 1);
+
+        // Negative motion: $F0 = -1
+        tia.write(0x21, 0xF0);
+        assert_eq!(tia.hmp1, -1);
+
+        // Maximum positive: $70 = +7
+        tia.write(0x22, 0x70);
+        assert_eq!(tia.hmm0, 7);
+
+        // Maximum negative: $80 = -8
+        tia.write(0x23, 0x80);
+        assert_eq!(tia.hmm1, -8);
+    }
+
+    #[test]
+    fn test_audio_register_masking() {
+        // Audio registers have specific bit masks per spec
+        let mut tia = Tia::new();
+
+        // AUDC (4-bit control)
+        tia.write(0x15, 0xFF);
+        assert_eq!(tia.audc0, 0x0F); // Only lower 4 bits
+
+        // AUDF (5-bit frequency)
+        tia.write(0x17, 0xFF);
+        assert_eq!(tia.audf0, 0x1F); // Only lower 5 bits
+
+        // AUDV (4-bit volume)
+        tia.write(0x19, 0xFF);
+        assert_eq!(tia.audv0, 0x0F); // Only lower 4 bits
+    }
+
+    #[test]
+    fn test_enable_registers_bit_1() {
+        // ENAM0, ENAM1, ENABL use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test ENAM0
+        tia.write(0x1D, 0x00);
+        assert!(!tia.enam0);
+        tia.write(0x1D, 0x02);
+        assert!(tia.enam0);
+        tia.write(0x1D, 0xFF); // Other bits don't matter
+        assert!(tia.enam0);
+
+        // Test ENAM1
+        tia.write(0x1E, 0x00);
+        assert!(!tia.enam1);
+        tia.write(0x1E, 0x02);
+        assert!(tia.enam1);
+
+        // Test ENABL
+        tia.write(0x1F, 0x00);
+        assert!(!tia.enabl);
+        tia.write(0x1F, 0x02);
+        assert!(tia.enabl);
+    }
+
+    #[test]
+    fn test_vsync_vblank_bit_1() {
+        // VSYNC and VBLANK use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test VSYNC
+        tia.write(0x00, 0x00);
+        assert!(!tia.vsync);
+        tia.write(0x00, 0x02);
+        assert!(tia.vsync);
+        tia.write(0x00, 0xFF); // Other bits don't matter
+        assert!(tia.vsync);
+
+        // Test VBLANK
+        tia.write(0x01, 0x00);
+        assert!(!tia.vblank);
+        tia.write(0x01, 0x02);
+        assert!(tia.vblank);
+    }
+
+    #[test]
+    fn test_player_reflect_bit_3() {
+        // REFP0/REFP1 use bit 3 (0x08) per spec
+        let mut tia = Tia::new();
+
+        // Test REFP0
+        tia.write(0x0B, 0x00);
+        assert!(!tia.player0_reflect);
+        tia.write(0x0B, 0x08);
+        assert!(tia.player0_reflect);
+
+        // Test REFP1
+        tia.write(0x0C, 0x00);
+        assert!(!tia.player1_reflect);
+        tia.write(0x0C, 0x08);
+        assert!(tia.player1_reflect);
+    }
+
+    #[test]
+    fn test_resmp_bit_1() {
+        // RESMP0/RESMP1 use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test RESMP0
+        tia.write(0x28, 0x00);
+        assert!(!tia.resmp0);
+        tia.write(0x28, 0x02);
+        assert!(tia.resmp0);
+
+        // Test RESMP1
+        tia.write(0x29, 0x00);
+        assert!(!tia.resmp1);
+        tia.write(0x29, 0x02);
+        assert!(tia.resmp1);
+    }
+
+    #[test]
+    fn test_vdel_bit_0() {
+        // VDELP0, VDELP1, VDELBL use bit 0 (0x01) per spec
+        let mut tia = Tia::new();
+
+        // Test VDELP0
+        tia.write(0x25, 0x00);
+        assert!(!tia.vdelp0);
+        tia.write(0x25, 0x01);
+        assert!(tia.vdelp0);
+
+        // Test VDELP1
+        tia.write(0x26, 0x00);
+        assert!(!tia.vdelp1);
+        tia.write(0x26, 0x01);
+        assert!(tia.vdelp1);
+
+        // Test VDELBL
+        tia.write(0x27, 0x00);
+        assert!(!tia.vdelbl);
+        tia.write(0x27, 0x01);
+        assert!(tia.vdelbl);
+    }
+
+    #[test]
+    fn test_collision_register_read_addresses() {
+        // Verify collision registers at correct read addresses per spec
+        let mut tia = Tia::new();
+
+        // Set collision bits manually for testing
+        tia.cxm0p = 0x80;
+        tia.cxm1p = 0x40;
+        tia.cxp0fb = 0xC0;
+        tia.cxp1fb = 0x80;
+        tia.cxm0fb = 0x40;
+        tia.cxm1fb = 0xC0;
+        tia.cxblpf = 0x80;
+        tia.cxppmm = 0x40;
+
+        // Read collision registers
+        assert_eq!(tia.read(0x00), 0x80); // CXM0P
+        assert_eq!(tia.read(0x01), 0x40); // CXM1P
+        assert_eq!(tia.read(0x02), 0xC0); // CXP0FB
+        assert_eq!(tia.read(0x03), 0x80); // CXP1FB
+        assert_eq!(tia.read(0x04), 0x40); // CXM0FB
+        assert_eq!(tia.read(0x05), 0xC0); // CXM1FB
+        assert_eq!(tia.read(0x06), 0x80); // CXBLPF
+        assert_eq!(tia.read(0x07), 0x40); // CXPPMM
+    }
+
+    #[test]
+    fn test_input_register_read_addresses() {
+        // Verify input registers at correct read addresses per spec
+        let mut tia = Tia::new();
+
+        // Set fire button states
+        tia.inpt4 = 0x00; // Pressed (bit 7 = 0)
+        tia.inpt5 = 0x80; // Released (bit 7 = 1)
+
+        // Read input registers
+        assert_eq!(tia.read(0x0C), 0x00); // INPT4 - pressed
+        assert_eq!(tia.read(0x0D), 0x80); // INPT5 - released
+    }
 }
