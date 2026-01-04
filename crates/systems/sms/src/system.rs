@@ -211,4 +211,57 @@ mod tests {
         assert_eq!(frame.width, 256);
         assert_eq!(frame.height, 192);
     }
+
+    #[test]
+    fn smoke_test_sms() {
+        // Load the test ROM
+        let rom = include_bytes!("../../../../test_roms/sms/test.sms");
+        let mut system = SmsSystem::new();
+        system.load_rom(rom.to_vec());
+
+        system.reset();
+
+        // Run for several frames to allow initialization
+        for _ in 0..10 {
+            let _ = system.step_frame();
+        }
+
+        // Get a frame
+        let frame = system.step_frame().unwrap();
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 192);
+
+        // The test ROM should produce a checkerboard pattern
+        // Check that we have non-zero pixels (display is working)
+        let pixels = &frame.pixels;
+        let non_zero_count = pixels.iter().filter(|&&p| p != 0).count();
+
+        // We should have a significant number of white pixels from the checkerboard
+        // The exact count depends on VDP implementation, but it should be > 0
+        assert!(
+            non_zero_count > 0,
+            "Expected visible output from test ROM, got {} non-zero pixels",
+            non_zero_count
+        );
+
+        // For a proper checkerboard, approximately half the pixels should be white
+        // Allow a wide tolerance since the exact rendering depends on tile implementation
+        let total_pixels = pixels.len();
+        let white_percentage = (non_zero_count as f32 / total_pixels as f32) * 100.0;
+
+        println!(
+            "Test ROM produced {:.1}% white pixels (expected ~50% for checkerboard)",
+            white_percentage
+        );
+
+        // Very loose check - just ensure SOME pixels are rendered
+        // (More strict checking would require full VDP implementation)
+        assert!(
+            white_percentage > 1.0,
+            "Expected at least some visible pixels, got {:.1}%",
+            white_percentage
+        );
+    }
 }
