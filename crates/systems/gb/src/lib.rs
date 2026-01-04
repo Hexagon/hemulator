@@ -1297,4 +1297,68 @@ mod tests {
         let key1 = sys.cpu.memory.read(0xFF4D);
         assert_eq!(key1 & 0x80, 0x00, "Speed should not have changed");
     }
+
+    #[test]
+    fn test_gta_style_speed_switching() {
+        // Integration test simulating GTA 1/2 speed switching behavior
+        // GTA games use STOP with KEY1 to switch speeds during gameplay
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        // Simulate GTA-style speed switching sequence
+        // 0x100: Arm speed switch
+        rom[0x100] = 0x3E; // LD A, 0x01
+        rom[0x101] = 0x01;
+        rom[0x102] = 0xE0; // LDH ($4D), A
+        rom[0x103] = 0x4D;
+        // 0x104: Execute STOP
+        rom[0x104] = 0x10; // STOP
+        rom[0x105] = 0x00;
+        // 0x106: Continue after speed switch
+        rom[0x106] = 0x3E; // LD A, 0x42
+        rom[0x107] = 0x42;
+        rom[0x108] = 0xEA; // LD ($C000), A (write to WRAM)
+        rom[0x109] = 0x00;
+        rom[0x10A] = 0xC0;
+        rom[0x10B] = 0x18; // JR -3 (infinite loop)
+        rom[0x10C] = 0xFD;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Run several frames to ensure the system doesn't freeze
+        for i in 0..10 {
+            let result = sys.step_frame();
+            assert!(
+                result.is_ok(),
+                "Frame {} should execute without freezing",
+                i
+            );
+        }
+
+        // Verify the system is still running and not stuck
+        // Check that execution continued past the STOP instruction
+        let wram_value = sys.cpu.memory.read(0xC000);
+        assert_eq!(
+            wram_value, 0x42,
+            "WRAM should contain 0x42, indicating execution continued after STOP"
+        );
+
+        // Verify speed was switched
+        let key1 = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1 & 0x80,
+            0x80,
+            "System should be in double speed mode (bit 7 set)"
+        );
+        assert_eq!(
+            key1 & 0x01,
+            0x00,
+            "Speed switch flag should be cleared (bit 0 = 0)"
+        );
+    }
 }
