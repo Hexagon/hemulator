@@ -914,4 +914,79 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_stat_register_bit7() {
+        // Test that STAT register bit 7 (unused) always reads as 1
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        let mut sys = GbSystem::new();
+
+        // Write various values to STAT
+        sys.cpu.memory.write(0xFF41, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF41) & 0x80,
+            0x80,
+            "STAT bit 7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF41, 0x7F);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF41) & 0x80,
+            0x80,
+            "STAT bit 7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF41, 0xFF);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF41) & 0x80,
+            0x80,
+            "STAT bit 7 should always read as 1"
+        );
+    }
+
+    #[test]
+    fn test_joypad_register_bits67() {
+        // Test that joypad register bits 6-7 (unused) always read as 1
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        let mut sys = GbSystem::new();
+
+        // Write various values to P1 register
+        sys.cpu.memory.write(0xFF00, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF00) & 0xC0,
+            0xC0,
+            "P1 bits 6-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF00, 0x3F);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF00) & 0xC0,
+            0xC0,
+            "P1 bits 6-7 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF00, 0xFF);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF00) & 0xC0,
+            0xC0,
+            "P1 bits 6-7 should always read as 1"
+        );
+
+        // Test with button selection bits
+        sys.cpu.memory.write(0xFF00, 0x10); // Select d-pad
+        assert_eq!(
+            sys.cpu.memory.read(0xFF00) & 0xC0,
+            0xC0,
+            "P1 bits 6-7 should always read as 1 even with selection bits set"
+        );
+
+        sys.cpu.memory.write(0xFF00, 0x20); // Select buttons
+        assert_eq!(
+            sys.cpu.memory.read(0xFF00) & 0xC0,
+            0xC0,
+            "P1 bits 6-7 should always read as 1 even with selection bits set"
+        );
+    }
 }

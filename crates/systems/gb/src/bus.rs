@@ -87,13 +87,16 @@
 //! - ✅ Boot ROM disable register
 //! - ✅ Cartridge ROM loading (up to size)
 //! - ✅ Cartridge RAM with size detection
-//! - ✅ MBC0, MBC1, MBC3, MBC5 mappers
+//! - ✅ MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 mappers
+//! - ✅ OAM DMA transfer (0xFF46)
+//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD)
 //!
 //! ## Not Implemented
-//! - ❌ MBC2 mapper (built-in 512×4 bits RAM)
-//! - ❌ Serial transfer
-//! - ❌ DMA register
-//! - ❌ CGB-specific registers
+//! - ❌ Serial transfer (0xFF01, 0xFF02)
+//! - ❌ WRAM banking (SVBK at 0xFF70, CGB only)
+//! - ❌ Speed switching (KEY1 at 0xFF4D, CGB only)
+//! - ❌ HDMA (0xFF51-0xFF55, CGB only)
+//! - ❌ Infrared port (RP at 0xFF56, CGB only)
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
@@ -254,7 +257,8 @@ impl MemoryLr35902 for GbBus {
                     let select_buttons = (self.joypad & 0x20) == 0;
                     let select_dpad = (self.joypad & 0x10) == 0;
 
-                    let mut result = self.joypad & 0xF0;
+                    // Bits 6-7 are unused and always read as 1
+                    let mut result = (self.joypad & 0x30) | 0xC0;
                     if select_buttons {
                         result |= (self.button_state >> 4) & 0x0F;
                     } else if select_dpad {
@@ -272,7 +276,7 @@ impl MemoryLr35902 for GbBus {
                 0xFF30..=0xFF3F => self.apu.read_register(addr),
                 // PPU registers
                 0xFF40 => self.ppu.lcdc,
-                0xFF41 => self.ppu.stat,
+                0xFF41 => self.ppu.stat | 0x80, // Bit 7 unused, always reads as 1
                 0xFF42 => self.ppu.scy,
                 0xFF43 => self.ppu.scx,
                 0xFF44 => self.ppu.ly,
