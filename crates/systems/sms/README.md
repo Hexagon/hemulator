@@ -7,12 +7,17 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 **✅ Implemented:**
 - Z80 CPU with full instruction set and interrupt support (IM 0, IM 1, IM 2, NMI)
 - SN76489 PSG audio chip (3 tone channels + 1 noise channel)
-- VDP (Video Display Processor) with tilemap and sprite rendering
+- VDP (Video Display Processor) with:
+  - Tilemap and sprite rendering
+  - Frame interrupts
+  - Line interrupts
+  - Sprite overflow detection
+  - Sprite collision detection
 - Memory bus with ROM banking support
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (15/15)
+- All unit tests passing (19/19)
 
 **⚠️ Partially Implemented:**
 - Save state serialization (trait implemented, serialization logic pending)
@@ -104,10 +109,10 @@ Banking registers at 0xFFFC, 0xFFFD, 0xFFFE (in RAM) control which 16KB banks ar
 ## Testing
 
 Current test coverage:
-- ✅ VDP: register writes, VRAM access, color decoding (4 tests)
+- ✅ VDP: register writes, VRAM access, color decoding, interrupts, sprite flags (8 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
 - ✅ System: creation, reset, ROM loading, frame stepping, interrupts (8 tests)
-- ✅ Total: 15 tests passing
+- ✅ Total: 19 tests passing
 
 Run tests with:
 ```bash
@@ -154,4 +159,3 @@ SMS ROMs are typically headerless binary files:
 - Save states not fully implemented (serialization logic pending)
 - No Game Gear support yet (planned)
 - No FM sound unit support (Master System only, optional accessory)
-- VDP sprite overflow and collision detection not implemented
