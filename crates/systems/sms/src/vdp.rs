@@ -151,6 +151,7 @@ impl Vdp {
     }
 
     /// Step VDP by one scanline
+    #[allow(dead_code)]
     pub fn step_scanline(&mut self) {
         if self.scanline < 192 {
             // Render visible scanline
@@ -169,16 +170,18 @@ impl Vdp {
             self.scanline = 0;
         }
     }
-    
+
     /// Set current scanline (for cycle-accurate timing)
     pub fn set_scanline(&mut self, scanline: u16) {
         let old_scanline = self.scanline;
         self.scanline = scanline;
-        
+
         // Render any scanlines that were crossed
         if scanline < old_scanline {
             // Wrapped around to new frame
-            for line in old_scanline..192.min(262) {
+            // Render remaining scanlines from old_scanline to 192 (end of visible area)
+            // Note: If old_scanline > 192, this range is empty (which is correct)
+            for line in old_scanline..192 {
                 if line < 192 {
                     self.render_scanline(line as u8);
                 }
@@ -187,10 +190,8 @@ impl Vdp {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt at scanline 192
-            if old_scanline < 192 && scanline >= 192 {
-                if (self.registers[1] & 0x20) != 0 {
-                    self.frame_interrupt_pending = true;
-                }
+            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+                self.frame_interrupt_pending = true;
             }
         } else {
             // Normal forward progress within same frame
@@ -198,10 +199,8 @@ impl Vdp {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt at scanline 192
-            if old_scanline < 192 && scanline >= 192 {
-                if (self.registers[1] & 0x20) != 0 {
-                    self.frame_interrupt_pending = true;
-                }
+            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+                self.frame_interrupt_pending = true;
             }
         }
     }
