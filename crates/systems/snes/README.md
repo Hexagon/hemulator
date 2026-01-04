@@ -51,7 +51,10 @@ The SNES emulator is **fully functional** with complete CPU, PPU (all modes 0-7)
   - No windows, masks, or effects (Modes 0-7 work but without these)
   - No mosaic or color math
   - Mode 7 rotation/scaling (mode works but without transformation matrix)
-- ⏳ **APU (SPC700)**: Not implemented - no audio
+- ⚠️ **APU (SPC700)**: Communication ports stubbed - no audio processing
+  - Ports $2140-$2143 implemented with echo/passthrough behavior
+  - Games can proceed past APU initialization handshakes
+  - No actual SPC700 CPU emulation or sound output
 - ⏳ **Enhancement Chips**: No SuperFX, DSP, SA-1, etc.
 
 ## Architecture
@@ -63,6 +66,8 @@ SnesSystem
   └── SnesCpu (wraps Cpu65c816<SnesBus>)
       └── SnesBus (implements Memory65c816)
           ├── 128KB WRAM
+          ├── APU Communication Stub ($2140-$2143)
+          │   └── Echo/passthrough ports for boot handshakes
           ├── DMA Controller (8 channels)
           │   ├── General-purpose DMA
           │   ├── HDMA (H-blank DMA)
