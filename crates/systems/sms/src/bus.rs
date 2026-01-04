@@ -159,18 +159,18 @@ impl MemoryZ80 for SmsMemory {
             }
             _ => 0xFF,
         };
-        
+
         // Log I/O reads for debugging
         static mut READ_COUNT: u64 = 0;
         unsafe {
             READ_COUNT += 1;
-            if READ_COUNT <= 10 || (port == 0xBF && READ_COUNT % 100 == 0) {
+            if READ_COUNT <= 10 || (port == 0xBF && READ_COUNT.is_multiple_of(100)) {
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!("SMS I/O: Read port ${:02X} = ${:02X}", port, value)
                 });
             }
         }
-        
+
         value
     }
 

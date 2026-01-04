@@ -148,6 +148,77 @@ impl<M: MemoryZ80> CpuZ80<M> {
         cycles
     }
 
+    /// Trigger a maskable interrupt (honors IFF1 and interrupt mode)
+    ///
+    /// # Parameters
+    /// - `data`: Data byte from interrupting device (used in IM 0 and IM 2)
+    ///
+    /// # Interrupt Modes
+    /// - **IM 0**: Device provides instruction (usually RST), executes `data` as opcode
+    /// - **IM 1**: Jump to $0038 (most common, used by SMS/Game Gear)
+    /// - **IM 2**: Vectored interrupt, forms address from I register and `data`
+    pub fn interrupt(&mut self, data: u8) {
+        if !self.iff1 {
+            return; // Interrupts disabled
+        }
+
+        // Exit halt state
+        self.halted = false;
+
+        // Disable interrupts
+        self.iff1 = false;
+        self.iff2 = false;
+
+        // Push current PC to stack
+        self.push_u16(self.pc);
+
+        // Handle based on interrupt mode
+        match self.im {
+            0 => {
+                // IM 0: Execute the provided instruction (usually RST)
+                // For simplicity, treat as RST instruction
+                self.pc = (data & 0x38) as u16;
+            }
+            1 => {
+                // IM 1: Jump to $0038
+                self.pc = 0x0038;
+            }
+            2 => {
+                // IM 2: Vectored interrupt
+                // Vector address = (I << 8) | (data & 0xFE)
+                let vector_addr = ((self.i as u16) << 8) | ((data & 0xFE) as u16);
+                let lo = self.memory.read(vector_addr) as u16;
+                let hi = self.memory.read(vector_addr.wrapping_add(1)) as u16;
+                self.pc = (hi << 8) | lo;
+            }
+            _ => {
+                // Default to IM 1 behavior for invalid modes
+                self.pc = 0x0038;
+            }
+        }
+    }
+
+    /// Trigger a non-maskable interrupt (NMI)
+    ///
+    /// NMI cannot be disabled and always jumps to $0066.
+    /// IFF1 is copied to IFF2 so it can be restored by RETN.
+    pub fn nmi(&mut self) {
+        // Exit halt state
+        self.halted = false;
+
+        // Save IFF1 to IFF2 (for RETN to restore)
+        self.iff2 = self.iff1;
+
+        // Disable maskable interrupts
+        self.iff1 = false;
+
+        // Push current PC to stack
+        self.push_u16(self.pc);
+
+        // Jump to NMI vector
+        self.pc = 0x0066;
+    }
+
     // Helper methods
     fn read_pc(&mut self) -> u8 {
         let val = self.memory.read(self.pc);

@@ -64,7 +64,7 @@ impl SmsSystem {
                 &rom_data[0..16.min(rom_data.len())]
             )
         });
-        
+
         // Create new memory with ROM
         let memory = SmsMemory::new(rom_data, Rc::clone(&self.vdp), Rc::clone(&self.psg));
         self.cpu = CpuZ80::new(memory);
@@ -92,12 +92,14 @@ impl System for SmsSystem {
     type Error = SmsError;
 
     fn reset(&mut self) {
-        log(LogCategory::CPU, LogLevel::Info, || "SMS: System reset".to_string());
+        log(LogCategory::CPU, LogLevel::Info, || {
+            "SMS: System reset".to_string()
+        });
         self.cpu.reset();
         self.vdp.borrow_mut().reset();
         self.psg.borrow_mut().reset();
         self.cycles = 0;
-        
+
         log(LogCategory::CPU, LogLevel::Debug, || {
             format!(
                 "SMS CPU: PC=${:04X}, SP=${:04X}, A=${:02X}, F=${:02X}",
@@ -108,7 +110,7 @@ impl System for SmsSystem {
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         let target_cycles = 59659; // ~3.58 MHz / 60 Hz
-        
+
         static mut FRAME_COUNT: u64 = 0;
         let log_this_frame = unsafe {
             FRAME_COUNT += 1;
@@ -142,7 +144,8 @@ impl System for SmsSystem {
             // Check for VDP interrupts
             if self.vdp.borrow().frame_interrupt_pending() {
                 // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
-                self.cpu.interrupt();
+                // Data byte doesn't matter in IM 1, but pass 0xFF as default
+                self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_frame_interrupt();
             }
         }
