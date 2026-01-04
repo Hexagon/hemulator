@@ -4,58 +4,198 @@ This crate implements Super Nintendo Entertainment System emulation for the Hemu
 
 **For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
 
+## References
+
+This implementation follows specifications from the **SNESdev Wiki**:
+- **Main Wiki**: https://snes.nesdev.org/wiki/SNESdev_Wiki
+- **65C816 CPU**: https://snes.nesdev.org/wiki/65c816_reference
+- **PPU Registers**: https://snes.nesdev.org/wiki/PPU_registers
+- **CPU Registers**: https://snes.nesdev.org/wiki/CPU_registers
+- **Memory Map**: https://snes.nesdev.org/wiki/Memory_map
+- **DMA & HDMA**: https://snes.nesdev.org/wiki/DMA_&_HDMA
+- **Timing**: https://snes.nesdev.org/wiki/Timing
+
 ## Current Status
 
-The SNES emulator is **fully functional** with complete CPU, PPU (all modes 0-7), sprites, scrolling, DMA, HDMA, HiROM, and full controller support.
+The SNES emulator supports basic gameplay with complete CPU, PPU rendering (modes 0-7), sprites, scrolling, DMA/HDMA, and controller input. Audio is not implemented.
 
 ### What Works
 
+#### CPU & Memory
 - ✅ **CPU (65C816)** - Complete 16-bit CPU from `emu_core::cpu_65c816`
   - 256/256 opcodes implemented (100% complete)
-  - 8/16-bit mode switching
-  - 24-bit address space
-- ✅ **Memory Bus** - 128KB WRAM, cartridge mapping
-- ✅ **DMA** - Full 8-channel DMA support
-  - General-purpose DMA ($420B, $4300-$437F)
-  - All transfer modes (0-7) with proper patterns
-  - Address increment/decrement/fixed modes
-  - Cycle-accurate timing (8 cycles per byte + overhead)
-- ✅ **HDMA** - H-blank DMA for scanline effects
-  - 8-channel HDMA support ($420C, $4300-$437F)
-  - Direct and indirect addressing modes
-  - Per-scanline register updates
-  - Line counter and repeat mode
-  - Automatic table processing
-- ✅ **Cartridge Loading** - Both LoROM and HiROM mapping with SMC header detection
-  - Automatic mapping mode detection from ROM header
+  - 8/16-bit mode switching (M and X flags)
+  - 24-bit address space (16MB addressable)
+  - Native and emulation modes
+  - Reference: [65c816 Reference](https://snes.nesdev.org/wiki/65c816_reference)
+
+- ✅ **Memory Bus** - Full SNES memory map implementation
+  - 128KB WRAM ($7E0000-$7FFFFF)
+  - Shadow RAM at $0000-$1FFF in banks $00-$3F and $80-$BF
+  - Hardware registers ($2100-$21FF, $4000-$43FF)
+  - Reference: [Memory Map](https://snes.nesdev.org/wiki/Memory_map)
+
+- ✅ **Cartridge Loading** - Both LoROM and HiROM with auto-detection
   - LoROM: 32KB banks at $8000-$FFFF per bank
   - HiROM: Full 64KB banks with linear addressing
+  - SMC header detection and removal
   - SRAM support for both modes
-- ✅ **PPU** - Complete graphics rendering with all modes
+  - Reference: [ROM File Formats](https://snes.nesdev.org/wiki/ROM_file_formats)
+
+#### PPU (Picture Processing Unit)
+- ✅ **All 8 Background Modes** (0-7)
   - **Mode 0**: 4 BG layers, 2bpp each (4 colors per tile)
-  - **Mode 1**: 2 BG layers 4bpp + 1 BG layer 2bpp (most common mode)
+  - **Mode 1**: 2 BG layers 4bpp + 1 BG layer 2bpp (most common commercial mode)
   - **Mode 2**: 2 BG layers, 4bpp each, offset-per-tile capability
   - **Mode 3**: BG1 8bpp (256 colors), BG2 4bpp (16 colors)
   - **Mode 4**: BG1 8bpp (256 colors), BG2 2bpp (4 colors), offset-per-tile
   - **Mode 5**: 2 BG layers (hi-res), BG1 4bpp, BG2 2bpp
   - **Mode 6**: 1 BG layer (hi-res), 4bpp, offset-per-tile
-  - **Mode 7**: 1 BG layer, 8bpp (256 colors), basic rendering (no rotation yet)
-- ✅ **Sprites (OAM)** - 128 sprites with 4bpp, multiple size modes
-- ✅ **Scrolling** - Full horizontal and vertical scrolling on all BG layers
-- ✅ **Controllers** - Full SNES controller support (A, B, X, Y, L, R, Start, Select, D-pad)
-- ✅ **Save States** - CPU state serialization
+  - **Mode 7**: 1 BG layer, 8bpp (256 colors), basic rendering
+  - Reference: [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
+
+- ✅ **Sprites (OAM)** - Complete sprite system
+  - 128 sprites with 4bpp (16 colors per sprite)
+  - Multiple size modes (8x8, 16x16, 32x32, 64x64)
+  - Priority levels (0-3)
+  - Hardware-accurate 32 sprites/scanline limit
+  - 34 tile slots/scanline limit
+  - Reference: [Sprites](https://snes.nesdev.org/wiki/PPU_OAM)
+
+- ✅ **Scrolling** - Full background scrolling support
+  - Horizontal and vertical scrolling on all BG layers
+  - Per-layer scroll registers ($210D-$2114)
+  - Reference: [Scrolling](https://snes.nesdev.org/wiki/PPU_registers#Background_Scrolling)
+
+- ✅ **VRAM/CGRAM/OAM Access**
+  - 64KB VRAM for tiles and tilemaps
+  - 512-byte CGRAM for 256 colors (15-bit BGR)
+  - 544-byte OAM (512 bytes main + 32 bytes high table)
+  - VRAM access protection during active display
+  - Reference: [VRAM](https://snes.nesdev.org/wiki/PPU_registers#VRAM)
+
+#### DMA & HDMA
+- ✅ **General-Purpose DMA** - Full 8-channel support
+  - Channels configured via $4300-$437F
+  - Enable register $420B (MDMAEN)
+  - All transfer modes (0-7) with proper B-bus patterns
+  - Address modes: increment, decrement, fixed
+  - Direction: A-bus ↔ B-bus (both directions)
+  - Cycle-accurate timing (8 cycles per byte + overhead)
+  - Reference: [DMA](https://snes.nesdev.org/wiki/DMA_&_HDMA#DMA)
+
+- ✅ **HDMA (H-blank DMA)** - Per-scanline updates
+  - 8-channel HDMA support (shared channels with DMA)
+  - Enable register $420C (HDMAEN)
+  - Direct and indirect addressing modes
+  - Per-scanline register updates
+  - Line counter and repeat mode
+  - Automatic table processing
+  - Reference: [HDMA](https://snes.nesdev.org/wiki/DMA_&_HDMA#HDMA)
+
+#### CPU I/O Registers
+- ✅ **Interrupt Control**
+  - $4200 (NMITIMEN) - NMI/IRQ enable and auto-joypad
+  - $4210 (RDNMI) - NMI flag with read-and-clear ⭐
+  - $4211 (TIMEUP) - IRQ flag (stub)
+  - $4212 (HVBJOY) - H/V-Blank and joypad status
+  - Reference: [CPU Registers](https://snes.nesdev.org/wiki/CPU_registers)
+
+- ✅ **Controller Input**
+  - $4016-$4017 - Serial joypad ports (JOYSER0/1)
+  - $4218-$421F - Auto-joypad read registers (JOY1L-JOY4H)
+  - Full SNES controller support (12 buttons)
+  - Auto-joypad read during VBlank
+  - Reference: [Controllers](https://snes.nesdev.org/wiki/Input_devices)
+
+#### APU Communication
+- ⚠️ **APU Ports** - Stub implementation for boot
+  - $2140-$2143 (APUIO0-3) - CPU ↔ SPC700 communication ports
+  - Initialized to SPC700 IPL ready state (0xBB, 0xAA, 0x00, 0x00)
+  - Echo/passthrough behavior allows games to boot
+  - No actual SPC700 CPU emulation
+  - Reference: [APU](https://snes.nesdev.org/wiki/APU)
+
+#### Timing
+- ✅ **Frame Timing** - NTSC timing implementation
+  - 89,342 master cycles per frame (~3.58 MHz / 60 Hz)
+  - 341 cycles per scanline
+  - 262 scanlines per frame (224 visible + 38 VBlank)
+  - Reference: [Timing](https://snes.nesdev.org/wiki/Timing)
+
+- ✅ **VBlank/NMI**
+  - VBlank starts at scanline 225
+  - NMI triggers if enabled ($4200 bit 7)
+  - Proper NMI flag handling ($4210 read-and-clear)
+  - Reference: [NMI](https://snes.nesdev.org/wiki/NMI)
+
+#### Other Features
+- ✅ **Save States** - Full system state serialization
+- ✅ **Logging** - Comprehensive debug logging for CPU, PPU, DMA, interrupts
 
 ### What's Missing
 
-- ⏳ **PPU Advanced Features**: 
-  - No windows, masks, or effects (Modes 0-7 work but without these)
-  - No mosaic or color math
-  - Mode 7 rotation/scaling (mode works but without transformation matrix)
-- ⚠️ **APU (SPC700)**: Communication ports stubbed - no audio processing
-  - Ports $2140-$2143 implemented with echo/passthrough behavior
-  - Games can proceed past APU initialization handshakes
-  - No actual SPC700 CPU emulation or sound output
-- ⏳ **Enhancement Chips**: No SuperFX, DSP, SA-1, etc.
+#### PPU Advanced Features
+- ❌ **Windows** - No window masking ($2123-$212B)
+  - Reference: [Windows](https://snes.nesdev.org/wiki/PPU_registers#Windows)
+- ❌ **Color Math** - No color addition/subtraction ($2130-$2132)
+  - Reference: [Color Math](https://snes.nesdev.org/wiki/PPU_registers#Color_addition)
+- ❌ **Mosaic** - No mosaic effect ($2106)
+- ❌ **Sub-screen** - No sub-screen support ($212D)
+- ❌ **Mode 7 Transform** - Basic rendering only, no rotation/scaling matrix
+  - Reference: [Mode 7](https://snes.nesdev.org/wiki/Mode_7)
+- ❌ **Hi-res** - Modes 5-6 render at normal resolution
+
+#### APU (Audio)
+- ❌ **SPC700 CPU** - No audio processor emulation
+- ❌ **DSP** - No sound generation
+- ❌ **Audio Output** - Silent gameplay
+  - Reference: [SPC700](https://snes.nesdev.org/wiki/SPC700), [DSP](https://snes.nesdev.org/wiki/DSP)
+
+#### Enhancement Chips
+- ❌ **No enhancement chip support**
+  - No SuperFX, SA-1, DSP-1/2/3/4, S-DD1, Cx4, etc.
+  - Games requiring these chips will not work
+  - Reference: [Enhancement Chips](https://snes.nesdev.org/wiki/Enhancement_chips)
+
+#### Other Missing Features
+- ❌ **IRQ** - H/V timer interrupts not implemented
+- ❌ **PAL** - NTSC timing only
+- ❌ **Interlace** - No interlace mode support
+- ❌ **Hardware Multiply/Divide** - Registers stubbed
+
+## Register Implementation Status
+
+### PPU Registers ($2100-$213F)
+Core PPU registers implemented:
+- ✅ $2100 (INIDISP) - Screen display, force blank, brightness
+- ✅ $2105 (BGMODE) - BG mode and character size
+- ✅ $2107-$210A - BG tilemap address and size
+- ✅ $210B-$210C - BG character data address
+- ✅ $210D-$2114 - Background scrolling
+- ✅ $2115-$2119 - VRAM access
+- ✅ $2121-$2122 - CGRAM access
+- ✅ $2101-$2104 - OAM access
+- ✅ $212C (TM) - Main screen layer enable
+- ✅ $213F (STAT78) - PPU status and NMI flag
+- ⚠️ $2123-$212B - Windows (stubbed)
+- ⚠️ $2130-$2132 - Color math (stubbed)
+
+Reference: [PPU Registers](https://snes.nesdev.org/wiki/PPU_registers)
+
+### CPU I/O Registers ($4000-$43FF)
+- ✅ $4200 (NMITIMEN) - Interrupt enable
+- ✅ $4210 (RDNMI) - NMI flag ⭐ Critical for proper NMI handling
+- ✅ $4211 (TIMEUP) - IRQ flag (stub)
+- ✅ $4212 (HVBJOY) - H/V-Blank and joypad status
+- ✅ $4016-$4017 - Controller serial ports
+- ✅ $4218-$421F - Auto-joypad read
+- ✅ $420B (MDMAEN) - DMA enable
+- ✅ $420C (HDMAEN) - HDMA enable
+- ✅ $4300-$437F - DMA/HDMA channel registers
+- ⚠️ $4202-$4206 - Multiply/Divide (stubbed)
+
+Reference: [CPU Registers](https://snes.nesdev.org/wiki/CPU_registers)
 
 ## Architecture
 
@@ -84,232 +224,96 @@ SnesSystem
               └── 32KB SRAM
 ```
 
-### DMA Implementation
-
-**Location**: `src/bus.rs`
-
-**General-Purpose DMA Support**:
-
-- 8 independent DMA channels ($4300-$437F)
-- Channel enable register ($420B - MDMAEN)
-- Transfer modes 0-7 with proper B-bus patterns
-- Address modes: increment, decrement, fixed
-- Direction: A-bus ↔ B-bus (both directions)
-- Cycle-accurate timing (8 cycles per byte transferred)
-
-**HDMA (H-blank DMA) Support**:
-
-- 8 independent HDMA channels (shared with DMA)
-- HDMA enable register ($420C - HDMAEN)
-- Direct and indirect addressing modes
-- Automatic table processing with line counters
-- Repeat mode support (bit 7 of line count)
-- Executed during H-blank of each scanline (~40 cycles)
-- Per-scanline register updates for visual effects
-- Used for: gradient backgrounds, waterfalls, parallax scrolling, Mode 7 effects
-              ├── ROM banks
-              └── 32KB SRAM
-```
-
-### PPU Implementation
-
-**Location**: `src/ppu.rs`
-
-**All 8 Background Modes Supported**:
-
-- **Mode 0**: 4 BG layers, 2bpp each (4 colors per tile) - Complex multi-layer scenes
-- **Mode 1**: 2 BG layers 4bpp (16 colors), 1 BG layer 2bpp (4 colors) - Most common (~75% of games)
-- **Mode 2**: 2 BG layers, 4bpp each - Offset-per-tile capability
-- **Mode 3**: BG1 8bpp (256 colors), BG2 4bpp (16 colors) - High color backgrounds
-- **Mode 4**: BG1 8bpp (256 colors), BG2 2bpp (4 colors) - High color with offset-per-tile
-- **Mode 5**: 2 BG layers (hi-res 512px), BG1 4bpp, BG2 2bpp - Wide screen mode
-- **Mode 6**: 1 BG layer (hi-res), 4bpp - Wide screen with offset-per-tile
-- **Mode 7**: 1 BG layer, 8bpp (256 colors) - Rotation/scaling mode (basic rendering)
-
-**Color Depth Support**:
-- 2bpp: 4 colors per tile (Modes 0, 1, 4, 5)
-- 4bpp: 16 colors per tile (Modes 0, 1, 2, 3, 5, 6)
-- 8bpp: 256 colors per tile (Modes 3, 4, 7)
-
-**Features**:
-- Priority-based layer rendering in all modes
-- 128 sprites with 4bpp in all modes
-- Full scrolling on all BG layers
-- Tilemap sizes: 32x32, 64x32, 32x64, 64x64 tiles
-
-**NOT Implemented**:
-- Mode 7 rotation/scaling matrix transformation
-- Windows and masking effects
-- Color math and sub-screen blending
-- Mosaic effects
-- True hi-res (512px) for Modes 5-6
-
-**Sprite Support** (OAM):
-
-- 128 sprites total
-- 4bpp (16 colors per sprite)
-- 8 sprite palettes (CGRAM 128-255)
-- Multiple size modes (8x8/16x16, 8x8/32x32, etc.)
-- Horizontal and vertical flipping
-- Priority-based rendering (sprite 127 → sprite 0)
-- Configurable VRAM base address
-
-### Cartridge Mapping
-
-**Location**: `src/cartridge.rs`
-
-**Automatic Mapping Detection**:
-
-The cartridge automatically detects whether a ROM uses LoROM or HiROM mapping by:
-1. Checking header at $7FC0 (LoROM) and $FFC0 (HiROM)
-2. Scoring each header based on validity (mapper type, ROM size, checksum, reset vector)
-3. Using the mapping mode with the higher score
-
-**LoROM Mapping** (~60% of games):
-- ROM: $8000-$FFFF in banks $00-$7D/$80-$FF (32KB chunks)
-- SRAM: $0000-$7FFF in banks $70-$7D/$F0-$FF
-- Header: $7FC0 in ROM → $00FFC0 in SNES memory
-
-**HiROM Mapping** (~35% of games):
-- ROM: $0000-$FFFF in banks $C0-$FF (64KB linear)
-  - Mirrors: $40-$7D, $80-$BF at $8000-$FFFF
-- SRAM: $6000-$7FFF in banks $20-$3F/$A0-$BF
-- Header: $FFC0 in both ROM and SNES memory
-
-### Memory Map
-
-- **$00-$3F, $80-$BF**: WRAM mirrors, I/O, ROM
-- **$7E-$7F**: Full 128KB WRAM
-- **$8000-$FFFF**: Cartridge ROM (LoROM or HiROM depending on mode)
-- **$2000-$5FFF**: Hardware registers (PPU, APU, DMA)
-- **$4300-$437F**: DMA channel registers (8 channels × 11 registers)
-- **$420B**: DMA enable register (MDMAEN)
-- **$420C**: HDMA enable register (HDMAEN)
-
-## Building
-
-```bash
-# Build SNES crate
-cargo build --package emu_snes
-
-# Run tests
-cargo test --package emu_snes
-
-# Run with specific ROM
-cargo run --release -p emu_gui -- path/to/game.sfc
-```
+### Key Files
+- `src/lib.rs` - System initialization and frame execution
+- `src/cpu.rs` - CPU wrapper using core 65C816
+- `src/bus.rs` - Memory bus with all hardware registers
+- `src/ppu.rs` - Complete PPU implementation (modes 0-7)
+- `src/ppu_renderer.rs` - Rendering backend
+- `src/cartridge.rs` - ROM loading and mapping
 
 ## Testing
 
-The SNES crate includes comprehensive tests:
+### Test ROMs
+Located in `test_roms/snes/`:
+- `test.sfc` - Basic Mode 0 checkerboard pattern
+- `test_priority.sfc` - Priority bit handling test
+- `test_enhanced.sfc` - Enhanced rendering features
+- `test_sprite_overflow.sfc` - Sprite limits test
 
-- **61 total tests**:
-  - Cartridge tests (loading, SMC header, LoROM, HiROM, mapping detection)
-  - DMA tests (registers, transfers, multiple channels)
-  - HDMA tests (enable register, initialization, execution, repeat mode)
-  - PPU tests (Modes 0 & 1, scrolling, sprites, OAM registers, priority)
-  - Controller tests (serial I/O, auto-read, button mapping)
-  - System tests (state management)
-  - Smoke tests with 4 test ROMs (basic, enhanced, priority, sprite overflow)
+### Unit Tests
+```bash
+cargo test --package emu_snes
+```
+- 61+ unit tests covering bus, PPU, DMA, HDMA, controllers
+- All tests passing
 
-- **Test ROMs**: 
-  - `test.sfc` - Basic Mode 0 rendering
-  - `test_enhanced.sfc` - Mode 1 with sprites and scrolling
-  - `test_priority.sfc` - Priority bit handling
-  - `test_sprite_overflow.sfc` - Sprite-per-scanline limits
+### Commercial Game Testing
+Games known to work (with limitations):
+- ✅ **Super Mario World** - Works with Mode 1, sprites, scrolling (no audio)
+- ⚠️ **Donkey Kong Country** - Graphics work
+- ❌ **F-Zero** - Requires Mode 7 rotation
+- ❌ **Super Mario RPG** - Requires SA-1 chip
+- ❌ **Star Fox** - Requires SuperFX chip
 
-## Usage Example
+## Development
 
-```rust
-use emu_snes::{SnesSystem, controller};
-use emu_core::System;
-
-// Create system
-let mut snes = SnesSystem::new();
-
-// Load ROM
-let rom_data = std::fs::read("game.sfc")?;
-snes.mount("Cartridge", &rom_data)?;
-
-// Set controller input
-snes.set_controller(0, controller::A | controller::START);
-
-// Run one frame
-let frame = snes.step_frame()?;
+### Building
+```bash
+cargo build --profile release-quick
 ```
 
-### Controller Button Constants
+### Debugging
+Enable logging for different subsystems:
+```bash
+# CPU execution trace
+cargo run -- game.sfc --log-cpu trace
 
-```rust
-use emu_snes::controller;
+# Interrupt debugging
+cargo run -- game.sfc --log-interrupts info
 
-// Face buttons
-controller::A       // 0x0080
-controller::B       // 0x8000
-controller::X       // 0x0040
-controller::Y       // 0x4000
+# PPU register access
+cargo run -- game.sfc --log-ppu info
 
-// Shoulder buttons
-controller::L       // 0x0020
-controller::R       // 0x0010
-
-// System buttons
-controller::START   // 0x1000
-controller::SELECT  // 0x2000
-
-// D-pad
-controller::UP      // 0x0800
-controller::DOWN    // 0x0400
-controller::LEFT    // 0x0200
-controller::RIGHT   // 0x0100
+# DMA operations
+cargo run -- game.sfc --log-bus debug
 ```
 
-## Known Limitations
+## Known Issues
 
-See [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system) for user-facing limitations.
+1. **NMI Handling** - Fixed in recent commits
+   - $4210 (RDNMI) now properly implemented
+   - Reading clears NMI flag (critical for proper operation)
+   - See `SNES_REGISTER_FIXES.md` for details
 
-**Status**: Fully functional - can run games using all PPU Modes 0-7 with sprites, controllers, DMA, and HDMA. Supports both LoROM and HiROM mapping. Missing only audio, Mode 7 rotation matrix, and advanced PPU effects.
+2. **APU Communication** - Stub only
+   - Ports respond to allow boot sequence
+   - No actual audio processing
 
-**Compatibility**: Estimated ~95%+ of SNES library playable (all modes implemented, most games fully functional except those requiring audio or Mode 7 transformations).
+3. **Timing** - Frame-based, not cycle-accurate
+   - Good enough for most games
+   - Some timing-sensitive effects may not work
 
-## Performance
+## Additional Documentation
 
-- **Target**: ~60 FPS (NTSC)
-- **Current**: CPU executes at correct speed
-- **Single-threaded**: Uses one CPU core
+- `SNES_REGISTER_FIXES.md` - Details on NMI register implementation
+- `SNES_WAI_INVESTIGATION.md` - WAI instruction debugging notes
+- `docs/SNES_EMULATION_PITFALLS.md` - Known pitfalls and edge cases
 
-## Future Improvements
+## References & Further Reading
 
-**Short Term**:
-- PPU Mode 2-7 support
-- APU (SPC700 CPU + DSP)
+### Primary References
+- **SNESdev Wiki**: https://snes.nesdev.org/wiki/SNESdev_Wiki
+- **Anomie's Register Doc**: https://snes.nesdev.org/wiki/Anomie%27s_Doc
+- **fullsnes**: https://problemkaputt.de/fullsnes.htm
 
-**Medium Term**:
-- Save RAM persistence
-- Additional PPU features (windows, color math)
-
-**Long Term**:
-- Enhancement chips (SuperFX, DSP, SA-1)
-- Accurate timing
-- Full compatibility
-
-## Contributing
-
-When adding SNES features:
-
-1. **PPU Modes**: Add to `src/ppu.rs`
-2. **APU**: Create `src/apu.rs` with SPC700 CPU
-3. **DMA/HDMA**: Extend `src/bus.rs` (already implemented)
-4. **Tests**: Add unit tests for new functionality
-5. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
-
-## References
-
-- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#snes-super-nintendo-entertainment-system)
-- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
-- **SNESdev Wiki**: https://www.snesdev.org/
-
-## License
-
-Same as the parent Hemulator project.
+### Specific Topics
+- **65C816 CPU**: https://snes.nesdev.org/wiki/65c816_reference
+- **PPU Registers**: https://snes.nesdev.org/wiki/PPU_registers
+- **CPU Registers**: https://snes.nesdev.org/wiki/CPU_registers
+- **DMA/HDMA**: https://snes.nesdev.org/wiki/DMA_&_HDMA
+- **Memory Map**: https://snes.nesdev.org/wiki/Memory_map
+- **Timing**: https://snes.nesdev.org/wiki/Timing
+- **Controllers**: https://snes.nesdev.org/wiki/Input_devices
+- **APU/SPC700**: https://snes.nesdev.org/wiki/SPC700
+- **Enhancement Chips**: https://snes.nesdev.org/wiki/Enhancement_chips
