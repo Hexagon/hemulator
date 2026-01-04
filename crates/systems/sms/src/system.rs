@@ -111,15 +111,9 @@ impl System for SmsSystem {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         let target_cycles = 59659; // ~3.58 MHz / 60 Hz
 
-        static mut FRAME_COUNT: u64 = 0;
-        let log_this_frame = unsafe {
-            FRAME_COUNT += 1;
-            FRAME_COUNT <= 5
-        };
-
         while self.cycles < target_cycles {
-            // Log CPU state on first few frames
-            if log_this_frame && self.cycles < 100 {
+            // Log CPU state on first few cycles (using cycles count directly)
+            if self.cycles < 100 {
                 let opcode = self.cpu.memory.read(self.cpu.pc);
                 log(LogCategory::CPU, LogLevel::Debug, || {
                     format!(

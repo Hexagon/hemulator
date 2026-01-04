@@ -5,20 +5,21 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 ## Current Status
 
 **✅ Implemented:**
+- Z80 CPU with full instruction set and interrupt support (IM 0, IM 1, IM 2, NMI)
 - SN76489 PSG audio chip (3 tone channels + 1 noise channel)
 - VDP (Video Display Processor) with tilemap and sprite rendering
 - Memory bus with ROM banking support
 - System trait implementation
-- All unit tests passing (11/11)
+- Frontend integration (ROM detection, controller input, audio)
+- Test ROM and smoke tests
+- All unit tests passing (15/15)
 
 **⚠️ Partially Implemented:**
-- Frontend integration (ROM detection complete, system enum partially integrated)
+- Save state serialization (trait implemented, serialization logic pending)
 
 **❌ Not Yet Implemented:**
-- Z80 CPU instruction set (stub exists, needs full implementation)
-- Frontend match arms for all EmulatorSystem methods
-- Test ROM and smoke tests
-- Save state serialization
+- Game Gear support (planned)
+- FM sound unit support (Master System only, optional accessory)
 
 ## Architecture
 
@@ -104,9 +105,9 @@ Banking registers at 0xFFFC, 0xFFFD, 0xFFFE (in RAM) control which 16KB banks ar
 
 Current test coverage:
 - ✅ VDP: register writes, VRAM access, color decoding (4 tests)
-- ✅ PSG: volume control, frequency, noise control (5 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
-- ✅ System: creation, reset, ROM loading, frame stepping (4 tests)
+- ✅ System: creation, reset, ROM loading, frame stepping, interrupts (8 tests)
+- ✅ Total: 15 tests passing
 
 Run tests with:
 ```bash
@@ -115,24 +116,23 @@ cargo test --package emu_sms
 
 ## Next Steps
 
-1. **Complete Z80 CPU** (~200-250 opcodes)
-   - Implement all instruction groups
-   - Add interrupt support (IM 0, IM 1, IM 2)
-   - Proper cycle counting
+1. **Save State Serialization**
+   - Implement state serialization for CPU, VDP, PSG, and memory
+   - Add tests for save/load functionality
 
-2. **Frontend Integration**
-   - Add SMS to all EmulatorSystem match arms
-   - Wire up controller input
-   - Add to system selection menu
+2. **Game Gear Support**
+   - Extended resolution (160×144)
+   - LCD palette
+   - Link cable support
 
-3. **Testing**
-   - Create test ROM in `test_roms/sms/`
-   - Add smoke test
-   - Test with real SMS ROMs
+3. **Enhanced Testing**
+   - Test with more commercial SMS ROMs
+   - Performance profiling
+   - Accuracy testing against hardware
 
 4. **Documentation**
-   - Update MANUAL.md with SMS controls
-   - Document known limitations
+   - Update MANUAL.md with detailed SMS controls and features
+   - Document mapper support
 
 ## ROM Format
 
@@ -151,7 +151,7 @@ SMS ROMs are typically headerless binary files:
 
 ## Known Limitations
 
-- Z80 CPU not yet implemented (stub only)
+- Save states not fully implemented (serialization logic pending)
 - No Game Gear support yet (planned)
-- Save states not implemented
-- No FM sound unit support (Master System only, optional)
+- No FM sound unit support (Master System only, optional accessory)
+- VDP sprite overflow and collision detection not implemented
