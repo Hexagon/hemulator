@@ -18,6 +18,12 @@ pub trait MemoryLr35902 {
     fn is_cgb_mode(&self) -> bool {
         false // Default: DMG mode
     }
+
+    /// Perform CGB speed switch (called by STOP instruction)
+    /// Returns true if speed switch was performed, false otherwise
+    fn perform_speed_switch(&mut self) -> bool {
+        false // Default: no speed switching (DMG mode or not implemented)
+    }
 }
 
 /// Sharp LR35902 CPU state
@@ -133,6 +139,11 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
         // If there are pending interrupts, wake from HALT even if IME is false
         if pending != 0 && self.halted {
             self.halted = false;
+        }
+
+        // Wake from STOP mode on any enabled interrupt (VBlank, LCD, Timer, Serial, or Joypad)
+        if pending != 0 && self.stopped {
+            self.stopped = false;
         }
 
         // Only service interrupts if IME is enabled
@@ -762,9 +773,22 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
 
             // STOP / HALT
             0x10 => {
-                self.stopped = true;
+                // STOP instruction
+                // Read the immediate byte (always 0x00 for STOP)
                 self.read_pc();
-                4
+
+                // Check if this is a speed switch (CGB only)
+                if self.memory.perform_speed_switch() {
+                    // Speed switch performed, continue execution
+                    // The actual speed change doesn't affect emulation timing
+                    // since we're not cycle-accurate
+                    4
+                } else {
+                    // True STOP - enter low power mode
+                    // Can be woken up by button press (joypad interrupt)
+                    self.stopped = true;
+                    4
+                }
             }
             0x76 => {
                 self.halted = true;

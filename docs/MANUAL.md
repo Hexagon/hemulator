@@ -709,6 +709,7 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
+- **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
 - **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
 - **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
@@ -823,7 +824,10 @@ The emulator supports the following cartridge banking schemes:
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-- **Audio**: SPC700 APU not implemented - silent gameplay
+- **Audio**: 
+  - SPC700 APU not implemented - silent gameplay
+  - APU communication ports ($2140-$2143) use simple echo stub to allow games to boot
+  - Games receive APU handshake responses but no actual audio processing occurs
 - **Cartridge**: 
   - Only basic LoROM mapping - no HiROM, ExHiROM, or special chips
   - No enhancement chips: SuperFX, SA1, DSP-1/2/3/4, S-DD1, Cx4, etc.

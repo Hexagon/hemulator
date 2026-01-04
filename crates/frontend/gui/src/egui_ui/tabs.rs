@@ -522,6 +522,11 @@ impl TabManager {
                             "Pioneering home video game console from 1977",
                         ),
                         (
+                            "SMS",
+                            "Sega Master System",
+                            "8-bit console with tile-based graphics and Z80 CPU",
+                        ),
+                        (
                             "SNES",
                             "Super Nintendo Entertainment System",
                             "16-bit console with advanced graphics and sound",

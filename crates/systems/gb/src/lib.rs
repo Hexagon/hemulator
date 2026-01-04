@@ -104,6 +104,7 @@
 //! - ✅ Interrupts: Full interrupt handling (VBlank, LCD STAT, Timer, Serial, Joypad)
 //! - ✅ Interrupts: Priority-based interrupt servicing with IME flag
 //! - ✅ CGB: Automatic mode detection and activation
+//! - ✅ CGB: Speed switching (KEY1 register, STOP instruction)
 //!
 //! ## Not Yet Implemented
 //! - ❌ Serial: Link cable communication
@@ -114,6 +115,7 @@
 //!    - PPU renders entire frames at once
 //!    - Some timing-critical effects may not work
 //!    - Trade-off: Better compatibility vs. perfect accuracy
+//!    - Note: Speed switching is supported but doesn't affect emulation timing
 //!
 //! 2. **ROM Support**: MBC0, MBC1, MBC2, MBC3, MBC5 supported
 //!    - Covers approximately 96%+ of commercial Game Boy games
@@ -125,6 +127,7 @@
 //!    - VRAM banking (2 banks of 8KB)
 //!    - Color palettes (8 BG + 8 OBJ, 4 colors each, 15-bit RGB)
 //!    - Tile attributes (palette selection, VRAM bank, flipping)
+//!    - Speed switching (normal 4.19 MHz / double 8.39 MHz)
 //!    - Backward compatible with DMG games
 //!
 //! # Usage Example
@@ -1084,6 +1087,278 @@ mod tests {
             sys.cpu.memory.read(0xFFFF),
             0xFF,
             "IE should read 0xFF when all writable bits are set"
+        );
+    }
+
+    #[test]
+    fn test_cgb_speed_switching() {
+        // Test CGB speed switching via KEY1 register and STOP instruction
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        // Program to test speed switching
+        // 0x100: Write 0x01 to KEY1 (prepare speed switch)
+        rom[0x100] = 0x3E; // LD A, 0x01
+        rom[0x101] = 0x01;
+        rom[0x102] = 0xE0; // LDH ($4D), A (write to KEY1 at 0xFF4D)
+        rom[0x103] = 0x4D;
+        // 0x104: Execute STOP instruction
+        rom[0x104] = 0x10; // STOP
+        rom[0x105] = 0x00; // Immediate byte (always 0x00)
+                           // 0x106: Continue execution after speed switch
+        rom[0x106] = 0x00; // NOP
+        rom[0x107] = 0x00; // NOP
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Verify we're in CGB mode
+        assert!(sys.cpu.memory.is_cgb_mode());
+
+        // KEY1 should start at 0 (normal speed)
+        let key1_initial = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1_initial & 0x80,
+            0x00,
+            "KEY1 bit 7 should start at 0 (normal speed)"
+        );
+
+        // Execute the program
+        // Step 1: LD A, 0x01
+        sys.cpu.step();
+        assert_eq!(sys.cpu.a, 0x01);
+
+        // Step 2: LDH ($4D), A - write to KEY1
+        sys.cpu.step();
+        let key1_after_write = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1_after_write & 0x01,
+            0x01,
+            "KEY1 bit 0 should be set (speed switch armed)"
+        );
+        assert_eq!(
+            key1_after_write & 0x80,
+            0x00,
+            "KEY1 bit 7 should still be 0 (still in normal speed)"
+        );
+
+        // Verify CPU is not stopped before STOP instruction
+        assert!(!sys.cpu.stopped, "CPU should not be stopped yet");
+
+        // Step 3: STOP instruction - should perform speed switch
+        sys.cpu.step();
+
+        // After STOP with KEY1 bit 0 set, speed should have switched
+        let key1_after_stop = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1_after_stop & 0x80,
+            0x80,
+            "KEY1 bit 7 should be set (double speed mode)"
+        );
+        assert_eq!(
+            key1_after_stop & 0x01,
+            0x00,
+            "KEY1 bit 0 should be cleared (speed switch completed)"
+        );
+        assert!(
+            !sys.cpu.stopped,
+            "CPU should not be stopped after speed switch"
+        );
+
+        // Verify execution continues
+        assert_eq!(sys.cpu.pc, 0x106, "PC should have advanced past STOP");
+
+        // Test switching back to normal speed
+        sys.cpu.memory.write(0xFF4D, 0x01); // Arm speed switch again
+        let key1_before_second_switch = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1_before_second_switch & 0x01,
+            0x01,
+            "KEY1 bit 0 should be set again"
+        );
+
+        // Manually trigger speed switch via memory interface
+        let switched = sys.cpu.memory.perform_speed_switch();
+        assert!(switched, "Speed switch should succeed");
+
+        let key1_after_second_switch = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1_after_second_switch & 0x80,
+            0x00,
+            "KEY1 bit 7 should be back to 0 (normal speed)"
+        );
+        assert_eq!(
+            key1_after_second_switch & 0x01,
+            0x00,
+            "KEY1 bit 0 should be cleared"
+        );
+    }
+
+    #[test]
+    fn test_stop_without_speed_switch() {
+        // Test STOP instruction without speed switch (should enter low power mode)
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        // Program: Just execute STOP without arming speed switch
+        rom[0x100] = 0x10; // STOP
+        rom[0x101] = 0x00; // Immediate byte
+        rom[0x102] = 0x00; // NOP (should not reach here)
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // KEY1 bit 0 should be 0 (speed switch not armed)
+        let key1 = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(key1 & 0x01, 0x00, "KEY1 bit 0 should not be set");
+
+        // Execute STOP
+        sys.cpu.step();
+
+        // CPU should be in stopped state
+        assert!(
+            sys.cpu.stopped,
+            "CPU should be stopped when STOP is executed without speed switch"
+        );
+
+        // Speed should not have changed
+        let key1_after = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(key1_after & 0x80, 0x00, "Speed should not have changed");
+    }
+
+    #[test]
+    fn test_key1_register_bits() {
+        // Test KEY1 register bit behavior
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test that bits 1-6 always read as 1
+        sys.cpu.memory.write(0xFF4D, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF4D) & 0x7E,
+            0x7E,
+            "KEY1 bits 1-6 should always read as 1"
+        );
+
+        sys.cpu.memory.write(0xFF4D, 0x81);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF4D) & 0x7E,
+            0x7E,
+            "KEY1 bits 1-6 should always read as 1"
+        );
+
+        // Test that only bit 0 is writable
+        sys.cpu.memory.write(0xFF4D, 0xFF);
+        let key1 = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(key1 & 0x01, 0x01, "KEY1 bit 0 should be writable");
+        // Bit 7 should still be 0 (can only be changed by speed switch)
+        assert_eq!(key1 & 0x80, 0x00, "KEY1 bit 7 cannot be written directly");
+    }
+
+    #[test]
+    fn test_dmg_no_speed_switching() {
+        // Test that speed switching doesn't work in DMG mode
+        let mut sys = GbSystem::new();
+
+        // Create a DMG (non-CGB) ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x00; // NOT CGB
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Verify DMG mode
+        assert!(!sys.cpu.memory.is_cgb_mode());
+
+        // Try to arm speed switch
+        sys.cpu.memory.write(0xFF4D, 0x01);
+
+        // Attempt speed switch
+        let switched = sys.cpu.memory.perform_speed_switch();
+        assert!(!switched, "Speed switch should not work in DMG mode");
+
+        // Verify KEY1 is still 0
+        let key1 = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(key1 & 0x80, 0x00, "Speed should not have changed");
+    }
+
+    #[test]
+    fn test_gta_style_speed_switching() {
+        // Integration test simulating GTA 1/2 speed switching behavior
+        // GTA games use STOP with KEY1 to switch speeds during gameplay
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x8000];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        // Simulate GTA-style speed switching sequence
+        // 0x100: Arm speed switch
+        rom[0x100] = 0x3E; // LD A, 0x01
+        rom[0x101] = 0x01;
+        rom[0x102] = 0xE0; // LDH ($4D), A
+        rom[0x103] = 0x4D;
+        // 0x104: Execute STOP
+        rom[0x104] = 0x10; // STOP
+        rom[0x105] = 0x00;
+        // 0x106: Continue after speed switch
+        rom[0x106] = 0x3E; // LD A, 0x42
+        rom[0x107] = 0x42;
+        rom[0x108] = 0xEA; // LD ($C000), A (write to WRAM)
+        rom[0x109] = 0x00;
+        rom[0x10A] = 0xC0;
+        rom[0x10B] = 0x18; // JR -3 (infinite loop)
+        rom[0x10C] = 0xFD;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Run several frames to ensure the system doesn't freeze
+        for i in 0..10 {
+            let result = sys.step_frame();
+            assert!(
+                result.is_ok(),
+                "Frame {} should execute without freezing",
+                i
+            );
+        }
+
+        // Verify the system is still running and not stuck
+        // Check that execution continued past the STOP instruction
+        let wram_value = sys.cpu.memory.read(0xC000);
+        assert_eq!(
+            wram_value, 0x42,
+            "WRAM should contain 0x42, indicating execution continued after STOP"
+        );
+
+        // Verify speed was switched
+        let key1 = sys.cpu.memory.read(0xFF4D);
+        assert_eq!(
+            key1 & 0x80,
+            0x80,
+            "System should be in double speed mode (bit 7 set)"
+        );
+        assert_eq!(
+            key1 & 0x01,
+            0x00,
+            "Speed switch flag should be cleared (bit 0 = 0)"
         );
     }
 }

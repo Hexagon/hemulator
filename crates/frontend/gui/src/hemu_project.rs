@@ -182,7 +182,7 @@ impl HemuProject {
     pub fn relevant_mount_points(&self) -> Vec<&str> {
         match self.system.as_str() {
             "pc" => vec!["BIOS", "FloppyA", "FloppyB", "HardDrive"],
-            "nes" | "gb" | "gameboy" | "atari2600" | "snes" | "n64" => vec!["Cartridge"],
+            "nes" | "gb" | "gameboy" | "atari2600" | "snes" | "n64" | "sms" => vec!["Cartridge"],
             _ => vec![],
         }
     }
