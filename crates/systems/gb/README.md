@@ -163,7 +163,7 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 - Frame-based timing (not cycle-accurate)
 - RTC in MBC3 doesn't count time
 - No serial/link cable support
-- Simplified PPU mode transitions (Mode 1 and 2 only; Mode 0 and 3 not tracked)
+- No STAT interrupts or PPU mode transitions
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)
