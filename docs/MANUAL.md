@@ -581,12 +581,13 @@ saves/
 
 ## Supported Systems
 
-This emulator supports 7 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
+This emulator supports 8 different retro gaming systems. **NES emulation is fully working** with ~90% game coverage. Other systems are in various stages of development.
 
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
 | **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Some edge cases, stability | Testing/development |
+| **CHIP-8** | ✅ Fully Working | Complete CHIP-8 specification | Super-CHIP extensions | Playing CHIP-8 programs |
 | **Game Boy** | 🚧 In Development | Core features, MBC0/1/2/3/5 | Some edge cases, audio refinement | Testing/development |
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
@@ -673,6 +674,53 @@ The emulator supports the following cartridge banking schemes:
 - Z = Fire button
 - Enter = Game Reset (console switch)
 - Left Shift = Game Select (console switch)
+
+### CHIP-8
+
+**Status**: ✅ Fully Working  
+**Coverage**: Complete CHIP-8 specification (35 opcodes, all features implemented)
+
+**Program Format**: .ch8 or .c8 files - automatically detected by file size (< 3.5KB)
+
+**Features**:
+- Complete CHIP-8 interpreter implementation
+- 64x32 pixel monochrome display
+- All 35 original opcodes supported
+- Built-in hexadecimal font (sprites for 0-F)
+- 16-key hexadecimal keypad
+- Sound timer (beep indicator)
+- Delay timer for game timing
+- 4KB memory with 16-level stack
+- Save states (F5-F9)
+- Runs at ~700 instructions per second (original CHIP-8 speed)
+
+**Keyboard Layout**: The 16-key CHIP-8 hex keypad is mapped to QWERTY:
+```
+CHIP-8 Keypad:     Keyboard Mapping:
+1 2 3 C            1 2 3 4
+4 5 6 D      →     Q W E R
+7 8 9 E            A S D F
+A 0 B F            Z X C V
+```
+
+**Known Limitations**:
+- **Extensions**: Only original CHIP-8 specification supported (no Super-CHIP or XO-CHIP extensions)
+- **Audio**: Sound timer provides beep flag only, no actual tone generation in this module
+- **Random Number**: Uses simple pseudo-random generator (not cryptographically secure)
+- **Display**: Original 64x32 resolution only (no Super-CHIP 128x64 mode)
+
+**Technical Details**:
+- 16 8-bit general-purpose registers (V0-VF, where VF is used as flag)
+- Programs loaded at address 0x200
+- XOR-based sprite drawing with collision detection
+- Deterministic behavior for save states and replay
+
+**Recommended Programs**:
+- Classic CHIP-8 games (Pong, Tetris, Space Invaders, Breakout)
+- Homebrew programs
+- CHIP-8 test ROMs
+
+For more technical information, see [crates/systems/chip8/README.md](../crates/systems/chip8/README.md).
 
 ### Game Boy / Game Boy Color
 
