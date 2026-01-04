@@ -426,7 +426,8 @@ impl Memory65c816 for SnesBus {
                         });
                         self.apu_ports[port]
                     }
-                    // Hardware registers (PPU: $2100-$213F, excluding APU ports)
+                    // Hardware registers (PPU: $2100-$213F, excluding APU ports above)
+                    // Note: $2140-$2143 are handled by the APU case above
                     0x2100..=0x213F => self.ppu.read_register(offset),
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
@@ -590,7 +591,8 @@ impl Memory65c816 for SnesBus {
                         // This allows games to proceed past APU initialization handshakes
                         self.apu_ports[port] = val;
                     }
-                    // $2100-$213F - PPU registers (excluding APU ports)
+                    // $2100-$213F - PPU registers (excluding APU ports above)
+                    // Note: $2140-$2143 are handled by the APU case above
                     0x2100..=0x213F => self.ppu.write_register(offset, val),
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
