@@ -824,7 +824,10 @@ The emulator supports the following cartridge banking schemes:
   - No windows, masks, or special effects
   - No HDMA, mosaic, or color math
   - No sub-screen support
-- **Audio**: SPC700 APU not implemented - silent gameplay
+- **Audio**: 
+  - SPC700 APU not implemented - silent gameplay
+  - APU communication ports ($2140-$2143) use simple echo stub to allow games to boot
+  - Games receive APU handshake responses but no actual audio processing occurs
 - **Cartridge**: 
   - Only basic LoROM mapping - no HiROM, ExHiROM, or special chips
   - No enhancement chips: SuperFX, SA1, DSP-1/2/3/4, S-DD1, Cx4, etc.
