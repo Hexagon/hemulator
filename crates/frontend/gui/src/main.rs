@@ -3807,12 +3807,12 @@ fn main() {
             // Determine how many frames to step based on time difference
             // Calculate the actual number of frames we need to catch up
             // We step all necessary frames but only render the last one for smooth visuals
-            let frames_behind =
-                (time_diff_secs / target_frame_duration.as_secs_f64()).floor() as u32;
+            let frames_behind = (time_diff_secs / target_frame_duration.as_secs_f64()) as usize;
             let frames_to_step = if frames_behind > 0 {
-                // Cap at a reasonable maximum to avoid spiral of death
-                // If we're more than 5 frames behind, just step 5 to try to recover
-                frames_behind.min(5)
+                // Cap frames per iteration to prevent pathological catch-up behavior
+                // Higher cap (30) allows faster recovery from lag spikes without audio desync
+                let max_frames_per_iteration: usize = 30;
+                frames_behind.min(max_frames_per_iteration)
             } else {
                 0
             };
@@ -3841,7 +3841,7 @@ fn main() {
             }
 
             // Accumulate emulated time outside the loop (based on frames actually stepped)
-            total_emulated_time += target_frame_duration * frames_to_step;
+            total_emulated_time += target_frame_duration * frames_to_step as u32;
 
             // Render only the last frame to the display (always update client screen - requirement 3.2)
             if let Some(mut frame) = last_frame_opt {
