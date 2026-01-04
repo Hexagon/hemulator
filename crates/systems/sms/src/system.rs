@@ -135,12 +135,16 @@ impl System for SmsSystem {
             let current_scanline = (self.cycles / 228) % 262;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
-            // Check for VDP interrupts
+            // Check for VDP interrupts (frame interrupt has priority over line interrupt)
             if self.vdp.borrow().frame_interrupt_pending() {
                 // Trigger Z80 interrupt (IM 1: RST 38h = jump to 0x0038)
                 // Data byte doesn't matter in IM 1, but pass 0xFF as default
                 self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_frame_interrupt();
+            } else if self.vdp.borrow().line_interrupt_pending() {
+                // Trigger Z80 interrupt for line interrupt
+                self.cpu.interrupt(0xFF);
+                self.vdp.borrow_mut().clear_line_interrupt();
             }
         }
 
