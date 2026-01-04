@@ -5,6 +5,14 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_z80.md`
 
+// Z80 Flag bits
+const FLAG_S: u8 = 0b10000000; // Sign
+const FLAG_Z: u8 = 0b01000000; // Zero
+const FLAG_H: u8 = 0b00010000; // Half Carry
+const FLAG_P: u8 = 0b00000100; // Parity/Overflow
+const FLAG_N: u8 = 0b00000010; // Subtract (BCD)
+const FLAG_C: u8 = 0b00000001; // Carry
+
 /// Memory interface trait for the Z80 CPU
 pub trait MemoryZ80 {
     /// Read a byte from memory
@@ -984,79 +992,1194 @@ impl<M: MemoryZ80> CpuZ80<M> {
 
     // CB prefix instructions (bit operations)
     fn execute_cb(&mut self) -> u32 {
-        let _opcode = self.read_pc();
-        // TODO: Implement full CB instruction set
-        // For now, return basic timing
-        8
+        let opcode = self.read_pc();
+        let reg = opcode & 0x07;
+        let bit = (opcode >> 3) & 0x07;
+
+        // RLC, RRC, RL, RR, SLA, SRA, SLL, SRL (0x00-0x3F)
+        if opcode < 0x40 {
+            let op = (opcode >> 3) & 0x07;
+            let mut val = self.get_reg8(reg);
+
+            val = match op {
+                0 => self.rlc(val), // RLC
+                1 => self.rrc(val), // RRC
+                2 => self.rl(val),  // RL
+                3 => self.rr(val),  // RR
+                4 => self.sla(val), // SLA
+                5 => self.sra(val), // SRA
+                6 => self.sll(val), // SLL (undocumented)
+                7 => self.srl(val), // SRL
+                _ => val,
+            };
+
+            self.set_reg8(reg, val);
+            if reg == 6 {
+                15
+            } else {
+                8
+            } // (HL) takes longer
+        }
+        // BIT b,r (0x40-0x7F)
+        else if opcode < 0x80 {
+            let val = self.get_reg8(reg);
+            let bit_val = (val >> bit) & 1;
+
+            self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_N, false);
+            self.set_flag(FLAG_H, true);
+
+            if reg == 6 {
+                12
+            } else {
+                8
+            } // (HL) takes longer
+        }
+        // RES b,r (0x80-0xBF)
+        else if opcode < 0xC0 {
+            let val = self.get_reg8(reg);
+            let result = val & !(1 << bit);
+            self.set_reg8(reg, result);
+
+            if reg == 6 {
+                15
+            } else {
+                8
+            } // (HL) takes longer
+        }
+        // SET b,r (0xC0-0xFF)
+        else {
+            let val = self.get_reg8(reg);
+            let result = val | (1 << bit);
+            self.set_reg8(reg, result);
+
+            if reg == 6 {
+                15
+            } else {
+                8
+            } // (HL) takes longer
+        }
+    }
+
+    // Helper for CB rotate/shift operations
+    fn rlc(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x80) != 0;
+        let result = (val << 1) | if carry { 1 } else { 0 };
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn rrc(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x01) != 0;
+        let result = (val >> 1) | if carry { 0x80 } else { 0 };
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn rl(&mut self, val: u8) -> u8 {
+        let old_carry = if self.get_flag(FLAG_C) { 1 } else { 0 };
+        let carry = (val & 0x80) != 0;
+        let result = (val << 1) | old_carry;
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn rr(&mut self, val: u8) -> u8 {
+        let old_carry = if self.get_flag(FLAG_C) { 0x80 } else { 0 };
+        let carry = (val & 0x01) != 0;
+        let result = (val >> 1) | old_carry;
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn sla(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x80) != 0;
+        let result = val << 1;
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn sra(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x01) != 0;
+        let result = (val >> 1) | (val & 0x80); // Keep sign bit
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn sll(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x80) != 0;
+        let result = (val << 1) | 1; // Undocumented, shifts in 1
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    fn srl(&mut self, val: u8) -> u8 {
+        let carry = (val & 0x01) != 0;
+        let result = val >> 1;
+        self.set_flag(FLAG_C, carry);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, false);
+        self.set_sz_flags(result);
+        result
+    }
+
+    // Get register for CB instructions (0-7: B,C,D,E,H,L,(HL),A)
+    fn get_reg8(&self, reg: u8) -> u8 {
+        match reg {
+            0 => self.b,
+            1 => self.c,
+            2 => self.d,
+            3 => self.e,
+            4 => self.h,
+            5 => self.l,
+            6 => self.memory.read(self.hl()),
+            7 => self.a,
+            _ => 0,
+        }
+    }
+
+    fn set_reg8(&mut self, reg: u8, val: u8) {
+        match reg {
+            0 => self.b = val,
+            1 => self.c = val,
+            2 => self.d = val,
+            3 => self.e = val,
+            4 => self.h = val,
+            5 => self.l = val,
+            6 => self.memory.write(self.hl(), val),
+            7 => self.a = val,
+            _ => {}
+        }
+    }
+
+    fn set_sz_flags(&mut self, val: u8) {
+        self.set_flag(FLAG_S, (val & 0x80) != 0);
+        self.set_flag(FLAG_Z, val == 0);
+        self.set_flag(FLAG_P, self.parity(val));
+    }
+
+    // Calculate parity (even parity = true)
+    fn parity(&self, val: u8) -> bool {
+        val.count_ones().is_multiple_of(2)
     }
 
     // ED prefix instructions (extended instructions)
     fn execute_ed(&mut self) -> u32 {
         let opcode = self.read_pc();
         match opcode {
-            // RETI (Return from interrupt)
-            0x4D => {
-                self.pc = self.pop_u16();
-                self.iff1 = self.iff2;
-                14
+            // IN r,(C) - 0x40, 0x48, 0x50, 0x58, 0x60, 0x68, 0x78
+            0x40 => {
+                self.b = self.memory.io_read(self.c);
+                self.set_sz_flags(self.b);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
             }
+            0x48 => {
+                self.c = self.memory.io_read(self.c);
+                self.set_sz_flags(self.c);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+            0x50 => {
+                self.d = self.memory.io_read(self.c);
+                self.set_sz_flags(self.d);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+            0x58 => {
+                self.e = self.memory.io_read(self.c);
+                self.set_sz_flags(self.e);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+            0x60 => {
+                self.h = self.memory.io_read(self.c);
+                self.set_sz_flags(self.h);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+            0x68 => {
+                self.l = self.memory.io_read(self.c);
+                self.set_sz_flags(self.l);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+            0x78 => {
+                self.a = self.memory.io_read(self.c);
+                self.set_sz_flags(self.a);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                12
+            }
+
+            // OUT (C),r - 0x41, 0x49, 0x51, 0x59, 0x61, 0x69, 0x79
+            0x41 => {
+                self.memory.io_write(self.c, self.b);
+                12
+            }
+            0x49 => {
+                self.memory.io_write(self.c, self.c);
+                12
+            }
+            0x51 => {
+                self.memory.io_write(self.c, self.d);
+                12
+            }
+            0x59 => {
+                self.memory.io_write(self.c, self.e);
+                12
+            }
+            0x61 => {
+                self.memory.io_write(self.c, self.h);
+                12
+            }
+            0x69 => {
+                self.memory.io_write(self.c, self.l);
+                12
+            }
+            0x79 => {
+                self.memory.io_write(self.c, self.a);
+                12
+            }
+
+            // SBC HL,rr
+            0x42 => {
+                self.sbc_hl(self.bc());
+                15
+            }
+            0x52 => {
+                self.sbc_hl(self.de());
+                15
+            }
+            0x62 => {
+                self.sbc_hl(self.hl());
+                15
+            }
+            0x72 => {
+                self.sbc_hl(self.sp);
+                15
+            }
+
+            // ADC HL,rr
+            0x4A => {
+                self.adc_hl(self.bc());
+                15
+            }
+            0x5A => {
+                self.adc_hl(self.de());
+                15
+            }
+            0x6A => {
+                self.adc_hl(self.hl());
+                15
+            }
+            0x7A => {
+                self.adc_hl(self.sp);
+                15
+            }
+
+            // LD (nn),rr
+            0x43 => {
+                let addr = self.read_pc_u16();
+                let val = self.bc();
+                self.memory.write(addr, (val & 0xFF) as u8);
+                self.memory.write(addr.wrapping_add(1), (val >> 8) as u8);
+                20
+            }
+            0x53 => {
+                let addr = self.read_pc_u16();
+                let val = self.de();
+                self.memory.write(addr, (val & 0xFF) as u8);
+                self.memory.write(addr.wrapping_add(1), (val >> 8) as u8);
+                20
+            }
+            0x63 => {
+                let addr = self.read_pc_u16();
+                let val = self.hl();
+                self.memory.write(addr, (val & 0xFF) as u8);
+                self.memory.write(addr.wrapping_add(1), (val >> 8) as u8);
+                20
+            }
+            0x73 => {
+                let addr = self.read_pc_u16();
+                self.memory.write(addr, (self.sp & 0xFF) as u8);
+                self.memory
+                    .write(addr.wrapping_add(1), (self.sp >> 8) as u8);
+                20
+            }
+
+            // LD rr,(nn)
+            0x4B => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.set_bc((high << 8) | low);
+                20
+            }
+            0x5B => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.set_de((high << 8) | low);
+                20
+            }
+            0x6B => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.set_hl((high << 8) | low);
+                20
+            }
+            0x7B => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.sp = (high << 8) | low;
+                20
+            }
+
+            // NEG
+            0x44 => {
+                let a = self.a;
+                self.a = 0;
+                self.sub_a(a, false);
+                8
+            }
+
             // RETN (Return from NMI)
             0x45 => {
                 self.pc = self.pop_u16();
                 self.iff1 = self.iff2;
                 14
             }
+
             // IM 0
             0x46 => {
                 self.im = 0;
                 8
             }
-            // IM 1
-            0x56 => {
-                self.im = 1;
-                8
-            }
-            // IM 2
-            0x5E => {
-                self.im = 2;
-                8
-            }
+
             // LD I,A
             0x47 => {
                 self.i = self.a;
                 9
             }
+
             // LD R,A
             0x4F => {
                 self.r = self.a;
                 9
             }
+
+            // RETI (Return from interrupt)
+            0x4D => {
+                self.pc = self.pop_u16();
+                self.iff1 = self.iff2;
+                14
+            }
+
+            // IM 1
+            0x56 => {
+                self.im = 1;
+                8
+            }
+
             // LD A,I
             0x57 => {
                 self.a = self.i;
                 9
             }
+
+            // IM 2
+            0x5E => {
+                self.im = 2;
+                8
+            }
+
             // LD A,R
             0x5F => {
                 self.a = self.r;
                 9
             }
+
+            // RRD
+            0x67 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                let low_a = self.a & 0x0F;
+                self.a = (self.a & 0xF0) | (val & 0x0F);
+                self.memory.write(hl, (val >> 4) | (low_a << 4));
+                self.set_sz_flags(self.a);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                18
+            }
+
+            // RLD
+            0x6F => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                let low_a = self.a & 0x0F;
+                self.a = (self.a & 0xF0) | (val >> 4);
+                self.memory.write(hl, (val << 4) | low_a);
+                self.set_sz_flags(self.a);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                18
+            }
+
+            // LDI - Load and increment
+            0xA0 => {
+                let hl = self.hl();
+                let de = self.de();
+                let val = self.memory.read(hl);
+                self.memory.write(de, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.set_de(de.wrapping_add(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                16
+            }
+
+            // CPI - Compare and increment
+            0xA1 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.cp_a(val);
+                self.set_hl(hl.wrapping_add(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
+                16
+            }
+
+            // INI - Input and increment
+            0xA2 => {
+                let hl = self.hl();
+                let val = self.memory.io_read(self.c);
+                self.memory.write(hl, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_Z, self.b == 0);
+                self.set_flag(FLAG_N, true);
+                16
+            }
+
+            // OUTI - Output and increment
+            0xA3 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.memory.io_write(self.c, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_Z, self.b == 0);
+                self.set_flag(FLAG_N, true);
+                16
+            }
+
+            // LDD - Load and decrement
+            0xA8 => {
+                let hl = self.hl();
+                let de = self.de();
+                let val = self.memory.read(hl);
+                self.memory.write(de, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.set_de(de.wrapping_sub(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                16
+            }
+
+            // CPD - Compare and decrement
+            0xA9 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.cp_a(val);
+                self.set_hl(hl.wrapping_sub(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, bc != 0);
+                16
+            }
+
+            // IND - Input and decrement
+            0xAA => {
+                let hl = self.hl();
+                let val = self.memory.io_read(self.c);
+                self.memory.write(hl, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_Z, self.b == 0);
+                self.set_flag(FLAG_N, true);
+                16
+            }
+
+            // OUTD - Output and decrement
+            0xAB => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.memory.io_write(self.c, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_Z, self.b == 0);
+                self.set_flag(FLAG_N, true);
+                16
+            }
+
+            // LDIR - Load, increment, repeat
+            0xB0 => {
+                let hl = self.hl();
+                let de = self.de();
+                let val = self.memory.read(hl);
+                self.memory.write(de, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.set_de(de.wrapping_add(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, false);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                if bc != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    16
+                }
+            }
+
+            // CPIR - Compare, increment, repeat
+            0xB1 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.cp_a(val);
+                self.set_hl(hl.wrapping_add(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                let z = self.get_flag(FLAG_Z);
+                if bc != 0 && !z {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_P, bc != 0);
+                    16
+                }
+            }
+
+            // INIR - Input, increment, repeat
+            0xB2 => {
+                let hl = self.hl();
+                let val = self.memory.io_read(self.c);
+                self.memory.write(hl, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_N, true);
+                if self.b != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_Z, true);
+                    16
+                }
+            }
+
+            // OTIR - Output, increment, repeat
+            0xB3 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.memory.io_write(self.c, val);
+                self.set_hl(hl.wrapping_add(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_N, true);
+                if self.b != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_Z, true);
+                    16
+                }
+            }
+
+            // LDDR - Load, decrement, repeat
+            0xB8 => {
+                let hl = self.hl();
+                let de = self.de();
+                let val = self.memory.read(hl);
+                self.memory.write(de, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.set_de(de.wrapping_sub(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                self.set_flag(FLAG_P, false);
+                self.set_flag(FLAG_N, false);
+                self.set_flag(FLAG_H, false);
+                if bc != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    16
+                }
+            }
+
+            // CPDR - Compare, decrement, repeat
+            0xB9 => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.cp_a(val);
+                self.set_hl(hl.wrapping_sub(1));
+                let bc = self.bc().wrapping_sub(1);
+                self.set_bc(bc);
+                let z = self.get_flag(FLAG_Z);
+                if bc != 0 && !z {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_P, bc != 0);
+                    16
+                }
+            }
+
+            // INDR - Input, decrement, repeat
+            0xBA => {
+                let hl = self.hl();
+                let val = self.memory.io_read(self.c);
+                self.memory.write(hl, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_N, true);
+                if self.b != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_Z, true);
+                    16
+                }
+            }
+
+            // OTDR - Output, decrement, repeat
+            0xBB => {
+                let hl = self.hl();
+                let val = self.memory.read(hl);
+                self.memory.io_write(self.c, val);
+                self.set_hl(hl.wrapping_sub(1));
+                self.b = self.b.wrapping_sub(1);
+                self.set_flag(FLAG_N, true);
+                if self.b != 0 {
+                    self.pc = self.pc.wrapping_sub(2);
+                    21
+                } else {
+                    self.set_flag(FLAG_Z, true);
+                    16
+                }
+            }
+
             _ => 8,
         }
     }
 
+    // Helper for SBC HL,rr
+    fn sbc_hl(&mut self, val: u16) {
+        let hl = self.hl();
+        let carry = if self.get_flag(FLAG_C) { 1 } else { 0 };
+        let result = hl.wrapping_sub(val).wrapping_sub(carry);
+
+        self.set_flag(FLAG_S, (result & 0x8000) != 0);
+        self.set_flag(FLAG_Z, result == 0);
+        self.set_flag(FLAG_H, (hl & 0x0FFF) < (val & 0x0FFF) + carry);
+        self.set_flag(FLAG_P, ((hl ^ val) & (hl ^ result) & 0x8000) != 0);
+        self.set_flag(FLAG_N, true);
+        self.set_flag(FLAG_C, hl < val.wrapping_add(carry));
+
+        self.set_hl(result);
+    }
+
+    // Helper for ADC HL,rr
+    fn adc_hl(&mut self, val: u16) {
+        let hl = self.hl();
+        let carry = if self.get_flag(FLAG_C) { 1 } else { 0 };
+        let result = hl.wrapping_add(val).wrapping_add(carry);
+
+        self.set_flag(FLAG_S, (result & 0x8000) != 0);
+        self.set_flag(FLAG_Z, result == 0);
+        self.set_flag(FLAG_H, ((hl & 0x0FFF) + (val & 0x0FFF) + carry) > 0x0FFF);
+        self.set_flag(
+            FLAG_P,
+            (!((hl ^ val) & 0x8000) != 0) && (((hl ^ result) & 0x8000) != 0),
+        );
+        self.set_flag(FLAG_N, false);
+        self.set_flag(
+            FLAG_C,
+            ((hl as u32) + (val as u32) + (carry as u32)) > 0xFFFF,
+        );
+
+        self.set_hl(result);
+    }
+
     // DD prefix instructions (IX operations)
     fn execute_dd(&mut self) -> u32 {
-        let _opcode = self.read_pc();
-        // TODO: Implement IX indexed operations
-        8
+        let opcode = self.read_pc();
+        match opcode {
+            // LD IX,nn
+            0x21 => {
+                self.ix = self.read_pc_u16();
+                14
+            }
+            // LD (nn),IX
+            0x22 => {
+                let addr = self.read_pc_u16();
+                self.memory.write(addr, (self.ix & 0xFF) as u8);
+                self.memory
+                    .write(addr.wrapping_add(1), (self.ix >> 8) as u8);
+                20
+            }
+            // INC IX
+            0x23 => {
+                self.ix = self.ix.wrapping_add(1);
+                10
+            }
+            // LD IX,(nn)
+            0x2A => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.ix = (high << 8) | low;
+                20
+            }
+            // DEC IX
+            0x2B => {
+                self.ix = self.ix.wrapping_sub(1);
+                10
+            }
+            // INC (IX+d)
+            0x34 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.ix.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let result = self.inc(val);
+                self.memory.write(addr, result);
+                23
+            }
+            // DEC (IX+d)
+            0x35 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.ix.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let result = self.dec(val);
+                self.memory.write(addr, result);
+                23
+            }
+            // LD (IX+d),n
+            0x36 => {
+                let offset = self.read_pc() as i8;
+                let val = self.read_pc();
+                let addr = self.ix.wrapping_add(offset as u16);
+                self.memory.write(addr, val);
+                19
+            }
+            // ADD IX,BC / ADD IX,DE / ADD IX,IX / ADD IX,SP
+            0x09 => {
+                self.ix = self.add16(self.ix, self.bc());
+                15
+            }
+            0x19 => {
+                self.ix = self.add16(self.ix, self.de());
+                15
+            }
+            0x29 => {
+                self.ix = self.add16(self.ix, self.ix);
+                15
+            }
+            0x39 => {
+                self.ix = self.add16(self.ix, self.sp);
+                15
+            }
+            // LD r,(IX+d) - Load register from (IX+offset)
+            0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E => {
+                let offset = self.read_pc() as i8;
+                let addr = self.ix.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let reg = (opcode >> 3) & 0x07;
+                match reg {
+                    0 => self.b = val,
+                    1 => self.c = val,
+                    2 => self.d = val,
+                    3 => self.e = val,
+                    4 => self.h = val,
+                    5 => self.l = val,
+                    7 => self.a = val,
+                    _ => {}
+                }
+                19
+            }
+            // LD (IX+d),r - Store register to (IX+offset)
+            0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x77 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.ix.wrapping_add(offset as u16);
+                let reg = opcode & 0x07;
+                let val = match reg {
+                    0 => self.b,
+                    1 => self.c,
+                    2 => self.d,
+                    3 => self.e,
+                    4 => self.h,
+                    5 => self.l,
+                    7 => self.a,
+                    _ => 0,
+                };
+                self.memory.write(addr, val);
+                19
+            }
+            // ADD A,(IX+d) / ADC A,(IX+d) / SUB (IX+d) / SBC A,(IX+d)
+            // AND (IX+d) / XOR (IX+d) / OR (IX+d) / CP (IX+d)
+            0x86 | 0x8E | 0x96 | 0x9E | 0xA6 | 0xAE | 0xB6 | 0xBE => {
+                let offset = self.read_pc() as i8;
+                let addr = self.ix.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                match opcode & 0x38 {
+                    0x00 => self.add_a(val, false), // ADD
+                    0x08 => self.add_a(val, true),  // ADC
+                    0x10 => self.sub_a(val, false), // SUB
+                    0x18 => self.sub_a(val, true),  // SBC
+                    0x20 => self.and_a(val),        // AND
+                    0x28 => self.xor_a(val),        // XOR
+                    0x30 => self.or_a(val),         // OR
+                    0x38 => self.cp_a(val),         // CP
+                    _ => {}
+                }
+                19
+            }
+            // POP IX
+            0xE1 => {
+                self.ix = self.pop_u16();
+                14
+            }
+            // EX (SP),IX
+            0xE3 => {
+                let sp_val = self.pop_u16();
+                self.push_u16(self.ix);
+                self.ix = sp_val;
+                23
+            }
+            // PUSH IX
+            0xE5 => {
+                self.push_u16(self.ix);
+                15
+            }
+            // JP (IX)
+            0xE9 => {
+                self.pc = self.ix;
+                8
+            }
+            // LD SP,IX
+            0xF9 => {
+                self.sp = self.ix;
+                10
+            }
+            // CB prefix with IX offset
+            0xCB => {
+                let offset = self.read_pc() as i8;
+                let cb_opcode = self.read_pc();
+                self.execute_ddcb(offset, cb_opcode)
+            }
+            _ => 8,
+        }
     }
 
     // FD prefix instructions (IY operations)
     fn execute_fd(&mut self) -> u32 {
-        let _opcode = self.read_pc();
-        // TODO: Implement IY indexed operations
-        8
+        let opcode = self.read_pc();
+        match opcode {
+            // LD IY,nn
+            0x21 => {
+                self.iy = self.read_pc_u16();
+                14
+            }
+            // LD (nn),IY
+            0x22 => {
+                let addr = self.read_pc_u16();
+                self.memory.write(addr, (self.iy & 0xFF) as u8);
+                self.memory
+                    .write(addr.wrapping_add(1), (self.iy >> 8) as u8);
+                20
+            }
+            // INC IY
+            0x23 => {
+                self.iy = self.iy.wrapping_add(1);
+                10
+            }
+            // LD IY,(nn)
+            0x2A => {
+                let addr = self.read_pc_u16();
+                let low = self.memory.read(addr) as u16;
+                let high = self.memory.read(addr.wrapping_add(1)) as u16;
+                self.iy = (high << 8) | low;
+                20
+            }
+            // DEC IY
+            0x2B => {
+                self.iy = self.iy.wrapping_sub(1);
+                10
+            }
+            // INC (IY+d)
+            0x34 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.iy.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let result = self.inc(val);
+                self.memory.write(addr, result);
+                23
+            }
+            // DEC (IY+d)
+            0x35 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.iy.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let result = self.dec(val);
+                self.memory.write(addr, result);
+                23
+            }
+            // LD (IY+d),n
+            0x36 => {
+                let offset = self.read_pc() as i8;
+                let val = self.read_pc();
+                let addr = self.iy.wrapping_add(offset as u16);
+                self.memory.write(addr, val);
+                19
+            }
+            // ADD IY,BC / ADD IY,DE / ADD IY,IY / ADD IY,SP
+            0x09 => {
+                self.iy = self.add16(self.iy, self.bc());
+                15
+            }
+            0x19 => {
+                self.iy = self.add16(self.iy, self.de());
+                15
+            }
+            0x29 => {
+                self.iy = self.add16(self.iy, self.iy);
+                15
+            }
+            0x39 => {
+                self.iy = self.add16(self.iy, self.sp);
+                15
+            }
+            // LD r,(IY+d) - Load register from (IY+offset)
+            0x46 | 0x4E | 0x56 | 0x5E | 0x66 | 0x6E | 0x7E => {
+                let offset = self.read_pc() as i8;
+                let addr = self.iy.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                let reg = (opcode >> 3) & 0x07;
+                match reg {
+                    0 => self.b = val,
+                    1 => self.c = val,
+                    2 => self.d = val,
+                    3 => self.e = val,
+                    4 => self.h = val,
+                    5 => self.l = val,
+                    7 => self.a = val,
+                    _ => {}
+                }
+                19
+            }
+            // LD (IY+d),r - Store register to (IY+offset)
+            0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x77 => {
+                let offset = self.read_pc() as i8;
+                let addr = self.iy.wrapping_add(offset as u16);
+                let reg = opcode & 0x07;
+                let val = match reg {
+                    0 => self.b,
+                    1 => self.c,
+                    2 => self.d,
+                    3 => self.e,
+                    4 => self.h,
+                    5 => self.l,
+                    7 => self.a,
+                    _ => 0,
+                };
+                self.memory.write(addr, val);
+                19
+            }
+            // ADD A,(IY+d) / ADC A,(IY+d) / SUB (IY+d) / SBC A,(IY+d)
+            // AND (IY+d) / XOR (IY+d) / OR (IY+d) / CP (IY+d)
+            0x86 | 0x8E | 0x96 | 0x9E | 0xA6 | 0xAE | 0xB6 | 0xBE => {
+                let offset = self.read_pc() as i8;
+                let addr = self.iy.wrapping_add(offset as u16);
+                let val = self.memory.read(addr);
+                match opcode & 0x38 {
+                    0x00 => self.add_a(val, false), // ADD
+                    0x08 => self.add_a(val, true),  // ADC
+                    0x10 => self.sub_a(val, false), // SUB
+                    0x18 => self.sub_a(val, true),  // SBC
+                    0x20 => self.and_a(val),        // AND
+                    0x28 => self.xor_a(val),        // XOR
+                    0x30 => self.or_a(val),         // OR
+                    0x38 => self.cp_a(val),         // CP
+                    _ => {}
+                }
+                19
+            }
+            // POP IY
+            0xE1 => {
+                self.iy = self.pop_u16();
+                14
+            }
+            // EX (SP),IY
+            0xE3 => {
+                let sp_val = self.pop_u16();
+                self.push_u16(self.iy);
+                self.iy = sp_val;
+                23
+            }
+            // PUSH IY
+            0xE5 => {
+                self.push_u16(self.iy);
+                15
+            }
+            // JP (IY)
+            0xE9 => {
+                self.pc = self.iy;
+                8
+            }
+            // LD SP,IY
+            0xF9 => {
+                self.sp = self.iy;
+                10
+            }
+            // CB prefix with IY offset
+            0xCB => {
+                let offset = self.read_pc() as i8;
+                let cb_opcode = self.read_pc();
+                self.execute_fdcb(offset, cb_opcode)
+            }
+            _ => 8,
+        }
+    }
+
+    // DDCB prefix (IX+offset bit operations)
+    fn execute_ddcb(&mut self, offset: i8, opcode: u8) -> u32 {
+        let addr = self.ix.wrapping_add(offset as u16);
+        let mut val = self.memory.read(addr);
+        let bit = (opcode >> 3) & 0x07;
+
+        // Rotate/shift operations (0x00-0x3F)
+        if opcode < 0x40 {
+            let op = (opcode >> 3) & 0x07;
+            val = match op {
+                0 => self.rlc(val),
+                1 => self.rrc(val),
+                2 => self.rl(val),
+                3 => self.rr(val),
+                4 => self.sla(val),
+                5 => self.sra(val),
+                6 => self.sll(val),
+                7 => self.srl(val),
+                _ => val,
+            };
+            self.memory.write(addr, val);
+        }
+        // BIT b,(IX+d) (0x40-0x7F)
+        else if opcode < 0x80 {
+            let bit_val = (val >> bit) & 1;
+            self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_N, false);
+            self.set_flag(FLAG_H, true);
+            return 20;
+        }
+        // RES b,(IX+d) (0x80-0xBF)
+        else if opcode < 0xC0 {
+            val &= !(1 << bit);
+            self.memory.write(addr, val);
+        }
+        // SET b,(IX+d) (0xC0-0xFF)
+        else {
+            val |= 1 << bit;
+            self.memory.write(addr, val);
+        }
+        23
+    }
+
+    // FDCB prefix (IY+offset bit operations)
+    fn execute_fdcb(&mut self, offset: i8, opcode: u8) -> u32 {
+        let addr = self.iy.wrapping_add(offset as u16);
+        let mut val = self.memory.read(addr);
+        let bit = (opcode >> 3) & 0x07;
+
+        // Rotate/shift operations (0x00-0x3F)
+        if opcode < 0x40 {
+            let op = (opcode >> 3) & 0x07;
+            val = match op {
+                0 => self.rlc(val),
+                1 => self.rrc(val),
+                2 => self.rl(val),
+                3 => self.rr(val),
+                4 => self.sla(val),
+                5 => self.sra(val),
+                6 => self.sll(val),
+                7 => self.srl(val),
+                _ => val,
+            };
+            self.memory.write(addr, val);
+        }
+        // BIT b,(IY+d) (0x40-0x7F)
+        else if opcode < 0x80 {
+            let bit_val = (val >> bit) & 1;
+            self.set_flag(FLAG_Z, bit_val == 0);
+            self.set_flag(FLAG_N, false);
+            self.set_flag(FLAG_H, true);
+            return 20;
+        }
+        // RES b,(IY+d) (0x80-0xBF)
+        else if opcode < 0xC0 {
+            val &= !(1 << bit);
+            self.memory.write(addr, val);
+        }
+        // SET b,(IY+d) (0xC0-0xFF)
+        else {
+            val |= 1 << bit;
+            self.memory.write(addr, val);
+        }
+        23
+    }
+
+    // Helper for 16-bit addition with carry flag
+    fn add16(&mut self, a: u16, b: u16) -> u16 {
+        let result = a.wrapping_add(b);
+        self.set_flag(FLAG_N, false);
+        self.set_flag(FLAG_H, ((a & 0x0FFF) + (b & 0x0FFF)) > 0x0FFF);
+        self.set_flag(FLAG_C, (a as u32 + b as u32) > 0xFFFF);
+        result
     }
 }
 
