@@ -122,7 +122,7 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // 3. If other formats don't match and size is small enough
     // Note: This check should come after more specific formats but before Atari 2600
     // since Atari 2600 uses some overlapping sizes
-    
+
     // Check for Atari 2600
     // Atari 2600 ROMs are typically 2K, 4K, 8K, 12K, 16K, or 32K
     // They have no header, so we detect by size and lack of other formats
@@ -131,7 +131,7 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         // and doesn't match other formats, assume it's Atari 2600
         return Ok(SystemType::Atari2600);
     }
-    
+
     // CHIP-8: Small programs that don't match other formats
     // Max size is 3584 bytes (4096 - 512 for interpreter space)
     if data.len() >= 16 && data.len() <= 3584 {

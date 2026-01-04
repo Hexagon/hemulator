@@ -28,7 +28,7 @@
 //! ## Input
 //! - 16-key hexadecimal keypad (0x0-0xF)
 //! - Original layout:
-//!   ```
+//!   ```text
 //!   1 2 3 C
 //!   4 5 6 D
 //!   7 8 9 E
@@ -48,7 +48,6 @@
 #![allow(clippy::upper_case_acronyms)]
 
 use emu_core::{types::Frame, MountPointInfo, System};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -90,40 +89,33 @@ const DISPLAY_HEIGHT: usize = 32;
 const STACK_SIZE: usize = 16;
 
 /// CHIP-8 system state
-#[derive(Serialize, Deserialize)]
 pub struct Chip8System {
     // Registers
-    v: [u8; 16],         // V0-VF general purpose registers
-    i: u16,              // Index register
-    pc: u16,             // Program counter
-    sp: u8,              // Stack pointer
-    
+    v: [u8; 16], // V0-VF general purpose registers
+    i: u16,      // Index register
+    pc: u16,     // Program counter
+    sp: u8,      // Stack pointer
+
     // Memory
     memory: [u8; MEMORY_SIZE],
     stack: [u16; STACK_SIZE],
-    
+
     // Display
-    #[serde(skip)]
     display: [bool; DISPLAY_WIDTH * DISPLAY_HEIGHT],
-    #[serde(skip)]
     display_updated: bool, // Flag to know when to redraw
-    
+
     // Timers
     delay_timer: u8,
     sound_timer: u8,
-    
+
     // Input (16 keys)
-    #[serde(skip)]
     keys: [bool; 16],
-    
+
     // Execution
-    #[serde(skip)]
     cycles_this_frame: u32,
-    #[serde(skip)]
     program_loaded: bool,
-    
+
     // For waiting for keypress (FX0A instruction)
-    #[serde(skip)]
     waiting_for_key: Option<usize>, // Some(register_index) when waiting
 }
 
@@ -152,13 +144,13 @@ impl Chip8System {
             program_loaded: false,
             waiting_for_key: None,
         };
-        
+
         // Load font data into memory (at 0x000-0x04F)
         system.memory[0..FONT_DATA.len()].copy_from_slice(&FONT_DATA);
-        
+
         system
     }
-    
+
     /// Execute one instruction
     fn execute_instruction(&mut self) {
         // Check if waiting for key press
@@ -173,22 +165,22 @@ impl Chip8System {
             }
             return; // Don't execute instructions while waiting
         }
-        
+
         // Fetch opcode (2 bytes, big-endian)
         let opcode = u16::from_be_bytes([
             self.memory[self.pc as usize],
             self.memory[self.pc as usize + 1],
         ]);
-        
+
         // Decode and execute
         self.pc += 2; // Increment PC before execution (some instructions modify PC)
-        
-        let nnn = opcode & 0x0FFF;                    // 12-bit address
-        let nn = (opcode & 0x00FF) as u8;            // 8-bit constant
-        let n = (opcode & 0x000F) as u8;             // 4-bit constant
-        let x = ((opcode & 0x0F00) >> 8) as usize;   // 4-bit register index
-        let y = ((opcode & 0x00F0) >> 4) as usize;   // 4-bit register index
-        
+
+        let nnn = opcode & 0x0FFF; // 12-bit address
+        let nn = (opcode & 0x00FF) as u8; // 8-bit constant
+        let n = (opcode & 0x000F) as u8; // 4-bit constant
+        let x = ((opcode & 0x0F00) >> 8) as usize; // 4-bit register index
+        let y = ((opcode & 0x00F0) >> 4) as usize; // 4-bit register index
+
         match opcode & 0xF000 {
             0x0000 => match nn {
                 0xE0 => {
@@ -304,8 +296,12 @@ impl Chip8System {
             }
             0xC000 => {
                 // CXNN - RND Vx, byte: Set Vx = random byte AND NN
-                // Use simple LCG for deterministic behavior
-                let random = ((self.pc.wrapping_mul(1103515245).wrapping_add(12345)) >> 8) as u8;
+                // Use simple LCG for deterministic behavior (using cycle count as seed)
+                let random = ((self
+                    .cycles_this_frame
+                    .wrapping_mul(1103515245)
+                    .wrapping_add(12345))
+                    >> 16) as u8;
                 self.v[x] = random & nn;
             }
             0xD000 => {
@@ -377,22 +373,22 @@ impl Chip8System {
             _ => {}
         }
     }
-    
+
     /// Draw sprite at (Vx, Vy) with height n
     fn draw_sprite(&mut self, x_reg: usize, y_reg: usize, height: usize) {
         let x_pos = self.v[x_reg] as usize % DISPLAY_WIDTH;
         let y_pos = self.v[y_reg] as usize % DISPLAY_HEIGHT;
-        
+
         self.v[0xF] = 0; // Reset collision flag
-        
+
         for row in 0..height {
             let y = (y_pos + row) % DISPLAY_HEIGHT;
             let sprite_byte = self.memory[self.i as usize + row];
-            
+
             for col in 0..8 {
                 let x = (x_pos + col) % DISPLAY_WIDTH;
                 let pixel = (sprite_byte & (0x80 >> col)) != 0;
-                
+
                 if pixel {
                     let index = y * DISPLAY_WIDTH + x;
                     if self.display[index] {
@@ -402,17 +398,17 @@ impl Chip8System {
                 }
             }
         }
-        
+
         self.display_updated = true;
     }
-    
+
     /// Set key state (0-15)
     pub fn set_key(&mut self, key: u8, pressed: bool) {
         if key < 16 {
             self.keys[key as usize] = pressed;
         }
     }
-    
+
     /// Set controller state using standard button mapping
     /// Maps keyboard to CHIP-8's 16-key hexadecimal keypad
     /// Standard mapping (QWERTY):
@@ -423,14 +419,14 @@ impl Chip8System {
     pub fn set_controller(&mut self, state: u16) {
         // Clear all keys first
         self.keys.fill(false);
-        
+
         // Map 16-bit state to CHIP-8 keys
         // Bits 0-15 represent keys 0x0-0xF
         for i in 0..16 {
             self.keys[i] = (state & (1 << i)) != 0;
         }
     }
-    
+
     /// Get debug information
     pub fn debug_info(&self) -> DebugInfo {
         DebugInfo {
@@ -443,7 +439,7 @@ impl Chip8System {
             sound_timer: self.sound_timer,
         }
     }
-    
+
     /// Check if sound should be playing
     pub fn is_sound_playing(&self) -> bool {
         self.sound_timer > 0
@@ -463,30 +459,30 @@ pub struct DebugInfo {
 
 impl System for Chip8System {
     type Error = Chip8Error;
-    
+
     fn reset(&mut self) {
         *self = Self::new();
         self.program_loaded = false;
     }
-    
+
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         if !self.program_loaded {
             return Err(Chip8Error::NoProgram);
         }
-        
+
         // Execute instructions for one frame
         // CHIP-8 runs at ~700 instructions/second, 60 fps = ~11-12 instructions per frame
         // We'll use 10 instructions per frame for simplicity
         const INSTRUCTIONS_PER_FRAME: u32 = 10;
-        
+
         self.cycles_this_frame = 0;
         self.display_updated = false;
-        
+
         for _ in 0..INSTRUCTIONS_PER_FRAME {
             self.execute_instruction();
             self.cycles_this_frame += 1;
         }
-        
+
         // Update timers (they count down at 60Hz)
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
@@ -494,30 +490,68 @@ impl System for Chip8System {
         if self.sound_timer > 0 {
             self.sound_timer -= 1;
         }
-        
+
         // Convert display to frame
         let mut frame = Frame::new(DISPLAY_WIDTH as u32, DISPLAY_HEIGHT as u32);
         for (i, &pixel) in self.display.iter().enumerate() {
             frame.pixels[i] = if pixel { 0xFFFFFFFF } else { 0xFF000000 };
         }
-        
+
         Ok(frame)
     }
-    
+
     fn save_state(&self) -> Value {
-        serde_json::to_value(self).unwrap_or_else(|_| Value::Null)
+        // Manually create JSON for save state due to large array serialization limitations
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        serde_json::json!({
+            "v": self.v,
+            "i": self.i,
+            "pc": self.pc,
+            "sp": self.sp,
+            "memory": STANDARD.encode(self.memory),
+            "stack": self.stack,
+            "delay_timer": self.delay_timer,
+            "sound_timer": self.sound_timer,
+        })
     }
-    
+
     fn load_state(&mut self, v: &Value) -> Result<(), serde_json::Error> {
-        *self = serde_json::from_value(v.clone())?;
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        // Manually deserialize from JSON
+        if let Some(v_array) = v["v"].as_array() {
+            for (i, val) in v_array.iter().enumerate().take(16) {
+                self.v[i] = val.as_u64().unwrap_or(0) as u8;
+            }
+        }
+        self.i = v["i"].as_u64().unwrap_or(0) as u16;
+        self.pc = v["pc"].as_u64().unwrap_or(PROGRAM_START as u64) as u16;
+        self.sp = v["sp"].as_u64().unwrap_or(0) as u8;
+
+        // Decode base64 memory
+        if let Some(memory_b64) = v["memory"].as_str() {
+            if let Ok(memory_bytes) = STANDARD.decode(memory_b64) {
+                if memory_bytes.len() == MEMORY_SIZE {
+                    self.memory.copy_from_slice(&memory_bytes);
+                }
+            }
+        }
+
+        if let Some(stack_array) = v["stack"].as_array() {
+            for (i, val) in stack_array.iter().enumerate().take(STACK_SIZE) {
+                self.stack[i] = val.as_u64().unwrap_or(0) as u16;
+            }
+        }
+        self.delay_timer = v["delay_timer"].as_u64().unwrap_or(0) as u8;
+        self.sound_timer = v["sound_timer"].as_u64().unwrap_or(0) as u8;
+
         self.program_loaded = true; // Ensure program is marked as loaded
         Ok(())
     }
-    
+
     fn supports_save_states(&self) -> bool {
         true
     }
-    
+
     fn mount_points(&self) -> Vec<MountPointInfo> {
         vec![MountPointInfo {
             id: "Program".to_string(),
@@ -526,12 +560,12 @@ impl System for Chip8System {
             required: true,
         }]
     }
-    
+
     fn mount(&mut self, mount_point_id: &str, data: &[u8]) -> Result<(), Self::Error> {
         if mount_point_id != "Program" {
             return Err(Chip8Error::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         let max_size = MEMORY_SIZE - PROGRAM_START;
         if data.len() > max_size {
             return Err(Chip8Error::ProgramTooLarge {
@@ -539,13 +573,13 @@ impl System for Chip8System {
                 max: max_size,
             });
         }
-        
+
         // Clear previous program
         self.memory[PROGRAM_START..].fill(0);
-        
+
         // Load new program
         self.memory[PROGRAM_START..PROGRAM_START + data.len()].copy_from_slice(data);
-        
+
         // Reset system state
         self.pc = PROGRAM_START as u16;
         self.sp = 0;
@@ -558,22 +592,22 @@ impl System for Chip8System {
         self.keys.fill(false);
         self.waiting_for_key = None;
         self.program_loaded = true;
-        
+
         Ok(())
     }
-    
+
     fn unmount(&mut self, mount_point_id: &str) -> Result<(), Self::Error> {
         if mount_point_id != "Program" {
             return Err(Chip8Error::InvalidMountPoint(mount_point_id.to_string()));
         }
-        
+
         self.memory[PROGRAM_START..].fill(0);
         self.program_loaded = false;
         self.reset();
-        
+
         Ok(())
     }
-    
+
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "Program" && self.program_loaded
     }
@@ -582,38 +616,38 @@ impl System for Chip8System {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_chip8_initialization() {
         let system = Chip8System::new();
         assert_eq!(system.pc, PROGRAM_START as u16);
         assert_eq!(system.sp, 0);
         assert!(!system.program_loaded);
-        
+
         // Check font data is loaded
         assert_eq!(system.memory[0], 0xF0); // First byte of '0' sprite
     }
-    
+
     #[test]
     fn test_load_program() {
         let mut system = Chip8System::new();
         let program = vec![0x00, 0xE0]; // CLS instruction
-        
+
         system.mount("Program", &program).unwrap();
         assert!(system.program_loaded);
         assert_eq!(system.memory[PROGRAM_START], 0x00);
         assert_eq!(system.memory[PROGRAM_START + 1], 0xE0);
     }
-    
+
     #[test]
     fn test_program_too_large() {
         let mut system = Chip8System::new();
         let large_program = vec![0; MEMORY_SIZE]; // Too large
-        
+
         let result = system.mount("Program", &large_program);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_cls_instruction() {
         let mut system = Chip8System::new();
@@ -621,22 +655,22 @@ mod tests {
         system.memory[PROGRAM_START] = 0x00;
         system.memory[PROGRAM_START + 1] = 0xE0;
         system.program_loaded = true;
-        
+
         system.execute_instruction();
         assert!(system.display.iter().all(|&p| !p));
     }
-    
+
     #[test]
     fn test_set_register() {
         let mut system = Chip8System::new();
         system.memory[PROGRAM_START] = 0x61; // LD V1, 0x42
         system.memory[PROGRAM_START + 1] = 0x42;
         system.program_loaded = true;
-        
+
         system.execute_instruction();
         assert_eq!(system.v[1], 0x42);
     }
-    
+
     #[test]
     fn test_add_register() {
         let mut system = Chip8System::new();
@@ -644,23 +678,51 @@ mod tests {
         system.memory[PROGRAM_START] = 0x71; // ADD V1, 0x05
         system.memory[PROGRAM_START + 1] = 0x05;
         system.program_loaded = true;
-        
+
         system.execute_instruction();
         assert_eq!(system.v[1], 0x15);
     }
-    
+
     #[test]
     fn test_save_load_state() {
         let mut system = Chip8System::new();
         system.v[0] = 42;
         system.pc = 0x300;
-        
+
         let state = system.save_state();
-        
+
         let mut system2 = Chip8System::new();
         system2.load_state(&state).unwrap();
-        
+
         assert_eq!(system2.v[0], 42);
         assert_eq!(system2.pc, 0x300);
+    }
+
+    #[test]
+    fn smoke_test() {
+        // Load the test ROM and verify it runs without crashing
+        let test_rom_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../test_roms/chip8/test.ch8"
+        );
+        let rom_data = std::fs::read(test_rom_path).expect("Failed to read test ROM");
+
+        let mut system = Chip8System::new();
+        system
+            .mount("Program", &rom_data)
+            .expect("Failed to mount test ROM");
+
+        // Run a few frames to ensure nothing crashes
+        for _ in 0..10 {
+            let frame = system.step_frame().expect("Frame execution failed");
+            assert_eq!(frame.width, DISPLAY_WIDTH as u32);
+            assert_eq!(frame.height, DISPLAY_HEIGHT as u32);
+            assert_eq!(frame.pixels.len(), DISPLAY_WIDTH * DISPLAY_HEIGHT);
+        }
+
+        // The test ROM should have drawn some pixels
+        // Check that at least some pixels are white (0xFFFFFFFF)
+        let white_pixels = system.display.iter().filter(|&&p| p).count();
+        assert!(white_pixels > 0, "Test ROM should have drawn some pixels");
     }
 }

@@ -463,9 +463,6 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 ~700 Hz (0.0007 MHz)
         }
     }
-            EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
-        }
-    }
 
     /// Get actual CPU frequency in MHz (measured from cycle count)
     /// Returns None if we can't calculate it yet
@@ -3237,6 +3234,39 @@ fn main() {
                                         egui_app
                                             .status_bar
                                             .set_message("SMS ROM loaded".to_string());
+                                        let _ = sys.resolution();
+                                        if let Some(ref hash) = rom_hash {
+                                            _game_saves = GameSaves::load(hash);
+                                        }
+                                    }
+                                }
+                                Ok(SystemType::Chip8) => {
+                                    rom_hash = Some(GameSaves::rom_hash(&data));
+                                    let mut chip8_sys = emu_chip8::Chip8System::new();
+                                    if let Err(e) = chip8_sys.mount("Program", &data) {
+                                        egui_app.status_bar.set_message(format!("Error: {}", e));
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                                        egui_app.property_pane.system_name = "CHIP-8".to_string();
+                                        egui_app.property_pane.rendering_backend =
+                                            sys.get_current_renderer_name();
+                                        egui_app.property_pane.available_renderers =
+                                            sys.get_available_renderers();
+                                        runtime_state
+                                            .set_mount("Program".to_string(), file_path.clone());
+                                        settings.last_rom_path = Some(file_path.clone());
+                                        settings.add_recent_file(file_path.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
+                                        egui_app
+                                            .status_bar
+                                            .set_message("CHIP-8 program loaded".to_string());
                                         let _ = sys.resolution();
                                         if let Some(ref hash) = rom_hash {
                                             _game_saves = GameSaves::load(hash);
