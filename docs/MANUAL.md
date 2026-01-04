@@ -674,8 +674,8 @@ The emulator supports the following cartridge banking schemes:
 
 ### Game Boy / Game Boy Color
 
-**Status**: 🚧 In Development  
-**Coverage**: ~96%+ of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5 implemented)
+**Status**: ✅ Fully Functional  
+**Coverage**: ~97% of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
@@ -695,6 +695,7 @@ The emulator supports the following cartridge banking schemes:
   - MBC2: Built-in RAM mapper (~1% of games, up to 256KB ROM, 512×4 bits built-in RAM)
   - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
+  - HuC1: Hudson Soft mapper (<1% of games, up to 1MB ROM, 32KB RAM, IR sensor support)
 - Joypad input with matrix selection
 - Timer registers (DIV, TIMA, TMA, TAC) with interrupt support
 - VBlank and Timer interrupts
@@ -706,7 +707,8 @@ The emulator supports the following cartridge banking schemes:
 **Known Limitations**:
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Other**: No serial transfer (link cable), OAM DMA, STAT interrupts, or PPU mode transitions
+- **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
+- **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
 - Arrow keys = D-pad

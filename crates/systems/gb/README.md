@@ -6,7 +6,7 @@ This crate implements Game Boy (DMG) and Game Boy Color (CGB) emulation for the 
 
 ## Current Status
 
-The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/1/2/3/5 support and full CGB color support.
+The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/1/2/3/5 and HuC1 support, plus full CGB color support.
 
 ### What Works
 
@@ -16,7 +16,7 @@ The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/
 - ✅ **VRAM Banking** - 2 banks of 8KB for CGB mode
 - ✅ **Tile Attributes** - CGB palette selection, VRAM banking, flipping
 - ✅ **APU** - Complete audio with all 4 channels
-- ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5 (~96% coverage)
+- ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 (~97% coverage)
 - ✅ **Joypad** - Full input support
 - ✅ **Timer** - DIV, TIMA, TMA, TAC with interrupts
 - ✅ **Interrupts** - VBlank and Timer interrupts
@@ -37,6 +37,10 @@ The Game Boy emulator is **fully working** with ~96% game coverage through MBC0/
 - **MBC5**: Advanced mapper (~10% of games)
   - Up to 8MB ROM, 128KB RAM
   - 9-bit ROM banking
+- **HuC1**: Hudson Soft mapper (<1% of games)
+  - Up to 1MB ROM, 32KB RAM
+  - IR sensor support (stubbed)
+  - Used by: Pocket Bomberman, Tamagotchi games
 
 ## Architecture
 
@@ -124,11 +128,11 @@ cargo run --release -p emu_gui -- path/to/game.gb
 
 The Game Boy crate includes comprehensive tests:
 
-- **97 total tests**:
+- **114 total tests**:
   - PPU tests (rendering, registers, scrolling)
   - APU tests (all channels, registers)
   - System tests (reset, state management, controller input, joypad integration)
-  - Mapper tests (MBC0/1/2/3/5)
+  - Mapper tests (MBC0/1/2/3/5, HuC1)
   - Timer tests (DIV, TIMA overflow, interrupts)
   - Renderer tests (software renderer)
 
@@ -159,8 +163,14 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 - Frame-based timing (not cycle-accurate)
 - RTC in MBC3 doesn't count time
 - No serial/link cable support
-- No OAM DMA transfer
 - No STAT interrupts or PPU mode transitions
+
+**Unimplemented Mappers** (rare, <3% of games combined):
+- MBC6 (Game Boy Camera only)
+- MBC7 (tilt sensor games: Kirby Tilt 'n' Tumble, Command Master)
+- HuC3 (Robopon games)
+- MMM01 (multi-game cartridges)
+- TAMA5 (Tamagotchi 3)
 
 ## Performance
 
@@ -170,7 +180,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 
 ## Future Improvements
 
-- Game Boy Color support (CGB mode)
 - Cycle-accurate timing
 - Link cable emulation
 - Boot ROM support
