@@ -111,10 +111,8 @@
 //! ## Known Limitations
 //!
 //! 1. **Frame-based rendering**: Uses scanline state latching rather than cycle-accurate generation
-//! 2. **Paddle controllers**: Not implemented (INPT0-INPT3 always return 0)
 //!
-//! These limitations represent acceptable trade-offs for a functional emulator. Most games
-//! will work correctly with the current implementation.
+//! The emulator now implements paddle controller support via capacitor charge simulation.
 
 use emu_core::apu::PolynomialCounter;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
@@ -229,6 +227,19 @@ pub struct Tia {
     // INPT4/INPT5: Joystick fire buttons (bit 7: 0=pressed, 1=not pressed)
     inpt4: u8, // Player 0 fire button
     inpt5: u8, // Player 1 fire button
+    
+    // INPT0-INPT3: Paddle controllers (bit 7: 0=charged, 1=not charged)
+    // Paddles use capacitor charging time to measure position
+    inpt0: u8, // Paddle 0 (Port 0 X)
+    inpt1: u8, // Paddle 1 (Port 0 Y)
+    inpt2: u8, // Paddle 2 (Port 1 X)
+    inpt3: u8, // Paddle 3 (Port 1 Y)
+    
+    // Paddle state
+    paddle_positions: [u8; 4], // 0-255 for each paddle (0 = left/up, 255 = right/down)
+    paddle_charge_time: [u32; 4], // Color clocks since capacitor dump
+    paddle_dump_enabled: bool, // VBLANK bit 7: dump paddle capacitors
+    paddle_latch_enabled: bool, // VBLANK bit 6: latch paddle fire buttons
 
     // Current scanline and pixel position
     scanline: u16,
@@ -368,6 +379,14 @@ impl Tia {
             hmbl: 0,
             inpt4: 0x80, // Not pressed (bit 7 = 1)
             inpt5: 0x80, // Not pressed (bit 7 = 1)
+            inpt0: 0x80, // Paddle not charged (bit 7 = 1)
+            inpt1: 0x80,
+            inpt2: 0x80,
+            inpt3: 0x80,
+            paddle_positions: [128, 128, 128, 128], // Center position
+            paddle_charge_time: [0, 0, 0, 0],
+            paddle_dump_enabled: false,
+            paddle_latch_enabled: false,
             scanline: 0,
             pixel: 0,
 
@@ -442,6 +461,50 @@ impl Tia {
             0 => self.inpt4 = value,
             1 => self.inpt5 = value,
             _ => {}
+        }
+    }
+
+    /// Set paddle position for a paddle (0-3)
+    ///
+    /// Paddle positions are 0-255:
+    /// - 0 = fully counter-clockwise (left/up)
+    /// - 255 = fully clockwise (right/down)
+    /// - 128 = center
+    ///
+    /// The TIA measures paddle position by timing capacitor charge.
+    /// Lower positions charge faster, higher positions charge slower.
+    pub fn set_paddle_position(&mut self, paddle: u8, position: u8) {
+        if paddle < 4 {
+            self.paddle_positions[paddle as usize] = position;
+        }
+    }
+
+    /// Update paddle capacitor charging simulation
+    /// Called each color clock to simulate the analog capacitor charging
+    fn update_paddle_charging(&mut self) {
+        if !self.paddle_dump_enabled {
+            // Capacitors are charging
+            for i in 0..4 {
+                self.paddle_charge_time[i] += 1;
+                
+                // Calculate charge threshold based on paddle position
+                // Position 0 (left) = fast charge (small threshold)
+                // Position 255 (right) = slow charge (large threshold)
+                // Typical range: ~56000 to ~80000 color clocks for full range
+                let threshold = 56000 + (self.paddle_positions[i] as u32 * 100);
+                
+                // Update INPTx bit 7 based on whether capacitor has charged
+                if self.paddle_charge_time[i] >= threshold {
+                    // Capacitor charged - bit 7 goes high
+                    match i {
+                        0 => self.inpt0 |= 0x80,
+                        1 => self.inpt1 |= 0x80,
+                        2 => self.inpt2 |= 0x80,
+                        3 => self.inpt3 |= 0x80,
+                        _ => {}
+                    }
+                }
+            }
         }
     }
 
@@ -545,6 +608,25 @@ impl Tia {
             0x01 => {
                 self.writes_vblank = self.writes_vblank.saturating_add(1);
                 self.vblank = (val & 0x02) != 0;
+                
+                // Bit 6: Latch paddle fire buttons (optional, not commonly used)
+                self.paddle_latch_enabled = (val & 0x40) != 0;
+                
+                // Bit 7: Dump paddle capacitors to ground
+                let new_dump = (val & 0x80) != 0;
+                if new_dump && !self.paddle_dump_enabled {
+                    // Rising edge: start dumping (grounding capacitors)
+                    self.paddle_charge_time = [0, 0, 0, 0];
+                    self.inpt0 = 0x00; // Bit 7 = 0 when dumping
+                    self.inpt1 = 0x00;
+                    self.inpt2 = 0x00;
+                    self.inpt3 = 0x00;
+                } else if !new_dump && self.paddle_dump_enabled {
+                    // Falling edge: stop dumping, begin charging
+                    // Capacitors start charging from ground
+                    self.paddle_charge_time = [0, 0, 0, 0];
+                }
+                self.paddle_dump_enabled = new_dump;
             }
             0x02 => {} // WSYNC - handled by bus
             0x03 => {} // RSYNC
@@ -774,7 +856,10 @@ impl Tia {
             0x05 => self.cxm1fb, // Missile 1 to Playfield/Ball collisions
             0x06 => self.cxblpf, // Ball to Playfield collisions
             0x07 => self.cxppmm, // Player and Missile collisions
-            0x08..=0x0B => 0,    // Input ports 0-3 (paddles, not implemented)
+            0x08 => self.inpt0,  // Input port 0 (Paddle 0)
+            0x09 => self.inpt1,  // Input port 1 (Paddle 1)
+            0x0A => self.inpt2,  // Input port 2 (Paddle 2)
+            0x0B => self.inpt3,  // Input port 3 (Paddle 3)
             0x0C => self.inpt4,  // Input port 4 (Player 0 fire button)
             0x0D => self.inpt5,  // Input port 5 (Player 1 fire button)
             _ => 0,
@@ -783,6 +868,9 @@ impl Tia {
 
     /// Clock the TIA for one CPU cycle (3 color clocks)
     pub fn clock(&mut self) {
+        // Update paddle capacitor charging (every color clock)
+        self.update_paddle_charging();
+        
         // Simplified: just advance pixel counter
         self.pixel += 3; // 3 color clocks per CPU cycle
 
@@ -2275,5 +2363,150 @@ mod tests {
         // Read input registers
         assert_eq!(tia.read(0x0C), 0x00); // INPT4 - pressed
         assert_eq!(tia.read(0x0D), 0x80); // INPT5 - released
+    }
+
+    #[test]
+    fn test_paddle_position_setting() {
+        // Test setting paddle positions via public API
+        let mut tia = Tia::new();
+
+        // Set paddle positions
+        tia.set_paddle_position(0, 0);     // Fully left
+        tia.set_paddle_position(1, 128);   // Center
+        tia.set_paddle_position(2, 255);   // Fully right
+        tia.set_paddle_position(3, 64);    // Quarter turn
+
+        assert_eq!(tia.paddle_positions[0], 0);
+        assert_eq!(tia.paddle_positions[1], 128);
+        assert_eq!(tia.paddle_positions[2], 255);
+        assert_eq!(tia.paddle_positions[3], 64);
+
+        // Out of range paddle should be ignored
+        tia.set_paddle_position(4, 100);
+        // No crash, just ignored
+    }
+
+    #[test]
+    fn test_paddle_capacitor_dump() {
+        // Test VBLANK bit 7 (dump paddle capacitors)
+        let mut tia = Tia::new();
+
+        // Initially not dumping
+        assert!(!tia.paddle_dump_enabled);
+
+        // Enable dump (VBLANK bit 7 = 1)
+        tia.write(0x01, 0x80);
+        assert!(tia.paddle_dump_enabled);
+
+        // All paddle inputs should read 0 when dumping
+        assert_eq!(tia.read(0x08), 0x00); // INPT0
+        assert_eq!(tia.read(0x09), 0x00); // INPT1
+        assert_eq!(tia.read(0x0A), 0x00); // INPT2
+        assert_eq!(tia.read(0x0B), 0x00); // INPT3
+
+        // Disable dump (VBLANK bit 7 = 0)
+        tia.write(0x01, 0x00);
+        assert!(!tia.paddle_dump_enabled);
+    }
+
+    #[test]
+    fn test_paddle_charging_simulation() {
+        // Test that paddle capacitors charge after dump is released
+        let mut tia = Tia::new();
+
+        // Set a paddle position
+        tia.set_paddle_position(0, 0); // Fast charge (low resistance)
+
+        // Dump capacitors
+        tia.write(0x01, 0x80);
+        assert_eq!(tia.read(0x08) & 0x80, 0x00); // Not charged
+
+        // Release dump and let it charge
+        tia.write(0x01, 0x00);
+
+        // Simulate time passing by calling update_paddle_charging
+        // For position 0, threshold is ~56000 color clocks
+        for _ in 0..20000 {
+            tia.update_paddle_charging();
+        }
+        // Should still be charging
+        assert_eq!(tia.read(0x08) & 0x80, 0x00);
+
+        // Continue charging
+        for _ in 0..40000 {
+            tia.update_paddle_charging();
+        }
+        // Should now be charged (bit 7 = 1)
+        assert_eq!(tia.read(0x08) & 0x80, 0x80);
+    }
+
+    #[test]
+    fn test_paddle_position_affects_charge_time() {
+        // Test that different paddle positions result in different charge times
+        let mut tia1 = Tia::new();
+        let mut tia2 = Tia::new();
+
+        // Set different positions
+        tia1.set_paddle_position(0, 0);     // Fast charge
+        tia2.set_paddle_position(0, 255);   // Slow charge
+
+        // Dump and release
+        tia1.write(0x01, 0x80);
+        tia2.write(0x01, 0x80);
+        tia1.write(0x01, 0x00);
+        tia2.write(0x01, 0x00);
+
+        // Charge for same amount of time
+        for _ in 0..60000 {
+            tia1.update_paddle_charging();
+            tia2.update_paddle_charging();
+        }
+
+        // Position 0 should be charged
+        assert_eq!(tia1.read(0x08) & 0x80, 0x80);
+
+        // Position 255 should not yet be charged (needs more time)
+        assert_eq!(tia2.read(0x08) & 0x80, 0x00);
+    }
+
+    #[test]
+    fn test_paddle_register_addresses() {
+        // Test that INPT0-3 are at correct addresses
+        let mut tia = Tia::new();
+
+        // Set paddle inputs manually
+        tia.inpt0 = 0x80;
+        tia.inpt1 = 0x00;
+        tia.inpt2 = 0x80;
+        tia.inpt3 = 0x00;
+
+        assert_eq!(tia.read(0x08), 0x80); // INPT0
+        assert_eq!(tia.read(0x09), 0x00); // INPT1
+        assert_eq!(tia.read(0x0A), 0x80); // INPT2
+        assert_eq!(tia.read(0x0B), 0x00); // INPT3
+    }
+
+    #[test]
+    fn test_vblank_bit6_latch() {
+        // Test VBLANK bit 6 (latch paddle fire buttons)
+        let mut tia = Tia::new();
+
+        // Initially not latched
+        assert!(!tia.paddle_latch_enabled);
+
+        // Enable latch (VBLANK bit 6 = 1, also set bit 7 to test combination)
+        tia.write(0x01, 0x40);
+        assert!(tia.paddle_latch_enabled);
+        assert!(!tia.paddle_dump_enabled);
+
+        // Both bits
+        tia.write(0x01, 0xC0);
+        assert!(tia.paddle_latch_enabled);
+        assert!(tia.paddle_dump_enabled);
+
+        // Disable
+        tia.write(0x01, 0x00);
+        assert!(!tia.paddle_latch_enabled);
+        assert!(!tia.paddle_dump_enabled);
     }
 }

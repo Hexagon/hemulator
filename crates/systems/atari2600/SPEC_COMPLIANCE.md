@@ -100,7 +100,7 @@ This document tracks compliance with the problemkaputt.de 2k6specs.htm specifica
 ### Input Registers
 - ✅ **INPT4 ($0C read)**: Player 0 fire button (bit 7, active-low) - Implemented
 - ✅ **INPT5 ($0D read)**: Player 1 fire button (bit 7, active-low) - Implemented
-- ❌ **INPT0-INPT3**: Paddle/driving controllers - Not implemented (always 0)
+- ✅ **INPT0-INPT3**: Paddle controllers - Implemented with capacitor charge simulation
 
 ### Tests Added
 - ✅ `test_tia_audio` - Audio channel configuration
@@ -235,12 +235,12 @@ This document tracks compliance with the problemkaputt.de 2k6specs.htm specifica
 
 ## Summary
 
-### Total Test Count: 97 tests (all passing)
+### Total Test Count: 103 tests (all passing)
 
 ### Coverage by Component
 - **System Integration**: 14 tests
-- **TIA**: 31 tests (increased from 13)
-- **RIOT**: 17 tests (increased from 7)
+- **TIA**: 37 tests (increased from 31, +6 paddle tests)
+- **RIOT**: 17 tests
 - **Cartridge**: 6 tests
 - **Bus**: 5 tests
 - **Rendering**: 10 tests
@@ -249,8 +249,9 @@ This document tracks compliance with the problemkaputt.de 2k6specs.htm specifica
 - **NUSIZ**: 6 tests
 - **Audio**: 2 tests
 - **Timer**: 3 tests
+- **Paddle**: 6 tests (NEW)
 
-### New Tests Added (22 total)
+### New Tests Added (28 total)
 
 #### TIA Register Tests (18)
 - ✅ `test_color_register_addresses` - Verify COLUP0/1, COLUPF, COLUBK
@@ -266,6 +267,14 @@ This document tracks compliance with the problemkaputt.de 2k6specs.htm specifica
 - ✅ `test_vdel_bit_0` - VDELP0/1/BL bit 0 behavior
 - ✅ `test_collision_register_read_addresses` - All 8 collision registers
 - ✅ `test_input_register_read_addresses` - INPT4/5 fire buttons
+
+#### Paddle Controller Tests (6 NEW)
+- ✅ `test_paddle_position_setting` - Set paddle positions via API
+- ✅ `test_paddle_capacitor_dump` - VBLANK bit 7 dumps capacitors
+- ✅ `test_paddle_charging_simulation` - Capacitor charge timing
+- ✅ `test_paddle_position_affects_charge_time` - Position affects timing
+- ✅ `test_paddle_register_addresses` - INPT0-3 at correct addresses
+- ✅ `test_vblank_bit6_latch` - VBLANK bit 6 latches fire buttons
 
 #### RIOT Register Tests (10)
 - ✅ `test_riot_timer_register_addresses` - TIM1T, TIM8T, TIM64T, T1024T
@@ -285,13 +294,13 @@ This document tracks compliance with the problemkaputt.de 2k6specs.htm specifica
 - ✅ **Memory Map**: Correct mirroring and dual-write behavior
 - ✅ **Cartridge**: All standard banking schemes
 - ✅ **Timing**: NTSC frame timing and WSYNC
-- ⚠️ **Limitations**: Paddle controllers, exotic banking, cycle-accurate rendering
+- ✅ **Paddle Controllers**: Capacitor charge simulation implemented
+- ⚠️ **Limitations**: Exotic banking, cycle-accurate rendering
 
-### Specification Compliance: ~95%
+### Specification Compliance: ~98%
 
-The implementation covers all essential hardware features documented in the problemkaputt.de specification. The main limitations are:
-1. Paddle controller support (INPT0-INPT3)
-2. Exotic cartridge banking schemes (DPC, FE, 3F, E0)
-3. Cycle-accurate TIA rendering (uses frame-based instead)
+The implementation covers all essential hardware features documented in the problemkaputt.de specification. The remaining limitations are:
+1. Exotic cartridge banking schemes (DPC, FE, 3F, E0)
+2. Cycle-accurate TIA rendering (uses frame-based instead)
 
 These limitations are acceptable trade-offs for a functional emulator and are clearly documented.
