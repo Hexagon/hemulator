@@ -160,12 +160,9 @@ cd rgbds && make && sudo make install
 These ROMs are included in the smoke tests for each system crate:
 - `crates/systems/nes/src/lib.rs` - NES smoke test
 - `crates/systems/snes/src/lib.rs` - SNES smoke test
-- `crates/systems/gb/src/lib.rs` - Game Boy smoke test
-- `crates/systems/atari2600/src/lib.rs` - Atari 2600 smoke test
-- `crates/systems/n64/src/lib.rs` - N64 smoke test
-- `crates/systems/sms/src/system.rs` - SMS smoke test
 - `crates/systems/gb/src/lib.rs` - Game Boy and Game Boy Color smoke tests
 - `crates/systems/atari2600/src/lib.rs` - Atari 2600 smoke test
 - `crates/systems/n64/src/lib.rs` - N64 display list smoke test
+- `crates/systems/sms/src/system.rs` - SMS smoke test
 
 The tests load each ROM (or manually construct equivalent state for N64), run it for a few frames (or process display lists), and verify that the output frame contains expected non-zero pixel data (for systems with working rendering) or correct dimensions (for minimal implementations), confirming that the emulator infrastructure is functioning correctly.
