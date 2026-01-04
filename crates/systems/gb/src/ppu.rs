@@ -757,15 +757,17 @@ impl Ppu {
                 let bg_priority = (flags & 0x80) != 0;
 
                 // Extract palette numbers based on mode
-                // In CGB compat mode, use DMG palette number (bit 4) like DMG mode
+                // In CGB compat mode, use DMG palette number (bit 4) for BOTH dmg and cgb palette
                 // In CGB-only mode, use CGB palette number (bits 2-0)
                 let (dmg_palette_num, cgb_palette_num, sprite_vram_bank) =
                     if self.cgb_mode && !self.cgb_compat_mode {
                         // CGB-only mode: use CGB palette from bits 2-0
-                        ((flags >> 4) & 0x01, flags & 0x07, (flags >> 3) & 0x01)
+                        (0, flags & 0x07, (flags >> 3) & 0x01)
                     } else {
                         // DMG mode or CGB compat mode: use DMG palette from bit 4
-                        ((flags >> 4) & 0x01, 0, 0)
+                        // In compat mode, this palette number is used for BOTH DMG translation and CGB lookup
+                        let dmg_pal = (flags >> 4) & 0x01;
+                        (dmg_pal, dmg_pal, 0)
                     };
 
                 // Calculate which row of the sprite we're rendering
