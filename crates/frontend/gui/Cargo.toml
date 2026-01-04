@@ -39,5 +39,5 @@ egui_extras = { version = "0.32", features = ["image"] }
 egui_sdl2_gl = "0.32"
 
 [features]
-default = []
+default = ["opengl"]
 opengl = []

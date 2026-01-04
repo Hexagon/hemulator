@@ -112,7 +112,7 @@ impl OpenGLNesPpuRenderer {
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGBA as i32,
+                glow::RGBA8 as i32,
                 width as i32,
                 height as i32,
                 0,
@@ -725,7 +725,23 @@ void main() {
     #[cfg(feature = "opengl")]
     fn read_pixels(&mut self) {
         unsafe {
+            // Clear any previous errors
+            while self.gl.get_error() != glow::NO_ERROR {}
+            
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            
+            // Check framebuffer status
+            let status = self.gl.check_framebuffer_status(glow::FRAMEBUFFER);
+            if status != glow::FRAMEBUFFER_COMPLETE {
+                eprintln!("Error: Framebuffer not complete: 0x{:X}", status);
+                self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                return;
+            }
+            
+            // Set pixel pack alignment to 4 bytes (default, but be explicit)
+            self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 4);
+            
+            // Read pixels from framebuffer
             self.gl.read_pixels(
                 0,
                 0,
@@ -735,11 +751,24 @@ void main() {
                 glow::UNSIGNED_BYTE,
                 glow::PixelPackData::Slice(bytemuck::cast_slice_mut(&mut self.framebuffer.pixels)),
             );
+            
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-
-            // Check for OpenGL errors
+            
+            // Check for OpenGL errors after all operations
             if let Some(err) = self.check_gl_error() {
                 eprintln!("OpenGL error in read_pixels: {}", err);
+            }
+            
+            // OpenGL framebuffers are bottom-to-top, but our Frame expects top-to-bottom
+            // Flip the image vertically
+            let width = self.width as usize;
+            let height = self.height as usize;
+            for y in 0..(height / 2) {
+                let top_row = y * width;
+                let bottom_row = (height - 1 - y) * width;
+                for x in 0..width {
+                    self.framebuffer.pixels.swap(top_row + x, bottom_row + x);
+                }
             }
         }
     }
@@ -876,12 +905,13 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
     }
 
     fn render_scanline(&mut self, ppu: &mut Ppu, scanline: u32) {
-        // For OpenGL renderer, we accumulate scanline data and render the full frame
-        // This is a simplified implementation - ideally would batch scanlines
-        let _ = (ppu, scanline); // Silence unused warnings for now
-
-        // TODO: Implement incremental scanline rendering
-        // For now, this is a placeholder that would need to accumulate state
+        // For OpenGL renderer, render the complete frame on the last scanline
+        // This is simpler than incremental rendering and works well for most games
+        if scanline == 239 {
+            // Last visible scanline - render the complete frame
+            self.render_frame(ppu);
+        }
+        // Earlier scanlines are ignored - we render everything at once on scanline 239
     }
 
     fn render_frame(&mut self, ppu: &Ppu) {
@@ -916,7 +946,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             self.gl.tex_image_1d(
                 glow::TEXTURE_1D,
                 0,
-                glow::RGBA as i32,
+                glow::RGBA8 as i32,
                 64,
                 0,
                 glow::RGBA,
@@ -1038,6 +1068,13 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             self.gl
                 .viewport(0, 0, self.width as i32, self.height as i32);
+            
+            // Set clear color to backdrop color (palette entry 0)
+            let backdrop_color = Self::nes_palette_rgb(ppu.palette[0] & 0x3F);
+            let r = ((backdrop_color >> 16) & 0xFF) as f32 / 255.0;
+            let g = ((backdrop_color >> 8) & 0xFF) as f32 / 255.0;
+            let b = (backdrop_color & 0xFF) as f32 / 255.0;
+            self.gl.clear_color(r, g, b, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
 
             // Enable blending for sprites
@@ -1238,6 +1275,11 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
             self.gl.disable(glow::BLEND);
             self.gl.bind_vertex_array(None);
             self.gl.use_program(None);
+            
+            // Ensure all rendering commands complete before unbinding
+            self.gl.flush();
+            self.gl.finish();
+            
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
             // Check for OpenGL errors during rendering
