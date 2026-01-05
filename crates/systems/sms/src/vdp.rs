@@ -10,6 +10,7 @@
 //! - Scrolling support
 //! - Line and frame interrupts
 
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
 
@@ -38,6 +39,10 @@ pub struct Vdp {
     line_interrupt_pending: bool,
     line_counter: u8,
 
+    // Sprite flags
+    sprite_overflow: bool,
+    sprite_collision: bool,
+
     // Current scanline
     scanline: u16,
 }
@@ -57,6 +62,8 @@ impl Vdp {
             frame_interrupt_pending: false,
             line_interrupt_pending: false,
             line_counter: 0,
+            sprite_overflow: false,
+            sprite_collision: false,
             scanline: 0,
         }
     }
@@ -77,7 +84,11 @@ impl Vdp {
             if self.code_register == 0x02 {
                 let reg = data & 0x0F;
                 if (reg as usize) < self.registers.len() {
-                    self.registers[reg as usize] = (self.address_register & 0xFF) as u8;
+                    let value = (self.address_register & 0xFF) as u8;
+                    self.registers[reg as usize] = value;
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SMS VDP: Register R{} = ${:02X}", reg, value)
+                    });
                 }
             }
         }
@@ -91,7 +102,13 @@ impl Vdp {
         match self.code_register {
             0x03 => {
                 // CRAM write
-                self.cram[(self.address_register & 0x1F) as usize] = data;
+                let addr = self.address_register & 0x1F;
+                self.cram[addr as usize] = data;
+                if addr == 16 {
+                    log(LogCategory::PPU, LogLevel::Info, || {
+                        format!("SMS VDP: Backdrop color = ${:02X}", data)
+                    });
+                }
             }
             _ => {
                 // VRAM write
@@ -122,13 +139,21 @@ impl Vdp {
         }
 
         // Bit 6: Sprite overflow
-        // TODO: Implement sprite overflow detection
+        if self.sprite_overflow {
+            status |= 0x40;
+        }
 
         // Bit 5: Sprite collision
-        // TODO: Implement sprite collision detection
+        if self.sprite_collision {
+            status |= 0x20;
+        }
 
         // Clear frame interrupt flag on read
         self.frame_interrupt_pending = false;
+
+        // Clear sprite flags on read
+        self.sprite_overflow = false;
+        self.sprite_collision = false;
 
         status
     }
@@ -140,6 +165,7 @@ impl Vdp {
     }
 
     /// Step VDP by one scanline
+    #[allow(dead_code)]
     pub fn step_scanline(&mut self) {
         if self.scanline < 192 {
             // Render visible scanline
@@ -159,13 +185,80 @@ impl Vdp {
         }
     }
 
+    /// Set current scanline (for cycle-accurate timing)
+    pub fn set_scanline(&mut self, scanline: u16) {
+        let old_scanline = self.scanline;
+        self.scanline = scanline;
+
+        // Render any scanlines that were crossed
+        if scanline < old_scanline {
+            // Wrapped around to new frame
+            // Render remaining scanlines from old_scanline to 192 (end of visible area)
+            // Note: If old_scanline > 192, this range is empty (which is correct)
+            for line in old_scanline..192 {
+                if line < 192 {
+                    self.render_scanline(line as u8);
+                }
+            }
+            for line in 0..scanline.min(192) {
+                self.render_scanline(line as u8);
+            }
+            // Check for frame interrupt at scanline 192
+            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+                self.frame_interrupt_pending = true;
+            }
+        } else {
+            // Normal forward progress within same frame
+            for line in old_scanline..scanline.min(192) {
+                self.render_scanline(line as u8);
+            }
+            // Check for frame interrupt at scanline 192
+            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+                self.frame_interrupt_pending = true;
+            }
+        }
+    }
+
     /// Check if frame interrupt is pending
     pub fn frame_interrupt_pending(&self) -> bool {
         self.frame_interrupt_pending
     }
 
+    /// Clear frame interrupt
+    pub fn clear_frame_interrupt(&mut self) {
+        self.frame_interrupt_pending = false;
+    }
+
+    /// Check if line interrupt is pending
+    pub fn line_interrupt_pending(&self) -> bool {
+        self.line_interrupt_pending
+    }
+
+    /// Clear line interrupt
+    pub fn clear_line_interrupt(&mut self) {
+        self.line_interrupt_pending = false;
+    }
+
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
+        // Handle line counter and line interrupts
+        if line < 192 {
+            if self.line_counter == 0 {
+                // Reload line counter from register 10
+                self.line_counter = self.registers[10];
+
+                // Trigger line interrupt if enabled (bit 4 of register 0)
+                if (self.registers[0] & 0x10) != 0 {
+                    self.line_interrupt_pending = true;
+                }
+            } else {
+                self.line_counter = self.line_counter.wrapping_sub(1);
+            }
+        } else if line == 192 {
+            // Reset line counter at start of VBlank
+            self.line_counter = self.registers[10];
+        }
+
         // Clear scanline to backdrop color
         let backdrop_color = self.decode_color(self.cram[16] & 0x3F);
         let line_offset = (line as usize) * 256;
@@ -262,6 +355,10 @@ impl Vdp {
 
         let mut sprites_on_line = 0;
 
+        // Track which pixels have sprites for collision detection
+        // Using a simple array for the scanline
+        let mut sprite_pixels = [false; 256];
+
         // Sprites are rendered in reverse order (higher priority first)
         for i in (0..64).rev() {
             let y = self.vram[(sprite_attr_table + i) as usize];
@@ -278,7 +375,8 @@ impl Vdp {
 
             sprites_on_line += 1;
             if sprites_on_line > 8 {
-                // Sprite overflow - only 8 sprites per line
+                // Sprite overflow - set the flag and stop rendering
+                self.sprite_overflow = true;
                 break;
             }
 
@@ -315,9 +413,19 @@ impl Vdp {
 
                 // Sprite pixel 0 is transparent
                 if pixel != 0 {
+                    let x_index = x as usize;
+
+                    // Check for sprite collision
+                    if sprite_pixels[x_index] {
+                        self.sprite_collision = true;
+                    }
+
+                    // Mark this pixel as having a sprite
+                    sprite_pixels[x_index] = true;
+
                     let color_index = 16 + pixel as usize; // Sprites use second palette
                     let color = self.decode_color(self.cram[color_index] & 0x3F);
-                    self.frame.pixels[line_offset + x as usize] = color;
+                    self.frame.pixels[line_offset + x_index] = color;
                 }
             }
         }
@@ -348,6 +456,22 @@ impl Default for Vdp {
 
 impl Renderer for Vdp {
     fn get_frame(&self) -> &Frame {
+        // Log every time frame is retrieved
+        let backdrop = self.decode_color(self.cram[16] & 0x3F);
+        let bg_enabled = (self.registers[1] & 0x40) != 0;
+        let sprite_enabled = (self.registers[1] & 0x08) != 0;
+        let mut non_backdrop = 0;
+        for &pixel in &self.frame.pixels {
+            if pixel != backdrop {
+                non_backdrop += 1;
+            }
+        }
+        log(LogCategory::PPU, LogLevel::Info, || {
+            format!(
+                "SMS VDP: get_frame() - BG={} SPR={} R1=${:02X} backdrop=${:08X} non-backdrop={}",
+                bg_enabled, sprite_enabled, self.registers[1], backdrop, non_backdrop
+            )
+        });
         &self.frame
     }
 
@@ -366,6 +490,8 @@ impl Renderer for Vdp {
         self.frame_interrupt_pending = false;
         self.line_interrupt_pending = false;
         self.line_counter = 0;
+        self.sprite_overflow = false;
+        self.sprite_collision = false;
         self.scanline = 0;
         self.clear(0xFF000000);
     }
@@ -433,5 +559,149 @@ mod tests {
 
         // Test red (0x03)
         assert_eq!(vdp.decode_color(0x03), 0xFFFF0000);
+    }
+
+    #[test]
+    fn test_sprite_overflow_detection() {
+        let mut vdp = Vdp::new();
+
+        // Enable display and sprites (bit 6 for display, bit 3 for sprites in register 1)
+        vdp.registers[1] = 0x40 | 0x08;
+
+        // Set sprite attribute table at 0x3F00 (register 5)
+        vdp.registers[5] = 0x7E; // (0x7E << 7) = 0x3F00
+
+        // Create 9 sprites on the same scanline (line 100)
+        let sprite_attr_table = 0x3F00;
+        for i in 0..9 {
+            // Y position - 1 (since Y is offset by 1)
+            vdp.vram[sprite_attr_table + i] = 99;
+        }
+
+        // Render the scanline
+        vdp.render_scanline(100);
+
+        // Check that sprite overflow flag is set
+        assert!(vdp.sprite_overflow);
+
+        // Read status should return bit 6 set
+        let status = vdp.read_status();
+        assert_eq!(status & 0x40, 0x40);
+
+        // After reading status, flag should be cleared
+        assert!(!vdp.sprite_overflow);
+    }
+
+    #[test]
+    fn test_sprite_collision_detection() {
+        let mut vdp = Vdp::new();
+
+        // Enable display and sprites
+        vdp.registers[1] = 0x40 | 0x08;
+
+        // Set sprite attribute table
+        vdp.registers[5] = 0x7E; // 0x3F00
+
+        let sprite_attr_table = 0x3F00;
+
+        // Create two sprites that overlap on line 100 at X position 50
+        // Sprite 0
+        vdp.vram[sprite_attr_table] = 99; // Y position - 1
+        vdp.vram[sprite_attr_table + 128] = 50; // X position
+        vdp.vram[sprite_attr_table + 128 + 1] = 0; // Tile 0
+
+        // Sprite 1 (overlapping)
+        vdp.vram[sprite_attr_table + 1] = 99; // Y position - 1
+        vdp.vram[sprite_attr_table + 128 + 2] = 50; // X position (same)
+        vdp.vram[sprite_attr_table + 128 + 3] = 1; // Tile 1
+
+        // Set up tile patterns with non-transparent pixels
+        // Tile 0 - all white pixels
+        for i in 0..32 {
+            vdp.vram[i] = 0xFF;
+        }
+        // Tile 1 - all white pixels
+        for i in 32..64 {
+            vdp.vram[i] = 0xFF;
+        }
+
+        // Set up palette
+        vdp.cram[16] = 0x3F; // Sprite palette entry 0 = white
+
+        // Render the scanline
+        vdp.render_scanline(100);
+
+        // Check that sprite collision flag is set
+        assert!(vdp.sprite_collision);
+
+        // Read status should return bit 5 set
+        let status = vdp.read_status();
+        assert_eq!(status & 0x20, 0x20);
+
+        // After reading status, flag should be cleared
+        assert!(!vdp.sprite_collision);
+    }
+
+    #[test]
+    fn test_line_interrupt_triggering() {
+        let mut vdp = Vdp::new();
+
+        // Enable line interrupts (bit 4 of register 0)
+        vdp.registers[0] = 0x10;
+
+        // Set line counter reload value (register 10)
+        vdp.registers[10] = 5;
+
+        // Initialize line counter to register 10 value (simulating start of frame)
+        vdp.line_counter = vdp.registers[10];
+
+        // Render scanlines and check line interrupt triggering
+        // First scanline should decrement counter
+        vdp.render_scanline(0);
+        assert_eq!(vdp.line_counter, 4);
+        assert!(!vdp.line_interrupt_pending);
+
+        // After 4 more scanlines, counter reaches 0
+        for line in 1..=4 {
+            vdp.render_scanline(line);
+        }
+        assert_eq!(vdp.line_counter, 0);
+        assert!(!vdp.line_interrupt_pending);
+
+        // Next scanline (when counter is 0) should trigger interrupt and reload
+        vdp.render_scanline(5);
+        assert!(vdp.line_interrupt_pending);
+        assert_eq!(vdp.line_counter, 5);
+
+        // Clear interrupt
+        vdp.clear_line_interrupt();
+        assert!(!vdp.line_interrupt_pending);
+    }
+
+    #[test]
+    fn test_status_flags_cleared_on_read() {
+        let mut vdp = Vdp::new();
+
+        // Set all flags
+        vdp.frame_interrupt_pending = true;
+        vdp.sprite_overflow = true;
+        vdp.sprite_collision = true;
+
+        // Read status
+        let status = vdp.read_status();
+
+        // All flags should be set
+        assert_eq!(status & 0x80, 0x80); // Frame interrupt
+        assert_eq!(status & 0x40, 0x40); // Sprite overflow
+        assert_eq!(status & 0x20, 0x20); // Sprite collision
+
+        // After read, flags should be cleared
+        assert!(!vdp.frame_interrupt_pending);
+        assert!(!vdp.sprite_overflow);
+        assert!(!vdp.sprite_collision);
+
+        // Second read should return 0
+        let status2 = vdp.read_status();
+        assert_eq!(status2 & 0xE0, 0);
     }
 }

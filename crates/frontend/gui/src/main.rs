@@ -497,8 +497,8 @@ impl EmulatorSystem {
             EmulatorSystem::PC(_) => vec![0; count], // TODO: Implement audio for PC
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
-            EmulatorSystem::SMS(_) => vec![0; count], // TODO: Wire up SMS audio once Z80 is implemented
             EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
+            EmulatorSystem::SMS(sys) => sys.get_audio_samples(count),
         }
     }
 

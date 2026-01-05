@@ -5,7 +5,7 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_6502.md`
 
-use crate::logging::{LogCategory, LogConfig, LogLevel};
+use crate::logging::{log, LogCategory, LogLevel};
 
 /// Memory interface trait for the 6502 CPU
 ///
@@ -290,13 +290,13 @@ impl<M: Memory6502> Cpu6502<M> {
 
     /// Execute one instruction and return cycles used.
     pub fn step(&mut self) -> u32 {
-        if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Trace) {
+        log(LogCategory::CPU, LogLevel::Trace, || {
             let op = self.read(self.pc);
-            eprintln!(
+            format!(
                 "CPU: PC={:04X} OP={:02X} A={:02X} X={:02X} Y={:02X} SP={:02X} P={:02X}",
                 self.pc, op, self.a, self.x, self.y, self.sp, self.status
-            );
-        }
+            )
+        });
         let op = self.fetch_u8();
         match op {
             0x08 => {
@@ -1416,12 +1416,12 @@ impl<M: Memory6502> Cpu6502<M> {
                 // before pushing.
                 let pc_to_push = self.pc.wrapping_add(1);
                 let brk_pc = self.pc.wrapping_sub(1);
-                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Debug) {
-                    eprintln!(
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!(
                         "CPU: BRK executed at PC={:04X}, pushing {:04X}, status={:02X}",
                         brk_pc, pc_to_push, self.status
-                    );
-                }
+                    )
+                });
                 self.push_u16(pc_to_push);
 
                 let mut s = self.status;
@@ -1431,21 +1431,21 @@ impl<M: Memory6502> Cpu6502<M> {
 
                 self.status |= 0x04; // set I
                 self.pc = self.read_u16(0xFFFE);
-                if LogConfig::global().should_log(LogCategory::CPU, LogLevel::Debug) {
-                    eprintln!("CPU: BRK jumped to {:04X}", self.pc);
-                }
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!("CPU: BRK jumped to {:04X}", self.pc)
+                });
                 self.cycles += 7;
                 7
             }
             _ => {
                 // Unknown opcode: treat as NOP to keep forward progress
-                if LogConfig::global().should_log(LogCategory::Stubs, LogLevel::Info) {
+                log(LogCategory::Stubs, LogLevel::Info, || {
                     let pc = self.pc.wrapping_sub(1);
-                    eprintln!(
+                    format!(
                         "UNKNOWN OPCODE: pc=0x{:04X} op=0x{:02X} a=0x{:02X} x=0x{:02X} y=0x{:02X} sp=0x{:02X} p=0x{:02X}",
                         pc, op, self.a, self.x, self.y, self.sp, self.status
-                    );
-                }
+                    )
+                });
                 self.cycles += 2;
                 2
             }
