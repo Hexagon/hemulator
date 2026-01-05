@@ -4,12 +4,12 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 
 ## Features
 
-- 🎮 **NES Emulation**: ✅ Fully working - ~90%+ of NES games via 14 mapper implementations
-- 💻 **PC Emulation**: ⚠️ Functional - COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS boots.
-- 🕹️ **Atari 2600 Emulation**: 🚧 In development - Support for most cartridge formats (2K-32K) with multiple banking schemes
-- 🎲 **Game Boy Emulation**: ✅ Fully Functional - ~97% game coverage (MBC0/1/2/3/5, HuC1), full APU and timer support
-- 🏰 **SNES Emulation**: 🚧 In development - CPU working, PPU infrastructure in place, no visible output yet
-- 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
+- 🎮 **NES Emulation**: 14 mapper implementations supporting most popular games
+- 💻 **PC Emulation**: COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS support
+- 🕹️ **Atari 2600 Emulation**: Support for most cartridge formats (2K-32K) with multiple banking schemes
+- 🎲 **Game Boy Emulation**: MBC0/1/2/3/5 and HuC1 support with full APU and timer functionality
+- 🏰 **SNES Emulation**: CPU working with PPU infrastructure in place
+- 🎮 **N64 Emulation**: 3D rendering functionality
 - 🖱️ **Modern GUI**: Menu bar and status bar with mouse and keyboard support - no more cryptic F-keys!
 - 💾 **Save States**: 5 slots per game with instant save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
 - ⚙️ **Persistent Settings**: Customizable controls, window scaling, and auto-restore last ROM
@@ -217,12 +217,12 @@ hemulator/
 ├── crates/
 │   ├── core/           # Shared traits and types (System, Frame, save-state)
 │   ├── systems/
-│   │   ├── nes/        # ✅ NES emulation (CPU, PPU, APU, mappers)
-│   │   ├── atari2600/  # ✅ Atari 2600 emulation (TIA, RIOT, cartridge banking)
-│   │   ├── gb/         # ✅ Game Boy emulation (CPU, PPU, APU, MBC0/1/2/3/5, HuC1)
-│   │   ├── snes/       # 🚧 SNES emulation (basic infrastructure)
-│   │   ├── n64/        # 🚧 N64 emulation (in development, 3D rendering)
-│   │   └── pc/         # 🧪 IBM PC/XT emulation (experimental)
+│   │   ├── nes/        # NES emulation (CPU, PPU, APU, mappers)
+│   │   ├── atari2600/  # Atari 2600 emulation (TIA, RIOT, cartridge banking)
+│   │   ├── gb/         # Game Boy emulation (CPU, PPU, APU, MBC0/1/2/3/5, HuC1)
+│   │   ├── snes/       # SNES emulation (basic infrastructure)
+│   │   ├── n64/        # N64 emulation (in development, 3D rendering)
+│   │   └── pc/         # IBM PC/XT emulation (experimental)
 │   └── frontend/
 │       └── gui/        # GUI frontend (SDL2 + rodio) - builds as 'hemu'
 ├── config.json         # User settings (created on first run)
@@ -319,12 +319,12 @@ The project follows a modular architecture:
   - Save state serialization support
   
 - **Systems**: Individual emulator implementations
-  - **NES (`emu_nes`)**: ✅ Complete NES emulator with CPU, PPU, APU, and 14 mappers
-  - **Atari 2600 (`emu_atari2600`)**: ✅ Complete Atari 2600 with TIA, RIOT, and cartridge banking
-  - **Game Boy (`emu_gb`)**: ✅ Fully functional Game Boy emulator (LR35902 CPU, PPU, APU, MBC0/1/2/3/5, HuC1)
-  - **SNES (`emu_snes`)**: 🚧 Basic SNES infrastructure (CPU working, minimal PPU)
-  - **N64 (`emu_n64`)**: 🚧 N64 in development (CPU, RDP 3D rendering, RSP HLE)
-  - **PC (`emu_pc`)**: 🧪 Experimental IBM PC/XT emulator with 8086 CPU and BIOS stub
+  - **NES (`emu_nes`)**: Complete NES emulator with CPU, PPU, APU, and 14 mappers
+  - **Atari 2600 (`emu_atari2600`)**: Complete Atari 2600 with TIA, RIOT, and cartridge banking
+  - **Game Boy (`emu_gb`)**: Fully functional Game Boy emulator (LR35902 CPU, PPU, APU, MBC0/1/2/3/5, HuC1)
+  - **SNES (`emu_snes`)**: Basic SNES infrastructure (CPU working, minimal PPU)
+  - **N64 (`emu_n64`)**: N64 in development (CPU, RDP 3D rendering, RSP HLE)
+  - **PC (`emu_pc`)**: Experimental IBM PC/XT emulator with 8086 CPU and BIOS stub
   
 - **Frontend (`emu_gui`)**: GUI application
   - Window management with SDL2
