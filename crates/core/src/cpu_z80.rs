@@ -5,6 +5,8 @@
 //!
 //! For detailed CPU reference documentation, see: `docs/references/cpu_z80.md`
 
+use crate::cpu_8080_common;
+
 // Z80 Flag bits
 const FLAG_S: u8 = 0b10000000; // Sign
 const FLAG_Z: u8 = 0b01000000; // Zero
@@ -230,61 +232,48 @@ impl<M: MemoryZ80> CpuZ80<M> {
     }
 
     fn read_pc_u16(&mut self) -> u16 {
-        let lo = self.read_pc() as u16;
-        let hi = self.read_pc() as u16;
-        (hi << 8) | lo
+        cpu_8080_common::read_pc_u16_le(|| self.read_pc())
     }
 
     fn push_u16(&mut self, val: u16) {
-        self.sp = self.sp.wrapping_sub(1);
-        self.memory.write(self.sp, (val >> 8) as u8);
-        self.sp = self.sp.wrapping_sub(1);
-        self.memory.write(self.sp, val as u8);
+        cpu_8080_common::push_u16_le(&mut self.sp, val, |addr, v| self.memory.write(addr, v));
     }
 
     fn pop_u16(&mut self) -> u16 {
-        let lo = self.memory.read(self.sp) as u16;
-        self.sp = self.sp.wrapping_add(1);
-        let hi = self.memory.read(self.sp) as u16;
-        self.sp = self.sp.wrapping_add(1);
-        (hi << 8) | lo
+        cpu_8080_common::pop_u16_le(&mut self.sp, |addr| self.memory.read(addr))
     }
 
     // Register pair accessors
     fn bc(&self) -> u16 {
-        ((self.b as u16) << 8) | (self.c as u16)
+        cpu_8080_common::get_reg_pair(self.b, self.c)
     }
 
     fn set_bc(&mut self, val: u16) {
-        self.b = (val >> 8) as u8;
-        self.c = val as u8;
+        (self.b, self.c) = cpu_8080_common::set_reg_pair(val);
     }
 
     fn de(&self) -> u16 {
-        ((self.d as u16) << 8) | (self.e as u16)
+        cpu_8080_common::get_reg_pair(self.d, self.e)
     }
 
     fn set_de(&mut self, val: u16) {
-        self.d = (val >> 8) as u8;
-        self.e = val as u8;
+        (self.d, self.e) = cpu_8080_common::set_reg_pair(val);
     }
 
     fn hl(&self) -> u16 {
-        ((self.h as u16) << 8) | (self.l as u16)
+        cpu_8080_common::get_reg_pair(self.h, self.l)
     }
 
     fn set_hl(&mut self, val: u16) {
-        self.h = (val >> 8) as u8;
-        self.l = val as u8;
+        (self.h, self.l) = cpu_8080_common::set_reg_pair(val);
     }
 
     fn af(&self) -> u16 {
-        ((self.a as u16) << 8) | (self.f as u16)
+        cpu_8080_common::get_reg_pair(self.a, self.f)
     }
 
     fn set_af(&mut self, val: u16) {
-        self.a = (val >> 8) as u8;
-        self.f = val as u8;
+        (self.a, self.f) = cpu_8080_common::set_reg_pair(val);
     }
 
     // Flag operations
