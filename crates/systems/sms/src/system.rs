@@ -1,8 +1,8 @@
 //! Sega Master System main system implementation
 
 use crate::bus::SmsMemory;
+use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
-use emu_core::apu::{AudioChip, Sn76489Psg, TimingMode};
 use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
@@ -27,7 +27,7 @@ pub struct SmsSystem {
 
     // Shared components
     vdp: Rc<RefCell<Vdp>>,
-    psg: Rc<RefCell<Sn76489Psg>>,
+    psg: Rc<RefCell<SmsPsg>>,
 
     // Timing
     cycles: u64,
@@ -38,7 +38,7 @@ impl SmsSystem {
     pub fn new() -> Self {
         // Create shared components
         let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
 
         // Create empty ROM
         let rom = vec![0; 0x8000];
@@ -207,6 +207,13 @@ impl SmsSystem {
     /// the SN76489 PSG audio chip.
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         self.psg.borrow_mut().generate_samples(count)
+    }
+
+    /// Set timing mode (NTSC/PAL) for the PSG
+    ///
+    /// This updates the PSG's clock rate to match the selected timing mode.
+    pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
+        self.psg.borrow_mut().set_timing(timing);
     }
 }
 
@@ -441,5 +448,63 @@ mod tests {
             "NMI test passed: PC jumped from 0x{:04X} to 0x{:04X}",
             initial_pc, system.cpu.pc
         );
+    }
+
+    #[test]
+    fn test_audio_generation_integration() {
+        let mut system = SmsSystem::new();
+
+        // Generate audio samples
+        let samples = system.get_audio_samples(1000);
+
+        // Should generate exactly the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // With default muted state, samples should be near zero
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output by default, got max sample: {}",
+            max_sample
+        );
+
+        // Now write to PSG to enable a tone
+        // Set channel 0 to max volume
+        system.cpu.memory.io_write(0x7F, 0x90); // Volume 0 (max)
+
+        // Set a frequency
+        system.cpu.memory.io_write(0x7F, 0x80 | 0x04); // Low bits
+        system.cpu.memory.io_write(0x7F, 0x01); // High bits
+
+        // Generate more samples
+        let samples_with_tone = system.get_audio_samples(1000);
+        assert_eq!(samples_with_tone.len(), 1000);
+
+        // Should now have audible output
+        let non_zero_count = samples_with_tone.iter().filter(|&&s| s != 0).count();
+        assert!(
+            non_zero_count > 0,
+            "Expected audio output after enabling tone"
+        );
+    }
+
+    #[test]
+    fn test_set_timing_mode() {
+        use emu_core::apu::TimingMode;
+
+        let mut system = SmsSystem::new();
+
+        // Change to PAL timing
+        system.set_timing(TimingMode::Pal);
+
+        // Should still be able to generate audio
+        let samples = system.get_audio_samples(100);
+        assert_eq!(samples.len(), 100);
+
+        // Change back to NTSC
+        system.set_timing(TimingMode::Ntsc);
+
+        let samples = system.get_audio_samples(100);
+        assert_eq!(samples.len(), 100);
     }
 }
