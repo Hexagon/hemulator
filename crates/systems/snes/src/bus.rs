@@ -49,8 +49,6 @@ enum ApuState {
     BootReady,
     /// Uploading data - echoing bytes and counting
     Uploading,
-    /// Processing - simulating code execution after upload
-    Processing,
     /// Ready - ready for next command after processing
     Ready,
 }
@@ -112,8 +110,6 @@ pub struct SnesBus {
     apu_state: ApuState,
     /// Session identifier to track different upload sequences
     apu_session_id: u8,
-    /// Expected value for echo protocol validation
-    apu_expected_echo: u8,
 }
 
 impl SnesBus {
@@ -137,7 +133,6 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            apu_expected_echo: 0,
         }
     }
 
@@ -653,27 +648,44 @@ impl Memory65c816 for SnesBus {
                             )
                         });
 
-                        // Track what was written for protocol detection
-                        self.apu_last_written[port] = val;
-
                         // Enhanced APU communication protocol stub with state machine
                         // The SPC700 boot ROM implements a multi-round handshake protocol
                         // We simulate this with a proper state machine to handle multiple upload sessions
 
-                        // Detect new session starts based on write patterns
-                        // Pattern: Writes to ports 2-3 (address) followed by port 1 (control/length)
-                        // followed by port 0 (command byte) often indicate a new session
-                        let potential_new_session = (port == 2 || port == 3)
-                            && (self.apu_state == ApuState::BootReady
-                                || self.apu_state == ApuState::Ready
-                                || self.apu_state == ApuState::Processing);
+                        // Check for boot handshake pattern (all ports cleared to $00)
+                        // Must check BEFORE updating apu_last_written
+                        let boot_handshake_pattern = port == 3 && {
+                            let mut temp = self.apu_last_written;
+                            temp[port] = val;
+                            temp == [0x00, 0x00, 0x00, 0x00]
+                        };
 
-                        if potential_new_session {
+                        // Track what was written for protocol detection (after pattern check)
+                        self.apu_last_written[port] = val;
+
+                        // Handle boot handshake
+                        if boot_handshake_pattern {
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                "SNES Bus: APU boot handshake - setting ready signature".to_string()
+                            });
+                            // SPC700 IPL ready signature
+                            self.apu_ports[0] = 0xAA; // Low byte of $BBAA
+                            self.apu_ports[1] = 0xBB; // High byte of $BBAA
+                            self.apu_ports[2] = 0x00;
+                            self.apu_ports[3] = 0x00;
+                            self.apu_response_delay = 10;
+                            self.apu_transfer_counter = 0;
+                            self.apu_state = ApuState::BootReady;
+                            return;
+                        }
+
+                        // Detect new session starts based on write patterns
+                        // Writes to ports 2-3 (address/control) when in Ready state indicate new session
+                        if (port == 2 || port == 3) && self.apu_state == ApuState::Ready {
                             log(LogCategory::Bus, LogLevel::Debug, || {
                                 format!("SNES Bus: APU new session detected (port {} write)", port)
                             });
                             self.apu_session_id = self.apu_session_id.wrapping_add(1);
-                            self.apu_transfer_counter = 0;
                             self.apu_state = ApuState::Idle;
                             self.apu_ports[port] = val;
                             return;
@@ -681,31 +693,17 @@ impl Memory65c816 for SnesBus {
 
                         match self.apu_state {
                             ApuState::Idle | ApuState::BootReady | ApuState::Ready => {
-                                // Check for boot handshake pattern (all ports cleared to $00)
-                                if port == 3 && self.apu_last_written == [0x00, 0x00, 0x00, 0x00] {
-                                    log(LogCategory::Bus, LogLevel::Debug, || {
-                                        "SNES Bus: APU boot handshake - setting ready signature"
-                                            .to_string()
-                                    });
-                                    // SPC700 IPL ready signature
-                                    self.apu_ports[0] = 0xAA; // Low byte of $BBAA
-                                    self.apu_ports[1] = 0xBB; // High byte of $BBAA
-                                    self.apu_ports[2] = 0x00;
-                                    self.apu_ports[3] = 0x00;
-                                    self.apu_response_delay = 10;
-                                    self.apu_transfer_counter = 0;
-                                    self.apu_state = ApuState::BootReady;
-                                }
                                 // Check for upload command byte (port 0 with non-zero, non-AA value)
                                 // This typically starts a data upload sequence
-                                else if port == 0 && val != 0x00 && val != 0xAA {
+                                if port == 0 && val != 0x00 && val != 0xAA {
                                     log(LogCategory::Bus, LogLevel::Debug, || {
-                                        format!("SNES Bus: APU starting upload session {} with command 0x{:02X}", 
-                                                self.apu_session_id, val)
+                                        format!(
+                                            "SNES Bus: APU starting upload session {} with command 0x{:02X}",
+                                            self.apu_session_id, val
+                                        )
                                     });
                                     // Echo the command byte to acknowledge
                                     self.apu_ports[0] = val;
-                                    self.apu_expected_echo = val;
                                     self.apu_transfer_counter = 1;
                                     self.apu_state = ApuState::Uploading;
                                     self.apu_response_delay = 5;
@@ -727,15 +725,19 @@ impl Memory65c816 for SnesBus {
                                         self.apu_transfer_counter.wrapping_add(1);
 
                                     log(LogCategory::Bus, LogLevel::Trace, || {
-                                        format!("SNES Bus: APU uploading byte {} of session {}: 0x{:02X}", 
-                                                self.apu_transfer_counter, self.apu_session_id, val)
+                                        format!(
+                                            "SNES Bus: APU uploading byte {} of session {}: 0x{:02X}",
+                                            self.apu_transfer_counter, self.apu_session_id, val
+                                        )
                                     });
 
                                     // After ~25 bytes, assume upload complete and return ready signature
                                     if self.apu_transfer_counter >= 25 {
                                         log(LogCategory::Bus, LogLevel::Debug, || {
-                                            format!("SNES Bus: APU session {} upload complete ({} bytes) - returning ready signature", 
-                                                    self.apu_session_id, self.apu_transfer_counter)
+                                            format!(
+                                                "SNES Bus: APU session {} upload complete ({} bytes) - returning ready signature",
+                                                self.apu_session_id, self.apu_transfer_counter
+                                            )
                                         });
                                         // Return completion signature $BBAA
                                         self.apu_ports[0] = 0xAA;
@@ -746,21 +748,10 @@ impl Memory65c816 for SnesBus {
                                     } else {
                                         // Continue echoing data bytes
                                         self.apu_ports[0] = val;
-                                        self.apu_expected_echo = val;
                                         self.apu_response_delay = 5;
                                     }
                                 } else {
                                     // Writes to other ports during upload (address, control bytes)
-                                    self.apu_ports[port] = val;
-                                }
-                            }
-
-                            ApuState::Processing => {
-                                // Processing state - simulating code execution
-                                // Just echo any port 0 writes
-                                if port == 0 {
-                                    self.apu_ports[0] = val;
-                                } else {
                                     self.apu_ports[port] = val;
                                 }
                             }
