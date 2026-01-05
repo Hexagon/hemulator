@@ -92,58 +92,89 @@ $FFED: 10 EB        BPL $FFDA         ; Continue if positive
 3. **Block continuation**: When Y wraps to 0, increment high byte ($01)
 4. **Block termination**: When high byte bit 7 is set, fall through to $FFEF
 
-### Phase 6: Entry Point Setup ($FFEF-$FFFE)
+### Phase 6: Entry Point Setup and Execution ($FFEF-$FFFF)
 ```assembly
-$FFEF: E4 F6        MOV A, $F6        ; Read low byte of entry point
-$FFF1: C4 F4        MOV $F4, A        ; Echo to port $F4
-$FFF3: E4 F7        MOV A, $F7        ; Read high byte of entry point
-$FFF5: C4 F5        MOV $F5, A        ; Echo to port $F5
-$FFF7: E4 F6        MOV A, $F6        ; Read entry point low byte again
-$FFF9: C4 00        MOV $00, A        ; Store as low byte of return address
-$FFFB: E4 F7        MOV A, $F7        ; Read entry point high byte again
-$FFFD: C4 $01       MOV $01, A        ; Store as high byte of return address
-$FFFF: 6F           RET               ; Jump to address in $0000-$0001
+$FFEF: BA F6        MOVW YA, $F6      ; Read 16-bit entry point from ports $F6/$F7
+$FFF1: DA 00        MOVW $00, YA      ; Store entry point at $0000-$0001
+$FFF3: BA F4        MOVW YA, $F4      ; Read 16-bit mode value from ports $F4/$F5
+$FFF5: C4 F4        MOV $F4, A        ; Echo low byte to port $F4
+$FFF7: DD           MOV A, Y          ; A = high byte of mode
+$FFF8: 5D           MOV X, A          ; X = high byte of mode
+$FFF9: D0 DB        BNE $FFD6         ; If X != 0, branch to upload loop
+$FFFB: 1F 00 00     JMP [$0000+X]     ; Jump indirect to address at $0000+X
 ```
 
 **Actions:**
-- Reads 16-bit entry point from ports $F6/$F7
-- Echoes entry point to ports $F4/$F5 (acknowledgment)
-- Stores entry point at $0000-$0001
-- RET pops stack (which has junk) and jumps to entry point
+- Reads 16-bit entry point from ports $F6/$F7 (A=low, Y=high)
+- Stores entry point at zero page $0000-$0001
+- Reads 16-bit mode value from ports $F4/$F5
+- Echoes low byte to port $F4 (acknowledgment)
+- Uses high byte of mode to determine action:
+  - If high byte != 0: Branch to upload loop at $FFD6
+  - If high byte == 0: Execute JMP [$0000+X] to jump to entry point
+
+**Key Insight:**
+The JMP [$0000+X] instruction reads the 16-bit address stored at $0000+X and jumps to it.
+Since X=0 (because we only execute this when high byte of mode is 0), it jumps to the
+address at $0000-$0001, which is the entry point we just stored!
 
 ## Main CPU Upload Procedure
 
-### Step 1: Wait for Ready Signature
-```
-1. Reset SPC700 (enable IPL ROM)
-2. Wait for port $2140 = $AA
-3. Wait for port $2141 = $BB
-```
-
-### Step 2: Send Upload Command
-```
-4. Write $CC to port $2140
-5. Write $00 to ports $2141-$2143 (optional, for protocol init)
-```
-
-### Step 3: Upload Data Blocks
-For multi-block uploads, games may jump to $FFD6 by:
-- Setting entry point to $FFD6 initially
-- Using the upload loop to upload code that loops back
+### Method 1: Direct Execution (No Upload)
+For games that have pre-loaded audio code or don't need to upload:
 
 ```
-6. Set destination address in ZP ($0000-$0001)
-7. For each byte:
-   - Write index to port $2140
-   - Write data to port $2141
-   - Wait for port $2140 to echo index (acknowledgment)
+1. Wait for port $2140 = $AA
+2. Wait for port $2141 = $BB
+3. Write $CC to port $2140 (trigger ready state)
+4. Write entry point low byte to port $2142 ($F6)
+5. Write entry point high byte to port $2143 ($F7)
+6. Write $00 to port $2140 ($F4) - mode low byte
+7. Write $00 to port $2141 ($F5) - mode high byte = 0 means execute
+8. SPC700 echoes $00 to port $2140
+9. SPC700 jumps to entry point
 ```
 
-### Step 4: Execute Uploaded Code
+### Method 2: Upload with IPL ROM Upload Loop
+For games that need to upload audio driver code:
+
+**Step 1: Initial Setup**
 ```
-8. Write entry point low byte to port $2142
-9. Write entry point high byte to port $2143
-10. SPC700 reads from $F6/$F7 and jumps to entry point
+1. Wait for port $2140 = $AA
+2. Wait for port $2141 = $BB
+3. Write $CC to port $2140 (trigger ready state)
+```
+
+**Step 2: Enter Upload Mode**
+```
+4. Write entry point low byte to port $2142 ($F6) - typically $D6
+5. Write entry point high byte to port $2143 ($F7) - typically $FF
+6. Write $00 to port $2140 ($F4) - mode low byte
+7. Write $01 to port $2141 ($F5) - mode high byte = non-zero triggers upload
+8. SPC700 branches to upload loop at $FFD6
+```
+
+**Step 3: Upload Data Blocks**
+Set destination address in ports (SPC700 will store at $0000-$0001):
+```
+For each block:
+  For each byte:
+    - Write index to port $2140 ($F4)
+    - Write data byte to port $2141 ($F5)
+    - Wait for port $2140 to echo index back
+  When 256 bytes sent (index wraps to 0):
+    - High byte at $0001 increments automatically
+  To end upload:
+    - Ensure high byte ($0001) >= $80 (bit 7 set)
+```
+
+**Step 4: Execute Uploaded Code**
+```
+9. Write final entry point low byte to port $2142 ($F6)
+10. Write final entry point high byte to port $2143 ($F7)
+11. Write $00 to port $2140 ($F4)
+12. Write $00 to port $2141 ($F5) - mode = 0 to execute
+13. SPC700 jumps to uploaded code at final entry point
 ```
 
 ## Common Usage Patterns

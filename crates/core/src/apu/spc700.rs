@@ -43,40 +43,41 @@ const COUNTER2: u16 = 0x00FF; // Timer 2 counter
 /// This is the actual SPC700 IPL ROM from hardware
 /// The clear loop intentionally clears ports $F4-$F7, then rewrites $F4/$F5 with $AA/$BB
 const IPL_ROM: [u8; 64] = [
-    // Real SPC700 IPL ROM (verified bytes from multiple sources)
-    0xCD, 0xEF, // $FFC0: MOV X, #$EF
-    0xBD, // $FFC2: MOV SP, X
-    0xE8, 0x00, // $FFC3: MOV A, #$00
-    0xC6, // $FFC5: MOV (X), A
-    0x1D, // $FFC6: DEC X
-    0xD0, 0xFC, // $FFC7: BNE $FFC5
-    0x8F, 0xAA, 0xF4, // $FFC9: MOV $F4, #$AA  <- This writes AFTER the clear
-    0x8F, 0xBB, 0xF5, // $FFCC: MOV $F5, #$BB
-    0x78, 0xCC, 0xF4, // $FFCF: CMP $F4, #$CC
-    0xD0, 0xFB, // $FFD2: BNE $FFCF
-    0x2F, 0x19, // $FFD4: BRA $FFEF
-    0xEB, 0xF4, // $FFD6: MOV Y, $F4
-    0xD0, 0xFC, // $FFD8: BNE $FFD6
-    0x7E, 0xF4, // $FFDA: CMP Y, $F4
-    0xD0, 0x0B, // $FFDC: BNE $FFE9
-    0xE4, 0xF5, // $FFDE: MOV A, $F5
-    0xCB, 0xF4, // $FFE0: MOV $F4, Y
-    0xD7, 0x00, // $FFE2: MOV ($00)+Y, A
-    0xFC, // $FFE4: INC Y
-    0xD0, 0xF3, // $FFE5: BNE $FFDA
-    0xAB, 0x01, // $FFE7: INC $01
-    0x10, 0xEF, // $FFE9: BPL $FFDA
-    0x7E, 0xF4, // $FFEB: CMP Y, $F4
-    0x10, 0xEB, // $FFED: BPL $FFDA
-    0xE4, 0xF6, // $FFEF: MOV A, $F6
-    0xC4, 0xF4, // $FFF1: MOV $F4, A
-    0xE4, 0xF7, // $FFF3: MOV A, $F7
-    0xC4, 0xF5, // $FFF5: MOV $F5, A
-    0xE4, 0xF6, // $FFF7: MOV A, $F6
-    0xC4, 0x00, // $FFF9: MOV $00, A
-    0xE4, 0xF7, // $FFFB: MOV A, $F7
-    0xC4, 0x01, // $FFFD: MOV $01, A
-    0x6F, // $FFFF: RET (jumps to ($FFFE-$FFFF) = $0002 after reset)
+    // Real SPC700 IPL ROM (verified from hardware dumps and documentation)
+    // Source: Anomie's SPC700 documentation, SnesLab, multiple emulators
+    0xCD, 0xEF, // $FFC0: MOV X, #$EF       - Set X to $EF
+    0xBD, // $FFC2: MOV SP, X         - Set stack pointer to $EF
+    0xE8, 0x00, // $FFC3: MOV A, #$00       - A = 0
+    0xC6, // $FFC5: MOV (X), A        - Clear memory from $EF down
+    0x1D, // $FFC6: DEC X             - Decrement X
+    0xD0, 0xFC, // $FFC7: BNE $FFC5         - Loop until X = 0 (clears $00-$EF)
+    0x8F, 0xAA, 0xF4, // $FFC9: MOV $F4, #$AA     - Write $AA to port $F4
+    0x8F, 0xBB, 0xF5, // $FFCC: MOV $F5, #$BB     - Write $BB to port $F5 (ready signature)
+    0x78, 0xCC, 0xF4, // $FFCF: CMP $F4, #$CC     - Wait for $CC in port $F4
+    0xD0, 0xFB, // $FFD2: BNE $FFCF         - Loop until $CC received
+    0x2F, 0x19, // $FFD4: BRA $FFEF         - Branch to entry point setup
+    0xEB, 0xF4, // $FFD6: MOV Y, $F4        - Upload loop: Y = index from port
+    0xD0, 0xFC, // $FFD8: BNE $FFD6         - Loop while Y = 0
+    0x7E, 0xF4, // $FFDA: CMP Y, $F4        - Compare Y with port (wait for match)
+    0xD0, 0x0B, // $FFDC: BNE $FFE9         - If not equal, go to $FFE9
+    0xE4, 0xF5, // $FFDE: MOV A, $F5        - Read data byte from port $F5
+    0xCB, 0xF4, // $FFE0: MOV $F4, Y        - Echo index to port $F4 (acknowledge)
+    0xD7, 0x00, // $FFE2: MOV ($00)+Y, A    - Store byte at (ZP+Y)
+    0xFC, // $FFE4: INC Y             - Increment Y
+    0xD0, 0xF3, // $FFE5: BNE $FFDA         - Loop if Y != 0
+    0xAB, 0x01, // $FFE7: INC $01           - Increment high byte of address
+    0x10, 0xEF, // $FFE9: BPL $FFDA         - Continue if bit 7 clear
+    0x7E, 0xF4, // $FFEB: CMP Y, $F4        - Final check
+    0x10, 0xEB, // $FFED: BPL $FFDA         - Continue if positive
+    0xBA, 0xF6, // $FFEF: MOVW YA, $F6      - Read 16-bit entry point from ports $F6/$F7
+    0xDA, 0x00, // $FFF1: MOVW $00, YA      - Store entry point at $0000-$0001
+    0xBA, 0xF4, // $FFF3: MOVW YA, $F4      - Read 16-bit value from ports $F4/$F5
+    0xC4, 0xF4, // $FFF5: MOV $F4, A        - Echo low byte to port $F4
+    0xDD, // $FFF7: MOV A, Y          - A = Y (high byte)
+    0x5D, // $FFF8: MOV X, A          - X = A
+    0xD0, 0xDB, // $FFF9: BNE $FFD6         - If X != 0, go to upload loop
+    0x1F, 0x00, 0x00, // $FFFB: JMP [$0000+X]     - Jump indirect to address at $0000+X
+    0xC0, 0xFF, // $FFFE: (Reset vector points to $FFC0)
 ];
 
 /// SPC700 memory implementation
@@ -513,12 +514,24 @@ mod tests {
     fn test_audio_chip_interface() {
         let mut apu = Spc700::new();
 
+        // Run enough cycles for IPL ROM to write $BBAA signature
+        apu.run_cycles(3000);
+
         // Test AudioChip trait methods
         apu.write_register(0x2140, 0x12);
+
+        // Run a few cycles to let SPC700 process
+        apu.run_cycles(10);
+
         let val = apu.read_register(0x2140);
 
-        // Should get back what SPC700 wrote
-        assert!(val == 0x12 || val == 0xAA); // Either echo or default
+        // With correct IPL ROM, after writing signature, SPC700 is waiting for $CC
+        // So it won't echo our $12, but we should still see $AA from the signature
+        assert!(
+            val == 0x12 || val == 0xAA,
+            "Got ${:02X}, expected $12 or $AA",
+            val
+        );
     }
 
     #[test]
