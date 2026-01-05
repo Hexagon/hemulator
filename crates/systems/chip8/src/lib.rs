@@ -90,6 +90,8 @@ const DISPLAY_WIDTH_LOW: usize = 64;
 const DISPLAY_HEIGHT_LOW: usize = 32;
 const DISPLAY_WIDTH_HIGH: usize = 128;
 const DISPLAY_HEIGHT_HIGH: usize = 64;
+const DISPLAY_WIDTH_HIRES: usize = 64;
+const DISPLAY_HEIGHT_HIRES: usize = 64;
 const STACK_SIZE: usize = 16;
 
 /// Emulation mode
@@ -101,6 +103,8 @@ pub enum Chip8Mode {
     SuperChip,
     /// XO-CHIP (128x64, 4 colors, audio, extended memory)
     XoChip,
+    /// CHIP-8 Hires (64x64, VIP 2-page mode for Cosmac VIP/Telmac 1800)
+    Chip8Hires,
 }
 
 /// Super-CHIP large font data (10 bytes per character, 0-9)
@@ -184,6 +188,7 @@ impl Chip8System {
 
         let (display_width, display_height) = match mode {
             Chip8Mode::SuperChip | Chip8Mode::XoChip => (DISPLAY_WIDTH_HIGH, DISPLAY_HEIGHT_HIGH),
+            Chip8Mode::Chip8Hires => (DISPLAY_WIDTH_HIRES, DISPLAY_HEIGHT_HIRES),
             Chip8Mode::Chip8 => (DISPLAY_WIDTH_LOW, DISPLAY_HEIGHT_LOW),
         };
 
@@ -304,17 +309,40 @@ impl Chip8System {
             )
         });
 
+        // Special handling for VIP 2-page hires mode (64x64)
+        // If we're at the start of the program (0x200) and opcode is 0x1260,
+        // this signals a hires mode ROM that needs 64x64 resolution
+        let mut modified_opcode = opcode;
+        if self.pc == PROGRAM_START as u16 && opcode == 0x1260 {
+            log(LogCategory::PPU, LogLevel::Info, || {
+                "CHIP-8: VIP 2-page hires mode detected (64x64) - Switching to hires mode"
+                    .to_string()
+            });
+            // Switch to hires mode
+            if self.mode != Chip8Mode::Chip8Hires {
+                self.mode = Chip8Mode::Chip8Hires;
+                self.display_width = DISPLAY_WIDTH_HIRES;
+                self.display_height = DISPLAY_HEIGHT_HIRES;
+                let new_size = DISPLAY_WIDTH_HIRES * DISPLAY_HEIGHT_HIRES;
+                self.display_planes[0].resize(new_size, false);
+                self.display_planes[1].resize(new_size, false);
+                self.display_updated = true;
+            }
+            // Redirect to 0x2C0 instead of 0x260
+            modified_opcode = 0x12C0;
+        }
+
         // Decode and execute
         self.pc += 2; // Increment PC before execution (some instructions modify PC)
 
-        let nnn = opcode & 0x0FFF; // 12-bit address
-        let nn = (opcode & 0x00FF) as u8; // 8-bit constant
-        let n = (opcode & 0x000F) as u8; // 4-bit constant
-        let x = ((opcode & 0x0F00) >> 8) as usize; // 4-bit register index
-        let y = ((opcode & 0x00F0) >> 4) as usize; // 4-bit register index
+        let nnn = modified_opcode & 0x0FFF; // 12-bit address
+        let nn = (modified_opcode & 0x00FF) as u8; // 8-bit constant
+        let n = (modified_opcode & 0x000F) as u8; // 4-bit constant
+        let x = ((modified_opcode & 0x0F00) >> 8) as usize; // 4-bit register index
+        let y = ((modified_opcode & 0x00F0) >> 4) as usize; // 4-bit register index
 
-        match opcode & 0xF000 {
-            0x0000 => match opcode {
+        match modified_opcode & 0xF000 {
+            0x0000 => match modified_opcode {
                 0x00E0 => {
                     // 00E0 - CLS: Clear display
                     log(LogCategory::PPU, LogLevel::Debug, || {
@@ -324,6 +352,18 @@ impl Chip8System {
                         plane.fill(false);
                     }
                     self.display_updated = true;
+                }
+                0x0230 => {
+                    // 0230 - CLS (Hires): Clear display for VIP 2-page hires mode (64x64)
+                    if self.mode == Chip8Mode::Chip8Hires {
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            "CHIP-8: CLS (Hires 0x0230) - Clearing 64x64 display".to_string()
+                        });
+                        for plane in &mut self.display_planes {
+                            plane.fill(false);
+                        }
+                        self.display_updated = true;
+                    }
                 }
                 0x00EE => {
                     // 00EE - RET: Return from subroutine
@@ -1009,6 +1049,7 @@ impl System for Chip8System {
                 Chip8Mode::Chip8 => 0,
                 Chip8Mode::SuperChip => 1,
                 Chip8Mode::XoChip => 2,
+                Chip8Mode::Chip8Hires => 3,
             },
             "high_res": self.high_res,
         })
@@ -1048,6 +1089,7 @@ impl System for Chip8System {
             let mode = match mode_val {
                 1 => Chip8Mode::SuperChip,
                 2 => Chip8Mode::XoChip,
+                3 => Chip8Mode::Chip8Hires,
                 _ => Chip8Mode::Chip8,
             };
             if mode != self.mode {

@@ -678,12 +678,13 @@ The emulator supports the following cartridge banking schemes:
 ### CHIP-8
 
 **Status**: ✅ Fully Working  
-**Coverage**: Complete CHIP-8, Super-CHIP, and XO-CHIP specifications (all opcodes and features implemented)
+**Coverage**: Complete CHIP-8, CHIP-8 Hires, Super-CHIP, and XO-CHIP specifications (all opcodes and features implemented)
 
 **Program Format**: .ch8 or .c8 files - automatically detected by file size (< 3.5KB for CHIP-8/Super-CHIP, < 64KB for XO-CHIP)
 
 **Features**:
 - **CHIP-8 Core**: All 35 original opcodes, 64x32 monochrome display, 4KB memory
+- **CHIP-8 Hires**: VIP 2-page mode with 64x64 resolution for Cosmac VIP/Telmac 1800 ROMs
 - **Super-CHIP Extensions**: 128x64 high-resolution mode, 4-direction scrolling, 16x16 sprites, large font, flag registers
 - **XO-CHIP Extensions**: 4-color display with dual bit planes, 64KB extended memory, audio patterns, plane selection
 - Built-in hexadecimal fonts (5x8 standard, 10x16 large)
@@ -704,8 +705,15 @@ A 0 B F            Z X C V
 
 **Mode Selection**:
 - Programs automatically run in CHIP-8 mode by default
+- CHIP-8 Hires mode is automatically detected when opcode 0x1260 is at PC=0x200
 - Super-CHIP and XO-CHIP programs can switch modes using specific opcodes
 - Manual mode selection available via API (for developers)
+
+**CHIP-8 Hires Features** (fully implemented):
+- 64x64 pixel high-resolution mode for original VIP hardware
+- Automatic mode detection via opcode 0x1260 at program start
+- Special clear screen opcode 0x0230 for 64x64 display
+- Compatible with ROMs designed for Cosmac VIP and Telmac 1800
 
 **Super-CHIP Features** (fully implemented):
 - High-resolution 128x64 display (switchable with 00FE/00FF)
@@ -733,10 +741,11 @@ A 0 B F            Z X C V
 - XOR-based sprite drawing with collision detection
 - Deterministic behavior for save states and replay
 - Variable memory: 4KB (CHIP-8/Super-CHIP) or 64KB (XO-CHIP)
-- Variable resolution: 64x32 (low-res) or 128x64 (high-res)
+- Variable resolution: 64x32 (low-res), 64x64 (hires), or 128x64 (high-res)
 
 **Recommended Programs**:
 - Classic CHIP-8 games (Pong, Tetris, Space Invaders, Breakout)
+- VIP 2-page hires ROMs for original Cosmac VIP/Telmac 1800 hardware
 - Super-CHIP games with enhanced graphics
 - XO-CHIP programs with color and audio
 - Homebrew programs and test ROMs

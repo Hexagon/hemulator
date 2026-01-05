@@ -131,9 +131,21 @@ let mut system = Chip8System::new_with_mode(Chip8Mode::XoChip);
 system.mount("Program", &rom_data)?;
 let frame = system.step_frame()?;
 // frame.pixels contains 128x64 RGBA pixels with 4 colors
+
+// CHIP-8 Hires (VIP 2-page mode for Cosmac VIP/Telmac 1800)
+let mut system = Chip8System::new_with_mode(Chip8Mode::Chip8Hires);
+system.mount("Program", &rom_data)?;
+let frame = system.step_frame()?;
+// frame.pixels contains 64x64 RGBA pixels
 ```
 
 ## Implemented Extensions
+
+### CHIP-8 Hires (VIP 2-page Mode)
+- ✅ 64x64 pixel high-resolution mode for original VIP hardware
+- ✅ Automatic mode detection via opcode 0x1260 at PC=0x200
+- ✅ Special clear screen opcode 0x0230 for 64x64 display
+- ✅ Compatible with ROMs designed for Cosmac VIP and Telmac 1800
 
 ### Super-CHIP (SCHIP)
 - ✅ High-resolution 128x64 display mode (00FE/00FF opcodes)
@@ -159,8 +171,9 @@ let frame = system.step_frame()?;
 2. **Audio**: Audio pattern buffer and pitch are tracked but no actual sound synthesis in this module
 3. **Timing**: Fixed instruction count per frame rather than cycle-accurate timing
 4. **Original CHIP-8 Compatibility**: All 35 original opcodes fully implemented
-5. **Super-CHIP Compatibility**: All Super-CHIP extensions fully implemented
-6. **XO-CHIP Compatibility**: All XO-CHIP extensions fully implemented
+5. **CHIP-8 Hires Compatibility**: VIP 2-page hires mode (64x64) fully implemented
+6. **Super-CHIP Compatibility**: All Super-CHIP extensions fully implemented
+7. **XO-CHIP Compatibility**: All XO-CHIP extensions fully implemented
 
 ## References
 
