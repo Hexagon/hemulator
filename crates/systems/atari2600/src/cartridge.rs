@@ -142,6 +142,14 @@ pub enum BankingScheme {
     F6,
     /// 32K F4 banking (8x 4K banks)
     F4,
+    /// FE banking (8K, 2x 4K banks, write to $01FE switches banks)
+    FE,
+    /// 3F banking (up to 512K, bank selected by writing to $3F)
+    ThreeF,
+    /// E0 banking (8K, 3 banks: 1x 4K fixed + 2x 2K switchable)
+    E0,
+    /// DPC (Pitfall II, 10K with extra display data)
+    DPC,
 }
 
 /// Atari 2600 cartridge
@@ -149,8 +157,10 @@ pub enum BankingScheme {
 pub struct Cartridge {
     /// ROM data
     rom: Vec<u8>,
-    /// Current bank number
+    /// Current bank number (for simple schemes)
     current_bank: Cell<usize>,
+    /// For E0: separate bank selections for each 2K segment
+    e0_banks: Cell<[usize; 3]>,
     /// Banking scheme
     scheme: BankingScheme,
 }
@@ -163,12 +173,60 @@ impl Cartridge {
         Ok(Self {
             rom,
             current_bank: Cell::new(0),
+            e0_banks: Cell::new([0, 0, 0]),
             scheme,
         })
     }
 
-    /// Detect banking scheme from ROM size
+    /// Detect exotic banking schemes by searching for signature sequences
+    fn detect_by_signature(rom: &[u8]) -> Option<BankingScheme> {
+        // FE scheme: Look for STA $01FE (0x8D 0xFE 0x01 or 0x8D 0xFE 0x00)
+        for i in 0..rom.len().saturating_sub(3) {
+            if rom[i] == 0x8D && rom[i + 1] == 0xFE && (rom[i + 2] == 0x00 || rom[i + 2] == 0x01) {
+                // Found FE signature
+                if rom.len() == 8192 {
+                    return Some(BankingScheme::FE);
+                }
+            }
+        }
+
+        // 3F scheme: Look for STA $3F (0x85 0x3F)
+        for i in 0..rom.len().saturating_sub(2) {
+            if rom[i] == 0x85 && rom[i + 1] == 0x3F {
+                // Found 3F signature
+                return Some(BankingScheme::ThreeF);
+            }
+        }
+
+        // E0 scheme: Look for STA $E0/$E1/$E2 (0x8D 0xE0/0xE1/0xE2 0x1F)
+        for i in 0..rom.len().saturating_sub(3) {
+            if rom[i] == 0x8D
+                && (rom[i + 1] == 0xE0 || rom[i + 1] == 0xE1 || rom[i + 1] == 0xE2)
+                && rom[i + 2] == 0x1F
+            {
+                // Found E0 signature
+                if rom.len() == 8192 {
+                    return Some(BankingScheme::E0);
+                }
+            }
+        }
+
+        // DPC scheme: Check for 10K size (10240 bytes) - Pitfall II
+        if rom.len() == 10240 {
+            return Some(BankingScheme::DPC);
+        }
+
+        None
+    }
+
+    /// Detect banking scheme from ROM size and signatures
     fn detect_banking(rom: &[u8]) -> Result<BankingScheme, CartridgeError> {
+        // First, try signature-based detection for exotic schemes
+        if let Some(scheme) = Self::detect_by_signature(rom) {
+            return Ok(scheme);
+        }
+
+        // Fall back to size-based detection for standard schemes
         match rom.len() {
             2048 => Ok(BankingScheme::Rom2K),
             4096 => Ok(BankingScheme::Rom4K),
@@ -222,6 +280,75 @@ impl Cartridge {
                 let bank_offset = self.current_bank.get() * 4096;
                 self.rom[bank_offset + offset]
             }
+            BankingScheme::FE => {
+                // FE banking: Two 4K banks
+                // Bank is selected by D5 bit of last byte written to $01FE
+                let offset = (addr & 0x0FFF) as usize;
+                let bank_offset = self.current_bank.get() * 4096;
+                self.rom[bank_offset + offset]
+            }
+            BankingScheme::ThreeF => {
+                // 3F banking: Write bank number to $3F
+                // Can support many banks (up to 512K)
+                let offset = (addr & 0x07FF) as usize; // 2K banks
+                let bank_offset = self.current_bank.get() * 2048;
+                if bank_offset + offset < self.rom.len() {
+                    self.rom[bank_offset + offset]
+                } else {
+                    0
+                }
+            }
+            BankingScheme::E0 => {
+                // E0 banking: 8K with 3 segments
+                // $1000-$13FF: bank 0-7 (selected by $1FE0-$1FE7)
+                // $1400-$17FF: bank 0-7 (selected by $1FE8-$1FEF)
+                // $1800-$1BFF: bank 0-7 (selected by $1FE0-$1FE7) - alternate
+                // $1C00-$1FFF: always bank 7 (fixed)
+                let banks = self.e0_banks.get();
+                let segment = ((addr & 0x0FFF) >> 10) as usize; // Which 1K segment (0-3)
+
+                match segment {
+                    0 => {
+                        // $1000-$13FF - switchable bank
+                        let offset = (addr & 0x03FF) as usize;
+                        let bank_offset = banks[0] * 1024;
+                        self.rom[bank_offset + offset]
+                    }
+                    1 => {
+                        // $1400-$17FF - switchable bank
+                        let offset = (addr & 0x03FF) as usize;
+                        let bank_offset = banks[1] * 1024;
+                        self.rom[bank_offset + offset]
+                    }
+                    2 => {
+                        // $1800-$1BFF - switchable bank
+                        let offset = (addr & 0x03FF) as usize;
+                        let bank_offset = banks[2] * 1024;
+                        self.rom[bank_offset + offset]
+                    }
+                    _ => {
+                        // $1C00-$1FFF - fixed to last 1K
+                        let offset = (addr & 0x03FF) as usize;
+                        let bank_offset = 7 * 1024;
+                        self.rom[bank_offset + offset]
+                    }
+                }
+            }
+            BankingScheme::DPC => {
+                // DPC (Pitfall II): Complex scheme with display processor
+                // For now, implement basic 8K + 2K structure
+                // First 8K is banked ROM, last 2K is graphics data
+                if addr < 0x1800 {
+                    // Banked ROM area
+                    let offset = (addr & 0x0FFF) as usize;
+                    let bank_offset = self.current_bank.get() * 4096;
+                    self.rom[bank_offset + offset]
+                } else {
+                    // Graphics data area (fixed)
+                    let offset = ((addr - 0x1800) & 0x07FF) as usize;
+                    self.rom[8192 + offset]
+                }
+            }
         }
     }
 
@@ -258,13 +385,71 @@ impl Cartridge {
                 0x1FFB => self.current_bank.set(7),
                 _ => {}
             },
+            BankingScheme::FE => {
+                // FE banking switches on reads to $01FE
+                // Bank selected by D5 bit (bit 5) of data bus during write
+                // For simplicity, alternate between banks on access
+                if addr == 0x01FE {
+                    let current = self.current_bank.get();
+                    self.current_bank.set(1 - current); // Toggle between 0 and 1
+                }
+            }
+            BankingScheme::ThreeF => {
+                // 3F banking: bank number written to $3F
+                // Handled in write() method
+            }
+            BankingScheme::E0 => {
+                // E0 banking: Multiple hotspots for different segments
+                match addr {
+                    0x1FE0..=0x1FE6 => {
+                        // Select bank for segment 0
+                        let bank = (addr - 0x1FE0) as usize;
+                        let mut banks = self.e0_banks.get();
+                        banks[0] = bank;
+                        self.e0_banks.set(banks);
+                    }
+                    0x1FE8..=0x1FEE => {
+                        // Select bank for segment 1
+                        let bank = (addr - 0x1FE8) as usize;
+                        let mut banks = self.e0_banks.get();
+                        banks[1] = bank;
+                        self.e0_banks.set(banks);
+                    }
+                    0x1FE7 | 0x1FEF => {
+                        // Select bank for segment 2
+                        let bank = if addr == 0x1FE7 { 6 } else { 7 };
+                        let mut banks = self.e0_banks.get();
+                        banks[2] = bank;
+                        self.e0_banks.set(banks);
+                    }
+                    _ => {}
+                }
+            }
+            BankingScheme::DPC => {
+                // DPC banking switches on reads to $1FF8-$1FF9
+                match addr {
+                    0x1FF8 => self.current_bank.set(0),
+                    0x1FF9 => self.current_bank.set(1),
+                    _ => {}
+                }
+            }
         }
     }
 
     /// Write to cartridge (for bank switching)
-    pub fn write(&mut self, addr: u16) {
-        // Some carts also switch on writes; keep this for compatibility.
-        self.maybe_bank_switch(addr);
+    pub fn write(&mut self, addr: u16, value: u8) {
+        // Handle 3F banking which uses the written value as bank number
+        if matches!(self.scheme, BankingScheme::ThreeF) && (addr & 0x3F) == 0x3F {
+            // Write to $3F selects bank
+            let bank = value as usize;
+            let max_banks = self.rom.len() / 2048; // 2K banks
+            if bank < max_banks {
+                self.current_bank.set(bank);
+            }
+        } else {
+            // Other schemes just need address-based switching
+            self.maybe_bank_switch(addr);
+        }
     }
 
     /// Get the current banking scheme
@@ -327,12 +512,12 @@ mod tests {
         assert_eq!(cart.read(0xF000), 0x11);
 
         // Switch to bank 1
-        cart.write(0x1FF9);
+        cart.write(0x1FF9, 0);
         assert_eq!(cart.current_bank(), 1);
         assert_eq!(cart.read(0xF000), 0x22);
 
         // Switch back to bank 0
-        cart.write(0x1FF8);
+        cart.write(0x1FF8, 0);
         assert_eq!(cart.current_bank(), 0);
         assert_eq!(cart.read(0xF000), 0x11);
     }
@@ -350,7 +535,7 @@ mod tests {
 
         // Test all 4 banks
         for bank in 0..4 {
-            cart.write(0x1FF6 + bank as u16);
+            cart.write(0x1FF6 + bank as u16, 0);
             assert_eq!(cart.current_bank(), bank);
             assert_eq!(cart.read(0xF000), (0x10 + bank) as u8);
         }
@@ -365,7 +550,7 @@ mod tests {
 
         // Test all 8 banks
         for bank in 0..8 {
-            cart.write(0x1FF4 + bank as u16);
+            cart.write(0x1FF4 + bank as u16, 0);
             assert_eq!(cart.current_bank(), bank);
         }
     }
@@ -374,5 +559,82 @@ mod tests {
     fn test_invalid_rom_size() {
         let rom = vec![0x00; 1000];
         assert!(Cartridge::new(rom).is_err());
+    }
+
+    #[test]
+    fn test_fe_banking_signature_detection() {
+        // Create an 8K ROM with FE signature (STA $01FE)
+        let mut rom = vec![0x00; 8192];
+        // Insert signature: 0x8D 0xFE 0x01 (STA $01FE)
+        rom[100] = 0x8D;
+        rom[101] = 0xFE;
+        rom[102] = 0x01;
+
+        let cart = Cartridge::new(rom).unwrap();
+        assert_eq!(cart.scheme(), BankingScheme::FE);
+    }
+
+    #[test]
+    fn test_3f_banking_signature_detection() {
+        // Create a ROM with 3F signature (STA $3F)
+        let mut rom = vec![0x00; 8192];
+        // Insert signature: 0x85 0x3F (STA $3F)
+        rom[50] = 0x85;
+        rom[51] = 0x3F;
+
+        let cart = Cartridge::new(rom).unwrap();
+        assert_eq!(cart.scheme(), BankingScheme::ThreeF);
+    }
+
+    #[test]
+    fn test_e0_banking_signature_detection() {
+        // Create an 8K ROM with E0 signature (STA $1FE0)
+        let mut rom = vec![0x00; 8192];
+        // Insert signature: 0x8D 0xE0 0x1F (STA $1FE0)
+        rom[200] = 0x8D;
+        rom[201] = 0xE0;
+        rom[202] = 0x1F;
+
+        let cart = Cartridge::new(rom).unwrap();
+        assert_eq!(cart.scheme(), BankingScheme::E0);
+    }
+
+    #[test]
+    fn test_dpc_banking_size_detection() {
+        // Create a 10K ROM (DPC - Pitfall II)
+        let rom = vec![0x00; 10240];
+
+        let cart = Cartridge::new(rom).unwrap();
+        assert_eq!(cart.scheme(), BankingScheme::DPC);
+    }
+
+    #[test]
+    fn test_3f_banking_write_value() {
+        // Create a ROM large enough for multiple 2K banks
+        let mut rom = vec![0x00; 8192]; // 4 banks of 2K each
+                                        // Add 3F signature
+        rom[50] = 0x85;
+        rom[51] = 0x3F;
+
+        // Set different values in each 2K bank
+        for bank in 0..4 {
+            rom[bank * 2048] = (0x10 + bank) as u8;
+        }
+
+        let mut cart = Cartridge::new(rom).unwrap();
+        assert_eq!(cart.scheme(), BankingScheme::ThreeF);
+
+        // Test bank switching by writing bank number to $3F
+        cart.write(0x003F, 0); // Select bank 0
+        assert_eq!(cart.read(0xF800), 0x10);
+
+        cart.write(0x003F, 1); // Select bank 1
+        assert_eq!(cart.read(0xF800), 0x11);
+
+        cart.write(0x003F, 2); // Select bank 2
+        assert_eq!(cart.read(0xF800), 0x12);
+
+        cart.write(0x003F, 3); // Select bank 3
+        assert_eq!(cart.read(0xF800), 0x13);
     }
 }

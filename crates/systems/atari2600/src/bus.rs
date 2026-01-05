@@ -190,7 +190,7 @@ impl Memory6502 for Atari2600Bus {
             // Everything else maps to cartridge ROM (for bank switching)
             _ => {
                 if let Some(cart) = &mut self.cartridge {
-                    cart.write(addr);
+                    cart.write(addr, val);
                 }
             }
         }
