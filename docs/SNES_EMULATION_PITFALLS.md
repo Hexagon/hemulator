@@ -142,7 +142,27 @@ Our SNES emulator implements:
 
 **Issue**: SNES has a separate SPC700 CPU for audio with its own memory and DSP
 
-**Current Status**: ❌ Not implemented (stub only)
+**Current Status**: ⚠️ Stub implementation - communication ports functional, no audio processing
+
+**APU Communication Ports ($2140-$2143)**:
+- **APUIO0-3**: Bidirectional communication ports between 65C816 CPU and SPC700
+- CPU writes to $2140-$2143 to send data to APU
+- CPU reads from $2140-$2143 to receive data from APU
+- SPC700 has mirrored ports at $F4-$F7 in its address space
+
+**Boot Sequence Handshake**:
+1. SPC700 IPL ROM initializes ports to $2140=0xBB, $2141=0xAA (ready signal)
+2. Game waits for APU ready signal by polling $2140 for 0xBB and $2141 for 0xAA
+3. Game sends initialization data (IPL boot code or audio driver)
+4. APU confirms receipt by echoing values or setting specific response codes
+5. Without proper handshake, games hang at boot and never configure PPU/VRAM
+
+**Implementation**:
+- ✅ Ports $2140-$2143 initialized to 0xBB, 0xAA, 0x00, 0x00 (matching SPC700 IPL)
+- ✅ Ports implement simple echo/passthrough behavior for handshake
+- ✅ Games can proceed past APU initialization handshakes
+- ❌ No actual SPC700 CPU emulation
+- ❌ No audio processing or sound output
 
 **Edge Cases**:
 - SPC700 runs independently at ~1.024 MHz
@@ -151,8 +171,8 @@ Our SNES emulator implements:
 - Echo effects, pitch modulation, noise generation
 
 **Recommendation**:
-- ✅ Already documented as not supported
-- Consider as major future enhancement
+- ✅ Current stub allows games to boot and run graphically
+- Consider full SPC700/DSP implementation as major future enhancement
 
 ## Testing Recommendations
 

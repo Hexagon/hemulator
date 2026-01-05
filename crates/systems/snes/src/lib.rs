@@ -150,6 +150,17 @@ impl System for SnesSystem {
         for scanline in 0..SNES_VISIBLE_SCANLINES {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
+            // Log CPU state on first scanline of first few frames for debugging
+            if scanline == 0 && self.current_cycles < 10000 {
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!(
+                        "SNES CPU: PC=${:02X}:{:04X}, A=${:04X}, X=${:04X}, Y=${:04X}, S=${:04X}, P=${:02X}, E={}",
+                        self.cpu.cpu.pbr, self.cpu.cpu.pc, self.cpu.cpu.c, self.cpu.cpu.x,
+                        self.cpu.cpu.y, self.cpu.cpu.s, self.cpu.cpu.status, self.cpu.cpu.emulation
+                    )
+                });
+            }
+
             // Execute CPU until end of active display portion of scanline
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 let cycles = self.cpu.step();
