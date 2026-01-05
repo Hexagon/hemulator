@@ -528,6 +528,20 @@ impl EmulatorSystem {
         }
     }
 
+    /// Get the SystemType for ROM detection hints
+    fn system_type(&self) -> SystemType {
+        match self {
+            EmulatorSystem::NES(_) => SystemType::NES,
+            EmulatorSystem::GameBoy(_) => SystemType::GameBoy,
+            EmulatorSystem::Atari2600(_) => SystemType::Atari2600,
+            EmulatorSystem::PC(_) => SystemType::PC,
+            EmulatorSystem::SNES(_) => SystemType::SNES,
+            EmulatorSystem::N64(_) => SystemType::N64,
+            EmulatorSystem::SMS(_) => SystemType::SMS,
+            EmulatorSystem::Chip8(_) => SystemType::Chip8,
+        }
+    }
+
     /// Update POST screen for PC system
     fn update_post_screen(&mut self) {
         if let EmulatorSystem::PC(sys) = self {
@@ -2005,8 +2019,19 @@ fn main() {
                         .and_then(|e| e.to_str())
                         .map(|e| e.to_lowercase());
 
-                    // Use extension-aware detection
-                    let system_type = detect_rom_type_with_extension(&data, extension.as_deref());
+                    // Use extension-aware detection with preferred system hint
+                    // If --system was specified, use that as preferred system for ambiguous formats
+                    let preferred_system = if cli_args.system.is_some() && rom_loaded {
+                        Some(sys.system_type())
+                    } else {
+                        None
+                    };
+
+                    let system_type = detect_rom_type_with_extension(
+                        &data,
+                        extension.as_deref(),
+                        preferred_system,
+                    );
 
                     match system_type {
                         Ok(SystemType::NES) => {
@@ -2615,7 +2640,18 @@ fn main() {
                                 // Get file extension for extension-aware detection
                                 let extension = path.extension().and_then(|e| e.to_str());
 
-                                match detect_rom_type_with_extension(&data, extension) {
+                                // Use current system as hint for ambiguous formats
+                                let preferred_system = if rom_loaded {
+                                    Some(sys.system_type())
+                                } else {
+                                    None
+                                };
+
+                                match detect_rom_type_with_extension(
+                                    &data,
+                                    extension,
+                                    preferred_system,
+                                ) {
                                     Ok(SystemType::NES) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let gl_ctx = egui_backend.gl_context();
@@ -3145,7 +3181,18 @@ fn main() {
                                 // Get file extension for extension-aware detection
                                 let extension = path.extension().and_then(|e| e.to_str());
 
-                                match detect_rom_type_with_extension(&data, extension) {
+                                // Use current system as hint for ambiguous formats
+                                let preferred_system = if rom_loaded {
+                                    Some(sys.system_type())
+                                } else {
+                                    None
+                                };
+
+                                match detect_rom_type_with_extension(
+                                    &data,
+                                    extension,
+                                    preferred_system,
+                                ) {
                                     Ok(SystemType::NES) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let mut nes_sys = emu_nes::NesSystem::default();
