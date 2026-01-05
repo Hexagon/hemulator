@@ -17,7 +17,7 @@ This implementation follows specifications from the **SNESdev Wiki**:
 
 ## Current Status
 
-The SNES emulator supports basic gameplay with complete CPU, PPU rendering (modes 0-7), sprites, scrolling, DMA/HDMA, and controller input. Audio is not implemented.
+The SNES emulator supports basic gameplay with complete CPU, full DMA/HDMA, both LoROM and HiROM cartridge support, and PPU rendering for modes 0-7 (with limitations). Modes 0 and 1 are fully complete. Modes 2-7 have basic rendering but missing advanced features (offset-per-tile, hi-res, Mode 7 matrix). Audio is not implemented.
 
 ### What Works
 
@@ -43,15 +43,15 @@ The SNES emulator supports basic gameplay with complete CPU, PPU rendering (mode
   - Reference: [ROM File Formats](https://snes.nesdev.org/wiki/ROM_file_formats)
 
 #### PPU (Picture Processing Unit)
-- ✅ **All 8 Background Modes** (0-7)
-  - **Mode 0**: 4 BG layers, 2bpp each (4 colors per tile)
-  - **Mode 1**: 2 BG layers 4bpp + 1 BG layer 2bpp (most common commercial mode)
-  - **Mode 2**: 2 BG layers, 4bpp each, offset-per-tile capability
-  - **Mode 3**: BG1 8bpp (256 colors), BG2 4bpp (16 colors)
-  - **Mode 4**: BG1 8bpp (256 colors), BG2 2bpp (4 colors), offset-per-tile
-  - **Mode 5**: 2 BG layers (hi-res), BG1 4bpp, BG2 2bpp
-  - **Mode 6**: 1 BG layer (hi-res), 4bpp, offset-per-tile
-  - **Mode 7**: 1 BG layer, 8bpp (256 colors), basic rendering
+- ⚠️ **Background Modes** - Basic rendering for all modes, some features missing
+  - **Mode 0**: ✅ Complete - 4 BG layers, 2bpp each (4 colors per tile)
+  - **Mode 1**: ✅ Complete - 2 BG layers 4bpp + 1 BG layer 2bpp (most common commercial mode)
+  - **Mode 2**: ⚠️ Partial - 2 BG layers, 4bpp each (offset-per-tile NOT implemented)
+  - **Mode 3**: ✅ Complete - BG1 8bpp (256 colors), BG2 4bpp (16 colors)
+  - **Mode 4**: ⚠️ Partial - BG1 8bpp, BG2 2bpp (offset-per-tile NOT implemented)
+  - **Mode 5**: ⚠️ Partial - BG1 4bpp, BG2 2bpp (renders at 256px, NOT true 512px hi-res)
+  - **Mode 6**: ⚠️ Partial - BG1 4bpp (renders at 256px, offset-per-tile NOT implemented)
+  - **Mode 7**: ⚠️ Partial - 8bpp rendering only (matrix transformation NOT implemented)
   - Reference: [PPU Overview](https://snes.nesdev.org/wiki/PPU_registers)
 
 - ✅ **Sprites (OAM)** - Complete sprite system
@@ -142,9 +142,14 @@ The SNES emulator supports basic gameplay with complete CPU, PPU rendering (mode
   - Reference: [Color Math](https://snes.nesdev.org/wiki/PPU_registers#Color_addition)
 - ❌ **Mosaic** - No mosaic effect ($2106)
 - ❌ **Sub-screen** - No sub-screen support ($212D)
-- ❌ **Mode 7 Transform** - Basic rendering only, no rotation/scaling matrix
+- ❌ **Mode 7 Transform** - Matrix registers not implemented ($211A-$2120)
+  - Basic 8bpp tile rendering works, but no rotation/scaling
+  - Missing: M7SEL, M7A-M7D (matrix), M7X/M7Y (center point)
   - Reference: [Mode 7](https://snes.nesdev.org/wiki/Mode_7)
-- ❌ **Hi-res** - Modes 5-6 render at normal resolution
+- ❌ **Hi-res (512px)** - Modes 5-6 render at normal 256px resolution
+- ❌ **Offset-per-tile** - Not implemented for Modes 2, 4, 6
+  - Would require reading offset data from BG3 tilemap
+  - Reference: [Offset-per-tile](https://snes.nesdev.org/wiki/PPU_registers#BG_Scroll)
 
 #### APU (Audio)
 - ❌ **SPC700 CPU** - No audio processor emulation
