@@ -153,16 +153,12 @@ pub struct Chip8System {
     waiting_for_key: Option<usize>, // Some(register_index) when waiting
 
     // Super-CHIP flag registers (RPL user flags)
-    #[allow(dead_code)]
     flag_registers: [u8; 16],
 
     // XO-CHIP extensions
-    #[allow(dead_code)]
-    selected_plane: u8, // Which plane(s) to draw to (bitmask: 0-3)
-    #[allow(dead_code)]
+    selected_plane: u8,      // Which plane(s) to draw to (bitmask: 0-3)
     audio_pattern: [u8; 16], // XO-CHIP audio pattern buffer
-    #[allow(dead_code)]
-    audio_pitch: u8, // XO-CHIP audio playback rate
+    audio_pitch: u8,         // XO-CHIP audio playback rate
 }
 
 impl Default for Chip8System {
@@ -349,12 +345,35 @@ impl Chip8System {
                     self.pc += 2;
                 }
             }
-            0x5000 => {
-                // 5XY0 - SE Vx, Vy: Skip next instruction if Vx == Vy
-                if self.v[x] == self.v[y] {
-                    self.pc += 2;
+            0x5000 => match n {
+                0x0 => {
+                    // 5XY0 - SE Vx, Vy: Skip next instruction if Vx == Vy
+                    if self.v[x] == self.v[y] {
+                        self.pc += 2;
+                    }
                 }
-            }
+                0x2 => {
+                    // 5XY2 - SAVE Vx - Vy (XO-CHIP): Save Vx through Vy to memory at I
+                    if self.mode == Chip8Mode::XoChip {
+                        let start = x.min(y);
+                        let end = x.max(y);
+                        for reg in start..=end {
+                            self.memory[self.i as usize + (reg - start)] = self.v[reg];
+                        }
+                    }
+                }
+                0x3 => {
+                    // 5XY3 - LOAD Vx - Vy (XO-CHIP): Load Vx through Vy from memory at I
+                    if self.mode == Chip8Mode::XoChip {
+                        let start = x.min(y);
+                        let end = x.max(y);
+                        for reg in start..=end {
+                            self.v[reg] = self.memory[self.i as usize + (reg - start)];
+                        }
+                    }
+                }
+                _ => {}
+            },
             0x6000 => {
                 // 6XNN - LD Vx, byte: Set Vx = NN
                 self.v[x] = nn;
@@ -476,8 +495,14 @@ impl Chip8System {
                     self.i = self.i.wrapping_add(self.v[x] as u16);
                 }
                 0x29 => {
-                    // FX29 - LD F, Vx: Set I = location of sprite for digit Vx
+                    // FX29 - LD F, Vx: Set I = location of sprite for digit Vx (small font)
                     self.i = (self.v[x] as u16 & 0x0F) * 5;
+                }
+                0x30 => {
+                    // FX30 - LD HF, Vx (Super-CHIP): Set I = location of 16x16 sprite for digit Vx
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        self.i = 0x50 + (self.v[x] as u16 & 0x0F) * 10;
+                    }
                 }
                 0x33 => {
                     // FX33 - LD B, Vx: Store BCD representation of Vx in memory locations I, I+1, I+2
@@ -498,7 +523,55 @@ impl Chip8System {
                         self.v[reg] = self.memory[self.i as usize + reg];
                     }
                 }
-                _ => {}
+                0x75 => {
+                    // FX75 - SAVE Vx (Super-CHIP): Save V0-Vx to flag registers
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        for reg in 0..=x.min(15) {
+                            self.flag_registers[reg] = self.v[reg];
+                        }
+                    }
+                }
+                0x85 => {
+                    // FX85 - LOAD Vx (Super-CHIP): Load V0-Vx from flag registers
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        for reg in 0..=x.min(15) {
+                            self.v[reg] = self.flag_registers[reg];
+                        }
+                    }
+                }
+                _ => {
+                    // Check for XO-CHIP specific opcodes
+                    if self.mode == Chip8Mode::XoChip {
+                        match nn {
+                            0x00 => {
+                                // F000 NNNN - I := NNNN (XO-CHIP): Load I with 16-bit address
+                                // This is a special 4-byte instruction
+                                if self.pc as usize + 1 < self.memory.len() {
+                                    let high_byte = self.memory[self.pc as usize] as u16;
+                                    let low_byte = self.memory[self.pc as usize + 1] as u16;
+                                    self.i = (high_byte << 8) | low_byte;
+                                    self.pc += 2; // Skip the next instruction bytes
+                                }
+                            }
+                            0x01 => {
+                                // FN01 - PLANE N (XO-CHIP): Select drawing plane(s)
+                                // N is in the low nibble of x (the first hex digit after F)
+                                self.selected_plane = x as u8 & 0x03; // Mask to 0-3
+                            }
+                            0x02 => {
+                                // F002 - AUDIO (XO-CHIP): Store 16 bytes at I in audio buffer
+                                for i in 0..16 {
+                                    self.audio_pattern[i] = self.memory[self.i as usize + i];
+                                }
+                            }
+                            0x3A => {
+                                // FX3A - PITCH Vx (XO-CHIP): Set audio pitch to Vx
+                                self.audio_pitch = self.v[x];
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             },
             _ => {}
         }

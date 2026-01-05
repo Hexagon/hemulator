@@ -587,7 +587,7 @@ This emulator supports 8 different retro gaming systems. **NES emulation is full
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
 | **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Some edge cases, stability | Testing/development |
-| **CHIP-8** | ✅ Fully Working | Complete CHIP-8 specification | Super-CHIP extensions | Playing CHIP-8 programs |
+| **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | 🚧 In Development | Core features, MBC0/1/2/3/5 | Some edge cases, audio refinement | Testing/development |
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
 | **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
@@ -678,20 +678,19 @@ The emulator supports the following cartridge banking schemes:
 ### CHIP-8
 
 **Status**: ✅ Fully Working  
-**Coverage**: Complete CHIP-8 specification (35 opcodes, all features implemented)
+**Coverage**: Complete CHIP-8, Super-CHIP, and XO-CHIP specifications (all opcodes and features implemented)
 
-**Program Format**: .ch8 or .c8 files - automatically detected by file size (< 3.5KB)
+**Program Format**: .ch8 or .c8 files - automatically detected by file size (< 3.5KB for CHIP-8/Super-CHIP, < 64KB for XO-CHIP)
 
 **Features**:
-- Complete CHIP-8 interpreter implementation
-- 64x32 pixel monochrome display
-- All 35 original opcodes supported
-- Built-in hexadecimal font (sprites for 0-F)
+- **CHIP-8 Core**: All 35 original opcodes, 64x32 monochrome display, 4KB memory
+- **Super-CHIP Extensions**: 128x64 high-resolution mode, 4-direction scrolling, 16x16 sprites, large font, flag registers
+- **XO-CHIP Extensions**: 4-color display with dual bit planes, 64KB extended memory, audio patterns, plane selection
+- Built-in hexadecimal fonts (5x8 standard, 10x16 large)
 - 16-key hexadecimal keypad
-- Sound timer (beep indicator)
-- Delay timer for game timing
-- 4KB memory with 16-level stack
-- Save states (F5-F9)
+- Sound and delay timers (60Hz)
+- 16-level stack for subroutines
+- Save states (F5-F9) with mode and resolution preservation
 - Runs at ~700 instructions per second (original CHIP-8 speed)
 
 **Keyboard Layout**: The 16-key CHIP-8 hex keypad is mapped to QWERTY:
@@ -703,22 +702,44 @@ CHIP-8 Keypad:     Keyboard Mapping:
 A 0 B F            Z X C V
 ```
 
+**Mode Selection**:
+- Programs automatically run in CHIP-8 mode by default
+- Super-CHIP and XO-CHIP programs can switch modes using specific opcodes
+- Manual mode selection available via API (for developers)
+
+**Super-CHIP Features** (fully implemented):
+- High-resolution 128x64 display (switchable with 00FE/00FF)
+- Scrolling: down (00CN), up (00DN), right (00FB), left (00FC)
+- Large 16x16 font sprites for digits 0-9 (FX30)
+- 16x16 sprite drawing in high-res mode (DXY0)
+- RPL flag register save/load (FX75/FX85)
+
+**XO-CHIP Features** (fully implemented):
+- 4-color display using dual bit planes (black, green, red, yellow)
+- Extended 64KB memory addressing
+- Plane selection for multi-color graphics (FN01)
+- Audio pattern buffer (F002) and pitch control (FX3A)
+- Extended I register loading (F000 NNNN)
+- Range save/load opcodes (5XY2/5XY3)
+
 **Known Limitations**:
-- **Extensions**: Only original CHIP-8 specification supported (no Super-CHIP or XO-CHIP extensions)
-- **Audio**: Sound timer provides beep flag only, no actual tone generation in this module
+- **Audio**: Audio pattern buffer and pitch are tracked but no actual tone generation
 - **Random Number**: Uses simple pseudo-random generator (not cryptographically secure)
-- **Display**: Original 64x32 resolution only (no Super-CHIP 128x64 mode)
+- **Timing**: Fixed instruction count per frame (not cycle-accurate)
 
 **Technical Details**:
 - 16 8-bit general-purpose registers (V0-VF, where VF is used as flag)
 - Programs loaded at address 0x200
 - XOR-based sprite drawing with collision detection
 - Deterministic behavior for save states and replay
+- Variable memory: 4KB (CHIP-8/Super-CHIP) or 64KB (XO-CHIP)
+- Variable resolution: 64x32 (low-res) or 128x64 (high-res)
 
 **Recommended Programs**:
 - Classic CHIP-8 games (Pong, Tetris, Space Invaders, Breakout)
-- Homebrew programs
-- CHIP-8 test ROMs
+- Super-CHIP games with enhanced graphics
+- XO-CHIP programs with color and audio
+- Homebrew programs and test ROMs
 
 For more technical information, see [crates/systems/chip8/README.md](../crates/systems/chip8/README.md).
 

@@ -110,26 +110,57 @@ Test ROM verifies:
 ## Usage
 
 ```rust
-use emu_chip8::Chip8System;
+use emu_chip8::{Chip8System, Chip8Mode};
 use emu_core::System;
 
+// Original CHIP-8
 let mut system = Chip8System::new();
-
-// Load a CHIP-8 program
 let rom_data = std::fs::read("program.ch8")?;
 system.mount("Program", &rom_data)?;
-
-// Run one frame
 let frame = system.step_frame()?;
 // frame.pixels contains 64x32 RGBA pixels
+
+// Super-CHIP with high resolution
+let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+system.mount("Program", &rom_data)?;
+let frame = system.step_frame()?;
+// frame.pixels contains 128x64 RGBA pixels
+
+// XO-CHIP with 4-color support
+let mut system = Chip8System::new_with_mode(Chip8Mode::XoChip);
+system.mount("Program", &rom_data)?;
+let frame = system.step_frame()?;
+// frame.pixels contains 128x64 RGBA pixels with 4 colors
 ```
+
+## Implemented Extensions
+
+### Super-CHIP (SCHIP)
+- ✅ High-resolution 128x64 display mode (00FE/00FF opcodes)
+- ✅ Scrolling in all 4 directions (00CN, 00DN, 00FB, 00FC)
+- ✅ Large 16x16 font sprites for digits 0-9
+- ✅ 16x16 sprite drawing in high-res mode (DXY0)
+- ✅ RPL flag register save/load (FX75/FX85)
+- ✅ Large font pointer (FX30)
+
+### XO-CHIP
+- ✅ 4-color display using dual bit planes
+- ✅ Extended 64KB memory addressing
+- ✅ Plane selection (FN01)
+- ✅ Audio pattern buffer (F002)
+- ✅ Pitch control (FX3A)
+- ✅ Extended I register loading (F000 NNNN)
+- ✅ Range save/load opcodes (5XY2/5XY3)
+- ✅ Scroll up opcode (00DN)
 
 ## Known Limitations
 
 1. **Random Number Generator**: Uses simple LCG instead of true random
-2. **Audio**: Simple beep flag only, no actual sound synthesis in this module
+2. **Audio**: Audio pattern buffer and pitch are tracked but no actual sound synthesis in this module
 3. **Timing**: Fixed instruction count per frame rather than cycle-accurate timing
-4. **Extensions**: Only original CHIP-8 specification supported (no Super-CHIP or XO-CHIP extensions)
+4. **Original CHIP-8 Compatibility**: All 35 original opcodes fully implemented
+5. **Super-CHIP Compatibility**: All Super-CHIP extensions fully implemented
+6. **XO-CHIP Compatibility**: All XO-CHIP extensions fully implemented
 
 ## References
 
