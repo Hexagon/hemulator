@@ -25,9 +25,11 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
 | **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
-| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Atari 2600** | ✅ Complete | 6502/6507 (Complete) | TIA (Complete) | TIA (Complete) | ✅ | ✅ | All standard cartridge formats (2K-32K) |
+| **CHIP-8** | ✅ Fully Working | CHIP-8 VM (Complete) | Multi-mode (Complete) | Beep timer (Complete) | ✅ | ✅ | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **Game Boy** | ✅ Fully Functional | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~97% of games; MBC0/1/2/3/5, HuC1 supported |
-| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
+| **SMS** | ✅ Functional | Z80 (Complete) | VDP (Complete) | PSG (Complete) | ✅ | ✅ | Full hardware emulation; needs game testing |
+| **SNES** | ✅ Functional | 65C816 (Complete) | PPU (Mode 0/1) | ❌ Not implemented | ✅ | ✅ | Modes 0 & 1, sprites, scrolling, controllers |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 
 **Legend:**
