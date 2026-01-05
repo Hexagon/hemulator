@@ -83,9 +83,15 @@ pub struct SnesBus {
     hdma_state: [HdmaState; 8],
     /// APU communication ports ($2140-$2143)
     /// These ports are used for bidirectional communication with the SPC700 audio processor
-    /// Without a full APU implementation, we implement a simple echo/passthrough stub
+    /// Without a full APU implementation, we implement a comprehensive stub
     /// to allow games to proceed past APU initialization handshakes
     apu_ports: [u8; 4],
+    /// APU communication state tracker
+    apu_last_written: [u8; 4],
+    /// Cycle counter for simulating APU response delay
+    apu_response_delay: u32,
+    /// Counter for data transfer sequences to detect completion
+    apu_transfer_counter: u8,
 }
 
 impl SnesBus {
@@ -103,7 +109,10 @@ impl SnesBus {
             dma_channels: [DmaChannel::default(); 8],
             hdma_enable: 0,
             hdma_state: [HdmaState::default(); 8],
-            apu_ports: [0xBB, 0xAA, 0x00, 0x00], // Initial values for APU ready state (SPC700 IPL sets $2140=0xBB, $2141=0xAA)
+            apu_ports: [0xAA, 0xBB, 0x00, 0x00], // Initial values for APU ready state (SPC700 IPL sets ports to $BBAA when read as 16-bit)
+            apu_last_written: [0; 4],
+            apu_response_delay: 0,
+            apu_transfer_counter: 0,
         }
     }
 
@@ -142,6 +151,11 @@ impl SnesBus {
     /// Update cycle counter within frame (called after each CPU step)
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
+        
+        // Decrement APU response delay for simulating processing time
+        if self.apu_response_delay > 0 {
+            self.apu_response_delay = self.apu_response_delay.saturating_sub(cycles);
+        }
     }
 
     /// Check if currently in VBlank period
@@ -613,9 +627,57 @@ impl Memory65c816 for SnesBus {
                                 offset, port, val
                             )
                         });
-                        // Simple echo/passthrough stub: store the value so it can be read back
-                        // This allows games to proceed past APU initialization handshakes
-                        self.apu_ports[port] = val;
+                        
+                        // Track what was written for echo protocol
+                        self.apu_last_written[port] = val;
+                        
+                        // APU communication protocol stub:
+                        // The SPC700 boot ROM implements a specific handshake protocol.
+                        // We simulate the APU by implementing common patterns:
+                        // 1. Boot ready signature: When all ports cleared, return $BBAA in ports 0-1
+                        // 2. Echo protocol: APU echoes back what was written after a short delay
+                        // 3. Handshake patterns: Respond to common Nintendo SDK sequences
+                        
+                        // Pattern 1: Initial boot - all ports cleared to $00
+                        if port == 3 && self.apu_last_written == [0x00, 0x00, 0x00, 0x00] {
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                "SNES Bus: APU boot handshake - setting ready signature".to_string()
+                            });
+                            // SPC700 IPL ready signature
+                            self.apu_ports[0] = 0xAA;  // Low byte of $BBAA
+                            self.apu_ports[1] = 0xBB;  // High byte of $BBAA
+                            self.apu_ports[2] = 0x00;
+                            self.apu_ports[3] = 0x00;
+                            self.apu_response_delay = 10;  // Simulate short delay
+                            self.apu_transfer_counter = 0;  // Reset transfer counter
+                        }
+                        // Pattern 2: Data upload handshake (common in Nintendo SDK)
+                        // CPU writes non-zero to port 0, waits for APU to echo it back
+                        else if port == 0 && val != 0x00 {
+                            self.apu_transfer_counter = self.apu_transfer_counter.wrapping_add(1);
+                            
+                            // After significant data transfer (~25 bytes), signal completion
+                            if self.apu_transfer_counter >= 25 {
+                                log(LogCategory::Bus, LogLevel::Debug, || {
+                                    "SNES Bus: APU transfer complete - returning ready signature".to_string()
+                                });
+                                // Return completion signature
+                                self.apu_ports[0] = 0xAA;
+                                self.apu_ports[1] = 0xBB;
+                                self.apu_transfer_counter = 0;
+                            } else {
+                                log(LogCategory::Bus, LogLevel::Trace, || {
+                                    format!("SNES Bus: APU data handshake - echoing port 0: 0x{:02X} (transfer {})", val, self.apu_transfer_counter)
+                                });
+                                // Echo back immediately (real APU would take a few cycles)
+                                self.apu_ports[0] = val;
+                            }
+                            self.apu_response_delay = 5;
+                        }
+                        // Pattern 3: General write - store for potential echo
+                        else {
+                            self.apu_ports[port] = val;
+                        }
                     }
                     // $2100-$213F - PPU registers (excluding APU ports above)
                     // Note: $2140-$2143 are handled by the APU case above
