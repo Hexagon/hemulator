@@ -118,6 +118,7 @@ use emu_core::apu::PolynomialCounter;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use serde::{Deserialize, Serialize};
 
+use crate::timing_mode::TimingMode;
 use crate::video_mode::VideoMode;
 
 /// Per-scanline snapshot of TIA state for rendering
@@ -299,6 +300,10 @@ pub struct Tia {
 
     // Video mode (NTSC/PAL)
     video_mode: VideoMode,
+    
+    // Timing mode (cycle-accurate or frame-based)
+    #[serde(skip)]
+    timing_mode: TimingMode,
 }
 
 impl Default for Tia {
@@ -331,13 +336,18 @@ impl Tia {
         }
     }
 
-    /// Create a new TIA chip with default NTSC video mode
+    /// Create a new TIA chip with default NTSC video mode and cycle-accurate timing
     pub fn new() -> Self {
-        Self::with_video_mode(VideoMode::default())
+        Self::with_video_mode_and_timing(VideoMode::default(), TimingMode::default())
     }
 
-    /// Create a new TIA chip with specified video mode
+    /// Create a new TIA chip with specified video mode and default timing
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
+        Self::with_video_mode_and_timing(video_mode, TimingMode::default())
+    }
+
+    /// Create a new TIA chip with specified video mode and timing mode
+    pub fn with_video_mode_and_timing(video_mode: VideoMode, timing_mode: TimingMode) -> Self {
         let total_scanlines = video_mode.scanlines_per_frame() as usize;
 
         Self {
@@ -431,6 +441,7 @@ impl Tia {
             cached_visible_start: None,
 
             video_mode,
+            timing_mode,
         }
     }
 
@@ -890,19 +901,59 @@ impl Tia {
         // Update paddle capacitor charging (every color clock)
         self.update_paddle_charging();
 
-        // Simplified: just advance pixel counter
-        self.pixel += 3; // 3 color clocks per CPU cycle
+        match self.timing_mode {
+            TimingMode::CycleAccurate => {
+                // Cycle-accurate: Process each color clock individually
+                // This ensures mid-scanline register changes affect pixels correctly
+                for _ in 0..3 {
+                    self.clock_color_clock();
+                }
+            }
+            TimingMode::FrameBased => {
+                // Frame-based: Just advance pixel counter and latch at scanline boundaries
+                self.pixel += 3; // 3 color clocks per CPU cycle
+
+                if self.pixel >= 228 {
+                    self.pixel -= 228;
+                    let old_scanline = self.scanline;
+
+                    // Latch the state of the OLD scanline BEFORE advancing to the new one
+                    self.latch_scanline_state(old_scanline);
+
+                    self.scanline += 1;
+                    self.scanline_counter = self.scanline_counter.saturating_add(1);
+
+                    let total_scanlines = self.video_mode.scanlines_per_frame();
+                    if self.scanline >= total_scanlines {
+                        self.scanline = 0;
+                    }
+
+                    // Debug logging
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
+                        && (old_scanline == 261 || self.scanline <= 1)
+                    {
+                        eprintln!(
+                            "[TIA CLOCK] Scanline {} -> {} (latched {})",
+                            old_scanline, self.scanline, old_scanline
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clock one color clock (used in cycle-accurate mode)
+    fn clock_color_clock(&mut self) {
+        self.pixel += 1;
 
         if self.pixel >= 228 {
-            self.pixel -= 228; // Wrap pixel properly (was = 0, which loses remainders)
+            self.pixel = 0;
             let old_scanline = self.scanline;
 
-            // Latch the state of the OLD scanline BEFORE advancing to the new one
-            // This ensures we capture the final state of the scanline after all register writes
+            // In cycle-accurate mode, latch state at scanline boundaries
             self.latch_scanline_state(old_scanline);
 
             self.scanline += 1;
-
             self.scanline_counter = self.scanline_counter.saturating_add(1);
 
             let total_scanlines = self.video_mode.scanlines_per_frame();
