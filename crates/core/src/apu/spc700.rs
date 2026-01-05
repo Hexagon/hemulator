@@ -25,7 +25,9 @@ const CONTROL_REG: u16 = 0x00F1; // Control register (timer enables, IPL ROM ena
 const DSP_ADDR: u16 = 0x00F2; // DSP address register
 const DSP_DATA: u16 = 0x00F3; // DSP data register
 const CPUIO0: u16 = 0x00F4; // Communication port 0
+#[allow(dead_code)]
 const CPUIO1: u16 = 0x00F5; // Communication port 1
+#[allow(dead_code)]
 const CPUIO2: u16 = 0x00F6; // Communication port 2
 const CPUIO3: u16 = 0x00F7; // Communication port 3
 const AUX_IO4: u16 = 0x00F8; // Auxiliary I/O port 4
@@ -133,10 +135,9 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => self.cpuio[(addr - CPUIO0) as usize],
             // Timer counters
             COUNTER0 => {
-                let val = self.timer_counter[0];
                 // Reading counter clears it (on real hardware)
                 // We'll implement this when timers are active
-                val
+                self.timer_counter[0]
             }
             COUNTER1 => self.timer_counter[1],
             COUNTER2 => self.timer_counter[2],
