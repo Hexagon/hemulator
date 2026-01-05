@@ -208,13 +208,16 @@ impl SnesBus {
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
 
-        // Clear APU port latch after a short delay (2-3 cycles should be enough for a 16-bit read)
-        // This ensures the latch is cleared after the current instruction completes
+        // Clear APU port latch after the instruction completes
+        // We use a cycle-based heuristic: clear latch if it's been active for
+        // at least as many cycles as we just ticked (i.e., the instruction completed)
         if self.apu_port_latch_active.get() {
             let latch_age = self
                 .frame_cycle
                 .wrapping_sub(self.apu_port_latch_cycle.get());
-            if latch_age >= 3 {
+            // Clear if the latch has been active for at least as long as the current instruction
+            // This ensures multi-cycle instructions complete before the latch clears
+            if latch_age >= cycles {
                 self.apu_port_latch_active.set(false);
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!(
