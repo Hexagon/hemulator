@@ -108,6 +108,18 @@ impl NesCpu {
     pub fn a(&self) -> u8 {
         self.cpu.a
     }
+    pub fn x(&self) -> u8 {
+        self.cpu.x
+    }
+    pub fn y(&self) -> u8 {
+        self.cpu.y
+    }
+    pub fn sp(&self) -> u8 {
+        self.cpu.sp
+    }
+    pub fn status(&self) -> u8 {
+        self.cpu.status
+    }
     pub fn pc(&self) -> u16 {
         self.cpu.pc
     }

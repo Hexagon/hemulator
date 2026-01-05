@@ -18,6 +18,7 @@ pub enum MenuAction {
     Reset,
     Pause,
     Resume,
+    Step,
 
     // View menu
     Screenshot,
@@ -156,6 +157,14 @@ impl MenuBar {
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::Resume);
+                    ui.close();
+                }
+                if ui
+                    .button("⏭️ Step")
+                    .on_hover_text("Step one instruction (when paused)")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::Step);
                     ui.close();
                 }
             });
