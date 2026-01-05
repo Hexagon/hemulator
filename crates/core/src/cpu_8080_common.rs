@@ -81,6 +81,13 @@ pub fn get_reg_pair(high: u8, low: u8) -> u16 {
 ///
 /// Used for BC, DE, HL register pairs where the first register is the high byte
 /// Returns (high_byte, low_byte)
+///
+/// **Note for AF register pair**: Some CPUs have specific flag register constraints:
+/// - **LR35902 (Game Boy)**: Flag register (F) lower 4 bits are always 0
+/// - **Z80**: All 8 bits of F are used
+/// - **8080**: Uses a flags register with fixed bit 1
+///
+/// When using this function to set AF, apply any CPU-specific masking after calling it.
 #[inline]
 pub fn set_reg_pair(val: u16) -> (u8, u8) {
     ((val >> 8) as u8, val as u8)

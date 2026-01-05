@@ -241,7 +241,9 @@ impl<M: MemoryLr35902> CpuLr35902<M> {
 
     fn set_af(&mut self, val: u16) {
         (self.a, self.f) = cpu_8080_common::set_reg_pair(val);
-        self.f &= 0xF0; // Lower 4 bits always 0
+        // LR35902-specific: Flag register lower 4 bits are always 0
+        // This is different from Z80 where all 8 bits are used
+        self.f &= 0xF0;
     }
 
     // Flag operations
