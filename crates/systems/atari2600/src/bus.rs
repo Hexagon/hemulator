@@ -40,6 +40,7 @@ impl Atari2600Bus {
     }
 
     /// Create a new bus with specified video mode and default timing
+    #[allow(dead_code)] // Kept for API consistency
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
         Self::with_video_mode_and_timing(video_mode, TimingMode::default())
     }

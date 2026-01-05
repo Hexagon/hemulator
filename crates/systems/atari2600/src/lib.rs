@@ -164,6 +164,7 @@ pub struct Atari2600System {
     cycles: u64,
     renderer: Box<dyn TiaRenderer>,
     video_mode: VideoMode,
+    #[allow(dead_code)] // Stored for future use and API consistency
     timing_mode: TimingMode,
 }
 
@@ -1357,7 +1358,7 @@ mod tests {
             VideoMode::default(),
             TimingMode::CycleAccurate,
         );
-        
+
         // Verify system was created successfully
         assert_eq!(sys.cycles, 0);
         assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
@@ -1369,7 +1370,7 @@ mod tests {
             VideoMode::default(),
             TimingMode::FrameBased,
         );
-        
+
         // Verify system was created successfully
         assert_eq!(sys.cycles, 0);
         assert_eq!(sys.timing_mode, TimingMode::FrameBased);
@@ -1385,10 +1386,8 @@ mod tests {
     fn test_both_timing_modes_produce_frames() {
         // Test that both timing modes can execute and produce frames
         for timing_mode in [TimingMode::CycleAccurate, TimingMode::FrameBased] {
-            let mut sys = Atari2600System::with_video_mode_and_timing(
-                VideoMode::default(),
-                timing_mode,
-            );
+            let mut sys =
+                Atari2600System::with_video_mode_and_timing(VideoMode::default(), timing_mode);
 
             // Load a minimal ROM
             let rom = vec![0xFF; 4096];
@@ -1396,8 +1395,12 @@ mod tests {
 
             // Execute one frame - should not panic
             let frame = sys.step_frame();
-            assert!(frame.is_ok(), "Failed to produce frame with {:?} timing mode", timing_mode);
-            
+            assert!(
+                frame.is_ok(),
+                "Failed to produce frame with {:?} timing mode",
+                timing_mode
+            );
+
             let frame = frame.unwrap();
             assert_eq!(frame.width, 160);
             assert_eq!(frame.height, 192);

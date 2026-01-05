@@ -345,6 +345,7 @@ impl Settings {
 
     /// Set Atari 2600 timing mode in settings
     /// Valid values: "cycle_accurate", "frame_based"
+    #[allow(dead_code)] // Kept for API completeness
     pub fn set_atari_timing_mode(&mut self, mode: &str) {
         self.extra.insert(
             "atari_timing_mode".to_string(),

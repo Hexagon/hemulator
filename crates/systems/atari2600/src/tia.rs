@@ -300,7 +300,7 @@ pub struct Tia {
 
     // Video mode (NTSC/PAL)
     video_mode: VideoMode,
-    
+
     // Timing mode (cycle-accurate or frame-based)
     #[serde(skip)]
     timing_mode: TimingMode,
