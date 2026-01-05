@@ -1350,4 +1350,57 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_cycle_accurate_timing_mode() {
+        let sys = Atari2600System::with_video_mode_and_timing(
+            VideoMode::default(),
+            TimingMode::CycleAccurate,
+        );
+        
+        // Verify system was created successfully
+        assert_eq!(sys.cycles, 0);
+        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
+    }
+
+    #[test]
+    fn test_frame_based_timing_mode() {
+        let sys = Atari2600System::with_video_mode_and_timing(
+            VideoMode::default(),
+            TimingMode::FrameBased,
+        );
+        
+        // Verify system was created successfully
+        assert_eq!(sys.cycles, 0);
+        assert_eq!(sys.timing_mode, TimingMode::FrameBased);
+    }
+
+    #[test]
+    fn test_default_timing_mode_is_cycle_accurate() {
+        let sys = Atari2600System::new();
+        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
+    }
+
+    #[test]
+    fn test_both_timing_modes_produce_frames() {
+        // Test that both timing modes can execute and produce frames
+        for timing_mode in [TimingMode::CycleAccurate, TimingMode::FrameBased] {
+            let mut sys = Atari2600System::with_video_mode_and_timing(
+                VideoMode::default(),
+                timing_mode,
+            );
+
+            // Load a minimal ROM
+            let rom = vec![0xFF; 4096];
+            sys.mount("Cartridge", &rom).unwrap();
+
+            // Execute one frame - should not panic
+            let frame = sys.step_frame();
+            assert!(frame.is_ok(), "Failed to produce frame with {:?} timing mode", timing_mode);
+            
+            let frame = frame.unwrap();
+            assert_eq!(frame.width, 160);
+            assert_eq!(frame.height, 192);
+        }
+    }
 }
