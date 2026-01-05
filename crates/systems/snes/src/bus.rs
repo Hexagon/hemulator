@@ -710,7 +710,11 @@ impl Memory65c816 for SnesBus {
                                     self.apu_state = ApuState::Uploading;
                                     self.apu_response_delay = 5;
                                 }
-                                // General write - just store value
+                                // Port 0 write with 0x00 or 0xAA - echo it back
+                                else if port == 0 {
+                                    self.apu_ports[0] = val;
+                                }
+                                // General write to other ports - just store value
                                 else {
                                     self.apu_ports[port] = val;
                                 }
@@ -727,17 +731,18 @@ impl Memory65c816 for SnesBus {
                                                 self.apu_transfer_counter, self.apu_session_id, val)
                                     });
 
-                                    // After ~25 bytes, transition to processing/completion
+                                    // After ~25 bytes, assume upload complete and return ready signature
                                     if self.apu_transfer_counter >= 25 {
                                         log(LogCategory::Bus, LogLevel::Debug, || {
-                                            format!("SNES Bus: APU session {} complete - transitioning to processing", 
-                                                    self.apu_session_id)
+                                            format!("SNES Bus: APU session {} upload complete ({} bytes) - returning ready signature", 
+                                                    self.apu_session_id, self.apu_transfer_counter)
                                         });
-                                        // Don't immediately return $BBAA - transition to processing state first
-                                        // This allows for potential continuation of the session
-                                        self.apu_ports[0] = val; // Echo last byte
-                                        self.apu_state = ApuState::Processing;
-                                        self.apu_response_delay = 20; // Longer delay for "processing"
+                                        // Return completion signature $BBAA
+                                        self.apu_ports[0] = 0xAA;
+                                        self.apu_ports[1] = 0xBB;
+                                        self.apu_state = ApuState::Ready;
+                                        self.apu_transfer_counter = 0;
+                                        self.apu_response_delay = 20; // Simulate processing time
                                     } else {
                                         // Continue echoing data bytes
                                         self.apu_ports[0] = val;
@@ -751,28 +756,11 @@ impl Memory65c816 for SnesBus {
                             }
 
                             ApuState::Processing => {
-                                // In processing state, detect if CPU is starting new operation
-                                // or if we should complete the current session
-
-                                // If port 0 is written with a different value, might be next session
-                                if port == 0 && val != self.apu_expected_echo {
-                                    // Check if this looks like a new command vs. continuation
-                                    if val == 0x00 {
-                                        // Writing 0x00 might be part of completion protocol
-                                        self.apu_ports[0] = val;
-                                    } else {
-                                        // New command - return ready signature and start new session
-                                        log(LogCategory::Bus, LogLevel::Debug, || {
-                                            format!("SNES Bus: APU completing session {}, returning ready signature", 
-                                                    self.apu_session_id)
-                                        });
-                                        self.apu_ports[0] = 0xAA;
-                                        self.apu_ports[1] = 0xBB;
-                                        self.apu_state = ApuState::Ready;
-                                        self.apu_transfer_counter = 0;
-                                    }
+                                // Processing state - simulating code execution
+                                // Just echo any port 0 writes
+                                if port == 0 {
+                                    self.apu_ports[0] = val;
                                 } else {
-                                    // General write during processing
                                     self.apu_ports[port] = val;
                                 }
                             }
