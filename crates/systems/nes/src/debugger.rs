@@ -4,9 +4,7 @@
 //! memory inspection, and CPU state tracking.
 
 use crate::bus::Bus;
-use emu_core::debug::{
-    CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion,
-};
+use emu_core::debug::{CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion};
 use emu_core::disasm_6502;
 
 use crate::NesSystem;
@@ -39,7 +37,7 @@ impl Debugger for NesSystem {
     }
 
     fn get_memory_regions(&self) -> Vec<MemoryRegion> {
-        let mut regions = vec![
+        vec![
             // CPU address space
             MemoryRegion::new(
                 "Internal RAM",
@@ -66,33 +64,22 @@ impl Debugger for NesSystem {
                 true,
             ),
             MemoryRegion::new(
-                "Cartridge Space",
+                "Expansion Area",
                 0x4020,
-                0xFFFF,
-                "PRG ROM/RAM and mapper registers",
+                0x7FFF,
+                "Cartridge expansion area (mapper-specific)",
                 true,
                 false,
             ),
-        ];
-
-        // Add mapper-specific regions if we have cartridge info
-        if let Some(bus) = self.cpu.bus() {
-            if let Some(mapper_num) = bus.mapper_number() {
-                // Add PRG ROM region
-                if bus.prg_rom_size() > 0 {
-                    regions.push(MemoryRegion::new(
-                        "PRG ROM",
-                        0x8000,
-                        0xFFFF,
-                        format!("Program ROM (Mapper {})", mapper_num),
-                        true,
-                        false,
-                    ));
-                }
-            }
-        }
-
-        regions
+            MemoryRegion::new(
+                "PRG ROM",
+                0x8000,
+                0xFFFF,
+                "Program ROM (32KB, mapper-banked)",
+                true,
+                false,
+            ),
+        ]
     }
 
     fn get_cpu_state(&self) -> CpuState {
@@ -105,7 +92,15 @@ impl Debugger for NesSystem {
         state.add_register(CpuRegister::new_8bit("Y", self.cpu.y()));
         state.add_register(CpuRegister::new_8bit("SP", self.cpu.sp()));
 
-        // Add status flags (NV-BDIZC)
+        // Add status flags (NV-BDIZC format)
+        // Bit 7 (0x80): N (Negative)
+        // Bit 6 (0x40): V (Overflow)
+        // Bit 5: Unused (always 1)
+        // Bit 4 (0x10): B (Break)
+        // Bit 3 (0x08): D (Decimal - unused on NES)
+        // Bit 2 (0x04): I (IRQ Disable)
+        // Bit 1 (0x02): Z (Zero)
+        // Bit 0 (0x01): C (Carry)
         let status = self.cpu.status();
         state.add_flag("N", (status & 0x80) != 0); // Negative
         state.add_flag("V", (status & 0x40) != 0); // Overflow

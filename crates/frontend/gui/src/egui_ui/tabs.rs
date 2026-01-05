@@ -827,42 +827,55 @@ impl TabManager {
         ui.add_space(5.0);
 
         // 3-column layout: Disassembly | Memory | CPU State
-        egui::Grid::new("debug_panels")
-            .num_columns(3)
-            .spacing([10.0, 0.0])
-            .show(ui, |ui| {
-                // Column headers
+        // Use horizontal layout with equal-width columns that fill available height
+        ui.horizontal(|ui| {
+            let available_width = ui.available_width();
+            let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
+            let available_height = ui.available_height();
+
+            // Left panel: Disassembly
+            ui.vertical(|ui| {
+                ui.set_width(column_width);
                 ui.heading("📜 Disassembly");
-                ui.heading("💾 Memory");
-                ui.heading("🖥️ CPU State");
-                ui.end_row();
-
-                // Content panels - make them scrollable
-                let panel_height = ui.available_height() - 10.0;
-
-                // Left panel: Disassembly
+                ui.separator();
                 ScrollArea::vertical()
-                    .max_height(panel_height)
+                    .auto_shrink([false; 2])
+                    .max_height(available_height - 40.0)
                     .show(ui, |ui| {
                         self.render_disassembly_panel(ui, state);
                     });
+            });
 
-                // Middle panel: Memory Explorer
+            ui.add_space(10.0);
+
+            // Middle panel: Memory Explorer
+            ui.vertical(|ui| {
+                ui.set_width(column_width);
+                ui.heading("💾 Memory");
+                ui.separator();
                 ScrollArea::vertical()
-                    .max_height(panel_height)
+                    .auto_shrink([false; 2])
+                    .max_height(available_height - 40.0)
                     .show(ui, |ui| {
                         self.render_memory_panel(ui, state);
                     });
+            });
 
-                // Right panel: CPU State
+            ui.add_space(10.0);
+
+            // Right panel: CPU State
+            ui.vertical(|ui| {
+                ui.set_width(column_width);
+                ui.heading("🖥️ CPU State");
+                ui.separator();
                 ScrollArea::vertical()
-                    .max_height(panel_height)
+                    .auto_shrink([false; 2])
+                    .max_height(available_height - 40.0)
                     .show(ui, |ui| {
                         self.render_cpu_state_panel(ui, state);
                     });
-
-                ui.end_row();
             });
+        });
     }
 
     fn render_disassembly_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {

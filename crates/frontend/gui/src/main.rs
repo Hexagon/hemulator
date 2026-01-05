@@ -1447,15 +1447,25 @@ fn create_enhanced_debug_state(
     let cpu_state = debugger.get_cpu_state();
     let memory_regions = debugger.get_memory_regions();
 
-    // Disassemble instructions around current PC
+    // Disassemble instructions around the current PC.
+    //
+    // Note: this is an *approximate* centering:
+    // - We start 32 bytes before PC (clamped to 0 via `saturating_sub`).
+    // - We request 20 instructions from that starting address.
+    //
+    // On CPUs with variable-length instructions (e.g. 1–3 bytes), this does
+    // not guarantee that PC will appear exactly in the middle of the rendered
+    // disassembly, and early addresses (PC < 32) cannot be centered at all.
+    // This trade-off keeps the implementation simple while still providing
+    // useful context around the current PC.
     let pc = cpu_state.pc;
     let disassembly = debugger.disassemble_range(pc.saturating_sub(32), 20);
 
     let mut enhanced_state = system_adapter::EnhancedDebugState::new(system_name);
-    enhanced_state.cpu_state = Some(cpu_state.clone());
+    enhanced_state.cpu_state = Some(cpu_state);
     enhanced_state.memory_regions = memory_regions;
     enhanced_state.disassembly = disassembly;
-    enhanced_state.current_pc = cpu_state.pc;
+    enhanced_state.current_pc = pc;
 
     enhanced_state
 }
@@ -2607,8 +2617,8 @@ fn main() {
             }
         }
 
-        // Update debug info if debug tab is visible
-        if egui_app.tab_manager.debug_visible {
+        // Update debug info only if debug tab is actually active (not just visible)
+        if egui_app.tab_manager.active_tab == egui_ui::Tab::Debug {
             use system_adapter::SystemDebugInfo;
             let debug_info = match &sys {
                 EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
