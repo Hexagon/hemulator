@@ -135,6 +135,7 @@ mod cpu;
 mod riot;
 mod tia;
 pub mod tia_renderer;
+mod timing_mode;
 mod video_mode;
 
 use bus::Atari2600Bus;
@@ -144,6 +145,7 @@ use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
 use tia_renderer::{SoftwareTiaRenderer, TiaRenderer};
+pub use timing_mode::TimingMode;
 pub use video_mode::VideoMode;
 
 #[derive(Debug, Error)]
@@ -162,6 +164,8 @@ pub struct Atari2600System {
     cycles: u64,
     renderer: Box<dyn TiaRenderer>,
     video_mode: VideoMode,
+    #[allow(dead_code)] // Stored for future use and API consistency
+    timing_mode: TimingMode,
 }
 
 impl Default for Atari2600System {
@@ -171,14 +175,19 @@ impl Default for Atari2600System {
 }
 
 impl Atari2600System {
-    /// Create a new Atari 2600 system with default NTSC video mode
+    /// Create a new Atari 2600 system with default NTSC video mode and cycle-accurate timing
     pub fn new() -> Self {
-        Self::with_video_mode(VideoMode::default())
+        Self::with_video_mode_and_timing(VideoMode::default(), TimingMode::default())
     }
 
-    /// Create a new Atari 2600 system with specified video mode
+    /// Create a new Atari 2600 system with specified video mode and default timing
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
-        let bus = Atari2600Bus::with_video_mode(video_mode);
+        Self::with_video_mode_and_timing(video_mode, TimingMode::default())
+    }
+
+    /// Create a new Atari 2600 system with specified video mode and timing mode
+    pub fn with_video_mode_and_timing(video_mode: VideoMode, timing_mode: TimingMode) -> Self {
+        let bus = Atari2600Bus::with_video_mode_and_timing(video_mode, timing_mode);
         let cpu = Atari2600Cpu::new(bus);
 
         Self {
@@ -186,6 +195,7 @@ impl Atari2600System {
             cycles: 0,
             renderer: Box::new(SoftwareTiaRenderer::new()),
             video_mode,
+            timing_mode,
         }
     }
 
@@ -1339,6 +1349,61 @@ mod tests {
                     scanline, bar, color1, color2, color3
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_cycle_accurate_timing_mode() {
+        let sys = Atari2600System::with_video_mode_and_timing(
+            VideoMode::default(),
+            TimingMode::CycleAccurate,
+        );
+
+        // Verify system was created successfully
+        assert_eq!(sys.cycles, 0);
+        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
+    }
+
+    #[test]
+    fn test_frame_based_timing_mode() {
+        let sys = Atari2600System::with_video_mode_and_timing(
+            VideoMode::default(),
+            TimingMode::FrameBased,
+        );
+
+        // Verify system was created successfully
+        assert_eq!(sys.cycles, 0);
+        assert_eq!(sys.timing_mode, TimingMode::FrameBased);
+    }
+
+    #[test]
+    fn test_default_timing_mode_is_cycle_accurate() {
+        let sys = Atari2600System::new();
+        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
+    }
+
+    #[test]
+    fn test_both_timing_modes_produce_frames() {
+        // Test that both timing modes can execute and produce frames
+        for timing_mode in [TimingMode::CycleAccurate, TimingMode::FrameBased] {
+            let mut sys =
+                Atari2600System::with_video_mode_and_timing(VideoMode::default(), timing_mode);
+
+            // Load a minimal ROM
+            let rom = vec![0xFF; 4096];
+            sys.mount("Cartridge", &rom).unwrap();
+
+            // Execute one frame - should not panic
+            let frame = sys.step_frame();
+            assert!(
+                frame.is_ok(),
+                "Failed to produce frame with {:?} timing mode",
+                timing_mode
+            );
+
+            let frame = frame.unwrap();
+            assert_eq!(frame.width, 160);
+            assert_eq!(frame.height, 192);
         }
     }
 }
