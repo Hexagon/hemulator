@@ -26,7 +26,7 @@
 //!
 //! The PSG generates 44.1 kHz stereo audio by:
 //!
-//! 1. Clocking the PSG at CPU speed (~3.58 MHz NTSC or ~3.55 MHz PAL)
+//! 1. Clocking the PSG at SMS CPU speed (3.579545 MHz NTSC or 3.546894 MHz PAL)
 //! 2. Mixing all 4 channels using exponential volume curve
 //! 3. Downsampling to the target sample rate (44.1 kHz)
 //!
@@ -39,15 +39,18 @@ use emu_core::logging::{log, LogCategory, LogLevel};
 /// SMS PSG with proper CPU-cycle-based audio generation
 ///
 /// This wrapper provides cycle-accurate PSG emulation by clocking
-/// the underlying SN76489 chip at CPU speed and downsampling to
+/// the underlying SN76489 chip at SMS CPU speed and downsampling to
 /// the target audio sample rate.
 ///
 /// # Timing
 ///
-/// The PSG runs at CPU clock speed:
+/// The PSG runs at SMS CPU clock speed:
 ///
 /// - NTSC: 3.579545 MHz
 /// - PAL: 3.546894 MHz
+///
+/// Note: These are different from NES clock speeds (~1.79 MHz).
+/// The SMS runs at exactly double the NES clock rate.
 ///
 /// Audio is downsampled to 44.1 kHz by accumulating CPU cycles
 /// and clocking the PSG multiple times per audio sample.
@@ -79,9 +82,17 @@ impl SmsPsg {
     }
 
     /// Set timing mode (NTSC/PAL)
+    ///
+    /// This updates the timing used for CPU-cycle-to-sample conversion
+    /// without recreating the underlying PSG, so audio state (registers,
+    /// phase, LFSR, etc.) is preserved.
     pub fn set_timing(&mut self, timing: TimingMode) {
-        self.timing = timing;
-        self.psg = Sn76489Psg::new(timing);
+        if self.timing != timing {
+            self.timing = timing;
+            // Reset cycle accumulator so fractional cycles don't carry across
+            // between different CPU clock rates (e.g., NTSC <-> PAL).
+            self.cycle_accum = 0.0;
+        }
     }
 
     /// Write a byte to the PSG
@@ -114,7 +125,11 @@ impl SmsPsg {
     /// 3. Average the output over those cycles
     pub fn generate_samples(&mut self, sample_count: usize) -> Vec<i16> {
         const SAMPLE_HZ: f64 = 44_100.0;
-        let cpu_hz = self.timing.cpu_clock_hz();
+        // SMS CPU clock rates (not the same as NES!)
+        let cpu_hz = match self.timing {
+            TimingMode::Ntsc => 3_579_545.0, // SMS NTSC
+            TimingMode::Pal => 3_546_894.0,  // SMS PAL
+        };
         let cycles_per_sample = cpu_hz / SAMPLE_HZ;
 
         let mut out = Vec::with_capacity(sample_count);

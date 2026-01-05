@@ -11,7 +11,7 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
   - 1 noise generator (16-bit LFSR for Sega variant)
   - 4-bit volume control per channel (0=max, 15=mute)
   - Exponential volume curve (~-2dB per step)
-  - Proper downsampling from CPU speed (~3.58 MHz) to 44.1 kHz
+  - Proper downsampling from SMS CPU speed (3.579545 MHz NTSC / 3.546894 MHz PAL) to 44.1 kHz
   - NTSC and PAL timing support
 - VDP (Video Display Processor) with:
   - Tilemap and sprite rendering
@@ -146,8 +146,8 @@ Current test coverage:
 - ✅ PSG: audio generation, volume control, tone/noise channels, timing modes, cycle accuracy (9 tests)
 - ✅ VDP: register writes, VRAM access, color decoding, interrupts, sprite flags (8 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
-- ✅ System: creation, reset, ROM loading, frame stepping, interrupts (8 tests)
-- ✅ Total: 28 tests passing
+- ✅ System: creation, reset, ROM loading, frame stepping, interrupts (10 tests)
+- ✅ Total: 30 tests passing
 
 Run tests with:
 ```bash
