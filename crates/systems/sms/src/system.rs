@@ -1,8 +1,8 @@
 //! Sega Master System main system implementation
 
 use crate::bus::SmsMemory;
+use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
-use emu_core::apu::{AudioChip, Sn76489Psg, TimingMode};
 use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
@@ -27,7 +27,7 @@ pub struct SmsSystem {
 
     // Shared components
     vdp: Rc<RefCell<Vdp>>,
-    psg: Rc<RefCell<Sn76489Psg>>,
+    psg: Rc<RefCell<SmsPsg>>,
 
     // Timing
     cycles: u64,
@@ -38,7 +38,7 @@ impl SmsSystem {
     pub fn new() -> Self {
         // Create shared components
         let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
 
         // Create empty ROM
         let rom = vec![0; 0x8000];
@@ -207,6 +207,13 @@ impl SmsSystem {
     /// the SN76489 PSG audio chip.
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         self.psg.borrow_mut().generate_samples(count)
+    }
+
+    /// Set timing mode (NTSC/PAL) for the PSG
+    ///
+    /// This updates the PSG's clock rate to match the selected timing mode.
+    pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
+        self.psg.borrow_mut().set_timing(timing);
     }
 }
 
