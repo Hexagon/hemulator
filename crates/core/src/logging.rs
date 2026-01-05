@@ -103,21 +103,25 @@ pub enum LogCategory {
     Stubs,
 }
 
-/// Rate limiter for controlling log output frequency per category
+/// Rate limiter for controlling log output frequency per category and level
 ///
 /// Uses a sliding window algorithm to track log timestamps and enforce
-/// a maximum rate of logs per second.
+/// a maximum rate of logs per second. Rate limiting is applied independently
+/// for each (category, level) combination, ensuring that high-frequency trace
+/// logs don't prevent important error logs from being shown, and that CPU logs
+/// don't rate-limit PPU logs.
 struct RateLimiter {
     /// Maximum logs allowed per second (atomic for dynamic updates)
     max_logs_per_second: AtomicUsize,
     /// Sliding window duration (1 second)
     window_duration: Duration,
-    /// Timestamps of recent logs (one queue per category)
-    timestamps: Mutex<[VecDeque<Instant>; 6]>,
-    /// Counter for dropped messages per category
-    dropped_counts: Mutex<[usize; 6]>,
-    /// Last time we reported dropped messages per category
-    last_drop_report: Mutex<[Option<Instant>; 6]>,
+    /// Timestamps of recent logs (one queue per category-level combination)
+    /// 6 categories × 5 levels (Error through Trace) = 30 buckets
+    timestamps: Mutex<[VecDeque<Instant>; 30]>,
+    /// Counter for dropped messages per category-level combination
+    dropped_counts: Mutex<[usize; 30]>,
+    /// Last time we reported dropped messages per category-level combination
+    last_drop_report: Mutex<[Option<Instant>; 30]>,
 }
 
 impl RateLimiter {
@@ -133,9 +137,33 @@ impl RateLimiter {
                 VecDeque::new(),
                 VecDeque::new(),
                 VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
+                VecDeque::new(),
             ]),
-            dropped_counts: Mutex::new([0; 6]),
-            last_drop_report: Mutex::new([None; 6]),
+            dropped_counts: Mutex::new([0; 30]),
+            last_drop_report: Mutex::new([None; 30]),
         }
     }
 
@@ -149,23 +177,36 @@ impl RateLimiter {
         self.max_logs_per_second.load(Ordering::Relaxed)
     }
 
-    /// Get the category index for array access
-    fn category_index(category: LogCategory) -> usize {
-        match category {
+    /// Get the bucket index for a (category, level) combination
+    /// Each category gets 5 slots (for Error, Warn, Info, Debug, Trace)
+    /// Off level should never reach here as it's filtered earlier
+    fn bucket_index(category: LogCategory, level: LogLevel) -> usize {
+        let category_idx = match category {
             LogCategory::CPU => 0,
             LogCategory::Bus => 1,
             LogCategory::PPU => 2,
             LogCategory::APU => 3,
             LogCategory::Interrupts => 4,
             LogCategory::Stubs => 5,
-        }
+        };
+
+        let level_idx = match level {
+            LogLevel::Off => 0, // Should never happen, but map to 0 for safety
+            LogLevel::Error => 0,
+            LogLevel::Warn => 1,
+            LogLevel::Info => 2,
+            LogLevel::Debug => 3,
+            LogLevel::Trace => 4,
+        };
+
+        category_idx * 5 + level_idx
     }
 
     /// Check if a log should be allowed based on rate limits
     /// Returns (allowed, dropped_count) where dropped_count is Some(n) if we should report drops
-    fn should_allow(&self, category: LogCategory) -> (bool, Option<usize>) {
+    fn should_allow(&self, category: LogCategory, level: LogLevel) -> (bool, Option<usize>) {
         let now = Instant::now();
-        let idx = Self::category_index(category);
+        let idx = Self::bucket_index(category, level);
 
         let mut timestamps = self.timestamps.lock().unwrap();
         let mut dropped_counts = self.dropped_counts.lock().unwrap();
@@ -418,8 +459,13 @@ impl LogConfig {
 /// # Rate Limiting
 ///
 /// To prevent log flooding, this function enforces a rate limit of 60 logs per second
-/// per category. When the rate limit is exceeded, logs are dropped and a summary
-/// message is periodically emitted.
+/// per (category, level) combination. This ensures that:
+/// - High-frequency trace logs don't prevent important error logs from being shown
+/// - CPU logs don't rate-limit PPU logs
+/// - Different log levels within the same category are independently rate-limited
+///
+/// When the rate limit is exceeded, logs are dropped and a summary message is
+/// periodically emitted showing which (category, level) combination was affected.
 ///
 /// # Arguments
 ///
@@ -449,15 +495,15 @@ where
 {
     let config = LogConfig::global();
     if config.should_log(category, level) {
-        // Check rate limit before evaluating the message
-        let (allowed, dropped_count) = config.rate_limiter.should_allow(category);
+        // Check rate limit before evaluating the message (per category and level)
+        let (allowed, dropped_count) = config.rate_limiter.should_allow(category, level);
 
         // If we have dropped messages to report, emit a warning
         if let Some(count) = dropped_count {
             if count > 0 {
                 let warning = format!(
-                    "[{:?}] WARNING: Rate limit exceeded, {} log message(s) dropped in the last second",
-                    category, count
+                    "[{:?} {:?}] WARNING: Rate limit exceeded, {} log message(s) dropped in the last second",
+                    category, level, count
                 );
                 config.write_message(&warning);
             }
@@ -594,9 +640,9 @@ mod tests {
     fn test_rate_limiter_allows_within_limit() {
         let limiter = RateLimiter::new(60);
 
-        // Should allow up to 60 logs
+        // Should allow up to 60 logs per (category, level) combination
         for _ in 0..60 {
-            let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+            let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
             assert!(allowed, "Should allow logs within the rate limit");
         }
     }
@@ -605,13 +651,13 @@ mod tests {
     fn test_rate_limiter_blocks_over_limit() {
         let limiter = RateLimiter::new(60);
 
-        // Fill up the rate limit
+        // Fill up the rate limit for CPU Trace
         for _ in 0..60 {
-            limiter.should_allow(LogCategory::CPU);
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         }
 
         // The 61st log should be blocked
-        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         assert!(!allowed, "Should block logs exceeding the rate limit");
     }
 
@@ -619,18 +665,39 @@ mod tests {
     fn test_rate_limiter_per_category() {
         let limiter = RateLimiter::new(60);
 
-        // Fill up CPU category
+        // Fill up CPU category at Trace level
         for _ in 0..60 {
-            limiter.should_allow(LogCategory::CPU);
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         }
 
-        // CPU should be blocked
-        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
-        assert!(!allowed, "CPU category should be blocked");
+        // CPU Trace should be blocked
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
+        assert!(!allowed, "CPU Trace category should be blocked");
 
-        // But Bus should still be allowed
-        let (allowed, _) = limiter.should_allow(LogCategory::Bus);
-        assert!(allowed, "Bus category should still be allowed");
+        // But Bus Trace should still be allowed
+        let (allowed, _) = limiter.should_allow(LogCategory::Bus, LogLevel::Trace);
+        assert!(allowed, "Bus Trace category should still be allowed");
+    }
+
+    #[test]
+    fn test_rate_limiter_per_level() {
+        let limiter = RateLimiter::new(60);
+
+        // Fill up CPU Trace level
+        for _ in 0..60 {
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
+        }
+
+        // CPU Trace should be blocked
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
+        assert!(!allowed, "CPU Trace should be blocked");
+
+        // But CPU Error should still be allowed (different level)
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Error);
+        assert!(
+            allowed,
+            "CPU Error should still be allowed (different level)"
+        );
     }
 
     #[test]
@@ -641,18 +708,18 @@ mod tests {
 
         // Fill up the limit
         for _ in 0..5 {
-            limiter.should_allow(LogCategory::CPU);
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         }
 
         // Should be blocked
-        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         assert!(!allowed);
 
         // Wait for the window to slide (1.1 seconds to ensure we're past the window)
         sleep(Duration::from_millis(1100));
 
         // Should be allowed again after window slides
-        let (allowed, _) = limiter.should_allow(LogCategory::CPU);
+        let (allowed, _) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         assert!(allowed, "Should allow logs after sliding window expires");
     }
 
@@ -662,19 +729,19 @@ mod tests {
 
         // Fill up the limit
         for _ in 0..5 {
-            limiter.should_allow(LogCategory::CPU);
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         }
 
         // Drop some logs
         for _ in 0..10 {
-            limiter.should_allow(LogCategory::CPU);
+            limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         }
 
         // Wait for window to slide
         std::thread::sleep(Duration::from_millis(1100));
 
         // Next log should report dropped count
-        let (allowed, dropped) = limiter.should_allow(LogCategory::CPU);
+        let (allowed, dropped) = limiter.should_allow(LogCategory::CPU, LogLevel::Trace);
         assert!(allowed, "Should be allowed after window slides");
         assert!(dropped.is_some(), "Should report dropped count");
         // The count might be 9 or 10 depending on timing of the drop report
