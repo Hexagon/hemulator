@@ -1315,6 +1315,153 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 5
             }
 
+            // TCALL family (Table calls) - 16 opcodes
+            // TCALL uses table at $FFDE (for TCALL 0) and decrements by 2 for each
+            0x01 => { let addr = self.read_word(0xFFDE); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x11 => { let addr = self.read_word(0xFFDC); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x21 => { let addr = self.read_word(0xFFDA); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x31 => { let addr = self.read_word(0xFFD8); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x41 => { let addr = self.read_word(0xFFD6); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x51 => { let addr = self.read_word(0xFFD4); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x61 => { let addr = self.read_word(0xFFD2); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x71 => { let addr = self.read_word(0xFFD0); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x81 => { let addr = self.read_word(0xFFCE); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0x91 => { let addr = self.read_word(0xFFCC); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xA1 => { let addr = self.read_word(0xFFCA); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xB1 => { let addr = self.read_word(0xFFC8); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xC1 => { let addr = self.read_word(0xFFC6); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xD1 => { let addr = self.read_word(0xFFC4); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xE1 => { let addr = self.read_word(0xFFC2); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+            0xF1 => { let addr = self.read_word(0xFFC0); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = addr; 8 }
+
+            // SET1/CLR1 - Set/clear bit in direct page (8 variants each)
+            0x02 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x01; self.write(addr, val); 4 }
+            0x22 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x02; self.write(addr, val); 4 }
+            0x42 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x04; self.write(addr, val); 4 }
+            0x62 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x08; self.write(addr, val); 4 }
+            0x82 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x10; self.write(addr, val); 4 }
+            0xA2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x20; self.write(addr, val); 4 }
+            0xC2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x40; self.write(addr, val); 4 }
+            0xE2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) | 0x80; self.write(addr, val); 4 }
+
+            0x12 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x01; self.write(addr, val); 4 }
+            0x32 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x02; self.write(addr, val); 4 }
+            0x52 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x04; self.write(addr, val); 4 }
+            0x72 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x08; self.write(addr, val); 4 }
+            0x92 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x10; self.write(addr, val); 4 }
+            0xB2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x20; self.write(addr, val); 4 }
+            0xD2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x40; self.write(addr, val); 4 }
+            0xF2 => { let addr = self.direct_page() | (self.fetch_byte() as u16); let val = self.read(addr) & !0x80; self.write(addr, val); 4 }
+
+            // BBS/BBC - Branch if bit set/clear (8 variants each)
+            0x03 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x01) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x23 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x02) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x43 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x04) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x63 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x08) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x83 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x10) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xA3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x20) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xC3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x40) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xE3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x80) != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+
+            0x13 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x01) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x33 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x02) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x53 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x04) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x73 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x08) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0x93 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x10) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xB3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x20) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xD3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x40) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+            0xF3 => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); if (self.read(addr) & 0x80) == 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+
+            // More MOV variants and other critical opcodes
+            // MOV A, (dp)+Y
+            0xF7 => {
+                let dp = self.fetch_byte() as u16;
+                let addr_lo = self.read(dp);
+                let addr_hi = self.read(dp.wrapping_add(1));
+                let base_addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
+                let addr = base_addr.wrapping_add(self.y as u16);
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                6
+            }
+
+            // MOV A, (X)
+            0xE6 => {
+                self.a = self.read(self.x as u16);
+                self.update_nz(self.a);
+                3
+            }
+
+            // MOV dp, dp
+            0xFA => {
+                let src_dp = self.fetch_byte();
+                let dst_dp = self.fetch_byte();
+                let val = self.read(src_dp as u16);
+                self.write(dst_dp as u16, val);
+                5
+            }
+
+            // OR/AND dp, dp
+            0x09 => {
+                let src_dp = self.fetch_byte();
+                let dst_dp = self.fetch_byte();
+                let src_val = self.read(src_dp as u16);
+                let dst_val = self.read(dst_dp as u16);
+                let result = dst_val | src_val;
+                self.write(dst_dp as u16, result);
+                self.update_nz(result);
+                6
+            }
+
+            0x29 => {
+                let src_dp = self.fetch_byte();
+                let dst_dp = self.fetch_byte();
+                let src_val = self.read(src_dp as u16);
+                let dst_val = self.read(dst_dp as u16);
+                let result = dst_val & src_val;
+                self.write(dst_dp as u16, result);
+                self.update_nz(result);
+                6
+            }
+
+            // OR/AND dp, #imm
+            0x18 => {
+                let imm = self.fetch_byte();
+                let dp = self.fetch_byte();
+                let val = self.read(dp as u16);
+                let result = val | imm;
+                self.write(dp as u16, result);
+                self.update_nz(result);
+                5
+            }
+
+            0x38 => {
+                let imm = self.fetch_byte();
+                let dp = self.fetch_byte();
+                let val = self.read(dp as u16);
+                let result = val & imm;
+                self.write(dp as u16, result);
+                self.update_nz(result);
+                5
+            }
+
+            // ADC/SBC more variants
+            0x86 => { let val = self.read(self.x as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 3 }
+            0x87 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = addr.wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 6 }
+            0x94 => { let dp = self.fetch_byte(); let val = self.read(dp.wrapping_add(self.x) as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 4 }
+            0x95 => { let addr = self.fetch_word().wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 5 }
+            0x96 => { let addr = self.fetch_word().wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 5 }
+            0x97 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 6 }
+            0x99 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = dst_val as u16 + src_val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
+
+            0xA6 => { let val = self.read(self.x as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 3 }
+            0xA7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = addr.wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 6 }
+            0xB4 => { let dp = self.fetch_byte(); let val = self.read(dp.wrapping_add(self.x) as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 4 }
+            0xB5 => { let addr = self.fetch_word().wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 5 }
+            0xB6 => { let addr = self.fetch_word().wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 5 }
+            0xB7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 6 }
+            0xB9 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = dst_val as i16 - src_val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
+
             // Unknown opcode - log and treat as NOP
             _ => {
                 log(LogCategory::Bus, LogLevel::Warn, || {
