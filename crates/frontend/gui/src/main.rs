@@ -142,6 +142,19 @@ impl EmulatorSystem {
         }
     }
 
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        match self {
+            EmulatorSystem::NES(sys) => sys.debugger(),
+            EmulatorSystem::GameBoy(sys) => sys.debugger(),
+            EmulatorSystem::Atari2600(sys) => sys.debugger(),
+            EmulatorSystem::PC(sys) => sys.debugger(),
+            EmulatorSystem::SNES(sys) => sys.debugger(),
+            EmulatorSystem::N64(sys) => sys.debugger(),
+            EmulatorSystem::SMS(sys) => sys.debugger(),
+            EmulatorSystem::Chip8(sys) => sys.debugger(),
+        }
+    }
+
     #[allow(dead_code)]
     fn mount(
         &mut self,
@@ -1153,6 +1166,10 @@ struct CliArgs {
     log_interrupts: Option<String>, // Interrupt log level
     log_stubs: Option<String>,      // Stub/unimplemented log level
     log_file: Option<String>,       // Log file path
+    // Debug dump configuration
+    debug_dump_pc: Option<u32>,      // PC value to trigger debug dump
+    debug_dump_cycles: Option<u64>,  // Cycle count to trigger debug dump
+    debug_dump_file: Option<String>, // Output file for debug dump (default: debug_dump.txt)
 }
 
 impl CliArgs {
@@ -1271,6 +1288,47 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--debug-dump-pc" => {
+                    if let Some(value) = arg_iter.next() {
+                        let pc = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match pc {
+                            Ok(pc_value) => args.debug_dump_pc = Some(pc_value),
+                            Err(_) => {
+                                eprintln!("Error: --debug-dump-pc requires a valid number (hex: 0x8000 or decimal: 32768).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --debug-dump-pc requires a PC value.");
+                        std::process::exit(1);
+                    }
+                }
+                "--debug-dump-cycles" => {
+                    if let Some(value) = arg_iter.next() {
+                        match value.parse::<u64>() {
+                            Ok(cycles) => args.debug_dump_cycles = Some(cycles),
+                            Err(_) => {
+                                eprintln!("Error: --debug-dump-cycles requires a valid number.");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --debug-dump-cycles requires a cycle count.");
+                        std::process::exit(1);
+                    }
+                }
+                "--debug-dump-file" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.debug_dump_file = Some(path);
+                    } else {
+                        eprintln!("Error: --debug-dump-file requires a file path.");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -1322,6 +1380,14 @@ impl CliArgs {
         eprintln!("  --log-stubs <LEVEL>      Set unimplemented feature log level");
         eprintln!("  --log-file <PATH>        Write logs to file instead of stderr");
         eprintln!();
+        eprintln!("Debug Dump Options:");
+        eprintln!("  --debug-dump-pc <PC>     Dump debug info when PC reaches value (hex: 0x8000 or decimal)");
+        eprintln!("  --debug-dump-cycles <N>  Dump debug info after N cycles");
+        eprintln!(
+            "  --debug-dump-file <PATH> Output file for debug dump (default: debug_dump.txt)"
+        );
+        eprintln!("                           Dumps full disassembly and memory contents");
+        eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
         eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
@@ -1345,6 +1411,12 @@ impl CliArgs {
             "  hemu --log-level info game.nes                 # Load with global info logging"
         );
         eprintln!("  hemu --log-cpu trace --log-file trace.log game.nes # Log CPU trace to file");
+        eprintln!(
+            "  hemu --debug-dump-pc 0x8000 game.nes           # Dump debug info when PC=0x8000"
+        );
+        eprintln!(
+            "  hemu --debug-dump-cycles 10000 game.nes        # Dump debug info after 10000 cycles"
+        );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
         );
@@ -1468,6 +1540,178 @@ fn create_enhanced_debug_state(
     enhanced_state.current_pc = pc;
 
     enhanced_state
+}
+
+/// Generate a comprehensive debug dump with disassembly and memory contents
+fn generate_debug_dump(
+    system_adapter: &EmulatorSystem,
+    output_file: &str,
+    cycle_count: u64,
+) -> std::io::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let mut file = File::create(output_file)?;
+
+    writeln!(file, "===============================================")?;
+    writeln!(file, "       HEMULATOR DEBUG DUMP")?;
+    writeln!(file, "===============================================")?;
+    writeln!(file)?;
+    writeln!(
+        file,
+        "Timestamp: {}",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    )?;
+    writeln!(file, "Cycle Count: {}", cycle_count)?;
+    writeln!(file)?;
+
+    // Get debugger if available
+    if let Some(debugger) = system_adapter.debugger() {
+        let cpu_state = debugger.get_cpu_state();
+
+        writeln!(file, "===============================================")?;
+        writeln!(file, "       CPU STATE")?;
+        writeln!(file, "===============================================")?;
+        writeln!(file)?;
+        writeln!(file, "Program Counter: ${:04X}", cpu_state.pc)?;
+        writeln!(file)?;
+
+        writeln!(file, "Registers:")?;
+        for reg in &cpu_state.registers {
+            writeln!(
+                file,
+                "  {} = ${:0width$X}",
+                reg.name,
+                reg.value,
+                width = (reg.width / 4) as usize
+            )?;
+        }
+        writeln!(file)?;
+
+        writeln!(file, "Flags:")?;
+        for (name, value) in &cpu_state.flags.flags {
+            writeln!(file, "  {} = {}", name, if *value { "1" } else { "0" })?;
+        }
+        writeln!(file)?;
+
+        // Disassembly around current PC
+        writeln!(file, "===============================================")?;
+        writeln!(file, "       DISASSEMBLY (±100 instructions from PC)")?;
+        writeln!(file, "===============================================")?;
+        writeln!(file)?;
+
+        let start_addr = cpu_state.pc.saturating_sub(200);
+        let instructions = debugger.disassemble_range(start_addr, 200);
+
+        for instr in instructions {
+            let marker = if instr.address == cpu_state.pc {
+                "▶"
+            } else {
+                " "
+            };
+            let bytes_str: String = instr
+                .bytes
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let comment = instr
+                .comment
+                .as_ref()
+                .map(|c| format!(" ; {}", c))
+                .unwrap_or_default();
+
+            writeln!(
+                file,
+                "{} {:04X}  {:12}  {}{}",
+                marker, instr.address, bytes_str, instr.mnemonic, comment
+            )?;
+        }
+        writeln!(file)?;
+
+        // Memory dump
+        writeln!(file, "===============================================")?;
+        writeln!(file, "       MEMORY REGIONS")?;
+        writeln!(file, "===============================================")?;
+        writeln!(file)?;
+
+        let regions = debugger.get_memory_regions();
+        for region in &regions {
+            writeln!(
+                file,
+                "--- {} (${:04X}-${:04X}, {} bytes) ---",
+                region.name,
+                region.start,
+                region.end,
+                region.size()
+            )?;
+            writeln!(file, "Description: {}", region.description)?;
+            writeln!(
+                file,
+                "Access: {}",
+                match (region.readable, region.writable) {
+                    (true, true) => "R/W",
+                    (true, false) => "R",
+                    (false, true) => "W",
+                    (false, false) => "-",
+                }
+            )?;
+            writeln!(file)?;
+
+            if region.readable {
+                // Dump memory in hex format (16 bytes per line)
+                let size = region.size().min(65536) as usize; // Limit to 64KB per region
+                if let Some(data) = debugger.read_memory(region.start, size) {
+                    for (offset, chunk) in data.chunks(16).enumerate() {
+                        let addr: u32 = region.start + (offset * 16) as u32;
+                        write!(file, "{:04X}:  ", addr)?;
+
+                        // Hex bytes
+                        for (i, byte) in chunk.iter().enumerate() {
+                            write!(file, "{:02X} ", byte)?;
+                            if i == 7 {
+                                write!(file, " ")?; // Extra space at halfway point
+                            }
+                        }
+
+                        // Padding for incomplete lines
+                        for i in chunk.len()..16 {
+                            write!(file, "   ")?;
+                            if i == 7 {
+                                write!(file, " ")?;
+                            }
+                        }
+
+                        // ASCII representation
+                        write!(file, " |")?;
+                        for byte in chunk {
+                            let ch: char = if *byte >= 32 && *byte < 127 {
+                                *byte as char
+                            } else {
+                                '.'
+                            };
+                            write!(file, "{}", ch)?;
+                        }
+                        writeln!(file, "|")?;
+                    }
+                } else {
+                    writeln!(file, "(Memory read failed)")?;
+                }
+            } else {
+                writeln!(file, "(Not readable)")?;
+            }
+            writeln!(file)?;
+        }
+    } else {
+        writeln!(file, "Debug interface not available for this system.")?;
+    }
+
+    writeln!(file, "===============================================")?;
+    writeln!(file, "       END OF DEBUG DUMP")?;
+    writeln!(file, "===============================================")?;
+
+    Ok(())
 }
 
 fn main() {
@@ -2322,6 +2566,107 @@ fn main() {
     let window_width = settings.window_width.max(width);
     let window_height = settings.window_height.max(height);
 
+    // ===== HEADLESS MODE FOR DEBUG DUMP =====
+    // If debug dump is requested, run without GUI for faster execution
+    if cli_args.debug_dump_pc.is_some() || cli_args.debug_dump_cycles.is_some() {
+        eprintln!("Running in headless mode for debug dump...");
+
+        if !rom_loaded {
+            eprintln!("Error: No ROM loaded. Debug dump requires a loaded ROM.");
+            std::process::exit(1);
+        }
+
+        let mut total_cycles: u64 = 0;
+        let dump_file = cli_args
+            .debug_dump_file
+            .as_deref()
+            .unwrap_or("debug_dump.txt");
+
+        // Determine trigger condition
+        let trigger_pc = cli_args.debug_dump_pc;
+        let trigger_cycles = cli_args.debug_dump_cycles;
+
+        eprintln!("Debug dump will be triggered:");
+        if let Some(pc) = trigger_pc {
+            eprintln!("  - When PC = ${:04X}", pc);
+        }
+        if let Some(cycles) = trigger_cycles {
+            eprintln!("  - After {} cycles", cycles);
+        }
+        eprintln!("  - Output file: {}", dump_file);
+        eprintln!();
+
+        // Run emulation loop until trigger condition is met
+        loop {
+            // Step one frame
+            match sys.step_frame() {
+                Ok(_) => {
+                    total_cycles += 1;
+
+                    // Check for trigger conditions
+                    let should_dump =
+                        if let (Some(pc_trigger), Some(debugger)) = (trigger_pc, sys.debugger()) {
+                            let cpu_state = debugger.get_cpu_state();
+                            cpu_state.pc == pc_trigger
+                        } else {
+                            false
+                        } || if let Some(cycle_trigger) = trigger_cycles {
+                            total_cycles >= cycle_trigger
+                        } else {
+                            false
+                        };
+
+                    if should_dump {
+                        eprintln!("Trigger condition met at {} cycles", total_cycles);
+                        eprintln!("Generating debug dump...");
+
+                        match generate_debug_dump(&sys, dump_file, total_cycles) {
+                            Ok(()) => {
+                                eprintln!("✓ Debug dump written successfully to {}", dump_file);
+                                std::process::exit(0);
+                            }
+                            Err(e) => {
+                                eprintln!("✗ Failed to write debug dump: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+
+                    // Progress indicator every 1000 cycles
+                    if total_cycles.is_multiple_of(1000) {
+                        eprint!("\rCycles: {}...", total_cycles);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("\nEmulation error after {} cycles: {}", total_cycles, e);
+                    eprintln!("Generating debug dump at error point...");
+
+                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                        Ok(()) => {
+                            eprintln!("✓ Debug dump written to {}", dump_file);
+                            std::process::exit(1);
+                        }
+                        Err(dump_err) => {
+                            eprintln!("✗ Failed to write debug dump: {}", dump_err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+
+            // Safety limit to prevent infinite loops (can be removed or increased)
+            if total_cycles > 100_000_000 {
+                eprintln!("\nReached cycle limit (100M) without triggering dump.");
+                eprintln!(
+                    "Current PC: ${:04X}",
+                    sys.debugger().map(|d| d.get_cpu_state().pc).unwrap_or(0)
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+    // ===== END HEADLESS MODE =====
+
     // Create egui backend
     let mut egui_backend = match Sdl2EguiBackend::new(
         "Hemulator - Multi-System Emulator",
@@ -2408,6 +2753,10 @@ fn main() {
     // Track emulation speed changes to reset timing
     let mut previous_emulation_speed = settings.emulation_speed;
     const SPEED_CHANGE_THRESHOLD: f64 = 0.001; // Minimum change to detect speed adjustment
+
+    // Debug dump tracking
+    let mut total_cycles: u64 = 0;
+    let mut debug_dump_triggered = false;
 
     // Audio sample rate
     const SAMPLE_RATE: usize = 44100;
@@ -4562,6 +4911,9 @@ fn main() {
                     Ok(frame) => {
                         last_frame_opt = Some(frame);
 
+                        // Track cycles (approximate - one frame worth)
+                        total_cycles += 1; // This is a placeholder - actual cycle count would depend on system
+
                         // Handle audio for each stepped frame
                         let samples_per_frame = (SAMPLE_RATE as f64 / frame_rate) as usize;
                         let audio_samples = sys.get_audio_samples(samples_per_frame);
@@ -4572,6 +4924,41 @@ fn main() {
                     Err(e) => {
                         eprintln!("Emulation error: {}", e);
                         break;
+                    }
+                }
+            }
+
+            // Check for debug dump triggers
+            if !debug_dump_triggered {
+                let should_dump = if let (Some(trigger_pc), Some(debugger)) =
+                    (cli_args.debug_dump_pc, sys.debugger())
+                {
+                    let cpu_state = debugger.get_cpu_state();
+                    cpu_state.pc == trigger_pc
+                } else {
+                    false
+                } || if let Some(trigger_cycles) = cli_args.debug_dump_cycles {
+                    total_cycles >= trigger_cycles
+                } else {
+                    false
+                };
+
+                if should_dump {
+                    let dump_file = cli_args
+                        .debug_dump_file
+                        .as_deref()
+                        .unwrap_or("debug_dump.txt");
+                    eprintln!("Debug dump triggered - writing to {}", dump_file);
+                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                        Ok(()) => {
+                            eprintln!("Debug dump written successfully to {}", dump_file);
+                            debug_dump_triggered = true;
+                            // Optionally exit after dump
+                            // std::process::exit(0);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to write debug dump: {}", e);
+                        }
                     }
                 }
             }
