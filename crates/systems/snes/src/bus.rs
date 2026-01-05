@@ -209,15 +209,16 @@ impl SnesBus {
         self.frame_cycle += cycles;
 
         // Clear APU port latch after the instruction completes
-        // We use a cycle-based heuristic: clear latch if it's been active for
-        // at least as many cycles as we just ticked (i.e., the instruction completed)
+        // The latch ensures atomic 16-bit reads across ports $2140-$2141
+        // We clear it after the instruction finishes (when tick_cycles is called)
+        // Using a minimum threshold of 2 cycles to ensure multi-byte reads complete
         if self.apu_port_latch_active.get() {
             let latch_age = self
                 .frame_cycle
                 .wrapping_sub(self.apu_port_latch_cycle.get());
-            // Clear if the latch has been active for at least as long as the current instruction
-            // This ensures multi-cycle instructions complete before the latch clears
-            if latch_age >= cycles {
+            // Clear if latch has been active for at least the current instruction's cycles
+            // AND at least 2 cycles to ensure 16-bit reads (2 sequential 8-bit reads) complete
+            if latch_age >= cycles.max(2) {
                 self.apu_port_latch_active.set(false);
                 log(LogCategory::Bus, LogLevel::Debug, || {
                     format!(
@@ -524,7 +525,7 @@ impl Memory65c816 for SnesBus {
                                     self.apu_port_latch[i as usize].set(spc700.read_port(i));
                                 }
                             } else {
-                                for i in 0..4 {
+                                for i in 0..4usize {
                                     self.apu_port_latch[i].set(self.apu_ports[i]);
                                 }
                             }
