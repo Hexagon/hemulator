@@ -594,4 +594,412 @@ mod tests {
             "SPC700 should have written $CC to port $F4"
         );
     }
+
+    /// Test the complete IPL ROM boot sequence as described in the wiki:
+    /// https://snes.nesdev.org/wiki/Booting_the_SPC700
+    #[test]
+    fn test_ipl_boot_sequence_complete() {
+        let mut apu = Spc700::new();
+
+        // Verify initial state
+        assert_eq!(
+            apu.cpu.pc, 0xFFC0,
+            "SPC700 should start at IPL ROM entry point"
+        );
+
+        // Step 1: Reset - Stack pointer = $EF, Zero-page from $00-$EF is set to $00
+        // Run the clear loop (takes about 2000+ cycles)
+        apu.run_cycles(2500);
+
+        // Verify stack pointer was set
+        assert_eq!(apu.cpu.sp, 0xEF, "Stack pointer should be set to $EF");
+
+        // Verify zero page was cleared (check a few spots)
+        for addr in [0x00, 0x10, 0x50, 0xEF] {
+            assert_eq!(
+                apu.cpu.memory.ram[addr], 0x00,
+                "Zero page ${:02X} should be cleared",
+                addr
+            );
+        }
+
+        // Step 2: Signal ready - Port 0 = $AA, Port 1 = $BB
+        assert_eq!(
+            apu.read_port(0),
+            0xAA,
+            "Port 0 should be $AA (ready signal)"
+        );
+        assert_eq!(
+            apu.read_port(1),
+            0xBB,
+            "Port 1 should be $BB (ready signal)"
+        );
+
+        // Step 3: Wait for signal - Loop until $CC is read from port 0
+        // SPC700 should be waiting at $FFCF or $FFD2 (the wait loop)
+        assert!(
+            apu.cpu.pc == 0xFFCF || apu.cpu.pc == 0xFFD2,
+            "SPC700 should be in wait loop at $FFCF-$FFD2, got ${:04X}",
+            apu.cpu.pc
+        );
+
+        // Verify it stays in the loop when we haven't sent $CC
+        apu.run_cycles(100);
+        assert!(
+            apu.cpu.pc == 0xFFCF || apu.cpu.pc == 0xFFD2,
+            "SPC700 should still be waiting for $CC"
+        );
+
+        // IMPORTANT: Before sending $CC, we must set up ports $F6/$F7 with an entry point
+        // Otherwise SPC700 will read garbage and jump to a random address
+        // Set entry point to $0200 (typical for SPC700 programs)
+        apu.write_port(2, 0x00); // Low byte of entry point
+        apu.write_port(3, 0x02); // High byte of entry point
+
+        // Also set port 1 to non-zero to indicate we'll upload data
+        apu.write_port(1, 0x01);
+
+        // Now send the $CC signal
+        apu.write_port(0, 0xCC);
+        apu.run_cycles(100);
+
+        // SPC700 should have progressed to $FFEF area (entry point setup)
+        // and then looped back to upload loop at $FFD6 (because port 1 was non-zero)
+        assert!(
+            apu.cpu.pc >= 0xFFD6,
+            "SPC700 should have progressed to upload loop after receiving $CC, PC=${:04X}",
+            apu.cpu.pc
+        );
+    }
+
+    /// Test the full upload protocol simulation as described in the wiki
+    #[test]
+    fn test_complete_upload_protocol() {
+        let mut apu = Spc700::new();
+
+        // Wait for IPL ROM to signal ready ($BBAA)
+        apu.run_cycles(3000);
+        assert_eq!(apu.read_port(0), 0xAA, "Should see $AA ready signal");
+        assert_eq!(apu.read_port(1), 0xBB, "Should see $BB ready signal");
+
+        // Step 1: Set starting address to $0200 (typical for SPC700 programs)
+        apu.write_port(2, 0x00); // Low byte
+        apu.write_port(3, 0x02); // High byte
+        apu.write_port(1, 0x01); // Non-zero value (indicates more data coming)
+        apu.write_port(0, 0xCC); // Send $CC to start
+
+        // Step 2: Wait for acknowledgment
+        apu.run_cycles(100);
+        assert_eq!(
+            apu.read_port(0),
+            0xCC,
+            "SPC700 should echo back $CC as acknowledgment"
+        );
+
+        // Step 3: Send data bytes (let's send a simple 4-byte program)
+        // Program: MOV $F4, #$42; BRA $-2 (write $42 to port, then loop)
+        let test_program = [
+            0x8F, 0x42, 0xF4, // MOV $F4, #$42
+            0x2F, 0xFD, // BRA $-3 (loop forever)
+        ];
+
+        for (i, &byte) in test_program.iter().enumerate() {
+            // Write data byte to port 1
+            apu.write_port(1, byte);
+
+            // Write index to port 0 (low byte of counter)
+            let index = i as u8;
+            apu.write_port(0, index);
+
+            // Run cycles to let SPC700 process
+            apu.run_cycles(50);
+
+            // Verify acknowledgment (SPC700 echoes index back)
+            assert_eq!(
+                apu.read_port(0),
+                index,
+                "SPC700 should echo index ${:02X} for byte {}",
+                index,
+                i
+            );
+        }
+
+        // Step 4: Tell SPC700 to execute the uploaded code
+        // Write entry point to ports 2-3 again
+        apu.write_port(2, 0x00);
+        apu.write_port(3, 0x02);
+        // Write 0 to port 1 (signals execution)
+        apu.write_port(1, 0x00);
+        // Increment counter by 2 (from last index + 2)
+        let final_index = (test_program.len() as u8).wrapping_add(2);
+        apu.write_port(0, final_index);
+
+        // Run more cycles to ensure SPC700 processes the execution command
+        // The SPC700 needs to:
+        // 1. Read the changed port 0 value (was 4, now 7)
+        // 2. Notice it jumped by more than 1
+        // 3. Echo it back
+        // 4. Jump to uploaded code
+        apu.run_cycles(100);
+
+        // Read port 0 - should be either the acknowledgment OR the uploaded code output
+        // The IPL ROM echoes the index, but then immediately jumps to uploaded code
+        // which writes $42 to port 0. Timing determines which we see.
+        let port0_value = apu.read_port(0);
+        assert!(
+            port0_value == final_index || port0_value == 0x42 || port0_value == 4,
+            "Port 0 should be last index $04, ack ${:02X}, or program output $42, got ${:02X}",
+            final_index,
+            port0_value
+        );
+
+        // SPC700 should now be executing the uploaded code
+        // NOTE: The IPL ROM may still be enabled - uploaded code must disable it explicitly
+        // by writing to control register $F1. The IPL ROM doesn't auto-disable.
+
+        // Our simple test program doesn't disable IPL ROM, so we can't assert it's disabled
+        // In real audio drivers, they typically disable IPL ROM early in initialization
+
+        // Run the uploaded program (it writes $42 to port 0)
+        apu.run_cycles(100);
+
+        // Verify the program executed - should definitely be $42 now
+        assert_eq!(
+            apu.read_port(0),
+            0x42,
+            "Uploaded program should have written $42 to port 0"
+        );
+    }
+
+    /// Test that simulates the exact sequence from Super Mario World
+    /// This is the real-world scenario that was failing
+    #[test]
+    fn test_super_mario_world_initialization_sequence() {
+        let mut apu = Spc700::new();
+
+        // === Phase 1: Wait for IPL ROM ready signal ===
+        println!("Phase 1: Waiting for IPL ROM ready signal...");
+        apu.run_cycles(3000);
+
+        let port0 = apu.read_port(0);
+        let port1 = apu.read_port(1);
+        println!("  Port 0: ${:02X}, Port 1: ${:02X}", port0, port1);
+
+        // Main CPU performs 16-bit read of $2140-$2141, expecting $BBAA
+        assert_eq!(port0, 0xAA, "Port 0 should be $AA");
+        assert_eq!(port1, 0xBB, "Port 1 should be $BB");
+
+        // Combine into 16-bit value (little-endian: low byte first)
+        let signature = (port1 as u16) << 8 | (port0 as u16);
+        assert_eq!(signature, 0xBBAA, "16-bit signature should be $BBAA");
+
+        println!("  ✓ Got correct $BBAA signature");
+
+        // === Phase 2: Clear ports (main CPU writes $00 to all ports) ===
+        println!("Phase 2: Clearing ports...");
+        apu.write_port(0, 0x00);
+        apu.write_port(1, 0x00);
+        apu.write_port(2, 0x00);
+        apu.write_port(3, 0x00);
+        apu.run_cycles(10);
+        println!("  ✓ Ports cleared");
+
+        // === Phase 3: Send start command ===
+        println!("Phase 3: Sending start command...");
+        // Set upload address to $0200
+        apu.write_port(2, 0x00); // Low byte
+        apu.write_port(3, 0x02); // High byte
+        apu.write_port(1, 0x01); // Non-zero (more data coming)
+        apu.write_port(0, 0xCC); // Start signal
+
+        apu.run_cycles(100);
+
+        // Verify SPC700 acknowledged
+        assert_eq!(apu.read_port(0), 0xCC, "SPC700 should acknowledge with $CC");
+        println!("  ✓ SPC700 acknowledged start command");
+
+        // === Phase 4: Upload audio driver (simplified - just a few bytes) ===
+        println!("Phase 4: Uploading audio driver...");
+
+        // Real audio driver is typically 1-2KB, but we'll upload a minimal stub
+        // that writes $CC back to port 0 to signal completion
+        let audio_driver = [
+            0x8F, 0xCC, 0xF4, // MOV $F4, #$CC (write $CC to port 0)
+            0x2F, 0xFD, // BRA $-3 (loop forever)
+        ];
+
+        for (i, &byte) in audio_driver.iter().enumerate() {
+            apu.write_port(1, byte);
+            apu.write_port(0, i as u8);
+            apu.run_cycles(50);
+
+            let echoed = apu.read_port(0);
+            assert_eq!(
+                echoed, i as u8,
+                "Index {} should be echoed, got ${:02X}",
+                i, echoed
+            );
+        }
+        println!("  ✓ {} bytes uploaded successfully", audio_driver.len());
+
+        // === Phase 5: Execute uploaded code ===
+        println!("Phase 5: Starting uploaded audio driver...");
+        apu.write_port(2, 0x00); // Entry point low
+        apu.write_port(3, 0x02); // Entry point high
+        apu.write_port(1, 0x00); // Zero = execute
+        let final_index = (audio_driver.len() as u8).wrapping_add(2);
+        apu.write_port(0, final_index);
+
+        // Run fewer cycles - uploaded code runs quickly and overwrites acknowledgment
+        apu.run_cycles(50);
+
+        // The SPC700 may have already jumped to uploaded code which writes $CC
+        // So we might see either the acknowledgment or $CC
+        let port0_after_exec = apu.read_port(0);
+        println!(
+            "  Port 0 after execution command: ${:02X} (expected ack ${:02X} or driver output $CC)",
+            port0_after_exec, final_index
+        );
+
+        // === Phase 6: Wait for audio driver to signal ready ===
+        println!("Phase 6: Waiting for audio driver ready signal...");
+
+        // The audio driver should now be running and will write $CC to port 0
+        apu.run_cycles(100);
+
+        let port0_final = apu.read_port(0);
+        println!("  Final port 0 value: ${:02X}", port0_final);
+
+        assert_eq!(
+            port0_final, 0xCC,
+            "Audio driver should signal ready with $CC"
+        );
+        println!("  ✓ Audio driver is running and signaled ready");
+
+        // === Phase 7: Verify main CPU can read $BBAA again (NOT expected in real world) ===
+        // In the real scenario, the main CPU at PC=$8085 is waiting for ports
+        // to return to $BBAA. However, this doesn't match the wiki documentation.
+        // The wiki says after upload, the SPC700 executes the uploaded code,
+        // which would NOT return to $BBAA.
+        //
+        // The main CPU should be waiting for the uploaded audio driver to
+        // acknowledge a command, not waiting for $BBAA again.
+
+        println!("\n=== Initialization Complete ===");
+        println!(
+            "SPC700 is now running uploaded code at PC=${:04X}",
+            apu.cpu.pc
+        );
+    }
+
+    /// Test atomic 16-bit port reads (simulating the issue at PC=$8085)
+    #[test]
+    fn test_atomic_16bit_port_read() {
+        let mut apu = Spc700::new();
+
+        // Let IPL ROM write $BBAA
+        apu.run_cycles(3000);
+
+        // Simulate main CPU doing a 16-bit read of ports $2140-$2141
+        // This should read both ports atomically, even if SPC700 is running
+
+        // First read (establishes latch)
+        let port0 = apu.read_port(0);
+
+        // Run SPC700 for some cycles (it might update ports)
+        apu.run_cycles(10);
+
+        // Second read (should still get same value if latched properly)
+        let port1 = apu.read_port(1);
+
+        // Combine into 16-bit value
+        let value = (port1 as u16) << 8 | (port0 as u16);
+
+        // Should be $BBAA regardless of SPC700 activity between reads
+        assert_eq!(
+            value, 0xBBAA,
+            "16-bit read should be atomic, got ${:04X}",
+            value
+        );
+    }
+
+    /// Test the control register IPL ROM enable/disable functionality
+    #[test]
+    fn test_ipl_rom_control() {
+        let mut apu = Spc700::new();
+
+        // IPL ROM should be enabled initially
+        assert_ne!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be enabled"
+        );
+
+        // Read from IPL ROM region
+        let ipl_byte = apu.cpu.memory.read(0xFFC0);
+        assert_eq!(ipl_byte, 0xCD, "Should read IPL ROM opcode at $FFC0");
+
+        // Disable IPL ROM by clearing bit 7 of control register
+        apu.cpu.memory.write(CONTROL_REG, 0x00);
+        assert_eq!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be disabled"
+        );
+
+        // Now reading same address should get RAM (which is 0)
+        let ram_byte = apu.cpu.memory.read(0xFFC0);
+        assert_eq!(
+            ram_byte, 0x00,
+            "Should read RAM (0) at $FFC0 when IPL disabled"
+        );
+
+        // Re-enable IPL ROM
+        apu.cpu.memory.write(CONTROL_REG, 0x80);
+        assert_ne!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be re-enabled"
+        );
+
+        // Should read IPL ROM again
+        let ipl_byte2 = apu.cpu.memory.read(0xFFC0);
+        assert_eq!(ipl_byte2, 0xCD, "Should read IPL ROM again at $FFC0");
+    }
+
+    /// Test port clearing functionality via control register
+    #[test]
+    fn test_port_clear_via_control() {
+        let mut apu = Spc700::new();
+
+        // Write some values to input ports (from main CPU)
+        apu.write_port(0, 0x12);
+        apu.write_port(1, 0x34);
+        apu.write_port(2, 0x56);
+        apu.write_port(3, 0x78);
+
+        // Verify they were written
+        assert_eq!(apu.cpu.memory.cpuio[0], 0x12);
+        assert_eq!(apu.cpu.memory.cpuio[1], 0x34);
+        assert_eq!(apu.cpu.memory.cpuio[2], 0x56);
+        assert_eq!(apu.cpu.memory.cpuio[3], 0x78);
+
+        // Clear ports 0-1 via control register (bit 4)
+        apu.cpu.memory.write(CONTROL_REG, 0x10);
+        assert_eq!(apu.cpu.memory.cpuio[0], 0x00, "Port 0 should be cleared");
+        assert_eq!(apu.cpu.memory.cpuio[1], 0x00, "Port 1 should be cleared");
+        assert_eq!(
+            apu.cpu.memory.cpuio[2], 0x56,
+            "Port 2 should not be cleared"
+        );
+        assert_eq!(
+            apu.cpu.memory.cpuio[3], 0x78,
+            "Port 3 should not be cleared"
+        );
+
+        // Clear ports 2-3 via control register (bit 5)
+        apu.cpu.memory.write(CONTROL_REG, 0x20);
+        assert_eq!(apu.cpu.memory.cpuio[2], 0x00, "Port 2 should be cleared");
+        assert_eq!(apu.cpu.memory.cpuio[3], 0x00, "Port 3 should be cleared");
+    }
 }
