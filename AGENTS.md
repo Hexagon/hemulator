@@ -12,6 +12,8 @@
 - **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
 - **[Game Boy](crates/systems/gb/README.md)**: Game Boy / Game Boy Color
 - **[Atari 2600](crates/systems/atari2600/README.md)**: Atari 2600
+- **[CHIP-8](crates/systems/chip8/README.md)**: CHIP-8 / Super-CHIP / XO-CHIP / Mega-CHIP
+- **[SMS](crates/systems/sms/README.md)**: Sega Master System
 - **[SNES](crates/systems/snes/README.md)**: Super Nintendo Entertainment System
 - **[N64](crates/systems/n64/README.md)**: Nintendo 64
 - **[PC](crates/systems/pc/README.md)**: IBM PC/XT
@@ -99,6 +101,8 @@ For system-specific implementation details, see each system's README:
 - **[NES](crates/systems/nes/README.md)** - PPU, APU, mappers
 - **[Game Boy](crates/systems/gb/README.md)** - PPU, APU, MBCs
 - **[Atari 2600](crates/systems/atari2600/README.md)** - TIA, RIOT, cartridges
+- **[CHIP-8](crates/systems/chip8/README.md)** - VM architecture, display modes
+- **[SMS](crates/systems/sms/README.md)** - Z80 CPU, VDP, PSG
 - **[SNES](crates/systems/snes/README.md)** - PPU modes, memory map
 - **[N64](crates/systems/n64/README.md)** - RDP renderer, RSP
 - **[PC](crates/systems/pc/README.md)** - Video adapters, BIOS
@@ -110,8 +114,8 @@ For system-specific implementation details, see each system's README:
 - Traits: System, Cpu, Renderer, AudioChip
 
 **System Modules** (`crates/systems/`):
-- ✅ NES (~90% game coverage), Atari 2600 (complete), Game Boy (complete)
-- 🚧 SNES (basic), N64 (in development)
+- ✅ NES (~90% game coverage), Game Boy (GB fully functional, GBC WIP), CHIP-8 (fully working), SMS (functional)
+- 🚧 Atari 2600 (rendering issues), SNES (no visible output), N64 (in development)
 - 🧪 PC (experimental)
 
 ## Implementation Guidelines
