@@ -2041,21 +2041,21 @@ fn main() {
                                 println!("Loaded NES ROM: {}", p);
                             }
                         }
-                    }
-                    Ok(SystemType::Atari2600) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut a2600_sys = create_atari2600_system(&settings);
-                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load Atari 2600 ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::Atari2600) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut a2600_sys = create_atari2600_system(&settings);
+                            if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
                             }
                         }
                         Ok(SystemType::GameBoy) => {
@@ -2174,7 +2174,7 @@ fn main() {
                 Err(e) => {
                     eprintln!("Failed to read ROM file: {}", e);
                 }
-            }
+            } // closes match std::fs::read
         } // closes else block for non-.hemu files
     } // closes if let Some(p) = &rom_path
 
