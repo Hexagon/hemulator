@@ -1462,6 +1462,143 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             0xB7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 6 }
             0xB9 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = dst_val as i16 - src_val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
 
+            // Remaining opcodes to complete the 256-opcode SPC700 instruction set
+            // OR A, (dp+X)
+            0x07 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp.wrapping_add(self.x as u16)); let addr_hi = self.read(dp.wrapping_add(self.x as u16).wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.a |= self.read(addr); self.update_nz(self.a); 6 }
+            // OR1 C, mem.bit
+            0x0A => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let bit_val = ((val >> bit) & 1) != 0; let carry = self.get_flag(psw_flags::CARRY); self.set_carry(carry | bit_val); 5 }
+            // ASL !abs
+            0x0C => { let addr = self.fetch_word(); let val = self.read(addr); let carry = (val & 0x80) != 0; let result = val << 1; self.write(addr, result); self.set_carry(carry); self.update_nz(result); 5 }
+            // TSET1 !abs - Test and set bits with A
+            0x0E => { let addr = self.fetch_word(); let val = self.read(addr); let result = self.a.wrapping_sub(val); self.update_nz(result); self.write(addr, val | self.a); 6 }
+            // BRK - Software interrupt
+            0x0F => { let ret = self.pc.wrapping_add(1); self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.push(self.psw); self.psw |= psw_flags::BREAK; self.psw &= !psw_flags::INTERRUPT; self.pc = self.read_word(0xFFDE); 8 }
+            
+            // OR A, (dp)+Y
+            0x17 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); self.a |= self.read(addr); self.update_nz(self.a); 6 }
+            // OR (X), (Y)
+            0x19 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let result = x_val | y_val; self.write(self.x as u16, result); self.update_nz(result); 5 }
+            // ASL dp+X
+            0x1B => { let dp = self.fetch_byte(); let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); let carry = (val & 0x80) != 0; let result = val << 1; self.write(addr, result); self.set_carry(carry); self.update_nz(result); 5 }
+            // CMP X, !abs
+            0x1E => { let addr = self.fetch_word(); let val = self.read(addr); let result = self.x.wrapping_sub(val); self.update_nz(result); self.set_carry(self.x >= val); 4 }
+
+            // AND A, (dp+X)
+            0x27 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp.wrapping_add(self.x as u16)); let addr_hi = self.read(dp.wrapping_add(self.x as u16).wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.a &= self.read(addr); self.update_nz(self.a); 6 }
+            // AND1 C, mem.bit
+            0x2A => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let bit_val = ((val >> bit) & 1) != 0; let carry = self.get_flag(psw_flags::CARRY); self.set_carry(carry & bit_val); 4 }
+            // ROL !abs
+            0x2C => { let addr = self.fetch_word(); let val = self.read(addr); let old_carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let new_carry = (val & 0x80) != 0; let result = (val << 1) | old_carry; self.write(addr, result); self.set_carry(new_carry); self.update_nz(result); 5 }
+            // CBNE dp, rel - Compare and branch if not equal
+            0x2E => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); let val = self.read(addr); if self.a != val { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+
+            // AND A, (dp)+Y
+            0x37 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); self.a &= self.read(addr); self.update_nz(self.a); 6 }
+            // AND (X), (Y)
+            0x39 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let result = x_val & y_val; self.write(self.x as u16, result); self.update_nz(result); 5 }
+            // ROL dp+X
+            0x3B => { let dp = self.fetch_byte(); let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); let old_carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let new_carry = (val & 0x80) != 0; let result = (val << 1) | old_carry; self.write(addr, result); self.set_carry(new_carry); self.update_nz(result); 5 }
+
+            // EOR A, (dp+X)
+            0x47 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp.wrapping_add(self.x as u16)); let addr_hi = self.read(dp.wrapping_add(self.x as u16).wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.a ^= self.read(addr); self.update_nz(self.a); 6 }
+            // EOR dp, dp
+            0x49 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let result = dst_val ^ src_val; self.write(dst as u16, result); self.update_nz(result); 6 }
+            // AND1 C, /mem.bit - AND carry with inverted bit
+            0x4A => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let bit_val = ((val >> bit) & 1) == 0; let carry = self.get_flag(psw_flags::CARRY); self.set_carry(carry & bit_val); 4 }
+            // LSR !abs
+            0x4C => { let addr = self.fetch_word(); let val = self.read(addr); let carry = (val & 0x01) != 0; let result = val >> 1; self.write(addr, result); self.set_carry(carry); self.update_nz(result); 5 }
+            // TCLR1 !abs - Test and clear bits with A
+            0x4E => { let addr = self.fetch_word(); let val = self.read(addr); let result = self.a.wrapping_sub(val); self.update_nz(result); self.write(addr, val & !self.a); 6 }
+            // PCALL u - Page call (call within page $FF)
+            0x4F => { let offset = self.fetch_byte(); let ret = self.pc; self.push((ret >> 8) as u8); self.push((ret & 0xFF) as u8); self.pc = 0xFF00 | (offset as u16); 6 }
+
+            // EOR A, (dp)+Y
+            0x57 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); self.a ^= self.read(addr); self.update_nz(self.a); 6 }
+            // EOR dp, #imm
+            0x58 => { let imm = self.fetch_byte(); let dp = self.fetch_byte(); let val = self.read(dp as u16); let result = val ^ imm; self.write(dp as u16, result); self.update_nz(result); 5 }
+            // EOR (X), (Y)
+            0x59 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let result = x_val ^ y_val; self.write(self.x as u16, result); self.update_nz(result); 5 }
+            // LSR dp+X
+            0x5B => { let dp = self.fetch_byte(); let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); let carry = (val & 0x01) != 0; let result = val >> 1; self.write(addr, result); self.set_carry(carry); self.update_nz(result); 5 }
+            // LSR X
+            0x5E => { let carry = (self.x & 0x01) != 0; self.x >>= 1; self.set_carry(carry); self.update_nz(self.x); 2 }
+
+            // CMP A, (dp)
+            0x65 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let val = self.read(addr); let result = self.a.wrapping_sub(val); self.update_nz(result); self.set_flag(psw_flags::CARRY, self.a >= val); 4 }
+            // CMP A, (X)
+            0x66 => { let val = self.read(self.x as u16); let result = self.a.wrapping_sub(val); self.update_nz(result); self.set_flag(psw_flags::CARRY, self.a >= val); 3 }
+            // CMP A, (dp+X)
+            0x67 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp.wrapping_add(self.x as u16)); let addr_hi = self.read(dp.wrapping_add(self.x as u16).wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let val = self.read(addr); let result = self.a.wrapping_sub(val); self.update_nz(result); self.set_flag(psw_flags::CARRY, self.a >= val); 6 }
+            // CMP dp, dp
+            0x69 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let result = dst_val.wrapping_sub(src_val); self.update_nz(result); self.set_flag(psw_flags::CARRY, dst_val >= src_val); 6 }
+            // AND1 C, /mem.bit (variant)
+            0x6A => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let bit_val = ((val >> bit) & 1) == 0; let carry = self.get_flag(psw_flags::CARRY); self.set_carry(carry & bit_val); 4 }
+            // ROR !abs
+            0x6C => { let addr = self.fetch_word(); let val = self.read(addr); let old_carry = if self.get_flag(psw_flags::CARRY) { 0x80 } else { 0 }; let new_carry = (val & 0x01) != 0; let result = (val >> 1) | old_carry; self.write(addr, result); self.set_carry(new_carry); self.update_nz(result); 5 }
+            // DBNZ dp, rel - Decrement and branch if not zero
+            0x6E => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = self.direct_page() | (dp as u16); let val = self.read(addr).wrapping_sub(1); self.write(addr, val); if val != 0 { self.pc = self.pc.wrapping_add(offset as u16); 7 } else { 5 } }
+
+            // MOV (dp), A
+            0x74 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.write(addr, self.a); 5 }
+            // CMP A, (dp)+Y
+            0x77 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); let val = self.read(addr); let result = self.a.wrapping_sub(val); self.update_nz(result); self.set_flag(psw_flags::CARRY, self.a >= val); 6 }
+            // CMP dp, #imm
+            0x79 => { let imm = self.fetch_byte(); let dp = self.fetch_byte(); let val = self.read(dp as u16); let result = val.wrapping_sub(imm); self.update_nz(result); self.set_flag(psw_flags::CARRY, val >= imm); 5 }
+            // ROR dp+X
+            0x7B => { let dp = self.fetch_byte(); let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); let old_carry = if self.get_flag(psw_flags::CARRY) { 0x80 } else { 0 }; let new_carry = (val & 0x01) != 0; let result = (val >> 1) | old_carry; self.write(addr, result); self.set_carry(new_carry); self.update_nz(result); 5 }
+            // RETI - Return from interrupt
+            0x7F => { self.psw = self.pop(); let lo = self.pop(); let hi = self.pop(); self.pc = ((hi as u16) << 8) | (lo as u16); 6 }
+
+            // ADC dp, dp
+            0x89 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = dst_val as u16 + src_val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
+            // EOR1 C, mem.bit
+            0x8A => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let bit_val = ((val >> bit) & 1) != 0; let carry = self.get_flag(psw_flags::CARRY); self.set_carry(carry ^ bit_val); 5 }
+            // ADC/SBC (X), (Y)
+            0x98 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = x_val as u16 + y_val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.write(self.x as u16, result as u8); self.update_nz(result as u8); 5 }
+            // SBC dp, dp
+            0x9B => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = dst_val as i16 - src_val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
+            // SBC (X), (Y)
+            0xB8 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = x_val as i16 - y_val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.write(self.x as u16, result as u8); self.update_nz(result as u8); 5 }
+
+            // SBC A, #imm (Note: A8 is already implemented above)
+            0xA9 => { let val = self.fetch_byte(); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 2 }
+            // DAS - Decimal adjust for subtraction
+            0xBE => { if !self.get_flag(psw_flags::CARRY) || self.a > 0x99 { self.a = self.a.wrapping_sub(0x60); self.set_carry(false); } if !self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 { self.a = self.a.wrapping_sub(0x06); } self.update_nz(self.a); 3 }
+
+            // MOV A, (dp)
+            0xE7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.a = self.read(addr); self.update_nz(self.a); 4 }
+            // MOV A, #imm (duplicate removed - already at 0xE8)
+            0xE9 => { let addr = self.fetch_word(); let val = self.read(addr); let bit = (val >> ((addr >> 13) & 0x07)) & 1; if bit != 0 { self.a = 1; } else { self.a = 0; } self.update_nz(self.a); 4 }
+            // NOT1 mem.bit
+            0xEA => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let result = val ^ (1 << bit); self.write(addr, result); 5 }
+            // MOV Y, !abs
+            0xEC => { let addr = self.fetch_word(); self.y = self.read(addr); self.update_nz(self.y); 4 }
+
+            // MOV dp+Y, A
+            0xD9 => { let dp = self.fetch_byte(); let addr = dp.wrapping_add(self.y) as u16; self.write(addr, self.a); 5 }
+            // MOVW dp, YA (duplicate removed - already implemented)
+            0xDB => { let dp = self.fetch_byte(); let addr = self.direct_page() | (dp as u16); self.x = self.read(addr); self.y = self.read(addr.wrapping_add(1)); self.update_nz(self.y); 5 }
+            // MOV Y, dp+X
+            0xFB => { let dp = self.fetch_byte(); let val = self.read(dp.wrapping_add(self.x) as u16); self.y = val; self.update_nz(self.y); 4 }
+            // CBNE dp+X, rel
+            0xDE => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); if self.a != val { self.pc = self.pc.wrapping_add(offset as u16); 8 } else { 6 } }
+            // DAA - Decimal adjust for addition
+            0xDF => { if self.get_flag(psw_flags::CARRY) || self.a > 0x99 { self.a = self.a.wrapping_add(0x60); self.set_carry(true); } if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 { self.a = self.a.wrapping_add(0x06); } self.update_nz(self.a); 3 }
+            // DBNZ Y, rel
+            0xFE => { let offset = self.fetch_byte() as i8; self.y = self.y.wrapping_sub(1); if self.y != 0 { self.pc = self.pc.wrapping_add(offset as u16); 6 } else { 4 } }
+            // MOV (dp), Y
+            0xD8 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.write(addr, self.y); 5 }
+            // MOV1 C, mem.bit (duplicate removed - already implemented)
+            0xCA => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let val = self.read(src as u16); self.write(dst as u16, val); self.update_nz(val); 5 }
+            // MOV1 mem.bit, C
+            0xC7 => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let result = if self.get_flag(psw_flags::CARRY) { val | (1 << bit) } else { val & !(1 << bit) }; self.write(addr, result); 6 }
+            // CMP X, dp
+            0xC9 => { let dp = self.fetch_byte(); let val = self.read(dp as u16); let result = self.x.wrapping_sub(val); self.update_nz(result); self.set_flag(psw_flags::CARRY, self.x >= val); 3 }
+            // MOV !abs, X
+            0xCC => { let addr = self.fetch_word(); self.write(addr, self.x); 5 }
+            // MOV Y, X
+            0xF9 => { self.y = self.x; self.update_nz(self.y); 2 }
+
             // Unknown opcode - log and treat as NOP
             _ => {
                 log(LogCategory::Bus, LogLevel::Warn, || {
