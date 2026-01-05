@@ -6,7 +6,13 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 
 **✅ Implemented:**
 - Z80 CPU with full instruction set and interrupt support (IM 0, IM 1, IM 2, NMI)
-- SN76489 PSG audio chip (3 tone channels + 1 noise channel)
+- SN76489 PSG audio chip with CPU-cycle-accurate emulation:
+  - 3 square wave tone generators (10-bit frequency control)
+  - 1 noise generator (16-bit LFSR for Sega variant)
+  - 4-bit volume control per channel (0=max, 15=mute)
+  - Exponential volume curve (~-2dB per step)
+  - Proper downsampling from SMS CPU speed (3.579545 MHz NTSC / 3.546894 MHz PAL) to 44.1 kHz
+  - NTSC and PAL timing support
 - VDP (Video Display Processor) with:
   - Tilemap and sprite rendering
   - Frame interrupts
@@ -17,7 +23,7 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (19/19)
+- All unit tests passing (28/28)
 
 **⚠️ Partially Implemented:**
 - Save state serialization (trait implemented, serialization logic pending)
@@ -48,12 +54,13 @@ crates/systems/sms/
 ├── src/
 │   ├── lib.rs          # Public API and module declarations
 │   ├── system.rs       # SmsSystem implementing System trait
+│   ├── psg.rs          # SMS-specific PSG wrapper with cycle-accurate audio
 │   ├── vdp.rs          # Video Display Processor
 │   └── bus.rs          # Memory bus (SmsMemory)
 └── Cargo.toml
 
 crates/core/src/apu/
-└── sn76489.rs          # PSG audio chip
+└── sn76489.rs          # Core SN76489 PSG implementation
 ```
 
 ## Implementation Details
@@ -72,16 +79,43 @@ Register interface:
 - Port 0xBE: Data port (read/write VRAM/CRAM)
 - Port 0xBF: Control/status port
 
-### SN76489 PSG
+### SN76489 PSG (Programmable Sound Generator)
 
-The PSG implements the `AudioChip` trait and provides:
-- 3 square wave tone generators (10-bit frequency control)
-- 1 noise generator (16-bit LFSR for Sega variant)
+The PSG uses a two-layer architecture similar to the NES APU:
+
+**System-Specific Layer (`psg.rs`):**
+- CPU-cycle-accurate audio generation with proper downsampling
+- Cycle accumulation for precise 44.1 kHz output
+- Timing mode support (NTSC @ 3.579545 MHz / PAL @ 3.546894 MHz)
+- Integration with SMS system timing
+
+**Core Implementation (`emu_core::apu::sn76489`):**
+- 3 square wave tone generators with 10-bit frequency control
+- 1 noise generator with 16-bit LFSR (Sega variant)
 - 4-bit volume control per channel (0=max, 15=mute)
 - Exponential volume curve (~-2dB per step)
+- Proper channel mixing and audio sample generation
 
-Register interface:
+**Audio Generation Process:**
+1. Calculate CPU cycles per audio sample (CPU_HZ / 44,100)
+2. Clock PSG at CPU speed for each audio sample
+3. Average output over CPU cycles to generate final sample
+4. Use cycle accumulation to handle fractional cycles
+
+This approach ensures cycle-accurate audio emulation similar to the NES,
+producing high-quality audio output that accurately represents the original
+hardware behavior.
+
+**Register Interface:**
 - Port 0x7E/0x7F: PSG write
+- Latch/Data byte format: `1cctdddd` (c=channel, t=type, d=data)
+- Data byte format: `0ddddddd` (d=data)
+
+**Frequency Calculation:**
+```
+Frequency (Hz) = CPU_Clock / (32 × register_value)
+For 440 Hz (A4): register = 3579545 / (32 × 440) ≈ 254
+```
 
 ### Memory Map
 
@@ -109,10 +143,11 @@ Banking registers at 0xFFFC, 0xFFFD, 0xFFFE (in RAM) control which 16KB banks ar
 ## Testing
 
 Current test coverage:
+- ✅ PSG: audio generation, volume control, tone/noise channels, timing modes, cycle accuracy (9 tests)
 - ✅ VDP: register writes, VRAM access, color decoding, interrupts, sprite flags (8 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
-- ✅ System: creation, reset, ROM loading, frame stepping, interrupts (8 tests)
-- ✅ Total: 19 tests passing
+- ✅ System: creation, reset, ROM loading, frame stepping, interrupts (10 tests)
+- ✅ Total: 30 tests passing
 
 Run tests with:
 ```bash

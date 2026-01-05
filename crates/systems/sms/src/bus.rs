@@ -1,7 +1,7 @@
 //! Sega Master System memory bus implementation
 
+use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
-use emu_core::apu::Sn76489Psg;
 use emu_core::cpu_z80::MemoryZ80;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use std::cell::RefCell;
@@ -31,7 +31,7 @@ pub struct SmsMemory {
     vdp: Rc<RefCell<Vdp>>,
 
     // Shared PSG reference
-    psg: Rc<RefCell<Sn76489Psg>>,
+    psg: Rc<RefCell<SmsPsg>>,
 
     // Banking registers (for ROMs > 48KB)
     rom_bank_0: usize, // Maps to 0x0000-0x3FFF
@@ -49,7 +49,7 @@ pub struct SmsMemory {
 
 impl SmsMemory {
     /// Create a new SMS memory bus
-    pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<Sn76489Psg>>) -> Self {
+    pub fn new(rom: Vec<u8>, vdp: Rc<RefCell<Vdp>>, psg: Rc<RefCell<SmsPsg>>) -> Self {
         // Calculate number of 16KB banks
         let num_banks = rom.len().div_ceil(0x4000);
 
@@ -197,12 +197,12 @@ impl MemoryZ80 for SmsMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use emu_core::apu::TimingMode;
+    use crate::psg::SmsPsg;
 
     #[test]
     fn test_ram_read_write() {
         let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
         let rom = vec![0; 0x8000];
         let mut mem = SmsMemory::new(rom, vdp, psg);
 
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn test_rom_read() {
         let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
         let mut rom = vec![0; 0x8000];
         rom[0x100] = 0xAB;
 
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn test_banking() {
         let vdp = Rc::new(RefCell::new(Vdp::new()));
-        let psg = Rc::new(RefCell::new(Sn76489Psg::new(TimingMode::Ntsc)));
+        let psg = Rc::new(RefCell::new(SmsPsg::new()));
 
         // Create 128KB ROM (8 banks of 16KB)
         let mut rom = vec![0; 0x20000];

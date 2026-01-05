@@ -13,6 +13,7 @@
 //! For detailed implementation information, see the SMS_IMPLEMENTATION_GUIDE.md
 
 mod bus;
+mod psg;
 mod system;
 mod vdp;
 
