@@ -187,8 +187,107 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             // NOP
             0x00 => 2,
 
-            // TODO: Implement all 256 opcodes
-            // For now, we'll implement the most critical ones for boot ROM execution
+            // CLRP - Clear direct page flag (P = 0, direct page = $0000)
+            0x20 => {
+                self.psw &= !psw_flags::DIRECT_PAGE;
+                2
+            }
+
+            // SETP - Set direct page flag (P = 1, direct page = $0100)
+            0x40 => {
+                self.psw |= psw_flags::DIRECT_PAGE;
+                2
+            }
+
+            // BRA rel - Branch always
+            0x2F => {
+                let offset = self.fetch_byte() as i8;
+                self.pc = self.pc.wrapping_add(offset as u16);
+                4
+            }
+
+            // BEQ rel - Branch if zero flag set
+            0xF0 => {
+                let offset = self.fetch_byte() as i8;
+                if self.get_flag(psw_flags::ZERO) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // BNE rel - Branch if zero flag clear
+            0xD0 => {
+                let offset = self.fetch_byte() as i8;
+                if !self.get_flag(psw_flags::ZERO) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // CMP A, #imm - Compare A with immediate
+            0x68 => {
+                let val = self.fetch_byte();
+                let result = self.a.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.a >= val);
+                2
+            }
+
+            // CMP A, dp - Compare A with direct page
+            0x64 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let result = self.a.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.a >= val);
+                3
+            }
+
+            // INC A - Increment accumulator
+            0xBC => {
+                self.a = self.a.wrapping_add(1);
+                self.update_nz(self.a);
+                2
+            }
+
+            // INC X - Increment X
+            0x3D => {
+                self.x = self.x.wrapping_add(1);
+                self.update_nz(self.x);
+                2
+            }
+
+            // INC Y - Increment Y
+            0xFC => {
+                self.y = self.y.wrapping_add(1);
+                self.update_nz(self.y);
+                2
+            }
+
+            // DEC A - Decrement accumulator
+            0x9C => {
+                self.a = self.a.wrapping_sub(1);
+                self.update_nz(self.a);
+                2
+            }
+
+            // DEC X - Decrement X
+            0x1D => {
+                self.x = self.x.wrapping_sub(1);
+                self.update_nz(self.x);
+                2
+            }
+
+            // DEC Y - Decrement Y
+            0xDC => {
+                self.y = self.y.wrapping_sub(1);
+                self.update_nz(self.y);
+                2
+            }
 
             // MOV A, #imm
             0xE8 => {
@@ -252,6 +351,68 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 self.a = self.read(addr);
                 self.update_nz(self.a);
                 3
+            }
+
+            // MOV dp, X (direct page)
+            0xD4 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.write(addr, self.x);
+                4
+            }
+
+            // MOV X, dp (direct page)
+            0xF8 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.x = self.read(addr);
+                self.update_nz(self.x);
+                3
+            }
+
+            // MOV dp, Y (direct page)
+            0xCB => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.write(addr, self.y);
+                4
+            }
+
+            // MOV Y, dp (direct page)
+            0xEB => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.y = self.read(addr);
+                self.update_nz(self.y);
+                3
+            }
+
+            // MOV !abs, A (absolute)
+            0xC5 => {
+                let addr = self.fetch_word();
+                self.write(addr, self.a);
+                5
+            }
+
+            // MOV A, !abs (absolute)
+            0xE5 => {
+                let addr = self.fetch_word();
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                4
+            }
+
+            // MOV (X)+, A - Move A to address in X, then increment X
+            0xAF => {
+                let addr = self.direct_page() | (self.x as u16);
+                self.write(addr, self.a);
+                self.x = self.x.wrapping_add(1);
+                4
+            }
+
+            // MOV A, (X)+ - Move from address in X to A, then increment X
+            0xBF => {
+                let addr = self.direct_page() | (self.x as u16);
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                self.x = self.x.wrapping_add(1);
+                4
             }
 
             // SLEEP - halt CPU until interrupt
