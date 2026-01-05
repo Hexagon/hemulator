@@ -26,6 +26,11 @@ use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 use window_backend::{string_to_key, Key, Sdl2EguiBackend, WindowBackend};
 
+/// Helper function to check if a file extension indicates a CHIP-8 ROM
+fn is_chip8_extension(extension: Option<&str>) -> bool {
+    matches!(extension, Some("ch8") | Some("c8"))
+}
+
 /// Runtime state for tracking currently loaded project and mounts
 /// This replaces the mount_points field in Settings which has been deprecated
 struct RuntimeState {
@@ -2005,7 +2010,7 @@ fn main() {
                         .and_then(|e| e.to_str())
                         .map(|e| e.to_lowercase());
 
-                    let system_type = if matches!(extension.as_deref(), Some("ch8") | Some("c8")) {
+                    let system_type = if is_chip8_extension(extension.as_deref()) {
                         // Force CHIP-8 detection for .ch8 and .c8 files
                         Ok(SystemType::Chip8)
                     } else {

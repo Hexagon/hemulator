@@ -115,13 +115,10 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
 
     // Check for DOS COM file (no header, typically small)
     // COM files are 64KB or less and have no specific signature
-    // We'll detect them by exclusion and reasonable size
-    // This check should come before CHIP-8 since there's overlap in size ranges
-    // and COM files are more common in general computing
+    // Note: CHIP-8 files (.ch8, .c8) overlap in size range with COM files,
+    // but are detected via file extension in the calling code (main.rs)
+    // This function only does content-based detection, so small files default to PC/COM
     if data.len() <= 0xFF00 && data.len() >= 16 {
-        // Small files could be either COM or CHIP-8
-        // Without file extension info, we default to PC/COM
-        // Users can still explicitly select CHIP-8 mode or use .ch8 extension
         return Ok(SystemType::PC);
     }
 
