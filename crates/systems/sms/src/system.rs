@@ -449,4 +449,62 @@ mod tests {
             initial_pc, system.cpu.pc
         );
     }
+
+    #[test]
+    fn test_audio_generation_integration() {
+        let mut system = SmsSystem::new();
+
+        // Generate audio samples
+        let samples = system.get_audio_samples(1000);
+
+        // Should generate exactly the requested number of samples
+        assert_eq!(samples.len(), 1000);
+
+        // With default muted state, samples should be near zero
+        let max_sample = samples.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        assert!(
+            max_sample <= 100,
+            "Expected near-silent output by default, got max sample: {}",
+            max_sample
+        );
+
+        // Now write to PSG to enable a tone
+        // Set channel 0 to max volume
+        system.cpu.memory.io_write(0x7F, 0x90); // Volume 0 (max)
+
+        // Set a frequency
+        system.cpu.memory.io_write(0x7F, 0x80 | 0x04); // Low bits
+        system.cpu.memory.io_write(0x7F, 0x01); // High bits
+
+        // Generate more samples
+        let samples_with_tone = system.get_audio_samples(1000);
+        assert_eq!(samples_with_tone.len(), 1000);
+
+        // Should now have audible output
+        let non_zero_count = samples_with_tone.iter().filter(|&&s| s != 0).count();
+        assert!(
+            non_zero_count > 0,
+            "Expected audio output after enabling tone"
+        );
+    }
+
+    #[test]
+    fn test_set_timing_mode() {
+        use emu_core::apu::TimingMode;
+
+        let mut system = SmsSystem::new();
+
+        // Change to PAL timing
+        system.set_timing(TimingMode::Pal);
+
+        // Should still be able to generate audio
+        let samples = system.get_audio_samples(100);
+        assert_eq!(samples.len(), 100);
+
+        // Change back to NTSC
+        system.set_timing(TimingMode::Ntsc);
+
+        let samples = system.get_audio_samples(100);
+        assert_eq!(samples.len(), 100);
+    }
 }
