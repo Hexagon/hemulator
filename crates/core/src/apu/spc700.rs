@@ -44,39 +44,39 @@ const COUNTER2: u16 = 0x00FF; // Timer 2 counter
 /// The clear loop intentionally clears ports $F4-$F7, then rewrites $F4/$F5 with $AA/$BB
 const IPL_ROM: [u8; 64] = [
     // Real SPC700 IPL ROM (verified bytes from multiple sources)
-    0xCD, 0xEF,       // $FFC0: MOV X, #$EF
-    0xBD,             // $FFC2: MOV SP, X
-    0xE8, 0x00,       // $FFC3: MOV A, #$00
-    0xC6,             // $FFC5: MOV (X), A
-    0x1D,             // $FFC6: DEC X
-    0xD0, 0xFC,       // $FFC7: BNE $FFC5
+    0xCD, 0xEF, // $FFC0: MOV X, #$EF
+    0xBD, // $FFC2: MOV SP, X
+    0xE8, 0x00, // $FFC3: MOV A, #$00
+    0xC6, // $FFC5: MOV (X), A
+    0x1D, // $FFC6: DEC X
+    0xD0, 0xFC, // $FFC7: BNE $FFC5
     0x8F, 0xAA, 0xF4, // $FFC9: MOV $F4, #$AA  <- This writes AFTER the clear
     0x8F, 0xBB, 0xF5, // $FFCC: MOV $F5, #$BB
     0x78, 0xCC, 0xF4, // $FFCF: CMP $F4, #$CC
-    0xD0, 0xFB,       // $FFD2: BNE $FFCF
-    0x2F, 0x19,       // $FFD4: BRA $FFEF
-    0xEB, 0xF4,       // $FFD6: MOV Y, $F4
-    0xD0, 0xFC,       // $FFD8: BNE $FFD6
-    0x7E, 0xF4,       // $FFDA: CMP Y, $F4
-    0xD0, 0x0B,       // $FFDC: BNE $FFE9
-    0xE4, 0xF5,       // $FFDE: MOV A, $F5
-    0xCB, 0xF4,       // $FFE0: MOV $F4, Y
-    0xD7, 0x00,       // $FFE2: MOV ($00)+Y, A
-    0xFC,             // $FFE4: INC Y
-    0xD0, 0xF3,       // $FFE5: BNE $FFDA
-    0xAB, 0x01,       // $FFE7: INC $01
-    0x10, 0xEF,       // $FFE9: BPL $FFDA
-    0x7E, 0xF4,       // $FFEB: CMP Y, $F4
-    0x10, 0xEB,       // $FFED: BPL $FFDA
-    0xE4, 0xF6,       // $FFEF: MOV A, $F6
-    0xC4, 0xF4,       // $FFF1: MOV $F4, A
-    0xE4, 0xF7,       // $FFF3: MOV A, $F7
-    0xC4, 0xF5,       // $FFF5: MOV $F5, A
-    0xE4, 0xF6,       // $FFF7: MOV A, $F6
-    0xC4, 0x00,       // $FFF9: MOV $00, A
-    0xE4, 0xF7,       // $FFFB: MOV A, $F7
-    0xC4, 0x01,       // $FFFD: MOV $01, A
-    0x6F              // $FFFF: RET (jumps to ($FFFE-$FFFF) = $0002 after reset)
+    0xD0, 0xFB, // $FFD2: BNE $FFCF
+    0x2F, 0x19, // $FFD4: BRA $FFEF
+    0xEB, 0xF4, // $FFD6: MOV Y, $F4
+    0xD0, 0xFC, // $FFD8: BNE $FFD6
+    0x7E, 0xF4, // $FFDA: CMP Y, $F4
+    0xD0, 0x0B, // $FFDC: BNE $FFE9
+    0xE4, 0xF5, // $FFDE: MOV A, $F5
+    0xCB, 0xF4, // $FFE0: MOV $F4, Y
+    0xD7, 0x00, // $FFE2: MOV ($00)+Y, A
+    0xFC, // $FFE4: INC Y
+    0xD0, 0xF3, // $FFE5: BNE $FFDA
+    0xAB, 0x01, // $FFE7: INC $01
+    0x10, 0xEF, // $FFE9: BPL $FFDA
+    0x7E, 0xF4, // $FFEB: CMP Y, $F4
+    0x10, 0xEB, // $FFED: BPL $FFDA
+    0xE4, 0xF6, // $FFEF: MOV A, $F6
+    0xC4, 0xF4, // $FFF1: MOV $F4, A
+    0xE4, 0xF7, // $FFF3: MOV A, $F7
+    0xC4, 0xF5, // $FFF5: MOV $F5, A
+    0xE4, 0xF6, // $FFF7: MOV A, $F6
+    0xC4, 0x00, // $FFF9: MOV $00, A
+    0xE4, 0xF7, // $FFFB: MOV A, $F7
+    0xC4, 0x01, // $FFFD: MOV $01, A
+    0x6F, // $FFFF: RET (jumps to ($FFFE-$FFFF) = $0002 after reset)
 ];
 
 /// SPC700 memory implementation
@@ -154,11 +154,11 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 let val = self.cpuio[port];
-                // Log port reads during upload (when IPL ROM is enabled)
-                if self.control & 0x80 != 0 && port == 1 {
+                // Log all port reads during upload (when IPL ROM is enabled)
+                if self.control & 0x80 != 0 {
                     log(LogCategory::APU, LogLevel::Debug, || {
-                        format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (during upload)", 
-                            4 + port, val)
+                        format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (IPL enabled, all ports: ${:02X} ${:02X} ${:02X} ${:02X})", 
+                            4 + port, val, self.cpuio[0], self.cpuio[1], self.cpuio[2], self.cpuio[3])
                     });
                 }
                 val
@@ -214,16 +214,22 @@ impl MemorySpc700 for Spc700Memory {
             CONTROL_REG => {
                 let old_control = self.control;
                 self.control = val;
-                
+
                 // Log IPL ROM enable/disable
                 if (old_control & 0x80) != (val & 0x80) {
                     log(LogCategory::APU, LogLevel::Info, || {
-                        format!("SPC700: IPL ROM {} (control=${:02X})", 
-                            if val & 0x80 != 0 { "ENABLED" } else { "DISABLED" },
-                            val)
+                        format!(
+                            "SPC700: IPL ROM {} (control=${:02X})",
+                            if val & 0x80 != 0 {
+                                "ENABLED"
+                            } else {
+                                "DISABLED"
+                            },
+                            val
+                        )
                     });
                 }
-                
+
                 if val & 0x10 != 0 {
                     // Clear ports $F4-$F5
                     self.cpuio[0] = 0;
@@ -253,11 +259,28 @@ impl MemorySpc700 for Spc700Memory {
             TEST_REG | COUNTER0 | COUNTER1 | COUNTER2 | AUX_IO4 | AUX_IO5 => {}
             // RAM
             _ => {
-                // Log writes to low RAM during upload (when IPL ROM is enabled)
-                if self.control & 0x80 != 0 && addr < 0x0100 {
+                // Log writes to zero page during upload (especially $00-$01 for indirect addressing)
+                if self.control & 0x80 != 0 && addr <= 0x01 {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!(
+                            "SPC700: ZP write RAM[${:04X}] = ${:02X} (base address for upload)",
+                            addr, val
+                        )
+                    });
+                }
+                // Log all other writes to low RAM during upload
+                else if self.control & 0x80 != 0 && addr < 0x0100 {
                     log(LogCategory::APU, LogLevel::Debug, || {
-                        format!("SPC700: Upload write to RAM[${:04X}] = ${:02X} (control=${:02X}, IPL enabled)", 
-                            addr, val, self.control)
+                        format!("SPC700: Upload write to RAM[${:04X}] = ${:02X}", addr, val)
+                    });
+                }
+                // Log writes to uploaded code area (likely $0200-$XXXX)
+                else if self.control & 0x80 != 0 && (0x0200..0x1000).contains(&addr) {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!(
+                            "SPC700: Upload data to RAM[${:04X}] = ${:02X} (uploaded code area)",
+                            addr, val
+                        )
                     });
                 }
                 self.ram[addr as usize] = val;
@@ -315,17 +338,64 @@ impl Spc700 {
 
     /// Execute CPU for a number of cycles
     pub fn run_cycles(&mut self, cycles: u32) {
+        // Track if we're in critical IPL ROM areas
+        let was_in_upload_loop = self.cpu.pc >= 0xFFD6 && self.cpu.pc <= 0xFFEE;
+        let was_in_entry_setup = self.cpu.pc >= 0xFFEF;
+
         // Log first few calls to verify this is being called
         if self.cpu.cycles < 1000 {
             log(LogCategory::APU, LogLevel::Info, || {
-                format!("SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}", 
-                    cycles, self.cpu.pc, self.cpu.cycles)
+                format!(
+                    "SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}",
+                    cycles, self.cpu.pc, self.cpu.cycles
+                )
             });
         }
-        
+
         let mut remaining = cycles;
         while remaining > 0 {
+            let old_pc = self.cpu.pc;
             let executed = self.cpu.step() as u32;
+
+            // Log when entering critical IPL ROM sections
+            if self.cpu.memory.control & 0x80 != 0 {
+                if !was_in_upload_loop && self.cpu.pc >= 0xFFD6 && self.cpu.pc <= 0xFFEE {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!(
+                            "SPC700: Entered upload loop at PC=${:04X} (from PC=${:04X})",
+                            self.cpu.pc, old_pc
+                        )
+                    });
+                }
+                if !was_in_entry_setup && self.cpu.pc >= 0xFFEF {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!("SPC700: Entered entry point setup at PC=${:04X} (from PC=${:04X}, ZP=$00={:02X}, ZP=$01={:02X})",
+                            self.cpu.pc, old_pc,
+                            self.cpu.memory.ram[0x00], self.cpu.memory.ram[0x01])
+                    });
+                }
+                // Log when IPL ROM is disabled or jumped out of
+                if old_pc >= 0xFFC0 && self.cpu.pc < 0xFFC0 {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!("SPC700: Jumped out of IPL ROM from PC=${:04X} to PC=${:04X} (uploaded code start)", 
+                            old_pc, self.cpu.pc)
+                    });
+                    // Dump first 64 bytes of uploaded code area for diagnosis
+                    let mut dump = String::from("SPC700: First 64 bytes at jump target:\n");
+                    for i in 0..4 {
+                        dump.push_str(&format!("${:04X}: ", self.cpu.pc + i * 16));
+                        for j in 0..16 {
+                            let addr = (self.cpu.pc + i * 16 + j) as usize;
+                            if addr < self.cpu.memory.ram.len() {
+                                dump.push_str(&format!("{:02X} ", self.cpu.memory.ram[addr]));
+                            }
+                        }
+                        dump.push('\n');
+                    }
+                    log(LogCategory::APU, LogLevel::Info, || dump);
+                }
+            }
+
             remaining = remaining.saturating_sub(executed);
         }
     }
@@ -457,27 +527,27 @@ mod tests {
 
         // Run until IPL ROM writes $BBAA (about 3000 cycles)
         apu.run_cycles(3000);
-        
+
         // Verify $BBAA signature
         assert_eq!(apu.read_port(0), 0xAA);
         assert_eq!(apu.read_port(1), 0xBB);
-        
+
         // Verify SPC700 is waiting for $CC at $FFCF-$FFD2
         assert!(apu.cpu.pc == 0xFFCF || apu.cpu.pc == 0xFFD2);
-        
+
         // Send $CC to signal ready
         apu.write_port(0, 0xCC);
         apu.run_cycles(100);
-        
+
         // SPC700 should now be at $FFEF (reading entry point)
         // Let's send entry point address $0200
         apu.write_port(2, 0x00); // Low byte of address
         apu.write_port(3, 0x02); // High byte of address
-        
+
         println!("PC before more cycles: ${:04X}", apu.cpu.pc);
         apu.run_cycles(100);
         println!("PC after IPL ROM: ${:04X}", apu.cpu.pc);
-        
+
         // After RET, SPC700 should jump to $0200
         // But since stack is cleared, it will actually jump to $0000
         // Let's write a simple test program to $0000: write $CC to port $F4
@@ -488,17 +558,23 @@ mod tests {
         apu.cpu.memory.ram[0x0002] = 0xF4; // Port address $F4
         apu.cpu.memory.ram[0x0003] = 0x2F; // BRA (infinite loop)
         apu.cpu.memory.ram[0x0004] = 0xFD; // Branch to self
-        
-        println!("Uploaded code at $0000: ${:02X} ${:02X} ${:02X}", 
-            apu.cpu.memory.ram[0x0000], apu.cpu.memory.ram[0x0001], apu.cpu.memory.ram[0x0002]);
-        
+
+        println!(
+            "Uploaded code at $0000: ${:02X} ${:02X} ${:02X}",
+            apu.cpu.memory.ram[0x0000], apu.cpu.memory.ram[0x0001], apu.cpu.memory.ram[0x0002]
+        );
+
         // Run until SPC700 executes the uploaded code
         apu.run_cycles(1000);
-        
+
         println!("SPC700 PC after execution: ${:04X}", apu.cpu.pc);
         println!("Port $F4 value: ${:02X}", apu.read_port(0));
-        
+
         // Verify SPC700 wrote $CC to port $F4
-        assert_eq!(apu.read_port(0), 0xCC, "SPC700 should have written $CC to port $F4");
+        assert_eq!(
+            apu.read_port(0),
+            0xCC,
+            "SPC700 should have written $CC to port $F4"
+        );
     }
 }

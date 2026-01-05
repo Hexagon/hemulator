@@ -120,7 +120,7 @@ impl SnesBus {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Initializing with real SPC700 APU".to_string()
         });
-        
+
         Self {
             wram: [0; 0x20000],
             cartridge: None,
@@ -489,7 +489,7 @@ impl Memory65c816 for SnesBus {
                             log(LogCategory::Bus, LogLevel::Debug, || {
                                 format!(
                                     "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X} (expecting ${:02X} at PC=${:04X})",
-                                    offset, port, val, 
+                                    offset, port, val,
                                     if offset == 0x2140 { 0xCC } else { 0x05 },
                                     0x80D3
                                 )
