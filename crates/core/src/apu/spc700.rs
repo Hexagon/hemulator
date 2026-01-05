@@ -150,8 +150,19 @@ impl MemorySpc700 for Spc700Memory {
                     self.ram[addr as usize]
                 }
             }
-            // Communication ports (read what SPC700 wrote)
-            CPUIO0..=CPUIO3 => self.cpuio[(addr - CPUIO0) as usize],
+            // Communication ports (read what main CPU wrote)
+            CPUIO0..=CPUIO3 => {
+                let port = (addr - CPUIO0) as usize;
+                let val = self.cpuio[port];
+                // Log port reads during upload (when IPL ROM is enabled)
+                if self.control & 0x80 != 0 && port == 1 {
+                    log(LogCategory::APU, LogLevel::Debug, || {
+                        format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (during upload)", 
+                            4 + port, val)
+                    });
+                }
+                val
+            }
             // Timer counters
             COUNTER0 => {
                 // Reading counter clears it (on real hardware)
@@ -201,7 +212,18 @@ impl MemorySpc700 for Spc700Memory {
             }
             // Control register
             CONTROL_REG => {
+                let old_control = self.control;
                 self.control = val;
+                
+                // Log IPL ROM enable/disable
+                if (old_control & 0x80) != (val & 0x80) {
+                    log(LogCategory::APU, LogLevel::Info, || {
+                        format!("SPC700: IPL ROM {} (control=${:02X})", 
+                            if val & 0x80 != 0 { "ENABLED" } else { "DISABLED" },
+                            val)
+                    });
+                }
+                
                 if val & 0x10 != 0 {
                     // Clear ports $F4-$F5
                     self.cpuio[0] = 0;
@@ -230,7 +252,16 @@ impl MemorySpc700 for Spc700Memory {
             // Test register and counters are read-only
             TEST_REG | COUNTER0 | COUNTER1 | COUNTER2 | AUX_IO4 | AUX_IO5 => {}
             // RAM
-            _ => self.ram[addr as usize] = val,
+            _ => {
+                // Log writes to low RAM during upload (when IPL ROM is enabled)
+                if self.control & 0x80 != 0 && addr < 0x0100 {
+                    log(LogCategory::APU, LogLevel::Debug, || {
+                        format!("SPC700: Upload write to RAM[${:04X}] = ${:02X} (control=${:02X}, IPL enabled)", 
+                            addr, val, self.control)
+                    });
+                }
+                self.ram[addr as usize] = val;
+            }
         }
     }
 }
@@ -284,6 +315,14 @@ impl Spc700 {
 
     /// Execute CPU for a number of cycles
     pub fn run_cycles(&mut self, cycles: u32) {
+        // Log first few calls to verify this is being called
+        if self.cpu.cycles < 1000 {
+            log(LogCategory::APU, LogLevel::Info, || {
+                format!("SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}", 
+                    cycles, self.cpu.pc, self.cpu.cycles)
+            });
+        }
+        
         let mut remaining = cycles;
         while remaining > 0 {
             let executed = self.cpu.step() as u32;
