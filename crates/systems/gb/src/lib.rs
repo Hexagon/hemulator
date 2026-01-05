@@ -157,6 +157,7 @@ use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod apu;
 mod bus;
+mod debugger;
 mod mappers;
 pub(crate) mod ppu;
 pub mod ppu_renderer;
@@ -413,6 +414,10 @@ impl System for GbSystem {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "Cartridge" && self.cart_loaded
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 
