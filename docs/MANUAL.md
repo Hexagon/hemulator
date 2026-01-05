@@ -586,11 +586,11 @@ This emulator supports 8 different retro gaming systems. **NES emulation is full
 | System | Status | What Works | What's Missing | Recommended For |
 |--------|--------|------------|----------------|-----------------|
 | **NES** | ✅ Fully Working | Everything | - | Playing NES games |
-| **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Some edge cases, stability | Testing/development |
+| **Atari 2600** | 🚧 In Development | TIA, RIOT, cartridge formats | Rendering issues, stability | Testing/development |
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
-| **Game Boy** | 🚧 In Development | Core features, MBC0/1/2/3/5 | Some edge cases, audio refinement | Testing/development |
+| **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
-| **SNES** | 🚧 Basic | CPU, basic rendering | PPU features, audio, input | Testing only |
+| **SNES** | 🚧 In Development | CPU, basic infrastructure | PPU rendering, audio, input, visible output | Development only |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
@@ -885,8 +885,8 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: ✅ Functional (Modes 0 & 1, sprites, scrolling, input - ready for gameplay)  
-**Coverage**: Good - CPU complete, Modes 0 & 1 PPU functional, sprites, scrolling, controller support
+**Status**: 🚧 In Development (No visible output yet)  
+**Coverage**: Infrastructure in place - CPU complete, PPU partial, but does not currently render graphics
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
@@ -895,29 +895,15 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - Basic memory bus (128KB WRAM + cartridge mapping)
 - LoROM cartridge mapping
 - SMC header detection and removal
-- **PPU with Mode 0 & Mode 1 support**:
-  - **Mode 0**: 4 background layers with 2bpp tiles (4 colors per tile)
-  - **Mode 1**: 2 background layers with 4bpp tiles (16 colors) + 1 layer with 2bpp
-  - **Priority bit handling**: Tiles render in correct priority order (high/low priority)
-  - **BG3 priority toggle**: In Mode 1, BG3 can render above all sprites (for HUDs)
-  - **Sprite priority**: 4 priority levels (0-3) with correct rendering order
-  - **Sprite limits**: Hardware-accurate 32 sprites/scanline and 34 tile slots/scanline limits
-  - **Scrolling**: Full horizontal and vertical scrolling on all BG layers
-  - **Sprites (OAM)**: 128 sprites with 4bpp (16 colors), multiple size modes
-  - 8 palettes per layer
-  - Horizontal and vertical tile flipping
-  - Layer enable/disable control
-  - Proper tile attribute handling
-  - 256x224 resolution
-- **Controller Support**: Full SNES controller with 12 buttons (A, B, X, Y, L, R, Start, Select, D-pad)
+- PPU infrastructure partially implemented
 - Save states (F5/F6)
 
 **Known Limitations**:
 - **Graphics**: 
-  - Modes 2-7 not implemented (only Mode 0 and Mode 1 supported)
-  - No windows, masks, or special effects
-  - No HDMA, mosaic, or color math
-  - No sub-screen support
+  - **No visible output currently** - PPU does not produce working display
+  - PPU infrastructure partially implemented but non-functional
+  - Modes 0-7 require significant work to produce output
+  - No sprites, backgrounds, or any visual rendering working yet
 - **Audio**: 
   - SPC700 APU not fully implemented - silent gameplay
   - APU communication ports ($2140-$2143) use enhanced state machine stub
@@ -925,23 +911,18 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - Games receive proper APU handshake responses ($BBAA signature) and echo protocol
   - No actual audio processing or SPC700 code execution occurs
 - **Cartridge**: 
-  - Only basic LoROM mapping - no HiROM, ExHiROM, or special chips
-  - No enhancement chips: SuperFX, SA1, DSP-1/2/3/4, S-DD1, Cx4, etc.
-  - Games requiring these chips will not work
+  - Only basic LoROM mapping
+  - No HiROM, ExHiROM, or enhancement chips
+- **Input**:
+  - Controller infrastructure present but not tested
 - **Timing**: 
   - Frame-based rendering - not cycle-accurate
-  - NTSC timing only (no PAL support)
-  - No mid-scanline effects
-- **Input**:
-  - Standard controllers only (no mouse, multitap, or special peripherals)
-- **Status**: Can run games using Mode 0 or Mode 1 with sprites and controllers. Most commercial titles that use these modes are playable (without audio). Games requiring enhancement chips or advanced PPU features will not work.
+  - NTSC timing only
+- **Status**: **Not playable** - SNES emulation is in early development with infrastructure in place but no working graphics output. Not recommended for use.
 
-**Recommended Test Games**:
-- ✅ Super Mario World (works - Mode 1, sprites, scrolling)
-- ❌ F-Zero (requires Mode 7)
-- ⚠️ Donkey Kong Country (needs better priority handling for full graphics)
-- ❌ Super Mario RPG (requires SA1 enhancement chip)
-- ❌ Star Fox (requires SuperFX chip)
+**Recommended For**:
+- Development and testing only
+- Not suitable for playing games
 
 ### N64 (Nintendo 64)
 

@@ -8,7 +8,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 - 💻 **PC Emulation**: ⚠️ Functional - COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS boots.
 - 🕹️ **Atari 2600 Emulation**: 🚧 In development - Support for most cartridge formats (2K-32K) with multiple banking schemes
 - 🎲 **Game Boy Emulation**: ✅ Fully Functional - ~97% game coverage (MBC0/1/2/3/5, HuC1), full APU and timer support
-- 🏰 **SNES Emulation**: 🚧 In development - CPU working, minimal PPU, no APU/input yet
+- 🏰 **SNES Emulation**: 🚧 In development - CPU working, PPU infrastructure in place, no visible output yet
 - 🎮 **N64 Emulation**: 🚧 In development - 3D rendering functional, limited game support
 - 🖱️ **Modern GUI**: Menu bar and status bar with mouse and keyboard support - no more cryptic F-keys!
 - 💾 **Save States**: 5 slots per game with instant save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
@@ -25,9 +25,11 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 |--------|--------|-----|----------|-------|-------|-------------|----------------|
 | **NES** | ✅ Fully Working | 6502 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~90% of all games via 14 mappers |
 | **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
-| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Functional) | TIA (Complete) | ✅ | ✅ | Most cartridge formats (2K-32K) |
+| **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Partial - rendering issues) | TIA (Complete) | ✅ | ✅ | Most cartridge formats; rendering WIP |
+| **CHIP-8** | ✅ Fully Working | CHIP-8 VM (Complete) | Multi-mode (Complete) | Beep timer (Complete) | ✅ | ✅ | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **Game Boy** | ✅ Fully Functional | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~97% of games; MBC0/1/2/3/5, HuC1 supported |
-| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Minimal) | ❌ Not implemented | ❌ | ✅ | Infrastructure only; minimal rendering |
+| **SMS** | ✅ Functional | Z80 (Complete) | VDP (Complete) | PSG (Complete) | ✅ | ✅ | Full hardware emulation; needs game testing |
+| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Partial) | ❌ Not implemented | ❌ | ✅ | No visible output yet; infrastructure in place |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 
 **Legend:**
@@ -54,12 +56,14 @@ See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements
 - [NEXT_EMULATOR_RECOMMENDATION.md](docs/NEXT_EMULATOR_RECOMMENDATION.md) - Recommendation for next emulator to implement
 - [SMS_IMPLEMENTATION_GUIDE.md](docs/SMS_IMPLEMENTATION_GUIDE.md) - Practical guide for implementing Sega Master System
 - [SNES_EMULATION_PITFALLS.md](docs/SNES_EMULATION_PITFALLS.md) - Technical reference for SNES emulation edge cases
-- [REFERENCE.md](docs/REFERENCE.md) - General technical references
+- [references/](docs/references/) - CPU and hardware technical references
 
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
 - [Game Boy](crates/systems/gb/README.md) - PPU, APU, MBCs
 - [Atari 2600](crates/systems/atari2600/README.md) - TIA, RIOT, cartridges
+- [CHIP-8](crates/systems/chip8/README.md) - VM architecture, display modes
+- [SMS](crates/systems/sms/README.md) - Z80 CPU, VDP, PSG
 - [SNES](crates/systems/snes/README.md) - PPU modes, memory map
 - [N64](crates/systems/n64/README.md) - RDP renderer, RSP
 - [PC](crates/systems/pc/README.md) - Video adapters, BIOS
