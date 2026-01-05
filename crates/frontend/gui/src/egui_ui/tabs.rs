@@ -787,8 +787,10 @@ impl TabManager {
             self.render_legacy_debug_view(ui, debug_info);
         } else {
             // No debug information available
+            let available_height = ui.available_height();
             ScrollArea::vertical()
                 .auto_shrink([false; 2])
+                .max_height(available_height)
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
@@ -812,68 +814,73 @@ impl TabManager {
     }
 
     fn render_enhanced_debug_view(&self, ui: &mut Ui, state: &EnhancedDebugState) {
-        // Header
-        ui.vertical_centered(|ui| {
+        let total_available_height = ui.available_height();
+        
+        ui.vertical(|ui| {
+            // Header
+            ui.vertical_centered(|ui| {
+                ui.add_space(5.0);
+                ui.heading(
+                    egui::RichText::new(format!("🔧 {} Debugger", state.system_type))
+                        .size(20.0)
+                        .strong(),
+                );
+            });
+
             ui.add_space(5.0);
-            ui.heading(
-                egui::RichText::new(format!("🔧 {} Debugger", state.system_type))
-                    .size(20.0)
-                    .strong(),
-            );
-        });
+            ui.separator();
+            ui.add_space(5.0);
 
-        ui.add_space(5.0);
-        ui.separator();
-        ui.add_space(5.0);
+            // 3-column layout: Disassembly | Memory | CPU State
+            // Use horizontal layout with equal-width columns that fill available height
+            let header_height = 80.0; // Approximate height used by header elements above
+            ui.horizontal_top(|ui| {
+                let available_width = ui.available_width();
+                let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
+                let content_height = total_available_height - header_height;
 
-        // 3-column layout: Disassembly | Memory | CPU State
-        // Use horizontal layout with equal-width columns that fill available height
-        ui.horizontal(|ui| {
-            let available_width = ui.available_width();
-            let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
-            let available_height = ui.available_height();
+                // Left panel: Disassembly
+                ui.vertical(|ui| {
+                    ui.set_width(column_width);
+                    ui.set_height(content_height);
+                    ui.heading("📜 Disassembly");
+                    ui.separator();
+                    ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            self.render_disassembly_panel(ui, state);
+                        });
+                });
 
-            // Left panel: Disassembly
-            ui.vertical(|ui| {
-                ui.set_width(column_width);
-                ui.heading("📜 Disassembly");
-                ui.separator();
-                ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .max_height(available_height - 40.0)
-                    .show(ui, |ui| {
-                        self.render_disassembly_panel(ui, state);
-                    });
-            });
+                ui.add_space(10.0);
 
-            ui.add_space(10.0);
+                // Middle panel: Memory Explorer
+                ui.vertical(|ui| {
+                    ui.set_width(column_width);
+                    ui.set_height(content_height);
+                    ui.heading("💾 Memory");
+                    ui.separator();
+                    ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            self.render_memory_panel(ui, state);
+                        });
+                });
 
-            // Middle panel: Memory Explorer
-            ui.vertical(|ui| {
-                ui.set_width(column_width);
-                ui.heading("💾 Memory");
-                ui.separator();
-                ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .max_height(available_height - 40.0)
-                    .show(ui, |ui| {
-                        self.render_memory_panel(ui, state);
-                    });
-            });
+                ui.add_space(10.0);
 
-            ui.add_space(10.0);
-
-            // Right panel: CPU State
-            ui.vertical(|ui| {
-                ui.set_width(column_width);
-                ui.heading("🖥️ CPU State");
-                ui.separator();
-                ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .max_height(available_height - 40.0)
-                    .show(ui, |ui| {
-                        self.render_cpu_state_panel(ui, state);
-                    });
+                // Right panel: CPU State
+                ui.vertical(|ui| {
+                    ui.set_width(column_width);
+                    ui.set_height(content_height);
+                    ui.heading("🖥️ CPU State");
+                    ui.separator();
+                    ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            self.render_cpu_state_panel(ui, state);
+                        });
+                });
             });
         });
     }
