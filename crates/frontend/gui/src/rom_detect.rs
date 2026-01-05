@@ -28,6 +28,70 @@ impl fmt::Display for UnsupportedRomError {
 
 impl Error for UnsupportedRomError {}
 
+/// Detect ROM type with file extension hint
+/// This function first checks the file extension for unambiguous cases (like .ch8 for CHIP-8),
+/// then falls back to content-based detection
+pub fn detect_rom_type_with_extension(
+    data: &[u8],
+    extension: Option<&str>,
+) -> Result<SystemType, UnsupportedRomError> {
+    // Check file extension first for unambiguous cases
+    // CHIP-8 files (.ch8, .c8) have no header and overlap in size with PC COM files
+    if let Some(ext) = extension {
+        let ext_lower = ext.to_lowercase();
+        match ext_lower.as_str() {
+            "ch8" | "c8" => return Ok(SystemType::Chip8),
+            "nes" => {
+                // For .nes extension, still verify it has iNES header
+                if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
+                    return Ok(SystemType::NES);
+                }
+                // If no header, fall through to content detection
+            }
+            "gb" | "gbc" => {
+                // For Game Boy extensions, verify the logo
+                if data.len() >= 0x150 {
+                    let logo_start = &data[0x104..0x108];
+                    if logo_start == [0xCE, 0xED, 0x66, 0x66] {
+                        return Ok(SystemType::GameBoy);
+                    }
+                }
+                // Fall through to content detection
+            }
+            "sms" => {
+                // Prefer SMS for .sms extension even without header
+                return Ok(SystemType::SMS);
+            }
+            "a26" | "bin" => {
+                // For Atari 2600 extensions, prefer Atari detection
+                // Check if size matches known Atari cartridge sizes
+                if matches!(data.len(), 2048 | 4096 | 8192 | 12288 | 16384 | 32768) {
+                    return Ok(SystemType::Atari2600);
+                }
+                // Fall through to content detection for other sizes
+            }
+            "smc" | "sfc" => {
+                // Prefer SNES for .smc/.sfc extensions
+                return Ok(SystemType::SNES);
+            }
+            "z64" | "n64" | "v64" => {
+                // Prefer N64 for these extensions
+                return Ok(SystemType::N64);
+            }
+            "com" | "exe" => {
+                // PC executable extensions
+                return Ok(SystemType::PC);
+            }
+            _ => {
+                // Unknown extension, fall through to content detection
+            }
+        }
+    }
+
+    // Fall back to content-based detection
+    detect_rom_type(data)
+}
+
 pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check for NES (iNES format)
     if data.len() >= 16 && &data[0..4] == b"NES\x1A" {
@@ -256,6 +320,104 @@ mod tests {
         let data = vec![0u8; 49152];
         assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SMS);
     }
+
+    // Tests for extension-aware detection
+    #[test]
+    fn test_chip8_extension_detection() {
+        // Small file that could be PC COM or CHIP-8
+        let data = vec![0u8; 512];
+
+        // Without extension, should detect as PC
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::PC);
+
+        // With .ch8 extension, should detect as CHIP-8
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("ch8")).unwrap(),
+            SystemType::Chip8
+        );
+
+        // With .c8 extension, should detect as CHIP-8
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("c8")).unwrap(),
+            SystemType::Chip8
+        );
+    }
+
+    #[test]
+    fn test_atari2600_extension_detection() {
+        // 32KB file could be Atari 2600 or SNES
+        let data = vec![0u8; 32768];
+
+        // Without extension, currently detects as SNES (ambiguous)
+        assert_eq!(detect_rom_type(&data).unwrap(), SystemType::SNES);
+
+        // With .a26 extension, should detect as Atari 2600
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("a26")).unwrap(),
+            SystemType::Atari2600
+        );
+
+        // With .bin extension, should detect as Atari 2600
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("bin")).unwrap(),
+            SystemType::Atari2600
+        );
+    }
+
+    #[test]
+    fn test_snes_extension_detection() {
+        // 32KB file with SNES extension
+        let data = vec![0u8; 32768];
+
+        // With .smc extension, should detect as SNES
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("smc")).unwrap(),
+            SystemType::SNES
+        );
+
+        // With .sfc extension, should detect as SNES
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("sfc")).unwrap(),
+            SystemType::SNES
+        );
+    }
+
+    #[test]
+    fn test_pc_extension_detection() {
+        // Small file with PC executable extension
+        let data = vec![0u8; 100];
+
+        // With .com extension, should detect as PC
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("com")).unwrap(),
+            SystemType::PC
+        );
+
+        // With .exe extension, should detect as PC
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("exe")).unwrap(),
+            SystemType::PC
+        );
+    }
+
+    #[test]
+    fn test_extension_case_insensitive() {
+        let data = vec![0u8; 512];
+
+        // Extensions should be case-insensitive
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("CH8")).unwrap(),
+            SystemType::Chip8
+        );
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("Ch8")).unwrap(),
+            SystemType::Chip8
+        );
+        assert_eq!(
+            detect_rom_type_with_extension(&data, Some("C8")).unwrap(),
+            SystemType::Chip8
+        );
+    }
 }
 
 #[cfg(test)]
@@ -268,33 +430,36 @@ mod edge_case_tests {
         // Currently this will incorrectly detect as SNES
         let data = vec![0u8; 32768];
         let result = detect_rom_type(&data).unwrap();
-        
+
         // This test will fail because 32KB is detected as SNES, not Atari2600
         // This is the bug!
         println!("32KB file detected as: {:?}", result);
-        
+
         // The current logic detects this as SNES because SNES check comes first
-        assert_eq!(result, SystemType::SNES, 
-            "BUG: 32KB files are ambiguous - could be Atari 2600 or SNES");
+        assert_eq!(
+            result,
+            SystemType::SNES,
+            "BUG: 32KB files are ambiguous - could be Atari 2600 or SNES"
+        );
     }
-    
+
     #[test]
     fn test_8kb_file_ambiguity() {
         // An 8KB file with no headers could be Atari 2600 or small PC COM
         let data = vec![0u8; 8192];
         let result = detect_rom_type(&data).unwrap();
-        
+
         println!("8KB file detected as: {:?}", result);
         // Currently detected as Atari2600 (line 110 matches 8192)
         assert_eq!(result, SystemType::Atari2600);
     }
-    
+
     #[test]
     fn test_4kb_file_ambiguity() {
         // A 4KB file with no headers could be Atari 2600 or PC COM
         let data = vec![0u8; 4096];
         let result = detect_rom_type(&data).unwrap();
-        
+
         println!("4KB file detected as: {:?}", result);
         // Currently detected as Atari2600 (line 110 matches 4096)
         assert_eq!(result, SystemType::Atari2600);
