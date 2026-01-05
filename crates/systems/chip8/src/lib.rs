@@ -92,6 +92,8 @@ const DISPLAY_WIDTH_HIGH: usize = 128;
 const DISPLAY_HEIGHT_HIGH: usize = 64;
 const DISPLAY_WIDTH_HIRES: usize = 64;
 const DISPLAY_HEIGHT_HIRES: usize = 64;
+const DISPLAY_WIDTH_MEGA: usize = 256;
+const DISPLAY_HEIGHT_MEGA: usize = 192;
 const STACK_SIZE: usize = 16;
 
 /// Emulation mode
@@ -105,6 +107,8 @@ pub enum Chip8Mode {
     XoChip,
     /// CHIP-8 Hires (64x64, VIP 2-page mode for Cosmac VIP/Telmac 1800)
     Chip8Hires,
+    /// Mega-CHIP (256x192, ultra-high resolution)
+    MegaChip,
 }
 
 /// Super-CHIP large font data (10 bytes per character, 0-9)
@@ -189,6 +193,7 @@ impl Chip8System {
         let (display_width, display_height) = match mode {
             Chip8Mode::SuperChip | Chip8Mode::XoChip => (DISPLAY_WIDTH_HIGH, DISPLAY_HEIGHT_HIGH),
             Chip8Mode::Chip8Hires => (DISPLAY_WIDTH_HIRES, DISPLAY_HEIGHT_HIRES),
+            Chip8Mode::MegaChip => (DISPLAY_WIDTH_MEGA, DISPLAY_HEIGHT_MEGA),
             Chip8Mode::Chip8 => (DISPLAY_WIDTH_LOW, DISPLAY_HEIGHT_LOW),
         };
 
@@ -205,7 +210,10 @@ impl Chip8System {
             display_width,
             display_height,
             display_updated: false,
-            high_res: matches!(mode, Chip8Mode::SuperChip | Chip8Mode::XoChip),
+            high_res: matches!(
+                mode,
+                Chip8Mode::SuperChip | Chip8Mode::XoChip | Chip8Mode::MegaChip
+            ),
             delay_timer: 0,
             sound_timer: 0,
             keys: [false; 16],
@@ -411,12 +419,24 @@ impl Chip8System {
                     }
                 }
                 0x00FF => {
-                    // 00FF - HIGH (Super-CHIP): Enable high resolution mode
+                    // 00FF - HIGH: Enable high resolution mode
+                    // Super-CHIP/XO-CHIP: 128x64
+                    // Mega-CHIP: 256x192
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
                         log(LogCategory::PPU, LogLevel::Info, || {
                             "CHIP-8: HIGH - Switching to high-res mode (128x64)".to_string()
                         });
                         self.set_high_res();
+                    } else if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
+                        // Auto-upgrade to Mega-CHIP when high-res is requested from basic CHIP-8
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: HIGH - Auto-upgrading to Mega-CHIP mode (256x192)".to_string()
+                        });
+                        self.set_mega_res();
+                    } else if self.mode == Chip8Mode::MegaChip {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: HIGH - Already in Mega-CHIP mode (256x192)".to_string()
+                        });
                     }
                 }
                 _ => {
@@ -906,6 +926,19 @@ impl Chip8System {
         }
     }
 
+    /// Enable mega resolution mode (256x192) - Mega-CHIP
+    fn set_mega_res(&mut self) {
+        if self.mode != Chip8Mode::MegaChip {
+            self.mode = Chip8Mode::MegaChip;
+        }
+        self.display_width = DISPLAY_WIDTH_MEGA;
+        self.display_height = DISPLAY_HEIGHT_MEGA;
+        self.high_res = true;
+        let display_size = self.display_width * self.display_height;
+        self.display_planes = [vec![false; display_size], vec![false; display_size]];
+        self.display_updated = true;
+    }
+
     /// Set key state (0-15)
     pub fn set_key(&mut self, key: u8, pressed: bool) {
         if key < 16 {
@@ -940,6 +973,15 @@ impl Chip8System {
 
     /// Get debug information
     pub fn debug_info(&self) -> DebugInfo {
+        let mode_str = match self.mode {
+            Chip8Mode::Chip8 => "CHIP-8",
+            Chip8Mode::SuperChip => "Super-CHIP",
+            Chip8Mode::XoChip => "XO-CHIP",
+            Chip8Mode::Chip8Hires => "CHIP-8 Hires",
+            Chip8Mode::MegaChip => "Mega-CHIP",
+        };
+        let resolution_str = format!("{}x{}", self.display_width, self.display_height);
+
         DebugInfo {
             pc: self.pc,
             i: self.i,
@@ -948,6 +990,8 @@ impl Chip8System {
             vf: self.v[0xF],
             delay_timer: self.delay_timer,
             sound_timer: self.sound_timer,
+            mode: mode_str.to_string(),
+            resolution: resolution_str,
         }
     }
 
@@ -966,6 +1010,8 @@ pub struct DebugInfo {
     pub vf: u8,
     pub delay_timer: u8,
     pub sound_timer: u8,
+    pub mode: String,
+    pub resolution: String,
 }
 
 impl System for Chip8System {
@@ -1050,6 +1096,7 @@ impl System for Chip8System {
                 Chip8Mode::SuperChip => 1,
                 Chip8Mode::XoChip => 2,
                 Chip8Mode::Chip8Hires => 3,
+                Chip8Mode::MegaChip => 4,
             },
             "high_res": self.high_res,
         })
@@ -1090,6 +1137,7 @@ impl System for Chip8System {
                 1 => Chip8Mode::SuperChip,
                 2 => Chip8Mode::XoChip,
                 3 => Chip8Mode::Chip8Hires,
+                4 => Chip8Mode::MegaChip,
                 _ => Chip8Mode::Chip8,
             };
             if mode != self.mode {

@@ -137,6 +137,12 @@ let mut system = Chip8System::new_with_mode(Chip8Mode::Chip8Hires);
 system.mount("Program", &rom_data)?;
 let frame = system.step_frame()?;
 // frame.pixels contains 64x64 RGBA pixels
+
+// Mega-CHIP with ultra-high resolution
+let mut system = Chip8System::new_with_mode(Chip8Mode::MegaChip);
+system.mount("Program", &rom_data)?;
+let frame = system.step_frame()?;
+// frame.pixels contains 256x192 RGBA pixels
 ```
 
 ## Implemented Extensions
@@ -165,6 +171,13 @@ let frame = system.step_frame()?;
 - ✅ Range save/load opcodes (5XY2/5XY3)
 - ✅ Scroll up opcode (00DN)
 
+### Mega-CHIP
+- ✅ Ultra-high resolution 256x192 display mode
+- ✅ Automatic mode upgrade when 00FF opcode used from basic CHIP-8
+- ✅ Full backward compatibility with all CHIP-8 opcodes
+- ✅ Larger display buffer for advanced graphics
+- ✅ Save state support with mode preservation
+
 ## Known Limitations
 
 1. **Random Number Generator**: Uses simple LCG instead of true random
@@ -174,6 +187,7 @@ let frame = system.step_frame()?;
 5. **CHIP-8 Hires Compatibility**: VIP 2-page hires mode (64x64) fully implemented
 6. **Super-CHIP Compatibility**: All Super-CHIP extensions fully implemented
 7. **XO-CHIP Compatibility**: All XO-CHIP extensions fully implemented
+8. **Mega-CHIP Compatibility**: Mega-CHIP extensions fully implemented
 
 ## References
 
@@ -194,6 +208,14 @@ This implementation is based on the following specifications and resources:
 4. **CHIP-8 Wikipedia Article**  
    https://en.wikipedia.org/wiki/CHIP-8  
    Historical context and overview of the CHIP-8 system and its variants.
+
+5. **Mega-CHIP Documentation**  
+   https://github.com/NinjaWeedle/MegaChip8  
+   Official Mega-CHIP specification and test ROMs for 256x192 resolution mode.
+
+6. **CHIP-8 Variant Opcode Table**  
+   https://chip8.gulrak.net/reference/opcodes/  
+   Comprehensive comparison of opcodes across CHIP-8 variants.
 
 5. **Chip-8 on the COSMAC VIP**  
    RCA COSMAC VIP Instruction Manual (1978)  

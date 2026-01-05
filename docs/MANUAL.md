@@ -678,7 +678,7 @@ The emulator supports the following cartridge banking schemes:
 ### CHIP-8
 
 **Status**: ✅ Fully Working  
-**Coverage**: Complete CHIP-8, CHIP-8 Hires, Super-CHIP, and XO-CHIP specifications (all opcodes and features implemented)
+**Coverage**: Complete CHIP-8, CHIP-8 Hires, Super-CHIP, XO-CHIP, and Mega-CHIP specifications (all opcodes and features implemented)
 
 **Program Format**: .ch8 or .c8 files - automatically detected by file size (< 3.5KB for CHIP-8/Super-CHIP, < 64KB for XO-CHIP)
 
@@ -687,6 +687,7 @@ The emulator supports the following cartridge banking schemes:
 - **CHIP-8 Hires**: VIP 2-page mode with 64x64 resolution for Cosmac VIP/Telmac 1800 ROMs
 - **Super-CHIP Extensions**: 128x64 high-resolution mode, 4-direction scrolling, 16x16 sprites, large font, flag registers
 - **XO-CHIP Extensions**: 4-color display with dual bit planes, 64KB extended memory, audio patterns, plane selection
+- **Mega-CHIP Extensions**: Ultra-high 256x192 resolution, advanced graphics capabilities
 - Built-in hexadecimal fonts (5x8 standard, 10x16 large)
 - 16-key hexadecimal keypad
 - Sound and delay timers (60Hz)
@@ -707,7 +708,9 @@ A 0 B F            Z X C V
 - Programs automatically run in CHIP-8 mode by default
 - CHIP-8 Hires mode is automatically detected when opcode 0x1260 is at PC=0x200
 - Super-CHIP and XO-CHIP programs can switch modes using specific opcodes
+- Mega-CHIP mode auto-activates when 00FF opcode is used from basic CHIP-8
 - Manual mode selection available via API (for developers)
+- Current mode displayed in debug panel for easy verification
 
 **CHIP-8 Hires Features** (fully implemented):
 - 64x64 pixel high-resolution mode for original VIP hardware
@@ -730,6 +733,13 @@ A 0 B F            Z X C V
 - Extended I register loading (F000 NNNN)
 - Range save/load opcodes (5XY2/5XY3)
 
+**Mega-CHIP Features** (fully implemented):
+- Ultra-high resolution 256x192 display mode
+- Automatic mode upgrade when 00FF opcode used from basic CHIP-8
+- Full backward compatibility with all standard CHIP-8 opcodes
+- Larger display buffer for advanced graphics and homebrew games
+- Save state support with mode preservation
+
 **Known Limitations**:
 - **Audio**: Audio pattern buffer and pitch are tracked but no actual tone generation
 - **Random Number**: Uses simple pseudo-random generator (not cryptographically secure)
@@ -741,13 +751,15 @@ A 0 B F            Z X C V
 - XOR-based sprite drawing with collision detection
 - Deterministic behavior for save states and replay
 - Variable memory: 4KB (CHIP-8/Super-CHIP) or 64KB (XO-CHIP)
-- Variable resolution: 64x32 (low-res), 64x64 (hires), or 128x64 (high-res)
+- Variable resolution: 64x32 (low-res), 64x64 (hires), 128x64 (high-res), or 256x192 (mega)
+- Debug panel shows current mode and active resolution for easy verification
 
 **Recommended Programs**:
 - Classic CHIP-8 games (Pong, Tetris, Space Invaders, Breakout)
 - VIP 2-page hires ROMs for original Cosmac VIP/Telmac 1800 hardware
 - Super-CHIP games with enhanced graphics
 - XO-CHIP programs with color and audio
+- Mega-CHIP homebrew with advanced graphics
 - Homebrew programs and test ROMs
 
 For more technical information, see [crates/systems/chip8/README.md](../crates/systems/chip8/README.md).

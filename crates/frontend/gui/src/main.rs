@@ -781,32 +781,64 @@ fn get_snes_controller_state(window: &dyn WindowBackend, mapping: &settings::Key
 /// Returns a 16-bit value where bit N represents key N (0x0-0xF)
 fn get_chip8_controller_state(window: &dyn WindowBackend) -> u16 {
     let mut state: u16 = 0;
-    
+
     // Map keyboard keys to CHIP-8 hex keypad
     // Row 1: 1 2 3 4 -> keys 1 2 3 C
-    if window.is_key_down(Key::Key1) { state |= 1 << 0x1; }
-    if window.is_key_down(Key::Key2) { state |= 1 << 0x2; }
-    if window.is_key_down(Key::Key3) { state |= 1 << 0x3; }
-    if window.is_key_down(Key::Key4) { state |= 1 << 0xC; }
-    
+    if window.is_key_down(Key::Key1) {
+        state |= 1 << 0x1;
+    }
+    if window.is_key_down(Key::Key2) {
+        state |= 1 << 0x2;
+    }
+    if window.is_key_down(Key::Key3) {
+        state |= 1 << 0x3;
+    }
+    if window.is_key_down(Key::Key4) {
+        state |= 1 << 0xC;
+    }
+
     // Row 2: Q W E R -> keys 4 5 6 D
-    if window.is_key_down(Key::Q) { state |= 1 << 0x4; }
-    if window.is_key_down(Key::W) { state |= 1 << 0x5; }
-    if window.is_key_down(Key::E) { state |= 1 << 0x6; }
-    if window.is_key_down(Key::R) { state |= 1 << 0xD; }
-    
+    if window.is_key_down(Key::Q) {
+        state |= 1 << 0x4;
+    }
+    if window.is_key_down(Key::W) {
+        state |= 1 << 0x5;
+    }
+    if window.is_key_down(Key::E) {
+        state |= 1 << 0x6;
+    }
+    if window.is_key_down(Key::R) {
+        state |= 1 << 0xD;
+    }
+
     // Row 3: A S D F -> keys 7 8 9 E
-    if window.is_key_down(Key::A) { state |= 1 << 0x7; }
-    if window.is_key_down(Key::S) { state |= 1 << 0x8; }
-    if window.is_key_down(Key::D) { state |= 1 << 0x9; }
-    if window.is_key_down(Key::F) { state |= 1 << 0xE; }
-    
+    if window.is_key_down(Key::A) {
+        state |= 1 << 0x7;
+    }
+    if window.is_key_down(Key::S) {
+        state |= 1 << 0x8;
+    }
+    if window.is_key_down(Key::D) {
+        state |= 1 << 0x9;
+    }
+    if window.is_key_down(Key::F) {
+        state |= 1 << 0xE;
+    }
+
     // Row 4: Z X C V -> keys A 0 B F
-    if window.is_key_down(Key::Z) { state |= 1 << 0xA; }
-    if window.is_key_down(Key::X) { state |= 1 << 0x0; }
-    if window.is_key_down(Key::C) { state |= 1 << 0xB; }
-    if window.is_key_down(Key::V) { state |= 1 << 0xF; }
-    
+    if window.is_key_down(Key::Z) {
+        state |= 1 << 0xA;
+    }
+    if window.is_key_down(Key::X) {
+        state |= 1 << 0x0;
+    }
+    if window.is_key_down(Key::C) {
+        state |= 1 << 0xB;
+    }
+    if window.is_key_down(Key::V) {
+        state |= 1 << 0xF;
+    }
+
     state
 }
 
@@ -4258,8 +4290,10 @@ fn main() {
             if !egui_wants_input {
                 if !matches!(&sys, EmulatorSystem::PC(_)) {
                     // For non-PC systems, use standard controller mapping
-                    let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
-                    let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
+                    let controller_state =
+                        get_controller_state(&egui_backend, &settings.input.player1);
+                    let snes_state =
+                        get_snes_controller_state(&egui_backend, &settings.input.player1);
                     let chip8_state = get_chip8_controller_state(&egui_backend);
                     match &mut sys {
                         EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),

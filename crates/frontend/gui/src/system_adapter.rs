@@ -113,6 +113,8 @@ impl SystemDebugInfo {
 
     pub fn from_chip8(info: &emu_chip8::DebugInfo) -> Self {
         let mut debug_info = Self::new("CHIP-8".to_string());
+        debug_info.add_field("Mode".to_string(), info.mode.clone());
+        debug_info.add_field("Resolution".to_string(), info.resolution.clone());
         debug_info.add_field("PC".to_string(), format!("${:04X}", info.pc));
         debug_info.add_field("I".to_string(), format!("${:04X}", info.i));
         debug_info.add_field("SP".to_string(), format!("{}", info.sp));
