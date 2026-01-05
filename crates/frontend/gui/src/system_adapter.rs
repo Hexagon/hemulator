@@ -110,6 +110,20 @@ impl SystemDebugInfo {
         );
         debug_info
     }
+
+    pub fn from_chip8(info: &emu_chip8::DebugInfo) -> Self {
+        let mut debug_info = Self::new("CHIP-8".to_string());
+        debug_info.add_field("Mode".to_string(), info.mode.clone());
+        debug_info.add_field("Resolution".to_string(), info.resolution.clone());
+        debug_info.add_field("PC".to_string(), format!("${:04X}", info.pc));
+        debug_info.add_field("I".to_string(), format!("${:04X}", info.i));
+        debug_info.add_field("SP".to_string(), format!("{}", info.sp));
+        debug_info.add_field("V0".to_string(), format!("${:02X}", info.v0));
+        debug_info.add_field("VF".to_string(), format!("${:02X}", info.vf));
+        debug_info.add_field("Delay Timer".to_string(), format!("{}", info.delay_timer));
+        debug_info.add_field("Sound Timer".to_string(), format!("{}", info.sound_timer));
+        debug_info
+    }
 }
 
 /// Configuration options for different system types

@@ -16,6 +16,7 @@ emu_pc = { path = "../../systems/pc" }
 emu_snes = { path = "../../systems/snes" }
 emu_sms = { path = "../../systems/sms" }
 emu_n64 = { path = "../../systems/n64", features = ["opengl"] }
+emu_chip8 = { path = "../../systems/chip8" }
 rodio = "0.17"
 log = "0.4"
 env_logger = "0.10"
