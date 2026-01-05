@@ -199,6 +199,21 @@ impl<M: MemorySpc700> CpuSpc700<M> {
         self.set_flag(psw_flags::CARRY, carry);
     }
 
+    /// Read a 16-bit word from memory (little-endian)
+    #[inline]
+    fn read_word(&self, addr: u16) -> u16 {
+        let lo = self.read(addr) as u16;
+        let hi = self.read(addr.wrapping_add(1)) as u16;
+        (hi << 8) | lo
+    }
+
+    /// Write a 16-bit word to memory (little-endian)
+    #[inline]
+    fn write_word(&mut self, addr: u16, val: u16) {
+        self.write(addr, (val & 0xFF) as u8);
+        self.write(addr.wrapping_add(1), (val >> 8) as u8);
+    }
+
     /// Execute a single opcode and return cycles taken
     fn execute_opcode(&mut self, opcode: u8) -> u8 {
         match opcode {
@@ -598,6 +613,705 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let lo = self.pop();
                 let hi = self.pop();
                 self.pc = ((hi as u16) << 8) | (lo as u16);
+                5
+            }
+
+            // CALL !abs - Call subroutine at absolute address
+            0x3F => {
+                let addr = self.fetch_word();
+                let ret_addr = self.pc;
+                self.push((ret_addr >> 8) as u8);
+                self.push((ret_addr & 0xFF) as u8);
+                self.pc = addr;
+                8
+            }
+
+            // JMP !abs - Jump to absolute address
+            0x5F => {
+                self.pc = self.fetch_word();
+                3
+            }
+
+            // JMP (! abs+X) - Jump indirect indexed
+            0x1F => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.pc = self.read_word(addr);
+                6
+            }
+
+            // BMI rel - Branch if minus (N flag set)
+            0x30 => {
+                let offset = self.fetch_byte() as i8;
+                if self.get_flag(psw_flags::NEGATIVE) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // BVS rel - Branch if overflow set
+            0x70 => {
+                let offset = self.fetch_byte() as i8;
+                if self.get_flag(psw_flags::OVERFLOW) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // BVC rel - Branch if overflow clear
+            0x50 => {
+                let offset = self.fetch_byte() as i8;
+                if !self.get_flag(psw_flags::OVERFLOW) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // BCC rel - Branch if carry clear
+            0x90 => {
+                let offset = self.fetch_byte() as i8;
+                if !self.get_flag(psw_flags::CARRY) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // BCS rel - Branch if carry set
+            0xB0 => {
+                let offset = self.fetch_byte() as i8;
+                if self.get_flag(psw_flags::CARRY) {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // PUSH A
+            0x2D => {
+                self.push(self.a);
+                4
+            }
+
+            // PUSH X
+            0x4D => {
+                self.push(self.x);
+                4
+            }
+
+            // PUSH Y
+            0x6D => {
+                self.push(self.y);
+                4
+            }
+
+            // PUSH PSW
+            0x0D => {
+                self.push(self.psw);
+                4
+            }
+
+            // POP A
+            0xAE => {
+                self.a = self.pop();
+                self.update_nz(self.a);
+                4
+            }
+
+            // POP X
+            0xCE => {
+                self.x = self.pop();
+                self.update_nz(self.x);
+                4
+            }
+
+            // POP Y
+            0xEE => {
+                self.y = self.pop();
+                self.update_nz(self.y);
+                4
+            }
+
+            // POP PSW
+            0x8E => {
+                self.psw = self.pop();
+                4
+            }
+
+            // AND A, #imm
+            0x28 => {
+                let val = self.fetch_byte();
+                self.a &= val;
+                self.update_nz(self.a);
+                2
+            }
+
+            // AND A, dp
+            0x24 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.a &= self.read(addr);
+                self.update_nz(self.a);
+                3
+            }
+
+            // AND A, !abs
+            0x25 => {
+                let addr = self.fetch_word();
+                self.a &= self.read(addr);
+                self.update_nz(self.a);
+                4
+            }
+
+            // AND A, (X)
+            0x26 => {
+                self.a &= self.read(self.x as u16);
+                self.update_nz(self.a);
+                3
+            }
+
+            // AND A, dp+X
+            0x34 => {
+                let dp = self.fetch_byte();
+                self.a &= self.read(dp.wrapping_add(self.x) as u16);
+                self.update_nz(self.a);
+                4
+            }
+
+            // AND A, !abs+X
+            0x35 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.a &= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // AND A, !abs+Y
+            0x36 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                self.a &= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // OR A, #imm
+            0x08 => {
+                let val = self.fetch_byte();
+                self.a |= val;
+                self.update_nz(self.a);
+                2
+            }
+
+            // OR A, dp
+            0x04 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.a |= self.read(addr);
+                self.update_nz(self.a);
+                3
+            }
+
+            // OR A, !abs
+            0x05 => {
+                let addr = self.fetch_word();
+                self.a |= self.read(addr);
+                self.update_nz(self.a);
+                4
+            }
+
+            // OR A, (X)
+            0x06 => {
+                self.a |= self.read(self.x as u16);
+                self.update_nz(self.a);
+                3
+            }
+
+            // OR A, dp+X
+            0x14 => {
+                let dp = self.fetch_byte();
+                self.a |= self.read(dp.wrapping_add(self.x) as u16);
+                self.update_nz(self.a);
+                4
+            }
+
+            // OR A, !abs+X
+            0x15 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.a |= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // OR A, !abs+Y
+            0x16 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                self.a |= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // EOR A, #imm
+            0x48 => {
+                let val = self.fetch_byte();
+                self.a ^= val;
+                self.update_nz(self.a);
+                2
+            }
+
+            // EOR A, dp
+            0x44 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.a ^= self.read(addr);
+                self.update_nz(self.a);
+                3
+            }
+
+            // EOR A, !abs
+            0x45 => {
+                let addr = self.fetch_word();
+                self.a ^= self.read(addr);
+                self.update_nz(self.a);
+                4
+            }
+
+            // EOR A, (X)
+            0x46 => {
+                self.a ^= self.read(self.x as u16);
+                self.update_nz(self.a);
+                3
+            }
+
+            // EOR A, dp+X
+            0x54 => {
+                let dp = self.fetch_byte();
+                self.a ^= self.read(dp.wrapping_add(self.x) as u16);
+                self.update_nz(self.a);
+                4
+            }
+
+            // EOR A, !abs+X
+            0x55 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.a ^= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // EOR A, !abs+Y
+            0x56 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                self.a ^= self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // ADC A, #imm
+            0x88 => {
+                let val = self.fetch_byte();
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                2
+            }
+
+            // ADC A, dp
+            0x84 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                3
+            }
+
+            // ADC A, !abs
+            0x85 => {
+                let addr = self.fetch_word();
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                4
+            }
+
+            // SBC A, #imm
+            0xA8 => {
+                let val = self.fetch_byte();
+                let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 };
+                let result = self.a as i16 - val as i16 - carry as i16;
+                self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(psw_flags::OVERFLOW, ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry as i16) < 0);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                2
+            }
+
+            // SBC A, dp
+            0xA4 => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 };
+                let result = self.a as i16 - val as i16 - carry as i16;
+                self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(psw_flags::OVERFLOW, ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry as i16) < 0);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                3
+            }
+
+            // SBC A, !abs
+            0xA5 => {
+                let addr = self.fetch_word();
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 };
+                let result = self.a as i16 - val as i16 - carry as i16;
+                self.set_flag(psw_flags::CARRY, result >= 0);
+                self.set_flag(psw_flags::OVERFLOW, ((self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) as i16 - (val & 0x0F) as i16 - carry as i16) < 0);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                4
+            }
+
+            // CMP X, #imm
+            0xC8 => {
+                let val = self.fetch_byte();
+                let result = self.x.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.x >= val);
+                2
+            }
+
+            // CMP X, dp
+            0x3E => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let result = self.x.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.x >= val);
+                3
+            }
+
+            // CMP Y, #imm
+            0xAD => {
+                let val = self.fetch_byte();
+                let result = self.y.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.y >= val);
+                2
+            }
+
+            // CMP A, !abs+X
+            0x75 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                let val = self.read(addr);
+                let result = self.a.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.a >= val);
+                5
+            }
+
+            // CMP A, !abs+Y
+            0x76 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                let val = self.read(addr);
+                let result = self.a.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_flag(psw_flags::CARRY, self.a >= val);
+                5
+            }
+
+            // ASL A
+            0x1C => {
+                let carry = (self.a & 0x80) != 0;
+                self.a <<= 1;
+                self.set_carry(carry);
+                self.update_nz(self.a);
+                2
+            }
+
+            // ASL dp
+            0x0B => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let carry = (val & 0x80) != 0;
+                let result = val << 1;
+                self.write(addr, result);
+                self.set_carry(carry);
+                self.update_nz(result);
+                4
+            }
+
+            // LSR A
+            0x5C => {
+                let carry = (self.a & 0x01) != 0;
+                self.a >>= 1;
+                self.set_carry(carry);
+                self.update_nz(self.a);
+                2
+            }
+
+            // LSR dp
+            0x4B => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let carry = (val & 0x01) != 0;
+                let result = val >> 1;
+                self.write(addr, result);
+                self.set_carry(carry);
+                self.update_nz(result);
+                4
+            }
+
+            // ROL A
+            0x3C => {
+                let old_carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let new_carry = (self.a & 0x80) != 0;
+                self.a = (self.a << 1) | old_carry;
+                self.set_carry(new_carry);
+                self.update_nz(self.a);
+                2
+            }
+
+            // ROL dp
+            0x2B => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let old_carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let new_carry = (val & 0x80) != 0;
+                let result = (val << 1) | old_carry;
+                self.write(addr, result);
+                self.set_carry(new_carry);
+                self.update_nz(result);
+                4
+            }
+
+            // ROR A
+            0x7C => {
+                let old_carry = if self.get_flag(psw_flags::CARRY) { 0x80 } else { 0 };
+                let new_carry = (self.a & 0x01) != 0;
+                self.a = (self.a >> 1) | old_carry;
+                self.set_carry(new_carry);
+                self.update_nz(self.a);
+                2
+            }
+
+            // ROR dp
+            0x6B => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let old_carry = if self.get_flag(psw_flags::CARRY) { 0x80 } else { 0 };
+                let new_carry = (val & 0x01) != 0;
+                let result = (val >> 1) | old_carry;
+                self.write(addr, result);
+                self.set_carry(new_carry);
+                self.update_nz(result);
+                4
+            }
+
+            // MOVW YA, dp - Move 16-bit word from memory to YA
+            0xBA => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.a = self.read(addr);
+                self.y = self.read(addr.wrapping_add(1));
+                self.update_nz(self.y); // Only Y affects flags
+                5
+            }
+
+            // MOVW dp, YA - Move 16-bit word from YA to memory
+            0xDA => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                self.write(addr, self.a);
+                self.write(addr.wrapping_add(1), self.y);
+                5
+            }
+
+            // INCW dp - Increment 16-bit word
+            0x3A => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read_word(addr);
+                let result = val.wrapping_add(1);
+                self.write_word(addr, result);
+                self.set_flag(psw_flags::ZERO, result == 0);
+                self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
+                6
+            }
+
+            // DECW dp - Decrement 16-bit word
+            0x1A => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read_word(addr);
+                let result = val.wrapping_sub(1);
+                self.write_word(addr, result);
+                self.set_flag(psw_flags::ZERO, result == 0);
+                self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
+                6
+            }
+
+            // ADDW YA, dp - Add 16-bit word to YA
+            0x7A => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read_word(addr);
+                let ya = ((self.y as u16) << 8) | (self.a as u16);
+                let result = ya.wrapping_add(val);
+                self.a = (result & 0xFF) as u8;
+                self.y = (result >> 8) as u8;
+                self.set_flag(psw_flags::CARRY, result < ya || result < val);
+                self.set_flag(psw_flags::ZERO, result == 0);
+                self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((ya & 0x0FFF) + (val & 0x0FFF)) > 0x0FFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(ya ^ val) & (ya ^ result) & 0x8000) != 0);
+                5
+            }
+
+            // SUBW YA, dp - Subtract 16-bit word from YA
+            0x9A => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read_word(addr);
+                let ya = ((self.y as u16) << 8) | (self.a as u16);
+                let result = ya.wrapping_sub(val);
+                self.a = (result & 0xFF) as u8;
+                self.y = (result >> 8) as u8;
+                self.set_flag(psw_flags::CARRY, ya >= val);
+                self.set_flag(psw_flags::ZERO, result == 0);
+                self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, (ya & 0x0FFF) < (val & 0x0FFF));
+                self.set_flag(psw_flags::OVERFLOW, ((ya ^ val) & (ya ^ result) & 0x8000) != 0);
+                5
+            }
+
+            // CMPW YA, dp - Compare 16-bit word with YA
+            0x5A => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read_word(addr);
+                let ya = ((self.y as u16) << 8) | (self.a as u16);
+                let result = ya.wrapping_sub(val);
+                self.set_flag(psw_flags::ZERO, result == 0);
+                self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
+                self.set_flag(psw_flags::CARRY, ya >= val);
+                4
+            }
+
+            // MUL YA - Multiply Y * A -> YA
+            0xCF => {
+                let result = (self.y as u16) * (self.a as u16);
+                self.a = (result & 0xFF) as u8;
+                self.y = (result >> 8) as u8;
+                self.update_nz(self.y);
+                9
+            }
+
+            // DIV YA, X - Divide YA by X
+            0x9E => {
+                let ya = ((self.y as u16) << 8) | (self.a as u16);
+                if self.x == 0 {
+                    // Division by zero
+                    self.a = 0xFF;
+                    self.y = 0xFF;
+                    self.set_flag(psw_flags::OVERFLOW, true);
+                    self.set_flag(psw_flags::HALF_CARRY, true);
+                } else {
+                    let quotient = ya / (self.x as u16);
+                    let remainder = ya % (self.x as u16);
+                    self.a = (quotient & 0xFF) as u8;
+                    self.y = (remainder & 0xFF) as u8;
+                    self.set_flag(psw_flags::OVERFLOW, quotient > 0xFF);
+                    self.set_flag(psw_flags::HALF_CARRY, (self.y & 0x0F) >= (self.x & 0x0F));
+                }
+                self.update_nz(self.a);
+                12
+            }
+
+            // XCN A - Exchange nibbles in A
+            0x9F => {
+                self.a = (self.a >> 4) | (self.a << 4);
+                self.update_nz(self.a);
+                5
+            }
+
+            // CLRC - Clear carry flag
+            0x60 => {
+                self.set_carry(false);
+                2
+            }
+
+            // CLRV - Clear overflow and half-carry flags
+            0xE0 => {
+                self.psw &= !(psw_flags::OVERFLOW | psw_flags::HALF_CARRY);
+                2
+            }
+
+            // NOTC - Complement carry flag
+            0xED => {
+                self.set_carry(!self.get_flag(psw_flags::CARRY));
+                3
+            }
+
+            // EI - Enable interrupts
+            0xA0 => {
+                self.psw |= psw_flags::INTERRUPT;
+                3
+            }
+
+            // DI - Disable interrupts
+            0xC0 => {
+                self.psw &= !psw_flags::INTERRUPT;
+                3
+            }
+
+            // MOV X, SP - Move stack pointer to X
+            0x9D => {
+                self.x = self.sp;
+                self.update_nz(self.x);
+                2
+            }
+
+            // DEC dp
+            0x8B => {
+                let addr = self.direct_page() | (self.fetch_byte() as u16);
+                let val = self.read(addr);
+                let result = val.wrapping_sub(1);
+                self.write(addr, result);
+                self.update_nz(result);
+                4
+            }
+
+            // DEC !abs
+            0x8C => {
+                let addr = self.fetch_word();
+                let val = self.read(addr);
+                let result = val.wrapping_sub(1);
+                self.write(addr, result);
+                self.update_nz(result);
+                5
+            }
+
+            // INC !abs
+            0xAC => {
+                let addr = self.fetch_word();
+                let val = self.read(addr);
+                let result = val.wrapping_add(1);
+                self.write(addr, result);
+                self.update_nz(result);
                 5
             }
 
