@@ -148,6 +148,79 @@ impl<M: MemoryZ80> CpuZ80<M> {
         cycles
     }
 
+    /// Trigger a maskable interrupt (honors IFF1 and interrupt mode)
+    ///
+    /// # Parameters
+    /// - `data`: Data byte from interrupting device (used in IM 0 and IM 2)
+    ///
+    /// # Interrupt Modes
+    /// - **IM 0**: Device provides instruction (usually RST), executes `data` as opcode
+    /// - **IM 1**: Jump to $0038 (most common, used by SMS/Game Gear)
+    /// - **IM 2**: Vectored interrupt, forms address from I register and `data`
+    pub fn interrupt(&mut self, data: u8) {
+        if !self.iff1 {
+            return; // Interrupts disabled
+        }
+
+        // Exit halt state
+        self.halted = false;
+
+        // Disable interrupts
+        self.iff1 = false;
+        self.iff2 = false;
+
+        // Push current PC to stack
+        self.push_u16(self.pc);
+
+        // Handle based on interrupt mode
+        match self.im {
+            0 => {
+                // IM 0: Execute the provided instruction (usually RST)
+                // Note: Full IM 0 requires executing arbitrary instructions from the data byte.
+                // For simplicity, we assume RST instructions (most common case) and jump to
+                // the RST vector. This works for typical hardware like the SMS.
+                self.pc = (data & 0x38) as u16;
+            }
+            1 => {
+                // IM 1: Jump to $0038
+                self.pc = 0x0038;
+            }
+            2 => {
+                // IM 2: Vectored interrupt
+                // Vector address = (I << 8) | (data & 0xFE)
+                let vector_addr = ((self.i as u16) << 8) | ((data & 0xFE) as u16);
+                let lo = self.memory.read(vector_addr) as u16;
+                let hi = self.memory.read(vector_addr.wrapping_add(1)) as u16;
+                self.pc = (hi << 8) | lo;
+            }
+            _ => {
+                // Default to IM 1 behavior for invalid modes
+                self.pc = 0x0038;
+            }
+        }
+    }
+
+    /// Trigger a non-maskable interrupt (NMI)
+    ///
+    /// NMI cannot be disabled and always jumps to $0066.
+    /// IFF1 is copied to IFF2 so it can be restored by RETN.
+    pub fn nmi(&mut self) {
+        // Exit halt state
+        self.halted = false;
+
+        // Save IFF1 to IFF2 (for RETN to restore)
+        self.iff2 = self.iff1;
+
+        // Disable maskable interrupts
+        self.iff1 = false;
+
+        // Push current PC to stack
+        self.push_u16(self.pc);
+
+        // Jump to NMI vector
+        self.pc = 0x0066;
+    }
+
     // Helper methods
     fn read_pc(&mut self) -> u8 {
         let val = self.memory.read(self.pc);
@@ -2190,5 +2263,215 @@ impl<M: MemoryZ80> crate::Cpu for CpuZ80<M> {
 
     fn step(&mut self) -> u32 {
         self.step()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Simple test memory implementation
+    struct TestMemory {
+        ram: [u8; 0x10000],
+    }
+
+    impl TestMemory {
+        fn new() -> Self {
+            Self { ram: [0; 0x10000] }
+        }
+
+        fn with_program(program: &[u8]) -> Self {
+            let mut mem = Self::new();
+            mem.ram[..program.len()].copy_from_slice(program);
+            mem
+        }
+    }
+
+    impl MemoryZ80 for TestMemory {
+        fn read(&self, addr: u16) -> u8 {
+            self.ram[addr as usize]
+        }
+
+        fn write(&mut self, addr: u16, val: u8) {
+            self.ram[addr as usize] = val;
+        }
+    }
+
+    #[test]
+    fn test_interrupt_im0() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.im = 0;
+        cpu.iff1 = true; // Enable interrupts
+
+        // Trigger interrupt with RST 0x10 (vector 0x10)
+        cpu.interrupt(0x10);
+
+        assert_eq!(cpu.pc, 0x0010); // Should jump to RST vector
+        assert!(!cpu.iff1); // Interrupts should be disabled
+        assert!(!cpu.iff2);
+        assert_eq!(cpu.sp, 0xFFFC); // Stack should have PC pushed
+    }
+
+    #[test]
+    fn test_interrupt_im1() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.im = 1;
+        cpu.iff1 = true; // Enable interrupts
+
+        // Trigger interrupt (data byte doesn't matter in IM 1)
+        cpu.interrupt(0xFF);
+
+        assert_eq!(cpu.pc, 0x0038); // Should jump to $0038
+        assert!(!cpu.iff1); // Interrupts should be disabled
+        assert!(!cpu.iff2);
+        assert_eq!(cpu.sp, 0xFFFC); // Stack should have PC pushed
+    }
+
+    #[test]
+    fn test_interrupt_im2() {
+        let mut memory = TestMemory::new();
+        // Set up interrupt vector table at $8000
+        memory.ram[0x80FE] = 0x34; // Low byte of handler address
+        memory.ram[0x80FF] = 0x12; // High byte of handler address
+
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x5678;
+        cpu.sp = 0xFFFE;
+        cpu.im = 2;
+        cpu.i = 0x80; // Interrupt vector high byte
+        cpu.iff1 = true; // Enable interrupts
+
+        // Trigger interrupt with device byte 0xFF (uses $80FE as vector table address)
+        cpu.interrupt(0xFF);
+
+        assert_eq!(cpu.pc, 0x1234); // Should jump to handler at $1234
+        assert!(!cpu.iff1); // Interrupts should be disabled
+        assert!(!cpu.iff2);
+        assert_eq!(cpu.sp, 0xFFFC); // Stack should have PC pushed
+    }
+
+    #[test]
+    fn test_interrupt_disabled() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.im = 1;
+        cpu.iff1 = false; // Interrupts disabled
+
+        // Try to trigger interrupt
+        cpu.interrupt(0xFF);
+
+        // PC should not change
+        assert_eq!(cpu.pc, 0x1234);
+        assert_eq!(cpu.sp, 0xFFFE); // Stack should not change
+    }
+
+    #[test]
+    fn test_interrupt_exits_halt() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.im = 1;
+        cpu.iff1 = true;
+        cpu.halted = true; // CPU is halted
+
+        // Trigger interrupt
+        cpu.interrupt(0xFF);
+
+        assert!(!cpu.halted); // Should exit halt state
+        assert_eq!(cpu.pc, 0x0038); // Should jump to interrupt vector
+    }
+
+    #[test]
+    fn test_nmi() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.iff1 = true; // Interrupts enabled
+
+        // Trigger NMI
+        cpu.nmi();
+
+        assert_eq!(cpu.pc, 0x0066); // Should jump to $0066
+        assert!(!cpu.iff1); // IFF1 should be disabled
+        assert!(cpu.iff2); // IFF2 should save previous IFF1 state (true)
+        assert_eq!(cpu.sp, 0xFFFC); // Stack should have PC pushed
+    }
+
+    #[test]
+    fn test_nmi_when_interrupts_disabled() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.iff1 = false; // Interrupts disabled
+
+        // Trigger NMI (should still work)
+        cpu.nmi();
+
+        assert_eq!(cpu.pc, 0x0066); // Should jump to $0066
+        assert!(!cpu.iff1); // IFF1 should be disabled
+        assert!(!cpu.iff2); // IFF2 should save previous IFF1 state (false)
+        assert_eq!(cpu.sp, 0xFFFC); // Stack should have PC pushed
+    }
+
+    #[test]
+    fn test_nmi_exits_halt() {
+        let memory = TestMemory::new();
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.pc = 0x1234;
+        cpu.sp = 0xFFFE;
+        cpu.halted = true; // CPU is halted
+
+        // Trigger NMI
+        cpu.nmi();
+
+        assert!(!cpu.halted); // Should exit halt state
+        assert_eq!(cpu.pc, 0x0066); // Should jump to NMI vector
+    }
+
+    #[test]
+    fn test_ei_instruction() {
+        let program = [0xFB]; // EI instruction
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+
+        cpu.step();
+
+        assert!(cpu.iff1); // Interrupts should be enabled
+        assert!(cpu.iff2);
+    }
+
+    #[test]
+    fn test_di_instruction() {
+        let program = [0xF3]; // DI instruction
+        let memory = TestMemory::with_program(&program);
+        let mut cpu = CpuZ80::new(memory);
+        cpu.reset();
+        cpu.iff1 = true;
+        cpu.iff2 = true;
+
+        cpu.step();
+
+        assert!(!cpu.iff1); // Interrupts should be disabled
+        assert!(!cpu.iff2);
     }
 }
