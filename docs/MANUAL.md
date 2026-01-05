@@ -905,7 +905,11 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - Modes 0-7 require significant work to produce output
   - No sprites, backgrounds, or any visual rendering working yet
 - **Audio**: 
-  - SPC700 APU not implemented - no audio
+  - SPC700 APU not fully implemented - silent gameplay
+  - APU communication ports ($2140-$2143) use enhanced state machine stub
+  - Supports multi-session upload protocols to allow games to boot and progress
+  - Games receive proper APU handshake responses ($BBAA signature) and echo protocol
+  - No actual audio processing or SPC700 code execution occurs
 - **Cartridge**: 
   - Only basic LoROM mapping
   - No HiROM, ExHiROM, or enhancement chips
