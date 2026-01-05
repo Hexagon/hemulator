@@ -15,7 +15,7 @@ use egui_ui::EguiApp;
 use emu_core::{types::Frame, System};
 use hemu_project::HemuProject;
 use rodio::{OutputStream, Source};
-use rom_detect::{detect_rom_type, SystemType};
+use rom_detect::{detect_rom_type_with_extension, SystemType};
 use save_state::GameSaves;
 use settings::Settings;
 use std::collections::HashMap;
@@ -25,11 +25,6 @@ use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::time::{Duration, Instant};
 use window_backend::{string_to_key, Key, Sdl2EguiBackend, WindowBackend};
-
-/// Helper function to check if a file extension indicates a CHIP-8 ROM
-fn is_chip8_extension(extension: Option<&str>) -> bool {
-    matches!(extension, Some("ch8") | Some("c8"))
-}
 
 /// Runtime state for tracking currently loaded project and mounts
 /// This replaces the mount_points field in Settings which has been deprecated
@@ -530,6 +525,20 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => "n64",
             EmulatorSystem::SMS(_) => "sms",
             EmulatorSystem::Chip8(_) => "chip8",
+        }
+    }
+
+    /// Get the SystemType for ROM detection hints
+    fn system_type(&self) -> SystemType {
+        match self {
+            EmulatorSystem::NES(_) => SystemType::NES,
+            EmulatorSystem::GameBoy(_) => SystemType::GameBoy,
+            EmulatorSystem::Atari2600(_) => SystemType::Atari2600,
+            EmulatorSystem::PC(_) => SystemType::PC,
+            EmulatorSystem::SNES(_) => SystemType::SNES,
+            EmulatorSystem::N64(_) => SystemType::N64,
+            EmulatorSystem::SMS(_) => SystemType::SMS,
+            EmulatorSystem::Chip8(_) => SystemType::Chip8,
         }
     }
 
@@ -2010,13 +2019,19 @@ fn main() {
                         .and_then(|e| e.to_str())
                         .map(|e| e.to_lowercase());
 
-                    let system_type = if is_chip8_extension(extension.as_deref()) {
-                        // Force CHIP-8 detection for .ch8 and .c8 files
-                        Ok(SystemType::Chip8)
+                    // Use extension-aware detection with preferred system hint
+                    // If --system was specified, use that as preferred system for ambiguous formats
+                    let preferred_system = if cli_args.system.is_some() && rom_loaded {
+                        Some(sys.system_type())
                     } else {
-                        // Use content-based detection for all other files
-                        detect_rom_type(&data)
+                        None
                     };
+
+                    let system_type = detect_rom_type_with_extension(
+                        &data,
+                        extension.as_deref(),
+                        preferred_system,
+                    );
 
                     match system_type {
                         Ok(SystemType::NES) => {
@@ -2621,305 +2636,374 @@ fn main() {
                     {
                         let path_str = path.to_string_lossy().to_string();
                         match std::fs::read(&path) {
-                            Ok(data) => match detect_rom_type(&data) {
-                                Ok(SystemType::NES) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let gl_ctx = egui_backend.gl_context();
-                                    let mut nes_sys =
-                                        create_nes_system(&settings.video_backend, gl_ctx);
-                                    if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                        egui_app
-                                            .status_bar
-                                            .set_error(format!("Failed to load NES ROM: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::NES(Box::new(nes_sys));
-                                        egui_app.property_pane.system_name = "NES".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_success("NES ROM loaded successfully".to_string());
-                                        // Update resolution
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::GameBoy) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut gb_sys = emu_gb::GbSystem::new();
-                                    if let Err(e) = gb_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                                        egui_app.property_pane.system_name = "Game Boy".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("Game Boy ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::Atari2600) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut a2600_sys = create_atari2600_system(&settings);
-                                    if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                                        egui_app.property_pane.system_name =
-                                            "Atari 2600".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("Atari 2600 ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::PC) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut pc_sys = emu_pc::PcSystem::new();
-                                    if let Err(e) = pc_sys.mount("Disk", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::PC(Box::new(pc_sys));
-                                        egui_app.property_pane.system_name = "PC".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Disk".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("PC executable loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::SNES) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut snes_sys = emu_snes::SnesSystem::new();
-                                    if let Err(e) = snes_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                                        egui_app.property_pane.system_name = "SNES".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("SNES ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::N64) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
-                                    let mut n64_sys =
-                                        create_n64_system(&settings.video_backend, gl_ctx);
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::N64(Box::new(n64_sys));
+                            Ok(data) => {
+                                // Get file extension for extension-aware detection
+                                let extension = path.extension().and_then(|e| e.to_str());
 
-                                        // Enable OpenGL renderer for N64
-                                        if let Some(renderer_name) =
-                                            enable_n64_opengl_renderer(&mut sys, &egui_backend)
-                                        {
-                                            egui_app.property_pane.rendering_backend =
-                                                renderer_name;
+                                // Use current system as hint for ambiguous formats
+                                let preferred_system = if rom_loaded {
+                                    Some(sys.system_type())
+                                } else {
+                                    None
+                                };
+
+                                match detect_rom_type_with_extension(
+                                    &data,
+                                    extension,
+                                    preferred_system,
+                                ) {
+                                    Ok(SystemType::NES) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let gl_ctx = egui_backend.gl_context();
+                                        let mut nes_sys =
+                                            create_nes_system(&settings.video_backend, gl_ctx);
+                                        if let Err(e) = nes_sys.mount("Cartridge", &data) {
+                                            egui_app.status_bar.set_error(format!(
+                                                "Failed to load NES ROM: {}",
+                                                e
+                                            ));
+                                            rom_hash = None;
                                         } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::NES(Box::new(nes_sys));
+                                            egui_app.property_pane.system_name = "NES".to_string();
                                             egui_app.property_pane.rendering_backend =
                                                 sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_success(
+                                                "NES ROM loaded successfully".to_string(),
+                                            );
+                                            // Update resolution
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
+                                    }
+                                    Ok(SystemType::GameBoy) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gb_sys = emu_gb::GbSystem::new();
+                                        if let Err(e) = gb_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game Boy".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Game Boy ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::Atari2600) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut a2600_sys = create_atari2600_system(&settings);
+                                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Atari 2600".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Atari 2600 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::PC) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut pc_sys = emu_pc::PcSystem::new();
+                                        if let Err(e) = pc_sys.mount("Disk", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::PC(Box::new(pc_sys));
+                                            egui_app.property_pane.system_name = "PC".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state
+                                                .set_mount("Disk".to_string(), path_str.clone());
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("PC executable loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::SNES) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut snes_sys = emu_snes::SnesSystem::new();
+                                        if let Err(e) = snes_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SNES(Box::new(snes_sys));
+                                            egui_app.property_pane.system_name = "SNES".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("SNES ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::N64) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
+                                        let mut n64_sys =
+                                            create_n64_system(&settings.video_backend, gl_ctx);
+                                        if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::N64(Box::new(n64_sys));
 
-                                        egui_app.property_pane.system_name = "N64".to_string();
-                                        // Set renderer display based on settings preference
-                                        egui_app.property_pane.rendering_backend =
-                                            if settings.video_backend == "opengl" {
-                                                "Hardware".to_string()
+                                            // Enable OpenGL renderer for N64
+                                            if let Some(renderer_name) =
+                                                enable_n64_opengl_renderer(&mut sys, &egui_backend)
+                                            {
+                                                egui_app.property_pane.rendering_backend =
+                                                    renderer_name;
                                             } else {
-                                                "Software".to_string()
-                                            };
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("N64 ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::SMS) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut sms_sys = emu_sms::SmsSystem::new();
-                                    if let Err(e) = sms_sys.mount("cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::SMS(Box::new(sms_sys));
-                                        egui_app.property_pane.system_name = "SMS".to_string();
-                                        runtime_state
-                                            .set_mount("cartridge".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app
-                                            .status_bar
-                                            .set_message("SMS ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                                egui_app.property_pane.rendering_backend =
+                                                    sys.get_current_renderer_name();
+                                            }
+
+                                            egui_app.property_pane.system_name = "N64".to_string();
+                                            // Set renderer display based on settings preference
+                                            egui_app.property_pane.rendering_backend =
+                                                if settings.video_backend == "opengl" {
+                                                    "Hardware".to_string()
+                                                } else {
+                                                    "Software".to_string()
+                                                };
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("N64 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
-                                }
-                                Ok(SystemType::Chip8) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut chip8_sys = emu_chip8::Chip8System::new();
-                                    if let Err(e) = chip8_sys.mount("Program", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
-                                        egui_app.property_pane.system_name = "CHIP-8".to_string();
-                                        runtime_state
-                                            .set_mount("Program".to_string(), path_str.clone());
-                                        settings.last_rom_path = Some(path_str.clone());
-                                        // Add to recent files
-                                        settings.add_recent_file(path_str.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("CHIP-8 program loaded".to_string());
-                                        let _ = sys.resolution();
-                                        // Load save states for this ROM
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                    Ok(SystemType::SMS) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut sms_sys = emu_sms::SmsSystem::new();
+                                        if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                                            egui_app.property_pane.system_name = "SMS".to_string();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                path_str.clone(),
+                                            );
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app
+                                                .status_bar
+                                                .set_message("SMS ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
+                                    Ok(SystemType::Chip8) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut chip8_sys = emu_chip8::Chip8System::new();
+                                        if let Err(e) = chip8_sys.mount("Program", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                                            egui_app.property_pane.system_name =
+                                                "CHIP-8".to_string();
+                                            runtime_state
+                                                .set_mount("Program".to_string(), path_str.clone());
+                                            settings.last_rom_path = Some(path_str.clone());
+                                            // Add to recent files
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("CHIP-8 program loaded".to_string());
+                                            let _ = sys.resolution();
+                                            // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        egui_app
+                                            .status_bar
+                                            .set_error(format!("Failed to detect ROM type: {}", e));
+                                    }
                                 }
-                                Err(e) => {
-                                    egui_app
-                                        .status_bar
-                                        .set_error(format!("Failed to detect ROM type: {}", e));
-                                }
-                            },
+                            }
                             Err(e) => {
                                 egui_app
                                     .status_bar
@@ -3093,299 +3177,372 @@ fn main() {
                     } else {
                         // Load as a ROM file
                         match fs::read(&path) {
-                            Ok(data) => match detect_rom_type(&data) {
-                                Ok(SystemType::NES) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut nes_sys = emu_nes::NesSystem::default();
-                                    if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                                        egui_app
-                                            .status_bar
-                                            .set_error(format!("Failed to load NES ROM: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
+                            Ok(data) => {
+                                // Get file extension for extension-aware detection
+                                let extension = path.extension().and_then(|e| e.to_str());
 
-                                        // Apply renderer preference if OpenGL is requested
-                                        #[cfg(feature = "opengl")]
-                                        if settings.video_backend == "opengl" {
-                                            if let Some(gl) = egui_backend.gl_context() {
-                                                if let Err(e) = nes_sys.enable_opengl_renderer(gl) {
-                                                    eprintln!(
-                                                        "Failed to enable OpenGL renderer: {}",
-                                                        e
-                                                    );
-                                                    egui_app.tab_manager.add_log(format!(
+                                // Use current system as hint for ambiguous formats
+                                let preferred_system = if rom_loaded {
+                                    Some(sys.system_type())
+                                } else {
+                                    None
+                                };
+
+                                match detect_rom_type_with_extension(
+                                    &data,
+                                    extension,
+                                    preferred_system,
+                                ) {
+                                    Ok(SystemType::NES) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut nes_sys = emu_nes::NesSystem::default();
+                                        if let Err(e) = nes_sys.mount("Cartridge", &data) {
+                                            egui_app.status_bar.set_error(format!(
+                                                "Failed to load NES ROM: {}",
+                                                e
+                                            ));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+
+                                            // Apply renderer preference if OpenGL is requested
+                                            #[cfg(feature = "opengl")]
+                                            if settings.video_backend == "opengl" {
+                                                if let Some(gl) = egui_backend.gl_context() {
+                                                    if let Err(e) =
+                                                        nes_sys.enable_opengl_renderer(gl)
+                                                    {
+                                                        eprintln!(
+                                                            "Failed to enable OpenGL renderer: {}",
+                                                            e
+                                                        );
+                                                        egui_app.tab_manager.add_log(format!(
                                                         "Failed to enable OpenGL renderer, using Software: {}",
                                                         e
                                                     ));
+                                                    }
                                                 }
                                             }
-                                        }
 
-                                        sys = EmulatorSystem::NES(Box::new(nes_sys));
-                                        egui_app.property_pane.system_name = "NES".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        // Add to recent files (already in list since it was clicked from recent files)
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_success("NES ROM loaded successfully".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::GameBoy) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut gb_sys = emu_gb::GbSystem::new();
-                                    if let Err(e) = gb_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                                        egui_app.property_pane.system_name = "Game Boy".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("Game Boy ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                            sys = EmulatorSystem::NES(Box::new(nes_sys));
+                                            egui_app.property_pane.system_name = "NES".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            // Add to recent files (already in list since it was clicked from recent files)
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app.status_bar.set_success(
+                                                "NES ROM loaded successfully".to_string(),
+                                            );
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
-                                }
-                                Ok(SystemType::Atari2600) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut a2600_sys = create_atari2600_system(&settings);
-                                    if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                                        egui_app.property_pane.system_name =
-                                            "Atari 2600".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("Atari 2600 ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::PC) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut pc_sys = emu_pc::PcSystem::new();
-                                    if let Err(e) = pc_sys.mount("Disk", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::PC(Box::new(pc_sys));
-                                        egui_app.property_pane.system_name = "PC".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Disk".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("PC executable loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                    Ok(SystemType::GameBoy) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut gb_sys = emu_gb::GbSystem::new();
+                                        if let Err(e) = gb_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Game Boy".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Game Boy ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
-                                }
-                                Ok(SystemType::SNES) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut snes_sys = emu_snes::SnesSystem::new();
-                                    if let Err(e) = snes_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                                        egui_app.property_pane.system_name = "SNES".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("SNES ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::N64) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut n64_sys = emu_n64::N64System::new();
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                        egui_app.property_pane.system_name = "N64".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("N64 ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                    Ok(SystemType::Atari2600) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut a2600_sys = create_atari2600_system(&settings);
+                                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                                            egui_app.property_pane.system_name =
+                                                "Atari 2600".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("Atari 2600 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
-                                }
-                                Ok(SystemType::SMS) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut sms_sys = emu_sms::SmsSystem::new();
-                                    if let Err(e) = sms_sys.mount("cartridge", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::SMS(Box::new(sms_sys));
-                                        egui_app.property_pane.system_name = "SMS".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("cartridge".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("SMS ROM loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
-                                        }
-                                    }
-                                }
-                                Ok(SystemType::Chip8) => {
-                                    rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut chip8_sys = emu_chip8::Chip8System::new();
-                                    if let Err(e) = chip8_sys.mount("Program", &data) {
-                                        egui_app.status_bar.set_message(format!("Error: {}", e));
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
-                                        egui_app.property_pane.system_name = "CHIP-8".to_string();
-                                        egui_app.property_pane.rendering_backend =
-                                            sys.get_current_renderer_name();
-                                        egui_app.property_pane.available_renderers =
-                                            sys.get_available_renderers();
-                                        runtime_state
-                                            .set_mount("Program".to_string(), file_path.clone());
-                                        settings.last_rom_path = Some(file_path.clone());
-                                        settings.add_recent_file(file_path.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
-                                        }
-                                        egui_app.update_recent_files(
-                                            settings.get_recent_files().to_vec(),
-                                        );
-                                        egui_app
-                                            .status_bar
-                                            .set_message("CHIP-8 program loaded".to_string());
-                                        let _ = sys.resolution();
-                                        if let Some(ref hash) = rom_hash {
-                                            _game_saves = GameSaves::load(hash);
+                                    Ok(SystemType::PC) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut pc_sys = emu_pc::PcSystem::new();
+                                        if let Err(e) = pc_sys.mount("Disk", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::PC(Box::new(pc_sys));
+                                            egui_app.property_pane.system_name = "PC".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state
+                                                .set_mount("Disk".to_string(), file_path.clone());
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("PC executable loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
                                         }
                                     }
+                                    Ok(SystemType::SNES) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut snes_sys = emu_snes::SnesSystem::new();
+                                        if let Err(e) = snes_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SNES(Box::new(snes_sys));
+                                            egui_app.property_pane.system_name = "SNES".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("SNES ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::N64) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut n64_sys = emu_n64::N64System::new();
+                                        if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                            egui_app.property_pane.system_name = "N64".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("N64 ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::SMS) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut sms_sys = emu_sms::SmsSystem::new();
+                                        if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                                            egui_app.property_pane.system_name = "SMS".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("SMS ROM loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::Chip8) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut chip8_sys = emu_chip8::Chip8System::new();
+                                        if let Err(e) = chip8_sys.mount("Program", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {}", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                                            egui_app.property_pane.system_name =
+                                                "CHIP-8".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Program".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.last_rom_path = Some(file_path.clone());
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("CHIP-8 program loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        egui_app
+                                            .status_bar
+                                            .set_error(format!("Unknown ROM format: {}", e));
+                                    }
                                 }
-                                Err(e) => {
-                                    egui_app
-                                        .status_bar
-                                        .set_error(format!("Unknown ROM format: {}", e));
-                                }
-                            },
+                            }
                             Err(e) => {
                                 egui_app
                                     .status_bar
@@ -4178,6 +4335,34 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message("Created new N64 system".to_string());
+                        }
+                        "SMS" => {
+                            sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "SMS".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new SMS system".to_string());
+                        }
+                        "CHIP-8" => {
+                            sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
+                            rom_loaded = false;
+                            rom_hash = None;
+                            runtime_state.clear_mounts();
+                            egui_app.property_pane.system_name = "CHIP-8".to_string();
+                            egui_app.property_pane.rendering_backend =
+                                sys.get_current_renderer_name();
+                            egui_app.property_pane.available_renderers =
+                                sys.get_available_renderers();
+                            egui_app
+                                .status_bar
+                                .set_message("Created new CHIP-8 system".to_string());
                         }
                         _ => {
                             egui_app
