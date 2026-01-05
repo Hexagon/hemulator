@@ -1446,7 +1446,7 @@ fn create_enhanced_debug_state(
 ) -> system_adapter::EnhancedDebugState {
     let cpu_state = debugger.get_cpu_state();
     let memory_regions = debugger.get_memory_regions();
-    
+
     // Disassemble instructions around current PC
     let pc = cpu_state.pc;
     let disassembly = debugger.disassemble_range(pc.saturating_sub(32), 20);
@@ -2609,7 +2609,7 @@ fn main() {
 
         // Update debug info if debug tab is visible
         if egui_app.tab_manager.debug_visible {
-            use system_adapter::{EnhancedDebugState, SystemDebugInfo};
+            use system_adapter::SystemDebugInfo;
             let debug_info = match &sys {
                 EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
                 EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
@@ -2640,9 +2640,11 @@ fn main() {
                 }
                 _ => None, // Other systems don't have debugger implemented yet
             };
-            
+
             if let Some(enhanced_state) = enhanced_state_opt {
-                egui_app.tab_manager.update_enhanced_debug_state(enhanced_state);
+                egui_app
+                    .tab_manager
+                    .update_enhanced_debug_state(enhanced_state);
             }
         }
 

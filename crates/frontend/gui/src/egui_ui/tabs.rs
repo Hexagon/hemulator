@@ -787,25 +787,27 @@ impl TabManager {
             self.render_legacy_debug_view(ui, debug_info);
         } else {
             // No debug information available
-            ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(40.0);
-                    ui.label(egui::RichText::new("🔧").size(48.0));
-                    ui.add_space(10.0);
-                    ui.heading("No Debug Information Available");
-                    ui.add_space(10.0);
-                    ui.label("Load a ROM to see system-specific debug information");
-                    ui.add_space(5.0);
-                    ui.label(
-                        egui::RichText::new("Debug info includes CPU state, memory maps, and")
-                            .weak(),
-                    );
-                    ui.label(
-                        egui::RichText::new("disassembly for troubleshooting and analysis.")
-                            .weak(),
-                    );
+            ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🔧").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("No Debug Information Available");
+                        ui.add_space(10.0);
+                        ui.label("Load a ROM to see system-specific debug information");
+                        ui.add_space(5.0);
+                        ui.label(
+                            egui::RichText::new("Debug info includes CPU state, memory maps, and")
+                                .weak(),
+                        );
+                        ui.label(
+                            egui::RichText::new("disassembly for troubleshooting and analysis.")
+                                .weak(),
+                        );
+                    });
                 });
-            });
         }
     }
 
@@ -885,19 +887,17 @@ impl TabManager {
                         ui.visuals().window_fill()
                     };
 
-                    egui::Frame::new()
-                        .fill(bg_color)
-                        .show(ui, |ui| {
-                            // Address
-                            let addr_text = if is_current {
-                                egui::RichText::new(format!("▶ {:04X}", instr.address))
-                                    .monospace()
-                                    .strong()
-                            } else {
-                                egui::RichText::new(format!("  {:04X}", instr.address)).monospace()
-                            };
-                            ui.label(addr_text);
-                        });
+                    egui::Frame::new().fill(bg_color).show(ui, |ui| {
+                        // Address
+                        let addr_text = if is_current {
+                            egui::RichText::new(format!("▶ {:04X}", instr.address))
+                                .monospace()
+                                .strong()
+                        } else {
+                            egui::RichText::new(format!("  {:04X}", instr.address)).monospace()
+                        };
+                        ui.label(addr_text);
+                    });
 
                     egui::Frame::new().fill(bg_color).show(ui, |ui| {
                         // Bytes
@@ -949,9 +949,7 @@ impl TabManager {
                 });
                 ui.horizontal(|ui| {
                     ui.label("Size:");
-                    ui.label(
-                        egui::RichText::new(format!("{} bytes", region.size())).monospace(),
-                    );
+                    ui.label(egui::RichText::new(format!("{} bytes", region.size())).monospace());
                 });
                 ui.horizontal(|ui| {
                     ui.label("Access:");
@@ -965,9 +963,13 @@ impl TabManager {
                 });
                 ui.label(egui::RichText::new(&region.description).weak().italics());
                 ui.add_space(5.0);
-                
+
                 // Note: Actual hex dump would be shown here in a complete implementation
-                ui.label(egui::RichText::new("💡 Memory viewer coming soon").weak().italics());
+                ui.label(
+                    egui::RichText::new("💡 Memory viewer coming soon")
+                        .weak()
+                        .italics(),
+                );
             });
         }
     }
@@ -976,7 +978,11 @@ impl TabManager {
         if let Some(ref cpu_state) = state.cpu_state {
             // Program Counter
             ui.heading("Program Counter");
-            ui.label(egui::RichText::new(format!("${:04X}", cpu_state.pc)).monospace().strong());
+            ui.label(
+                egui::RichText::new(format!("${:04X}", cpu_state.pc))
+                    .monospace()
+                    .strong(),
+            );
             ui.add_space(10.0);
 
             // Registers

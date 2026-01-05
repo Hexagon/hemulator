@@ -4,7 +4,9 @@
 //! memory inspection, and CPU state tracking.
 
 use crate::bus::Bus;
-use emu_core::debug::{CpuFlags, CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion};
+use emu_core::debug::{
+    CpuRegister, CpuState, Debugger, DisassembledInstruction, MemoryRegion,
+};
 use emu_core::disasm_6502;
 
 use crate::NesSystem;
