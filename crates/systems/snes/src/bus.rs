@@ -1144,30 +1144,49 @@ mod tests {
     fn test_apu_ports_echo() {
         let mut bus = SnesBus::new();
 
-        // Write to APU ports
-        bus.write(0x2140, 0xDE);
-        bus.write(0x2141, 0xAD);
-        bus.write(0x2142, 0xBE);
-        bus.write(0x2143, 0xEF);
+        // With real SPC700, we need to wait for it to boot and write $BBAA signature
+        bus.tick_cycles(3000);
 
-        // Read back - should echo the written values
-        assert_eq!(bus.read(0x2140), 0xDE);
-        assert_eq!(bus.read(0x2141), 0xAD);
-        assert_eq!(bus.read(0x2142), 0xBE);
-        assert_eq!(bus.read(0x2143), 0xEF);
+        // Verify SPC700 is ready (wrote $BBAA)
+        assert_eq!(bus.read(0x2140), 0xAA, "SPC700 should signal ready with $AA");
+        assert_eq!(bus.read(0x2141), 0xBB, "SPC700 should signal ready with $BB");
+
+        // Send start command with entry point
+        bus.write(0x2142, 0x00); // Entry point low byte
+        bus.write(0x2143, 0x02); // Entry point high byte  
+        bus.write(0x2141, 0x01); // Non-zero (upload mode)
+        bus.write(0x2140, 0xCC); // Start signal
+
+        bus.tick_cycles(100);
+
+        // SPC700 should echo $CC back
+        assert_eq!(bus.read(0x2140), 0xCC, "SPC700 should acknowledge with $CC");
+
+        // Now upload a byte (index 0, data $DE)
+        bus.write(0x2141, 0xDE); // Data
+        bus.write(0x2140, 0x00); // Index 0
+
+        bus.tick_cycles(50);
+
+        // SPC700 should echo index 0
+        assert_eq!(bus.read(0x2140), 0x00, "SPC700 should echo index 0");
     }
 
     #[test]
     fn test_apu_ports_initial_values() {
-        let bus = SnesBus::new();
+        let mut bus = SnesBus::new();
 
-        // APU ports should have initial ready values matching SPC700 IPL ROM behavior
+        // With real SPC700, we need to run it for enough cycles to complete boot
+        // and write the $BBAA ready signature
+        bus.tick_cycles(3000);
+
+        // APU ports should now have ready values from SPC700 IPL ROM
         // SPC700 IPL sets ports to $BBAA when read as 16-bit little-endian value
         // This means: $2140 (port 0) = 0xAA (low byte), $2141 (port 1) = 0xBB (high byte)
-        assert_eq!(bus.read(0x2140), 0xAA);
-        assert_eq!(bus.read(0x2141), 0xBB);
-        assert_eq!(bus.read(0x2142), 0x00);
-        assert_eq!(bus.read(0x2143), 0x00);
+        assert_eq!(bus.read(0x2140), 0xAA, "Port 0 should be $AA after boot");
+        assert_eq!(bus.read(0x2141), 0xBB, "Port 1 should be $BB after boot");
+        assert_eq!(bus.read(0x2142), 0x00, "Port 2 should be $00");
+        assert_eq!(bus.read(0x2143), 0x00, "Port 3 should be $00");
     }
 
     #[test]
