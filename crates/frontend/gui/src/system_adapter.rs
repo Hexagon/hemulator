@@ -4,7 +4,36 @@
 //! exposing their specific debug information and configuration options
 //! to the egui UI in a type-safe and modular way.
 
-/// Unified debug information for all systems
+use emu_core::debug::{CpuState, DisassembledInstruction, MemoryRegion};
+
+/// Enhanced debug state with rich debugging information
+#[derive(Clone)]
+pub struct EnhancedDebugState {
+    /// System type name
+    pub system_type: String,
+    /// CPU state (registers, flags, PC)
+    pub cpu_state: Option<CpuState>,
+    /// Memory regions available for inspection
+    pub memory_regions: Vec<MemoryRegion>,
+    /// Disassembled instructions around current PC
+    pub disassembly: Vec<DisassembledInstruction>,
+    /// Current PC for highlighting
+    pub current_pc: u32,
+}
+
+impl EnhancedDebugState {
+    pub fn new(system_type: impl Into<String>) -> Self {
+        Self {
+            system_type: system_type.into(),
+            cpu_state: None,
+            memory_regions: Vec::new(),
+            disassembly: Vec::new(),
+            current_pc: 0,
+        }
+    }
+}
+
+/// Unified debug information for all systems (legacy format for property pane)
 #[derive(Clone)]
 pub struct SystemDebugInfo {
     pub system_type: String,
