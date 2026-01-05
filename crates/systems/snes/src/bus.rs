@@ -113,10 +113,21 @@ pub struct SnesBus {
     apu_session_id: u8,
     /// Optional real SPC700 APU (if None, uses stub)
     spc700: Option<Spc700>,
+    /// APU port read latch (for atomic 16-bit reads)
+    /// Uses Cell for interior mutability since read() takes &self
+    apu_port_latch: [Cell<u8>; 4],
+    /// Whether the APU port latch is active
+    apu_port_latch_active: Cell<bool>,
+    /// Cycle counter to clear latch after a short time
+    apu_port_latch_cycle: Cell<u32>,
 }
 
 impl SnesBus {
     pub fn new() -> Self {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "SNES Bus: Initializing with real SPC700 APU".to_string()
+        });
+
         Self {
             wram: [0; 0x20000],
             cartridge: None,
@@ -136,7 +147,10 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: None, // Start with stub, can be enabled later
+            spc700: Some(Spc700::new()), // Enable real SPC700 APU by default
+            apu_port_latch: [Cell::new(0), Cell::new(0), Cell::new(0), Cell::new(0)],
+            apu_port_latch_active: Cell::new(false),
+            apu_port_latch_cycle: Cell::new(0),
         }
     }
 
@@ -193,6 +207,32 @@ impl SnesBus {
     /// Update cycle counter within frame (called after each CPU step)
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
+
+        // Clear APU port latch after the instruction completes
+        // The latch ensures atomic 16-bit reads across ports $2140-$2141
+        // We clear it after the instruction finishes (when tick_cycles is called)
+        // Using a minimum threshold of 2 cycles to ensure multi-byte reads complete
+        if self.apu_port_latch_active.get() {
+            let latch_age = self
+                .frame_cycle
+                .wrapping_sub(self.apu_port_latch_cycle.get());
+            // Clear if latch has been active for at least the current instruction's cycles
+            // AND at least 2 cycles to ensure 16-bit reads (2 sequential 8-bit reads) complete
+            if latch_age >= cycles.max(2) {
+                self.apu_port_latch_active.set(false);
+                log(LogCategory::Bus, LogLevel::Debug, || {
+                    format!(
+                        "SNES Bus: APU port latch cleared at cycle {} (age: {} cycles)",
+                        self.frame_cycle, latch_age
+                    )
+                });
+            }
+        }
+
+        // Run SPC700 for the same number of cycles
+        if let Some(ref mut spc700) = self.spc700 {
+            spc700.run_cycles(cycles);
+        }
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
@@ -474,26 +514,48 @@ impl Memory65c816 for SnesBus {
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
-                        // Use real SPC700 if available, otherwise use stub
-                        if let Some(ref spc700) = self.spc700 {
-                            let val = spc700.read_port(port);
-                            log(LogCategory::Bus, LogLevel::Trace, || {
+
+                        // Implement port read latching for atomic 16-bit reads
+                        // On first APU port read (when latch inactive), capture all port values
+                        // This prevents the SPC700 from updating ports mid-read
+                        if !self.apu_port_latch_active.get() {
+                            // Latch all 4 ports atomically
+                            if let Some(ref spc700) = self.spc700 {
+                                for i in 0..4u8 {
+                                    self.apu_port_latch[i as usize].set(spc700.read_port(i));
+                                }
+                            } else {
+                                for i in 0..4usize {
+                                    self.apu_port_latch[i].set(self.apu_ports[i]);
+                                }
+                            }
+                            self.apu_port_latch_active.set(true);
+                            self.apu_port_latch_cycle.set(self.frame_cycle);
+
+                            log(LogCategory::Bus, LogLevel::Debug, || {
                                 format!(
-                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) from SPC700: 0x{:02X}",
-                                    offset, port, val
+                                    "SNES Bus: APU port latch activated at cycle {}, ports = ${:02X} ${:02X} ${:02X} ${:02X}",
+                                    self.frame_cycle,
+                                    self.apu_port_latch[0].get(),
+                                    self.apu_port_latch[1].get(),
+                                    self.apu_port_latch[2].get(),
+                                    self.apu_port_latch[3].get()
                                 )
                             });
-                            val
-                        } else {
-                            let val = self.apu_ports[port as usize];
-                            log(LogCategory::Bus, LogLevel::Trace, || {
-                                format!(
-                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) from stub: 0x{:02X}",
-                                    offset, port, val
-                                )
-                            });
-                            val
                         }
+
+                        // Return latched value
+                        let val = self.apu_port_latch[port as usize].get();
+                        log(LogCategory::Bus, LogLevel::Trace, || {
+                            format!(
+                                "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X} (latched={})",
+                                offset,
+                                port,
+                                val,
+                                self.apu_port_latch_active.get()
+                            )
+                        });
+                        val
                     }
                     // Hardware registers (PPU: $2100-$213F, excluding APU ports above)
                     // Note: $2140-$2143 are handled by the APU case above
@@ -745,6 +807,13 @@ impl Memory65c816 for SnesBus {
                                 return;
                             }
 
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                format!(
+                                    "SNES Bus: APU write handler - state: {:?}, port: {}, val: 0x{:02X}, current port 0: 0x{:02X}",
+                                    self.apu_state, port, val, self.apu_ports[0]
+                                )
+                            });
+
                             match self.apu_state {
                                 ApuState::Idle | ApuState::BootReady | ApuState::Ready => {
                                     // Check for upload command byte (port 0 with non-zero, non-AA value)
@@ -785,20 +854,20 @@ impl Memory65c816 for SnesBus {
                                         )
                                         });
 
-                                        // After ~25 bytes, assume upload complete and return ready signature
+                                        // After ~25 bytes, assume upload complete and transition to Ready
                                         if self.apu_transfer_counter >= 25 {
                                             log(LogCategory::Bus, LogLevel::Debug, || {
                                                 format!(
-                                                "SNES Bus: APU session {} upload complete ({} bytes) - returning ready signature",
+                                                "SNES Bus: APU session {} upload complete ({} bytes) - transitioning to Ready",
                                                 self.apu_session_id, self.apu_transfer_counter
                                             )
                                             });
-                                            // Return completion signature $BBAA
-                                            self.apu_ports[0] = 0xAA;
-                                            self.apu_ports[1] = 0xBB;
+                                            // Echo the byte but transition to Ready state
+                                            // Do NOT overwrite port 0 with $AA - keep the echoed byte!
+                                            self.apu_ports[0] = val;
                                             self.apu_state = ApuState::Ready;
                                             self.apu_transfer_counter = 0;
-                                            self.apu_response_delay = 20; // Simulate processing time
+                                            self.apu_response_delay = 5;
                                         } else {
                                             // Continue echoing data bytes
                                             self.apu_ports[0] = val;
@@ -1075,30 +1144,57 @@ mod tests {
     fn test_apu_ports_echo() {
         let mut bus = SnesBus::new();
 
-        // Write to APU ports
-        bus.write(0x2140, 0xDE);
-        bus.write(0x2141, 0xAD);
-        bus.write(0x2142, 0xBE);
-        bus.write(0x2143, 0xEF);
+        // With real SPC700, we need to wait for it to boot and write $BBAA signature
+        bus.tick_cycles(3000);
 
-        // Read back - should echo the written values
-        assert_eq!(bus.read(0x2140), 0xDE);
-        assert_eq!(bus.read(0x2141), 0xAD);
-        assert_eq!(bus.read(0x2142), 0xBE);
-        assert_eq!(bus.read(0x2143), 0xEF);
+        // Verify SPC700 is ready (wrote $BBAA)
+        assert_eq!(
+            bus.read(0x2140),
+            0xAA,
+            "SPC700 should signal ready with $AA"
+        );
+        assert_eq!(
+            bus.read(0x2141),
+            0xBB,
+            "SPC700 should signal ready with $BB"
+        );
+
+        // Send start command with entry point
+        bus.write(0x2142, 0x00); // Entry point low byte
+        bus.write(0x2143, 0x02); // Entry point high byte
+        bus.write(0x2141, 0x01); // Non-zero (upload mode)
+        bus.write(0x2140, 0xCC); // Start signal
+
+        bus.tick_cycles(100);
+
+        // SPC700 should echo $CC back
+        assert_eq!(bus.read(0x2140), 0xCC, "SPC700 should acknowledge with $CC");
+
+        // Now upload a byte (index 0, data $DE)
+        bus.write(0x2141, 0xDE); // Data
+        bus.write(0x2140, 0x00); // Index 0
+
+        bus.tick_cycles(50);
+
+        // SPC700 should echo index 0
+        assert_eq!(bus.read(0x2140), 0x00, "SPC700 should echo index 0");
     }
 
     #[test]
     fn test_apu_ports_initial_values() {
-        let bus = SnesBus::new();
+        let mut bus = SnesBus::new();
 
-        // APU ports should have initial ready values matching SPC700 IPL ROM behavior
+        // With real SPC700, we need to run it for enough cycles to complete boot
+        // and write the $BBAA ready signature
+        bus.tick_cycles(3000);
+
+        // APU ports should now have ready values from SPC700 IPL ROM
         // SPC700 IPL sets ports to $BBAA when read as 16-bit little-endian value
         // This means: $2140 (port 0) = 0xAA (low byte), $2141 (port 1) = 0xBB (high byte)
-        assert_eq!(bus.read(0x2140), 0xAA);
-        assert_eq!(bus.read(0x2141), 0xBB);
-        assert_eq!(bus.read(0x2142), 0x00);
-        assert_eq!(bus.read(0x2143), 0x00);
+        assert_eq!(bus.read(0x2140), 0xAA, "Port 0 should be $AA after boot");
+        assert_eq!(bus.read(0x2141), 0xBB, "Port 1 should be $BB after boot");
+        assert_eq!(bus.read(0x2142), 0x00, "Port 2 should be $00");
+        assert_eq!(bus.read(0x2143), 0x00, "Port 3 should be $00");
     }
 
     #[test]
