@@ -498,4 +498,216 @@ mod tests {
         assert_eq!(riot.read(0x0080), 0x00);
         assert_eq!(riot.read(0x0284), 0x00);
     }
+
+    #[test]
+    fn test_riot_timer_register_addresses() {
+        // Verify timer registers at correct addresses per spec
+        let mut riot = Riot::new();
+
+        // TIM1T = $294 (1 clock interval)
+        riot.write(0x0294, 10);
+        riot.clock(1);
+        assert_eq!(riot.read(0x0284), 9); // INTIM at $284
+
+        // TIM8T = $295 (8 clock interval)
+        riot.write(0x0295, 10);
+        riot.clock(8);
+        assert_eq!(riot.read(0x0284), 9);
+
+        // TIM64T = $296 (64 clock interval)
+        riot.write(0x0296, 10);
+        riot.clock(64);
+        assert_eq!(riot.read(0x0284), 9);
+
+        // T1024T = $297 (1024 clock interval)
+        riot.write(0x0297, 10);
+        riot.clock(1024);
+        assert_eq!(riot.read(0x0284), 9);
+    }
+
+    #[test]
+    fn test_riot_timer_underflow_continues() {
+        // Timer continues counting down after reaching 0 (at 1 cycle per decrement)
+        let mut riot = Riot::new();
+
+        // Set timer to 2
+        riot.write(0x0294, 2); // TIM1T
+
+        // Clock to zero
+        riot.clock(2);
+        assert_eq!(riot.read(0x0284), 0);
+
+        // Continue clocking - timer should wrap to 0xFF
+        riot.clock(1);
+        assert_eq!(riot.read(0x0284), 0xFF);
+
+        // Continue
+        riot.clock(1);
+        assert_eq!(riot.read(0x0284), 0xFE);
+    }
+
+    #[test]
+    fn test_riot_ram_mirroring() {
+        // RAM mirrors at multiple addresses per spec
+        let mut riot = Riot::new();
+
+        // Write to $80
+        riot.write(0x0080, 0x42);
+
+        // Should be readable at $80 (base address)
+        assert_eq!(riot.read(0x0080), 0x42);
+
+        // Should be readable at $00 (mirror with A7=0)
+        assert_eq!(riot.read(0x0000), 0x42);
+
+        // Should be readable at $180 (mirror with A8=1)
+        assert_eq!(riot.read(0x0180), 0x42);
+
+        // Write to $FF (last byte of RAM)
+        riot.write(0x00FF, 0x99);
+        assert_eq!(riot.read(0x00FF), 0x99);
+        assert_eq!(riot.read(0x017F), 0x99); // Mirror
+    }
+
+    #[test]
+    fn test_riot_io_port_addresses() {
+        // Verify I/O ports at correct addresses per spec
+        let mut riot = Riot::new();
+
+        // SWCHA at $280 (Port A data)
+        riot.set_joystick(0, 0, true); // Press P0 Up
+        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+
+        // SWACNT at $281 (Port A direction - written but not enforced)
+        riot.write(0x0281, 0xFF);
+        // Just verify write doesn't crash
+
+        // SWCHB at $282 (Port B data)
+        riot.set_console_switch(0, true); // Press reset
+        assert_eq!(riot.read(0x0282) & 0x01, 0x00);
+
+        // SWBCNT at $283 (Port B direction)
+        riot.write(0x0283, 0xFF);
+        // Just verify write doesn't crash
+    }
+
+    #[test]
+    fn test_riot_swcha_active_low() {
+        // SWCHA uses active-low logic per spec (0=pressed, 1=released)
+        let mut riot = Riot::new();
+
+        // Initial state: all released (all bits 1)
+        assert_eq!(riot.read(0x0280), 0xFF);
+
+        // Press Player 0 Up (bit 0) - should become 0
+        riot.set_joystick(0, 0, true);
+        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+
+        // Release Player 0 Up - should become 1
+        riot.set_joystick(0, 0, false);
+        assert_eq!(riot.read(0x0280) & 0x01, 0x01);
+
+        // Press Player 1 Right (bit 7) - should become 0
+        riot.set_joystick(1, 3, true);
+        assert_eq!(riot.read(0x0280) & 0x80, 0x00);
+    }
+
+    #[test]
+    fn test_riot_swchb_active_low() {
+        // SWCHB uses active-low logic per spec
+        let mut riot = Riot::new();
+
+        // Initial state: Color mode (bit 3=1), difficulty B (bits 6-7=1), no buttons (bits 0-1=1)
+        let initial = riot.read(0x0282);
+        assert_eq!(initial & 0x08, 0x08); // Color bit
+        assert_eq!(initial & 0x40, 0x40); // Left difficulty
+        assert_eq!(initial & 0x80, 0x80); // Right difficulty
+
+        // Press reset (bit 0) - should become 0
+        riot.set_console_switch(0, true);
+        assert_eq!(riot.read(0x0282) & 0x01, 0x00);
+
+        // Release reset - should become 1
+        riot.set_console_switch(0, false);
+        assert_eq!(riot.read(0x0282) & 0x01, 0x01);
+    }
+
+    #[test]
+    fn test_riot_timer_interval_accuracy() {
+        // Verify exact timer interval behavior per spec
+        let mut riot = Riot::new();
+
+        // TIM1T: 1 clock per decrement
+        riot.write(0x0294, 100);
+        riot.clock(50);
+        assert_eq!(riot.read(0x0284), 50);
+
+        // TIM8T: 8 clocks per decrement
+        riot.write(0x0295, 100);
+        riot.clock(400); // 50 decrements at 8 clocks each
+        assert_eq!(riot.read(0x0284), 50);
+
+        // TIM64T: 64 clocks per decrement
+        riot.write(0x0296, 100);
+        riot.clock(3200); // 50 decrements at 64 clocks each
+        assert_eq!(riot.read(0x0284), 50);
+
+        // T1024T: 1024 clocks per decrement
+        riot.write(0x0297, 10);
+        riot.clock(5120); // 5 decrements at 1024 clocks each
+        assert_eq!(riot.read(0x0284), 5);
+    }
+
+    #[test]
+    fn test_riot_timer_write_clears_underflow() {
+        // Writing to any timer register should clear the underflow flag per spec
+        let mut riot = Riot::new();
+
+        // Set timer to expire
+        riot.write(0x0294, 1);
+        riot.clock(1);
+
+        // Read TIMINT to set the flag
+        let status = riot.read(0x0285);
+        assert_eq!(status & 0x80, 0x80); // Flag should be set
+
+        // Write to timer again - should clear flag
+        riot.write(0x0295, 10);
+
+        // Read TIMINT - flag should be cleared
+        let status = riot.read(0x0285);
+        assert_eq!(status & 0x80, 0x00);
+    }
+
+    #[test]
+    fn test_riot_joystick_all_directions() {
+        // Test all 8 joystick direction bits per spec
+        let mut riot = Riot::new();
+
+        // Player 0 directions (bits 0-3)
+        riot.set_joystick(0, 0, true); // Up (bit 0)
+        assert_eq!(riot.read(0x0280) & 0x01, 0x00);
+
+        riot.set_joystick(0, 1, true); // Down (bit 1)
+        assert_eq!(riot.read(0x0280) & 0x02, 0x00);
+
+        riot.set_joystick(0, 2, true); // Left (bit 2)
+        assert_eq!(riot.read(0x0280) & 0x04, 0x00);
+
+        riot.set_joystick(0, 3, true); // Right (bit 3)
+        assert_eq!(riot.read(0x0280) & 0x08, 0x00);
+
+        // Player 1 directions (bits 4-7)
+        riot.set_joystick(1, 0, true); // Up (bit 4)
+        assert_eq!(riot.read(0x0280) & 0x10, 0x00);
+
+        riot.set_joystick(1, 1, true); // Down (bit 5)
+        assert_eq!(riot.read(0x0280) & 0x20, 0x00);
+
+        riot.set_joystick(1, 2, true); // Left (bit 6)
+        assert_eq!(riot.read(0x0280) & 0x40, 0x00);
+
+        riot.set_joystick(1, 3, true); // Right (bit 7)
+        assert_eq!(riot.read(0x0280) & 0x80, 0x00);
+    }
 }

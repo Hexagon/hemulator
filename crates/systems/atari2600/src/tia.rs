@@ -111,14 +111,14 @@
 //! ## Known Limitations
 //!
 //! 1. **Frame-based rendering**: Uses scanline state latching rather than cycle-accurate generation
-//! 2. **Paddle controllers**: Not implemented (INPT0-INPT3 always return 0)
 //!
-//! These limitations represent acceptable trade-offs for a functional emulator. Most games
-//! will work correctly with the current implementation.
+//! The emulator now implements paddle controller support via capacitor charge simulation.
 
 use emu_core::apu::PolynomialCounter;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use serde::{Deserialize, Serialize};
+
+use crate::video_mode::VideoMode;
 
 /// Per-scanline snapshot of TIA state for rendering
 #[derive(Debug, Clone, Copy, Default)]
@@ -230,6 +230,19 @@ pub struct Tia {
     inpt4: u8, // Player 0 fire button
     inpt5: u8, // Player 1 fire button
 
+    // INPT0-INPT3: Paddle controllers (bit 7: 0=charged, 1=not charged)
+    // Paddles use capacitor charging time to measure position
+    inpt0: u8, // Paddle 0 (Port 0 X)
+    inpt1: u8, // Paddle 1 (Port 0 Y)
+    inpt2: u8, // Paddle 2 (Port 1 X)
+    inpt3: u8, // Paddle 3 (Port 1 Y)
+
+    // Paddle state
+    paddle_positions: [u8; 4], // 0-255 for each paddle (0 = left/up, 255 = right/down)
+    paddle_charge_time: [u32; 4], // Color clocks since capacitor dump
+    paddle_dump_enabled: bool, // VBLANK bit 7: dump paddle capacitors
+    paddle_latch_enabled: bool, // VBLANK bit 6: latch paddle fire buttons
+
     // Current scanline and pixel position
     scanline: u16,
     pixel: u16,
@@ -283,6 +296,9 @@ pub struct Tia {
     // Cached visible window start (to prevent vertical jumping)
     #[serde(skip)]
     cached_visible_start: Option<u16>,
+
+    // Video mode (NTSC/PAL)
+    video_mode: VideoMode,
 }
 
 impl Default for Tia {
@@ -315,8 +331,15 @@ impl Tia {
         }
     }
 
-    /// Create a new TIA chip
+    /// Create a new TIA chip with default NTSC video mode
     pub fn new() -> Self {
+        Self::with_video_mode(VideoMode::default())
+    }
+
+    /// Create a new TIA chip with specified video mode
+    pub fn with_video_mode(video_mode: VideoMode) -> Self {
+        let total_scanlines = video_mode.scanlines_per_frame() as usize;
+
         Self {
             vsync: false,
             vblank: false,
@@ -368,12 +391,20 @@ impl Tia {
             hmbl: 0,
             inpt4: 0x80, // Not pressed (bit 7 = 1)
             inpt5: 0x80, // Not pressed (bit 7 = 1)
+            inpt0: 0x80, // Paddle not charged (bit 7 = 1)
+            inpt1: 0x80,
+            inpt2: 0x80,
+            inpt3: 0x80,
+            paddle_positions: [128, 128, 128, 128], // Center position
+            paddle_charge_time: [0, 0, 0, 0],
+            paddle_dump_enabled: false,
+            paddle_latch_enabled: false,
             scanline: 0,
             pixel: 0,
 
             scanline_counter: 0,
 
-            scanline_states: vec![ScanlineState::default(); 262],
+            scanline_states: vec![ScanlineState::default(); total_scanlines],
 
             audio0: PolynomialCounter::new(),
             audio1: PolynomialCounter::new(),
@@ -398,6 +429,8 @@ impl Tia {
             writes_colors_nonzero: 0,
 
             cached_visible_start: None,
+
+            video_mode,
         }
     }
 
@@ -445,9 +478,58 @@ impl Tia {
         }
     }
 
+    /// Set paddle position for a paddle (0-3)
+    ///
+    /// Paddle positions are 0-255:
+    /// - 0 = fully counter-clockwise (left/up)
+    /// - 255 = fully clockwise (right/down)
+    /// - 128 = center
+    ///
+    /// The TIA measures paddle position by timing capacitor charge.
+    /// Lower positions charge faster, higher positions charge slower.
+    pub fn set_paddle_position(&mut self, paddle: u8, position: u8) {
+        if paddle < 4 {
+            self.paddle_positions[paddle as usize] = position;
+        }
+    }
+
+    /// Update paddle capacitor charging simulation
+    /// Called each color clock to simulate the analog capacitor charging
+    fn update_paddle_charging(&mut self) {
+        if !self.paddle_dump_enabled {
+            // Capacitors are charging
+            for i in 0..4 {
+                self.paddle_charge_time[i] += 1;
+
+                // Calculate charge threshold based on paddle position
+                // Position 0 (left) = fast charge (small threshold)
+                // Position 255 (right) = slow charge (large threshold)
+                // Typical range: ~56000 to ~80000 color clocks for full range
+                let threshold = 56000 + (self.paddle_positions[i] as u32 * 100);
+
+                // Update INPTx bit 7 based on whether capacitor has charged
+                if self.paddle_charge_time[i] >= threshold {
+                    // Capacitor charged - bit 7 goes high
+                    match i {
+                        0 => self.inpt0 |= 0x80,
+                        1 => self.inpt1 |= 0x80,
+                        2 => self.inpt2 |= 0x80,
+                        3 => self.inpt3 |= 0x80,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     /// Get a monotonically increasing scanline counter (increments once per scanline)
     pub fn get_scanline_counter(&self) -> u64 {
         self.scanline_counter
+    }
+
+    /// Get the current video mode (NTSC/PAL)
+    pub fn video_mode(&self) -> VideoMode {
+        self.video_mode
     }
 
     /// Latch the current scanline's state immediately (public wrapper for render timing)
@@ -545,6 +627,25 @@ impl Tia {
             0x01 => {
                 self.writes_vblank = self.writes_vblank.saturating_add(1);
                 self.vblank = (val & 0x02) != 0;
+
+                // Bit 6: Latch paddle fire buttons (optional, not commonly used)
+                self.paddle_latch_enabled = (val & 0x40) != 0;
+
+                // Bit 7: Dump paddle capacitors to ground
+                let new_dump = (val & 0x80) != 0;
+                if new_dump && !self.paddle_dump_enabled {
+                    // Rising edge: start dumping (grounding capacitors)
+                    self.paddle_charge_time = [0, 0, 0, 0];
+                    self.inpt0 = 0x00; // Bit 7 = 0 when dumping
+                    self.inpt1 = 0x00;
+                    self.inpt2 = 0x00;
+                    self.inpt3 = 0x00;
+                } else if !new_dump && self.paddle_dump_enabled {
+                    // Falling edge: stop dumping, begin charging
+                    // Capacitors start charging from ground
+                    self.paddle_charge_time = [0, 0, 0, 0];
+                }
+                self.paddle_dump_enabled = new_dump;
             }
             0x02 => {} // WSYNC - handled by bus
             0x03 => {} // RSYNC
@@ -774,7 +875,10 @@ impl Tia {
             0x05 => self.cxm1fb, // Missile 1 to Playfield/Ball collisions
             0x06 => self.cxblpf, // Ball to Playfield collisions
             0x07 => self.cxppmm, // Player and Missile collisions
-            0x08..=0x0B => 0,    // Input ports 0-3 (paddles, not implemented)
+            0x08 => self.inpt0,  // Input port 0 (Paddle 0)
+            0x09 => self.inpt1,  // Input port 1 (Paddle 1)
+            0x0A => self.inpt2,  // Input port 2 (Paddle 2)
+            0x0B => self.inpt3,  // Input port 3 (Paddle 3)
             0x0C => self.inpt4,  // Input port 4 (Player 0 fire button)
             0x0D => self.inpt5,  // Input port 5 (Player 1 fire button)
             _ => 0,
@@ -783,6 +887,9 @@ impl Tia {
 
     /// Clock the TIA for one CPU cycle (3 color clocks)
     pub fn clock(&mut self) {
+        // Update paddle capacitor charging (every color clock)
+        self.update_paddle_charging();
+
         // Simplified: just advance pixel counter
         self.pixel += 3; // 3 color clocks per CPU cycle
 
@@ -798,7 +905,8 @@ impl Tia {
 
             self.scanline_counter = self.scanline_counter.saturating_add(1);
 
-            if self.scanline >= 262 {
+            let total_scanlines = self.video_mode.scanlines_per_frame();
+            if self.scanline >= total_scanlines {
                 self.scanline = 0;
             }
 
@@ -866,10 +974,11 @@ impl Tia {
     /// from a drifting reference point.
     pub fn visible_window_start_scanline_from(&self, frame_start_scanline: u16) -> u16 {
         let debug = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
+        let total_scanlines = self.video_mode.scanlines_per_frame();
 
-        for offset in 1..262u16 {
-            let prev_idx = (frame_start_scanline + offset - 1) % 262;
-            let cur_idx = (frame_start_scanline + offset) % 262;
+        for offset in 1..total_scanlines {
+            let prev_idx = (frame_start_scanline + offset - 1) % total_scanlines;
+            let cur_idx = (frame_start_scanline + offset) % total_scanlines;
 
             let prev = self
                 .scanline_states
@@ -900,8 +1009,9 @@ impl Tia {
             }
         }
 
-        // Fallback: common NTSC visible start is around scanline ~37-40 *after* VSYNC.
-        (frame_start_scanline + 40) % 262
+        // Fallback: common visible start is around scanline ~40 after VSYNC (NTSC)
+        // For PAL, this is also reasonable as a fallback
+        (frame_start_scanline + 40) % total_scanlines
     }
 
     /// Try to infer the start of the visible picture area based on VBLANK timing
@@ -916,8 +1026,10 @@ impl Tia {
             return cached;
         }
 
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
+
         // First detection: find where VBLANK transitions from true to false
-        for i in 1..262 {
+        for i in 1..total_scanlines {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
 
@@ -928,18 +1040,20 @@ impl Tia {
             }
         }
 
-        // Fallback: common NTSC visible start is around scanline ~37-40
+        // Fallback: common visible start is around scanline ~40
         self.cached_visible_start = Some(40);
         40
     }
 
-    /// Debug helper: count how many of the 192 visible scanlines have any playfield/player bits.
+    /// Debug helper: count how many of the visible scanlines have any playfield/player bits.
     pub fn debug_visible_scanline_activity(&self, visible_start: u16) -> (u32, u32) {
         let mut scanlines_with_pf = 0u32;
         let mut scanlines_with_grp = 0u32;
+        let total_scanlines = self.video_mode.scanlines_per_frame();
+        let visible_lines = self.video_mode.visible_scanlines();
 
-        for visible_line in 0..192u16 {
-            let tia_scanline = (visible_start + visible_line) % 262;
+        for visible_line in 0..visible_lines {
+            let tia_scanline = (visible_start + visible_line) % total_scanlines;
             let state = self
                 .scanline_states
                 .get(tia_scanline as usize)
@@ -957,12 +1071,13 @@ impl Tia {
         (scanlines_with_pf, scanlines_with_grp)
     }
 
-    /// Debug helper: count PF/GRP activity across all 262 scanlines.
+    /// Debug helper: count PF/GRP activity across all scanlines.
     pub fn debug_all_scanline_activity(&self) -> (u32, u32) {
         let mut scanlines_with_pf = 0u32;
         let mut scanlines_with_grp = 0u32;
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
 
-        for scanline in 0..262usize {
+        for scanline in 0..total_scanlines {
             let state = self
                 .scanline_states
                 .get(scanline)
@@ -995,7 +1110,7 @@ impl Tia {
 
         // Atari 2600 has 160 pixels per scanline
         for x in 0..160 {
-            let color = Self::get_pixel_color(&state, x);
+            let color = Self::get_pixel_color(&state, x, self.video_mode);
             buffer[visible_line * 160 + x] = color;
         }
     }
@@ -1003,9 +1118,10 @@ impl Tia {
     /// Detect and record collisions for a scanline (called during frame rendering)
     /// This should be called once per scanline to update collision registers
     fn detect_collisions_for_scanline(&mut self, tia_scanline: u16) {
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
         let state = self
             .scanline_states
-            .get((tia_scanline as usize).min(261))
+            .get((tia_scanline as usize).min(total_scanlines - 1))
             .copied()
             .unwrap_or_default();
 
@@ -1084,15 +1200,18 @@ impl Tia {
     /// Detect collisions for the entire frame (should be called after rendering)
     /// This updates the collision registers based on the current frame state
     pub fn detect_collisions_for_frame(&mut self, visible_start: u16) {
-        // Detect collisions for all 192 visible scanlines
-        for visible_line in 0..192 {
-            let tia_scanline = (visible_start + visible_line) % 262;
+        // Detect collisions for all visible scanlines
+        let visible_lines = self.video_mode.visible_scanlines();
+        let total_scanlines = self.video_mode.scanlines_per_frame();
+
+        for visible_line in 0..visible_lines {
+            let tia_scanline = (visible_start + visible_line) % total_scanlines;
             self.detect_collisions_for_scanline(tia_scanline);
         }
     }
 
     /// Get the color of a pixel at the given position using latched state
-    fn get_pixel_color(state: &ScanlineState, x: usize) -> u32 {
+    fn get_pixel_color(state: &ScanlineState, x: usize, video_mode: VideoMode) -> u32 {
         // During VBLANK, all pixels are black (video signal is blanked)
         if state.vblank {
             return 0xFF000000; // Black
@@ -1115,58 +1234,58 @@ impl Tia {
         if !state.playfield_priority {
             // Check Player 0
             if Self::is_player_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
 
             // Check Missile 0
             if Self::is_missile_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
 
             // Check Player 1
             if Self::is_player_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
 
             // Check Missile 1
             if Self::is_missile_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
 
             // Check Ball
             if Self::is_ball_pixel(state, x) {
-                return ntsc_to_rgb(state.colupf);
+                return palette_to_rgb(state.colupf, video_mode);
             }
         }
 
         // Check playfield
         if Self::is_playfield_pixel(state, x) {
-            return ntsc_to_rgb(state.colupf);
+            return palette_to_rgb(state.colupf, video_mode);
         }
 
         // Check Ball (if playfield priority)
         if state.playfield_priority && Self::is_ball_pixel(state, x) {
-            return ntsc_to_rgb(state.colupf);
+            return palette_to_rgb(state.colupf, video_mode);
         }
 
         // Check players and missiles (if playfield priority)
         if state.playfield_priority {
             if Self::is_player_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
             if Self::is_missile_pixel(state, 0, x) {
-                return ntsc_to_rgb(state.colup0);
+                return palette_to_rgb(state.colup0, video_mode);
             }
             if Self::is_player_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
             if Self::is_missile_pixel(state, 1, x) {
-                return ntsc_to_rgb(state.colup1);
+                return palette_to_rgb(state.colup1, video_mode);
             }
         }
 
         // Background color
-        ntsc_to_rgb(state.colubk)
+        palette_to_rgb(state.colubk, video_mode)
     }
 
     /// Check if a player pixel is visible at the given x position
@@ -1214,13 +1333,12 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = pos as usize + copy * spacing;
-            if copy_pos >= 160 {
-                continue;
-            }
-            let offset = x.wrapping_sub(copy_pos);
+            let copy_pos = (pos as usize + copy * spacing) % 160;
 
-            if offset < 8 * player_size {
+            // Check if x is within this copy's range
+            if x >= copy_pos && x < copy_pos + 8 * player_size {
+                let offset = x - copy_pos;
+
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
 
@@ -1278,13 +1396,10 @@ impl Tia {
 
         // Check each copy
         for copy in 0..num_copies {
-            let copy_pos = pos as usize + copy * spacing;
-            if copy_pos >= 160 {
-                continue;
-            }
-            let offset = x.wrapping_sub(copy_pos);
+            let copy_pos = (pos as usize + copy * spacing) % 160;
 
-            if offset < missile_size {
+            // Check if x is within this copy's range
+            if x >= copy_pos && x < copy_pos + missile_size {
                 return true;
             }
         }
@@ -1299,8 +1414,11 @@ impl Tia {
         }
 
         // Ball size is controlled by CTRLPF bits 4-5 (1, 2, 4, or 8 pixels)
-        let offset = x.wrapping_sub(state.ball_x as usize);
-        offset < state.ball_size as usize
+        let ball_pos = state.ball_x as usize;
+        let ball_size = state.ball_size as usize;
+
+        // Check if x is within ball's range
+        x >= ball_pos && x < ball_pos + ball_size
     }
 
     /// Check if a pixel is part of the playfield
@@ -1380,6 +1498,16 @@ impl Tia {
     }
 }
 
+/// Convert palette value to RGB based on video mode
+/// - NTSC: 128 colors
+/// - PAL: Uses NTSC palette as approximation (proper PAL palette could be added later)
+fn palette_to_rgb(value: u8, video_mode: VideoMode) -> u32 {
+    match video_mode {
+        VideoMode::NTSC => ntsc_to_rgb(value),
+        VideoMode::PAL => pal_to_rgb(value),
+    }
+}
+
 /// Convert NTSC palette value to RGB
 /// Atari 2600 uses NTSC color encoding with 128 colors
 /// Upper 4 bits: hue (0-15), Lower 3 bits: luminance (0-7, bit 0 unused)
@@ -1426,6 +1554,56 @@ fn ntsc_to_rgb(ntsc: u8) -> u32 {
     // Mask to 7 bits to ensure we're within the 128-color palette bounds
     // NTSC color encoding only uses bits 1-7 (bit 0 is unused)
     NTSC_PALETTE[ntsc as usize & 0x7F]
+}
+
+/// Convert PAL palette value to RGB
+/// Atari 2600 PAL uses a different color encoding with 104 colors
+/// The palette is organized in 8 luminance steps across 13 chroma values
+fn pal_to_rgb(pal: u8) -> u32 {
+    // PAL palette table for Atari 2600
+    // Organized by hue (13 hues) x luminance (8 levels) = 104 colors
+    // Based on accurate PAL color values from Lospec and RandomTerrain
+    const PAL_PALETTE: [u32; 104] = [
+        // Hue 0 (Gray) - Luminance 0-7
+        0xFF000000, 0xFF404040, 0xFF6C6C6C, 0xFF909090, 0xFFB0B0B0, 0xFFC8C8C8, 0xFFDCDCDC,
+        0xFFECECEC, // Hue 1 (Blue) - Luminance 0-7
+        0xFF000088, 0xFF20209C, 0xFF3C3CB0, 0xFF5858C0, 0xFF7070D0, 0xFF8484E0, 0xFF9C9CEC,
+        0xFFB0B0FC, // Hue 2 (Purple/Violet) - Luminance 0-7
+        0xFF3C0080, 0xFF542094, 0xFF6C3CA8, 0xFF8058BC, 0xFF9470CC, 0xFFA884DC, 0xFFB89CEC,
+        0xFFC8B0FC, // Hue 3 (Blue-Cyan) - Luminance 0-7
+        0xFF002070, 0xFF1C3C88, 0xFF3858A0, 0xFF5074B4, 0xFF6888C8, 0xFF7CA0DC, 0xFF90B4EC,
+        0xFFA4C8FC, // Hue 4 (Magenta) - Luminance 0-7
+        0xFF580070, 0xFF6C2088, 0xFF803CA0, 0xFF9458B4, 0xFFA470C8, 0xFFB484DC, 0xFFC49CEC,
+        0xFFD4B0FC, // Hue 5 (Cyan) - Luminance 0-7
+        0xFF003C70, 0xFF1C5888, 0xFF3874A0, 0xFF508CB4, 0xFF68A4C8, 0xFF7CB8DC, 0xFF90CCEC,
+        0xFFA4E0FC, // Hue 6 (Pink/Magenta) - Luminance 0-7
+        0xFF70005C, 0xFF842074, 0xFF943C88, 0xFFA8589C, 0xFFB470B0, 0xFFC484C0, 0xFFD09CD0,
+        0xFFE0B0E0, // Hue 7 (Cyan-Green) - Luminance 0-7
+        0xFF005C5C, 0xFF207474, 0xFF3C8C8C, 0xFF58A4A4, 0xFF70B8B8, 0xFF84C8C8, 0xFF9CDCDC,
+        0xFFB0ECEC, // Hue 8 (Red) - Luminance 0-7
+        0xFF700014, 0xFF882034, 0xFFA03C50, 0xFFB4586C, 0xFFC87084, 0xFFDC849C, 0xFFEC9CB4,
+        0xFFFCB0C8, // Hue 9 (Green) - Luminance 0-7
+        0xFF006414, 0xFF208034, 0xFF3C9850, 0xFF58B06C, 0xFF70C484, 0xFF84D89C, 0xFF9CE8B4,
+        0xFFB0FCC8, // Hue 10 (Orange-Brown) - Luminance 0-7
+        0xFF703400, 0xFF885020, 0xFFA0683C, 0xFFB48458, 0xFFC89870, 0xFFDCAC84, 0xFFECC09C,
+        0xFFFCD4B0, // Hue 11 (Yellow-Green) - Luminance 0-7
+        0xFF445C00, 0xFF5C7820, 0xFF74903C, 0xFF8CAC58, 0xFFA0C070, 0xFFB0D484, 0xFFC0E89C,
+        0xFFD4FCB0, // Hue 12 (Yellow-Orange) - Luminance 0-7
+        0xFF805800, 0xFF947020, 0xFFA8843C, 0xFFBC9C58, 0xFFCCAC70, 0xFFDCC084, 0xFFECD09C,
+        0xFFFCE0B0,
+    ];
+
+    // PAL uses 104 colors, so we need to map the 7-bit value appropriately
+    // The encoding is slightly different from NTSC
+    let index = pal as usize & 0x7F;
+
+    // Map to 104-color palette (some values may repeat)
+    if index < PAL_PALETTE.len() {
+        PAL_PALETTE[index]
+    } else {
+        // For values beyond 104, wrap around or use black
+        PAL_PALETTE[index % PAL_PALETTE.len()]
+    }
 }
 
 #[cfg(test)]
@@ -1998,5 +2176,468 @@ mod tests {
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.grp0, 0xAA); // Uses old value when VDELP0 is set
+    }
+
+    #[test]
+    fn test_color_register_addresses() {
+        // Verify all color registers map to correct addresses per spec
+        let mut tia = Tia::new();
+
+        // COLUP0 = $06
+        tia.write(0x06, 0x42);
+        assert_eq!(tia.colup0, 0x42);
+
+        // COLUP1 = $07
+        tia.write(0x07, 0x84);
+        assert_eq!(tia.colup1, 0x84);
+
+        // COLUPF = $08
+        tia.write(0x08, 0xC6);
+        assert_eq!(tia.colupf, 0xC6);
+
+        // COLUBK = $09
+        tia.write(0x09, 0x00);
+        assert_eq!(tia.colubk, 0x00);
+    }
+
+    #[test]
+    fn test_playfield_register_addresses() {
+        // Verify playfield registers at correct addresses per spec
+        let mut tia = Tia::new();
+
+        // PF0 = $0D (4-bit, reversed)
+        tia.write(0x0D, 0xF0);
+        assert_eq!(tia.pf0, 0xF0);
+
+        // PF1 = $0E (8-bit, MSB first)
+        tia.write(0x0E, 0xAA);
+        assert_eq!(tia.pf1, 0xAA);
+
+        // PF2 = $0F (8-bit)
+        tia.write(0x0F, 0x55);
+        assert_eq!(tia.pf2, 0x55);
+    }
+
+    #[test]
+    fn test_ctrlpf_ball_sizing() {
+        // CTRLPF bits 4-5 control ball size per spec
+        let mut tia = Tia::new();
+
+        // Size 00 = 1 pixel
+        tia.write(0x0A, 0x00);
+        assert_eq!(tia.ball_size, 1);
+
+        // Size 01 = 2 pixels
+        tia.write(0x0A, 0x10);
+        assert_eq!(tia.ball_size, 2);
+
+        // Size 10 = 4 pixels
+        tia.write(0x0A, 0x20);
+        assert_eq!(tia.ball_size, 4);
+
+        // Size 11 = 8 pixels
+        tia.write(0x0A, 0x30);
+        assert_eq!(tia.ball_size, 8);
+    }
+
+    #[test]
+    fn test_ctrlpf_playfield_modes() {
+        // CTRLPF bits 0-2 control playfield behavior per spec
+        let mut tia = Tia::new();
+
+        // Bit 0 = reflection
+        tia.write(0x0A, 0x01);
+        assert!(tia.playfield_reflect);
+        assert!(!tia.playfield_score_mode);
+        assert!(!tia.playfield_priority);
+
+        // Bit 1 = score mode
+        tia.write(0x0A, 0x02);
+        assert!(!tia.playfield_reflect);
+        assert!(tia.playfield_score_mode);
+        assert!(!tia.playfield_priority);
+
+        // Bit 2 = priority
+        tia.write(0x0A, 0x04);
+        assert!(!tia.playfield_reflect);
+        assert!(!tia.playfield_score_mode);
+        assert!(tia.playfield_priority);
+
+        // Multiple bits
+        tia.write(0x0A, 0x07);
+        assert!(tia.playfield_reflect);
+        assert!(tia.playfield_score_mode);
+        assert!(tia.playfield_priority);
+    }
+
+    #[test]
+    fn test_horizontal_motion_signed_values() {
+        // HMxx registers use signed 4-bit values (upper nibble)
+        let mut tia = Tia::new();
+
+        // Positive motion: $10 = +1
+        tia.write(0x20, 0x10);
+        assert_eq!(tia.hmp0, 1);
+
+        // Negative motion: $F0 = -1
+        tia.write(0x21, 0xF0);
+        assert_eq!(tia.hmp1, -1);
+
+        // Maximum positive: $70 = +7
+        tia.write(0x22, 0x70);
+        assert_eq!(tia.hmm0, 7);
+
+        // Maximum negative: $80 = -8
+        tia.write(0x23, 0x80);
+        assert_eq!(tia.hmm1, -8);
+    }
+
+    #[test]
+    fn test_audio_register_masking() {
+        // Audio registers have specific bit masks per spec
+        let mut tia = Tia::new();
+
+        // AUDC (4-bit control)
+        tia.write(0x15, 0xFF);
+        assert_eq!(tia.audc0, 0x0F); // Only lower 4 bits
+
+        // AUDF (5-bit frequency)
+        tia.write(0x17, 0xFF);
+        assert_eq!(tia.audf0, 0x1F); // Only lower 5 bits
+
+        // AUDV (4-bit volume)
+        tia.write(0x19, 0xFF);
+        assert_eq!(tia.audv0, 0x0F); // Only lower 4 bits
+    }
+
+    #[test]
+    fn test_enable_registers_bit_1() {
+        // ENAM0, ENAM1, ENABL use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test ENAM0
+        tia.write(0x1D, 0x00);
+        assert!(!tia.enam0);
+        tia.write(0x1D, 0x02);
+        assert!(tia.enam0);
+        tia.write(0x1D, 0xFF); // Other bits don't matter
+        assert!(tia.enam0);
+
+        // Test ENAM1
+        tia.write(0x1E, 0x00);
+        assert!(!tia.enam1);
+        tia.write(0x1E, 0x02);
+        assert!(tia.enam1);
+
+        // Test ENABL
+        tia.write(0x1F, 0x00);
+        assert!(!tia.enabl);
+        tia.write(0x1F, 0x02);
+        assert!(tia.enabl);
+    }
+
+    #[test]
+    fn test_vsync_vblank_bit_1() {
+        // VSYNC and VBLANK use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test VSYNC
+        tia.write(0x00, 0x00);
+        assert!(!tia.vsync);
+        tia.write(0x00, 0x02);
+        assert!(tia.vsync);
+        tia.write(0x00, 0xFF); // Other bits don't matter
+        assert!(tia.vsync);
+
+        // Test VBLANK
+        tia.write(0x01, 0x00);
+        assert!(!tia.vblank);
+        tia.write(0x01, 0x02);
+        assert!(tia.vblank);
+    }
+
+    #[test]
+    fn test_player_reflect_bit_3() {
+        // REFP0/REFP1 use bit 3 (0x08) per spec
+        let mut tia = Tia::new();
+
+        // Test REFP0
+        tia.write(0x0B, 0x00);
+        assert!(!tia.player0_reflect);
+        tia.write(0x0B, 0x08);
+        assert!(tia.player0_reflect);
+
+        // Test REFP1
+        tia.write(0x0C, 0x00);
+        assert!(!tia.player1_reflect);
+        tia.write(0x0C, 0x08);
+        assert!(tia.player1_reflect);
+    }
+
+    #[test]
+    fn test_resmp_bit_1() {
+        // RESMP0/RESMP1 use bit 1 (0x02) per spec
+        let mut tia = Tia::new();
+
+        // Test RESMP0
+        tia.write(0x28, 0x00);
+        assert!(!tia.resmp0);
+        tia.write(0x28, 0x02);
+        assert!(tia.resmp0);
+
+        // Test RESMP1
+        tia.write(0x29, 0x00);
+        assert!(!tia.resmp1);
+        tia.write(0x29, 0x02);
+        assert!(tia.resmp1);
+    }
+
+    #[test]
+    fn test_vdel_bit_0() {
+        // VDELP0, VDELP1, VDELBL use bit 0 (0x01) per spec
+        let mut tia = Tia::new();
+
+        // Test VDELP0
+        tia.write(0x25, 0x00);
+        assert!(!tia.vdelp0);
+        tia.write(0x25, 0x01);
+        assert!(tia.vdelp0);
+
+        // Test VDELP1
+        tia.write(0x26, 0x00);
+        assert!(!tia.vdelp1);
+        tia.write(0x26, 0x01);
+        assert!(tia.vdelp1);
+
+        // Test VDELBL
+        tia.write(0x27, 0x00);
+        assert!(!tia.vdelbl);
+        tia.write(0x27, 0x01);
+        assert!(tia.vdelbl);
+    }
+
+    #[test]
+    fn test_collision_register_read_addresses() {
+        // Verify collision registers at correct read addresses per spec
+        let mut tia = Tia::new();
+
+        // Set collision bits manually for testing
+        tia.cxm0p = 0x80;
+        tia.cxm1p = 0x40;
+        tia.cxp0fb = 0xC0;
+        tia.cxp1fb = 0x80;
+        tia.cxm0fb = 0x40;
+        tia.cxm1fb = 0xC0;
+        tia.cxblpf = 0x80;
+        tia.cxppmm = 0x40;
+
+        // Read collision registers
+        assert_eq!(tia.read(0x00), 0x80); // CXM0P
+        assert_eq!(tia.read(0x01), 0x40); // CXM1P
+        assert_eq!(tia.read(0x02), 0xC0); // CXP0FB
+        assert_eq!(tia.read(0x03), 0x80); // CXP1FB
+        assert_eq!(tia.read(0x04), 0x40); // CXM0FB
+        assert_eq!(tia.read(0x05), 0xC0); // CXM1FB
+        assert_eq!(tia.read(0x06), 0x80); // CXBLPF
+        assert_eq!(tia.read(0x07), 0x40); // CXPPMM
+    }
+
+    #[test]
+    fn test_input_register_read_addresses() {
+        // Verify input registers at correct read addresses per spec
+        let mut tia = Tia::new();
+
+        // Set fire button states
+        tia.inpt4 = 0x00; // Pressed (bit 7 = 0)
+        tia.inpt5 = 0x80; // Released (bit 7 = 1)
+
+        // Read input registers
+        assert_eq!(tia.read(0x0C), 0x00); // INPT4 - pressed
+        assert_eq!(tia.read(0x0D), 0x80); // INPT5 - released
+    }
+
+    #[test]
+    fn test_paddle_position_setting() {
+        // Test setting paddle positions via public API
+        let mut tia = Tia::new();
+
+        // Set paddle positions
+        tia.set_paddle_position(0, 0); // Fully left
+        tia.set_paddle_position(1, 128); // Center
+        tia.set_paddle_position(2, 255); // Fully right
+        tia.set_paddle_position(3, 64); // Quarter turn
+
+        assert_eq!(tia.paddle_positions[0], 0);
+        assert_eq!(tia.paddle_positions[1], 128);
+        assert_eq!(tia.paddle_positions[2], 255);
+        assert_eq!(tia.paddle_positions[3], 64);
+
+        // Out of range paddle should be ignored
+        tia.set_paddle_position(4, 100);
+        // No crash, just ignored
+    }
+
+    #[test]
+    fn test_paddle_capacitor_dump() {
+        // Test VBLANK bit 7 (dump paddle capacitors)
+        let mut tia = Tia::new();
+
+        // Initially not dumping
+        assert!(!tia.paddle_dump_enabled);
+
+        // Enable dump (VBLANK bit 7 = 1)
+        tia.write(0x01, 0x80);
+        assert!(tia.paddle_dump_enabled);
+
+        // All paddle inputs should read 0 when dumping
+        assert_eq!(tia.read(0x08), 0x00); // INPT0
+        assert_eq!(tia.read(0x09), 0x00); // INPT1
+        assert_eq!(tia.read(0x0A), 0x00); // INPT2
+        assert_eq!(tia.read(0x0B), 0x00); // INPT3
+
+        // Disable dump (VBLANK bit 7 = 0)
+        tia.write(0x01, 0x00);
+        assert!(!tia.paddle_dump_enabled);
+    }
+
+    #[test]
+    fn test_paddle_charging_simulation() {
+        // Test that paddle capacitors charge after dump is released
+        let mut tia = Tia::new();
+
+        // Set a paddle position
+        tia.set_paddle_position(0, 0); // Fast charge (low resistance)
+
+        // Dump capacitors
+        tia.write(0x01, 0x80);
+        assert_eq!(tia.read(0x08) & 0x80, 0x00); // Not charged
+
+        // Release dump and let it charge
+        tia.write(0x01, 0x00);
+
+        // Simulate time passing by calling update_paddle_charging
+        // For position 0, threshold is ~56000 color clocks
+        for _ in 0..20000 {
+            tia.update_paddle_charging();
+        }
+        // Should still be charging
+        assert_eq!(tia.read(0x08) & 0x80, 0x00);
+
+        // Continue charging
+        for _ in 0..40000 {
+            tia.update_paddle_charging();
+        }
+        // Should now be charged (bit 7 = 1)
+        assert_eq!(tia.read(0x08) & 0x80, 0x80);
+    }
+
+    #[test]
+    fn test_paddle_position_affects_charge_time() {
+        // Test that different paddle positions result in different charge times
+        let mut tia1 = Tia::new();
+        let mut tia2 = Tia::new();
+
+        // Set different positions
+        tia1.set_paddle_position(0, 0); // Fast charge
+        tia2.set_paddle_position(0, 255); // Slow charge
+
+        // Dump and release
+        tia1.write(0x01, 0x80);
+        tia2.write(0x01, 0x80);
+        tia1.write(0x01, 0x00);
+        tia2.write(0x01, 0x00);
+
+        // Charge for same amount of time
+        for _ in 0..60000 {
+            tia1.update_paddle_charging();
+            tia2.update_paddle_charging();
+        }
+
+        // Position 0 should be charged
+        assert_eq!(tia1.read(0x08) & 0x80, 0x80);
+
+        // Position 255 should not yet be charged (needs more time)
+        assert_eq!(tia2.read(0x08) & 0x80, 0x00);
+    }
+
+    #[test]
+    fn test_paddle_register_addresses() {
+        // Test that INPT0-3 are at correct addresses
+        let mut tia = Tia::new();
+
+        // Set paddle inputs manually
+        tia.inpt0 = 0x80;
+        tia.inpt1 = 0x00;
+        tia.inpt2 = 0x80;
+        tia.inpt3 = 0x00;
+
+        assert_eq!(tia.read(0x08), 0x80); // INPT0
+        assert_eq!(tia.read(0x09), 0x00); // INPT1
+        assert_eq!(tia.read(0x0A), 0x80); // INPT2
+        assert_eq!(tia.read(0x0B), 0x00); // INPT3
+    }
+
+    #[test]
+    fn test_vblank_bit6_latch() {
+        // Test VBLANK bit 6 (latch paddle fire buttons)
+        let mut tia = Tia::new();
+
+        // Initially not latched
+        assert!(!tia.paddle_latch_enabled);
+
+        // Enable latch (VBLANK bit 6 = 1, also set bit 7 to test combination)
+        tia.write(0x01, 0x40);
+        assert!(tia.paddle_latch_enabled);
+        assert!(!tia.paddle_dump_enabled);
+
+        // Both bits
+        tia.write(0x01, 0xC0);
+        assert!(tia.paddle_latch_enabled);
+        assert!(tia.paddle_dump_enabled);
+
+        // Disable
+        tia.write(0x01, 0x00);
+        assert!(!tia.paddle_latch_enabled);
+        assert!(!tia.paddle_dump_enabled);
+    }
+
+    #[test]
+    fn test_pal_palette_differs_from_ntsc() {
+        use crate::video_mode::VideoMode;
+
+        // Test that PAL and NTSC palettes produce different colors
+        let ntsc_color = palette_to_rgb(0x20, VideoMode::NTSC);
+        let pal_color = palette_to_rgb(0x20, VideoMode::PAL);
+
+        // They should be different
+        assert_ne!(ntsc_color, pal_color);
+
+        // PAL should have valid RGB values
+        assert_ne!(pal_color, 0);
+        assert_eq!(pal_color & 0xFF000000, 0xFF000000); // Alpha channel should be 0xFF
+    }
+
+    #[test]
+    fn test_pal_palette_gray_scale() {
+        use crate::video_mode::VideoMode;
+
+        // Test PAL grayscale (hue 0, different luminance values)
+        let black = palette_to_rgb(0x00, VideoMode::PAL);
+        let mid_gray = palette_to_rgb(0x03, VideoMode::PAL);
+        let light_gray = palette_to_rgb(0x06, VideoMode::PAL);
+
+        // Black should be darkest
+        assert_eq!(black, 0xFF000000);
+
+        // Extract RGB values (ignore alpha)
+        let mid_val = (mid_gray & 0x00FFFFFF) as i64;
+        let light_val = (light_gray & 0x00FFFFFF) as i64;
+
+        // Mid gray should be lighter than black
+        assert!(mid_val > 0);
+
+        // Light gray should be lighter than mid gray
+        // (In the palette, higher luminance = brighter)
+        assert!(light_val > mid_val);
     }
 }
