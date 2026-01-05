@@ -9,6 +9,15 @@
 //! - Little-endian 16-bit operations
 //! - Stack operations
 //! - Register pair accessors
+//!
+//! ## Testing Philosophy
+//!
+//! This module contains comprehensive tests for the **helper functions** themselves.
+//! Individual CPU modules (cpu_8080, cpu_z80, cpu_lr35902) test the **instructions**
+//! that use these helpers. This separation ensures:
+//! - Helper functions are tested in isolation
+//! - CPU instructions are tested end-to-end
+//! - No duplication of helper function tests across CPUs
 
 /// Read a 16-bit value from PC and advance PC by 2
 ///
