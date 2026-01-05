@@ -13,6 +13,7 @@ pub mod cpu_spc700;
 pub mod cpu_z80;
 pub mod debug;
 pub mod disasm_6502;
+pub mod disasm_chip8;
 pub mod graphics;
 pub mod logging;
 pub mod ppu;
