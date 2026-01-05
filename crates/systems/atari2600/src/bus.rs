@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::cartridge::Cartridge;
 use crate::riot::Riot;
 use crate::tia::Tia;
+use crate::timing_mode::TimingMode;
 use crate::video_mode::VideoMode;
 
 /// Atari 2600 memory bus
@@ -33,15 +34,21 @@ impl Default for Atari2600Bus {
 }
 
 impl Atari2600Bus {
-    /// Create a new bus with default NTSC video mode
+    /// Create a new bus with default NTSC video mode and cycle-accurate timing
     pub fn new() -> Self {
-        Self::with_video_mode(VideoMode::default())
+        Self::with_video_mode_and_timing(VideoMode::default(), TimingMode::default())
     }
 
-    /// Create a new bus with specified video mode
+    /// Create a new bus with specified video mode and default timing
+    #[allow(dead_code)] // Kept for API consistency
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
+        Self::with_video_mode_and_timing(video_mode, TimingMode::default())
+    }
+
+    /// Create a new bus with specified video mode and timing mode
+    pub fn with_video_mode_and_timing(video_mode: VideoMode, timing_mode: TimingMode) -> Self {
         Self {
-            tia: Tia::with_video_mode(video_mode),
+            tia: Tia::with_video_mode_and_timing(video_mode, timing_mode),
             riot: Riot::new(),
             cartridge: None,
             wsync_request: false,
