@@ -1175,7 +1175,9 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 let result = ya.wrapping_add(val);
                 self.a = (result & 0xFF) as u8;
                 self.y = (result >> 8) as u8;
-                self.set_flag(psw_flags::CARRY, result < ya || result < val);
+                // Carry is set if there's overflow in 16-bit addition
+                let (_, overflow) = ya.overflowing_add(val);
+                self.set_flag(psw_flags::CARRY, overflow);
                 self.set_flag(psw_flags::ZERO, result == 0);
                 self.set_flag(psw_flags::NEGATIVE, (result & 0x8000) != 0);
                 self.set_flag(psw_flags::HALF_CARRY, ((ya & 0x0FFF) + (val & 0x0FFF)) > 0x0FFF);
@@ -1445,14 +1447,111 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 5
             }
 
-            // ADC/SBC more variants
-            0x86 => { let val = self.read(self.x as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 3 }
-            0x87 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = addr.wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 6 }
-            0x94 => { let dp = self.fetch_byte(); let val = self.read(dp.wrapping_add(self.x) as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 4 }
-            0x95 => { let addr = self.fetch_word().wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 5 }
-            0x96 => { let addr = self.fetch_word().wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 5 }
-            0x97 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let base = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = base.wrapping_add(self.y as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = self.a as u16 + val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.a = result as u8; self.update_nz(self.a); 6 }
-            0x99 => { let src = self.fetch_byte(); let dst = self.fetch_byte(); let src_val = self.read(src as u16); let dst_val = self.read(dst as u16); let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 }; let result = dst_val as u16 + src_val as u16 + carry; self.set_flag(psw_flags::CARRY, result > 0xFF); self.write(dst as u16, result as u8); self.update_nz(result as u8); 6 }
+            // ADC A, (X)
+            0x86 => {
+                let val = self.read(self.x as u16);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                3
+            }
+
+            // ADC A, (dp+X)
+            0x87 => {
+                let dp = self.fetch_byte() as u16;
+                let addr_lo = self.read(dp.wrapping_add(self.x as u16));
+                let addr_hi = self.read(dp.wrapping_add(self.x as u16).wrapping_add(1));
+                let addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                6
+            }
+
+            // ADC A, dp+X
+            0x94 => {
+                let dp = self.fetch_byte();
+                let val = self.read(dp.wrapping_add(self.x) as u16);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                4
+            }
+
+            // ADC A, !abs+X
+            0x95 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                5
+            }
+
+            // ADC A, !abs+Y
+            0x96 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                5
+            }
+
+            // ADC A, (dp)+Y
+            0x97 => {
+                let dp = self.fetch_byte() as u16;
+                let addr_lo = self.read(dp);
+                let addr_hi = self.read(dp.wrapping_add(1));
+                let base = ((addr_hi as u16) << 8) | (addr_lo as u16);
+                let addr = base.wrapping_add(self.y as u16);
+                let val = self.read(addr);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = self.a as u16 + val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(self.a ^ val) & (self.a ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((self.a & 0x0F) + (val & 0x0F) + carry as u8) > 0x0F);
+                self.a = result as u8;
+                self.update_nz(self.a);
+                6
+            }
+
+            // ADC dp, dp
+            0x99 => {
+                let src = self.fetch_byte();
+                let dst = self.fetch_byte();
+                let src_val = self.read(src as u16);
+                let dst_val = self.read(dst as u16);
+                let carry = if self.get_flag(psw_flags::CARRY) { 1 } else { 0 };
+                let result = dst_val as u16 + src_val as u16 + carry;
+                self.set_flag(psw_flags::CARRY, result > 0xFF);
+                self.set_flag(psw_flags::OVERFLOW, (!(dst_val ^ src_val) & (dst_val ^ result as u8) & 0x80) != 0);
+                self.set_flag(psw_flags::HALF_CARRY, ((dst_val & 0x0F) + (src_val & 0x0F) + carry as u8) > 0x0F);
+                self.write(dst as u16, result as u8);
+                self.update_nz(result as u8);
+                6
+            }
 
             0xA6 => { let val = self.read(self.x as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 3 }
             0xA7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); let addr = addr.wrapping_add(self.x as u16); let val = self.read(addr); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 6 }
@@ -1561,14 +1660,39 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             0xB8 => { let x_val = self.read(self.x as u16); let y_val = self.read(self.y as u16); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = x_val as i16 - y_val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.write(self.x as u16, result as u8); self.update_nz(result as u8); 5 }
 
             // SBC A, #imm (Note: A8 is already implemented above)
+            // SBC A, #imm (Note: A8 is already implemented above)
             0xA9 => { let val = self.fetch_byte(); let carry = if self.get_flag(psw_flags::CARRY) { 0 } else { 1 }; let result = self.a as i16 - val as i16 - carry; self.set_flag(psw_flags::CARRY, result >= 0); self.a = result as u8; self.update_nz(self.a); 2 }
+            
             // DAS - Decimal adjust for subtraction
-            0xBE => { if !self.get_flag(psw_flags::CARRY) || self.a > 0x99 { self.a = self.a.wrapping_sub(0x60); self.set_carry(false); } if !self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 { self.a = self.a.wrapping_sub(0x06); } self.update_nz(self.a); 3 }
+            0xBE => {
+                // Adjust low nibble if half-carry is clear or low nibble > 9
+                if !self.get_flag(psw_flags::HALF_CARRY) {
+                    self.a = self.a.wrapping_sub(0x06);
+                }
+                // Adjust high nibble if carry is clear or A > 0x99
+                if !self.get_flag(psw_flags::CARRY) {
+                    self.a = self.a.wrapping_sub(0x60);
+                    self.set_carry(false);
+                }
+                self.update_nz(self.a);
+                3
+            }
 
             // MOV A, (dp)
             0xE7 => { let dp = self.fetch_byte() as u16; let addr_lo = self.read(dp); let addr_hi = self.read(dp.wrapping_add(1)); let addr = ((addr_hi as u16) << 8) | (addr_lo as u16); self.a = self.read(addr); self.update_nz(self.a); 4 }
-            // MOV A, #imm (duplicate removed - already at 0xE8)
-            0xE9 => { let addr = self.fetch_word(); let val = self.read(addr); let bit = (val >> ((addr >> 13) & 0x07)) & 1; if bit != 0 { self.a = 1; } else { self.a = 0; } self.update_nz(self.a); 4 }
+            
+            // EOR dp, dp (not bit operation - simple EOR)
+            0xE9 => {
+                let src = self.fetch_byte();
+                let dst = self.fetch_byte();
+                let src_val = self.read(src as u16);
+                let dst_val = self.read(dst as u16);
+                let result = dst_val ^ src_val;
+                self.write(dst as u16, result);
+                self.update_nz(result);
+                6
+            }
+            
             // NOT1 mem.bit
             0xEA => { let addr_low = self.fetch_byte(); let addr_high_and_bit = self.fetch_byte(); let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16; let bit = (addr_high_and_bit >> 5) & 0x07; let val = self.read(addr); let result = val ^ (1 << bit); self.write(addr, result); 5 }
             // MOV Y, !abs
@@ -1582,8 +1706,22 @@ impl<M: MemorySpc700> CpuSpc700<M> {
             0xFB => { let dp = self.fetch_byte(); let val = self.read(dp.wrapping_add(self.x) as u16); self.y = val; self.update_nz(self.y); 4 }
             // CBNE dp+X, rel
             0xDE => { let dp = self.fetch_byte(); let offset = self.fetch_byte() as i8; let addr = dp.wrapping_add(self.x) as u16; let val = self.read(addr); if self.a != val { self.pc = self.pc.wrapping_add(offset as u16); 8 } else { 6 } }
+            
             // DAA - Decimal adjust for addition
-            0xDF => { if self.get_flag(psw_flags::CARRY) || self.a > 0x99 { self.a = self.a.wrapping_add(0x60); self.set_carry(true); } if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 { self.a = self.a.wrapping_add(0x06); } self.update_nz(self.a); 3 }
+            0xDF => {
+                // Adjust low nibble if half-carry is set or low nibble > 9
+                if self.get_flag(psw_flags::HALF_CARRY) || (self.a & 0x0F) > 0x09 {
+                    self.a = self.a.wrapping_add(0x06);
+                }
+                // Adjust high nibble if carry is set or A > 0x99 (before adding 0x60)
+                if self.get_flag(psw_flags::CARRY) || self.a > 0x99 {
+                    self.a = self.a.wrapping_add(0x60);
+                    self.set_carry(true);
+                }
+                self.update_nz(self.a);
+                3
+            }
+            
             // DBNZ Y, rel
             0xFE => { let offset = self.fetch_byte() as i8; self.y = self.y.wrapping_sub(1); if self.y != 0 { self.pc = self.pc.wrapping_add(offset as u16); 6 } else { 4 } }
             // MOV (dp), Y
