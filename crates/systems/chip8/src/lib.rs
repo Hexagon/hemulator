@@ -83,10 +83,40 @@ const FONT_DATA: [u8; 80] = [
 ];
 
 const MEMORY_SIZE: usize = 4096;
+const MEMORY_SIZE_XO: usize = 65536; // XO-CHIP extended memory
 const PROGRAM_START: usize = 0x200;
-const DISPLAY_WIDTH: usize = 64;
-const DISPLAY_HEIGHT: usize = 32;
+const DISPLAY_WIDTH_LOW: usize = 64;
+const DISPLAY_HEIGHT_LOW: usize = 32;
+const DISPLAY_WIDTH_HIGH: usize = 128;
+const DISPLAY_HEIGHT_HIGH: usize = 64;
 const STACK_SIZE: usize = 16;
+
+/// Emulation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chip8Mode {
+    /// Original CHIP-8 (64x32, basic opcodes)
+    Chip8,
+    /// Super-CHIP (64x32 or 128x64, scrolling, extended opcodes)
+    SuperChip,
+    /// XO-CHIP (128x64, 4 colors, audio, extended memory)
+    XoChip,
+}
+
+/// Super-CHIP large font data (10 bytes per character, 0-9)
+/// Used for Super-CHIP's 16x16 font
+const LARGE_FONT_DATA: [u8; 100] = [
+    // 0
+    0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, // 1
+    0x18, 0x38, 0x58, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, // 2
+    0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xFF, 0xFF, // 3
+    0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, // 4
+    0x06, 0x0E, 0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, // 5
+    0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE, 0x03, 0xC3, 0x7E, 0x3C, // 6
+    0x3E, 0x7C, 0xC0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C, // 7
+    0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, // 8
+    0x3C, 0x7E, 0xC3, 0xC3, 0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, // 9
+    0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03, 0x3E, 0x7C,
+];
 
 /// CHIP-8 system state
 pub struct Chip8System {
@@ -96,13 +126,16 @@ pub struct Chip8System {
     pc: u16,     // Program counter
     sp: u8,      // Stack pointer
 
-    // Memory
-    memory: [u8; MEMORY_SIZE],
+    // Memory (extended for XO-CHIP)
+    memory: Vec<u8>, // 4KB for CHIP-8/Super-CHIP, 64KB for XO-CHIP
     stack: [u16; STACK_SIZE],
 
-    // Display
-    display: [bool; DISPLAY_WIDTH * DISPLAY_HEIGHT],
-    display_updated: bool, // Flag to know when to redraw
+    // Display (supports both 64x32 and 128x64)
+    display_planes: [Vec<bool>; 2], // Two bit planes for XO-CHIP (4 colors)
+    display_width: usize,
+    display_height: usize,
+    display_updated: bool,
+    high_res: bool, // Super-CHIP/XO-CHIP high resolution mode
 
     // Timers
     delay_timer: u8,
@@ -114,9 +147,22 @@ pub struct Chip8System {
     // Execution
     cycles_this_frame: u32,
     program_loaded: bool,
+    mode: Chip8Mode,
 
     // For waiting for keypress (FX0A instruction)
     waiting_for_key: Option<usize>, // Some(register_index) when waiting
+
+    // Super-CHIP flag registers (RPL user flags)
+    #[allow(dead_code)]
+    flag_registers: [u8; 16],
+
+    // XO-CHIP extensions
+    #[allow(dead_code)]
+    selected_plane: u8, // Which plane(s) to draw to (bitmask: 0-3)
+    #[allow(dead_code)]
+    audio_pattern: [u8; 16], // XO-CHIP audio pattern buffer
+    #[allow(dead_code)]
+    audio_pitch: u8, // XO-CHIP audio playback rate
 }
 
 impl Default for Chip8System {
@@ -126,29 +172,70 @@ impl Default for Chip8System {
 }
 
 impl Chip8System {
-    /// Create a new CHIP-8 system
+    /// Create a new CHIP-8 system with default mode (Chip8)
     pub fn new() -> Self {
+        Self::new_with_mode(Chip8Mode::Chip8)
+    }
+
+    /// Create a new CHIP-8 system with specified mode
+    pub fn new_with_mode(mode: Chip8Mode) -> Self {
+        let memory_size = match mode {
+            Chip8Mode::XoChip => MEMORY_SIZE_XO,
+            _ => MEMORY_SIZE,
+        };
+
+        let (display_width, display_height) = match mode {
+            Chip8Mode::SuperChip | Chip8Mode::XoChip => (DISPLAY_WIDTH_HIGH, DISPLAY_HEIGHT_HIGH),
+            Chip8Mode::Chip8 => (DISPLAY_WIDTH_LOW, DISPLAY_HEIGHT_LOW),
+        };
+
+        let display_size = display_width * display_height;
+
         let mut system = Self {
             v: [0; 16],
             i: 0,
             pc: PROGRAM_START as u16,
             sp: 0,
-            memory: [0; MEMORY_SIZE],
+            memory: vec![0; memory_size],
             stack: [0; STACK_SIZE],
-            display: [false; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+            display_planes: [vec![false; display_size], vec![false; display_size]],
+            display_width,
+            display_height,
             display_updated: false,
+            high_res: matches!(mode, Chip8Mode::SuperChip | Chip8Mode::XoChip),
             delay_timer: 0,
             sound_timer: 0,
             keys: [false; 16],
             cycles_this_frame: 0,
             program_loaded: false,
+            mode,
             waiting_for_key: None,
+            flag_registers: [0; 16],
+            selected_plane: 1, // Default to plane 1 (first plane)
+            audio_pattern: [0; 16],
+            audio_pitch: 64, // Default pitch
         };
 
         // Load font data into memory (at 0x000-0x04F)
         system.memory[0..FONT_DATA.len()].copy_from_slice(&FONT_DATA);
 
+        // Load large font for Super-CHIP (at 0x050-0x0A0)
+        if matches!(mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+            system.memory[0x50..0x50 + LARGE_FONT_DATA.len()].copy_from_slice(&LARGE_FONT_DATA);
+        }
+
         system
+    }
+
+    /// Set the emulation mode
+    pub fn set_mode(&mut self, mode: Chip8Mode) {
+        // Recreate system with new mode
+        *self = Self::new_with_mode(mode);
+    }
+
+    /// Get current emulation mode
+    pub fn mode(&self) -> Chip8Mode {
+        self.mode
     }
 
     /// Execute one instruction
@@ -182,19 +269,62 @@ impl Chip8System {
         let y = ((opcode & 0x00F0) >> 4) as usize; // 4-bit register index
 
         match opcode & 0xF000 {
-            0x0000 => match nn {
-                0xE0 => {
+            0x0000 => match opcode {
+                0x00E0 => {
                     // 00E0 - CLS: Clear display
-                    self.display.fill(false);
+                    for plane in &mut self.display_planes {
+                        plane.fill(false);
+                    }
                     self.display_updated = true;
                 }
-                0xEE => {
+                0x00EE => {
                     // 00EE - RET: Return from subroutine
                     self.sp -= 1;
                     self.pc = self.stack[self.sp as usize];
                 }
+                0x00FB => {
+                    // 00FB - SCR (Super-CHIP): Scroll display 4 pixels right
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        self.scroll_right(4);
+                    }
+                }
+                0x00FC => {
+                    // 00FC - SCL (Super-CHIP): Scroll display 4 pixels left
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        self.scroll_left(4);
+                    }
+                }
+                0x00FD => {
+                    // 00FD - EXIT (Super-CHIP): Exit interpreter
+                    // We'll treat this as a no-op for now
+                }
+                0x00FE => {
+                    // 00FE - LOW (Super-CHIP): Disable high resolution mode
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        self.set_low_res();
+                    }
+                }
+                0x00FF => {
+                    // 00FF - HIGH (Super-CHIP): Enable high resolution mode
+                    if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        self.set_high_res();
+                    }
+                }
                 _ => {
-                    // 0NNN - SYS addr: Call machine code routine (ignored)
+                    // 00CN - SCD N (Super-CHIP): Scroll display N lines down
+                    // 00DN - SCU N (XO-CHIP): Scroll display N lines up
+                    let n = (opcode & 0x000F) as usize;
+                    if opcode & 0x00F0 == 0x00C0 {
+                        // 00CN - Scroll down
+                        if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                            self.scroll_down(n);
+                        }
+                    } else if opcode & 0x00F0 == 0x00D0 && self.mode == Chip8Mode::XoChip {
+                        // 00DN - Scroll up (XO-CHIP only)
+                        self.scroll_up(n);
+                    } else {
+                        // 0NNN - SYS addr: Call machine code routine (ignored)
+                    }
                 }
             },
             0x1000 => {
@@ -376,30 +506,152 @@ impl Chip8System {
 
     /// Draw sprite at (Vx, Vy) with height n
     fn draw_sprite(&mut self, x_reg: usize, y_reg: usize, height: usize) {
-        let x_pos = self.v[x_reg] as usize % DISPLAY_WIDTH;
-        let y_pos = self.v[y_reg] as usize % DISPLAY_HEIGHT;
+        let x_pos = self.v[x_reg] as usize % self.display_width;
+        let y_pos = self.v[y_reg] as usize % self.display_height;
 
         self.v[0xF] = 0; // Reset collision flag
 
-        for row in 0..height {
-            let y = (y_pos + row) % DISPLAY_HEIGHT;
-            let sprite_byte = self.memory[self.i as usize + row];
+        // Determine sprite width (8 pixels for normal, 16 for Super-CHIP high-res 16x16 sprites)
+        let sprite_width = if height == 0 && self.high_res {
+            // DXY0 in high-res mode draws 16x16 sprite
+            16
+        } else {
+            8
+        };
 
-            for col in 0..8 {
-                let x = (x_pos + col) % DISPLAY_WIDTH;
-                let pixel = (sprite_byte & (0x80 >> col)) != 0;
+        let sprite_height = if height == 0 && self.high_res {
+            16
+        } else {
+            height
+        };
+
+        for row in 0..sprite_height {
+            let y = (y_pos + row) % self.display_height;
+
+            for col in 0..sprite_width {
+                let x = (x_pos + col) % self.display_width;
+
+                // Get sprite pixel
+                let byte_offset = if sprite_width == 16 {
+                    row * 2 + col / 8
+                } else {
+                    row
+                };
+                let sprite_byte = self.memory[self.i as usize + byte_offset];
+                let bit_offset = 7 - (col % 8);
+                let pixel = (sprite_byte & (1 << bit_offset)) != 0;
 
                 if pixel {
-                    let index = y * DISPLAY_WIDTH + x;
-                    if self.display[index] {
-                        self.v[0xF] = 1; // Collision detected
+                    let index = y * self.display_width + x;
+
+                    // Draw to selected plane(s) for XO-CHIP, or plane 0 for CHIP-8/Super-CHIP
+                    let planes_to_draw = if self.mode == Chip8Mode::XoChip {
+                        self.selected_plane
+                    } else {
+                        1 // Plane 0 only
+                    };
+
+                    for plane_idx in 0..2 {
+                        if (planes_to_draw & (1 << plane_idx)) != 0 {
+                            if self.display_planes[plane_idx][index] {
+                                self.v[0xF] = 1; // Collision detected
+                            }
+                            self.display_planes[plane_idx][index] ^= true; // XOR pixel
+                        }
                     }
-                    self.display[index] ^= true; // XOR pixel
                 }
             }
         }
 
         self.display_updated = true;
+    }
+
+    /// Scroll display down by n lines (Super-CHIP)
+    fn scroll_down(&mut self, n: usize) {
+        for plane in &mut self.display_planes {
+            let mut new_display = vec![false; self.display_width * self.display_height];
+            for y in n..self.display_height {
+                for x in 0..self.display_width {
+                    let old_idx = y * self.display_width + x;
+                    let new_idx = (y - n) * self.display_width + x;
+                    new_display[old_idx] = plane[new_idx];
+                }
+            }
+            *plane = new_display;
+        }
+        self.display_updated = true;
+    }
+
+    /// Scroll display up by n lines (XO-CHIP)
+    fn scroll_up(&mut self, n: usize) {
+        for plane in &mut self.display_planes {
+            let mut new_display = vec![false; self.display_width * self.display_height];
+            for y in 0..(self.display_height - n) {
+                for x in 0..self.display_width {
+                    let old_idx = y * self.display_width + x;
+                    let new_idx = (y + n) * self.display_width + x;
+                    new_display[old_idx] = plane[new_idx];
+                }
+            }
+            *plane = new_display;
+        }
+        self.display_updated = true;
+    }
+
+    /// Scroll display right by n pixels (Super-CHIP)
+    fn scroll_right(&mut self, n: usize) {
+        for plane in &mut self.display_planes {
+            let mut new_display = vec![false; self.display_width * self.display_height];
+            for y in 0..self.display_height {
+                for x in n..self.display_width {
+                    let old_idx = y * self.display_width + x;
+                    let new_idx = y * self.display_width + (x - n);
+                    new_display[old_idx] = plane[new_idx];
+                }
+            }
+            *plane = new_display;
+        }
+        self.display_updated = true;
+    }
+
+    /// Scroll display left by n pixels (Super-CHIP)
+    fn scroll_left(&mut self, n: usize) {
+        for plane in &mut self.display_planes {
+            let mut new_display = vec![false; self.display_width * self.display_height];
+            for y in 0..self.display_height {
+                for x in 0..(self.display_width - n) {
+                    let old_idx = y * self.display_width + x;
+                    let new_idx = y * self.display_width + (x + n);
+                    new_display[old_idx] = plane[new_idx];
+                }
+            }
+            *plane = new_display;
+        }
+        self.display_updated = true;
+    }
+
+    /// Enable low resolution mode (64x32) - Super-CHIP
+    fn set_low_res(&mut self) {
+        if self.high_res {
+            self.display_width = DISPLAY_WIDTH_LOW;
+            self.display_height = DISPLAY_HEIGHT_LOW;
+            self.high_res = false;
+            let display_size = self.display_width * self.display_height;
+            self.display_planes = [vec![false; display_size], vec![false; display_size]];
+            self.display_updated = true;
+        }
+    }
+
+    /// Enable high resolution mode (128x64) - Super-CHIP
+    fn set_high_res(&mut self) {
+        if !self.high_res {
+            self.display_width = DISPLAY_WIDTH_HIGH;
+            self.display_height = DISPLAY_HEIGHT_HIGH;
+            self.high_res = true;
+            let display_size = self.display_width * self.display_height;
+            self.display_planes = [vec![false; display_size], vec![false; display_size]];
+            self.display_updated = true;
+        }
     }
 
     /// Set key state (0-15)
@@ -492,9 +744,31 @@ impl System for Chip8System {
         }
 
         // Convert display to frame
-        let mut frame = Frame::new(DISPLAY_WIDTH as u32, DISPLAY_HEIGHT as u32);
-        for (i, &pixel) in self.display.iter().enumerate() {
-            frame.pixels[i] = if pixel { 0xFFFFFFFF } else { 0xFF000000 };
+        let mut frame = Frame::new(self.display_width as u32, self.display_height as u32);
+
+        // Combine planes into color output for XO-CHIP, or use monochrome for CHIP-8/Super-CHIP
+        if self.mode == Chip8Mode::XoChip {
+            // XO-CHIP: 4 colors using 2 bit planes
+            // 00 = background (black), 01 = color 1, 10 = color 2, 11 = color 3
+            for (i, pixel) in frame.pixels.iter_mut().enumerate() {
+                let plane0 = self.display_planes[0][i];
+                let plane1 = self.display_planes[1][i];
+                *pixel = match (plane1, plane0) {
+                    (false, false) => 0xFF000000, // Black (background)
+                    (false, true) => 0xFF00FF00,  // Green (plane 0)
+                    (true, false) => 0xFFFF0000,  // Red (plane 1)
+                    (true, true) => 0xFFFFFF00,   // Yellow (both planes)
+                };
+            }
+        } else {
+            // CHIP-8/Super-CHIP: Monochrome (use plane 0 only)
+            for (i, pixel) in frame.pixels.iter_mut().enumerate() {
+                *pixel = if self.display_planes[0][i] {
+                    0xFFFFFFFF
+                } else {
+                    0xFF000000
+                };
+            }
         }
 
         Ok(frame)
@@ -508,10 +782,16 @@ impl System for Chip8System {
             "i": self.i,
             "pc": self.pc,
             "sp": self.sp,
-            "memory": STANDARD.encode(self.memory),
+            "memory": STANDARD.encode(&self.memory),
             "stack": self.stack,
             "delay_timer": self.delay_timer,
             "sound_timer": self.sound_timer,
+            "mode": match self.mode {
+                Chip8Mode::Chip8 => 0,
+                Chip8Mode::SuperChip => 1,
+                Chip8Mode::XoChip => 2,
+            },
+            "high_res": self.high_res,
         })
     }
 
@@ -530,8 +810,8 @@ impl System for Chip8System {
         // Decode base64 memory
         if let Some(memory_b64) = v["memory"].as_str() {
             if let Ok(memory_bytes) = STANDARD.decode(memory_b64) {
-                if memory_bytes.len() == MEMORY_SIZE {
-                    self.memory.copy_from_slice(&memory_bytes);
+                if memory_bytes.len() <= self.memory.len() {
+                    self.memory[..memory_bytes.len()].copy_from_slice(&memory_bytes);
                 }
             }
         }
@@ -543,6 +823,26 @@ impl System for Chip8System {
         }
         self.delay_timer = v["delay_timer"].as_u64().unwrap_or(0) as u8;
         self.sound_timer = v["sound_timer"].as_u64().unwrap_or(0) as u8;
+
+        // Restore mode and resolution if saved
+        if let Some(mode_val) = v["mode"].as_u64() {
+            let mode = match mode_val {
+                1 => Chip8Mode::SuperChip,
+                2 => Chip8Mode::XoChip,
+                _ => Chip8Mode::Chip8,
+            };
+            if mode != self.mode {
+                self.set_mode(mode);
+            }
+        }
+
+        if let Some(high_res) = v["high_res"].as_bool() {
+            if high_res && !self.high_res {
+                self.set_high_res();
+            } else if !high_res && self.high_res {
+                self.set_low_res();
+            }
+        }
 
         self.program_loaded = true; // Ensure program is marked as loaded
         Ok(())
@@ -566,7 +866,7 @@ impl System for Chip8System {
             return Err(Chip8Error::InvalidMountPoint(mount_point_id.to_string()));
         }
 
-        let max_size = MEMORY_SIZE - PROGRAM_START;
+        let max_size = self.memory.len() - PROGRAM_START;
         if data.len() > max_size {
             return Err(Chip8Error::ProgramTooLarge {
                 size: data.len(),
@@ -575,7 +875,9 @@ impl System for Chip8System {
         }
 
         // Clear previous program
-        self.memory[PROGRAM_START..].fill(0);
+        for byte in &mut self.memory[PROGRAM_START..] {
+            *byte = 0;
+        }
 
         // Load new program
         self.memory[PROGRAM_START..PROGRAM_START + data.len()].copy_from_slice(data);
@@ -586,13 +888,15 @@ impl System for Chip8System {
         self.v.fill(0);
         self.i = 0;
         self.stack.fill(0);
-        self.display.fill(false);
+        for plane in &mut self.display_planes {
+            plane.fill(false);
+        }
         self.delay_timer = 0;
         self.sound_timer = 0;
         self.keys.fill(false);
         self.waiting_for_key = None;
-        self.program_loaded = true;
 
+        self.program_loaded = true;
         Ok(())
     }
 
@@ -601,7 +905,9 @@ impl System for Chip8System {
             return Err(Chip8Error::InvalidMountPoint(mount_point_id.to_string()));
         }
 
-        self.memory[PROGRAM_START..].fill(0);
+        for byte in &mut self.memory[PROGRAM_START..] {
+            *byte = 0;
+        }
         self.program_loaded = false;
         self.reset();
 
@@ -651,13 +957,13 @@ mod tests {
     #[test]
     fn test_cls_instruction() {
         let mut system = Chip8System::new();
-        system.display.fill(true);
+        system.display_planes[0].fill(true);
         system.memory[PROGRAM_START] = 0x00;
         system.memory[PROGRAM_START + 1] = 0xE0;
         system.program_loaded = true;
 
         system.execute_instruction();
-        assert!(system.display.iter().all(|&p| !p));
+        assert!(system.display_planes[0].iter().all(|&p| !p));
     }
 
     #[test]
@@ -715,14 +1021,14 @@ mod tests {
         // Run a few frames to ensure nothing crashes
         for _ in 0..10 {
             let frame = system.step_frame().expect("Frame execution failed");
-            assert_eq!(frame.width, DISPLAY_WIDTH as u32);
-            assert_eq!(frame.height, DISPLAY_HEIGHT as u32);
-            assert_eq!(frame.pixels.len(), DISPLAY_WIDTH * DISPLAY_HEIGHT);
+            assert_eq!(frame.width, DISPLAY_WIDTH_LOW as u32);
+            assert_eq!(frame.height, DISPLAY_HEIGHT_LOW as u32);
+            assert_eq!(frame.pixels.len(), DISPLAY_WIDTH_LOW * DISPLAY_HEIGHT_LOW);
         }
 
         // The test ROM should have drawn some pixels
         // Check that at least some pixels are white (0xFFFFFFFF)
-        let white_pixels = system.display.iter().filter(|&&p| p).count();
+        let white_pixels = system.display_planes[0].iter().filter(|&&p| p).count();
         assert!(white_pixels > 0, "Test ROM should have drawn some pixels");
     }
 }
