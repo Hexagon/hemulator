@@ -1412,6 +1412,19 @@ fn create_n64_system(
     n64_sys
 }
 
+/// Create an Atari 2600 system with the appropriate timing mode based on settings
+fn create_atari2600_system(settings: &Settings) -> emu_atari2600::Atari2600System {
+    let timing_mode_str = settings.get_atari_timing_mode();
+    let timing_mode = emu_atari2600::TimingMode::parse(&timing_mode_str).unwrap_or_default();
+
+    eprintln!("Atari 2600: Using {} timing mode", timing_mode.name());
+
+    emu_atari2600::Atari2600System::with_video_mode_and_timing(
+        emu_atari2600::VideoMode::default(),
+        timing_mode,
+    )
+}
+
 fn main() {
     // Parse command-line arguments
     let cli_args = CliArgs::parse();
@@ -1694,7 +1707,7 @@ fn main() {
                 }
             }
             "atari2600" | "atari" => {
-                sys = EmulatorSystem::Atari2600(Box::new(emu_atari2600::Atari2600System::new()));
+                sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(&settings)));
                 rom_loaded = true; // Mark system as loaded even without ROM
                 status_message = "Clean Atari 2600 system started".to_string();
                 println!("Started clean Atari 2600 system");
@@ -2023,23 +2036,21 @@ fn main() {
                                 println!("Loaded NES ROM: {}", p);
                             }
                         }
-                        Ok(SystemType::Atari2600) => {
-                            rom_hash = Some(GameSaves::rom_hash(&data));
-                            let mut a2600_sys = emu_atari2600::Atari2600System::new();
-                            if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                                eprintln!("Failed to load Atari 2600 ROM: {}", e);
-                                status_message = format!("Error: {}", e);
-                                rom_hash = None;
-                            } else {
-                                rom_loaded = true;
-                                sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
-                                }
-                                status_message = "Atari 2600 ROM loaded".to_string();
-                                println!("Loaded Atari 2600 ROM: {}", p);
+                    }
+                    Ok(SystemType::Atari2600) => {
+                        rom_hash = Some(GameSaves::rom_hash(&data));
+                        let mut a2600_sys = create_atari2600_system(&settings);
+                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                            eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                            status_message = format!("Error: {}", e);
+                            rom_hash = None;
+                        } else {
+                            rom_loaded = true;
+                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                            settings.last_rom_path = Some(p.clone());
+                            if let Err(e) = settings.save() {
+                                eprintln!("Warning: Failed to save settings: {}", e);
                             }
                         }
                         Ok(SystemType::GameBoy) => {
@@ -2683,7 +2694,7 @@ fn main() {
                                 }
                                 Ok(SystemType::Atari2600) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut a2600_sys = emu_atari2600::Atari2600System::new();
+                                    let mut a2600_sys = create_atari2600_system(&settings);
                                     if let Err(e) = a2600_sys.mount("Cartridge", &data) {
                                         egui_app.status_bar.set_message(format!("Error: {}", e));
                                         rom_hash = None;
@@ -3167,7 +3178,7 @@ fn main() {
                                 }
                                 Ok(SystemType::Atari2600) => {
                                     rom_hash = Some(GameSaves::rom_hash(&data));
-                                    let mut a2600_sys = emu_atari2600::Atari2600System::new();
+                                    let mut a2600_sys = create_atari2600_system(&settings);
                                     if let Err(e) = a2600_sys.mount("Cartridge", &data) {
                                         egui_app.status_bar.set_message(format!("Error: {}", e));
                                         rom_hash = None;
@@ -4097,9 +4108,9 @@ fn main() {
                                 .set_message("Created new Game Boy system".to_string());
                         }
                         "Atari 2600" => {
-                            sys = EmulatorSystem::Atari2600(Box::new(
-                                emu_atari2600::Atari2600System::new(),
-                            ));
+                            sys = EmulatorSystem::Atari2600(Box::new(create_atari2600_system(
+                                &settings,
+                            )));
                             rom_loaded = false;
                             rom_hash = None;
                             runtime_state.clear_mounts();
