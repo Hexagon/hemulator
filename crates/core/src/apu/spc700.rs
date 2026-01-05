@@ -40,24 +40,43 @@ const COUNTER1: u16 = 0x00FE; // Timer 1 counter
 const COUNTER2: u16 = 0x00FF; // Timer 2 counter
 
 /// SPC700 IPL (Initial Program Loader) boot ROM
-/// This 64-byte ROM implements the boot protocol for receiving code uploads
+/// This is the actual SPC700 IPL ROM from hardware
+/// The clear loop intentionally clears ports $F4-$F7, then rewrites $F4/$F5 with $AA/$BB
 const IPL_ROM: [u8; 64] = [
-    // This is a simplified/placeholder IPL ROM
-    // The real IPL ROM implements the upload protocol
-    // For now, we'll use a minimal stub that sets ports to $BBAA and halts
-    0xCD, 0x00, // MOV X, #$00
-    0x8D, 0x00, // MOV Y, #$00
-    0xE8, 0xAA, // MOV A, #$AA
-    0xC4, 0xF4, // MOV $F4, A
-    0xE8, 0xBB, // MOV A, #$BB
-    0xC4, 0xF5, // MOV $F5, A
-    0xEF, // SLEEP
-    0x2F, 0xFC, // BRA $-4 (loop)
-    // Pad with NOPs to reach 64 bytes
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00,
+    // Real SPC700 IPL ROM (verified bytes from multiple sources)
+    0xCD, 0xEF,       // $FFC0: MOV X, #$EF
+    0xBD,             // $FFC2: MOV SP, X
+    0xE8, 0x00,       // $FFC3: MOV A, #$00
+    0xC6,             // $FFC5: MOV (X), A
+    0x1D,             // $FFC6: DEC X
+    0xD0, 0xFC,       // $FFC7: BNE $FFC5
+    0x8F, 0xAA, 0xF4, // $FFC9: MOV $F4, #$AA  <- This writes AFTER the clear
+    0x8F, 0xBB, 0xF5, // $FFCC: MOV $F5, #$BB
+    0x78, 0xCC, 0xF4, // $FFCF: CMP $F4, #$CC
+    0xD0, 0xFB,       // $FFD2: BNE $FFCF
+    0x2F, 0x19,       // $FFD4: BRA $FFEF
+    0xEB, 0xF4,       // $FFD6: MOV Y, $F4
+    0xD0, 0xFC,       // $FFD8: BNE $FFD6
+    0x7E, 0xF4,       // $FFDA: CMP Y, $F4
+    0xD0, 0x0B,       // $FFDC: BNE $FFE9
+    0xE4, 0xF5,       // $FFDE: MOV A, $F5
+    0xCB, 0xF4,       // $FFE0: MOV $F4, Y
+    0xD7, 0x00,       // $FFE2: MOV ($00)+Y, A
+    0xFC,             // $FFE4: INC Y
+    0xD0, 0xF3,       // $FFE5: BNE $FFDA
+    0xAB, 0x01,       // $FFE7: INC $01
+    0x10, 0xEF,       // $FFE9: BPL $FFDA
+    0x7E, 0xF4,       // $FFEB: CMP Y, $F4
+    0x10, 0xEB,       // $FFED: BPL $FFDA
+    0xE4, 0xF6,       // $FFEF: MOV A, $F6
+    0xC4, 0xF4,       // $FFF1: MOV $F4, A
+    0xE4, 0xF7,       // $FFF3: MOV A, $F7
+    0xC4, 0xF5,       // $FFF5: MOV $F5, A
+    0xE4, 0xF6,       // $FFF7: MOV A, $F6
+    0xC4, 0x00,       // $FFF9: MOV $00, A
+    0xE4, 0xF7,       // $FFFB: MOV A, $F7
+    0xC4, 0x01,       // $FFFD: MOV $01, A
+    0x6F              // $FFFF: RET (jumps to ($FFFE-$FFFF) = $0002 after reset)
 ];
 
 /// SPC700 memory implementation
@@ -95,7 +114,7 @@ impl Spc700Memory {
             ram: Box::new([0; 0x10000]),
             control: 0x80, // IPL ROM enabled by default
             cpuio: [0; 4],
-            apu_out: [0xAA, 0xBB, 0, 0], // Default to ready signature
+            apu_out: [0; 4], // IPL ROM will write $AA/$BB signature
             timer_divisor: [0; 3],
             timer_counter: [0; 3],
             dsp_regs: [0; 128],
@@ -175,8 +194,9 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 self.apu_out[port] = val;
-                log(LogCategory::Bus, LogLevel::Trace, || {
-                    format!("SPC700: Write port ${:04X} = ${:02X}", addr, val)
+                log(LogCategory::APU, LogLevel::Debug, || {
+                    format!("SPC700: Write port $F{} = ${:02X} (apu_out now: ${:02X} ${:02X} ${:02X} ${:02X})", 
+                        4 + port, val, self.apu_out[0], self.apu_out[1], self.apu_out[2], self.apu_out[3])
                 });
             }
             // Control register

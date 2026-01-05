@@ -117,6 +117,10 @@ pub struct SnesBus {
 
 impl SnesBus {
     pub fn new() -> Self {
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "SNES Bus: Initializing with real SPC700 APU".to_string()
+        });
+        
         Self {
             wram: [0; 0x20000],
             cartridge: None,
@@ -136,7 +140,7 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: None, // Start with stub, can be enabled later
+            spc700: Some(Spc700::new()), // Enable real SPC700 APU by default
         }
     }
 
@@ -193,6 +197,11 @@ impl SnesBus {
     /// Update cycle counter within frame (called after each CPU step)
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
+
+        // Run SPC700 for the same number of cycles
+        if let Some(ref mut spc700) = self.spc700 {
+            spc700.run_cycles(cycles);
+        }
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
@@ -477,10 +486,12 @@ impl Memory65c816 for SnesBus {
                         // Use real SPC700 if available, otherwise use stub
                         if let Some(ref spc700) = self.spc700 {
                             let val = spc700.read_port(port);
-                            log(LogCategory::Bus, LogLevel::Trace, || {
+                            log(LogCategory::Bus, LogLevel::Debug, || {
                                 format!(
-                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) from SPC700: 0x{:02X}",
-                                    offset, port, val
+                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X} (expecting ${:02X} at PC=${:04X})",
+                                    offset, port, val, 
+                                    if offset == 0x2140 { 0xCC } else { 0x05 },
+                                    0x80D3
                                 )
                             });
                             val
@@ -745,6 +756,13 @@ impl Memory65c816 for SnesBus {
                                 return;
                             }
 
+                            log(LogCategory::Bus, LogLevel::Debug, || {
+                                format!(
+                                    "SNES Bus: APU write handler - state: {:?}, port: {}, val: 0x{:02X}, current port 0: 0x{:02X}",
+                                    self.apu_state, port, val, self.apu_ports[0]
+                                )
+                            });
+
                             match self.apu_state {
                                 ApuState::Idle | ApuState::BootReady | ApuState::Ready => {
                                     // Check for upload command byte (port 0 with non-zero, non-AA value)
@@ -785,20 +803,20 @@ impl Memory65c816 for SnesBus {
                                         )
                                         });
 
-                                        // After ~25 bytes, assume upload complete and return ready signature
+                                        // After ~25 bytes, assume upload complete and transition to Ready
                                         if self.apu_transfer_counter >= 25 {
                                             log(LogCategory::Bus, LogLevel::Debug, || {
                                                 format!(
-                                                "SNES Bus: APU session {} upload complete ({} bytes) - returning ready signature",
+                                                "SNES Bus: APU session {} upload complete ({} bytes) - transitioning to Ready",
                                                 self.apu_session_id, self.apu_transfer_counter
                                             )
                                             });
-                                            // Return completion signature $BBAA
-                                            self.apu_ports[0] = 0xAA;
-                                            self.apu_ports[1] = 0xBB;
+                                            // Echo the byte but transition to Ready state
+                                            // Do NOT overwrite port 0 with $AA - keep the echoed byte!
+                                            self.apu_ports[0] = val;
                                             self.apu_state = ApuState::Ready;
                                             self.apu_transfer_counter = 0;
-                                            self.apu_response_delay = 20; // Simulate processing time
+                                            self.apu_response_delay = 5;
                                         } else {
                                             // Continue echoing data bytes
                                             self.apu_ports[0] = val;

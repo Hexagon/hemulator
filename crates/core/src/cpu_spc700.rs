@@ -99,7 +99,17 @@ impl<M: MemorySpc700> CpuSpc700<M> {
 
     /// Execute one instruction and return the number of cycles it took
     pub fn step(&mut self) -> u8 {
+        let pc_before = self.pc;
         let opcode = self.fetch_byte();
+        
+        // Log every 1000th instruction to avoid spam
+        if self.cycles % 1000 == 0 {
+            log(LogCategory::APU, LogLevel::Debug, || {
+                format!("SPC700: PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}", 
+                    pc_before, opcode, self.a, self.x, self.y)
+            });
+        }
+        
         let cycles = self.execute_opcode(opcode);
         self.cycles += cycles as u64;
         cycles
@@ -181,6 +191,12 @@ impl<M: MemorySpc700> CpuSpc700<M> {
     fn update_nz(&mut self, val: u8) {
         self.set_flag(psw_flags::ZERO, val == 0);
         self.set_flag(psw_flags::NEGATIVE, val & 0x80 != 0);
+    }
+
+    /// Set carry flag
+    #[inline]
+    fn set_carry(&mut self, carry: bool) {
+        self.set_flag(psw_flags::CARRY, carry);
     }
 
     /// Execute a single opcode and return cycles taken
@@ -400,6 +416,36 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                 4
             }
 
+            // MOV A, !abs+X (absolute indexed by X)
+            0xF5 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // MOV A, !abs+Y (absolute indexed by Y)
+            0xF6 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                5
+            }
+
+            // MOV !abs+X, A (absolute indexed by X)
+            0xD5 => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                self.write(addr, self.a);
+                6
+            }
+
+            // MOV !abs+Y, A (absolute indexed by Y)
+            0xD6 => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                self.write(addr, self.a);
+                6
+            }
+
             // MOV (X)+, A - Move A to address in X, then increment X
             0xAF => {
                 let addr = self.direct_page() | (self.x as u16);
@@ -432,6 +478,127 @@ impl<M: MemorySpc700> CpuSpc700<M> {
                     "SPC700: STOP instruction executed".to_string()
                 });
                 3
+            }
+
+            // MOV SP, X - Move X to stack pointer
+            0xBD => {
+                self.sp = self.x;
+                2
+            }
+
+            // MOV (X), A - Store A at address in X (indirect X)
+            0xC6 => {
+                self.memory.write(self.x as u16, self.a);
+                4
+            }
+
+            // MOV dp, #imm - Move immediate to direct page
+            0x8F => {
+                let val = self.fetch_byte();
+                let dp = self.fetch_byte();
+                let addr = self.direct_page() | (dp as u16);
+                self.write(addr, val);
+                5
+            }
+
+            // SETC - Set carry flag
+            0x80 => {
+                self.set_carry(true);
+                2
+            }
+
+            // MOV A, dp+X - Move direct page indexed by X to A
+            0xF4 => {
+                let dp = self.fetch_byte();
+                let addr = (dp.wrapping_add(self.x)) as u16;
+                self.a = self.read(addr);
+                self.update_nz(self.a);
+                4
+            }
+
+            // INC dp+X - Increment direct page indexed by X
+            0xBB => {
+                let dp = self.fetch_byte();
+                let addr = (dp.wrapping_add(self.x)) as u16;
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                self.update_nz(val);
+                5
+            }
+
+            // MOV1 C, mem.bit - Move bit to carry (bit operations)
+            0xAA => {
+                // Fetch 13-bit address: low 8 bits, then high 5 bits + 3-bit number
+                let addr_low = self.fetch_byte();
+                let addr_high_and_bit = self.fetch_byte();
+                let addr = ((addr_high_and_bit as u16 & 0x1F) << 8) | addr_low as u16;
+                let bit_num = (addr_high_and_bit >> 5) & 0x07;
+                
+                let val = self.read(addr);
+                let bit = (val >> bit_num) & 1;
+                self.set_carry(bit != 0);
+                4
+            }
+
+            // CMP $F4, #imm - Compare direct page with immediate
+            0x78 => {
+                let imm = self.fetch_byte();
+                let addr = self.fetch_byte() as u16;
+                let val = self.memory.read(addr);
+                let result = val.wrapping_sub(imm);
+                self.update_nz(result);
+                self.set_carry(val >= imm);
+                4
+            }
+
+            // CMP Y, $F4 - Compare Y with direct page
+            0x7E => {
+                let addr = self.fetch_byte() as u16;
+                let val = self.memory.read(addr);
+                let result = self.y.wrapping_sub(val);
+                self.update_nz(result);
+                self.set_carry(self.y >= val);
+                3
+            }
+
+            // MOV ($00)+Y, A - Move A to (direct page + Y)
+            0xD7 => {
+                let dp = self.fetch_byte() as u16;
+                let addr_lo = self.memory.read(dp);
+                let addr_hi = self.memory.read(dp.wrapping_add(1));
+                let base_addr = ((addr_hi as u16) << 8) | (addr_lo as u16);
+                let addr = base_addr.wrapping_add(self.y as u16);
+                self.memory.write(addr, self.a);
+                7
+            }
+
+            // INC $01 - Increment direct page
+            0xAB => {
+                let addr = self.fetch_byte() as u16;
+                let val = self.memory.read(addr);
+                let result = val.wrapping_add(1);
+                self.memory.write(addr, result);
+                self.update_nz(result);
+                4
+            }
+
+            // BPL rel - Branch if plus (N flag clear)
+            0x10 => {
+                let offset = self.fetch_byte() as i8;
+                if self.psw & psw_flags::NEGATIVE == 0 {
+                    self.pc = self.pc.wrapping_add(offset as u16);
+                    4
+                } else {
+                    2
+                }
+            }
+
+            // RET - Return from subroutine
+            0x6F => {
+                let lo = self.pop();
+                let hi = self.pop();
+                self.pc = ((hi as u16) << 8) | (lo as u16);
+                5
             }
 
             // Unknown opcode - log and treat as NOP
@@ -518,5 +685,236 @@ mod tests {
         assert_eq!(cpu.a, 0x42);
         assert_eq!(cpu.x, 0x42);
         assert_eq!(cpu.y, 0x42);
+    }
+
+    #[test]
+    fn test_spc700_mov_absolute() {
+        let mut mem = TestMemory::new();
+        // Set up test data at $1234
+        mem.ram[0x1234] = 0x99;
+
+        // MOV A, !abs ($E5)
+        mem.ram[0xFFC0] = 0xE5;
+        mem.ram[0xFFC1] = 0x34;
+        mem.ram[0xFFC2] = 0x12;
+
+        let mut cpu = CpuSpc700::new(mem);
+        cpu.step();
+
+        assert_eq!(cpu.a, 0x99);
+        assert_eq!(cpu.pc, 0xFFC3);
+    }
+
+    #[test]
+    fn test_spc700_mov_absolute_indexed_x() {
+        let mut mem = TestMemory::new();
+        // Set up test data at $1240
+        mem.ram[0x1240] = 0x77;
+
+        // MOV X, #$10
+        mem.ram[0xFFC0] = 0xCD;
+        mem.ram[0xFFC1] = 0x10;
+        // MOV A, !abs+X ($F5) - read from $1230 + $10 = $1240
+        mem.ram[0xFFC2] = 0xF5;
+        mem.ram[0xFFC3] = 0x30;
+        mem.ram[0xFFC4] = 0x12;
+
+        let mut cpu = CpuSpc700::new(mem);
+        cpu.step(); // MOV X, #$10
+        cpu.step(); // MOV A, !abs+X
+
+        assert_eq!(cpu.x, 0x10);
+        assert_eq!(cpu.a, 0x77);
+    }
+
+    #[test]
+    fn test_spc700_mov_absolute_indexed_y() {
+        let mut mem = TestMemory::new();
+        // Set up test data at $2050
+        mem.ram[0x2050] = 0x88;
+
+        // MOV Y, #$50
+        mem.ram[0xFFC0] = 0x8D;
+        mem.ram[0xFFC1] = 0x50;
+        // MOV A, !abs+Y ($F6) - read from $2000 + $50 = $2050
+        mem.ram[0xFFC2] = 0xF6;
+        mem.ram[0xFFC3] = 0x00;
+        mem.ram[0xFFC4] = 0x20;
+
+        let mut cpu = CpuSpc700::new(mem);
+        cpu.step(); // MOV Y, #$50
+        cpu.step(); // MOV A, !abs+Y
+
+        assert_eq!(cpu.y, 0x50);
+        assert_eq!(cpu.a, 0x88);
+    }
+
+    #[test]
+    fn test_spc700_mov_write_absolute_indexed() {
+        let mut mem = TestMemory::new();
+
+        // MOV A, #$AA
+        mem.ram[0xFFC0] = 0xE8;
+        mem.ram[0xFFC1] = 0xAA;
+        // MOV X, #$05
+        mem.ram[0xFFC2] = 0xCD;
+        mem.ram[0xFFC3] = 0x05;
+        // MOV !abs+X, A ($D5) - write to $1000 + $05 = $1005
+        mem.ram[0xFFC4] = 0xD5;
+        mem.ram[0xFFC5] = 0x00;
+        mem.ram[0xFFC6] = 0x10;
+
+        let mut cpu = CpuSpc700::new(mem);
+        cpu.step(); // MOV A, #$AA
+        cpu.step(); // MOV X, #$05
+        cpu.step(); // MOV !abs+X, A
+
+        assert_eq!(cpu.memory.ram[0x1005], 0xAA);
+    }
+
+    #[test]
+    fn test_spc700_direct_page_flag() {
+        let mut mem = TestMemory::new();
+
+        // CLRP - clear direct page flag
+        mem.ram[0xFFC0] = 0x20;
+        // SETP - set direct page flag
+        mem.ram[0xFFC1] = 0x40;
+
+        let mut cpu = CpuSpc700::new(mem);
+
+        cpu.step(); // CLRP
+        assert_eq!(cpu.psw & psw_flags::DIRECT_PAGE, 0);
+
+        cpu.step(); // SETP
+        assert_ne!(cpu.psw & psw_flags::DIRECT_PAGE, 0);
+    }
+
+    #[test]
+    fn test_spc700_nz_flags() {
+        let mut mem = TestMemory::new();
+
+        // MOV A, #$00 - should set Z flag
+        mem.ram[0xFFC0] = 0xE8;
+        mem.ram[0xFFC1] = 0x00;
+        // MOV A, #$80 - should set N flag
+        mem.ram[0xFFC2] = 0xE8;
+        mem.ram[0xFFC3] = 0x80;
+        // MOV A, #$01 - should clear both flags
+        mem.ram[0xFFC4] = 0xE8;
+        mem.ram[0xFFC5] = 0x01;
+
+        let mut cpu = CpuSpc700::new(mem);
+
+        cpu.step(); // MOV A, #$00
+        assert_eq!(cpu.a, 0x00);
+        assert_ne!(cpu.psw & psw_flags::ZERO, 0, "Zero flag should be set");
+        assert_eq!(cpu.psw & psw_flags::NEGATIVE, 0, "Negative flag should be clear");
+
+        cpu.step(); // MOV A, #$80
+        assert_eq!(cpu.a, 0x80);
+        assert_eq!(cpu.psw & psw_flags::ZERO, 0, "Zero flag should be clear");
+        assert_ne!(cpu.psw & psw_flags::NEGATIVE, 0, "Negative flag should be set");
+
+        cpu.step(); // MOV A, #$01
+        assert_eq!(cpu.a, 0x01);
+        assert_eq!(cpu.psw & psw_flags::ZERO, 0, "Zero flag should be clear");
+        assert_eq!(cpu.psw & psw_flags::NEGATIVE, 0, "Negative flag should be clear");
+    }
+
+    #[test]
+    fn test_spc700_inc_dec() {
+        let mut mem = TestMemory::new();
+
+        // MOV A, #$FF
+        mem.ram[0xFFC0] = 0xE8;
+        mem.ram[0xFFC1] = 0xFF;
+        // INC A ($BC)
+        mem.ram[0xFFC2] = 0xBC;
+        // DEC A ($9C)
+        mem.ram[0xFFC3] = 0x9C;
+
+        let mut cpu = CpuSpc700::new(mem);
+
+        cpu.step(); // MOV A, #$FF
+        assert_eq!(cpu.a, 0xFF);
+
+        cpu.step(); // INC A
+        assert_eq!(cpu.a, 0x00);
+        assert_ne!(cpu.psw & psw_flags::ZERO, 0, "Zero flag should be set after INC $FF");
+
+        cpu.step(); // DEC A
+        assert_eq!(cpu.a, 0xFF);
+        assert_ne!(cpu.psw & psw_flags::NEGATIVE, 0, "Negative flag should be set");
+    }
+
+    #[test]
+    fn test_spc700_inc_x_y() {
+        let mut mem = TestMemory::new();
+
+        // MOV X, #$FE
+        mem.ram[0xFFC0] = 0xCD;
+        mem.ram[0xFFC1] = 0xFE;
+        // INX ($3D)
+        mem.ram[0xFFC2] = 0x3D;
+        // MOV Y, #$01
+        mem.ram[0xFFC3] = 0x8D;
+        mem.ram[0xFFC4] = 0x01;
+        // DEY ($DC)
+        mem.ram[0xFFC5] = 0xDC;
+
+        let mut cpu = CpuSpc700::new(mem);
+
+        cpu.step(); // MOV X, #$FE
+        cpu.step(); // INX
+        assert_eq!(cpu.x, 0xFF);
+
+        cpu.step(); // MOV Y, #$01
+        cpu.step(); // DEY
+        assert_eq!(cpu.y, 0x00);
+        assert_ne!(cpu.psw & psw_flags::ZERO, 0);
+    }
+
+    #[test]
+    fn test_spc700_auto_increment() {
+        let mut mem = TestMemory::new();
+        mem.ram[0x0005] = 0x42;
+
+        // MOV X, #$05
+        mem.ram[0xFFC0] = 0xCD;
+        mem.ram[0xFFC1] = 0x05;
+        // MOV A, (X)+ ($BF) - read from (X) then increment X
+        mem.ram[0xFFC2] = 0xBF;
+
+        let mut cpu = CpuSpc700::new(mem);
+
+        cpu.step(); // MOV X, #$05
+        assert_eq!(cpu.x, 0x05);
+
+        cpu.step(); // MOV A, (X)+
+        assert_eq!(cpu.a, 0x42);
+        assert_eq!(cpu.x, 0x06); // X should be incremented
+    }
+
+    #[test]
+    fn test_spc700_cycles() {
+        let mut mem = TestMemory::new();
+
+        // MOV A, #$42 (2 cycles)
+        mem.ram[0xFFC0] = 0xE8;
+        mem.ram[0xFFC1] = 0x42;
+        // NOP (2 cycles)
+        mem.ram[0xFFC2] = 0x00;
+
+        let mut cpu = CpuSpc700::new(mem);
+        assert_eq!(cpu.cycles, 0);
+
+        let cycles1 = cpu.step();
+        assert_eq!(cycles1, 2);
+        assert_eq!(cpu.cycles, 2);
+
+        let cycles2 = cpu.step();
+        assert_eq!(cycles2, 2);
+        assert_eq!(cpu.cycles, 4);
     }
 }
