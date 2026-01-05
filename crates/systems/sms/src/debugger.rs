@@ -45,14 +45,7 @@ impl Debugger for SmsSystem {
                 false,
             ),
             // RAM
-            MemoryRegion::new(
-                "RAM",
-                0xC000,
-                0xDFFF,
-                "Work RAM (8KB)",
-                true,
-                true,
-            ),
+            MemoryRegion::new("RAM", 0xC000, 0xDFFF, "Work RAM (8KB)", true, true),
             // RAM Mirror
             MemoryRegion::new(
                 "RAM Mirror",
@@ -169,7 +162,10 @@ mod tests {
             .iter()
             .map(|(name, _)| name.as_str())
             .collect();
-        assert_eq!(flag_names, vec!["S", "Z", "H", "P/V", "N", "C", "IFF1", "IFF2"]);
+        assert_eq!(
+            flag_names,
+            vec!["S", "Z", "H", "P/V", "N", "C", "IFF1", "IFF2"]
+        );
     }
 
     #[test]

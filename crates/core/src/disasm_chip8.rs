@@ -32,8 +32,8 @@ pub fn disassemble_chip8(memory: &[u8], address: u32) -> Option<DisassembledInst
         0x0000 => match opcode {
             0x00E0 => "CLS".to_string(),
             0x00EE => "RET".to_string(),
-            0x00FB => "SCR".to_string(), // Super-CHIP scroll right
-            0x00FC => "SCL".to_string(), // Super-CHIP scroll left
+            0x00FB => "SCR".to_string(),  // Super-CHIP scroll right
+            0x00FC => "SCL".to_string(),  // Super-CHIP scroll left
             0x00FD => "EXIT".to_string(), // Super-CHIP exit
             0x00FE => "LOW".to_string(),  // Super-CHIP low-res
             0x00FF => "HIGH".to_string(), // Super-CHIP high-res
@@ -88,7 +88,7 @@ pub fn disassemble_chip8(memory: &[u8], address: u32) -> Option<DisassembledInst
             _ => format!("??? {:04X}", opcode),
         },
         0xF000 => match nn {
-            0x00 => format!("LD I, LONG"), // XO-CHIP load long address
+            0x00 => "LD I, LONG".to_string(),  // XO-CHIP load long address
             0x01 => format!("PLANE {}", x), // XO-CHIP select plane
             0x02 => "AUDIO".to_string(),    // XO-CHIP load audio pattern
             0x07 => format!("LD V{:X}, DT", x),

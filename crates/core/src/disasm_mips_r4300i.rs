@@ -17,9 +17,9 @@ pub fn disassemble_mips(memory: &[u8], address: u32) -> Option<DisassembledInstr
     // MIPS instructions are 4 bytes, big-endian
     let bytes = vec![memory[0], memory[1], memory[2], memory[3]];
     let instruction = u32::from_be_bytes([memory[0], memory[1], memory[2], memory[3]]);
-    
+
     let mnemonic = format!("MIPS ${:08X}", instruction);
-    
+
     Some(DisassembledInstruction::new(address, bytes, mnemonic))
 }
 

@@ -15,25 +15,44 @@ pub fn disassemble_8086(memory: &[u8], address: u32) -> Option<DisassembledInstr
     }
 
     let opcode = memory[0];
-    
+
     // Very basic length estimation (8086 instructions are 1-6 bytes typically)
     let len = match opcode {
         // 1-byte instructions
-        0x90 | 0x9B..=0x9F | 0xA4..=0xA7 | 0xAA..=0xAF |
-        0xC3 | 0xC9 | 0xCB | 0xCC | 0xCE..=0xCF |
-        0xD0..=0xD7 | 0xE4..=0xE7 | 0xEC..=0xEF |
-        0xF0..=0xF3 | 0xF4 | 0xF5 | 0xF8..=0xFD => 1,
-        
+        0x90
+        | 0x9B..=0x9F
+        | 0xA4..=0xA7
+        | 0xAA..=0xAF
+        | 0xC3
+        | 0xC9
+        | 0xCB
+        | 0xCC
+        | 0xCE..=0xCF
+        | 0xD0..=0xD7
+        | 0xE4..=0xE7
+        | 0xEC..=0xEF
+        | 0xF0..=0xF3
+        | 0xF4
+        | 0xF5
+        | 0xF8..=0xFD => 1,
+
         // Common 2-byte instructions
-        0xB0..=0xBF | 0xCD | 0xD4 | 0xD5 => 2,
-        
+        0xB0..=0xBF | 0xCD => 2,
+
         // Assume 3 bytes for most other instructions (good enough for basic debugging)
         _ => 3,
     };
 
     let bytes: Vec<u8> = memory.iter().take(len.min(memory.len())).copied().collect();
-    let mnemonic = format!("DB ${}", bytes.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(","));
-    
+    let mnemonic = format!(
+        "DB ${}",
+        bytes
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
     Some(DisassembledInstruction::new(address, bytes, mnemonic))
 }
 

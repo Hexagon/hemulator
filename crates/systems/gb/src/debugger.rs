@@ -54,14 +54,7 @@ impl Debugger for GbSystem {
                 false,
             ),
             // VRAM
-            MemoryRegion::new(
-                "VRAM",
-                0x8000,
-                0x9FFF,
-                "Video RAM (8KB)",
-                true,
-                true,
-            ),
+            MemoryRegion::new("VRAM", 0x8000, 0x9FFF, "Video RAM (8KB)", true, true),
             // External RAM
             MemoryRegion::new(
                 "External RAM",
@@ -72,14 +65,7 @@ impl Debugger for GbSystem {
                 true,
             ),
             // Work RAM
-            MemoryRegion::new(
-                "WRAM",
-                0xC000,
-                0xDFFF,
-                "Work RAM (8KB)",
-                true,
-                true,
-            ),
+            MemoryRegion::new("WRAM", 0xC000, 0xDFFF, "Work RAM (8KB)", true, true),
             // Echo RAM
             MemoryRegion::new(
                 "Echo RAM",
@@ -108,14 +94,7 @@ impl Debugger for GbSystem {
                 true,
             ),
             // High RAM
-            MemoryRegion::new(
-                "HRAM",
-                0xFF80,
-                0xFFFE,
-                "High RAM (127 bytes)",
-                true,
-                true,
-            ),
+            MemoryRegion::new("HRAM", 0xFF80, 0xFFFE, "High RAM (127 bytes)", true, true),
             // Interrupt Enable
             MemoryRegion::new(
                 "IE Register",
@@ -150,7 +129,7 @@ impl Debugger for GbSystem {
         state.add_flag("N", (flags & 0x40) != 0); // Subtract
         state.add_flag("H", (flags & 0x20) != 0); // Half Carry
         state.add_flag("C", (flags & 0x10) != 0); // Carry
-        
+
         // Add other important state
         state.add_flag("IME", self.cpu.ime); // Interrupt Master Enable
         state.add_flag("HALT", self.cpu.halted); // Halted state

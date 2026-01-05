@@ -11,7 +11,7 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
     }
 
     let opcode = memory[0];
-    
+
     // Handle extended instructions
     match opcode {
         0xCB => return disassemble_cb_instruction(memory, address),
@@ -31,13 +31,13 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0x26 => ("LD H, n".to_string(), 2),
         0x2E => ("LD L, n".to_string(), 2),
         0x3E => ("LD A, n".to_string(), 2),
-        
+
         // 16-bit loads
         0x01 => ("LD BC, nn".to_string(), 3),
         0x11 => ("LD DE, nn".to_string(), 3),
         0x21 => ("LD HL, nn".to_string(), 3),
         0x31 => ("LD SP, nn".to_string(), 3),
-        
+
         // Stack operations
         0xC5 => ("PUSH BC".to_string(), 1),
         0xD5 => ("PUSH DE".to_string(), 1),
@@ -47,7 +47,7 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0xD1 => ("POP DE".to_string(), 1),
         0xE1 => ("POP HL".to_string(), 1),
         0xF1 => ("POP AF".to_string(), 1),
-        
+
         // Arithmetic
         0x04 => ("INC B".to_string(), 1),
         0x0C => ("INC C".to_string(), 1),
@@ -57,7 +57,7 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0x2C => ("INC L".to_string(), 1),
         0x34 => ("INC (HL)".to_string(), 1),
         0x3C => ("INC A".to_string(), 1),
-        
+
         0x05 => ("DEC B".to_string(), 1),
         0x0D => ("DEC C".to_string(), 1),
         0x15 => ("DEC D".to_string(), 1),
@@ -66,14 +66,14 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0x2D => ("DEC L".to_string(), 1),
         0x35 => ("DEC (HL)".to_string(), 1),
         0x3D => ("DEC A".to_string(), 1),
-        
+
         // Control flow
         0x00 => ("NOP".to_string(), 1),
         0x76 => ("HALT".to_string(), 1),
         0xC3 => ("JP nn".to_string(), 3),
         0xCD => ("CALL nn".to_string(), 3),
         0xC9 => ("RET".to_string(), 1),
-        
+
         0xC0 => ("RET NZ".to_string(), 1),
         0xC8 => ("RET Z".to_string(), 1),
         0xD0 => ("RET NC".to_string(), 1),
@@ -82,22 +82,22 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0xE8 => ("RET PE".to_string(), 1),
         0xF0 => ("RET P".to_string(), 1),
         0xF8 => ("RET M".to_string(), 1),
-        
+
         0xC2 => ("JP NZ, nn".to_string(), 3),
         0xCA => ("JP Z, nn".to_string(), 3),
         0xD2 => ("JP NC, nn".to_string(), 3),
         0xDA => ("JP C, nn".to_string(), 3),
-        
+
         0x18 => ("JR e".to_string(), 2),
         0x20 => ("JR NZ, e".to_string(), 2),
         0x28 => ("JR Z, e".to_string(), 2),
         0x30 => ("JR NC, e".to_string(), 2),
         0x38 => ("JR C, e".to_string(), 2),
-        
+
         // I/O
         0xD3 => ("OUT (n), A".to_string(), 2),
         0xDB => ("IN A, (n)".to_string(), 2),
-        
+
         // Misc
         0x27 => ("DAA".to_string(), 1),
         0x2F => ("CPL".to_string(), 1),
@@ -105,7 +105,7 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0x3F => ("CCF".to_string(), 1),
         0xF3 => ("DI".to_string(), 1),
         0xFB => ("EI".to_string(), 1),
-        
+
         // RST instructions
         0xC7 => ("RST 00H".to_string(), 1),
         0xCF => ("RST 08H".to_string(), 1),
@@ -115,7 +115,7 @@ pub fn disassemble_z80(memory: &[u8], address: u32) -> Option<DisassembledInstru
         0xEF => ("RST 28H".to_string(), 1),
         0xF7 => ("RST 30H".to_string(), 1),
         0xFF => ("RST 38H".to_string(), 1),
-        
+
         _ => (format!("DB ${:02X}", opcode), 1),
     };
 
@@ -127,11 +127,11 @@ fn disassemble_cb_instruction(memory: &[u8], address: u32) -> Option<Disassemble
     if memory.len() < 2 {
         return None;
     }
-    
+
     let cb_opcode = memory[1];
     let bit = (cb_opcode >> 3) & 0x07;
     let reg = cb_opcode & 0x07;
-    
+
     let reg_name = match reg {
         0 => "B",
         1 => "C",
@@ -143,9 +143,10 @@ fn disassemble_cb_instruction(memory: &[u8], address: u32) -> Option<Disassemble
         7 => "A",
         _ => "?",
     };
-    
+
     let mnemonic = match cb_opcode & 0xC0 {
-        0x00 => { // Rotates and shifts
+        0x00 => {
+            // Rotates and shifts
             match (cb_opcode >> 3) & 0x07 {
                 0 => format!("RLC {}", reg_name),
                 1 => format!("RRC {}", reg_name),
@@ -163,8 +164,12 @@ fn disassemble_cb_instruction(memory: &[u8], address: u32) -> Option<Disassemble
         0xC0 => format!("SET {}, {}", bit, reg_name),
         _ => format!("CB {:02X}", cb_opcode),
     };
-    
-    Some(DisassembledInstruction::new(address, vec![0xCB, cb_opcode], mnemonic))
+
+    Some(DisassembledInstruction::new(
+        address,
+        vec![0xCB, cb_opcode],
+        mnemonic,
+    ))
 }
 
 fn disassemble_dd_instruction(memory: &[u8], address: u32) -> Option<DisassembledInstruction> {
@@ -172,7 +177,11 @@ fn disassemble_dd_instruction(memory: &[u8], address: u32) -> Option<Disassemble
         return None;
     }
     // Simplified IX instructions
-    Some(DisassembledInstruction::new(address, vec![memory[0], memory[1]], format!("IX-prefix {:02X}", memory[1])))
+    Some(DisassembledInstruction::new(
+        address,
+        vec![memory[0], memory[1]],
+        format!("IX-prefix {:02X}", memory[1]),
+    ))
 }
 
 fn disassemble_ed_instruction(memory: &[u8], address: u32) -> Option<DisassembledInstruction> {
@@ -193,7 +202,7 @@ fn disassemble_ed_instruction(memory: &[u8], address: u32) -> Option<Disassemble
         0xB1 => ("CPIR".to_string(), 2),
         _ => (format!("ED {:02X}", ed_opcode), 2),
     };
-    
+
     let bytes: Vec<u8> = memory.iter().take(len).copied().collect();
     Some(DisassembledInstruction::new(address, bytes, mnemonic))
 }
@@ -203,7 +212,11 @@ fn disassemble_fd_instruction(memory: &[u8], address: u32) -> Option<Disassemble
         return None;
     }
     // Simplified IY instructions
-    Some(DisassembledInstruction::new(address, vec![memory[0], memory[1]], format!("IY-prefix {:02X}", memory[1])))
+    Some(DisassembledInstruction::new(
+        address,
+        vec![memory[0], memory[1]],
+        format!("IY-prefix {:02X}", memory[1]),
+    ))
 }
 
 #[cfg(test)]
