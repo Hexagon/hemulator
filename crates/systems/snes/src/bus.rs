@@ -1148,12 +1148,20 @@ mod tests {
         bus.tick_cycles(3000);
 
         // Verify SPC700 is ready (wrote $BBAA)
-        assert_eq!(bus.read(0x2140), 0xAA, "SPC700 should signal ready with $AA");
-        assert_eq!(bus.read(0x2141), 0xBB, "SPC700 should signal ready with $BB");
+        assert_eq!(
+            bus.read(0x2140),
+            0xAA,
+            "SPC700 should signal ready with $AA"
+        );
+        assert_eq!(
+            bus.read(0x2141),
+            0xBB,
+            "SPC700 should signal ready with $BB"
+        );
 
         // Send start command with entry point
         bus.write(0x2142, 0x00); // Entry point low byte
-        bus.write(0x2143, 0x02); // Entry point high byte  
+        bus.write(0x2143, 0x02); // Entry point high byte
         bus.write(0x2141, 0x01); // Non-zero (upload mode)
         bus.write(0x2140, 0xCC); // Start signal
 

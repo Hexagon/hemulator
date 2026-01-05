@@ -602,28 +602,38 @@ mod tests {
         let mut apu = Spc700::new();
 
         // Verify initial state
-        assert_eq!(apu.cpu.pc, 0xFFC0, "SPC700 should start at IPL ROM entry point");
-        
+        assert_eq!(
+            apu.cpu.pc, 0xFFC0,
+            "SPC700 should start at IPL ROM entry point"
+        );
+
         // Step 1: Reset - Stack pointer = $EF, Zero-page from $00-$EF is set to $00
         // Run the clear loop (takes about 2000+ cycles)
         apu.run_cycles(2500);
-        
+
         // Verify stack pointer was set
         assert_eq!(apu.cpu.sp, 0xEF, "Stack pointer should be set to $EF");
-        
+
         // Verify zero page was cleared (check a few spots)
         for addr in [0x00, 0x10, 0x50, 0xEF] {
             assert_eq!(
-                apu.cpu.memory.ram[addr],
-                0x00,
+                apu.cpu.memory.ram[addr], 0x00,
                 "Zero page ${:02X} should be cleared",
                 addr
             );
         }
 
         // Step 2: Signal ready - Port 0 = $AA, Port 1 = $BB
-        assert_eq!(apu.read_port(0), 0xAA, "Port 0 should be $AA (ready signal)");
-        assert_eq!(apu.read_port(1), 0xBB, "Port 1 should be $BB (ready signal)");
+        assert_eq!(
+            apu.read_port(0),
+            0xAA,
+            "Port 0 should be $AA (ready signal)"
+        );
+        assert_eq!(
+            apu.read_port(1),
+            0xBB,
+            "Port 1 should be $BB (ready signal)"
+        );
 
         // Step 3: Wait for signal - Loop until $CC is read from port 0
         // SPC700 should be waiting at $FFCF or $FFD2 (the wait loop)
@@ -634,26 +644,25 @@ mod tests {
         );
 
         // Verify it stays in the loop when we haven't sent $CC
-        let _pc_before = apu.cpu.pc;
         apu.run_cycles(100);
         assert!(
             apu.cpu.pc == 0xFFCF || apu.cpu.pc == 0xFFD2,
             "SPC700 should still be waiting for $CC"
         );
-        
+
         // IMPORTANT: Before sending $CC, we must set up ports $F6/$F7 with an entry point
         // Otherwise SPC700 will read garbage and jump to a random address
         // Set entry point to $0200 (typical for SPC700 programs)
         apu.write_port(2, 0x00); // Low byte of entry point
         apu.write_port(3, 0x02); // High byte of entry point
-        
+
         // Also set port 1 to non-zero to indicate we'll upload data
         apu.write_port(1, 0x01);
-        
+
         // Now send the $CC signal
         apu.write_port(0, 0xCC);
         apu.run_cycles(100);
-        
+
         // SPC700 should have progressed to $FFEF area (entry point setup)
         // and then looped back to upload loop at $FFD6 (because port 1 was non-zero)
         assert!(
@@ -689,7 +698,7 @@ mod tests {
 
         // Step 3: Send data bytes (let's send a simple 4-byte program)
         // Program: MOV $F4, #$42; BRA $-2 (write $42 to port, then loop)
-        let test_program = vec![
+        let test_program = [
             0x8F, 0x42, 0xF4, // MOV $F4, #$42
             0x2F, 0xFD, // BRA $-3 (loop forever)
         ];
@@ -697,14 +706,14 @@ mod tests {
         for (i, &byte) in test_program.iter().enumerate() {
             // Write data byte to port 1
             apu.write_port(1, byte);
-            
+
             // Write index to port 0 (low byte of counter)
             let index = i as u8;
             apu.write_port(0, index);
-            
+
             // Run cycles to let SPC700 process
             apu.run_cycles(50);
-            
+
             // Verify acknowledgment (SPC700 echoes index back)
             assert_eq!(
                 apu.read_port(0),
@@ -747,7 +756,7 @@ mod tests {
         // SPC700 should now be executing the uploaded code
         // NOTE: The IPL ROM may still be enabled - uploaded code must disable it explicitly
         // by writing to control register $F1. The IPL ROM doesn't auto-disable.
-        
+
         // Our simple test program doesn't disable IPL ROM, so we can't assert it's disabled
         // In real audio drivers, they typically disable IPL ROM early in initialization
 
@@ -806,19 +815,15 @@ mod tests {
         apu.run_cycles(100);
 
         // Verify SPC700 acknowledged
-        assert_eq!(
-            apu.read_port(0),
-            0xCC,
-            "SPC700 should acknowledge with $CC"
-        );
+        assert_eq!(apu.read_port(0), 0xCC, "SPC700 should acknowledge with $CC");
         println!("  ✓ SPC700 acknowledged start command");
 
         // === Phase 4: Upload audio driver (simplified - just a few bytes) ===
         println!("Phase 4: Uploading audio driver...");
-        
+
         // Real audio driver is typically 1-2KB, but we'll upload a minimal stub
         // that writes $CC back to port 0 to signal completion
-        let audio_driver = vec![
+        let audio_driver = [
             0x8F, 0xCC, 0xF4, // MOV $F4, #$CC (write $CC to port 0)
             0x2F, 0xFD, // BRA $-3 (loop forever)
         ];
@@ -858,7 +863,7 @@ mod tests {
 
         // === Phase 6: Wait for audio driver to signal ready ===
         println!("Phase 6: Waiting for audio driver ready signal...");
-        
+
         // The audio driver should now be running and will write $CC to port 0
         apu.run_cycles(100);
 
@@ -897,19 +902,19 @@ mod tests {
 
         // Simulate main CPU doing a 16-bit read of ports $2140-$2141
         // This should read both ports atomically, even if SPC700 is running
-        
+
         // First read (establishes latch)
         let port0 = apu.read_port(0);
-        
+
         // Run SPC700 for some cycles (it might update ports)
         apu.run_cycles(10);
-        
+
         // Second read (should still get same value if latched properly)
         let port1 = apu.read_port(1);
-        
+
         // Combine into 16-bit value
         let value = (port1 as u16) << 8 | (port0 as u16);
-        
+
         // Should be $BBAA regardless of SPC700 activity between reads
         assert_eq!(
             value, 0xBBAA,
@@ -924,7 +929,11 @@ mod tests {
         let mut apu = Spc700::new();
 
         // IPL ROM should be enabled initially
-        assert_ne!(apu.cpu.memory.control & 0x80, 0, "IPL ROM should be enabled");
+        assert_ne!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be enabled"
+        );
 
         // Read from IPL ROM region
         let ipl_byte = apu.cpu.memory.read(0xFFC0);
@@ -932,7 +941,11 @@ mod tests {
 
         // Disable IPL ROM by clearing bit 7 of control register
         apu.cpu.memory.write(CONTROL_REG, 0x00);
-        assert_eq!(apu.cpu.memory.control & 0x80, 0, "IPL ROM should be disabled");
+        assert_eq!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be disabled"
+        );
 
         // Now reading same address should get RAM (which is 0)
         let ram_byte = apu.cpu.memory.read(0xFFC0);
@@ -943,7 +956,11 @@ mod tests {
 
         // Re-enable IPL ROM
         apu.cpu.memory.write(CONTROL_REG, 0x80);
-        assert_ne!(apu.cpu.memory.control & 0x80, 0, "IPL ROM should be re-enabled");
+        assert_ne!(
+            apu.cpu.memory.control & 0x80,
+            0,
+            "IPL ROM should be re-enabled"
+        );
 
         // Should read IPL ROM again
         let ipl_byte2 = apu.cpu.memory.read(0xFFC0);
@@ -971,8 +988,14 @@ mod tests {
         apu.cpu.memory.write(CONTROL_REG, 0x10);
         assert_eq!(apu.cpu.memory.cpuio[0], 0x00, "Port 0 should be cleared");
         assert_eq!(apu.cpu.memory.cpuio[1], 0x00, "Port 1 should be cleared");
-        assert_eq!(apu.cpu.memory.cpuio[2], 0x56, "Port 2 should not be cleared");
-        assert_eq!(apu.cpu.memory.cpuio[3], 0x78, "Port 3 should not be cleared");
+        assert_eq!(
+            apu.cpu.memory.cpuio[2], 0x56,
+            "Port 2 should not be cleared"
+        );
+        assert_eq!(
+            apu.cpu.memory.cpuio[3], 0x78,
+            "Port 3 should not be cleared"
+        );
 
         // Clear ports 2-3 via control register (bit 5)
         apu.cpu.memory.write(CONTROL_REG, 0x20);
