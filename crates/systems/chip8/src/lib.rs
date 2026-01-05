@@ -47,6 +47,7 @@
 
 #![allow(clippy::upper_case_acronyms)]
 
+use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
@@ -220,11 +221,24 @@ impl Chip8System {
             system.memory[0x50..0x50 + LARGE_FONT_DATA.len()].copy_from_slice(&LARGE_FONT_DATA);
         }
 
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!(
+                "CHIP-8: Initialized - Mode: {:?}, Memory: {}KB, Display: {}x{}",
+                mode,
+                memory_size / 1024,
+                display_width,
+                display_height
+            )
+        });
+
         system
     }
 
     /// Set the emulation mode
     pub fn set_mode(&mut self, mode: Chip8Mode) {
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!("CHIP-8: Switching mode from {:?} to {:?}", self.mode, mode)
+        });
         // Recreate system with new mode
         *self = Self::new_with_mode(mode);
     }
@@ -241,6 +255,12 @@ impl Chip8System {
             // Check if any key is pressed
             for (i, &pressed) in self.keys.iter().enumerate() {
                 if pressed {
+                    log(LogCategory::CPU, LogLevel::Debug, || {
+                        format!(
+                            "CHIP-8: Key press detected - Key: 0x{:X}, stored in V{:X}",
+                            i, register
+                        )
+                    });
                     self.v[register] = i as u8;
                     self.waiting_for_key = None;
                     break;
@@ -255,6 +275,13 @@ impl Chip8System {
             self.memory[self.pc as usize + 1],
         ]);
 
+        log(LogCategory::CPU, LogLevel::Trace, || {
+            format!(
+                "CHIP-8: PC={:04X} Opcode={:04X} I={:04X} SP={:02X}",
+                self.pc, opcode, self.i, self.sp
+            )
+        });
+
         // Decode and execute
         self.pc += 2; // Increment PC before execution (some instructions modify PC)
 
@@ -268,6 +295,9 @@ impl Chip8System {
             0x0000 => match opcode {
                 0x00E0 => {
                     // 00E0 - CLS: Clear display
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        "CHIP-8: CLS - Clearing display".to_string()
+                    });
                     for plane in &mut self.display_planes {
                         plane.fill(false);
                     }
@@ -277,32 +307,53 @@ impl Chip8System {
                     // 00EE - RET: Return from subroutine
                     self.sp -= 1;
                     self.pc = self.stack[self.sp as usize];
+                    log(LogCategory::CPU, LogLevel::Debug, || {
+                        format!(
+                            "CHIP-8: RET - Return to PC={:04X}, SP={:02X}",
+                            self.pc, self.sp
+                        )
+                    });
                 }
                 0x00FB => {
                     // 00FB - SCR (Super-CHIP): Scroll display 4 pixels right
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            "CHIP-8: SCR - Scroll right 4 pixels (Super-CHIP)".to_string()
+                        });
                         self.scroll_right(4);
                     }
                 }
                 0x00FC => {
                     // 00FC - SCL (Super-CHIP): Scroll display 4 pixels left
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            "CHIP-8: SCL - Scroll left 4 pixels (Super-CHIP)".to_string()
+                        });
                         self.scroll_left(4);
                     }
                 }
                 0x00FD => {
                     // 00FD - EXIT (Super-CHIP): Exit interpreter
+                    log(LogCategory::CPU, LogLevel::Info, || {
+                        "CHIP-8: EXIT - Exit interpreter opcode (treated as no-op)".to_string()
+                    });
                     // We'll treat this as a no-op for now
                 }
                 0x00FE => {
                     // 00FE - LOW (Super-CHIP): Disable high resolution mode
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: LOW - Switching to low-res mode (64x32)".to_string()
+                        });
                         self.set_low_res();
                     }
                 }
                 0x00FF => {
                     // 00FF - HIGH (Super-CHIP): Enable high resolution mode
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: HIGH - Switching to high-res mode (128x64)".to_string()
+                        });
                         self.set_high_res();
                     }
                 }
@@ -313,22 +364,40 @@ impl Chip8System {
                     if opcode & 0x00F0 == 0x00C0 {
                         // 00CN - Scroll down
                         if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                            log(LogCategory::PPU, LogLevel::Debug, || {
+                                format!("CHIP-8: SCD - Scroll down {} lines (Super-CHIP)", n)
+                            });
                             self.scroll_down(n);
                         }
                     } else if opcode & 0x00F0 == 0x00D0 && self.mode == Chip8Mode::XoChip {
                         // 00DN - Scroll up (XO-CHIP only)
+                        log(LogCategory::PPU, LogLevel::Debug, || {
+                            format!("CHIP-8: SCU - Scroll up {} lines (XO-CHIP)", n)
+                        });
                         self.scroll_up(n);
                     } else {
                         // 0NNN - SYS addr: Call machine code routine (ignored)
+                        log(LogCategory::Stubs, LogLevel::Trace, || {
+                            format!(
+                                "CHIP-8: SYS {:03X} - Machine code routine (ignored)",
+                                opcode & 0x0FFF
+                            )
+                        });
                     }
                 }
             },
             0x1000 => {
                 // 1NNN - JP addr: Jump to address
+                log(LogCategory::CPU, LogLevel::Trace, || {
+                    format!("CHIP-8: JP {:03X}", nnn)
+                });
                 self.pc = nnn;
             }
             0x2000 => {
                 // 2NNN - CALL addr: Call subroutine
+                log(LogCategory::CPU, LogLevel::Debug, || {
+                    format!("CHIP-8: CALL {:03X} - SP={:02X}", nnn, self.sp)
+                });
                 self.stack[self.sp as usize] = self.pc;
                 self.sp += 1;
                 self.pc = nnn;
@@ -357,6 +426,12 @@ impl Chip8System {
                     if self.mode == Chip8Mode::XoChip {
                         let start = x.min(y);
                         let end = x.max(y);
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!(
+                                "CHIP-8: SAVE V{:X}-V{:X} to [{:04X}] (XO-CHIP)",
+                                start, end, self.i
+                            )
+                        });
                         for reg in start..=end {
                             self.memory[self.i as usize + (reg - start)] = self.v[reg];
                         }
@@ -367,6 +442,12 @@ impl Chip8System {
                     if self.mode == Chip8Mode::XoChip {
                         let start = x.min(y);
                         let end = x.max(y);
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!(
+                                "CHIP-8: LOAD V{:X}-V{:X} from [{:04X}] (XO-CHIP)",
+                                start, end, self.i
+                            )
+                        });
                         for reg in start..=end {
                             self.v[reg] = self.memory[self.i as usize + (reg - start)];
                         }
@@ -479,15 +560,24 @@ impl Chip8System {
                 }
                 0x0A => {
                     // FX0A - LD Vx, K: Wait for key press, store key in Vx
+                    log(LogCategory::CPU, LogLevel::Debug, || {
+                        format!("CHIP-8: LD V{:X}, K - Waiting for key press", x)
+                    });
                     self.waiting_for_key = Some(x);
                     self.pc -= 2; // Stay on this instruction until key is pressed
                 }
                 0x15 => {
                     // FX15 - LD DT, Vx: Set delay timer = Vx
+                    log(LogCategory::APU, LogLevel::Trace, || {
+                        format!("CHIP-8: LD DT, V{:X} - Set delay timer to {}", x, self.v[x])
+                    });
                     self.delay_timer = self.v[x];
                 }
                 0x18 => {
                     // FX18 - LD ST, Vx: Set sound timer = Vx
+                    log(LogCategory::APU, LogLevel::Debug, || {
+                        format!("CHIP-8: LD ST, V{:X} - Set sound timer to {}", x, self.v[x])
+                    });
                     self.sound_timer = self.v[x];
                 }
                 0x1E => {
@@ -526,6 +616,9 @@ impl Chip8System {
                 0x75 => {
                     // FX75 - SAVE Vx (Super-CHIP): Save V0-Vx to flag registers
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("CHIP-8: SAVE V0-V{:X} to flag registers (Super-CHIP)", x)
+                        });
                         for reg in 0..=x.min(15) {
                             self.flag_registers[reg] = self.v[reg];
                         }
@@ -534,6 +627,9 @@ impl Chip8System {
                 0x85 => {
                     // FX85 - LOAD Vx (Super-CHIP): Load V0-Vx from flag registers
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
+                        log(LogCategory::Bus, LogLevel::Debug, || {
+                            format!("CHIP-8: LOAD V0-V{:X} from flag registers (Super-CHIP)", x)
+                        });
                         for reg in 0..=x.min(15) {
                             self.v[reg] = self.flag_registers[reg];
                         }
@@ -550,6 +646,12 @@ impl Chip8System {
                                     let high_byte = self.memory[self.pc as usize] as u16;
                                     let low_byte = self.memory[self.pc as usize + 1] as u16;
                                     self.i = (high_byte << 8) | low_byte;
+                                    log(LogCategory::CPU, LogLevel::Debug, || {
+                                        format!(
+                                            "CHIP-8: I := {:04X} (XO-CHIP extended addressing)",
+                                            self.i
+                                        )
+                                    });
                                     self.pc += 2; // Skip the next instruction bytes
                                 }
                             }
@@ -557,9 +659,18 @@ impl Chip8System {
                                 // FN01 - PLANE N (XO-CHIP): Select drawing plane(s)
                                 // N is in the low nibble of x (the first hex digit after F)
                                 self.selected_plane = x as u8 & 0x03; // Mask to 0-3
+                                log(LogCategory::PPU, LogLevel::Debug, || {
+                                    format!(
+                                        "CHIP-8: PLANE {} - Select drawing plane(s) (XO-CHIP)",
+                                        self.selected_plane
+                                    )
+                                });
                             }
                             0x02 => {
                                 // F002 - AUDIO (XO-CHIP): Store 16 bytes at I in audio buffer
+                                log(LogCategory::APU, LogLevel::Info, || {
+                                    format!("CHIP-8: AUDIO - Load 16 bytes from [{:04X}] to audio buffer (XO-CHIP)", self.i)
+                                });
                                 for i in 0..16 {
                                     self.audio_pattern[i] = self.memory[self.i as usize + i];
                                 }
@@ -567,6 +678,12 @@ impl Chip8System {
                             0x3A => {
                                 // FX3A - PITCH Vx (XO-CHIP): Set audio pitch to Vx
                                 self.audio_pitch = self.v[x];
+                                log(LogCategory::APU, LogLevel::Info, || {
+                                    format!(
+                                        "CHIP-8: PITCH V{:X} - Set audio pitch to {} (XO-CHIP)",
+                                        x, self.audio_pitch
+                                    )
+                                });
                             }
                             _ => {}
                         }
@@ -730,6 +847,13 @@ impl Chip8System {
     /// Set key state (0-15)
     pub fn set_key(&mut self, key: u8, pressed: bool) {
         if key < 16 {
+            log(LogCategory::CPU, LogLevel::Trace, || {
+                format!(
+                    "CHIP-8: Key 0x{:X} {}",
+                    key,
+                    if pressed { "pressed" } else { "released" }
+                )
+            });
             self.keys[key as usize] = pressed;
         }
     }
@@ -947,6 +1071,14 @@ impl System for Chip8System {
             });
         }
 
+        log(LogCategory::Bus, LogLevel::Info, || {
+            format!(
+                "CHIP-8: Mounting program - Size: {} bytes, Max: {} bytes",
+                data.len(),
+                max_size
+            )
+        });
+
         // Clear previous program
         for byte in &mut self.memory[PROGRAM_START..] {
             *byte = 0;
@@ -970,6 +1102,11 @@ impl System for Chip8System {
         self.waiting_for_key = None;
 
         self.program_loaded = true;
+
+        log(LogCategory::CPU, LogLevel::Info, || {
+            "CHIP-8: Program loaded successfully, system reset to PROGRAM_START".to_string()
+        });
+
         Ok(())
     }
 
@@ -977,6 +1114,10 @@ impl System for Chip8System {
         if mount_point_id != "Program" {
             return Err(Chip8Error::InvalidMountPoint(mount_point_id.to_string()));
         }
+
+        log(LogCategory::Bus, LogLevel::Info, || {
+            "CHIP-8: Unmounting program".to_string()
+        });
 
         for byte in &mut self.memory[PROGRAM_START..] {
             *byte = 0;
