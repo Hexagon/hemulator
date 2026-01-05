@@ -23,7 +23,7 @@ pub enum SmsError {
 /// Sega Master System emulator
 pub struct SmsSystem {
     // CPU
-    cpu: CpuZ80<SmsMemory>,
+    pub(crate) cpu: CpuZ80<SmsMemory>,
 
     // Shared components
     vdp: Rc<RefCell<Vdp>>,
@@ -197,6 +197,10 @@ impl System for SmsSystem {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "cartridge"
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 

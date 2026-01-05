@@ -15,6 +15,7 @@ pub mod debug;
 pub mod disasm_6502;
 pub mod disasm_chip8;
 pub mod disasm_lr35902;
+pub mod disasm_z80;
 pub mod graphics;
 pub mod logging;
 pub mod ppu;
