@@ -1985,160 +1985,176 @@ fn main() {
         } else {
             // Regular ROM file detection (not a .hemu file)
             match std::fs::read(p) {
-                Ok(data) => match detect_rom_type(&data) {
-                    Ok(SystemType::NES) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut nes_sys = emu_nes::NesSystem::default();
-                        // Use the mount point system to load the cartridge
-                        if let Err(e) = nes_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load NES ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            // Enable OpenGL renderer if requested (note: GL context not available at startup)
-                            // OpenGL can be enabled later when switching renderers
-                            rom_loaded = true;
-                            sys = EmulatorSystem::NES(Box::new(nes_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone()); // Keep for backward compat
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                Ok(data) => {
+                    // Check file extension first for CHIP-8 (since it overlaps with PC COM files in size)
+                    let extension = std::path::Path::new(p)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase());
+
+                    let system_type = if matches!(extension.as_deref(), Some("ch8") | Some("c8")) {
+                        // Force CHIP-8 detection for .ch8 and .c8 files
+                        Ok(SystemType::Chip8)
+                    } else {
+                        // Use content-based detection for all other files
+                        detect_rom_type(&data)
+                    };
+
+                    match system_type {
+                        Ok(SystemType::NES) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut nes_sys = emu_nes::NesSystem::default();
+                            // Use the mount point system to load the cartridge
+                            if let Err(e) = nes_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load NES ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                // Enable OpenGL renderer if requested (note: GL context not available at startup)
+                                // OpenGL can be enabled later when switching renderers
+                                rom_loaded = true;
+                                sys = EmulatorSystem::NES(Box::new(nes_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone()); // Keep for backward compat
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "NES ROM loaded".to_string();
+                                println!("Loaded NES ROM: {}", p);
                             }
-                            status_message = "NES ROM loaded".to_string();
-                            println!("Loaded NES ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::Atari2600) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut a2600_sys = emu_atari2600::Atari2600System::new();
-                        if let Err(e) = a2600_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load Atari 2600 ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::Atari2600) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut a2600_sys = emu_atari2600::Atari2600System::new();
+                            if let Err(e) = a2600_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load Atari 2600 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "Atari 2600 ROM loaded".to_string();
+                                println!("Loaded Atari 2600 ROM: {}", p);
                             }
-                            status_message = "Atari 2600 ROM loaded".to_string();
-                            println!("Loaded Atari 2600 ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::GameBoy) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut gb_sys = emu_gb::GbSystem::new();
-                        if let Err(e) = gb_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load Game Boy ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::GameBoy) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut gb_sys = emu_gb::GbSystem::new();
+                            if let Err(e) = gb_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load Game Boy ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "Game Boy ROM loaded".to_string();
+                                println!("Loaded Game Boy ROM: {}", p);
                             }
-                            status_message = "Game Boy ROM loaded".to_string();
-                            println!("Loaded Game Boy ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::PC) => {
-                        // PC executables should be on disk images, not loaded directly
-                        // Create a new PC system and let user mount disk images via F3
-                        status_message =
-                            "PC system detected. Use F3 to mount disk images.".to_string();
-                        rom_hash = None; // PC systems don't use ROM hash
-                        let pc_sys = emu_pc::PcSystem::new();
-                        sys = EmulatorSystem::PC(Box::new(pc_sys));
-                        // Don't save mount points for PC since they use disk images
-                        eprintln!("PC executable detected. Please mount disk images using F3.");
-                        println!("Initialized PC system. Mount disk images to proceed.");
-                    }
-                    Ok(SystemType::SNES) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut snes_sys = emu_snes::SnesSystem::new();
-                        if let Err(e) = snes_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load SNES ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::SNES(Box::new(snes_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::PC) => {
+                            // PC executables should be on disk images, not loaded directly
+                            // Create a new PC system and let user mount disk images via F3
+                            status_message =
+                                "PC system detected. Use F3 to mount disk images.".to_string();
+                            rom_hash = None; // PC systems don't use ROM hash
+                            let pc_sys = emu_pc::PcSystem::new();
+                            sys = EmulatorSystem::PC(Box::new(pc_sys));
+                            // Don't save mount points for PC since they use disk images
+                            eprintln!("PC executable detected. Please mount disk images using F3.");
+                            println!("Initialized PC system. Mount disk images to proceed.");
+                        }
+                        Ok(SystemType::SNES) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut snes_sys = emu_snes::SnesSystem::new();
+                            if let Err(e) = snes_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load SNES ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::SNES(Box::new(snes_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "SNES ROM loaded".to_string();
+                                println!("Loaded SNES ROM: {}", p);
                             }
-                            status_message = "SNES ROM loaded".to_string();
-                            println!("Loaded SNES ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::N64) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut n64_sys = emu_n64::N64System::new();
-                        if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                            eprintln!("Failed to load N64 ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::N64(Box::new(n64_sys));
-                            runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::N64) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut n64_sys = emu_n64::N64System::new();
+                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load N64 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "N64 ROM loaded".to_string();
+                                println!("Loaded N64 ROM: {}", p);
                             }
-                            status_message = "N64 ROM loaded".to_string();
-                            println!("Loaded N64 ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::SMS) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut sms_sys = emu_sms::SmsSystem::new();
-                        if let Err(e) = sms_sys.mount("cartridge", &data) {
-                            eprintln!("Failed to load SMS ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::SMS(Box::new(sms_sys));
-                            runtime_state.set_mount("cartridge".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::SMS) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut sms_sys = emu_sms::SmsSystem::new();
+                            if let Err(e) = sms_sys.mount("cartridge", &data) {
+                                eprintln!("Failed to load SMS ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::SMS(Box::new(sms_sys));
+                                runtime_state.set_mount("cartridge".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "SMS ROM loaded".to_string();
+                                println!("Loaded SMS ROM: {}", p);
                             }
-                            status_message = "SMS ROM loaded".to_string();
-                            println!("Loaded SMS ROM: {}", p);
                         }
-                    }
-                    Ok(SystemType::Chip8) => {
-                        rom_hash = Some(GameSaves::rom_hash(&data));
-                        let mut chip8_sys = emu_chip8::Chip8System::new();
-                        if let Err(e) = chip8_sys.mount("Program", &data) {
-                            eprintln!("Failed to load CHIP-8 ROM: {}", e);
-                            status_message = format!("Error: {}", e);
-                            rom_hash = None;
-                        } else {
-                            rom_loaded = true;
-                            sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
-                            runtime_state.set_mount("Program".to_string(), p.clone());
-                            settings.last_rom_path = Some(p.clone());
-                            if let Err(e) = settings.save() {
-                                eprintln!("Warning: Failed to save settings: {}", e);
+                        Ok(SystemType::Chip8) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut chip8_sys = emu_chip8::Chip8System::new();
+                            if let Err(e) = chip8_sys.mount("Program", &data) {
+                                eprintln!("Failed to load CHIP-8 ROM: {}", e);
+                                status_message = format!("Error: {}", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
+                                runtime_state.set_mount("Program".to_string(), p.clone());
+                                settings.last_rom_path = Some(p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "CHIP-8 program loaded".to_string();
+                                println!("Loaded CHIP-8 program: {}", p);
                             }
-                            status_message = "CHIP-8 program loaded".to_string();
-                            println!("Loaded CHIP-8 program: {}", p);
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("Unsupported ROM: {}", e);
-                        status_message = format!("Unsupported ROM: {}", e);
-                    }
-                }, // closes inner match detect_rom_type
+                        Err(e) => {
+                            eprintln!("Unsupported ROM: {}", e);
+                            status_message = format!("Unsupported ROM: {}", e);
+                        }
+                    } // closes match system_type
+                } // closes Ok(data)
                 Err(e) => {
                     eprintln!("Failed to read ROM file: {}", e);
                 }

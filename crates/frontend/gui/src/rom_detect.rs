@@ -104,26 +104,7 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         return Ok(SystemType::PC);
     }
 
-    // Check for DOS COM file (no header, typically small)
-    // COM files are 64KB or less and have no specific signature
-    // We'll detect them by exclusion and reasonable size
-    if data.len() <= 0xFF00 && data.len() >= 16 {
-        // Could be a COM file - check if it's not another format first
-        // If we get here and it's a reasonable size, tentatively classify as PC
-        // but continue checking other formats
-    }
-
-    // Check for CHIP-8 programs
-    // CHIP-8 programs are typically small (up to ~3.5KB, as they load at 0x200 in 4KB memory)
-    // They have no header or magic bytes
-    // We'll detect them by:
-    // 1. Reasonable size (16 bytes to 3584 bytes)
-    // 2. File extension (.ch8 or .c8) - but we can't check that here
-    // 3. If other formats don't match and size is small enough
-    // Note: This check should come after more specific formats but before Atari 2600
-    // since Atari 2600 uses some overlapping sizes
-
-    // Check for Atari 2600
+    // Check for Atari 2600 FIRST (before CHIP-8 and COM files)
     // Atari 2600 ROMs are typically 2K, 4K, 8K, 12K, 16K, or 32K
     // They have no header, so we detect by size and lack of other formats
     if matches!(data.len(), 2048 | 4096 | 8192 | 12288 | 16384 | 32768) {
@@ -132,15 +113,15 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
         return Ok(SystemType::Atari2600);
     }
 
-    // CHIP-8: Small programs that don't match other formats
-    // Max size is 3584 bytes (4096 - 512 for interpreter space)
-    if data.len() >= 16 && data.len() <= 3584 {
-        // This is our best guess for CHIP-8 if nothing else matched
-        return Ok(SystemType::Chip8);
-    }
-
-    // If it's small enough and not another format, assume COM file
+    // Check for DOS COM file (no header, typically small)
+    // COM files are 64KB or less and have no specific signature
+    // We'll detect them by exclusion and reasonable size
+    // This check should come before CHIP-8 since there's overlap in size ranges
+    // and COM files are more common in general computing
     if data.len() <= 0xFF00 && data.len() >= 16 {
+        // Small files could be either COM or CHIP-8
+        // Without file extension info, we default to PC/COM
+        // Users can still explicitly select CHIP-8 mode or use .ch8 extension
         return Ok(SystemType::PC);
     }
 
