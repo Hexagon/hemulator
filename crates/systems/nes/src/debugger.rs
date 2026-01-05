@@ -83,9 +83,14 @@ impl Debugger for NesSystem {
     }
 
     fn get_cpu_state(&self) -> CpuState {
+        // Note: CpuState stores the program counter both as a dedicated `pc` field
+        // (set via CpuState::new) and as a register entry named "PC".
+        // The `pc` field is used by the debugger for navigation (current instruction),
+        // while the "PC" register is added below so it also appears in the generic
+        // registers list shown in the UI.
         let mut state = CpuState::new(self.cpu.pc() as u32);
 
-        // Add registers
+        // Add registers (including PC for display in the registers panel)
         state.add_register(CpuRegister::new_16bit("PC", self.cpu.pc()));
         state.add_register(CpuRegister::new_8bit("A", self.cpu.a()));
         state.add_register(CpuRegister::new_8bit("X", self.cpu.x()));
@@ -151,8 +156,40 @@ mod tests {
         assert!(state.registers.iter().any(|r| r.name == "Y"));
         assert!(state.registers.iter().any(|r| r.name == "SP"));
 
-        // Should have all status flags
+        // Should have all status flags in correct order (NV-BDIZC)
         assert_eq!(state.flags.flags.len(), 7);
+        let flag_names: Vec<&str> = state
+            .flags
+            .flags
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(flag_names, vec!["N", "V", "B", "D", "I", "Z", "C"]);
+    }
+
+    #[test]
+    fn test_nes_cpu_flags_extraction() {
+        let system = NesSystem::default();
+        let state = system.get_cpu_state();
+
+        // Verify all 7 flags exist and are booleans
+        assert_eq!(state.flags.flags.len(), 7);
+
+        // After reset, status should be 0x24 (I flag set, unused bit set)
+        // Verify the flags are extracted correctly
+        for (name, value) in &state.flags.flags {
+            match name.as_str() {
+                "N" | "V" | "B" | "D" | "Z" | "C" => {
+                    // These should be false (bits 7, 6, 4, 3, 1, 0)
+                    assert!(!value, "Flag {} should be false after reset", name);
+                }
+                "I" => {
+                    // I flag (bit 2) should be true after reset (0x24 & 0x04 = 0x04)
+                    assert!(*value, "I flag should be true after reset");
+                }
+                _ => panic!("Unexpected flag: {}", name),
+            }
+        }
     }
 
     #[test]

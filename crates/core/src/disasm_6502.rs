@@ -992,7 +992,18 @@ pub fn disassemble_6502(memory: &[u8], address: u32) -> Option<DisassembledInstr
         format!("{} {}", instr.mnemonic, operand_str)
     };
 
-    Some(DisassembledInstruction::new(address, all_bytes, mnemonic))
+    let mut result = DisassembledInstruction::new(address, all_bytes, mnemonic);
+
+    // For relative branches, add target address as a comment
+    if instr.mode == AddressingMode::Relative && !operand_bytes.is_empty() {
+        let offset = operand_bytes[0] as i8;
+        // Target address = (PC after instruction) + offset
+        // PC after instruction = current address + instruction length (2 bytes for branches)
+        let target = (address as i32 + 2 + offset as i32) as u32;
+        result = result.with_comment(format!("-> ${:04X}", target));
+    }
+
+    Some(result)
 }
 
 #[cfg(test)]
@@ -1041,10 +1052,14 @@ mod tests {
         let instr = disassemble_6502(&memory, 0x8000).unwrap();
         assert_eq!(instr.mnemonic, "BCC +$10");
         assert_eq!(instr.len(), 2);
+        // Target = 0x8000 + 2 + 0x10 = 0x8012
+        assert_eq!(instr.comment, Some("-> $8012".to_string()));
 
         let memory_neg = [0x90, 0xF0]; // BCC -$10
         let instr_neg = disassemble_6502(&memory_neg, 0x8000).unwrap();
         assert_eq!(instr_neg.mnemonic, "BCC -$10");
+        // Target = 0x8000 + 2 + (-16) = 0x7FF2
+        assert_eq!(instr_neg.comment, Some("-> $7FF2".to_string()));
     }
 
     #[test]

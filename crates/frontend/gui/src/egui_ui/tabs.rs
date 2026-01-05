@@ -924,11 +924,17 @@ impl TabManager {
                     });
 
                     egui::Frame::new().fill(bg_color).show(ui, |ui| {
-                        // Mnemonic
-                        let mnem_text = if is_current {
-                            egui::RichText::new(&instr.mnemonic).monospace().strong()
+                        // Mnemonic with optional comment
+                        let mnem_with_comment = if let Some(ref comment) = instr.comment {
+                            format!("{}  ; {}", instr.mnemonic, comment)
                         } else {
-                            egui::RichText::new(&instr.mnemonic).monospace()
+                            instr.mnemonic.clone()
+                        };
+
+                        let mnem_text = if is_current {
+                            egui::RichText::new(&mnem_with_comment).monospace().strong()
+                        } else {
+                            egui::RichText::new(&mnem_with_comment).monospace()
                         };
                         ui.label(mnem_text);
                     });
