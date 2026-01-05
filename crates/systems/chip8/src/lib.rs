@@ -151,7 +151,8 @@ pub struct Chip8System {
     mode: Chip8Mode,
 
     // For waiting for keypress (FX0A instruction)
-    waiting_for_key: Option<usize>, // Some(register_index) when waiting
+    waiting_for_key: Option<usize>, // Some(register_index) when waiting for key press
+    key_pressed_while_waiting: Option<u8>, // Stores which key was pressed, waiting for release
 
     // Super-CHIP flag registers (RPL user flags)
     flag_registers: [u8; 16],
@@ -207,6 +208,7 @@ impl Chip8System {
             program_loaded: false,
             mode,
             waiting_for_key: None,
+            key_pressed_while_waiting: None,
             flag_registers: [0; 16],
             selected_plane: 1, // Default to plane 1 (first plane)
             audio_pattern: [0; 16],
@@ -250,23 +252,43 @@ impl Chip8System {
 
     /// Execute one instruction
     fn execute_instruction(&mut self) {
-        // Check if waiting for key press
+        // Check if waiting for key press/release
         if let Some(register) = self.waiting_for_key {
-            // Check if any key is pressed
-            for (i, &pressed) in self.keys.iter().enumerate() {
-                if pressed {
+            if let Some(pressed_key) = self.key_pressed_while_waiting {
+                // We detected a key press, now wait for it to be released
+                if !self.keys[pressed_key as usize] {
+                    // Key has been released - store it and continue
                     log(LogCategory::CPU, LogLevel::Debug, || {
                         format!(
-                            "CHIP-8: Key press detected - Key: 0x{:X}, stored in V{:X}",
-                            i, register
+                            "CHIP-8: Key 0x{:X} released, stored in V{:X}, continuing execution",
+                            pressed_key, register
                         )
                     });
-                    self.v[register] = i as u8;
+                    self.v[register] = pressed_key;
                     self.waiting_for_key = None;
-                    break;
+                    self.key_pressed_while_waiting = None;
+                    // Advance PC past the FX0A instruction (2 bytes) and continue
+                    self.pc += 2;
+                } else {
+                    // Still pressed, keep waiting
+                    return;
                 }
+            } else {
+                // Waiting for initial key press
+                for (i, &pressed) in self.keys.iter().enumerate() {
+                    if pressed {
+                        log(LogCategory::CPU, LogLevel::Debug, || {
+                            format!(
+                                "CHIP-8: Key press detected - Key: 0x{:X}, waiting for release",
+                                i
+                            )
+                        });
+                        self.key_pressed_while_waiting = Some(i as u8);
+                        break;
+                    }
+                }
+                return; // Don't execute instructions while waiting
             }
-            return; // Don't execute instructions while waiting
         }
 
         // Fetch opcode (2 bytes, big-endian)
@@ -1100,6 +1122,7 @@ impl System for Chip8System {
         self.sound_timer = 0;
         self.keys.fill(false);
         self.waiting_for_key = None;
+        self.key_pressed_while_waiting = None;
 
         self.program_loaded = true;
 

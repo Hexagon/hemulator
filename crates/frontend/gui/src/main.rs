@@ -339,21 +339,19 @@ impl EmulatorSystem {
                     sys.set_controller_2(state);
                 }
             }
-            EmulatorSystem::Chip8(sys) => {
-                // CHIP-8 uses 16-key hexadecimal keypad
-                // For now, we'll use the standard 8-bit state and extend to 16-bit
-                // Mapping: Standard buttons map to CHIP-8 keys 0-7, extended keys 8-F need special handling
-                // This will be enhanced when we implement proper keyboard passthrough
-                sys.set_controller(state as u16);
+            EmulatorSystem::Chip8(_) => {
+                // Chip8 uses 16-bit controller state via set_controller_16
+                // This 8-bit set_controller is not used for Chip8
             }
         }
     }
 
     fn set_controller_16(&mut self, port: usize, state: u16) {
-        if let EmulatorSystem::SNES(sys) = self {
-            sys.set_controller(port, state)
+        match self {
+            EmulatorSystem::SNES(sys) => sys.set_controller(port, state),
+            EmulatorSystem::Chip8(sys) => sys.set_controller(state),
+            _ => {} // Other systems use 8-bit set_controller
         }
-        // Other systems use 8-bit set_controller
     }
 
     fn get_debug_info_nes(&self) -> Option<emu_nes::DebugInfo> {
@@ -394,13 +392,6 @@ impl EmulatorSystem {
     fn get_debug_info_gb(&self) -> Option<emu_gb::DebugInfo> {
         match self {
             EmulatorSystem::GameBoy(sys) => Some(sys.debug_info()),
-            _ => None,
-        }
-    }
-
-    fn get_debug_info_chip8(&self) -> Option<emu_chip8::DebugInfo> {
-        match self {
-            EmulatorSystem::Chip8(sys) => Some(sys.debug_info()),
             _ => None,
         }
     }
@@ -459,8 +450,8 @@ impl EmulatorSystem {
             EmulatorSystem::PC(sys) => Some(sys.cpu_speed_mhz()), // Variable based on CPU model
             EmulatorSystem::SNES(_) => Some(3.58), // SNES 65C816 (3.58 MHz)
             EmulatorSystem::N64(_) => Some(93.75), // N64 R4300i (93.75 MHz)
-            EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80 (3.58 MHz)
-            EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 ~700 Hz (0.0007 MHz)
+            EmulatorSystem::SMS(_) => Some(3.58), // SMS Z80A (3.58 MHz NTSC)
+            EmulatorSystem::Chip8(_) => Some(0.0007), // CHIP-8 runs at ~700 instructions/sec (~0.7 kHz)
         }
     }
 
@@ -507,7 +498,7 @@ impl EmulatorSystem {
             EmulatorSystem::SNES(_) => vec![0; count], // TODO: Implement audio for SNES
             EmulatorSystem::N64(_) => vec![0; count], // TODO: Implement audio for N64
             EmulatorSystem::SMS(_) => vec![0; count], // TODO: Wire up SMS audio once Z80 is implemented
-            EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement beep audio for CHIP-8
+            EmulatorSystem::Chip8(_) => vec![0; count], // TODO: Implement CHIP-8 audio (single beep tone)
         }
     }
 
@@ -769,6 +760,53 @@ fn get_snes_controller_state(window: &dyn WindowBackend, mapping: &settings::Key
             }
         }
     }
+    state
+}
+
+/// Get CHIP-8 controller state from current keyboard state (16-bit for 16-key hexadecimal keypad)
+///
+/// CHIP-8 has a 16-key hexadecimal keypad (0x0-0xF):
+/// Original layout:
+///   1 2 3 C
+///   4 5 6 D
+///   7 8 9 E
+///   A 0 B F
+///
+/// Commonly mapped to QWERTY keyboard:
+///   1 2 3 4  ->  1 2 3 C
+///   Q W E R  ->  4 5 6 D
+///   A S D F  ->  7 8 9 E
+///   Z X C V  ->  A 0 B F
+///
+/// Returns a 16-bit value where bit N represents key N (0x0-0xF)
+fn get_chip8_controller_state(window: &dyn WindowBackend) -> u16 {
+    let mut state: u16 = 0;
+    
+    // Map keyboard keys to CHIP-8 hex keypad
+    // Row 1: 1 2 3 4 -> keys 1 2 3 C
+    if window.is_key_down(Key::Key1) { state |= 1 << 0x1; }
+    if window.is_key_down(Key::Key2) { state |= 1 << 0x2; }
+    if window.is_key_down(Key::Key3) { state |= 1 << 0x3; }
+    if window.is_key_down(Key::Key4) { state |= 1 << 0xC; }
+    
+    // Row 2: Q W E R -> keys 4 5 6 D
+    if window.is_key_down(Key::Q) { state |= 1 << 0x4; }
+    if window.is_key_down(Key::W) { state |= 1 << 0x5; }
+    if window.is_key_down(Key::E) { state |= 1 << 0x6; }
+    if window.is_key_down(Key::R) { state |= 1 << 0xD; }
+    
+    // Row 3: A S D F -> keys 7 8 9 E
+    if window.is_key_down(Key::A) { state |= 1 << 0x7; }
+    if window.is_key_down(Key::S) { state |= 1 << 0x8; }
+    if window.is_key_down(Key::D) { state |= 1 << 0x9; }
+    if window.is_key_down(Key::F) { state |= 1 << 0xE; }
+    
+    // Row 4: Z X C V -> keys A 0 B F
+    if window.is_key_down(Key::Z) { state |= 1 << 0xA; }
+    if window.is_key_down(Key::X) { state |= 1 << 0x0; }
+    if window.is_key_down(Key::C) { state |= 1 << 0xB; }
+    if window.is_key_down(Key::V) { state |= 1 << 0xF; }
+    
     state
 }
 
@@ -2049,7 +2087,7 @@ fn main() {
                         rom_hash = Some(GameSaves::rom_hash(&data));
                         let mut chip8_sys = emu_chip8::Chip8System::new();
                         if let Err(e) = chip8_sys.mount("Program", &data) {
-                            eprintln!("Failed to load CHIP-8 program: {}", e);
+                            eprintln!("Failed to load CHIP-8 ROM: {}", e);
                             status_message = format!("Error: {}", e);
                             rom_hash = None;
                         } else {
@@ -2794,9 +2832,14 @@ fn main() {
                                         runtime_state
                                             .set_mount("Program".to_string(), path_str.clone());
                                         settings.last_rom_path = Some(path_str.clone());
+                                        // Add to recent files
+                                        settings.add_recent_file(path_str.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
+                                        egui_app.update_recent_files(
+                                            settings.get_recent_files().to_vec(),
+                                        );
                                         egui_app
                                             .status_bar
                                             .set_message("CHIP-8 program loaded".to_string());
@@ -4072,20 +4115,6 @@ fn main() {
                                 .status_bar
                                 .set_message("Created new N64 system".to_string());
                         }
-                        "CHIP-8" => {
-                            sys = EmulatorSystem::Chip8(Box::new(emu_chip8::Chip8System::new()));
-                            rom_loaded = false;
-                            rom_hash = None;
-                            runtime_state.clear_mounts();
-                            egui_app.property_pane.system_name = "CHIP-8".to_string();
-                            egui_app.property_pane.rendering_backend =
-                                sys.get_current_renderer_name();
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app
-                                .status_bar
-                                .set_message("Created new CHIP-8 system".to_string());
-                        }
                         _ => {
                             egui_app
                                 .status_bar
@@ -4224,25 +4253,30 @@ fn main() {
                 );
             }
 
-            // Handle keyboard input for emulator
-            if !matches!(&sys, EmulatorSystem::PC(_)) {
-                // For non-PC systems, use standard controller mapping
-                let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
-                let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
-                match &mut sys {
-                    EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
-                    _ => sys.set_controller(0, controller_state),
-                }
-            } else {
-                // PC systems handle keyboard directly via scancodes
-                let pressed = egui_backend.get_sdl2_scancodes_pressed();
-                let released = egui_backend.get_sdl2_scancodes_released();
-                if let EmulatorSystem::PC(pc_sys) = &mut sys {
-                    for scancode in pressed {
-                        pc_sys.key_press_sdl2(*scancode as u32);
+            // Handle keyboard input for emulator (only if egui doesn't want it)
+            let egui_wants_input = egui_backend.egui_ctx().wants_keyboard_input();
+            if !egui_wants_input {
+                if !matches!(&sys, EmulatorSystem::PC(_)) {
+                    // For non-PC systems, use standard controller mapping
+                    let controller_state = get_controller_state(&egui_backend, &settings.input.player1);
+                    let snes_state = get_snes_controller_state(&egui_backend, &settings.input.player1);
+                    let chip8_state = get_chip8_controller_state(&egui_backend);
+                    match &mut sys {
+                        EmulatorSystem::SNES(s) => s.set_controller(0, snes_state),
+                        EmulatorSystem::Chip8(s) => s.set_controller(chip8_state),
+                        _ => sys.set_controller(0, controller_state),
                     }
-                    for scancode in released {
-                        pc_sys.key_release_sdl2(*scancode as u32);
+                } else {
+                    // PC systems handle keyboard directly via scancodes
+                    let pressed = egui_backend.get_sdl2_scancodes_pressed();
+                    let released = egui_backend.get_sdl2_scancodes_released();
+                    if let EmulatorSystem::PC(pc_sys) = &mut sys {
+                        for scancode in pressed {
+                            pc_sys.key_press_sdl2(*scancode as u32);
+                        }
+                        for scancode in released {
+                            pc_sys.key_release_sdl2(*scancode as u32);
+                        }
                     }
                 }
             }
