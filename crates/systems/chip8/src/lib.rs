@@ -460,10 +460,10 @@ impl Chip8System {
                         });
                         self.scroll_up(n);
                     } else {
-                        // 0NNN - SYS addr: Call machine code routine (ignored)
+                        // 0NNN - SYS addr: Call machine code routine (typically ignored by modern interpreters)
                         log(LogCategory::Stubs, LogLevel::Trace, || {
                             format!(
-                                "CHIP-8: SYS {:03X} - Machine code routine (ignored)",
+                                "CHIP-8: SYS {:03X} - Machine code routine (typically ignored by modern interpreters)",
                                 opcode & 0x0FFF
                             )
                         });
