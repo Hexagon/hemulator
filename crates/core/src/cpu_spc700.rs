@@ -135,6 +135,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
 
     /// Push a byte onto the stack
     #[inline]
+    #[allow(dead_code)]
     fn push(&mut self, val: u8) {
         let addr = 0x0100 | (self.sp as u16);
         self.write(addr, val);
@@ -143,6 +144,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
 
     /// Pop a byte from the stack
     #[inline]
+    #[allow(dead_code)]
     fn pop(&mut self) -> u8 {
         self.sp = self.sp.wrapping_add(1);
         let addr = 0x0100 | (self.sp as u16);

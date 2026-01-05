@@ -141,6 +141,7 @@ impl SnesBus {
     }
 
     /// Enable the real SPC700 APU (replaces stub)
+    #[allow(dead_code)]
     pub fn enable_spc700(&mut self) {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Enabling SPC700 APU".to_string()
@@ -149,6 +150,7 @@ impl SnesBus {
     }
 
     /// Disable the real SPC700 APU (use stub)
+    #[allow(dead_code)]
     pub fn disable_spc700(&mut self) {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Disabling SPC700 APU (using stub)".to_string()
