@@ -298,3 +298,39 @@ cargo run --release -- --log-level trace game.nes
 # Mix global and specific levels (specific overrides global)
 cargo run --release -- --log-level info --log-cpu trace game.nes
 ```
+
+## Command-Line Debug Dumps
+
+For deep analysis of emulation state at specific execution points, the emulator supports generating comprehensive debug dumps in **headless mode** (no GUI, faster execution).
+
+**For complete documentation**, see [AGENTS.md](../AGENTS.md#command-line-debug-dump).
+
+### Quick Start
+
+```bash
+# Dump when PC reaches specific address
+cargo run --release -- --debug-dump-pc 0x8000 game.nes
+
+# Dump after N cycles  
+cargo run --release -- --debug-dump-cycles 10000 game.nes
+
+# Specify custom output file
+cargo run --release -- --debug-dump-pc 0x8000 --debug-dump-file analysis.txt game.nes
+```
+
+### What's in a Debug Dump?
+
+- **CPU State**: All registers, flags, program counter
+- **Disassembly**: ±100 instructions around current PC
+- **Memory Dump**: Complete hex dump of all memory regions with ASCII view
+- **Metadata**: Cycle count, timestamp, memory region details
+
+### Benefits of Headless Mode
+
+When using debug dump options, the emulator runs without GUI:
+- ⚡ **Faster execution** - No graphics overhead
+- 🎯 **CI/CD friendly** - Deterministic, scriptable debugging
+- 📊 **Ideal for analysis** - Generate reference outputs for comparison
+- 💾 **Lower resource usage** - Runs on servers without display
+
+The emulator shows progress in the console and automatically exits after generating the dump.

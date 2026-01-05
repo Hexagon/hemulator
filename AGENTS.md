@@ -264,3 +264,139 @@ workbench/
 - Isolating emulator bugs from DOS environment
 
 See `workbench/README.md` for detailed instructions and examples.
+
+## Command-Line Debug Dump
+
+The emulator supports generating comprehensive debug dumps from the command line, which is useful for:
+- Analyzing specific execution points
+- Debugging ROM behavior without GUI interaction
+- Automated testing and continuous integration
+- Generating reference outputs for comparison
+
+**Headless Mode**: When debug dump options are specified, the emulator runs in headless mode (no GUI), making execution significantly faster. The emulator will automatically exit after generating the dump.
+
+### Usage
+
+**Dump at specific Program Counter (PC):**
+```bash
+hemu --debug-dump-pc 0x8000 game.nes
+hemu --debug-dump-pc 32768 game.nes  # Decimal also supported
+```
+
+**Dump after N cycles:**
+```bash
+hemu --debug-dump-cycles 10000 game.nes
+```
+
+**Specify output file (default: debug_dump.txt):**
+```bash
+hemu --debug-dump-pc 0x8000 --debug-dump-file my_dump.txt game.nes
+```
+
+**Combine with logging for detailed analysis:**
+```bash
+hemu --debug-dump-pc 0x8000 --log-cpu trace --log-file trace.log game.nes
+```
+
+### Debug Dump Contents
+
+The generated dump file includes:
+1. **Timestamp** - When the dump was generated
+2. **Cycle Count** - Total cycles executed
+3. **CPU State** - All registers and flags with current values
+4. **Disassembly** - ±100 instructions around current PC, with current instruction marked
+5. **Memory Regions** - Full hex dump of all memory regions:
+   - 16 bytes per line in hex format
+   - ASCII representation alongside hex values
+   - Region metadata (address range, size, permissions)
+
+### Example Output Format
+
+```
+===============================================
+       HEMULATOR DEBUG DUMP
+===============================================
+
+Timestamp: 2026-01-05 18:30:45
+Cycle Count: 10000
+
+===============================================
+       CPU STATE
+===============================================
+
+Program Counter: $8000
+
+Registers:
+  PC = $8000
+  A = $42
+  X = $00
+  Y = $00
+  SP = $FD
+
+Flags:
+  N = 0
+  V = 0
+  B = 0
+  D = 0
+  I = 1
+  Z = 0
+  C = 0
+
+===============================================
+       DISASSEMBLY (±100 instructions from PC)
+===============================================
+
+  7FFE  EA          NOP
+▶ 8000  A9 42       LDA #$42
+  8002  8D 00 02    STA $0200
+  8005  4C 00 80    JMP $8000 ; -> $8000
+
+===============================================
+       MEMORY REGIONS
+===============================================
+
+--- Internal RAM ($0000-$07FF, 2048 bytes) ---
+Description: 2KB internal RAM (mirrored to 0x1FFF)
+Access: R/W
+
+0000:  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+0010:  42 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |B...............|
+...
+```
+
+### Supported Systems
+
+Command-line debug dump works with all systems that implement the `Debugger` trait:
+- ✅ **NES** - Full support with complete memory map
+- ⏳ **Other systems** - Can be added by implementing the `Debugger` trait (see `crates/systems/nes/src/debugger.rs` for reference)
+
+### Performance
+
+**Headless mode** provides significant performance benefits:
+- **No GUI overhead**: Skips SDL, egui, and graphics initialization
+- **Faster execution**: Can run at maximum CPU speed without frame limiting
+- **Lower resource usage**: No window management or rendering
+- **Ideal for CI/CD**: Fast, deterministic debugging in automated environments
+
+Progress is shown in the console every 1000 cycles, and the emulator automatically exits after generating the dump or on error.
+
+### Integration with CI/Testing
+
+Debug dumps can be used in automated tests:
+
+```bash
+# Generate reference dump
+hemu --debug-dump-pc 0x8000 --debug-dump-file reference.txt game.nes
+
+# Compare with new dump
+hemu --debug-dump-pc 0x8000 --debug-dump-file current.txt game.nes
+diff reference.txt current.txt
+```
+
+### Troubleshooting
+
+- **No dump generated**: Ensure the trigger condition is reached. For PC-based dumps, verify the code actually executes that address.
+- **"Debug interface not available"**: The system hasn't implemented the `Debugger` trait yet. Currently only NES is fully supported.
+- **Incomplete dump**: For very early PC values or cycle counts, the emulator may not have reached the trigger point yet.
+
+See `workbench/README.md` for detailed instructions and examples.

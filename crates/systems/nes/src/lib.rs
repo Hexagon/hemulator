@@ -72,6 +72,7 @@ mod apu;
 mod bus;
 mod cartridge;
 mod cpu;
+mod debugger;
 mod mappers;
 mod ppu;
 pub mod ppu_renderer;
@@ -728,6 +729,10 @@ impl System for NesSystem {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "Cartridge" && self.cartridge_loaded
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 

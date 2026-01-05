@@ -11,6 +11,8 @@ pub mod cpu_lr35902;
 pub mod cpu_mips_r4300i;
 pub mod cpu_spc700;
 pub mod cpu_z80;
+pub mod debug;
+pub mod disasm_6502;
 pub mod graphics;
 pub mod logging;
 pub mod ppu;
@@ -94,6 +96,12 @@ pub trait System {
 
     /// Check if a mount point has media loaded
     fn is_mounted(&self, mount_point_id: &str) -> bool;
+
+    /// Get the debugger interface for this system (if available)
+    /// Default implementation returns None (no debug support)
+    fn debugger(&self) -> Option<&dyn debug::Debugger> {
+        None
+    }
 }
 
 #[cfg(test)]
