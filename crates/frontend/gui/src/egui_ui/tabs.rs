@@ -1,7 +1,7 @@
 //! Tab manager for left panel
 
 use crate::settings::ScalingMode;
-use crate::system_adapter::SystemDebugInfo;
+use crate::system_adapter::{EnhancedDebugState, SystemDebugInfo};
 use egui::{ScrollArea, TextureHandle, Ui};
 
 /// Application version constant
@@ -45,6 +45,7 @@ pub struct TabManager {
     pub pc_config_visible: bool,
     pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
+    pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -61,6 +62,7 @@ impl TabManager {
             pc_config_visible: false,
             about_visible: false,
             debug_info: None,
+            enhanced_debug_state: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -107,6 +109,10 @@ impl TabManager {
 
     pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
         self.debug_info = Some(info);
+    }
+
+    pub fn update_enhanced_debug_state(&mut self, state: EnhancedDebugState) {
+        self.enhanced_debug_state = Some(state);
     }
 
     /// Get and clear any pending action
@@ -773,61 +779,287 @@ impl TabManager {
     }
 
     fn render_debug_tab(&self, ui: &mut Ui) {
+        // If we have enhanced debug state, show the comprehensive 3-panel view
+        if let Some(ref state) = self.enhanced_debug_state {
+            self.render_enhanced_debug_view(ui, state);
+        } else if let Some(ref debug_info) = self.debug_info {
+            // Fallback to simple legacy view
+            self.render_legacy_debug_view(ui, debug_info);
+        } else {
+            // No debug information available
+            ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🔧").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No Debug Information Available");
+                    ui.add_space(10.0);
+                    ui.label("Load a ROM to see system-specific debug information");
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("Debug info includes CPU state, memory maps, and")
+                            .weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new("disassembly for troubleshooting and analysis.")
+                            .weak(),
+                    );
+                });
+            });
+        }
+    }
+
+    fn render_enhanced_debug_view(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+        // Header
+        ui.vertical_centered(|ui| {
+            ui.add_space(5.0);
+            ui.heading(
+                egui::RichText::new(format!("🔧 {} Debugger", state.system_type))
+                    .size(20.0)
+                    .strong(),
+            );
+        });
+
+        ui.add_space(5.0);
+        ui.separator();
+        ui.add_space(5.0);
+
+        // 3-column layout: Disassembly | Memory | CPU State
+        egui::Grid::new("debug_panels")
+            .num_columns(3)
+            .spacing([10.0, 0.0])
+            .show(ui, |ui| {
+                // Column headers
+                ui.heading("📜 Disassembly");
+                ui.heading("💾 Memory");
+                ui.heading("🖥️ CPU State");
+                ui.end_row();
+
+                // Content panels - make them scrollable
+                let panel_height = ui.available_height() - 10.0;
+
+                // Left panel: Disassembly
+                ScrollArea::vertical()
+                    .max_height(panel_height)
+                    .show(ui, |ui| {
+                        self.render_disassembly_panel(ui, state);
+                    });
+
+                // Middle panel: Memory Explorer
+                ScrollArea::vertical()
+                    .max_height(panel_height)
+                    .show(ui, |ui| {
+                        self.render_memory_panel(ui, state);
+                    });
+
+                // Right panel: CPU State
+                ScrollArea::vertical()
+                    .max_height(panel_height)
+                    .show(ui, |ui| {
+                        self.render_cpu_state_panel(ui, state);
+                    });
+
+                ui.end_row();
+            });
+    }
+
+    fn render_disassembly_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+        if state.disassembly.is_empty() {
+            ui.label(egui::RichText::new("No disassembly available").weak());
+            return;
+        }
+
+        // Show disassembled instructions
+        egui::Grid::new("disasm_grid")
+            .num_columns(3)
+            .spacing([5.0, 2.0])
+            .striped(false)
+            .show(ui, |ui| {
+                for instr in &state.disassembly {
+                    let is_current = instr.address == state.current_pc;
+
+                    // Highlight current instruction
+                    let bg_color = if is_current {
+                        egui::Color32::from_rgb(60, 80, 100)
+                    } else {
+                        ui.visuals().window_fill()
+                    };
+
+                    egui::Frame::new()
+                        .fill(bg_color)
+                        .show(ui, |ui| {
+                            // Address
+                            let addr_text = if is_current {
+                                egui::RichText::new(format!("▶ {:04X}", instr.address))
+                                    .monospace()
+                                    .strong()
+                            } else {
+                                egui::RichText::new(format!("  {:04X}", instr.address)).monospace()
+                            };
+                            ui.label(addr_text);
+                        });
+
+                    egui::Frame::new().fill(bg_color).show(ui, |ui| {
+                        // Bytes
+                        let bytes_str: String = instr
+                            .bytes
+                            .iter()
+                            .map(|b| format!("{:02X}", b))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        ui.label(egui::RichText::new(bytes_str).monospace());
+                    });
+
+                    egui::Frame::new().fill(bg_color).show(ui, |ui| {
+                        // Mnemonic
+                        let mnem_text = if is_current {
+                            egui::RichText::new(&instr.mnemonic).monospace().strong()
+                        } else {
+                            egui::RichText::new(&instr.mnemonic).monospace()
+                        };
+                        ui.label(mnem_text);
+                    });
+
+                    ui.end_row();
+                }
+            });
+    }
+
+    fn render_memory_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+        if state.memory_regions.is_empty() {
+            ui.label(egui::RichText::new("No memory regions defined").weak());
+            return;
+        }
+
+        // Show memory regions as expandable tree
+        for region in &state.memory_regions {
+            egui::CollapsingHeader::new(
+                egui::RichText::new(&region.name)
+                    .strong()
+                    .color(egui::Color32::from_rgb(180, 220, 255)),
+            )
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Range:");
+                    ui.label(
+                        egui::RichText::new(format!("${:04X} - ${:04X}", region.start, region.end))
+                            .monospace(),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Size:");
+                    ui.label(
+                        egui::RichText::new(format!("{} bytes", region.size())).monospace(),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Access:");
+                    let access = match (region.readable, region.writable) {
+                        (true, true) => "Read/Write",
+                        (true, false) => "Read-only",
+                        (false, true) => "Write-only",
+                        (false, false) => "No access",
+                    };
+                    ui.label(egui::RichText::new(access).monospace());
+                });
+                ui.label(egui::RichText::new(&region.description).weak().italics());
+                ui.add_space(5.0);
+                
+                // Note: Actual hex dump would be shown here in a complete implementation
+                ui.label(egui::RichText::new("💡 Memory viewer coming soon").weak().italics());
+            });
+        }
+    }
+
+    fn render_cpu_state_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+        if let Some(ref cpu_state) = state.cpu_state {
+            // Program Counter
+            ui.heading("Program Counter");
+            ui.label(egui::RichText::new(format!("${:04X}", cpu_state.pc)).monospace().strong());
+            ui.add_space(10.0);
+
+            // Registers
+            ui.heading("Registers");
+            egui::Grid::new("registers_grid")
+                .num_columns(2)
+                .spacing([15.0, 5.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for reg in &cpu_state.registers {
+                        ui.label(egui::RichText::new(&reg.name).strong());
+                        let value_str = match reg.width {
+                            8 => format!("${:02X}", reg.value),
+                            16 => format!("${:04X}", reg.value),
+                            32 => format!("${:08X}", reg.value),
+                            _ => format!("${:X}", reg.value),
+                        };
+                        ui.label(egui::RichText::new(value_str).monospace());
+                        ui.end_row();
+                    }
+                });
+
+            ui.add_space(10.0);
+
+            // Flags
+            ui.heading("Flags");
+            egui::Grid::new("flags_grid")
+                .num_columns(2)
+                .spacing([15.0, 5.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (flag_name, flag_value) in &cpu_state.flags.flags {
+                        ui.label(egui::RichText::new(flag_name).strong());
+                        let flag_str = if *flag_value { "1" } else { "0" };
+                        let flag_color = if *flag_value {
+                            egui::Color32::from_rgb(100, 255, 100)
+                        } else {
+                            egui::Color32::from_rgb(150, 150, 150)
+                        };
+                        ui.label(egui::RichText::new(flag_str).monospace().color(flag_color));
+                        ui.end_row();
+                    }
+                });
+        } else {
+            ui.label(egui::RichText::new("No CPU state available").weak());
+        }
+    }
+
+    fn render_legacy_debug_view(&self, ui: &mut Ui, debug_info: &SystemDebugInfo) {
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                if let Some(ref debug_info) = self.debug_info {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(10.0);
-                        ui.heading(
-                            egui::RichText::new(format!(
-                                "🔧 {} Debug Information",
-                                debug_info.system_type
-                            ))
-                            .size(24.0)
-                            .strong(),
-                        );
-                        ui.add_space(5.0);
-                        ui.label(
-                            egui::RichText::new("System internals and diagnostic information")
-                                .weak(),
-                        );
-                    });
-
-                    ui.add_space(15.0);
-                    ui.separator();
+                ui.vertical_centered(|ui| {
                     ui.add_space(10.0);
+                    ui.heading(
+                        egui::RichText::new(format!(
+                            "🔧 {} Debug Information",
+                            debug_info.system_type
+                        ))
+                        .size(24.0)
+                        .strong(),
+                    );
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("System internals and diagnostic information").weak(),
+                    );
+                });
 
-                    egui::Grid::new("debug_grid")
-                        .num_columns(2)
-                        .spacing([40.0, 8.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for (label, value) in &debug_info.fields {
-                                ui.label(egui::RichText::new(label).strong());
-                                ui.label(egui::RichText::new(value).monospace());
-                                ui.end_row();
-                            }
-                        });
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(40.0);
-                        ui.label(egui::RichText::new("🔧").size(48.0));
-                        ui.add_space(10.0);
-                        ui.heading("No Debug Information Available");
-                        ui.add_space(10.0);
-                        ui.label("Load a ROM to see system-specific debug information");
-                        ui.add_space(5.0);
-                        ui.label(
-                            egui::RichText::new("Debug info includes CPU state, memory maps, and")
-                                .weak(),
-                        );
-                        ui.label(
-                            egui::RichText::new("other technical details for troubleshooting.")
-                                .weak(),
-                        );
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                egui::Grid::new("debug_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for (label, value) in &debug_info.fields {
+                            ui.label(egui::RichText::new(label).strong());
+                            ui.label(egui::RichText::new(value).monospace());
+                            ui.end_row();
+                        }
                     });
-                }
             });
     }
 

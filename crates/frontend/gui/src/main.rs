@@ -1439,6 +1439,27 @@ fn create_atari2600_system(settings: &Settings) -> emu_atari2600::Atari2600Syste
     )
 }
 
+/// Helper function to create EnhancedDebugState from a Debugger
+fn create_enhanced_debug_state(
+    system_name: &str,
+    debugger: &dyn emu_core::debug::Debugger,
+) -> system_adapter::EnhancedDebugState {
+    let cpu_state = debugger.get_cpu_state();
+    let memory_regions = debugger.get_memory_regions();
+    
+    // Disassemble instructions around current PC
+    let pc = cpu_state.pc;
+    let disassembly = debugger.disassemble_range(pc.saturating_sub(32), 20);
+
+    let mut enhanced_state = system_adapter::EnhancedDebugState::new(system_name);
+    enhanced_state.cpu_state = Some(cpu_state.clone());
+    enhanced_state.memory_regions = memory_regions;
+    enhanced_state.disassembly = disassembly;
+    enhanced_state.current_pc = cpu_state.pc;
+
+    enhanced_state
+}
+
 fn main() {
     // Parse command-line arguments
     let cli_args = CliArgs::parse();
@@ -2588,7 +2609,7 @@ fn main() {
 
         // Update debug info if debug tab is visible
         if egui_app.tab_manager.debug_visible {
-            use system_adapter::SystemDebugInfo;
+            use system_adapter::{EnhancedDebugState, SystemDebugInfo};
             let debug_info = match &sys {
                 EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
                 EmulatorSystem::GameBoy(s) => SystemDebugInfo::from_gb(&s.debug_info()),
@@ -2609,6 +2630,20 @@ fn main() {
                 EmulatorSystem::Chip8(s) => SystemDebugInfo::from_chip8(&s.debug_info()),
             };
             egui_app.tab_manager.update_debug_info(debug_info);
+
+            // Populate enhanced debug state using the Debugger trait (if available)
+            use emu_core::debug::Debugger;
+            let enhanced_state_opt = match &sys {
+                EmulatorSystem::NES(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("NES", debugger))
+                }
+                _ => None, // Other systems don't have debugger implemented yet
+            };
+            
+            if let Some(enhanced_state) = enhanced_state_opt {
+                egui_app.tab_manager.update_enhanced_debug_state(enhanced_state);
+            }
         }
 
         // Render egui UI
