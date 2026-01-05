@@ -9,7 +9,7 @@ use crate::bus::Atari2600Bus;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Atari2600Cpu {
     #[serde(skip)]
-    cpu: Option<Cpu6502<Atari2600Bus>>,
+    pub(crate) cpu: Option<Cpu6502<Atari2600Bus>>,
 }
 
 impl Atari2600Cpu {
