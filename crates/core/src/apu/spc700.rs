@@ -127,6 +127,10 @@ impl Spc700Memory {
     fn write_cpuio(&mut self, port: usize, val: u8) {
         if port < 4 {
             self.cpuio[port] = val;
+            log(LogCategory::APU, LogLevel::Debug, || {
+                format!("SPC700 Memory: Main CPU wrote ${:02X} to port ${} (CPUIO now: ${:02X} ${:02X} ${:02X} ${:02X})",
+                    val, port, self.cpuio[0], self.cpuio[1], self.cpuio[2], self.cpuio[3])
+            });
         }
     }
 

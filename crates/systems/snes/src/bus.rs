@@ -486,12 +486,10 @@ impl Memory65c816 for SnesBus {
                         // Use real SPC700 if available, otherwise use stub
                         if let Some(ref spc700) = self.spc700 {
                             let val = spc700.read_port(port);
-                            log(LogCategory::Bus, LogLevel::Debug, || {
+                            log(LogCategory::Bus, LogLevel::Trace, || {
                                 format!(
-                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X} (expecting ${:02X} at PC=${:04X})",
-                                    offset, port, val,
-                                    if offset == 0x2140 { 0xCC } else { 0x05 },
-                                    0x80D3
+                                    "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X}",
+                                    offset, port, val
                                 )
                             });
                             val
