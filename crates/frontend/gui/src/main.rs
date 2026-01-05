@@ -3620,6 +3620,26 @@ fn main() {
                     settings.emulation_speed = 1.0;
                     egui_app.status_bar.set_message("Resumed".to_string());
                 }
+                MenuAction::Step => {
+                    // Step one frame when paused
+                    if rom_loaded && settings.emulation_speed == 0.0 {
+                        match sys.step_frame() {
+                            Ok(frame) => {
+                                latest_frame_buffer = Some((
+                                    frame.pixels.clone(),
+                                    frame.width as usize,
+                                    frame.height as usize,
+                                ));
+                                egui_app
+                                    .status_bar
+                                    .set_message("Stepped one frame".to_string());
+                            }
+                            Err(e) => {
+                                eprintln!("Error stepping frame: {:?}", e);
+                            }
+                        }
+                    }
+                }
                 MenuAction::Screenshot => {
                     // Take screenshot of current frame
                     if rom_loaded {
@@ -4415,6 +4435,41 @@ fn main() {
                             egui_app
                                 .status_bar
                                 .set_message(format!("Unknown system: {}", system_name));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle debug tab actions (pause, resume, step)
+        if let Some(debug_action) = egui_app.tab_manager.take_debug_action() {
+            use egui_ui::DebugAction;
+            match debug_action {
+                DebugAction::Pause => {
+                    settings.emulation_speed = 0.0;
+                    egui_app.status_bar.set_message("Paused".to_string());
+                }
+                DebugAction::Resume => {
+                    settings.emulation_speed = 1.0;
+                    egui_app.status_bar.set_message("Resumed".to_string());
+                }
+                DebugAction::Step => {
+                    // Step one frame when paused
+                    if rom_loaded && settings.emulation_speed == 0.0 {
+                        match sys.step_frame() {
+                            Ok(frame) => {
+                                latest_frame_buffer = Some((
+                                    frame.pixels.clone(),
+                                    frame.width as usize,
+                                    frame.height as usize,
+                                ));
+                                egui_app
+                                    .status_bar
+                                    .set_message("Stepped one frame".to_string());
+                            }
+                            Err(e) => {
+                                eprintln!("Error stepping frame: {:?}", e);
+                            }
                         }
                     }
                 }

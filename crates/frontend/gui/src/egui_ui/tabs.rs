@@ -3,6 +3,7 @@
 use crate::settings::ScalingMode;
 use crate::system_adapter::{EnhancedDebugState, SystemDebugInfo};
 use egui::{ScrollArea, TextureHandle, Ui};
+use emu_core::debug::MemoryRegion;
 
 /// Application version constant
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,6 +23,14 @@ pub enum Tab {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
     CreateNewProject(String), // String is the system name
+}
+
+/// Debug actions that can be triggered from the debug tab
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DebugAction {
+    Step,   // Step one instruction
+    Pause,  // Pause emulation
+    Resume, // Resume emulation
 }
 
 /// PC-specific configuration information for the DBA tab
@@ -49,7 +58,10 @@ pub struct TabManager {
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
+    pub pending_debug_action: Option<DebugAction>,
     pub pc_config_info: Option<PcConfigInfo>,
+    pub selected_memory_region_index: usize,
+    pub memory_view_address: u32,
 }
 
 impl TabManager {
@@ -66,7 +78,10 @@ impl TabManager {
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
+            pending_debug_action: None,
             pc_config_info: None,
+            selected_memory_region_index: 0,
+            memory_view_address: 0,
         }
     }
 
@@ -118,6 +133,11 @@ impl TabManager {
     /// Get and clear any pending action
     pub fn take_action(&mut self) -> Option<TabAction> {
         self.pending_action.take()
+    }
+
+    /// Get and clear any pending debug action
+    pub fn take_debug_action(&mut self) -> Option<DebugAction> {
+        self.pending_debug_action.take()
     }
 
     pub fn ui(
@@ -778,10 +798,10 @@ impl TabManager {
             });
     }
 
-    fn render_debug_tab(&self, ui: &mut Ui) {
+    fn render_debug_tab(&mut self, ui: &mut Ui) {
         // If we have enhanced debug state, show the comprehensive 3-panel view
-        if let Some(ref state) = self.enhanced_debug_state {
-            self.render_enhanced_debug_view(ui, state);
+        if let Some(state) = self.enhanced_debug_state.clone() {
+            self.render_enhanced_debug_view(ui, &state);
         } else if let Some(ref debug_info) = self.debug_info {
             // Fallback to simple legacy view
             self.render_legacy_debug_view(ui, debug_info);
@@ -813,9 +833,9 @@ impl TabManager {
         }
     }
 
-    fn render_enhanced_debug_view(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+    fn render_enhanced_debug_view(&mut self, ui: &mut Ui, state: &EnhancedDebugState) {
         let total_available_height = ui.available_height();
-        
+
         ui.vertical(|ui| {
             // Header
             ui.vertical_centered(|ui| {
@@ -829,11 +849,31 @@ impl TabManager {
 
             ui.add_space(5.0);
             ui.separator();
+
+            // Debugger toolbar
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Controls:").strong());
+
+                if ui.button("⏸ Pause").clicked() {
+                    self.pending_debug_action = Some(DebugAction::Pause);
+                }
+
+                if ui.button("▶ Resume").clicked() {
+                    self.pending_debug_action = Some(DebugAction::Resume);
+                }
+
+                if ui.button("⏭ Step").clicked() {
+                    self.pending_debug_action = Some(DebugAction::Step);
+                }
+            });
+
+            ui.add_space(5.0);
+            ui.separator();
             ui.add_space(5.0);
 
             // 3-column layout: Disassembly | Memory | CPU State
             // Use horizontal layout with equal-width columns that fill available height
-            let header_height = 80.0; // Approximate height used by header elements above
+            let header_height = 120.0; // Approximate height used by header elements above (including toolbar)
             ui.horizontal_top(|ui| {
                 let available_width = ui.available_width();
                 let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
@@ -951,53 +991,121 @@ impl TabManager {
             });
     }
 
-    fn render_memory_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
+    fn render_memory_panel(&mut self, ui: &mut Ui, state: &EnhancedDebugState) {
         if state.memory_regions.is_empty() {
             ui.label(egui::RichText::new("No memory regions defined").weak());
             return;
         }
 
-        // Show memory regions as expandable tree
-        for region in &state.memory_regions {
-            egui::CollapsingHeader::new(
-                egui::RichText::new(&region.name)
-                    .strong()
-                    .color(egui::Color32::from_rgb(180, 220, 255)),
-            )
-            .default_open(false)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Range:");
-                    ui.label(
-                        egui::RichText::new(format!("${:04X} - ${:04X}", region.start, region.end))
-                            .monospace(),
-                    );
+        // Dropdown for memory region selection
+        ui.horizontal(|ui| {
+            ui.label("Region:");
+            egui::ComboBox::from_id_salt("memory_region_selector")
+                .selected_text(
+                    state
+                        .memory_regions
+                        .get(self.selected_memory_region_index)
+                        .map(|r| r.name.as_str())
+                        .unwrap_or("Select region"),
+                )
+                .show_ui(ui, |ui| {
+                    for (idx, region) in state.memory_regions.iter().enumerate() {
+                        if ui
+                            .selectable_value(
+                                &mut self.selected_memory_region_index,
+                                idx,
+                                &region.name,
+                            )
+                            .clicked()
+                        {
+                            // Reset view address to region start when changing regions
+                            self.memory_view_address = region.start;
+                        }
+                    }
                 });
-                ui.horizontal(|ui| {
-                    ui.label("Size:");
-                    ui.label(egui::RichText::new(format!("{} bytes", region.size())).monospace());
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Access:");
-                    let access = match (region.readable, region.writable) {
-                        (true, true) => "Read/Write",
-                        (true, false) => "Read-only",
-                        (false, true) => "Write-only",
-                        (false, false) => "No access",
-                    };
-                    ui.label(egui::RichText::new(access).monospace());
-                });
-                ui.label(egui::RichText::new(&region.description).weak().italics());
-                ui.add_space(5.0);
+        });
 
-                // Note: Actual hex dump would be shown here in a complete implementation
+        ui.separator();
+
+        // Show selected region info and hex viewer
+        if let Some(region) = state.memory_regions.get(self.selected_memory_region_index) {
+            // Region info
+            ui.horizontal(|ui| {
+                ui.label("Range:");
                 ui.label(
-                    egui::RichText::new("💡 Memory viewer coming soon")
-                        .weak()
-                        .italics(),
+                    egui::RichText::new(format!("${:04X} - ${:04X}", region.start, region.end))
+                        .monospace(),
                 );
             });
+            ui.horizontal(|ui| {
+                ui.label("Size:");
+                ui.label(egui::RichText::new(format!("{} bytes", region.size())).monospace());
+            });
+            ui.horizontal(|ui| {
+                ui.label("Access:");
+                let access = match (region.readable, region.writable) {
+                    (true, true) => "Read/Write",
+                    (true, false) => "Read-only",
+                    (false, true) => "Write-only",
+                    (false, false) => "No access",
+                };
+                ui.label(egui::RichText::new(access).monospace());
+            });
+
+            ui.add_space(5.0);
+            ui.separator();
+
+            // Address navigation
+            ui.horizontal(|ui| {
+                ui.label("Address:");
+                let mut addr_input = format!("{:04X}", self.memory_view_address);
+                if ui.text_edit_singleline(&mut addr_input).changed() {
+                    if let Ok(addr) = u32::from_str_radix(&addr_input, 16) {
+                        self.memory_view_address = addr.clamp(region.start, region.end);
+                    }
+                }
+                if ui.button("⬆").clicked() && self.memory_view_address >= region.start + 16 {
+                    self.memory_view_address -= 16;
+                }
+                if ui.button("⬇").clicked() && self.memory_view_address + 16 <= region.end {
+                    self.memory_view_address += 16;
+                }
+            });
+
+            ui.add_space(5.0);
+
+            // Hex viewer placeholder (to be filled with actual memory data)
+            ui.label(egui::RichText::new("Memory Viewer:").strong());
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    self.render_hex_dump(ui, region);
+                });
         }
+    }
+
+    fn render_hex_dump(&self, ui: &mut Ui, _region: &MemoryRegion) {
+        // Display hex dump - note: actual memory reading would be done in main.rs
+        // For now, show placeholder
+        ui.label(
+            egui::RichText::new(format!("Memory view at ${:04X}", self.memory_view_address))
+                .monospace()
+                .weak(),
+        );
+        ui.label(
+            egui::RichText::new("(Memory content to be populated from debugger)")
+                .weak()
+                .italics(),
+        );
+
+        // Show sample hex dump format
+        ui.add_space(5.0);
+        ui.label(egui::RichText::new("Format:").weak());
+        ui.label(
+            egui::RichText::new("ADDR: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  ASCII")
+                .monospace()
+                .weak(),
+        );
     }
 
     fn render_cpu_state_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
