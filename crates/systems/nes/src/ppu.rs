@@ -611,6 +611,9 @@ impl Ppu {
     }
     #[cfg(test)]
     pub fn render_frame(&self) -> Frame {
+        // TEST-ONLY: This method is used for testing and renders the entire frame at once.
+        // Production code uses render_scanline() which is called 240 times per frame.
+        //
         // Rendering is done "out of band" (not cycle-accurate). Suppress A12 callbacks
         // so mappers like MMC3 don't see thousands of synthetic edges during draw.
         let prev_suppress = self.suppress_a12.replace(true);
@@ -773,6 +776,11 @@ impl Ppu {
                 };
 
                 // Check if this sprite can be rendered on its scanlines (8-sprite limit)
+                // NOTE: This implementation is conservative - it skips the entire sprite if ANY
+                // scanline it occupies has 8 sprites. Real NES hardware would render the sprite
+                // on scanlines that haven't hit the limit. This simplified approach is sufficient
+                // for most games and avoids complex per-scanline rendering logic in render_frame().
+                // Games requiring precise per-scanline sprite limiting should use render_scanline().
                 let mut can_render = false;
                 let mut hit_limit = false;
                 for row in 0..height_px {
