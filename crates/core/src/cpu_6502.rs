@@ -210,10 +210,10 @@ impl<M: Memory6502> Cpu6502<M> {
 
     /// Trigger a Non-Maskable Interrupt (NMI)
     pub fn trigger_nmi(&mut self) {
-        // Avoid nested NMIs in this simplified model.
-        if self.in_nmi {
-            return;
-        }
+        // NMI is non-maskable and always triggers, even if already in an NMI handler.
+        // The in_nmi flag is kept for tracking purposes but doesn't prevent NMI.
+        // Real 6502 behavior: NMIs can interrupt NMI handlers (edge-triggered).
+        // Games like Micro Machines rely on this to handle frame-based logic.
         self.in_nmi = true;
         // Push PC and status, then jump to NMI vector at $FFFA.
         self.push_u16(self.pc);
