@@ -400,7 +400,8 @@ impl Chip8System {
                     // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
                     if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
                         log(LogCategory::PPU, LogLevel::Info, || {
-                            "CHIP-8: SCR - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                            "CHIP-8: SCR - Auto-upgrading to Super-CHIP mode for scroll support"
+                                .to_string()
                         });
                         self.mode = Chip8Mode::SuperChip;
                     }
@@ -416,7 +417,8 @@ impl Chip8System {
                     // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
                     if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
                         log(LogCategory::PPU, LogLevel::Info, || {
-                            "CHIP-8: SCL - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                            "CHIP-8: SCL - Auto-upgrading to Super-CHIP mode for scroll support"
+                                .to_string()
                         });
                         self.mode = Chip8Mode::SuperChip;
                     }
@@ -482,7 +484,8 @@ impl Chip8System {
                         // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
                         if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
                             log(LogCategory::PPU, LogLevel::Info, || {
-                                "CHIP-8: SCD - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                                "CHIP-8: SCD - Auto-upgrading to Super-CHIP mode for scroll support"
+                                    .to_string()
                             });
                             self.mode = Chip8Mode::SuperChip;
                         }

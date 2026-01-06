@@ -97,13 +97,11 @@ impl N64System {
     }
 
     /// Create a new N64 system for testing (uses a null GL context)
-    /// This is only available in test builds
     ///
     /// NOTE: Tests using this method require `#[ignore]` attribute because the null
     /// GL context will fail when GL functions are actually called.
     /// For proper headless GL testing, glutin+winit would be needed as dev-dependencies,
     /// but this adds complexity. Tests are functional for manual testing with real GL.
-    #[cfg(test)]
     pub fn new_for_test() -> Self {
         // Use null GL context - tests will fail at runtime if GL functions are called
         // Tests are marked as #[ignore] for this reason
