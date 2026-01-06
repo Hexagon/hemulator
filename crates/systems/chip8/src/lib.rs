@@ -47,6 +47,8 @@
 
 #![allow(clippy::upper_case_acronyms)]
 
+mod debugger;
+
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
@@ -458,10 +460,10 @@ impl Chip8System {
                         });
                         self.scroll_up(n);
                     } else {
-                        // 0NNN - SYS addr: Call machine code routine (ignored)
+                        // 0NNN - SYS addr: Call machine code routine (typically ignored by modern interpreters)
                         log(LogCategory::Stubs, LogLevel::Trace, || {
                             format!(
-                                "CHIP-8: SYS {:03X} - Machine code routine (ignored)",
+                                "CHIP-8: SYS {:03X} - Machine code routine (typically ignored by modern interpreters)",
                                 opcode & 0x0FFF
                             )
                         });
@@ -1243,6 +1245,10 @@ impl System for Chip8System {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "Program" && self.program_loaded
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 

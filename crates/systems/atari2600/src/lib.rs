@@ -132,6 +132,7 @@ use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 mod bus;
 mod cartridge;
 mod cpu;
+mod debugger;
 mod riot;
 mod tia;
 pub mod tia_renderer;
@@ -562,6 +563,10 @@ impl System for Atari2600System {
             .bus()
             .map(|bus| bus.cartridge.is_some())
             .unwrap_or(false)
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 
