@@ -958,8 +958,10 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - Task execution framework for graphics microcode
 - RDP (Reality Display Processor) with enhanced framebuffer support
   - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
-  - **Software renderer** (default): Fully functional, high accuracy
-  - **OpenGL renderer** (stub): Architecture in place for future GPU acceleration
+  - **Software renderer** (default): Fully functional, high accuracy, CPU-based
+  - **OpenGL renderer** (optional): GPU-accelerated for better performance
+  - Both renderers support all features: 3D triangles, Z-buffer, texture mapping
+  - Switch renderers via Settings → Rendering Backend
   - **3D triangle rasterization** with flat, Gouraud shading, and texture mapping
   - **Z-buffer (depth buffer)** for hidden surface removal
   - **Scissor clipping** for efficient rendering
@@ -1009,12 +1011,13 @@ For N64 games, the standard controller mappings apply with these button equivale
 *Note: Controller mappings can be customized in `config.json`. Full analog stick and shoulder button support coming soon.*
 
 **Known Limitations**:
-- **Renderer Architecture**:
-  - Software renderer is fully functional (default)
-  - OpenGL renderer is a stub (requires GL context from frontend)
-  - To enable OpenGL stub: build with `--features opengl`
-  - OpenGL integration with SDL2 frontend is planned
-  - See system README files for details on renderer design
+- **Renderer Performance**:
+  - Software renderer (default): CPU-based, accurate but slower (~1-2 FPS for complex scenes)
+  - OpenGL renderer (optional): GPU-accelerated for better performance
+  - To enable OpenGL renderer: Set `video_backend: "opengl"` in `config.json`
+  - Renderer can be switched in Settings → Rendering Backend (requires ROM reload)
+  - Both renderers produce identical output with feature parity
+  - See system README for technical details on renderer architecture
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles
