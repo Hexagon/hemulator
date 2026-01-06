@@ -10,10 +10,9 @@ serde_json = "1.0"
 thiserror = "1.0"
 crc32fast = "1.4"
 
-# OpenGL dependencies (optional)
-glow = { version = "0.13", optional = true }
-bytemuck = { version = "1.14", optional = true }
+# OpenGL dependencies (required)
+glow = "0.13"
+bytemuck = "1.14"
 
 [features]
-default = ["opengl"]
-opengl = ["dep:glow", "dep:bytemuck"]
+default = []

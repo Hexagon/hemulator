@@ -15,24 +15,24 @@
 //! - Feature-gated behind `opengl` feature flag
 //! - Falls back to software renderer if GL context unavailable
 
-#[cfg(feature = "opengl")]
+
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
-#[cfg(feature = "opengl")]
+
 use emu_core::types::Frame;
-#[cfg(feature = "opengl")]
+
 use glow::HasContext;
 
 /// Wrapper for glow::Context that implements Send
 /// Safety: OpenGL contexts are generally safe to send between threads as long as
 /// they're not actively being used on multiple threads simultaneously. The RDP
 /// renderer is only used from the emulation thread, so this is safe.
-#[cfg(feature = "opengl")]
+
 struct SendContext(glow::Context);
 
-#[cfg(feature = "opengl")]
+
 unsafe impl Send for SendContext {}
 
-#[cfg(feature = "opengl")]
+
 impl std::ops::Deref for SendContext {
     type Target = glow::Context;
 
@@ -42,7 +42,7 @@ impl std::ops::Deref for SendContext {
 }
 
 /// Shader program type for different rendering modes
-#[cfg(feature = "opengl")]
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ShaderProgram {
     Flat,     // Solid color triangles
@@ -51,7 +51,7 @@ enum ShaderProgram {
 }
 
 /// OpenGL-based RDP renderer
-#[cfg(feature = "opengl")]
+
 pub struct OpenGLRdpRenderer {
     gl: SendContext,
     width: u32,
@@ -82,7 +82,7 @@ pub struct OpenGLRdpRenderer {
     zbuffer_enabled: bool,
 }
 
-#[cfg(feature = "opengl")]
+
 impl OpenGLRdpRenderer {
     /// Create a new OpenGL renderer with the given GL context
     pub fn new(gl: glow::Context, width: u32, height: u32) -> Result<Self, String> {
@@ -326,7 +326,7 @@ impl OpenGLRdpRenderer {
     }
 }
 
-#[cfg(feature = "opengl")]
+
 impl RdpRenderer for OpenGLRdpRenderer {
     fn init(&mut self, width: u32, height: u32) {
         unsafe {
@@ -1070,7 +1070,7 @@ impl RdpRenderer for OpenGLRdpRenderer {
 }
 
 /// Helper function to compile a shader
-#[cfg(feature = "opengl")]
+
 unsafe fn compile_shader(
     gl: &SendContext,
     shader_type: u32,
@@ -1093,7 +1093,7 @@ unsafe fn compile_shader(
 }
 
 /// Create flat shading program
-#[cfg(feature = "opengl")]
+
 fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -1127,7 +1127,7 @@ fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Create Gouraud shading program
-#[cfg(feature = "opengl")]
+
 fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -1161,7 +1161,7 @@ fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Create textured shading program
-#[cfg(feature = "opengl")]
+
 fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader = compile_shader(
@@ -1198,7 +1198,7 @@ fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Implement Drop to clean up OpenGL resources
-#[cfg(feature = "opengl")]
+
 impl Drop for OpenGLRdpRenderer {
     fn drop(&mut self) {
         unsafe {
@@ -1216,7 +1216,7 @@ impl Drop for OpenGLRdpRenderer {
 }
 
 #[cfg(test)]
-#[cfg(feature = "opengl")]
+
 mod tests {
     #[allow(unused_imports)] // Test module for documentation purposes
     use super::*;

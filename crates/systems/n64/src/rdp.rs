@@ -223,23 +223,23 @@ impl Rdp {
         })
     }
 
-    /// Create a new RDP for testing (uses a headless GL context)
+    /// Create a new RDP for testing (uses a null GL context)
     /// This is only available in test builds
+    ///
+    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        // Create a headless/mock GL context for testing
         let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-
         Self::new(gl).expect("Failed to create RDP for test")
     }
 
     /// Create a new RDP with specified resolution for testing
     /// This is only available in test builds
+    ///
+    /// NOTE: Tests using this require `#[ignore]` because null GL context will fail
     #[cfg(test)]
     pub fn with_resolution_for_test(width: u32, height: u32) -> Self {
-        // Create a headless/mock GL context for testing
         let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
-
         Self::with_resolution(gl, width, height).expect("Failed to create RDP for test")
     }
 

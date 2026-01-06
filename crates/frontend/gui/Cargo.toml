@@ -15,7 +15,7 @@ emu_atari2600 = { path = "../../systems/atari2600" }
 emu_pc = { path = "../../systems/pc" }
 emu_snes = { path = "../../systems/snes" }
 emu_sms = { path = "../../systems/sms" }
-emu_n64 = { path = "../../systems/n64", features = ["opengl"] }
+emu_n64 = { path = "../../systems/n64" }
 emu_chip8 = { path = "../../systems/chip8" }
 rodio = "0.17"
 log = "0.4"

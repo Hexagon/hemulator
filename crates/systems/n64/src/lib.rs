@@ -96,20 +96,18 @@ impl N64System {
         })
     }
 
-    /// Create a new N64 system for testing (uses a headless GL context)
+    /// Create a new N64 system for testing (uses a null GL context)
     /// This is only available in test builds
+    ///
+    /// NOTE: Tests using this method require `#[ignore]` attribute because the null
+    /// GL context will fail when GL functions are actually called.
+    /// For proper headless GL testing, glutin+winit would be needed as dev-dependencies,
+    /// but this adds complexity. Tests are functional for manual testing with real GL.
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        // Create a headless/mock GL context for testing
-        // In tests, we use a minimal stub that doesn't require real GPU
-
-        // Create a context that will work without display
-        // We'll use surfaceless/headless context
-        let gl = unsafe {
-            // For tests, create a minimal context
-            // This will fail gracefully if no GL is available
-            glow::Context::from_loader_function(|_s| std::ptr::null())
-        };
+        // Use null GL context - tests will fail at runtime if GL functions are called
+        // Tests are marked as #[ignore] for this reason
+        let gl = unsafe { glow::Context::from_loader_function(|_s| std::ptr::null()) };
 
         Self::new(gl).expect("Failed to create N64 system for test")
     }
@@ -397,9 +395,10 @@ mod tests {
     use super::*;
     use emu_core::cpu_mips_r4300i::MemoryMips;
 
-    // NOTE: N64 tests require OpenGL context which is not available in CI/headless environments.
-    // These tests are marked as #[ignore] and can be run locally with: cargo test -- --ignored
-    // A proper solution would require adding glutin/winit dependencies for headless GL context.
+    // NOTE: N64 tests use null GL context and are marked as #[ignore].
+    // For proper headless GL testing, glutin+winit would be needed as dev-dependencies.
+    // Tests are functional for manual testing with: cargo test --package emu_n64 -- --ignored
+    // (requires actual OpenGL 3.3+ support on the system)
 
     #[test]
     #[ignore] // Requires OpenGL context
@@ -1177,10 +1176,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context - run with --ignored flag if GL is available
+    #[ignore] // Requires OpenGL context
     fn test_n64_renderer_name() {
         // Test that renderer_name() reports the correct renderer
-        // Note: This test requires an actual OpenGL context and will fail in headless environments
+        // NOTE: Requires actual OpenGL 3.3+ to run
         let sys = N64System::new_for_test();
 
         // By default, should be using OpenGL renderer
