@@ -1560,28 +1560,15 @@ fn create_nes_system(
     nes_sys
 }
 
-/// Create an N64 system with the appropriate renderer based on settings
-fn create_n64_system(
-    video_backend: &str,
-    _gl_context: Option<std::rc::Rc<glow::Context>>,
-) -> emu_n64::N64System {
-    let n64_sys = emu_n64::N64System::new();
-
-    // Note: N64 renderer switching would happen here
-    if video_backend == "opengl" {
-        #[cfg(feature = "opengl")]
-        {
-            eprintln!(
-                "Note: N64 OpenGL renderer creation needs RDP access - using software for now"
-            );
-        }
-        #[cfg(not(feature = "opengl"))]
-        {
-            eprintln!("Warning: OpenGL feature not enabled - using software renderer");
-        }
+/// Create an N64 system with OpenGL hardware renderer
+/// Returns an error if GL context is not available or renderer initialization fails
+fn create_n64_system(gl_context: Option<glow::Context>) -> Result<emu_n64::N64System, String> {
+    if let Some(gl) = gl_context {
+        emu_n64::N64System::new(gl)
+    } else {
+        Err("OpenGL context required for N64 emulation: no GL context was created by the frontend or windowing system. \
+Please ensure your system supports hardware-accelerated OpenGL and that the graphics/video backend is configured to create an OpenGL context for the N64 renderer.".to_string())
     }
-
-    n64_sys
 }
 
 /// Create an Atari 2600 system with the appropriate timing mode based on settings
@@ -2241,38 +2228,55 @@ fn main() {
                 }
             }
             "n64" => {
-                sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
-                rom_loaded = true; // Mark system as loaded even without ROM
-                status_message = "Clean N64 system started".to_string();
-                println!("Started clean N64 system");
+                // Create N64 system with OpenGL renderer
+                match emu_n64::N64System::new(
+                    egui_backend
+                        .gl_context()
+                        .ok_or("GL context not available")?,
+                ) {
+                    Ok(n64_sys) => {
+                        sys = EmulatorSystem::N64(Box::new(n64_sys));
+                        rom_loaded = true; // Mark system as loaded even without ROM
+                        status_message = "Clean N64 system started".to_string();
+                        println!("Started clean N64 system");
 
-                // If a file is provided with --system n64, load it directly
-                if let Some(ref p) = rom_path {
-                    if !p.to_lowercase().ends_with(".hemu") {
-                        match std::fs::read(p) {
-                            Ok(data) => {
-                                rom_hash = Some(GameSaves::rom_hash(&data));
-                                if let EmulatorSystem::N64(n64_sys) = &mut sys {
-                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                        eprintln!("Failed to load N64 ROM: {}", e);
-                                        status_message = format!("Error: {}", e);
-                                        rom_hash = None;
-                                    } else {
-                                        rom_loaded = true;
-                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
-                                        if let Err(e) = settings.save() {
-                                            eprintln!("Warning: Failed to save settings: {}", e);
+                        // If a file is provided with --system n64, load it directly
+                        if let Some(ref p) = rom_path {
+                            if !p.to_lowercase().ends_with(".hemu") {
+                                match std::fs::read(p) {
+                                    Ok(data) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        if let EmulatorSystem::N64(n64_sys) = &mut sys {
+                                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                                eprintln!("Failed to load N64 ROM: {}", e);
+                                                status_message = format!("Error: {}", e);
+                                                rom_hash = None;
+                                            } else {
+                                                rom_loaded = true;
+                                                runtime_state
+                                                    .set_mount("Cartridge".to_string(), p.clone());
+                                                settings.last_rom_path = Some(p.clone());
+                                                if let Err(e) = settings.save() {
+                                                    eprintln!(
+                                                        "Warning: Failed to save settings: {}",
+                                                        e
+                                                    );
+                                                }
+                                                status_message = "N64 ROM loaded".to_string();
+                                                println!("Loaded N64 ROM: {}", p);
+                                            }
                                         }
-                                        status_message = "N64 ROM loaded".to_string();
-                                        println!("Loaded N64 ROM: {}", p);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to read file: {}", e);
                                     }
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("Failed to read file: {}", e);
-                            }
                         }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to create N64 system: {}", e);
+                        std::process::exit(1);
                     }
                 }
             }
@@ -2539,21 +2543,29 @@ fn main() {
                         }
                         Ok(SystemType::N64) => {
                             rom_hash = Some(GameSaves::rom_hash(&data));
-                            let mut n64_sys = emu_n64::N64System::new();
-                            if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                eprintln!("Failed to load N64 ROM: {}", e);
-                                status_message = format!("Error: {}", e);
-                                rom_hash = None;
-                            } else {
-                                rom_loaded = true;
-                                sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
-                                if let Err(e) = settings.save() {
-                                    eprintln!("Warning: Failed to save settings: {}", e);
+                            let gl_ctx = egui_backend.gl_context();
+                            match create_n64_system(gl_ctx) {
+                                Ok(mut n64_sys) => {
+                                    if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                        eprintln!("Failed to load N64 ROM: {}", e);
+                                        status_message = format!("Error: {}", e);
+                                        rom_hash = None;
+                                    } else {
+                                        rom_loaded = true;
+                                        sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                        runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                        settings.last_rom_path = Some(p.clone());
+                                        if let Err(e) = settings.save() {
+                                            eprintln!("Warning: Failed to save settings: {}", e);
+                                        }
+                                        status_message = "N64 ROM loaded".to_string();
+                                        println!("Loaded N64 ROM: {}", p);
+                                    }
                                 }
-                                status_message = "N64 ROM loaded".to_string();
-                                println!("Loaded N64 ROM: {}", p);
+                                Err(e) => {
+                                    eprintln!("Failed to create N64 system: {}", e);
+                                    status_message = format!("Error: {}", e);
+                                }
                             }
                         }
                         Ok(SystemType::SMS) => {
@@ -3983,41 +3995,54 @@ fn main() {
                                     }
                                     Ok(SystemType::N64) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let mut n64_sys = emu_n64::N64System::new();
-                                        if let Err(e) = n64_sys.mount("Cartridge", &data) {
-                                            egui_app
-                                                .status_bar
-                                                .set_message(format!("Error: {}", e));
-                                            rom_hash = None;
-                                        } else {
-                                            rom_loaded = true;
-                                            sys = EmulatorSystem::N64(Box::new(n64_sys));
-                                            egui_app.property_pane.system_name = "N64".to_string();
-                                            egui_app.property_pane.rendering_backend =
-                                                sys.get_current_renderer_name();
-                                            egui_app.property_pane.available_renderers =
-                                                sys.get_available_renderers();
-                                            runtime_state.set_mount(
-                                                "Cartridge".to_string(),
-                                                file_path.clone(),
-                                            );
-                                            settings.last_rom_path = Some(file_path.clone());
-                                            settings.add_recent_file(file_path.clone());
-                                            if let Err(e) = settings.save() {
-                                                eprintln!(
-                                                    "Warning: Failed to save settings: {}",
-                                                    e
-                                                );
+                                        let gl_ctx = egui_backend.gl_context();
+
+                                        match create_n64_system(gl_ctx) {
+                                            Ok(mut n64_sys) => {
+                                                if let Err(e) = n64_sys.mount("Cartridge", &data) {
+                                                    egui_app
+                                                        .status_bar
+                                                        .set_message(format!("Error: {}", e));
+                                                    rom_hash = None;
+                                                } else {
+                                                    rom_loaded = true;
+                                                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                                    egui_app.property_pane.system_name =
+                                                        "N64".to_string();
+                                                    egui_app.property_pane.rendering_backend =
+                                                        sys.get_current_renderer_name();
+                                                    egui_app.property_pane.available_renderers =
+                                                        sys.get_available_renderers();
+                                                    runtime_state.set_mount(
+                                                        "Cartridge".to_string(),
+                                                        file_path.clone(),
+                                                    );
+                                                    settings.last_rom_path =
+                                                        Some(file_path.clone());
+                                                    settings.add_recent_file(file_path.clone());
+                                                    if let Err(e) = settings.save() {
+                                                        eprintln!(
+                                                            "Warning: Failed to save settings: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                    egui_app.update_recent_files(
+                                                        settings.get_recent_files().to_vec(),
+                                                    );
+                                                    egui_app
+                                                        .status_bar
+                                                        .set_message("N64 ROM loaded".to_string());
+                                                    let _ = sys.resolution();
+                                                    if let Some(ref hash) = rom_hash {
+                                                        _game_saves = GameSaves::load(hash);
+                                                    }
+                                                }
                                             }
-                                            egui_app.update_recent_files(
-                                                settings.get_recent_files().to_vec(),
-                                            );
-                                            egui_app
-                                                .status_bar
-                                                .set_message("N64 ROM loaded".to_string());
-                                            let _ = sys.resolution();
-                                            if let Some(ref hash) = rom_hash {
-                                                _game_saves = GameSaves::load(hash);
+                                            Err(e) => {
+                                                egui_app.status_bar.set_message(format!(
+                                                    "Failed to create N64 system: {}",
+                                                    e
+                                                ));
                                             }
                                         }
                                     }
@@ -4707,39 +4732,14 @@ fn main() {
                                 }
                             }
                             #[cfg(feature = "opengl")]
-                            EmulatorSystem::N64(n64_sys) => {
-                                if renderer_name == "OpenGL" {
-                                    if let Some(gl) = egui_backend.gl_context() {
-                                        match n64_sys.enable_opengl_renderer(gl) {
-                                            Ok(()) => {
-                                                switched = true;
-                                                egui_app.property_pane.rendering_backend =
-                                                    "OpenGL".to_string();
-                                                egui_app.status_bar.set_success(
-                                                    "Switched to OpenGL renderer".to_string(),
-                                                );
-                                                egui_app.tab_manager.add_log(
-                                                    "N64: Switched to OpenGL hardware renderer"
-                                                        .to_string(),
-                                                );
-                                            }
-                                            Err(e) => {
-                                                eprintln!(
-                                                    "Failed to enable OpenGL renderer: {}",
-                                                    e
-                                                );
-                                                egui_app.status_bar.set_error(format!(
-                                                    "Failed to enable OpenGL renderer: {}",
-                                                    e
-                                                ));
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    egui_app.status_bar.set_message(
-                                        "Renderer preference saved. Reload ROM to switch to Software renderer.".to_string(),
-                                    );
-                                }
+                            EmulatorSystem::N64(_n64_sys) => {
+                                // N64 renderer is set at system creation time and cannot be changed
+                                egui_app.status_bar.set_error(
+                                    "N64 renderer cannot be changed after system creation. Restart with a new system to change renderer.".to_string(),
+                                );
+                                egui_app.tab_manager.add_log(
+                                    "N64: Renderer is fixed at system creation time".to_string(),
+                                );
                             }
                             _ => {
                                 // System doesn't support renderer switching
@@ -4900,27 +4900,28 @@ fn main() {
                                 .set_message("Created new SNES system".to_string());
                         }
                         "N64" => {
-                            sys = EmulatorSystem::N64(Box::new(emu_n64::N64System::new()));
-                            rom_loaded = false;
-                            rom_hash = None;
-                            runtime_state.clear_mounts();
-                            egui_app.property_pane.system_name = "N64".to_string();
-
-                            // Enable OpenGL renderer for N64
-                            if let Some(renderer_name) =
-                                enable_n64_opengl_renderer(&mut sys, &egui_backend)
-                            {
-                                egui_app.property_pane.rendering_backend = renderer_name;
-                            } else {
-                                egui_app.property_pane.rendering_backend =
-                                    sys.get_current_renderer_name();
+                            let gl_ctx = egui_backend.gl_context();
+                            match create_n64_system(gl_ctx) {
+                                Ok(n64_sys) => {
+                                    sys = EmulatorSystem::N64(Box::new(n64_sys));
+                                    rom_loaded = false;
+                                    rom_hash = None;
+                                    runtime_state.clear_mounts();
+                                    egui_app.property_pane.system_name = "N64".to_string();
+                                    egui_app.property_pane.rendering_backend =
+                                        sys.get_current_renderer_name();
+                                    egui_app.property_pane.available_renderers =
+                                        sys.get_available_renderers();
+                                    egui_app
+                                        .status_bar
+                                        .set_message("Created new N64 system".to_string());
+                                }
+                                Err(e) => {
+                                    egui_app
+                                        .status_bar
+                                        .set_message(format!("Failed to create N64 system: {}", e));
+                                }
                             }
-
-                            egui_app.property_pane.available_renderers =
-                                sys.get_available_renderers();
-                            egui_app
-                                .status_bar
-                                .set_message("Created new N64 system".to_string());
                         }
                         "SMS" => {
                             sys = EmulatorSystem::SMS(Box::new(emu_sms::SmsSystem::new()));
