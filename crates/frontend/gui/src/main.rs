@@ -1171,11 +1171,11 @@ struct CliArgs {
     debug_dump_cycles: Option<u64>,  // Cycle count to trigger debug dump
     debug_dump_file: Option<String>, // Output file for debug dump (default: debug_dump.txt)
     // Instruction tracing configuration
-    trace_instructions: bool,                 // Enable instruction tracing
-    trace_limit: Option<usize>,               // Max instructions to keep in trace buffer
-    trace_dump_file: Option<String>,          // File to dump trace on breakpoint/exit
+    trace_instructions: bool,        // Enable instruction tracing
+    trace_limit: Option<usize>,      // Max instructions to keep in trace buffer
+    trace_dump_file: Option<String>, // File to dump trace on breakpoint/exit
     // Breakpoint configuration
-    breakpoints: Vec<u32>,                    // List of breakpoint addresses
+    breakpoints: Vec<u32>, // List of breakpoint addresses
 }
 
 impl CliArgs {
@@ -1439,10 +1439,16 @@ impl CliArgs {
         eprintln!("                           Dumps full disassembly and memory contents");
         eprintln!();
         eprintln!("Instruction Tracing Options:");
-        eprintln!("  --trace-instructions     Enable instruction tracing (records executed instructions)");
-        eprintln!("  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)");
+        eprintln!(
+            "  --trace-instructions     Enable instruction tracing (records executed instructions)"
+        );
+        eprintln!(
+            "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)"
+        );
         eprintln!("  --trace-dump-file <PATH> File to dump trace when breakpoint hit (default: trace_dump.txt)");
-        eprintln!("  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)");
+        eprintln!(
+            "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
+        );
         eprintln!("                           When hit, dumps trace and optionally exits");
         eprintln!();
         eprintln!("Disk formats:");
@@ -1474,15 +1480,11 @@ impl CliArgs {
         eprintln!(
             "  hemu --debug-dump-cycles 10000 game.nes        # Dump debug info after 10000 cycles"
         );
-        eprintln!(
-            "  hemu --trace-instructions --breakpoint 0x8100 game.nes"
-        );
+        eprintln!("  hemu --trace-instructions --breakpoint 0x8100 game.nes");
         eprintln!(
             "                                                 # Trace execution until breakpoint hit"
         );
-        eprintln!(
-            "  hemu --trace-instructions --trace-limit 5000 game.nes"
-        );
+        eprintln!("  hemu --trace-instructions --trace-limit 5000 game.nes");
         eprintln!(
             "                                                 # Keep last 5000 instructions in trace"
         );

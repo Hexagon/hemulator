@@ -109,8 +109,7 @@ impl BreakpointManager {
         if !self.enabled {
             return false;
         }
-        self.breakpoints
-            .contains(&Breakpoint::new_execute(address))
+        self.breakpoints.contains(&Breakpoint::new_execute(address))
     }
 
     /// Check if a breakpoint should trigger for memory read

@@ -87,12 +87,7 @@ impl InstructionTracer {
 
     /// Get the last N instructions from history
     pub fn get_last_n(&self, n: usize) -> Vec<ExecutionTrace> {
-        self.history
-            .iter()
-            .rev()
-            .take(n)
-            .cloned()
-            .collect()
+        self.history.iter().rev().take(n).cloned().collect()
     }
 
     /// Clear the execution history
