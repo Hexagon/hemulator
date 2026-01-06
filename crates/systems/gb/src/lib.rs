@@ -172,6 +172,8 @@ pub struct GbSystem {
     cart_loaded: bool,
     /// Accumulated cycles for audio generation
     audio_cycles_accumulated: u32,
+    /// Total CPU cycles executed since reset
+    total_cycles: u64,
     /// Renderer for PPU output
     renderer: Box<dyn PpuRenderer>,
     /// Instruction tracer for debugging
@@ -196,6 +198,7 @@ impl GbSystem {
             cpu,
             cart_loaded: false,
             audio_cycles_accumulated: 0,
+            total_cycles: 0,
             renderer: Box::new(SoftwarePpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -327,6 +330,7 @@ impl System for GbSystem {
 
     fn reset(&mut self) {
         self.cpu.reset();
+        self.total_cycles = 0;
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -344,6 +348,7 @@ impl System for GbSystem {
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
+            self.total_cycles += cpu_cycles as u64;
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -479,6 +484,10 @@ impl System for GbSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 

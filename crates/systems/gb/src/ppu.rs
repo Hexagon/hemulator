@@ -871,6 +871,15 @@ impl Ppu {
     }
 
     /// Step the PPU for the given number of cycles
+    ///
+    /// Updates the PPU mode bits in STAT register based on current scanline position.
+    /// Returns true if VBlank just started (for triggering VBlank interrupt).
+    ///
+    /// # PPU Mode Timing (per scanline = 456 cycles)
+    /// - Mode 2 (OAM Search): Cycles 0-79 (80 cycles)
+    /// - Mode 3 (Pixel Transfer): Cycles 80-251 (172 cycles typical)
+    /// - Mode 0 (HBlank): Cycles 252-455 (204 cycles typical)
+    /// - Mode 1 (VBlank): Lines 144-153
     pub fn step(&mut self, cycles: u32) -> bool {
         // Accumulate cycles
         self.cycle_counter += cycles;
@@ -895,7 +904,46 @@ impl Ppu {
             }
         }
 
+        // Update STAT mode bits (bits 0-1) based on current state
+        // Mode bits should reflect the current PPU state
+        self.update_stat_mode();
+
         vblank_started
+    }
+
+    /// Update the PPU mode bits in STAT register
+    ///
+    /// The mode is determined by:
+    /// - LY >= 144: Mode 1 (VBlank)
+    /// - LY < 144 and cycle_counter < 80: Mode 2 (OAM Search)
+    /// - LY < 144 and cycle_counter < 252: Mode 3 (Pixel Transfer)
+    /// - LY < 144 and cycle_counter >= 252: Mode 0 (HBlank)
+    fn update_stat_mode(&mut self) {
+        // Clear mode bits (bits 0-1)
+        self.stat &= !0x03;
+
+        // Check if LCD is enabled
+        if (self.lcdc & LCDC_ENABLE) == 0 {
+            // LCD disabled: mode is always 0
+            return;
+        }
+
+        let mode = if self.ly >= 144 {
+            // Lines 144-153: VBlank (Mode 1)
+            1
+        } else if self.cycle_counter < 80 {
+            // First 80 cycles: OAM Search (Mode 2)
+            2
+        } else if self.cycle_counter < 252 {
+            // Cycles 80-251: Pixel Transfer (Mode 3)
+            3
+        } else {
+            // Cycles 252-455: HBlank (Mode 0)
+            0
+        };
+
+        // Set mode bits
+        self.stat |= mode;
     }
 }
 
