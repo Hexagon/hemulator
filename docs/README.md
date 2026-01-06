@@ -11,9 +11,8 @@ docs/
 │   ├── user/              # User documentation
 │   │   └── manual.md      # Complete user manual
 │   ├── developer/         # Developer documentation
-│   │   ├── architecture.md   # System architecture
+│   │   ├── architecture.md   # Architecture overview (refers to root ARCHITECTURE.md)
 │   │   ├── contributing.md   # Contributing guide
-│   │   ├── agents.md         # Agent guidelines
 │   │   ├── n64-status.md     # N64 development status
 │   │   ├── next-emulator.md  # Next system recommendation
 │   │   └── sms-guide.md      # SMS implementation guide
@@ -49,7 +48,9 @@ docs/
 End-user guides, manuals, and getting started information. Accessible to non-technical users.
 
 ### Developer Documentation (`src/developer/`)
-Architecture details, contribution guidelines, implementation guides, and development resources.
+Architecture overview, contribution guidelines, implementation guides, and development resources.
+
+**Note**: Full architecture documentation is maintained in the repository root at [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md). The site provides a high-level overview.
 
 ### System Documentation (`src/systems/`)
 Overview of all emulated systems with links to system-specific READMEs in `crates/systems/*/README.md`.
@@ -60,9 +61,14 @@ Overview of all emulated systems with links to system-specific READMEs in `crate
 Technical references for CPUs, hardware components, and protocols. Includes instruction sets, addressing modes, and implementation notes with sources.
 
 ### Root Documentation Files (`docs/*.md`)
-Most files in the root `docs/` directory are **simple redirects** to the documentation site for backward compatibility:
-- `MANUAL.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → redirect to site
+Most files in the root `docs/` directory are **simple redirects** for backward compatibility:
+- `MANUAL.md`, `CONTRIBUTING.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → redirect to site
+- `ARCHITECTURE.md` → redirects to repository root ARCHITECTURE.md
 - `README.md` → this file, documenting the site itself
+
+### Repository Root Documentation
+- **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Complete architecture documentation (repository root)
+- **[AGENTS.md](../AGENTS.md)** - Implementation guidelines for automated agents and CI (repository root)
 
 **The authoritative documentation is in `docs/src/`** and published to the site.
 

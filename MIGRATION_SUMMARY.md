@@ -17,9 +17,8 @@ docs/
 │   ├── user/                    # User documentation
 │   │   └── manual.md            # Complete user manual
 │   ├── developer/               # Developer documentation
-│   │   ├── architecture.md      # System architecture
+│   │   ├── architecture.md      # Architecture overview (refers to root ARCHITECTURE.md)
 │   │   ├── contributing.md      # Contributing guide
-│   │   ├── agents.md            # Agent guidelines
 │   │   ├── n64-status.md        # N64 development status
 │   │   ├── next-emulator.md     # Next system recommendation
 │   │   └── sms-guide.md         # SMS implementation guide
@@ -41,13 +40,20 @@ docs/
 ├── deno.json                    # Deno tasks and dependencies
 ├── .gitignore                   # Excludes _site build output
 ├── README.md                    # Documentation site guide
-├── ARCHITECTURE.md              # Redirect to site (backward compatibility)
+├── ARCHITECTURE.md              # Redirect to repository root
 ├── CONTRIBUTING.md              # Redirect to site (backward compatibility)
 ├── MANUAL.md                    # Redirect to site (backward compatibility)
 ├── N64_STATUS.md                # Redirect to site (backward compatibility)
 ├── NEXT_EMULATOR_RECOMMENDATION.md  # Redirect to site (backward compatibility)
 └── SMS_IMPLEMENTATION_GUIDE.md  # Redirect to site (backward compatibility)
 ```
+
+### Repository Root Documentation
+
+Key documentation files are maintained in the repository root:
+- **ARCHITECTURE.md** - Complete architecture documentation
+- **AGENTS.md** - Implementation guidelines for automated agents and CI
+- **README.md** - Main repository README
 
 ### GitHub Pages Deployment
 

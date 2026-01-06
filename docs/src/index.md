@@ -21,9 +21,9 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 ### For Developers
 
-- **[Architecture](developer/architecture.md)** - Overall emulation system architecture and design patterns
+- **[Architecture Overview](developer/architecture.md)** - High-level system architecture and design patterns
+  - Full details: [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in repository
 - **[Contributing](developer/contributing.md)** - Development workflow and contribution guidelines
-- **[Agent Guidelines](developer/agents.md)** - Implementation guidelines for automated agents and CI
 - **[CPU References](references/)** - Technical reference documentation for CPU implementations
 
 ## Quick Links

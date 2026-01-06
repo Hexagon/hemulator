@@ -8,9 +8,9 @@ Contributions are welcome! Please follow these guidelines.
 
 **For Users**: See [User Manual](../user/manual.md) for usage instructions.
 
-**For Architecture Details**: See [Architecture](architecture.md) for overall emulation system architecture.
+**For Architecture Details**: See [Architecture Overview](architecture.md) for high-level architecture, or [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository for complete details.
 
-**For Implementation Guidelines**: See [Agent Guidelines](agents.md) for detailed implementation patterns and CI requirements.
+**For Implementation Guidelines**: See [AGENTS.md](https://github.com/Hexagon/hemulator/blob/master/AGENTS.md) in the repository root for detailed implementation patterns and CI requirements.
 
 ## Pre-Commit Checks (REQUIRED)
 

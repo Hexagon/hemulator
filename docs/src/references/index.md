@@ -31,8 +31,7 @@ Hemulator implements several CPU architectures as reusable components. Each CPU 
 
 For guidelines on implementing new CPU components or systems, see:
 
-- [Architecture Documentation](../developer/architecture.md)
-- [Agent Guidelines](../developer/agents.md)
+- [Architecture Overview](../developer/architecture.md)
 - [Contributing Guide](../developer/contributing.md)
 
 ## External Resources

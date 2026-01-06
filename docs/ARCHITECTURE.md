@@ -1,11 +1,13 @@
 # Architecture
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.github.io/hemulator/developer/architecture.html)**
+> **📄 This documentation is maintained in the repository root**
 
-For the complete architecture documentation including system design patterns and implementation details, please visit:
+For the complete architecture documentation including system design patterns and implementation details, please see:
 
-**https://hexagon.github.io/hemulator/developer/architecture.html**
+**[ARCHITECTURE.md](../ARCHITECTURE.md)** in the repository root
+
+For a quick overview, see the [Architecture Overview](https://hexagon.github.io/hemulator/developer/architecture.html) on the documentation site.
 
 ---
 
-*This file is maintained as a redirect for backward compatibility. The authoritative documentation is now hosted on the documentation site.*
+*The full architecture documentation is maintained in the repository root for easy access by developers.*
