@@ -1602,4 +1602,141 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_sprite_clipping_superchip() {
+        // Super-CHIP should CLIP sprites at screen edges
+        let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+        system.program_loaded = true;
+
+        // Place sprite data in memory (8x5 sprite, all pixels set)
+        system.i = 0x300;
+        for i in 0..5 {
+            system.memory[0x300 + i] = 0xFF; // All 8 pixels set
+        }
+
+        // Draw sprite at position that goes off the right edge
+        // Screen width is 128, so X=125 means only first 3 pixels should be visible
+        system.v[0] = 125; // X position
+        system.v[1] = 10; // Y position
+        system.draw_sprite(0, 1, 5);
+
+        // Check that only the first 3 pixels are drawn on each row
+        for row in 0..5 {
+            let y = 10 + row;
+            // First 3 pixels should be set
+            for col in 0..3 {
+                let x = 125 + col;
+                let index = y * system.display_width + x;
+                assert!(
+                    system.display_planes[0][index],
+                    "Pixel at ({}, {}) should be set",
+                    x, y
+                );
+            }
+            // Pixels at the start of the row should NOT be set (no wrapping)
+            for col in 0..3 {
+                let index = y * system.display_width + col;
+                assert!(
+                    !system.display_planes[0][index],
+                    "Pixel at ({}, {}) should NOT be set (no wrapping)",
+                    col, y
+                );
+            }
+        }
+
+        // Clear display for next test
+        system.display_planes[0] = vec![false; system.display_width * system.display_height];
+
+        // Draw sprite at position that goes off the bottom edge
+        // Screen height is 64, so Y=62 means only first 2 rows should be visible
+        system.v[0] = 10; // X position
+        system.v[1] = 62; // Y position
+        system.draw_sprite(0, 1, 5);
+
+        // Check that only the first 2 rows are drawn
+        for row in 0..2 {
+            let y = 62 + row;
+            for col in 0..8 {
+                let x = 10 + col;
+                let index = y * system.display_width + x;
+                assert!(
+                    system.display_planes[0][index],
+                    "Pixel at ({}, {}) should be set",
+                    x, y
+                );
+            }
+        }
+        // Pixels at the top of the screen should NOT be set (no wrapping)
+        for row in 0..3 {
+            for col in 0..8 {
+                let x = 10 + col;
+                let index = row * system.display_width + x;
+                assert!(
+                    !system.display_planes[0][index],
+                    "Pixel at ({}, {}) should NOT be set (no wrapping)",
+                    x, row
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_sprite_wrapping_chip8() {
+        // Original CHIP-8 should WRAP sprites at screen edges
+        let mut system = Chip8System::new_with_mode(Chip8Mode::Chip8);
+        system.program_loaded = true;
+
+        // Place sprite data in memory (8x5 sprite, all pixels set)
+        system.i = 0x300;
+        for i in 0..5 {
+            system.memory[0x300 + i] = 0xFF; // All 8 pixels set
+        }
+
+        // Draw sprite at position that wraps around the right edge
+        // Screen width is 64, so X=62 means last 2 pixels wrap to X=0,1
+        system.v[0] = 62; // X position
+        system.v[1] = 10; // Y position
+        system.draw_sprite(0, 1, 5);
+
+        // Check that first 2 pixels wrapped to the left edge
+        for row in 0..5 {
+            let y = 10 + row;
+            // Last 6 pixels should be at X=62-63, and wrap continues at X=0-1
+            for col in 0..6 {
+                let x = 62 + col;
+                let x_wrapped = x % 64;
+                let index = y * system.display_width + x_wrapped;
+                assert!(
+                    system.display_planes[0][index],
+                    "Pixel at wrapped ({}, {}) should be set",
+                    x_wrapped, y
+                );
+            }
+        }
+
+        // Clear display for next test
+        system.display_planes[0] = vec![false; system.display_width * system.display_height];
+
+        // Draw sprite at position that wraps around the bottom edge
+        // Screen height is 32, so Y=30 means last 2 rows wrap to Y=0,1
+        system.v[0] = 10; // X position
+        system.v[1] = 30; // Y position
+        system.draw_sprite(0, 1, 5);
+
+        // Check that rows wrapped to the top
+        for row in 0..5 {
+            let y = 30 + row;
+            let y_wrapped = y % 32;
+            for col in 0..8 {
+                let x = 10 + col;
+                let index = y_wrapped * system.display_width + x;
+                assert!(
+                    system.display_planes[0][index],
+                    "Pixel at ({}, {}) wrapped should be set",
+                    x, y_wrapped
+                );
+            }
+        }
+    }
 }
