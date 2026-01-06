@@ -705,6 +705,95 @@ mod tests {
     }
 
     #[test]
+    fn test_cgb_palette_initialization() {
+        use emu_core::cpu_lr35902::MemoryLr35902;
+
+        // Test CGB compatibility mode (0x80) - should get DMG default palette
+        let mut sys = GbSystem::new();
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible (DMG with color support)
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Verify CGB mode is enabled
+        assert!(sys.cpu.memory.is_cgb_mode());
+        assert!(sys.cpu.memory.ppu.is_cgb_mode());
+
+        // Verify default DMG-compatible greenish palette is set
+        // Read palette 0, color 0 (should be white: 0x7FFF)
+        sys.cpu.memory.write(0xFF68, 0x00); // BCPS: index 0
+        let color0_low = sys.cpu.memory.read(0xFF69); // BCPD: read low byte
+        sys.cpu.memory.write(0xFF68, 0x01); // BCPS: index 1
+        let color0_high = sys.cpu.memory.read(0xFF69); // BCPD: read high byte
+        assert_eq!(color0_low, 0xFF, "Color 0 low byte should be 0xFF (white)");
+        assert_eq!(
+            color0_high, 0x7F,
+            "Color 0 high byte should be 0x7F (white)"
+        );
+
+        // Read palette 0, color 1 (should be light green: 0x3E90)
+        sys.cpu.memory.write(0xFF68, 0x02); // BCPS: index 2
+        let color1_low = sys.cpu.memory.read(0xFF69);
+        sys.cpu.memory.write(0xFF68, 0x03); // BCPS: index 3
+        let color1_high = sys.cpu.memory.read(0xFF69);
+        assert_eq!(
+            color1_low, 0x90,
+            "Color 1 low byte should be 0x90 (light green)"
+        );
+        assert_eq!(
+            color1_high, 0x3E,
+            "Color 1 high byte should be 0x3E (light green)"
+        );
+
+        // Read palette 0, color 2 (should be dark green: 0x16C4)
+        sys.cpu.memory.write(0xFF68, 0x04); // BCPS: index 4
+        let color2_low = sys.cpu.memory.read(0xFF69);
+        sys.cpu.memory.write(0xFF68, 0x05); // BCPS: index 5
+        let color2_high = sys.cpu.memory.read(0xFF69);
+        assert_eq!(
+            color2_low, 0xC4,
+            "Color 2 low byte should be 0xC4 (dark green)"
+        );
+        assert_eq!(
+            color2_high, 0x16,
+            "Color 2 high byte should be 0x16 (dark green)"
+        );
+
+        // Read palette 0, color 3 (should be black: 0x0000)
+        sys.cpu.memory.write(0xFF68, 0x06); // BCPS: index 6
+        let color3_low = sys.cpu.memory.read(0xFF69);
+        sys.cpu.memory.write(0xFF68, 0x07); // BCPS: index 7
+        let color3_high = sys.cpu.memory.read(0xFF69);
+        assert_eq!(color3_low, 0x00, "Color 3 low byte should be 0x00 (black)");
+        assert_eq!(
+            color3_high, 0x00,
+            "Color 3 high byte should be 0x00 (black)"
+        );
+
+        // Test CGB-only mode (0xC0) - should get white palette
+        let mut sys2 = GbSystem::new();
+        let mut rom2 = vec![0; 0x150];
+        rom2[0x143] = 0xC0; // CGB only
+        rom2[0x147] = 0x00;
+        rom2[0x149] = 0x00;
+
+        sys2.mount("Cartridge", &rom2).unwrap();
+
+        // Verify CGB mode is enabled
+        assert!(sys2.cpu.memory.is_cgb_mode());
+
+        // Verify white palette is set (all colors should be 0x7FFF)
+        sys2.cpu.memory.write(0xFF68, 0x00); // BCPS: index 0
+        let white_low = sys2.cpu.memory.read(0xFF69);
+        sys2.cpu.memory.write(0xFF68, 0x01);
+        let white_high = sys2.cpu.memory.read(0xFF69);
+        assert_eq!(white_low, 0xFF, "Color 0 should be white in CGB-only mode");
+        assert_eq!(white_high, 0x7F, "Color 0 should be white in CGB-only mode");
+    }
+
+    #[test]
     fn test_gb_smoke_test_rom() {
         // Load the test ROM
         let test_rom = include_bytes!("../../../../test_roms/gb/test.gb");

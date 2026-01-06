@@ -227,13 +227,55 @@ impl Ppu {
     }
 
     /// Enable CGB mode
-    pub fn enable_cgb_mode(&mut self) {
+    ///
+    /// # Arguments
+    /// * `compatibility_mode` - If true, this is a DMG game with CGB enhancements (flag 0x80).
+    ///   If false, this is a CGB-only game (flag 0xC0).
+    pub fn enable_cgb_mode(&mut self, compatibility_mode: bool) {
         self.cgb_mode = true;
-        // Initialize CGB palettes with default values
-        // Default: white palette (all colors set to white = 0x7FFF)
-        for i in 0..64 {
-            self.bg_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
-            self.obj_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+
+        if compatibility_mode {
+            // For DMG games with CGB support (flag 0x80), initialize with default
+            // DMG-compatible greenish palette that the boot ROM would set.
+            // This matches the classic Game Boy look on GBC hardware.
+            // Source: GBC boot ROM behavior, Pan Docs, TCRF documentation
+
+            // Default greenish palette colors (RGB555 little-endian format):
+            // Color 0: White (0x7FFF)
+            // Color 1: Light green (0x3E90)
+            // Color 2: Dark green (0x16C4)
+            // Color 3: Black (0x0000)
+            let default_palette: [(u8, u8); 4] = [
+                (0xFF, 0x7F), // White
+                (0x90, 0x3E), // Light green
+                (0xC4, 0x16), // Dark green
+                (0x00, 0x00), // Black
+            ];
+
+            // Initialize all 8 background palettes with the default palette
+            for palette_idx in 0..8 {
+                for (color_idx, &(low, high)) in default_palette.iter().enumerate() {
+                    let base_idx = (palette_idx * 8) + (color_idx * 2);
+                    self.bg_palette_data[base_idx] = low;
+                    self.bg_palette_data[base_idx + 1] = high;
+                }
+            }
+
+            // Initialize all 8 object palettes with the same default palette
+            for palette_idx in 0..8 {
+                for (color_idx, &(low, high)) in default_palette.iter().enumerate() {
+                    let base_idx = (palette_idx * 8) + (color_idx * 2);
+                    self.obj_palette_data[base_idx] = low;
+                    self.obj_palette_data[base_idx + 1] = high;
+                }
+            }
+        } else {
+            // For CGB-only games (flag 0xC0), initialize with white palette
+            // as the game will set its own palettes
+            for i in 0..64 {
+                self.bg_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+                self.obj_palette_data[i] = if i % 2 == 0 { 0xFF } else { 0x7F };
+            }
         }
     }
 
