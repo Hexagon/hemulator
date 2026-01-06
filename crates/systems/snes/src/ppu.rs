@@ -976,10 +976,25 @@ impl Ppu {
             }
         }
 
+        // Apply brightness (bits 0-3 of $2100)
+        // Brightness ranges from 0 (completely dark) to 15 (full brightness)
+        let brightness = (self.screen_display & 0x0F) as u32;
+
+        // Apply brightness scaling to all pixels
+        // Formula: color_out = (color_in * brightness) / 15
+        // We scale each RGB channel independently
+        for pixel in frame.pixels.iter_mut() {
+            let a = (*pixel >> 24) & 0xFF;
+            let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
+            let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
+            let b = (*pixel & 0xFF) * brightness / 15;
+            *pixel = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+
         log(LogCategory::PPU, LogLevel::Debug, || {
             format!(
-                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop color=0x{:08X}, first pixel=0x{:08X}",
-                non_backdrop_pixels, backdrop_color, frame.pixels[0]
+                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop color=0x{:08X}, brightness={}, first pixel=0x{:08X}",
+                non_backdrop_pixels, backdrop_color, brightness, frame.pixels[0]
             )
         });
 
@@ -2146,6 +2161,9 @@ mod tests {
     fn test_scrolling_rendering() {
         let mut ppu = Ppu::new();
 
+        // Leave screen in force blank mode for VRAM setup
+        // (screen_display starts at 0x80 = force blank)
+
         // Set up Mode 0
         ppu.write_register(0x2105, 0x00);
 
@@ -2207,6 +2225,9 @@ mod tests {
         ppu.write_register(0x2119, 0x00);
         ppu.write_register(0x2118, 0x01); // Tile 1
         ppu.write_register(0x2119, 0x00);
+
+        // Now enable screen with full brightness (force blank off)
+        ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
 
         // Render with no scrolling
         let frame1 = ppu.render_frame();
