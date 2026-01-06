@@ -110,6 +110,12 @@ pub trait System {
     fn debugger(&self) -> Option<&dyn debug::Debugger> {
         None
     }
+
+    /// Get the total number of CPU cycles executed since reset
+    /// Default implementation returns 0 (not tracking cycles)
+    fn get_total_cycles(&self) -> u64 {
+        0
+    }
 }
 
 #[cfg(test)]

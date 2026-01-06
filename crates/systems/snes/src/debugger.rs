@@ -125,6 +125,14 @@ impl Debugger for SnesSystem {
 
         state
     }
+
+    fn get_execution_history(&self) -> Vec<emu_core::debug::ExecutionTrace> {
+        self.instruction_tracer.get_history()
+    }
+
+    fn has_execution_history(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
 }
 
 #[cfg(test)]

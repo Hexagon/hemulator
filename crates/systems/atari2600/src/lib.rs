@@ -167,6 +167,10 @@ pub struct Atari2600System {
     video_mode: VideoMode,
     #[allow(dead_code)] // Stored for future use and API consistency
     timing_mode: TimingMode,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl Default for Atari2600System {
@@ -197,6 +201,8 @@ impl Atari2600System {
             renderer: Box::new(SoftwareTiaRenderer::new()),
             video_mode,
             timing_mode,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
     }
 
@@ -261,6 +267,51 @@ impl Atari2600System {
             // Set fire button in TIA (active-high when pressed: bit 7 = 0 when pressed)
             bus.tia.set_fire_button(player as u8, fire);
         }
+    }
+
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
     }
 }
 

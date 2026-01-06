@@ -172,6 +172,8 @@ pub struct NesSystem {
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
     breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    /// Total CPU cycles executed since reset
+    total_cycles: u64,
 }
 
 impl NesSystem {
@@ -344,6 +346,7 @@ impl Default for NesSystem {
             renderer: Box::new(SoftwareNesPpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+            total_cycles: 0,
         }
     }
 }
@@ -417,6 +420,7 @@ impl System for NesSystem {
 
     fn reset(&mut self) {
         self.cpu.reset();
+        self.total_cycles = 0;
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -713,6 +717,9 @@ impl System for NesSystem {
             }
         });
 
+        // Track total cycles
+        self.total_cycles += cpu_cycles_used as u64;
+
         // Return the rendered frame from the renderer by taking ownership
         // This avoids cloning 61,440 pixels (245KB) every frame (60 times/second)
         Ok(self.renderer.take_frame())
@@ -784,6 +791,10 @@ impl System for NesSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 

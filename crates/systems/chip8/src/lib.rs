@@ -171,6 +171,12 @@ pub struct Chip8System {
     selected_plane: u8,      // Which plane(s) to draw to (bitmask: 0-3)
     audio_pattern: [u8; 16], // XO-CHIP audio pattern buffer
     audio_pitch: u8,         // XO-CHIP audio playback rate
+
+    // Debugging
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl Default for Chip8System {
@@ -228,6 +234,8 @@ impl Chip8System {
             selected_plane: 1, // Default to plane 1 (first plane)
             audio_pattern: [0; 16],
             audio_pitch: 64, // Default pitch
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         };
 
         // Load font data into memory (at 0x000-0x04F)
@@ -1000,6 +1008,51 @@ impl Chip8System {
     /// Check if sound should be playing
     pub fn is_sound_playing(&self) -> bool {
         self.sound_timer > 0
+    }
+
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
     }
 }
 

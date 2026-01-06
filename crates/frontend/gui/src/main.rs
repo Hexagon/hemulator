@@ -155,6 +155,19 @@ impl EmulatorSystem {
         }
     }
 
+    fn get_total_cycles(&self) -> u64 {
+        match self {
+            EmulatorSystem::NES(sys) => sys.get_total_cycles(),
+            EmulatorSystem::GameBoy(sys) => sys.get_total_cycles(),
+            EmulatorSystem::Atari2600(sys) => sys.get_total_cycles(),
+            EmulatorSystem::PC(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SNES(sys) => sys.get_total_cycles(),
+            EmulatorSystem::N64(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SMS(sys) => sys.get_total_cycles(),
+            EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
+        }
+    }
+
     #[allow(dead_code)]
     fn mount(
         &mut self,
@@ -2703,7 +2716,8 @@ fn main() {
                         frame.height as usize,
                     ));
 
-                    total_cycles += 1;
+                    // Get actual CPU cycles from the system
+                    total_cycles = sys.get_total_cycles();
 
                     // Check for trigger conditions
                     let should_dump =
