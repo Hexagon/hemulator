@@ -127,6 +127,7 @@
 //! Total: 39 tests, all passing
 
 #![allow(clippy::upper_case_acronyms)]
+use emu_core::debug::Debugger;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
 mod bus;
@@ -167,6 +168,10 @@ pub struct Atari2600System {
     video_mode: VideoMode,
     #[allow(dead_code)] // Stored for future use and API consistency
     timing_mode: TimingMode,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl Default for Atari2600System {
@@ -197,6 +202,8 @@ impl Atari2600System {
             renderer: Box::new(SoftwareTiaRenderer::new()),
             video_mode,
             timing_mode,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
     }
 
@@ -262,6 +269,51 @@ impl Atari2600System {
             bus.tia.set_fire_button(player as u8, fire);
         }
     }
+
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -307,8 +359,19 @@ impl System for Atari2600System {
 
         // Run until scanline wraps around, indicating frame completion
         while cpu_steps < MAX_CPU_STEPS {
+            let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32);
             let cycles = self.cpu.step();
             cpu_steps += 1;
+
+            // Record instruction if tracing is enabled and CPU is available
+            if self.instruction_tracer.is_enabled() {
+                if let Some(pc) = pc_before {
+                    if let Some(instr) = self.disassemble_instruction(pc) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
+                }
+            }
 
             // Clock the TIA and RIOT
             if let Some(bus) = self.cpu.bus_mut() {

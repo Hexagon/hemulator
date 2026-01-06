@@ -305,12 +305,66 @@ hemu --debug-dump-pc 0x8000 --log-cpu trace --log-file trace.log game.nes
 The generated dump file includes:
 1. **Timestamp** - When the dump was generated
 2. **Cycle Count** - Total cycles executed
-3. **CPU State** - All registers and flags with current values
-4. **Disassembly** - ±100 instructions around current PC, with current instruction marked
-5. **Memory Regions** - Full hex dump of all memory regions:
+3. **Screenshot** - Path to screenshot of the last frame state (saved in `screenshots/<system>/`)
+4. **CPU State** - All registers and flags with current values
+5. **Disassembly** - ±100 instructions around current PC, with current instruction marked
+6. **Memory Regions** - Full hex dump of all memory regions:
    - 16 bytes per line in hex format
    - ASCII representation alongside hex values
    - Region metadata (address range, size, permissions)
+
+### Instruction Tracing
+
+The emulator now supports instruction tracing to avoid repeatedly restarting during debugging:
+
+**Enable instruction tracing:**
+```bash
+hemu --trace-instructions game.nes
+```
+
+**Set trace buffer size (default: 10,000 instructions):**
+```bash
+hemu --trace-instructions --trace-limit 5000 game.nes
+```
+
+**Dump trace to file when breakpoint is hit:**
+```bash
+hemu --trace-instructions --trace-dump-file trace.txt --breakpoint 0x8100 game.nes
+```
+
+**Multiple breakpoints:**
+```bash
+hemu --trace-instructions --breakpoint 0x8000 --breakpoint 0x8100 --breakpoint 0x8200 game.nes
+```
+
+### Instruction Trace Features
+
+- **Circular Buffer**: Keeps last N executed instructions in memory
+- **Breakpoints**: Set execution breakpoints at specific addresses
+- **Automatic Dump**: Dumps trace when breakpoint is hit (when CPU integration is complete)
+- **Minimal Overhead**: Tracing is disabled by default for performance
+- **Cross-System**: Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64. PC requires Debugger trait implementation.
+
+### Trace Output Format
+
+```
+===============================================
+    INSTRUCTION EXECUTION TRACE
+===============================================
+
+Timestamp: YYYY-MM-DD HH:MM:SS
+Total Instructions Traced: 5000
+History Size: 5000 instructions
+
+===============================================
+    EXECUTION HISTORY (newest first)
+===============================================
+
+     0: $8100  A9 42         LDA #$42             ; PC=$8102
+     1: $80FE  4C 00 81      JMP $8100            ; PC=$8101
+     2: $80FB  85 10         STA $10              ; PC=$80FD
+     ...
+```
 
 ### Example Output Format
 

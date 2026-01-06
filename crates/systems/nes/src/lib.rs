@@ -83,6 +83,7 @@ use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
@@ -168,6 +169,12 @@ pub struct NesSystem {
     frame_index: u64,
     last_stats: RuntimeStats,
     renderer: Box<dyn NesPpuRenderer>,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
+    /// Total CPU cycles executed since reset
+    total_cycles: u64,
 }
 
 impl NesSystem {
@@ -251,6 +258,51 @@ impl NesSystem {
         self.last_stats
     }
 
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
+    }
+
     /// Enable OpenGL hardware rendering (requires OpenGL feature)
     /// This should be called from the frontend after obtaining a GL context
     #[cfg(feature = "opengl")]
@@ -293,6 +345,9 @@ impl Default for NesSystem {
             frame_index: 0,
             last_stats: RuntimeStats::default(),
             renderer: Box::new(SoftwareNesPpuRenderer::new()),
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
+            total_cycles: 0,
         }
     }
 }
@@ -366,6 +421,7 @@ impl System for NesSystem {
 
     fn reset(&mut self) {
         self.cpu.reset();
+        self.total_cycles = 0;
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -414,10 +470,19 @@ impl System for NesSystem {
                 *e = e.saturating_add(1);
             }
 
+            let pc_before = self.cpu.pc();
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
@@ -515,10 +580,19 @@ impl System for NesSystem {
                 *e = e.saturating_add(1);
             }
 
+            let pc_before = self.cpu.pc();
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
@@ -662,6 +736,9 @@ impl System for NesSystem {
             }
         });
 
+        // Track total cycles
+        self.total_cycles += cpu_cycles_used as u64;
+
         // Return the rendered frame from the renderer by taking ownership
         // This avoids cloning 61,440 pixels (245KB) every frame (60 times/second)
         Ok(self.renderer.take_frame())
@@ -733,6 +810,10 @@ impl System for NesSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 

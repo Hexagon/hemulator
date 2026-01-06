@@ -155,6 +155,19 @@ impl EmulatorSystem {
         }
     }
 
+    fn get_total_cycles(&self) -> u64 {
+        match self {
+            EmulatorSystem::NES(sys) => sys.get_total_cycles(),
+            EmulatorSystem::GameBoy(sys) => sys.get_total_cycles(),
+            EmulatorSystem::Atari2600(sys) => sys.get_total_cycles(),
+            EmulatorSystem::PC(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SNES(sys) => sys.get_total_cycles(),
+            EmulatorSystem::N64(sys) => sys.get_total_cycles(),
+            EmulatorSystem::SMS(sys) => sys.get_total_cycles(),
+            EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
+        }
+    }
+
     #[allow(dead_code)]
     fn mount(
         &mut self,
@@ -1170,6 +1183,12 @@ struct CliArgs {
     debug_dump_pc: Option<u32>,      // PC value to trigger debug dump
     debug_dump_cycles: Option<u64>,  // Cycle count to trigger debug dump
     debug_dump_file: Option<String>, // Output file for debug dump (default: debug_dump.txt)
+    // Instruction tracing configuration
+    trace_instructions: bool,        // Enable instruction tracing
+    trace_limit: Option<usize>,      // Max instructions to keep in trace buffer
+    trace_dump_file: Option<String>, // File to dump trace on breakpoint/exit
+    // Breakpoint configuration
+    breakpoints: Vec<u32>, // List of breakpoint addresses
 }
 
 impl CliArgs {
@@ -1329,6 +1348,50 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--trace-instructions" => {
+                    args.trace_instructions = true;
+                }
+                "--trace-limit" => {
+                    if let Some(value) = arg_iter.next() {
+                        match value.parse::<usize>() {
+                            Ok(limit) => args.trace_limit = Some(limit),
+                            Err(_) => {
+                                eprintln!("Error: --trace-limit requires a valid number.");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --trace-limit requires a number.");
+                        std::process::exit(1);
+                    }
+                }
+                "--trace-dump-file" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.trace_dump_file = Some(path);
+                    } else {
+                        eprintln!("Error: --trace-dump-file requires a file path.");
+                        std::process::exit(1);
+                    }
+                }
+                "--breakpoint" | "-b" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --breakpoint requires a valid address (hex: 0x8000 or decimal: 32768).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -1388,6 +1451,21 @@ impl CliArgs {
         );
         eprintln!("                           Dumps full disassembly and memory contents");
         eprintln!();
+        eprintln!("Instruction Tracing Options:");
+        eprintln!("  --trace-instructions     Enable instruction tracing");
+        eprintln!("                           Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64.");
+        eprintln!("                           PC requires Debugger trait implementation.");
+        eprintln!(
+            "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)"
+        );
+        eprintln!("                           Note: Limit is set at tracer creation and cannot be changed at runtime.");
+        eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
+        eprintln!("                           Note: Automatic dumping on breakpoint hit not yet implemented.");
+        eprintln!(
+            "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
+        );
+        eprintln!("                           Note: Breakpoints can be set, but hit checking/triggering is not yet implemented.");
+        eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
         eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
@@ -1416,6 +1494,14 @@ impl CliArgs {
         );
         eprintln!(
             "  hemu --debug-dump-cycles 10000 game.nes        # Dump debug info after 10000 cycles"
+        );
+        eprintln!("  hemu --trace-instructions --breakpoint 0x8100 game.nes");
+        eprintln!(
+            "                                                 # Trace execution until breakpoint (experimental)"
+        );
+        eprintln!("  hemu --trace-instructions --trace-limit 5000 game.nes");
+        eprintln!(
+            "                                                 # Keep last 5000 instructions in trace (experimental)"
         );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
@@ -1542,11 +1628,44 @@ fn create_enhanced_debug_state(
     enhanced_state
 }
 
+/// Apply CLI debugging options to a system
+fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
+    // Enable instruction tracing if requested
+    if cli_args.trace_instructions {
+        match sys {
+            EmulatorSystem::NES(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::GameBoy(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::Atari2600(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::Chip8(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::SMS(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::SNES(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
+        }
+    }
+
+    // Add breakpoints
+    for &addr in &cli_args.breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_breakpoint(addr),
+        }
+    }
+}
+
 /// Generate a comprehensive debug dump with disassembly and memory contents
+/// Also captures a screenshot of the current frame state
 fn generate_debug_dump(
     system_adapter: &EmulatorSystem,
     output_file: &str,
     cycle_count: u64,
+    frame_buffer: Option<&(Vec<u32>, usize, usize)>,
 ) -> std::io::Result<()> {
     use std::fs::File;
     use std::io::Write;
@@ -1563,6 +1682,22 @@ fn generate_debug_dump(
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     )?;
     writeln!(file, "Cycle Count: {}", cycle_count)?;
+
+    // Save screenshot if frame buffer is available
+    if let Some((buffer, width, height)) = frame_buffer {
+        let system_name = system_adapter.system_name();
+        match save_screenshot(buffer, *width, *height, system_name) {
+            Ok(path) => {
+                writeln!(file, "Screenshot: {}", path)?;
+            }
+            Err(e) => {
+                writeln!(file, "Screenshot: Failed to save ({}) ", e)?;
+            }
+        }
+    } else {
+        writeln!(file, "Screenshot: No frame buffer available")?;
+    }
+
     writeln!(file)?;
 
     // Get debugger if available
@@ -1913,7 +2048,11 @@ fn main() {
     let mut runtime_state = RuntimeState::new();
 
     // Determine what to load based on CLI args
-    let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
+    let rom_path = cli_args
+        .rom_path
+        .as_ref()
+        .cloned()
+        .or_else(|| settings.last_rom_path.clone());
 
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
@@ -2468,6 +2607,11 @@ fn main() {
         } // closes else block for non-.hemu files
     } // closes if let Some(p) = &rom_path
 
+    // Apply debug options after ROM loading
+    if rom_loaded {
+        apply_debug_options(&mut sys, &cli_args);
+    }
+
     // Handle slot-based loading (primarily for PC system)
     // If any slot arguments are provided, auto-select PC mode if no ROM was loaded
     let has_slot_args = cli_args.slot1.is_some()
@@ -2559,6 +2703,11 @@ fn main() {
         }
     }
 
+    // Apply debug options after slot loading
+    if has_slot_args {
+        apply_debug_options(&mut sys, &cli_args);
+    }
+
     // Get resolution from the system
     let (width, height) = sys.resolution();
 
@@ -2596,12 +2745,23 @@ fn main() {
         eprintln!("  - Output file: {}", dump_file);
         eprintln!();
 
+        // Apply debug options (tracing, breakpoints) before starting emulation
+        apply_debug_options(&mut sys, &cli_args);
+
+        // Track the latest frame for screenshot on dump
+        let mut latest_frame_buffer: Option<(Vec<u32>, usize, usize)> = None;
+
         // Run emulation loop until trigger condition is met
         loop {
             // Step one frame
             match sys.step_frame() {
-                Ok(_) => {
-                    total_cycles += 1;
+                Ok(frame) => {
+                    // Store the latest frame for screenshot (move pixels instead of cloning)
+                    latest_frame_buffer =
+                        Some((frame.pixels, frame.width as usize, frame.height as usize));
+
+                    // Get actual CPU cycles from the system
+                    total_cycles = sys.get_total_cycles();
 
                     // Check for trigger conditions
                     let should_dump =
@@ -2620,7 +2780,12 @@ fn main() {
                         eprintln!("Trigger condition met at {} cycles", total_cycles);
                         eprintln!("Generating debug dump...");
 
-                        match generate_debug_dump(&sys, dump_file, total_cycles) {
+                        match generate_debug_dump(
+                            &sys,
+                            dump_file,
+                            total_cycles,
+                            latest_frame_buffer.as_ref(),
+                        ) {
                             Ok(()) => {
                                 eprintln!("✓ Debug dump written successfully to {}", dump_file);
                                 std::process::exit(0);
@@ -2641,7 +2806,12 @@ fn main() {
                     eprintln!("\nEmulation error after {} cycles: {}", total_cycles, e);
                     eprintln!("Generating debug dump at error point...");
 
-                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                    match generate_debug_dump(
+                        &sys,
+                        dump_file,
+                        total_cycles,
+                        latest_frame_buffer.as_ref(),
+                    ) {
                         Ok(()) => {
                             eprintln!("✓ Debug dump written to {}", dump_file);
                             std::process::exit(1);
@@ -4949,7 +5119,12 @@ fn main() {
                         .as_deref()
                         .unwrap_or("debug_dump.txt");
                     eprintln!("Debug dump triggered - writing to {}", dump_file);
-                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                    match generate_debug_dump(
+                        &sys,
+                        dump_file,
+                        total_cycles,
+                        latest_frame_buffer.as_ref(),
+                    ) {
                         Ok(()) => {
                             eprintln!("Debug dump written successfully to {}", dump_file);
                             debug_dump_triggered = true;

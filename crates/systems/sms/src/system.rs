@@ -4,6 +4,7 @@ use crate::bus::SmsMemory;
 use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
 use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
@@ -31,6 +32,12 @@ pub struct SmsSystem {
 
     // Timing
     cycles: u64,
+
+    // Debugging
+    /// Instruction tracer for debugging
+    pub(crate) instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    pub(crate) breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 impl SmsSystem {
@@ -52,6 +59,8 @@ impl SmsSystem {
             vdp,
             psg,
             cycles: 0,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
     }
 
@@ -127,8 +136,17 @@ impl System for SmsSystem {
             }
 
             // Execute one CPU instruction
+            let pc_before = self.cpu.pc as u32;
             let cpu_cycles = self.cpu.step() as u64;
             self.cycles += cpu_cycles;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update VDP scanline based on cycles
             // Each scanline takes approximately 228 cycles (~3.58MHz / 262 scanlines / 60Hz)
@@ -218,6 +236,51 @@ impl SmsSystem {
     /// This updates the PSG's clock rate to match the selected timing mode.
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
         self.psg.borrow_mut().set_timing(timing);
+    }
+
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
     }
 }
 

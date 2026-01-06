@@ -15,6 +15,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod debugger;
 mod mi;
 mod pif;
 mod rdp;
@@ -32,6 +33,7 @@ use cartridge::N64_ROM_MAGIC;
 use cpu::N64Cpu;
 #[cfg(test)]
 use cpu::{CP0_CONFIG_COMMERCIAL_BOOT, CP0_STATUS_COMMERCIAL_BOOT};
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use thiserror::Error;
@@ -73,6 +75,10 @@ pub struct N64System {
     cpu: N64Cpu,
     frame_cycles: u32,
     current_cycles: u32,
+    /// Instruction tracer for debugging
+    instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
+    /// Breakpoint manager for debugging
+    breakpoint_manager: emu_core::breakpoints::BreakpointManager,
 }
 
 // Re-export controller types for convenience
@@ -86,6 +92,8 @@ impl N64System {
             cpu: N64Cpu::new(bus),
             frame_cycles: 1562500, // ~93.75MHz / 60Hz (NTSC)
             current_cycles: 0,
+            instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
+            breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
     }
 
@@ -167,6 +175,51 @@ impl N64System {
             framebuffer_resolution,
         }
     }
+
+    /// Enable or disable instruction tracing
+    pub fn set_instruction_tracing(&mut self, enabled: bool) {
+        self.instruction_tracer.set_enabled(enabled);
+    }
+
+    /// Check if instruction tracing is enabled
+    pub fn is_instruction_tracing_enabled(&self) -> bool {
+        self.instruction_tracer.is_enabled()
+    }
+
+    /// Get the instruction tracer (for dumping trace to file)
+    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
+        &self.instruction_tracer
+    }
+
+    /// Add an execution breakpoint
+    pub fn add_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.add_execute(address);
+    }
+
+    /// Remove an execution breakpoint
+    pub fn remove_breakpoint(&mut self, address: u32) {
+        self.breakpoint_manager.remove_execute(address);
+    }
+
+    /// Clear all breakpoints
+    pub fn clear_breakpoints(&mut self) {
+        self.breakpoint_manager.clear();
+    }
+
+    /// Get all execution breakpoints
+    pub fn get_breakpoints(&self) -> Vec<u32> {
+        self.breakpoint_manager.get_execute_breakpoints()
+    }
+
+    /// Enable or disable breakpoints
+    pub fn set_breakpoints_enabled(&mut self, enabled: bool) {
+        self.breakpoint_manager.set_enabled(enabled);
+    }
+
+    /// Get the breakpoint manager
+    pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
+        &self.breakpoint_manager
+    }
 }
 
 impl Default for N64System {
@@ -209,8 +262,19 @@ impl System for N64System {
 
             // Execute CPU until we reach the cycles for this scanline
             while self.current_cycles < target_cycles {
+                // Capture PC before execution for tracing
+                let pc_before = self.cpu.cpu.pc as u32;
+
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+
+                // Record instruction in tracer if enabled
+                if self.instruction_tracer.is_enabled() {
+                    if let Some(instruction) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instruction, cpu_state);
+                    }
+                }
 
                 // Check for pending interrupts in MI and route them to CPU
                 let bus = self.cpu.bus();
