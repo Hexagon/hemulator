@@ -893,6 +893,13 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 
 **Features**:
 - ✅ 65C816 CPU core with 16-bit extensions (100% complete)
+- ✅ **SPC700 APU CPU** - Full audio processor implementation
+  - Complete SPC700 instruction set
+  - 64KB audio RAM (ARAM)
+  - IPL boot ROM with upload protocol
+  - Communication ports ($2140-$2143) working
+  - Games can upload and execute audio drivers
+  - DSP not implemented (no sound output)
 - ✅ PPU rendering for modes 0-7 (with brightness control)
 - ✅ Background layers (BG1-4) with priority rendering
 - ✅ Sprite rendering (128 sprites, 4bpp)
@@ -910,11 +917,12 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - ⚠️ Hi-res modes (512px) render at 256px
   - ⚠️ Offset-per-tile not implemented for modes 2, 4, 6
 - **Audio**: 
-  - ❌ SPC700 APU not fully implemented - **silent gameplay**
-  - APU communication ports ($2140-$2143) use enhanced state machine stub
-  - Supports multi-session upload protocols to allow games to boot and progress
-  - Games receive proper APU handshake responses ($BBAA signature) and echo protocol
-  - No actual audio processing or SPC700 code execution occurs
+  - ✅ SPC700 APU CPU fully implemented and functional
+  - ✅ APU communication ports ($2140-$2143) working correctly
+  - ✅ 64KB audio RAM (ARAM) and IPL boot ROM implemented
+  - ✅ Games can upload audio drivers and communicate with APU
+  - ❌ DSP (Digital Signal Processor) not implemented - **silent gameplay**
+  - No 8-voice synthesis, ADPCM playback, or echo effects
 - **Cartridge**: 
   - LoROM and HiROM supported
   - ❌ No enhancement chips (SuperFX, SA-1, etc.)
@@ -924,7 +932,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **Timing**: 
   - Frame-based rendering - not cycle-accurate
   - NTSC timing only
-- **Status**: **Playable with limitations** - Graphics now working! Most games should display, but audio is silent and some advanced graphics features are missing.
+- **Status**: **Playable with limitations** - Graphics now working! SPC700 APU fully functional but DSP not implemented so games run silently. Most games should display correctly (modes 0-1), but some advanced graphics features are missing.
 
 **Recommended For**:
 - Testing games that don't require enhancement chips

@@ -8,7 +8,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 - 💻 **PC Emulation**: COM/EXE loading, CGA text and graphics modes. MS-DOS 5.0 and FreeDOS support
 - 🕹️ **Atari 2600 Emulation**: Support for most cartridge formats (2K-32K) with multiple banking schemes
 - 🎲 **Game Boy Emulation**: MBC0/1/2/3/5 and HuC1 support with full APU and timer functionality
-- 🏰 **SNES Emulation**: CPU working with PPU infrastructure in place
+- 🏰 **SNES Emulation**: Full CPU and SPC700 APU, PPU modes 0-7 (0-1 complete), graphics working, silent gameplay
 - 🎮 **N64 Emulation**: 3D rendering functionality
 - 🖱️ **Modern GUI**: Menu bar and status bar with mouse and keyboard support - no more cryptic F-keys!
 - 💾 **Save States**: 5 slots per game with instant save/load (Ctrl+1-5 / Ctrl+Shift+1-5)
@@ -29,7 +29,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **CHIP-8** | ✅ Fully Working | CHIP-8 VM (Complete) | Multi-mode (Complete) | Beep timer (Complete) | ✅ | ✅ | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
 | **Game Boy** | ✅ Fully Functional | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~97% of games; MBC0/1/2/3/5, HuC1 supported |
 | **SMS** | ✅ Functional | Z80 (Complete) | VDP (Complete) | PSG (Complete) | ✅ | ✅ | Full hardware emulation; needs game testing |
-| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Partial) | ❌ Not implemented | ❌ | ✅ | No visible output yet; infrastructure in place |
+| **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Partial) | SPC700 (Complete, no DSP) | ✅ | ✅ | Graphics working; modes 0-1 complete; no audio output |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |
 
 **Legend:**
@@ -55,7 +55,6 @@ See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements
 - [N64_STATUS.md](docs/N64_STATUS.md) - Active development status for Nintendo 64 emulation
 - [NEXT_EMULATOR_RECOMMENDATION.md](docs/NEXT_EMULATOR_RECOMMENDATION.md) - Recommendation for next emulator to implement
 - [SMS_IMPLEMENTATION_GUIDE.md](docs/SMS_IMPLEMENTATION_GUIDE.md) - Practical guide for implementing Sega Master System
-- [SNES_EMULATION_PITFALLS.md](docs/SNES_EMULATION_PITFALLS.md) - Technical reference for SNES emulation edge cases
 - [references/](docs/references/) - CPU and hardware technical references
 
 **System-Specific Documentation**:
