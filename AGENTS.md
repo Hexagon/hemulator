@@ -341,9 +341,9 @@ hemu --trace-instructions --breakpoint 0x8000 --breakpoint 0x8100 --breakpoint 0
 
 - **Circular Buffer**: Keeps last N executed instructions in memory
 - **Breakpoints**: Set execution breakpoints at specific addresses
-- **Automatic Dump**: Dumps trace when breakpoint is hit
+- **Automatic Dump**: Dumps trace when breakpoint is hit (when CPU integration is complete)
 - **Minimal Overhead**: Tracing is disabled by default for performance
-- **Cross-System**: Works with any system that implements the `Debugger` trait
+- **Cross-System (In Progress)**: Infrastructure added to all systems; CPU integration in progress for systems with Debugger trait (NES, GB, Atari2600, CHIP-8, SMS, SNES). N64 and PC require Debugger trait implementation.
 
 ### Trace Output Format
 

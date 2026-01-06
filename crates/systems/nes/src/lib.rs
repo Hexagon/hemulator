@@ -83,6 +83,7 @@ use crate::bus::Bus;
 use crate::cartridge::Mirroring;
 use bus::NesBus;
 use cpu::NesCpu;
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
@@ -469,10 +470,19 @@ impl System for NesSystem {
                 *e = e.saturating_add(1);
             }
 
+            let pc_before = self.cpu.pc();
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
@@ -570,10 +580,19 @@ impl System for NesSystem {
                 *e = e.saturating_add(1);
             }
 
+            let pc_before = self.cpu.pc();
             let used = self.cpu.step();
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {

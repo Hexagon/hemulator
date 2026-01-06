@@ -1451,9 +1451,9 @@ impl CliArgs {
         );
         eprintln!("                           Dumps full disassembly and memory contents");
         eprintln!();
-        eprintln!("Instruction Tracing Options:");
+        eprintln!("Instruction Tracing Options (Experimental):");
         eprintln!(
-            "  --trace-instructions     Enable instruction tracing (records executed instructions)"
+            "  --trace-instructions     Enable instruction tracing (infrastructure enabled; CPU integration in progress)"
         );
         eprintln!(
             "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)"
@@ -1462,7 +1462,7 @@ impl CliArgs {
         eprintln!(
             "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
         );
-        eprintln!("                           When hit, dumps trace and optionally exits");
+        eprintln!("                           When hit, dumps trace and optionally exits (when CPU integration complete)");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -1495,11 +1495,11 @@ impl CliArgs {
         );
         eprintln!("  hemu --trace-instructions --breakpoint 0x8100 game.nes");
         eprintln!(
-            "                                                 # Trace execution until breakpoint hit"
+            "                                                 # Trace execution until breakpoint (experimental)"
         );
         eprintln!("  hemu --trace-instructions --trace-limit 5000 game.nes");
         eprintln!(
-            "                                                 # Keep last 5000 instructions in trace"
+            "                                                 # Keep last 5000 instructions in trace (experimental)"
         );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
