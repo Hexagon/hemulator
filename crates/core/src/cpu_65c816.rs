@@ -140,7 +140,7 @@ impl<M: Memory65c816> Cpu65c816<M> {
         // NMI is non-maskable and always triggers, even if already in an NMI handler.
         // The in_nmi flag is kept for tracking purposes but doesn't prevent NMI.
         // Real 65C816 behavior: NMIs can interrupt NMI handlers (edge-triggered).
-        
+
         // WAI instruction is released by any interrupt
         if self.waiting_for_interrupt {
             log(LogCategory::Interrupts, LogLevel::Info, || {
