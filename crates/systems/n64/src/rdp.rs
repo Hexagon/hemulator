@@ -255,6 +255,11 @@ impl Rdp {
         Ok(())
     }
 
+    /// Get the name of the current renderer backend
+    pub fn renderer_name(&self) -> &str {
+        self.renderer.name()
+    }
+
     /// Reset RDP to initial state
     pub fn reset(&mut self) {
         self.renderer.reset();

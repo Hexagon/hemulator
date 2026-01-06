@@ -619,10 +619,14 @@ impl EmulatorSystem {
                 }
             }
             EmulatorSystem::SNES(_) => "Software".to_string(),
-            EmulatorSystem::N64(_) => {
-                // N64 uses software renderer by default
-                // Note: OpenGL renderer would need to be exposed via debug info or separate method
-                "Software".to_string()
+            EmulatorSystem::N64(n64_sys) => {
+                // Get actual renderer name from N64 system
+                let name = n64_sys.renderer_name();
+                if name.contains("OpenGL") {
+                    "OpenGL".to_string()
+                } else {
+                    "Software".to_string()
+                }
             }
             EmulatorSystem::SMS(_) => "Software".to_string(),
             EmulatorSystem::Chip8(_) => "Software".to_string(),
@@ -1561,19 +1565,26 @@ fn create_nes_system(
 }
 
 /// Create an N64 system with the appropriate renderer based on settings
-fn create_n64_system(
-    video_backend: &str,
-    _gl_context: Option<std::rc::Rc<glow::Context>>,
-) -> emu_n64::N64System {
-    let n64_sys = emu_n64::N64System::new();
+fn create_n64_system(video_backend: &str, gl_context: Option<glow::Context>) -> emu_n64::N64System {
+    let mut n64_sys = emu_n64::N64System::new();
 
-    // Note: N64 renderer switching would happen here
+    // Enable OpenGL renderer if requested and available
     if video_backend == "opengl" {
         #[cfg(feature = "opengl")]
         {
-            eprintln!(
-                "Note: N64 OpenGL renderer creation needs RDP access - using software for now"
-            );
+            if let Some(gl) = gl_context {
+                match n64_sys.enable_opengl_renderer(gl) {
+                    Ok(()) => {
+                        eprintln!("N64: OpenGL hardware renderer enabled");
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to enable OpenGL renderer for N64: {}", e);
+                        eprintln!("Falling back to software renderer");
+                    }
+                }
+            } else {
+                eprintln!("Warning: No GL context available - using software renderer");
+            }
         }
         #[cfg(not(feature = "opengl"))]
         {
@@ -3434,7 +3445,7 @@ fn main() {
                                     }
                                     Ok(SystemType::N64) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
-                                        let gl_ctx: Option<std::rc::Rc<glow::Context>> = None; // GL context handling removed
+                                        let gl_ctx = egui_backend.gl_context();
                                         let mut n64_sys =
                                             create_n64_system(&settings.video_backend, gl_ctx);
                                         if let Err(e) = n64_sys.mount("Cartridge", &data) {
@@ -3446,25 +3457,9 @@ fn main() {
                                             rom_loaded = true;
                                             sys = EmulatorSystem::N64(Box::new(n64_sys));
 
-                                            // Enable OpenGL renderer for N64
-                                            if let Some(renderer_name) =
-                                                enable_n64_opengl_renderer(&mut sys, &egui_backend)
-                                            {
-                                                egui_app.property_pane.rendering_backend =
-                                                    renderer_name;
-                                            } else {
-                                                egui_app.property_pane.rendering_backend =
-                                                    sys.get_current_renderer_name();
-                                            }
-
                                             egui_app.property_pane.system_name = "N64".to_string();
-                                            // Set renderer display based on settings preference
                                             egui_app.property_pane.rendering_backend =
-                                                if settings.video_backend == "opengl" {
-                                                    "Hardware".to_string()
-                                                } else {
-                                                    "Software".to_string()
-                                                };
+                                                sys.get_current_renderer_name();
                                             egui_app.property_pane.available_renderers =
                                                 sys.get_available_renderers();
                                             runtime_state.set_mount(

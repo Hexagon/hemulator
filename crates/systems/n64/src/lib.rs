@@ -124,6 +124,11 @@ impl N64System {
         self.cpu.bus_mut().enable_opengl_renderer(gl)
     }
 
+    /// Get the name of the current renderer backend
+    pub fn renderer_name(&self) -> &str {
+        self.cpu.bus().rdp().renderer_name()
+    }
+
     /// Get debug information for the GUI overlay
     pub fn get_debug_info(&self) -> DebugInfo {
         let bus = self.cpu.bus();
