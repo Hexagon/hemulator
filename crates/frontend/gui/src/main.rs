@@ -1635,7 +1635,9 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
                 if let Some(limit) = cli_args.trace_limit {
                     // Note: InstructionTracer limit is set via TracerConfig during creation
                     // We can't change it after creation without adding a setter method
-                    eprintln!("Note: Trace limit can only be set during tracer creation (default: 10000)");
+                    eprintln!(
+                        "Note: Trace limit can only be set during tracer creation (default: 10000)"
+                    );
                 }
             }
             for &addr in &cli_args.breakpoints {
@@ -2093,7 +2095,11 @@ fn main() {
     let mut runtime_state = RuntimeState::new();
 
     // Determine what to load based on CLI args
-    let rom_path = cli_args.rom_path.as_ref().cloned().or_else(|| settings.last_rom_path.clone());
+    let rom_path = cli_args
+        .rom_path
+        .as_ref()
+        .cloned()
+        .or_else(|| settings.last_rom_path.clone());
 
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
