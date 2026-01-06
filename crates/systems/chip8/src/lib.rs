@@ -1452,12 +1452,18 @@ mod tests {
         // First two rows should be blank
         for x in 0..system.display_width {
             assert!(!system.display_planes[0][x], "Row 0 should be blank");
-            assert!(!system.display_planes[0][system.display_width + x], "Row 1 should be blank");
+            assert!(
+                !system.display_planes[0][system.display_width + x],
+                "Row 1 should be blank"
+            );
         }
 
         // Third row (index 2) should have the pixels that were in row 0
         for x in 0..system.display_width {
-            assert!(system.display_planes[0][2 * system.display_width + x], "Row 2 should have pixels");
+            assert!(
+                system.display_planes[0][2 * system.display_width + x],
+                "Row 2 should have pixels"
+            );
         }
     }
 
@@ -1479,14 +1485,23 @@ mod tests {
         let second_last_row = (system.display_height - 2) * system.display_width;
         let last_row = (system.display_height - 1) * system.display_width;
         for x in 0..system.display_width {
-            assert!(!system.display_planes[0][second_last_row + x], "Second-last row should be blank");
-            assert!(!system.display_planes[0][last_row + x], "Last row should be blank");
+            assert!(
+                !system.display_planes[0][second_last_row + x],
+                "Second-last row should be blank"
+            );
+            assert!(
+                !system.display_planes[0][last_row + x],
+                "Last row should be blank"
+            );
         }
 
         // Third-to-last row should have the pixels that were in the last row
         let third_last_row = (system.display_height - 3) * system.display_width;
         for x in 0..system.display_width {
-            assert!(system.display_planes[0][third_last_row + x], "Third-to-last row should have pixels");
+            assert!(
+                system.display_planes[0][third_last_row + x],
+                "Third-to-last row should have pixels"
+            );
         }
     }
 
@@ -1506,13 +1521,20 @@ mod tests {
         // First four columns should be blank
         for y in 0..system.display_height {
             for x in 0..4 {
-                assert!(!system.display_planes[0][y * system.display_width + x], "Column {} should be blank", x);
+                assert!(
+                    !system.display_planes[0][y * system.display_width + x],
+                    "Column {} should be blank",
+                    x
+                );
             }
         }
 
         // Fifth column (index 4) should have the pixels that were in column 0
         for y in 0..system.display_height {
-            assert!(system.display_planes[0][y * system.display_width + 4], "Column 4 should have pixels");
+            assert!(
+                system.display_planes[0][y * system.display_width + 4],
+                "Column 4 should have pixels"
+            );
         }
     }
 
@@ -1532,13 +1554,21 @@ mod tests {
         // Last four columns should be blank
         for y in 0..system.display_height {
             for x in (system.display_width - 4)..system.display_width {
-                assert!(!system.display_planes[0][y * system.display_width + x], "Column {} should be blank", x);
+                assert!(
+                    !system.display_planes[0][y * system.display_width + x],
+                    "Column {} should be blank",
+                    x
+                );
             }
         }
 
         // Fifth-to-last column should have the pixels that were in the last column
         for y in 0..system.display_height {
-            assert!(system.display_planes[0][y * system.display_width + (system.display_width - 5)], "Column {} should have pixels", system.display_width - 5);
+            assert!(
+                system.display_planes[0][y * system.display_width + (system.display_width - 5)],
+                "Column {} should have pixels",
+                system.display_width - 5
+            );
         }
     }
 }
