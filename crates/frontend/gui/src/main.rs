@@ -1612,10 +1612,12 @@ fn create_enhanced_debug_state(
 }
 
 /// Generate a comprehensive debug dump with disassembly and memory contents
+/// Also captures a screenshot of the current frame state
 fn generate_debug_dump(
     system_adapter: &EmulatorSystem,
     output_file: &str,
     cycle_count: u64,
+    frame_buffer: Option<&(Vec<u32>, usize, usize)>,
 ) -> std::io::Result<()> {
     use std::fs::File;
     use std::io::Write;
@@ -1632,6 +1634,25 @@ fn generate_debug_dump(
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
     )?;
     writeln!(file, "Cycle Count: {}", cycle_count)?;
+
+    // Save screenshot if frame buffer is available
+    let _screenshot_path = if let Some((buffer, width, height)) = frame_buffer {
+        let system_name = system_adapter.system_name();
+        match save_screenshot(buffer, *width, *height, system_name) {
+            Ok(path) => {
+                writeln!(file, "Screenshot: {}", path)?;
+                Some(path)
+            }
+            Err(e) => {
+                writeln!(file, "Screenshot: Failed to save ({}) ", e)?;
+                None
+            }
+        }
+    } else {
+        writeln!(file, "Screenshot: No frame buffer available")?;
+        None
+    };
+
     writeln!(file)?;
 
     // Get debugger if available
@@ -2665,11 +2686,21 @@ fn main() {
         eprintln!("  - Output file: {}", dump_file);
         eprintln!();
 
+        // Track the latest frame for screenshot on dump
+        let mut latest_frame_buffer: Option<(Vec<u32>, usize, usize)> = None;
+
         // Run emulation loop until trigger condition is met
         loop {
             // Step one frame
             match sys.step_frame() {
-                Ok(_) => {
+                Ok(frame) => {
+                    // Store the latest frame for screenshot
+                    latest_frame_buffer = Some((
+                        frame.pixels.clone(),
+                        frame.width as usize,
+                        frame.height as usize,
+                    ));
+
                     total_cycles += 1;
 
                     // Check for trigger conditions
@@ -2689,7 +2720,12 @@ fn main() {
                         eprintln!("Trigger condition met at {} cycles", total_cycles);
                         eprintln!("Generating debug dump...");
 
-                        match generate_debug_dump(&sys, dump_file, total_cycles) {
+                        match generate_debug_dump(
+                            &sys,
+                            dump_file,
+                            total_cycles,
+                            latest_frame_buffer.as_ref(),
+                        ) {
                             Ok(()) => {
                                 eprintln!("✓ Debug dump written successfully to {}", dump_file);
                                 std::process::exit(0);
@@ -2710,7 +2746,12 @@ fn main() {
                     eprintln!("\nEmulation error after {} cycles: {}", total_cycles, e);
                     eprintln!("Generating debug dump at error point...");
 
-                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                    match generate_debug_dump(
+                        &sys,
+                        dump_file,
+                        total_cycles,
+                        latest_frame_buffer.as_ref(),
+                    ) {
                         Ok(()) => {
                             eprintln!("✓ Debug dump written to {}", dump_file);
                             std::process::exit(1);
@@ -5018,7 +5059,12 @@ fn main() {
                         .as_deref()
                         .unwrap_or("debug_dump.txt");
                     eprintln!("Debug dump triggered - writing to {}", dump_file);
-                    match generate_debug_dump(&sys, dump_file, total_cycles) {
+                    match generate_debug_dump(
+                        &sys,
+                        dump_file,
+                        total_cycles,
+                        latest_frame_buffer.as_ref(),
+                    ) {
                         Ok(()) => {
                             eprintln!("Debug dump written successfully to {}", dump_file);
                             debug_dump_triggered = true;
