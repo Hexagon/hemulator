@@ -17,7 +17,7 @@ This implementation follows specifications from the **SNESdev Wiki**:
 
 ## Current Status
 
-The SNES emulator supports basic gameplay with complete CPU, full DMA/HDMA, both LoROM and HiROM cartridge support, and PPU rendering for modes 0-7 (with limitations). Modes 0 and 1 are fully complete. Modes 2-7 have basic rendering but missing advanced features (offset-per-tile, hi-res, Mode 7 matrix). Audio is not implemented.
+The SNES emulator supports basic gameplay with complete CPU, full DMA/HDMA, both LoROM and HiROM cartridge support, SPC700 APU processor, and PPU rendering for modes 0-7 (with limitations). Modes 0 and 1 are fully complete. Modes 2-7 have basic rendering but missing advanced features (offset-per-tile, hi-res, Mode 7 matrix). Audio processor (SPC700) is fully implemented but DSP (sound generation) is not, so games run silently.
 
 ### What Works
 
@@ -108,13 +108,21 @@ The SNES emulator supports basic gameplay with complete CPU, full DMA/HDMA, both
   - Auto-joypad read during VBlank
   - Reference: [Controllers](https://snes.nesdev.org/wiki/Input_devices)
 
-#### APU Communication
-- ⚠️ **APU Ports** - Stub implementation for boot
+#### APU (Audio Processing Unit)
+- ✅ **SPC700 CPU** - Complete audio processor implementation
+  - Full SPC700 instruction set from `emu_core::apu::Spc700`
+  - 64KB audio RAM (ARAM)
+  - IPL boot ROM with upload protocol
   - $2140-$2143 (APUIO0-3) - CPU ↔ SPC700 communication ports
-  - Initialized to SPC700 IPL ready state (0xBB, 0xAA, 0x00, 0x00)
-  - Echo/passthrough behavior allows games to boot
-  - No actual SPC700 CPU emulation
-  - Reference: [APU](https://snes.nesdev.org/wiki/APU)
+  - Bidirectional port communication working
+  - Games can upload audio drivers and communicate with APU
+  - Reference: [APU](https://snes.nesdev.org/wiki/APU), [SPC700](https://snes.nesdev.org/wiki/SPC700)
+
+- ❌ **DSP (Digital Signal Processor)** - Not implemented
+  - No audio sample generation
+  - No 8-voice synthesis
+  - Silent gameplay (no sound output)
+  - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Timing
 - ✅ **Frame Timing** - NTSC timing implementation
@@ -151,11 +159,12 @@ The SNES emulator supports basic gameplay with complete CPU, full DMA/HDMA, both
   - Would require reading offset data from BG3 tilemap
   - Reference: [Offset-per-tile](https://snes.nesdev.org/wiki/PPU_registers#BG_Scroll)
 
-#### APU (Audio)
-- ❌ **SPC700 CPU** - No audio processor emulation
-- ❌ **DSP** - No sound generation
-- ❌ **Audio Output** - Silent gameplay
-  - Reference: [SPC700](https://snes.nesdev.org/wiki/SPC700), [DSP](https://snes.nesdev.org/wiki/DSP)
+#### Audio
+- ❌ **DSP (Digital Signal Processor)** - No sound generation
+  - SPC700 CPU is fully implemented and functional
+  - DSP registers can be accessed but produce no audio
+  - No 8-voice synthesis, ADPCM playback, or echo effects
+  - Reference: [DSP](https://snes.nesdev.org/wiki/DSP)
 
 #### Enhancement Chips
 - ❌ **No enhancement chip support**
@@ -211,8 +220,12 @@ SnesSystem
   └── SnesCpu (wraps Cpu65c816<SnesBus>)
       └── SnesBus (implements Memory65c816)
           ├── 128KB WRAM
-          ├── APU Communication Stub ($2140-$2143)
-          │   └── Echo/passthrough ports for boot handshakes
+          ├── SPC700 APU (Full implementation)
+          │   ├── SPC700 CPU core
+          │   ├── 64KB Audio RAM (ARAM)
+          │   ├── IPL boot ROM
+          │   ├── Communication ports ($2140-$2143)
+          │   └── DSP registers (stub - no audio output)
           ├── DMA Controller (8 channels)
           │   ├── General-purpose DMA
           │   ├── HDMA (H-blank DMA)
@@ -286,16 +299,13 @@ cargo run -- game.sfc --log-bus debug
 
 ## Known Issues
 
-1. **NMI Handling** - Fixed in recent commits
-   - $4210 (RDNMI) now properly implemented
-   - Reading clears NMI flag (critical for proper operation)
-   - See `SNES_REGISTER_FIXES.md` for details
+1. **Audio Output** - SPC700 CPU implemented but no sound
+   - SPC700 processor fully functional
+   - Games can upload audio drivers
+   - DSP not implemented, so no audio generation
+   - Silent gameplay
 
-2. **APU Communication** - Stub only
-   - Ports respond to allow boot sequence
-   - No actual audio processing
-
-3. **Timing** - Frame-based, not cycle-accurate
+2. **Timing** - Frame-based, not cycle-accurate
    - Good enough for most games
    - Some timing-sensitive effects may not work
 
@@ -303,7 +313,6 @@ cargo run -- game.sfc --log-bus debug
 
 - `SNES_REGISTER_FIXES.md` - Details on NMI register implementation
 - `SNES_WAI_INVESTIGATION.md` - WAI instruction debugging notes
-- `docs/SNES_EMULATION_PITFALLS.md` - Known pitfalls and edge cases
 
 ## References & Further Reading
 
