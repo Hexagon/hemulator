@@ -153,6 +153,7 @@
 //! assert_eq!(frame.height, 144);
 //! ```
 
+use emu_core::debug::Debugger;
 use emu_core::{cpu_lr35902::CpuLr35902, types::Frame, MountPointInfo, System};
 
 mod apu;
@@ -340,8 +341,17 @@ impl System for GbSystem {
 
         let mut cycles = 0;
         while cycles < CYCLES_PER_FRAME {
+            let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before as u32) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Accumulate cycles for audio generation
             self.audio_cycles_accumulated += cpu_cycles;
