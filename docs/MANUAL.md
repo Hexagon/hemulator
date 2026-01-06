@@ -771,7 +771,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 ### Game Boy / Game Boy Color
 
 **Status**: ✅ Fully Functional  
-**Coverage**: ~97% of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 implemented)
+**Coverage**: ~99% of Game Boy games supported (MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 implemented)
 
 **ROM Format**: GB/GBC (.gb, .gbc files) - automatically detected
 
@@ -784,6 +784,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - 15-bit RGB color palettes (8 BG + 8 OBJ palettes)
   - DMG-compatible default palette initialization for early CGB games (e.g., Pokemon Yellow)
   - VRAM banking (2 banks of 8KB)
+  - WRAM banking (8 banks of 4KB, 32KB total) via SVBK register
   - Tile attributes (palette selection, VRAM banking, flipping)
   - Backward compatible with DMG games
 - **MBC (Memory Bank Controller) Support**:
@@ -805,6 +806,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
+- **HDMA**: HBlank DMA not implemented (affects some CGB games with advanced graphics effects)
 - **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
 - **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
