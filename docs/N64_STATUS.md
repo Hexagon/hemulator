@@ -22,7 +22,7 @@ For detailed implementation information, see:
 - ✅ **Save States** - Full system state serialization
 
 **Graphics (RDP)**:
-- ✅ **Software Renderer** - CPU-based rasterization (default, production-ready)
+- ✅ **OpenGL Hardware Renderer** - GPU-accelerated rendering (REQUIRED)
 - ✅ **3D Triangle Rendering** - Flat shading, Gouraud shading, Z-buffer depth testing
 - ✅ **Display List Processing** - RDP command execution
 - ✅ **Basic RDP Commands** - Fill, scissor, sync operations
@@ -48,18 +48,23 @@ For detailed implementation information, see:
 
 ## Renderer Architecture
 
-The N64 RDP uses a **pluggable renderer architecture**. See the [N64 README](../crates/systems/n64/README.md#renderer-architecture) for details.
+The N64 RDP now uses **OpenGL 3.3+ hardware-accelerated rendering exclusively**. Software renderer has been removed to simplify the codebase and ensure consistent GPU performance.
 
-### Software Renderer (Default)
-- ✅ Complete and production-ready
-- CPU-based scanline rasterization
-- Full triangle rendering with depth testing
-- Suitable for most use cases
+### OpenGL Renderer (Required)
 
-### OpenGL Renderer
-- ⏸️ Stub implementation (not functional)
-- Build with `--features opengl` to include
-- Hardware-accelerated rendering (when implemented)
+- ✅ **GPU-accelerated rendering** using OpenGL 3.3 Core Profile
+- ✅ **Hardware depth testing** - Leverages GPU Z-buffer
+- ✅ **Full triangle rendering** - Flat shading, Gouraud shading, textured triangles
+- ✅ **Feature parity** - All RDP rendering capabilities
+- ✅ **Default feature** - OpenGL is now part of default features (always enabled)
+- **Requirements**: OpenGL 3.3+ compatible graphics hardware
+
+### Architecture Changes (January 2026)
+
+- ❌ **Software renderer removed** - Deleted ~850 lines of CPU-based rasterization code
+- ✅ **Simplified initialization** - RDP created directly with OpenGL renderer
+- ✅ **Mandatory GL context** - `N64System::new()` requires `glow::Context` parameter
+- ✅ **No renderer switching** - Renderer is fixed at system creation time
 
 ## Testing
 
@@ -77,12 +82,15 @@ cd test_roms/n64
 ```
 
 ### Running Tests
+
+**Note**: N64 tests require an actual OpenGL context and are marked as `#[ignore]` for CI.
+
 ```bash
-# Run all N64 tests
+# Run all N64 tests (non-GL tests only)
 cargo test --package emu_n64
 
-# With OpenGL stub
-cargo test --package emu_n64 --features opengl
+# Run all tests including GL-dependent tests (requires OpenGL 3.3+)
+cargo test --package emu_n64 -- --ignored
 ```
 
 ## Known Limitations
@@ -95,6 +103,10 @@ See [MANUAL.md](MANUAL.md#n64-nintendo-64) for complete user-facing limitations.
 3. **No audio** - Audio interface not implemented
 4. **No controller input** - Input system not implemented
 5. **Frame-based timing** - Not cycle-accurate
+
+**System Requirements**:
+- **OpenGL 3.3+ required** - No software fallback available
+- Compatible graphics hardware with OpenGL 3.3+ support
 
 ## Development Priorities
 
@@ -111,20 +123,19 @@ For detailed development roadmap, see the [N64 README](../crates/systems/n64/REA
 3. Controller input support
 
 ### Long Term
-1. OpenGL renderer with GL context integration
-2. Cycle-accurate timing
-3. TLB and cache emulation
-4. Commercial game compatibility
+1. Cycle-accurate timing
+2. TLB and cache emulation
+3. Commercial game compatibility
 
 ## Building and Debugging
 
 ### Build Commands
 ```bash
-# Default (software renderer)
+# Default (OpenGL renderer - always enabled)
 cargo build --package emu_n64 --profile release-quick
 
-# With OpenGL stub
-cargo build --package emu_n64 --features opengl --profile release-quick
+# Frontend with N64 support
+cargo build --profile release-quick
 ```
 
 ### Debug Logging
@@ -159,6 +170,7 @@ This document tracks high-level status. For detailed change history:
 - Historical detailed session logs have been archived
 
 **Major Milestones**:
+- **January 2026**: OpenGL renderer made mandatory, software renderer removed (~850 lines)
 - **January 2026**: Basic RDP rendering, test ROMs working
 - **December 2025**: Initial MIPS R4300i CPU implementation
 - **November 2025**: Project structure and core components
