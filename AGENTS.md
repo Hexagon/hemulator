@@ -343,7 +343,7 @@ hemu --trace-instructions --breakpoint 0x8000 --breakpoint 0x8100 --breakpoint 0
 - **Breakpoints**: Set execution breakpoints at specific addresses
 - **Automatic Dump**: Dumps trace when breakpoint is hit (when CPU integration is complete)
 - **Minimal Overhead**: Tracing is disabled by default for performance
-- **Cross-System (In Progress)**: Infrastructure added to all systems; CPU integration in progress for systems with Debugger trait (NES, GB, Atari2600, CHIP-8, SMS, SNES). N64 and PC require Debugger trait implementation.
+- **Cross-System**: Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64. PC requires Debugger trait implementation.
 
 ### Trace Output Format
 

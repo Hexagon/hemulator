@@ -15,6 +15,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod debugger;
 mod mi;
 mod pif;
 mod rdp;
@@ -32,6 +33,7 @@ use cartridge::N64_ROM_MAGIC;
 use cpu::N64Cpu;
 #[cfg(test)]
 use cpu::{CP0_CONFIG_COMMERCIAL_BOOT, CP0_STATUS_COMMERCIAL_BOOT};
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use thiserror::Error;
@@ -260,8 +262,19 @@ impl System for N64System {
 
             // Execute CPU until we reach the cycles for this scanline
             while self.current_cycles < target_cycles {
+                // Capture PC before execution for tracing
+                let pc_before = self.cpu.cpu.pc as u32;
+
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+
+                // Record instruction in tracer if enabled
+                if self.instruction_tracer.is_enabled() {
+                    if let Some(instruction) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instruction, cpu_state);
+                    }
+                }
 
                 // Check for pending interrupts in MI and route them to CPU
                 let bus = self.cpu.bus();
