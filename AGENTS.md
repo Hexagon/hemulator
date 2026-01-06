@@ -352,7 +352,7 @@ hemu --trace-instructions --breakpoint 0x8000 --breakpoint 0x8100 --breakpoint 0
     INSTRUCTION EXECUTION TRACE
 ===============================================
 
-Timestamp: 2026-01-06 01:30:45
+Timestamp: YYYY-MM-DD HH:MM:SS
 Total Instructions Traced: 5000
 History Size: 5000 instructions
 

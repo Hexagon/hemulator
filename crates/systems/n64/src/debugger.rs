@@ -224,14 +224,7 @@ impl Debugger for N64System {
     }
 
     fn get_execution_history(&self) -> Vec<ExecutionTrace> {
-        self.instruction_tracer
-            .get_history()
-            .iter()
-            .map(|entry| ExecutionTrace {
-                instruction: entry.instruction.clone(),
-                cpu_state: entry.cpu_state.clone(),
-            })
-            .collect()
+        self.instruction_tracer.get_history()
     }
 
     fn has_execution_history(&self) -> bool {

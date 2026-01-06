@@ -1451,18 +1451,20 @@ impl CliArgs {
         );
         eprintln!("                           Dumps full disassembly and memory contents");
         eprintln!();
-        eprintln!("Instruction Tracing Options (Experimental):");
-        eprintln!(
-            "  --trace-instructions     Enable instruction tracing (infrastructure enabled; CPU integration in progress)"
-        );
+        eprintln!("Instruction Tracing Options:");
+        eprintln!("  --trace-instructions     Enable instruction tracing");
+        eprintln!("                           Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64.");
+        eprintln!("                           PC requires Debugger trait implementation.");
         eprintln!(
             "  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)"
         );
-        eprintln!("  --trace-dump-file <PATH> File to dump trace when breakpoint hit (default: trace_dump.txt)");
+        eprintln!("                           Note: Limit is set at tracer creation and cannot be changed at runtime.");
+        eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
+        eprintln!("                           Note: Automatic dumping on breakpoint hit not yet implemented.");
         eprintln!(
             "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
         );
-        eprintln!("                           When hit, dumps trace and optionally exits (when CPU integration complete)");
+        eprintln!("                           Note: Breakpoints can be set, but hit checking/triggering is not yet implemented.");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -1628,77 +1630,31 @@ fn create_enhanced_debug_state(
 
 /// Apply CLI debugging options to a system
 fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
-    match sys {
-        EmulatorSystem::NES(nes) => {
-            if cli_args.trace_instructions {
-                nes.set_instruction_tracing(true);
-                if let Some(_limit) = cli_args.trace_limit {
-                    // Note: InstructionTracer limit is set via TracerConfig during creation
-                    // We can't change it after creation without adding a setter method
-                    eprintln!(
-                        "Note: Trace limit can only be set during tracer creation (default: 10000)"
-                    );
-                }
-            }
-            for &addr in &cli_args.breakpoints {
-                nes.add_breakpoint(addr);
-            }
+    // Enable instruction tracing if requested
+    if cli_args.trace_instructions {
+        match sys {
+            EmulatorSystem::NES(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::GameBoy(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::Atari2600(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::Chip8(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::SMS(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::SNES(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::N64(s) => s.set_instruction_tracing(true),
+            EmulatorSystem::PC(s) => s.set_instruction_tracing(true),
         }
-        EmulatorSystem::GameBoy(gb) => {
-            if cli_args.trace_instructions {
-                gb.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                gb.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::Atari2600(a2600) => {
-            if cli_args.trace_instructions {
-                a2600.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                a2600.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::Chip8(chip8) => {
-            if cli_args.trace_instructions {
-                chip8.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                chip8.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::SMS(sms) => {
-            if cli_args.trace_instructions {
-                sms.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                sms.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::SNES(snes) => {
-            if cli_args.trace_instructions {
-                snes.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                snes.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::N64(n64) => {
-            if cli_args.trace_instructions {
-                n64.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                n64.add_breakpoint(addr);
-            }
-        }
-        EmulatorSystem::PC(pc) => {
-            if cli_args.trace_instructions {
-                pc.set_instruction_tracing(true);
-            }
-            for &addr in &cli_args.breakpoints {
-                pc.add_breakpoint(addr);
-            }
+    }
+
+    // Add breakpoints
+    for &addr in &cli_args.breakpoints {
+        match sys {
+            EmulatorSystem::NES(s) => s.add_breakpoint(addr),
+            EmulatorSystem::GameBoy(s) => s.add_breakpoint(addr),
+            EmulatorSystem::Atari2600(s) => s.add_breakpoint(addr),
+            EmulatorSystem::Chip8(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SMS(s) => s.add_breakpoint(addr),
+            EmulatorSystem::SNES(s) => s.add_breakpoint(addr),
+            EmulatorSystem::N64(s) => s.add_breakpoint(addr),
+            EmulatorSystem::PC(s) => s.add_breakpoint(addr),
         }
     }
 }
@@ -1728,22 +1684,19 @@ fn generate_debug_dump(
     writeln!(file, "Cycle Count: {}", cycle_count)?;
 
     // Save screenshot if frame buffer is available
-    let _screenshot_path = if let Some((buffer, width, height)) = frame_buffer {
+    if let Some((buffer, width, height)) = frame_buffer {
         let system_name = system_adapter.system_name();
         match save_screenshot(buffer, *width, *height, system_name) {
             Ok(path) => {
                 writeln!(file, "Screenshot: {}", path)?;
-                Some(path)
             }
             Err(e) => {
                 writeln!(file, "Screenshot: Failed to save ({}) ", e)?;
-                None
             }
         }
     } else {
         writeln!(file, "Screenshot: No frame buffer available")?;
-        None
-    };
+    }
 
     writeln!(file)?;
 
@@ -2803,12 +2756,9 @@ fn main() {
             // Step one frame
             match sys.step_frame() {
                 Ok(frame) => {
-                    // Store the latest frame for screenshot
-                    latest_frame_buffer = Some((
-                        frame.pixels.clone(),
-                        frame.width as usize,
-                        frame.height as usize,
-                    ));
+                    // Store the latest frame for screenshot (move pixels instead of cloning)
+                    latest_frame_buffer =
+                        Some((frame.pixels, frame.width as usize, frame.height as usize));
 
                     // Get actual CPU cycles from the system
                     total_cycles = sys.get_total_cycles();

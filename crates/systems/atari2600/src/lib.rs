@@ -359,15 +359,17 @@ impl System for Atari2600System {
 
         // Run until scanline wraps around, indicating frame completion
         while cpu_steps < MAX_CPU_STEPS {
-            let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32).unwrap_or(0);
+            let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32);
             let cycles = self.cpu.step();
             cpu_steps += 1;
 
-            // Record instruction if tracing is enabled
+            // Record instruction if tracing is enabled and CPU is available
             if self.instruction_tracer.is_enabled() {
-                if let Some(instr) = self.disassemble_instruction(pc_before) {
-                    let cpu_state = self.get_cpu_state();
-                    self.instruction_tracer.trace(instr, cpu_state);
+                if let Some(pc) = pc_before {
+                    if let Some(instr) = self.disassemble_instruction(pc) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
                 }
             }
 
