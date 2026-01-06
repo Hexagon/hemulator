@@ -40,6 +40,11 @@ egui_glow = "0.32"
 egui_extras = { version = "0.32", features = ["image"] }
 egui_sdl2_gl = "0.32"
 
+[build-dependencies]
+# Windows resource embedding
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
 [features]
 default = ["opengl"]
 opengl = []

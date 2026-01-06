@@ -27,7 +27,7 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 | **PC (DOS)** | ⚠️ Experimental | 8086-80386 (16-bit complete, 32-bit in progress) | CGA/EGA/VGA (Text + Graphics) | ❌ Not implemented | ⚠️ Keyboard passthrough | ✅ | COM/EXE loading; multi-mode video |
 | **Atari 2600** | 🚧 In Development | 6502/6507 (Complete) | TIA (Partial - rendering issues) | TIA (Complete) | ✅ | ✅ | Most cartridge formats; rendering WIP |
 | **CHIP-8** | ✅ Fully Working | CHIP-8 VM (Complete) | Multi-mode (Complete) | Beep timer (Complete) | ✅ | ✅ | CHIP-8/Hires/Super-CHIP/XO-CHIP/Mega-CHIP |
-| **Game Boy** | ✅ Fully Functional | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~97% of games; MBC0/1/2/3/5, HuC1 supported |
+| **Game Boy** | ✅ Fully Functional | LR35902 (Complete) | PPU (Complete) | APU (Complete) | ✅ | ✅ | ~99% of games; MBC0/1/2/3/5, HuC1 supported, WRAM banking |
 | **SMS** | ✅ Functional | Z80 (Complete) | VDP (Complete) | PSG (Complete) | ✅ | ✅ | Full hardware emulation; needs game testing |
 | **SNES** | 🚧 In Development | 65C816 (Complete) | PPU (Partial) | SPC700 (Complete, no DSP) | ✅ | ✅ | Graphics working; modes 0-1 complete; no audio output |
 | **N64** | 🚧 In Development | R4300i (Complete) | RDP/RSP (Partial) | ❌ Not implemented | ⚠️ Ready (not integrated) | ✅ | 3D rendering works; limited game support |

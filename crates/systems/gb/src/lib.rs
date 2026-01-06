@@ -172,6 +172,8 @@ pub struct GbSystem {
     cart_loaded: bool,
     /// Accumulated cycles for audio generation
     audio_cycles_accumulated: u32,
+    /// Total CPU cycles executed since reset
+    total_cycles: u64,
     /// Renderer for PPU output
     renderer: Box<dyn PpuRenderer>,
     /// Instruction tracer for debugging
@@ -196,6 +198,7 @@ impl GbSystem {
             cpu,
             cart_loaded: false,
             audio_cycles_accumulated: 0,
+            total_cycles: 0,
             renderer: Box::new(SoftwarePpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -327,6 +330,7 @@ impl System for GbSystem {
 
     fn reset(&mut self) {
         self.cpu.reset();
+        self.total_cycles = 0;
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -344,6 +348,7 @@ impl System for GbSystem {
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
+            self.total_cycles += cpu_cycles as u64;
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -479,6 +484,10 @@ impl System for GbSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 
@@ -1514,6 +1523,283 @@ mod tests {
             key1 & 0x01,
             0x00,
             "Speed switch flag should be cleared (bit 0 = 0)"
+        );
+    }
+
+    #[test]
+    fn test_wram_banking_cgb() {
+        // Test WRAM banking in CGB mode
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00; // ROM ONLY
+        rom[0x149] = 0x00; // No RAM
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test SVBK register read/write
+        sys.cpu.memory.write(0xFF70, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF70) & 0x07,
+            0x00,
+            "SVBK should read back as 0"
+        );
+        assert_eq!(
+            sys.cpu.memory.read(0xFF70) & 0xF8,
+            0xF8,
+            "SVBK bits 3-7 should always read as 1"
+        );
+
+        // Test bank 1
+        sys.cpu.memory.write(0xFF70, 0x01);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF70) & 0x07,
+            0x01,
+            "SVBK should read back as 1"
+        );
+
+        // Test bank 7
+        sys.cpu.memory.write(0xFF70, 0x07);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF70) & 0x07,
+            0x07,
+            "SVBK should read back as 7"
+        );
+
+        // Test that only bits 0-2 are writable
+        sys.cpu.memory.write(0xFF70, 0xFF);
+        assert_eq!(
+            sys.cpu.memory.read(0xFF70) & 0x07,
+            0x07,
+            "Only bits 0-2 should be writable"
+        );
+
+        // Test bank 0 (bank 0 is always at 0xC000-0xCFFF, not affected by SVBK)
+        sys.cpu.memory.write(0xFF70, 0x00);
+        sys.cpu.memory.write(0xC000, 0xAA); // Write to bank 0
+        assert_eq!(
+            sys.cpu.memory.read(0xC000),
+            0xAA,
+            "Bank 0 should be at 0xC000"
+        );
+
+        // Test that bank 0 in SVBK maps to bank 1 for switchable area
+        sys.cpu.memory.write(0xD000, 0xBB); // Should write to bank 1
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xBB,
+            "SVBK=0 should map to bank 1 for 0xD000-0xDFFF"
+        );
+
+        // Switch to bank 2 and verify isolation
+        sys.cpu.memory.write(0xFF70, 0x02);
+        sys.cpu.memory.write(0xD000, 0xCC); // Write to bank 2
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xCC,
+            "Bank 2 should have different data"
+        );
+
+        // Switch back to bank 1 and verify data is preserved
+        sys.cpu.memory.write(0xFF70, 0x01);
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xBB,
+            "Bank 1 data should be preserved"
+        );
+
+        // Verify bank 0 is unaffected
+        assert_eq!(
+            sys.cpu.memory.read(0xC000),
+            0xAA,
+            "Bank 0 should be unaffected by SVBK"
+        );
+    }
+
+    #[test]
+    fn test_wram_banking_all_banks() {
+        // Test all 8 WRAM banks
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Write unique values to banks 1-7 (skip 0 since it maps to 1)
+        for bank in 1..8 {
+            sys.cpu.memory.write(0xFF70, bank);
+            let value = 0x10 + bank;
+            sys.cpu.memory.write(0xD000, value);
+        }
+
+        // Verify banks 1-7 have their unique values
+        for bank in 1..8 {
+            sys.cpu.memory.write(0xFF70, bank);
+            let expected = 0x10 + bank;
+            let actual = sys.cpu.memory.read(0xD000);
+            assert_eq!(
+                actual, expected,
+                "Bank {} should contain 0x{:02X}, got 0x{:02X}",
+                bank, expected, actual
+            );
+        }
+
+        // Verify that bank 0 in SVBK maps to bank 1
+        sys.cpu.memory.write(0xFF70, 0x00);
+        let bank0_value = sys.cpu.memory.read(0xD000);
+        sys.cpu.memory.write(0xFF70, 0x01);
+        let bank1_value = sys.cpu.memory.read(0xD000);
+        assert_eq!(
+            bank0_value, bank1_value,
+            "Bank 0 in SVBK should map to bank 1"
+        );
+    }
+
+    #[test]
+    fn test_wram_echo_ram_banking() {
+        // Test that Echo RAM respects WRAM banking
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test bank 0 echo (0xE000-0xEFFF mirrors 0xC000-0xCFFF)
+        sys.cpu.memory.write(0xC000, 0x11);
+        assert_eq!(
+            sys.cpu.memory.read(0xE000),
+            0x11,
+            "Echo RAM should mirror bank 0"
+        );
+
+        // Test switchable bank echo (0xF000-0xFDFF mirrors 0xD000-0xDFFF)
+        sys.cpu.memory.write(0xFF70, 0x02); // Select bank 2
+        sys.cpu.memory.write(0xD000, 0x22);
+        assert_eq!(
+            sys.cpu.memory.read(0xF000),
+            0x22,
+            "Echo RAM should mirror selected bank"
+        );
+
+        // Switch bank and verify echo changes
+        sys.cpu.memory.write(0xFF70, 0x03); // Select bank 3
+        sys.cpu.memory.write(0xD000, 0x33);
+        assert_eq!(
+            sys.cpu.memory.read(0xF000),
+            0x33,
+            "Echo RAM should mirror new bank"
+        );
+
+        // Verify writes to echo RAM work
+        sys.cpu.memory.write(0xE001, 0x44);
+        assert_eq!(
+            sys.cpu.memory.read(0xC001),
+            0x44,
+            "Writes to echo RAM should update bank 0"
+        );
+
+        sys.cpu.memory.write(0xF001, 0x55);
+        assert_eq!(
+            sys.cpu.memory.read(0xD001),
+            0x55,
+            "Writes to echo RAM should update selected bank"
+        );
+    }
+
+    #[test]
+    fn test_wram_banking_dmg_mode() {
+        // Test that WRAM banking doesn't work in DMG mode
+        let mut sys = GbSystem::new();
+
+        // Create a DMG ROM (not CGB)
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x00; // Not CGB
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // In DMG mode, SVBK should still be readable/writable but always use bank 1
+        sys.cpu.memory.write(0xD000, 0xAA);
+
+        // Try to switch to bank 2
+        sys.cpu.memory.write(0xFF70, 0x02);
+
+        // Data should still be accessible (bank 1 is always used in DMG mode)
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xAA,
+            "DMG mode should always use bank 1"
+        );
+
+        // Try bank 0 (which maps to bank 1)
+        sys.cpu.memory.write(0xFF70, 0x00);
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xAA,
+            "DMG mode should still use bank 1 when SVBK=0"
+        );
+    }
+
+    #[test]
+    fn test_wram_banking_boundary_conditions() {
+        // Test boundary conditions for WRAM banking
+        let mut sys = GbSystem::new();
+
+        // Create a CGB ROM
+        let mut rom = vec![0; 0x150];
+        rom[0x143] = 0x80; // CGB compatible
+        rom[0x147] = 0x00;
+        rom[0x149] = 0x00;
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test boundary between bank 0 and switchable area
+        sys.cpu.memory.write(0xFF70, 0x02);
+        sys.cpu.memory.write(0xCFFF, 0xAA); // Last byte of bank 0
+        sys.cpu.memory.write(0xD000, 0xBB); // First byte of bank 2
+
+        assert_eq!(
+            sys.cpu.memory.read(0xCFFF),
+            0xAA,
+            "Last byte of bank 0 should be 0xAA"
+        );
+        assert_eq!(
+            sys.cpu.memory.read(0xD000),
+            0xBB,
+            "First byte of bank 2 should be 0xBB"
+        );
+
+        // Switch to bank 1 and verify bank 0 is unchanged
+        sys.cpu.memory.write(0xFF70, 0x01);
+        assert_eq!(
+            sys.cpu.memory.read(0xCFFF),
+            0xAA,
+            "Bank 0 should be unchanged"
+        );
+        assert_ne!(
+            sys.cpu.memory.read(0xD000),
+            0xBB,
+            "Bank 1 should have different data than bank 2"
+        );
+
+        // Test last byte of switchable area
+        sys.cpu.memory.write(0xFF70, 0x03);
+        sys.cpu.memory.write(0xDFFF, 0xCC);
+        assert_eq!(
+            sys.cpu.memory.read(0xDFFF),
+            0xCC,
+            "Last byte of switchable area should be accessible"
         );
     }
 }

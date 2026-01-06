@@ -397,6 +397,13 @@ impl Chip8System {
                 }
                 0x00FB => {
                     // 00FB - SCR (Super-CHIP): Scroll display 4 pixels right
+                    // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
+                    if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: SCR - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                        });
+                        self.mode = Chip8Mode::SuperChip;
+                    }
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
                         log(LogCategory::PPU, LogLevel::Debug, || {
                             "CHIP-8: SCR - Scroll right 4 pixels (Super-CHIP)".to_string()
@@ -406,6 +413,13 @@ impl Chip8System {
                 }
                 0x00FC => {
                     // 00FC - SCL (Super-CHIP): Scroll display 4 pixels left
+                    // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
+                    if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: SCL - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                        });
+                        self.mode = Chip8Mode::SuperChip;
+                    }
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
                         log(LogCategory::PPU, LogLevel::Debug, || {
                             "CHIP-8: SCL - Scroll left 4 pixels (Super-CHIP)".to_string()
@@ -422,6 +436,13 @@ impl Chip8System {
                 }
                 0x00FE => {
                     // 00FE - LOW (Super-CHIP): Disable high resolution mode
+                    // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
+                    if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            "CHIP-8: LOW - Auto-upgrading to Super-CHIP mode".to_string()
+                        });
+                        self.mode = Chip8Mode::SuperChip;
+                    }
                     if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
                         log(LogCategory::PPU, LogLevel::Info, || {
                             "CHIP-8: LOW - Switching to low-res mode (64x32)".to_string()
@@ -439,11 +460,13 @@ impl Chip8System {
                         });
                         self.set_high_res();
                     } else if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
-                        // Auto-upgrade to Mega-CHIP when high-res is requested from basic CHIP-8
+                        // Auto-upgrade to Super-CHIP when high-res is requested from basic CHIP-8
+                        // Most games using 00FF expect Super-CHIP (128x64), not Mega-CHIP (256x192)
                         log(LogCategory::PPU, LogLevel::Info, || {
-                            "CHIP-8: HIGH - Auto-upgrading to Mega-CHIP mode (256x192)".to_string()
+                            "CHIP-8: HIGH - Auto-upgrading to Super-CHIP mode (128x64)".to_string()
                         });
-                        self.set_mega_res();
+                        self.mode = Chip8Mode::SuperChip;
+                        self.set_high_res();
                     } else if self.mode == Chip8Mode::MegaChip {
                         log(LogCategory::PPU, LogLevel::Info, || {
                             "CHIP-8: HIGH - Already in Mega-CHIP mode (256x192)".to_string()
@@ -456,6 +479,13 @@ impl Chip8System {
                     let n = (opcode & 0x000F) as usize;
                     if opcode & 0x00F0 == 0x00C0 {
                         // 00CN - Scroll down
+                        // Auto-upgrade to Super-CHIP mode if in basic CHIP-8 mode
+                        if self.mode == Chip8Mode::Chip8 || self.mode == Chip8Mode::Chip8Hires {
+                            log(LogCategory::PPU, LogLevel::Info, || {
+                                "CHIP-8: SCD - Auto-upgrading to Super-CHIP mode for scroll support".to_string()
+                            });
+                            self.mode = Chip8Mode::SuperChip;
+                        }
                         if matches!(self.mode, Chip8Mode::SuperChip | Chip8Mode::XoChip) {
                             log(LogCategory::PPU, LogLevel::Debug, || {
                                 format!("CHIP-8: SCD - Scroll down {} lines (Super-CHIP)", n)
@@ -789,8 +819,8 @@ impl Chip8System {
 
     /// Draw sprite at (Vx, Vy) with height n
     fn draw_sprite(&mut self, x_reg: usize, y_reg: usize, height: usize) {
-        let x_pos = self.v[x_reg] as usize % self.display_width;
-        let y_pos = self.v[y_reg] as usize % self.display_height;
+        let x_pos = self.v[x_reg] as usize;
+        let y_pos = self.v[y_reg] as usize;
 
         self.v[0xF] = 0; // Reset collision flag
 
@@ -946,6 +976,7 @@ impl Chip8System {
     }
 
     /// Enable mega resolution mode (256x192) - Mega-CHIP
+    #[allow(dead_code)] // May be used for Mega-CHIP support in the future
     fn set_mega_res(&mut self) {
         if self.mode != Chip8Mode::MegaChip {
             self.mode = Chip8Mode::MegaChip;

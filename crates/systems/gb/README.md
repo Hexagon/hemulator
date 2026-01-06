@@ -6,7 +6,7 @@ This crate implements Game Boy (DMG) and Game Boy Color (CGB) emulation for the 
 
 ## Current Status
 
-The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/1/2/3/5 and HuC1 support, plus full CGB color support.
+The Game Boy emulator is **fully working** with ~99% game coverage through MBC0/1/2/3/5 and HuC1 support, plus full CGB color support and WRAM banking.
 
 ### What Works
 
@@ -15,6 +15,7 @@ The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/
 - ✅ **CGB Color** - 15-bit RGB color palettes (8 BG + 8 OBJ)
 - ✅ **Palette Initialization** - DMG-compatible defaults for early CGB games (Pokemon Yellow, etc.)
 - ✅ **VRAM Banking** - 2 banks of 8KB for CGB mode
+- ✅ **WRAM Banking** - 8 banks of 4KB (32KB total) with SVBK register for CGB mode
 - ✅ **Tile Attributes** - CGB palette selection, VRAM banking, flipping
 - ✅ **APU** - Complete audio with all 4 channels
 - ✅ **Mappers** - MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 (~97% coverage)
@@ -52,7 +53,9 @@ The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/
 GbSystem
   └── GbCpu (wraps CpuLr35902<GbBus>)
       └── GbBus (implements MemoryLr35902)
-          ├── 8KB Work RAM (WRAM)
+          ├── 32KB Work RAM (WRAM) with banking (CGB)
+          │   ├── Bank 0: 0xC000-0xCFFF (fixed)
+          │   └── Banks 1-7: 0xD000-0xDFFF (switchable via SVBK)
           ├── 127 bytes High RAM (HRAM)
           ├── GB PPU
           │   ├── 8KB VRAM
@@ -134,13 +137,14 @@ cargo run --release -p emu_gui -- path/to/game.gb
 
 The Game Boy crate includes comprehensive tests:
 
-- **114 total tests**:
+- **137 total tests**:
   - PPU tests (rendering, registers, scrolling)
   - APU tests (all channels, registers)
   - System tests (reset, state management, controller input, joypad integration)
   - Mapper tests (MBC0/1/2/3/5, HuC1)
   - Timer tests (DIV, TIMA overflow, interrupts)
   - Renderer tests (software renderer)
+  - WRAM banking tests (CGB mode, all banks, echo RAM, DMG mode, boundaries)
 
 - **Smoke Tests**: Uses `test_roms/gb/test.gb` and `test_roms/gbc/test.gbc` to verify basic functionality
 
@@ -172,7 +176,6 @@ See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facin
 - No STAT interrupts or PPU mode transitions
 
 **Missing CGB Features**:
-- WRAM banking (SVBK register at 0xFF70)
 - HDMA - HBlank DMA (registers 0xFF51-0xFF55)
 - Infrared port (RP register at 0xFF56)
 

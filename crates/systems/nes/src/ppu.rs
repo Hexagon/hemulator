@@ -611,6 +611,9 @@ impl Ppu {
     }
     #[cfg(test)]
     pub fn render_frame(&self) -> Frame {
+        // TEST-ONLY: This method is used for testing and renders the entire frame at once.
+        // Production code uses render_scanline() which is called 240 times per frame.
+        //
         // Rendering is done "out of band" (not cycle-accurate). Suppress A12 callbacks
         // so mappers like MMC3 don't see thousands of synthetic edges during draw.
         let prev_suppress = self.suppress_a12.replace(true);
@@ -745,6 +748,10 @@ impl Ppu {
             // None = no sprite pixel, Some((rgb, behind_bg)) = sprite pixel with priority.
             let mut sprite_buffer: Vec<Option<(u32, bool)>> = vec![None; (width * height) as usize];
 
+            // NES PPU hardware limitation: maximum 8 sprites per scanline.
+            // Track how many sprites are on each scanline to enforce the limit.
+            let mut sprites_per_scanline: Vec<u8> = vec![0; height as usize];
+
             // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
             // First opaque pixel at each position wins.
             for i in 0..64usize {
@@ -767,6 +774,42 @@ impl Ppu {
                 } else {
                     (tile, sprite_pattern_base, 8)
                 };
+
+                // Check if this sprite can be rendered on its scanlines (8-sprite limit)
+                // NOTE: This implementation is conservative - it skips the entire sprite if ANY
+                // scanline it occupies has 8 sprites. Real NES hardware would render the sprite
+                // on scanlines that haven't hit the limit. This simplified approach is sufficient
+                // for most games and avoids complex per-scanline rendering logic in render_frame().
+                // Games requiring precise per-scanline sprite limiting should use render_scanline().
+                let mut can_render = false;
+                let mut hit_limit = false;
+                for row in 0..height_px {
+                    let y = y_pos + row as i16;
+                    if y >= 0 && y < height as i16 {
+                        let scanline_idx = y as usize;
+                        if sprites_per_scanline[scanline_idx] >= 8 {
+                            // NES hardware limit: only 8 sprites per scanline
+                            hit_limit = true;
+                            break;
+                        }
+                        // At least one visible scanline exists and hasn't hit the limit yet
+                        can_render = true;
+                    }
+                }
+
+                // Skip this sprite if it would exceed the 8-sprite limit on any scanline,
+                // or if it's completely off-screen
+                if hit_limit || !can_render {
+                    continue;
+                }
+
+                // Mark scanlines as having this sprite
+                for row in 0..height_px {
+                    let y = y_pos + row as i16;
+                    if y >= 0 && y < height as i16 {
+                        sprites_per_scanline[y as usize] += 1;
+                    }
+                }
 
                 for row in 0..height_px {
                     let sy = if flip_v { height_px - 1 - row } else { row };
@@ -981,8 +1024,13 @@ impl Ppu {
             // None = no sprite pixel, Some((rgb, behind_bg, sprite_idx)) = sprite pixel with priority and index.
             let mut sprite_buffer: [Option<(u32, bool, usize)>; 256] = [None; 256];
 
+            // NES PPU hardware limitation: maximum 8 sprites per scanline.
+            // Track how many sprites are on this scanline to enforce the limit.
+            let mut sprites_on_scanline = 0;
+
             // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
             // First opaque pixel at each position wins.
+            // Stop after 8 sprites are found on this scanline (NES hardware limit).
             for i in 0..64usize {
                 let o = i * 4;
                 let y_pos = self.oam[o] as i16 + 1;
@@ -1006,6 +1054,14 @@ impl Ppu {
                 let row = (y as i16) - y_pos;
                 if row < 0 || row >= height_px {
                     continue;
+                }
+
+                // This sprite is on the current scanline
+                sprites_on_scanline += 1;
+                if sprites_on_scanline > 8 {
+                    // NES hardware limit: only 8 sprites can be rendered per scanline
+                    // Sprites beyond the 8th are skipped (sprite overflow flag is set by evaluate_sprites_for_scanline)
+                    break;
                 }
 
                 let sy = if flip_v { height_px - 1 - row } else { row };
@@ -2558,5 +2614,150 @@ mod tests {
 
         // The real test is that games like Turbo Racing now work correctly
         // This test just verifies the setup works as expected
+    }
+
+    #[test]
+    fn test_eight_sprite_per_scanline_limit() {
+        // Test that the NES hardware limitation of 8 sprites per scanline is enforced
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
+        ppu.chr_is_ram = true;
+
+        // Enable sprite rendering
+        ppu.ctrl = 0x00; // 8x8 sprites, pattern table at $0000
+        ppu.mask = 0x10; // Sprites enabled, no background
+
+        // Set up sprite pattern (solid tile)
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0xFF;
+        }
+
+        // Clear all OAM first
+        for i in 0..256 {
+            ppu.oam[i] = 0xFF; // Y=0xFF means off-screen
+        }
+
+        // Set up 10 sprites all on the same scanline (Y=7, which means scanline 8)
+        // Each sprite uses a different palette to make them distinguishable
+        for i in 0..10 {
+            let o = i * 4;
+            ppu.oam[o] = 7; // Y position (renders on scanline 8)
+            ppu.oam[o + 1] = 0; // Tile 0
+            ppu.oam[o + 2] = (i % 4) as u8; // Palette (cycling through 0-3)
+            ppu.oam[o + 3] = (i * 16) as u8; // X position (spaced 16 pixels apart)
+        }
+
+        // Set up palettes with distinct colors
+        ppu.palette[0x11] = 0x01; // Palette 0 color 1
+        ppu.palette[0x12] = 0x01; // Palette 0 color 2
+        ppu.palette[0x13] = 0x01; // Palette 0 color 3 - dark blue
+        ppu.palette[0x15] = 0x02; // Palette 1 color 1
+        ppu.palette[0x16] = 0x02; // Palette 1 color 2
+        ppu.palette[0x17] = 0x02; // Palette 1 color 3 - dark purple
+        ppu.palette[0x19] = 0x03; // Palette 2 color 1
+        ppu.palette[0x1A] = 0x03; // Palette 2 color 2
+        ppu.palette[0x1B] = 0x03; // Palette 2 color 3 - dark cyan
+        ppu.palette[0x1D] = 0x04; // Palette 3 color 1
+        ppu.palette[0x1E] = 0x04; // Palette 3 color 2
+        ppu.palette[0x1F] = 0x04; // Palette 3 color 3 - dark brown
+
+        let frame = ppu.render_frame();
+
+        // Check that sprites 0-7 are rendered (X positions 0, 16, 32, 48, 64, 80, 96, 112)
+        for i in 0..8 {
+            let x = i * 16;
+            let pixel = frame.pixels[8 * 256 + x];
+            // Each sprite should have its corresponding palette color
+            let expected_palette_idx = match i % 4 {
+                0 => 0x01,
+                1 => 0x02,
+                2 => 0x03,
+                3 => 0x04,
+                _ => unreachable!(),
+            };
+            assert_ne!(
+                pixel, 0x00000000,
+                "Sprite {} at X={} should be rendered (within 8-sprite limit)",
+                i, x
+            );
+            assert_eq!(
+                pixel,
+                nes_palette_rgb(expected_palette_idx),
+                "Sprite {} at X={} should have correct palette color",
+                i,
+                x
+            );
+        }
+
+        // Check that sprites 8-9 are NOT rendered (X positions 128, 144)
+        // These exceed the 8-sprite-per-scanline limit
+        // They should show the background color instead
+        let backdrop_color = nes_palette_rgb(ppu.palette[0]);
+        for i in 8..10 {
+            let x = i * 16;
+            let pixel = frame.pixels[8 * 256 + x];
+            assert_eq!(
+                pixel, backdrop_color,
+                "Sprite {} at X={} should NOT be rendered (exceeds 8-sprite limit), should show backdrop color",
+                i, x
+            );
+        }
+    }
+
+    #[test]
+    fn test_eight_sprite_limit_with_scanline_rendering() {
+        // Test that the 8-sprite limit works correctly with scanline-based rendering
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        ppu.ctrl = 0x00;
+        ppu.mask = 0x10; // Sprites only
+
+        // Set up sprite pattern
+        for i in 0..8 {
+            ppu.chr[i] = 0xFF;
+            ppu.chr[i + 8] = 0xFF;
+        }
+
+        // Create 10 sprites on scanline 50
+        for i in 0..10 {
+            let o = i * 4;
+            ppu.oam[o] = 49; // Y position (renders on scanline 50)
+            ppu.oam[o + 1] = 0;
+            ppu.oam[o + 2] = 0;
+            ppu.oam[o + 3] = (i * 20) as u8; // X position
+        }
+
+        ppu.palette[0x11] = 0x30; // White
+
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(50, &mut frame);
+
+        // First 8 sprites should be visible
+        for i in 0..8 {
+            let x = i * 20;
+            let pixel = frame.pixels[50 * 256 + x];
+            assert_ne!(
+                pixel, 0x00000000,
+                "Sprite {} should be rendered on scanline",
+                i
+            );
+        }
+
+        // Sprites 8-9 should not be rendered (they should show backdrop color)
+        let backdrop_color = nes_palette_rgb(ppu.palette[0]);
+        for i in 8..10 {
+            let x = i * 20;
+            if x < 256 {
+                let pixel = frame.pixels[50 * 256 + x];
+                assert_eq!(
+                    pixel, backdrop_color,
+                    "Sprite {} should NOT be rendered (exceeds limit), should show backdrop color",
+                    i
+                );
+            }
+        }
     }
 }
