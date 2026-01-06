@@ -789,8 +789,8 @@ impl Chip8System {
 
     /// Draw sprite at (Vx, Vy) with height n
     fn draw_sprite(&mut self, x_reg: usize, y_reg: usize, height: usize) {
-        let x_pos = self.v[x_reg] as usize % self.display_width;
-        let y_pos = self.v[y_reg] as usize % self.display_height;
+        let x_pos = self.v[x_reg] as usize;
+        let y_pos = self.v[y_reg] as usize;
 
         self.v[0xF] = 0; // Reset collision flag
 
@@ -808,11 +808,42 @@ impl Chip8System {
             height
         };
 
+        // Super-CHIP and XO-CHIP use clipping (pixels outside screen are not drawn)
+        // Original CHIP-8 uses wrapping (pixels wrap to opposite side)
+        let clip_sprites = matches!(
+            self.mode,
+            Chip8Mode::SuperChip | Chip8Mode::XoChip | Chip8Mode::MegaChip
+        );
+
         for row in 0..sprite_height {
-            let y = (y_pos + row) % self.display_height;
+            let y = y_pos + row;
+
+            // Clip or wrap Y coordinate
+            let y_final = if clip_sprites {
+                // Super-CHIP: Clip - skip rows outside screen
+                if y >= self.display_height {
+                    continue;
+                }
+                y
+            } else {
+                // Original CHIP-8: Wrap around
+                y % self.display_height
+            };
 
             for col in 0..sprite_width {
-                let x = (x_pos + col) % self.display_width;
+                let x = x_pos + col;
+
+                // Clip or wrap X coordinate
+                let x_final = if clip_sprites {
+                    // Super-CHIP: Clip - skip pixels outside screen
+                    if x >= self.display_width {
+                        continue;
+                    }
+                    x
+                } else {
+                    // Original CHIP-8: Wrap around
+                    x % self.display_width
+                };
 
                 // Get sprite pixel
                 let byte_offset = if sprite_width == 16 {
@@ -825,7 +856,7 @@ impl Chip8System {
                 let pixel = (sprite_byte & (1 << bit_offset)) != 0;
 
                 if pixel {
-                    let index = y * self.display_width + x;
+                    let index = y_final * self.display_width + x_final;
 
                     // Draw to selected plane(s) for XO-CHIP, or plane 0 for CHIP-8/Super-CHIP
                     let planes_to_draw = if self.mode == Chip8Mode::XoChip {
