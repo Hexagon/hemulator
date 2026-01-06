@@ -31,6 +31,7 @@ temp.img
 *out.txt
 debug_log*¨
 debug_run.txt
+*.txt
 
 # Backup files
 *.backup

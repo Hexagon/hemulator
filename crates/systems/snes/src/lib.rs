@@ -14,6 +14,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod debugger;
 mod ppu;
 pub mod ppu_renderer;
 
@@ -306,6 +307,10 @@ impl System for SnesSystem {
 
     fn is_mounted(&self, mount_point_id: &str) -> bool {
         mount_point_id == "Cartridge" && self.cpu.bus().has_cartridge()
+    }
+
+    fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 

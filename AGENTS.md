@@ -275,6 +275,8 @@ The emulator supports generating comprehensive debug dumps from the command line
 
 **Headless Mode**: When debug dump options are specified, the emulator runs in headless mode (no GUI), making execution significantly faster. The emulator will automatically exit after generating the dump.
 
+**Iterative Testing Performance**: Always use `--profile release-quick` with `cargo run` or `cargo build`. This makes the build process way quicker.
+
 ### Usage
 
 **Dump at specific Program Counter (PC):**
