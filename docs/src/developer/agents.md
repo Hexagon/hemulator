@@ -1,10 +1,13 @@
+---
+title: "Agent Guidelines"
+nav_order: 3
+---
 # AGENTS.md
 
 **Purpose**: Guidance for automated agents and maintainers about CI, formatting, and implementation guidelines.
 
 **Related Documentation**:
 - **[README.md](README.md)**: Developer quick start, build instructions, project overview
-- **[Documentation Site](https://hexagon.github.io/hemulator/)**: Complete documentation hosted via GitHub Pages
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
 - **[MANUAL.md](docs/MANUAL.md)**: End-user manual with controls, features, and system-specific information
 - **[CONTRIBUTING.md](docs/CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
@@ -22,34 +25,6 @@
 ---
 
 ## Agent Guidelines
-
-### Documentation Structure
-
-The project uses a **Lumocs-based documentation site** hosted at https://hexagon.github.io/hemulator/
-
-**Documentation Organization**:
-- **User Documentation**: `docs/src/user/` - End-user guides and manuals
-- **Developer Documentation**: `docs/src/developer/` - Architecture, contributing, implementation guides
-- **System Documentation**: `docs/src/systems/` - Overview with links to system-specific READMEs
-- **Reference Documentation**: `docs/src/references/` - CPU and hardware technical references
-
-**Repository Documentation**:
-- **System READMEs** (`crates/systems/*/README.md`): Keep repository-specific implementation details here
-- **Root Documentation** (`docs/*.md`): Maintained for backward compatibility and direct access
-- **Site Source** (`docs/src/`): Lumocs source files with frontmatter metadata
-
-**When Adding/Updating Documentation**:
-1. **User-facing content**: Update `docs/src/user/` and mirror changes to `docs/MANUAL.md`
-2. **Developer content**: Update `docs/src/developer/` and mirror changes to corresponding root docs
-3. **System-specific**: Update `crates/systems/*/README.md` and ensure `docs/src/systems/index.md` links are current
-4. **References**: Add CPU/hardware references to `docs/src/references/` with proper frontmatter
-5. **Always include sources**: Reference datasheets, wikis, and documentation in implementation docs
-
-**Documentation Workflow**:
-- Site automatically deploys via GitHub Actions on push to master/main
-- Test locally: `cd docs && deno task serve` (requires Deno)
-- Build locally: `cd docs && deno task build`
-- View output in `docs/_site/` (excluded from git)
 
 - **Keep track of known limitations**: Document known limitations and missing features in docs/MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 

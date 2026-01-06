@@ -41,15 +41,20 @@ A cross-platform, multi-system console emulator written in Rust. **NES emulation
 
 ## For Users
 
-Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page. See **[MANUAL.md](docs/MANUAL.md)** for complete usage instructions, controls, and system-specific information.
+Download the latest release from the [Releases](https://github.com/Hexagon/hemulator/releases) page.
+
+**Documentation**:
+- 📚 **[Complete Documentation Site](https://hexagon.github.io/hemulator/)** - Full documentation with user guides and developer references
+- 📖 **[User Manual](docs/MANUAL.md)** - Complete usage instructions, controls, and system-specific information
+- 🎮 **[System Documentation](https://hexagon.github.io/hemulator/systems/)** - Detailed information about each emulated system
 
 ## For Developers
 
-See **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** for overall emulation system architecture and design patterns.
-
-See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for development workflow and contribution guidelines.
-
-See **[AGENTS.md](AGENTS.md)** for implementation guidelines and CI requirements.
+**Core Documentation**:
+- 🏗️ **[Architecture Guide](docs/ARCHITECTURE.md)** - Overall emulation system architecture and design patterns
+- 🤝 **[Contributing Guide](docs/CONTRIBUTING.md)** - Development workflow and contribution guidelines
+- 🤖 **[Agent Guidelines](AGENTS.md)** - Implementation guidelines and CI requirements
+- 🌐 **[Full Documentation Site](https://hexagon.github.io/hemulator/)** - Complete developer and API documentation
 
 **Planning and Reference Documents**:
 - [N64_STATUS.md](docs/N64_STATUS.md) - Active development status for Nintendo 64 emulation
