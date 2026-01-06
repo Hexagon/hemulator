@@ -473,7 +473,11 @@ impl Sdl2EguiBackend {
     /// Load and set window icon from embedded PNG data
     fn set_window_icon(window: &mut sdl2::video::Window) {
         // Icon data is embedded at compile time
-        const ICON_DATA: &[u8] = include_bytes!("../../../../../assets/icon_32.png");
+        // Use CARGO_MANIFEST_DIR to build path at compile time
+        const ICON_DATA: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/icon_32.png"
+        ));
 
         // Try to load and set the icon, but don't fail if it doesn't work
         match Self::load_icon_from_png(ICON_DATA) {
@@ -508,14 +512,22 @@ impl Sdl2EguiBackend {
         let bytes = &buf[..info.buffer_size()];
 
         // Create SDL surface from the decoded RGBA data
-        // PNG crate outputs RGBA, which we need to convert to SDL's preferred format
+        // PNG crate outputs RGBA, we need to convert to ABGR8888 for SDL
         let mut surface =
             sdl2::surface::Surface::new(width, height, sdl2::pixels::PixelFormatEnum::ABGR8888)
                 .map_err(|e| format!("Failed to create surface: {}", e))?;
 
-        // Copy pixel data to surface
+        // Convert RGBA to ABGR and copy pixel data to surface
         surface.with_lock_mut(|pixels: &mut [u8]| {
-            pixels.copy_from_slice(bytes);
+            for i in 0..(bytes.len() / 4) {
+                let src_idx = i * 4;
+                let dst_idx = i * 4;
+                // Convert from RGBA to ABGR
+                pixels[dst_idx] = bytes[src_idx + 3]; // A
+                pixels[dst_idx + 1] = bytes[src_idx + 2]; // B
+                pixels[dst_idx + 2] = bytes[src_idx + 1]; // G
+                pixels[dst_idx + 3] = bytes[src_idx]; // R
+            }
         });
 
         Ok(surface)
