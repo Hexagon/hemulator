@@ -1566,7 +1566,8 @@ fn create_n64_system(gl_context: Option<glow::Context>) -> Result<emu_n64::N64Sy
     if let Some(gl) = gl_context {
         emu_n64::N64System::new(gl)
     } else {
-        Err("OpenGL context required for N64 emulation".to_string())
+        Err("OpenGL context required for N64 emulation: no GL context was created by the frontend or windowing system. \
+Please ensure your system supports hardware-accelerated OpenGL and that the graphics/video backend is configured to create an OpenGL context for the N64 renderer.".to_string())
     }
 }
 

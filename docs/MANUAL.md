@@ -1011,7 +1011,7 @@ For N64 games, the standard controller mappings apply with these button equivale
 **Known Limitations**:
 - **Renderer**: Uses OpenGL 3.3 for hardware-accelerated GPU rendering
   - Requires OpenGL 3.3+ compatible graphics hardware
-  - OpenGL is required for N64 emulation (no software fallback)
+  - OpenGL 3.3+ is required for N64 emulation (no software fallback)
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles
