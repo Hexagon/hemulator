@@ -13,6 +13,7 @@ The Game Boy emulator is **fully working** with ~97% game coverage through MBC0/
 - ✅ **CPU (LR35902)** - Complete Sharp LR35902 CPU from `emu_core::cpu_lr35902`
 - ✅ **PPU** - Full DMG and CGB PPU with background, window, sprites
 - ✅ **CGB Color** - 15-bit RGB color palettes (8 BG + 8 OBJ)
+- ✅ **Palette Initialization** - DMG-compatible defaults for early CGB games (Pokemon Yellow, etc.)
 - ✅ **VRAM Banking** - 2 banks of 8KB for CGB mode
 - ✅ **Tile Attributes** - CGB palette selection, VRAM banking, flipping
 - ✅ **APU** - Complete audio with all 4 channels
@@ -91,6 +92,10 @@ Implements DMG (original Game Boy) and CGB (Game Boy Color) modes with a flexibl
   - CGB: Tile attributes (palette, VRAM bank, flip)
   - CGB: Sprite attributes (palette, VRAM bank)
   - Automatic mode detection (DMG vs CGB)
+  - **Palette Initialization**:
+    - CGB compatibility mode (flag 0x80): DMG-compatible greenish palette (White, Light Green, Dark Green, Black)
+    - CGB-only mode (flag 0xC0): White default palette (game sets its own)
+    - Ensures early CGB games (Pokemon Yellow, etc.) display correctly without boot ROM
 - **Rendering**:
   - **Software Renderer**: CPU-based tile/sprite rendering (default)
   - **Hardware Renderer**: GPU-accelerated rendering (future work)
