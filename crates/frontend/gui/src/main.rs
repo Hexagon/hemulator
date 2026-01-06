@@ -1626,6 +1626,81 @@ fn create_enhanced_debug_state(
     enhanced_state
 }
 
+/// Apply CLI debugging options to a system
+fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
+    match sys {
+        EmulatorSystem::NES(nes) => {
+            if cli_args.trace_instructions {
+                nes.set_instruction_tracing(true);
+                if let Some(limit) = cli_args.trace_limit {
+                    // Note: InstructionTracer limit is set via TracerConfig during creation
+                    // We can't change it after creation without adding a setter method
+                    eprintln!("Note: Trace limit can only be set during tracer creation (default: 10000)");
+                }
+            }
+            for &addr in &cli_args.breakpoints {
+                nes.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::GameBoy(gb) => {
+            if cli_args.trace_instructions {
+                gb.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                gb.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::Atari2600(a2600) => {
+            if cli_args.trace_instructions {
+                a2600.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                a2600.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::Chip8(chip8) => {
+            if cli_args.trace_instructions {
+                chip8.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                chip8.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::SMS(sms) => {
+            if cli_args.trace_instructions {
+                sms.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                sms.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::SNES(snes) => {
+            if cli_args.trace_instructions {
+                snes.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                snes.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::N64(n64) => {
+            if cli_args.trace_instructions {
+                n64.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                n64.add_breakpoint(addr);
+            }
+        }
+        EmulatorSystem::PC(pc) => {
+            if cli_args.trace_instructions {
+                pc.set_instruction_tracing(true);
+            }
+            for &addr in &cli_args.breakpoints {
+                pc.add_breakpoint(addr);
+            }
+        }
+    }
+}
+
 /// Generate a comprehensive debug dump with disassembly and memory contents
 /// Also captures a screenshot of the current frame state
 fn generate_debug_dump(
@@ -2018,7 +2093,7 @@ fn main() {
     let mut runtime_state = RuntimeState::new();
 
     // Determine what to load based on CLI args
-    let rom_path = cli_args.rom_path.or_else(|| settings.last_rom_path.clone());
+    let rom_path = cli_args.rom_path.as_ref().cloned().or_else(|| settings.last_rom_path.clone());
 
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
@@ -2573,6 +2648,11 @@ fn main() {
         } // closes else block for non-.hemu files
     } // closes if let Some(p) = &rom_path
 
+    // Apply debug options after ROM loading
+    if rom_loaded {
+        apply_debug_options(&mut sys, &cli_args);
+    }
+
     // Handle slot-based loading (primarily for PC system)
     // If any slot arguments are provided, auto-select PC mode if no ROM was loaded
     let has_slot_args = cli_args.slot1.is_some()
@@ -2664,6 +2744,11 @@ fn main() {
         }
     }
 
+    // Apply debug options after slot loading
+    if has_slot_args {
+        apply_debug_options(&mut sys, &cli_args);
+    }
+
     // Get resolution from the system
     let (width, height) = sys.resolution();
 
@@ -2700,6 +2785,9 @@ fn main() {
         }
         eprintln!("  - Output file: {}", dump_file);
         eprintln!();
+
+        // Apply debug options (tracing, breakpoints) before starting emulation
+        apply_debug_options(&mut sys, &cli_args);
 
         // Track the latest frame for screenshot on dump
         let mut latest_frame_buffer: Option<(Vec<u32>, usize, usize)> = None;
