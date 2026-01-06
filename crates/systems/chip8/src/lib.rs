@@ -835,9 +835,9 @@ impl Chip8System {
 
                 // Clip or wrap X coordinate
                 let x_final = if clip_sprites {
-                    // Super-CHIP: Clip - skip pixels outside screen
+                    // Super-CHIP: Clip - skip remaining pixels in this row if outside screen
                     if x >= self.display_width {
-                        continue;
+                        break; // All subsequent columns will also be out of bounds
                     }
                     x
                 } else {
@@ -1699,11 +1699,11 @@ mod tests {
         system.v[1] = 10; // Y position
         system.draw_sprite(0, 1, 5);
 
-        // Check that first 2 pixels wrapped to the left edge
+        // Check that all 8 pixels wrapped correctly
         for row in 0..5 {
             let y = 10 + row;
-            // Last 6 pixels should be at X=62-63, and wrap continues at X=0-1
-            for col in 0..6 {
+            // All 8 sprite pixels: X=62-63 on screen, X=0-5 wrapped from left edge
+            for col in 0..8 {
                 let x = 62 + col;
                 let x_wrapped = x % 64;
                 let index = y * system.display_width + x_wrapped;
