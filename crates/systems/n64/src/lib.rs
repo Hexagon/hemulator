@@ -403,14 +403,12 @@ mod tests {
 
     #[test]
     #[ignore] // Requires OpenGL context
-    #[ignore] // Requires OpenGL context
     fn test_system_creation() {
         let sys = N64System::new_for_test();
         assert!(!sys.is_mounted("Cartridge"));
     }
 
     #[test]
-    #[ignore] // Requires OpenGL context
     #[ignore] // Requires OpenGL context
     fn test_mount_points() {
         let sys = N64System::new_for_test();
