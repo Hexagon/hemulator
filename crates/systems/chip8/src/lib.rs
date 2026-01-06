@@ -789,8 +789,8 @@ impl Chip8System {
 
     /// Draw sprite at (Vx, Vy) with height n
     fn draw_sprite(&mut self, x_reg: usize, y_reg: usize, height: usize) {
-        let x_pos = self.v[x_reg] as usize % self.display_width;
-        let y_pos = self.v[y_reg] as usize % self.display_height;
+        let x_pos = self.v[x_reg] as usize;
+        let y_pos = self.v[y_reg] as usize;
 
         self.v[0xF] = 0; // Reset collision flag
 
