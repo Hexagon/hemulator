@@ -41,9 +41,12 @@ docs/
 ├── deno.json                    # Deno tasks and dependencies
 ├── .gitignore                   # Excludes _site build output
 ├── README.md                    # Documentation site guide
-├── ARCHITECTURE.md              # Architecture (root copy for backward compatibility)
-├── CONTRIBUTING.md              # Contributing (root copy for backward compatibility)
-└── MANUAL.md                    # User manual (root copy for backward compatibility)
+├── ARCHITECTURE.md              # Redirect to site (backward compatibility)
+├── CONTRIBUTING.md              # Redirect to site (backward compatibility)
+├── MANUAL.md                    # Redirect to site (backward compatibility)
+├── N64_STATUS.md                # Redirect to site (backward compatibility)
+├── NEXT_EMULATOR_RECOMMENDATION.md  # Redirect to site (backward compatibility)
+└── SMS_IMPLEMENTATION_GUIDE.md  # Redirect to site (backward compatibility)
 ```
 
 ### GitHub Pages Deployment
@@ -70,15 +73,16 @@ Created `.github/workflows/pages.yml` to automatically build and deploy the docu
    - Adding new documentation guidelines
    - Maintenance best practices
 
-### Unchanged Files
+### Changed Files
 
-- **System READMEs** (`crates/systems/*/README.md`): Remain in place
+- **Root documentation** (`docs/*.md`): Converted to simple redirects
+  - `ARCHITECTURE.md`, `CONTRIBUTING.md`, `MANUAL.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` now contain links to the documentation site
+  - Eliminates content duplication while maintaining backward compatibility
+  - `docs/README.md` kept as guide for the documentation site itself
+  
+- **System READMEs** (`crates/systems/*/README.md`): Remain unchanged
   - System-specific implementation details stay close to the code
   - The documentation site links to these READMEs rather than duplicating them
-  
-- **Root documentation** (`docs/*.md`): Maintained for backward compatibility
-  - `ARCHITECTURE.md`, `CONTRIBUTING.md`, `MANUAL.md` kept in docs/
-  - Content mirrored in `docs/src/` for the site
 
 ## Key Features
 
@@ -150,6 +154,7 @@ Developers can:
 - **Presentation**: Static site instead of raw markdown
 - **Navigation**: Automatic navigation from frontmatter
 - **Cross-references**: Updated to use proper site paths
+- **Duplication Removal**: Root docs now redirect to site instead of duplicating content
 
 ### What We Added
 
@@ -161,13 +166,16 @@ Developers can:
 
 ## Backward Compatibility
 
-### Direct Access Still Works
+### Direct Access Works as Redirects
 
-Users can still access documentation directly:
-- `docs/MANUAL.md` - Still available in repository
-- `docs/ARCHITECTURE.md` - Still available in repository
-- `docs/CONTRIBUTING.md` - Still available in repository
-- System READMEs unchanged
+Users can still access documentation files directly in the repository:
+- `docs/MANUAL.md` - Now redirects to documentation site
+- `docs/ARCHITECTURE.md` - Now redirects to documentation site
+- `docs/CONTRIBUTING.md` - Now redirects to documentation site
+- `docs/N64_STATUS.md` - Now redirects to documentation site
+- `docs/NEXT_EMULATOR_RECOMMENDATION.md` - Now redirects to documentation site
+- `docs/SMS_IMPLEMENTATION_GUIDE.md` - Now redirects to documentation site
+- System READMEs unchanged - full content maintained
 
 ### Updated Links
 
@@ -199,10 +207,11 @@ Potential improvements for the documentation site:
 
 ### Updating Existing Documentation
 
-1. Edit the file in `docs/src/`
-2. For root docs, also update corresponding file in `docs/`
-3. Verify links are correct
-4. Push to master/main to deploy
+1. Edit the file in `docs/src/` (this is the authoritative source)
+2. Verify links are correct
+3. Push to master/main to deploy
+
+**Note**: Root docs in `docs/*.md` (except `README.md`) are now redirects and should not be edited.
 
 ### Testing Changes
 

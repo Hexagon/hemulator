@@ -34,9 +34,12 @@ docs/
 ├── _config.ts             # Lumocs configuration
 ├── deno.json              # Deno tasks and dependencies
 ├── .gitignore            # Excludes _site build output
-├── ARCHITECTURE.md        # Architecture (root copy)
-├── CONTRIBUTING.md        # Contributing (root copy)
-├── MANUAL.md              # User manual (root copy)
+├── ARCHITECTURE.md        # Redirect to site
+├── CONTRIBUTING.md        # Redirect to site
+├── MANUAL.md              # Redirect to site
+├── N64_STATUS.md          # Redirect to site
+├── NEXT_EMULATOR_RECOMMENDATION.md  # Redirect to site
+├── SMS_IMPLEMENTATION_GUIDE.md      # Redirect to site
 └── README.md              # This file
 ```
 
@@ -55,6 +58,13 @@ Overview of all emulated systems with links to system-specific READMEs in `crate
 
 ### Reference Documentation (`src/references/`)
 Technical references for CPUs, hardware components, and protocols. Includes instruction sets, addressing modes, and implementation notes with sources.
+
+### Root Documentation Files (`docs/*.md`)
+Most files in the root `docs/` directory are **simple redirects** to the documentation site for backward compatibility:
+- `MANUAL.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → redirect to site
+- `README.md` → this file, documenting the site itself
+
+**The authoritative documentation is in `docs/src/`** and published to the site.
 
 ## Building the Documentation
 
@@ -121,59 +131,13 @@ nav_order: 1  # Optional: controls navigation order
 
 ## Maintaining Consistency
 
-**Root Documentation Files**: The `docs/` directory contains copies of key documentation files for backward compatibility and direct access:
-- `ARCHITECTURE.md`
-- `CONTRIBUTING.md`
-- `MANUAL.md`
+**Root Documentation Files**: Most files in the `docs/` directory are now **simple redirects** to the documentation site:
+- `ARCHITECTURE.md`, `CONTRIBUTING.md`, `MANUAL.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → Redirect files
+- `README.md` → Documentation about the site itself
 
-When updating these files, update both the root copy and the `src/` version:
-1. Edit `docs/ARCHITECTURE.md`
-2. Copy changes to `docs/src/developer/architecture.md` (preserving frontmatter)
-3. Or vice versa, depending on workflow
+**The authoritative source is `docs/src/`** - all documentation edits should be made there.
 
-**System READMEs**: Always keep system-specific implementation details in `crates/systems/*/README.md`. The site should link to these READMEs rather than duplicating their content.
-
-## Links and Cross-References
-
-Use relative links within the documentation site:
-- User docs: `[Link](../user/manual.md)`
-- Developer docs: `[Link](../developer/architecture.md)`
-- References: `[Link](../references/6502.md)`
-
-For GitHub links (system READMEs), use absolute URLs:
-- `[NES README](https://github.com/Hexagon/hemulator/blob/master/crates/systems/nes/README.md)`
-
-## Styling and Features
-
-Lumocs provides:
-- Automatic navigation from frontmatter
-- Markdown rendering with GitHub Flavored Markdown
-- Code syntax highlighting
-- Automatic table of contents
-- Search functionality
-- Responsive design
-
-See [Lumocs documentation](https://lumocs.56k.guru/) for advanced features.
-
-## Troubleshooting
-
-**Site not updating**: 
-- Check GitHub Actions for build errors
-- Verify Pages is enabled in repository settings
-- Ensure `_site/` is in `.gitignore`
-
-**Broken links**:
-- Use relative links within the site
-- Test locally with `deno task serve`
-- Check navigation order in frontmatter
-
-**Deno errors**:
-- Ensure Deno 2.0.2+ is installed
-- Run `deno task lume` to update dependencies
-- Check `deno.json` for correct Lumocs version
-
-## Resources
-
-- [Lumocs Documentation](https://lumocs.56k.guru/)
-- [Lume Static Site Generator](https://lume.land/)
-- [GitHub Pages Documentation](https://docs.github.com/en/pages)
+When updating documentation:
+1. Edit files in `docs/src/` (this is the single source of truth)
+2. Push to master/main to automatically deploy to the site
+3. Do NOT edit the redirect files in `docs/` root
