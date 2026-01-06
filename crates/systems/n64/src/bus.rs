@@ -31,12 +31,16 @@ pub struct N64Bus {
 }
 
 impl N64Bus {
-    pub fn new() -> Self {
+    /// Create a new N64 bus with OpenGL renderer
+    /// Requires a GL context for hardware-accelerated rendering
+    pub fn new(gl: glow::Context) -> Result<Self, String> {
+        let rdp = Rdp::new(gl)?;
+
         let mut bus = Self {
             rdram: vec![0; 4 * 1024 * 1024], // 4MB
             pif: Pif::new(),
             cartridge: None,
-            rdp: Rdp::new(),
+            rdp,
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
             mi: MipsInterface::new(),
@@ -46,7 +50,7 @@ impl N64Bus {
         // Initialize PIF ROM
         bus.pif.init_rom();
 
-        bus
+        Ok(bus)
     }
 
     /// Update controller state (for input handling)
@@ -154,12 +158,6 @@ impl N64Bus {
         &mut self.mi
     }
 
-    /// Enable OpenGL hardware rendering for RDP (requires OpenGL feature)
-    #[cfg(feature = "opengl")]
-    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
-        self.rdp.enable_opengl_renderer(gl)
-    }
-
     /// Execute pending RSP task if RSP is not halted
     /// Returns true if an SP interrupt should be triggered
     pub fn process_rsp_task(&mut self) -> bool {
@@ -193,12 +191,6 @@ impl N64Bus {
     fn translate_address(&self, addr: u32) -> u32 {
         // Simple address translation (unmapped addresses)
         addr & 0x1FFFFFFF
-    }
-}
-
-impl Default for N64Bus {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

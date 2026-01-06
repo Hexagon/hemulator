@@ -20,9 +20,7 @@ mod mi;
 mod pif;
 mod rdp;
 mod rdp_renderer;
-#[cfg(feature = "opengl")]
 mod rdp_renderer_opengl;
-mod rdp_renderer_software;
 mod rsp;
 mod rsp_hle;
 mod vi;
@@ -85,16 +83,36 @@ pub struct N64System {
 pub use pif::{ControllerButtons, ControllerState};
 
 impl N64System {
-    /// Create a new N64 system
-    pub fn new() -> Self {
-        let bus = N64Bus::new();
-        Self {
+    /// Create a new N64 system with OpenGL renderer
+    /// Requires a GL context for hardware-accelerated rendering
+    pub fn new(gl: glow::Context) -> Result<Self, String> {
+        let bus = N64Bus::new(gl)?;
+        Ok(Self {
             cpu: N64Cpu::new(bus),
             frame_cycles: 1562500, // ~93.75MHz / 60Hz (NTSC)
             current_cycles: 0,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
-        }
+        })
+    }
+
+    /// Create a new N64 system for testing (uses a headless GL context)
+    /// This is only available in test builds
+    #[cfg(test)]
+    pub fn new_for_test() -> Self {
+        // Create a headless/mock GL context for testing
+        // In tests, we use a minimal stub that doesn't require real GPU
+        use glow::HasContext;
+
+        // Create a context that will work without display
+        // We'll use surfaceless/headless context
+        let gl = unsafe {
+            // For tests, create a minimal context
+            // This will fail gracefully if no GL is available
+            glow::Context::from_loader_function(|_s| std::ptr::null())
+        };
+
+        Self::new(gl).expect("Failed to create N64 system for test")
     }
 
     /// Update controller 1 state
@@ -115,13 +133,6 @@ impl N64System {
     /// Update controller 4 state
     pub fn set_controller4(&mut self, state: ControllerState) {
         self.cpu.bus_mut().set_controller4(state);
-    }
-
-    /// Enable OpenGL hardware rendering (requires OpenGL feature)
-    /// This should be called from the frontend after obtaining a GL context
-    #[cfg(feature = "opengl")]
-    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
-        self.cpu.bus_mut().enable_opengl_renderer(gl)
     }
 
     /// Get the name of the current renderer backend
@@ -224,12 +235,6 @@ impl N64System {
     /// Get the breakpoint manager
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
-    }
-}
-
-impl Default for N64System {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

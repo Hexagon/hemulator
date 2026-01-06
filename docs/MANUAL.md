@@ -956,17 +956,15 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
     - G_ENDDL (0xDF) - End display list
     - RDP passthrough (0xE0-0xFF) - Embedded RDP commands
   - Task execution framework for graphics microcode
-- RDP (Reality Display Processor) with enhanced framebuffer support
-  - **Pluggable renderer architecture**: Software (CPU) and OpenGL (GPU) backends
-  - **Software renderer** (default): Fully functional, high accuracy, CPU-based
-  - **OpenGL renderer** (optional): GPU-accelerated for better performance
-  - Both renderers support all features: 3D triangles, Z-buffer, texture mapping
-  - Switch renderers via Settings → Rendering Backend
+- RDP (Reality Display Processor) with OpenGL hardware-accelerated rendering
+  - **GPU-accelerated**: Uses OpenGL 3.3 Core Profile for high performance
+  - **Full feature set**: 3D triangles, Z-buffer, texture mapping, scissor clipping
+  - **Hardware depth testing**: Leverages GPU Z-buffer for efficient occlusion
   - **3D triangle rasterization** with flat, Gouraud shading, and texture mapping
   - **Z-buffer (depth buffer)** for hidden surface removal
   - **Scissor clipping** for efficient rendering
   - **Texture mapping** with UV coordinate interpolation
-  - Scanline-based triangle rasterization
+  - OpenGL renderer provides optimal performance for N64 3D graphics
 - VI (Video Interface) with display configuration registers
 - ROM loading with automatic byte-order detection and conversion
 - Save states (F5/F6)
@@ -1011,13 +1009,9 @@ For N64 games, the standard controller mappings apply with these button equivale
 *Note: Controller mappings can be customized in `config.json`. Full analog stick and shoulder button support coming soon.*
 
 **Known Limitations**:
-- **Renderer Performance**:
-  - Software renderer (default): CPU-based, accurate but slower (~1-2 FPS for complex scenes)
-  - OpenGL renderer (optional): GPU-accelerated for better performance
-  - To enable OpenGL renderer: Set `video_backend: "opengl"` in `config.json`
-  - Renderer can be switched in Settings → Rendering Backend (requires ROM reload)
-  - Both renderers produce identical output with feature parity
-  - See system README for technical details on renderer architecture
+- **Renderer**: Uses OpenGL 3.3 for hardware-accelerated GPU rendering
+  - Requires OpenGL 3.3+ compatible graphics hardware
+  - OpenGL is required for N64 emulation (no software fallback)
 - **Graphics**: RDP implementation supports basic display list commands
   - **Working commands**:
     - FILL_RECTANGLE - solid color rectangles

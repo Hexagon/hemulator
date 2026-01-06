@@ -15,5 +15,5 @@ glow = { version = "0.13", optional = true }
 bytemuck = { version = "1.14", optional = true }
 
 [features]
-default = []
+default = ["opengl"]
 opengl = ["dep:glow", "dep:bytemuck"]

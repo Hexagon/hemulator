@@ -49,29 +49,16 @@
 //! - Registers for configuration (color, resolution, etc.)
 //! - Not cycle-accurate; focuses on correct visual output
 //!
-//! ## Rendering Backends
+//! ## OpenGL Hardware Renderer
 //!
-//! The RDP supports two rendering backends via the `RdpRenderer` trait:
-//!
-//! ### Software Renderer (Default)
-//! - **CPU-based rasterization**: All rendering done on CPU
-//! - **Maximum accuracy**: Guaranteed consistent results
-//! - **Cross-platform**: Works on all platforms
-//! - **Z-buffer**: Full 16-bit depth buffer
-//! - **Performance**: Suitable for most N64 games
-//! - **Implementation**: `SoftwareRdpRenderer` in `rdp_renderer_software.rs`
-//!
-//! ### OpenGL Renderer (Optional)
+//! The RDP uses OpenGL for GPU-accelerated rendering:
 //! - **GPU-accelerated**: Uses OpenGL 3.3 Core Profile
 //! - **Hardware depth testing**: Leverages GPU Z-buffer
 //! - **Feature parity**: Implements all RdpRenderer methods
 //! - **Coordinate conversion**: Handles Y-axis flip (OpenGL bottom-up → framebuffer top-down)
 //! - **Color format conversion**: ARGB ↔ RGBA conversion for OpenGL compatibility
-//! - **Performance**: Better for complex 3D scenes
+//! - **Performance**: Optimized for complex 3D scenes
 //! - **Implementation**: `OpenGLRdpRenderer` in `rdp_renderer_opengl.rs`
-//! - **Enabled**: Feature-gated behind `opengl` feature flag
-//!
-//! Both renderers produce identical output and pass the same test suite.
 //!
 //! Full RDP emulation would require:
 //! - Complete display list command execution
@@ -81,9 +68,7 @@
 //! - Accurate timing and synchronization
 
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
-#[cfg(feature = "opengl")]
 use super::rdp_renderer_opengl::OpenGLRdpRenderer;
-use super::rdp_renderer_software::SoftwareRdpRenderer;
 use emu_core::graphics::ColorOps;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::types::Frame;
@@ -180,22 +165,27 @@ pub struct Rdp {
 }
 
 impl Rdp {
-    /// Create a new RDP with default resolution (320x240)
-    pub fn new() -> Self {
-        Self::with_resolution(320, 240)
+    /// Create a new RDP with OpenGL renderer at default resolution (320x240)
+    /// Requires a GL context for hardware-accelerated rendering
+    pub fn new(gl: glow::Context) -> Result<Self, String> {
+        Self::with_resolution(gl, 320, 240)
     }
 
-    /// Create a new RDP with specified resolution
-    pub fn with_resolution(width: u32, height: u32) -> Self {
-        let mut renderer = Box::new(SoftwareRdpRenderer::new(width, height));
+    /// Create a new RDP with OpenGL renderer at specified resolution
+    /// Requires a GL context for hardware-accelerated rendering
+    pub fn with_resolution(gl: glow::Context, width: u32, height: u32) -> Result<Self, String> {
+        let mut renderer = Box::new(OpenGLRdpRenderer::new(gl, width, height)?);
         // Initialize framebuffer to black (transparent)
         renderer.clear(0x00000000);
 
         log(LogCategory::Stubs, LogLevel::Info, || {
-            "N64 RDP initialized with Software renderer (320x240)".to_string()
+            format!(
+                "N64 RDP initialized with OpenGL renderer ({}x{})",
+                width, height
+            )
         });
 
-        Self {
+        Ok(Self {
             renderer,
             width,
             height,
@@ -230,29 +220,7 @@ impl Rdp {
             dpc_end: 0,
             dpc_current: 0,
             dpc_status: DPC_STATUS_CBUF_READY, // Start ready for commands
-        }
-    }
-
-    /// Enable OpenGL hardware rendering (requires OpenGL feature)
-    /// This should be called from the frontend after obtaining a GL context
-    #[cfg(feature = "opengl")]
-    pub fn enable_opengl_renderer(&mut self, gl: glow::Context) -> Result<(), String> {
-        let mut new_renderer = Box::new(OpenGLRdpRenderer::new(gl, self.width, self.height)?);
-
-        // Initialize to black
-        new_renderer.clear(0x00000000);
-
-        // Replace the software renderer with OpenGL renderer
-        self.renderer = new_renderer;
-
-        log(LogCategory::Stubs, LogLevel::Info, || {
-            format!(
-                "N64 RDP switched to OpenGL hardware renderer ({}x{})",
-                self.width, self.height
-            )
-        });
-
-        Ok(())
+        })
     }
 
     /// Get the name of the current renderer backend
@@ -1291,12 +1259,6 @@ impl Rdp {
                 });
             }
         }
-    }
-}
-
-impl Default for Rdp {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
