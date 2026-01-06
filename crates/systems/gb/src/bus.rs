@@ -264,17 +264,20 @@ impl GbBus {
         let ram_size_code = data[0x149];
 
         // Check CGB flag at 0x143
-        // 0x80 = Works on both DMG and CGB (compatibility mode)
-        // 0xC0 = CGB only
+        // 0x80 = DMG game that works on CGB (runs in DMG compatibility mode with colorization)
+        // 0xC0 = CGB only game (uses full CGB features)
+        // Other values = DMG only game
         let cgb_flag = data[0x143];
-        self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
 
-        // Enable CGB mode in PPU if CGB ROM
+        // Only enable CGB mode for CGB-only games (0xC0)
+        // Games with 0x80 are DMG games that just happen to work on CGB hardware
+        // They use DMG palettes (BGP/OBP0/OBP1), not CGB palettes (BCPS/BCPD)
+        self.cgb_mode = cgb_flag == 0xC0;
+
+        // Enable CGB mode in PPU if CGB-only ROM
         if self.cgb_mode {
-            // Pass compatibility_mode=true for 0x80 (DMG with CGB support)
-            // Pass compatibility_mode=false for 0xC0 (CGB only)
-            let compatibility_mode = cgb_flag == 0x80;
-            self.ppu.enable_cgb_mode(compatibility_mode);
+            // CGB-only game - will set its own palettes
+            self.ppu.enable_cgb_mode(false);
         }
 
         let ram_size = match ram_size_code {
