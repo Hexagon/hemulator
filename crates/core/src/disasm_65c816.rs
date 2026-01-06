@@ -27,9 +27,7 @@ pub fn disassemble_65c816(memory: &[u8], address: u32) -> Option<DisassembledIns
 
 fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
     // Helper to get operand bytes
-    let get_u8 = |offset: usize| -> u8 {
-        memory.get(offset).copied().unwrap_or(0)
-    };
+    let get_u8 = |offset: usize| -> u8 { memory.get(offset).copied().unwrap_or(0) };
     let get_u16 = |offset: usize| -> u16 {
         let lo = get_u8(offset) as u16;
         let hi = get_u8(offset + 1) as u16;

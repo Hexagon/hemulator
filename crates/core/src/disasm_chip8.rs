@@ -88,9 +88,9 @@ pub fn disassemble_chip8(memory: &[u8], address: u32) -> Option<DisassembledInst
             _ => format!("??? {:04X}", opcode),
         },
         0xF000 => match nn {
-            0x00 => "LD I, LONG".to_string(),  // XO-CHIP load long address
-            0x01 => format!("PLANE {}", x), // XO-CHIP select plane
-            0x02 => "AUDIO".to_string(),    // XO-CHIP load audio pattern
+            0x00 => "LD I, LONG".to_string(), // XO-CHIP load long address
+            0x01 => format!("PLANE {}", x),   // XO-CHIP select plane
+            0x02 => "AUDIO".to_string(),      // XO-CHIP load audio pattern
             0x07 => format!("LD V{:X}, DT", x),
             0x0A => format!("LD V{:X}, K", x),
             0x15 => format!("LD DT, V{:X}", x),
