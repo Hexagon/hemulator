@@ -54,12 +54,15 @@ impl Sdl2EguiBackend {
         gl_attr.set_context_version(3, 2);
         gl_attr.set_double_buffer(true);
 
-        let window = video_subsystem
+        let mut window = video_subsystem
             .window(title, width, height)
             .opengl()
             .resizable()
             .position_centered()
             .build()?;
+
+        // Set window icon
+        Self::set_window_icon(&mut window);
 
         let gl_context = window.gl_create_context()?;
         window.gl_make_current(&gl_context)?;
@@ -465,6 +468,82 @@ impl Sdl2EguiBackend {
     /// Get number of connected joysticks (non-gamepad)
     pub fn num_joysticks(&self) -> usize {
         self.joysticks.len()
+    }
+
+    /// Load and set window icon from embedded PNG data
+    ///
+    /// Attempts to load the embedded icon and set it on the window.
+    /// If loading fails, logs a warning but does not crash the application.
+    fn set_window_icon(window: &mut sdl2::video::Window) {
+        // Icon data is embedded at compile time
+        // Use CARGO_MANIFEST_DIR to build path at compile time
+        const ICON_DATA: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/icon_32.png"
+        ));
+
+        // Try to load and set the icon, but don't fail if it doesn't work
+        match Self::load_icon_from_png(ICON_DATA) {
+            Ok(surface) => {
+                window.set_icon(surface);
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to load window icon: {}", e);
+            }
+        }
+    }
+
+    /// Load an SDL surface from PNG data
+    ///
+    /// Decodes PNG data and creates an SDL surface with the correct pixel format.
+    /// The PNG crate outputs RGBA data which is converted to ABGR8888 for SDL.
+    ///
+    /// # Arguments
+    /// * `png_data` - Raw PNG file data as bytes
+    ///
+    /// # Returns
+    /// * `Ok(Surface)` - SDL surface with decoded image data
+    /// * `Err(String)` - Error message if decoding or conversion fails
+    fn load_icon_from_png(png_data: &[u8]) -> Result<sdl2::surface::Surface<'static>, String> {
+        use std::io::Cursor;
+
+        // Decode PNG using the png crate
+        let decoder = png::Decoder::new(Cursor::new(png_data));
+        let mut reader = decoder
+            .read_info()
+            .map_err(|e| format!("PNG decode error: {}", e))?;
+
+        let info = reader.info();
+        let width = info.width;
+        let height = info.height;
+
+        // Read the image data
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader
+            .next_frame(&mut buf)
+            .map_err(|e| format!("PNG read error: {}", e))?;
+        let bytes = &buf[..info.buffer_size()];
+
+        // Create SDL surface from the decoded RGBA data
+        // PNG crate outputs RGBA, we need to convert to ABGR8888 for SDL
+        let mut surface =
+            sdl2::surface::Surface::new(width, height, sdl2::pixels::PixelFormatEnum::ABGR8888)
+                .map_err(|e| format!("Failed to create surface: {}", e))?;
+
+        // Convert RGBA to ABGR and copy pixel data to surface
+        surface.with_lock_mut(|pixels: &mut [u8]| {
+            for i in 0..(bytes.len() / 4) {
+                let src_idx = i * 4;
+                let dst_idx = i * 4;
+                // Convert from RGBA to ABGR
+                pixels[dst_idx] = bytes[src_idx + 3]; // A
+                pixels[dst_idx + 1] = bytes[src_idx + 2]; // B
+                pixels[dst_idx + 2] = bytes[src_idx + 1]; // G
+                pixels[dst_idx + 3] = bytes[src_idx]; // R
+            }
+        });
+
+        Ok(surface)
     }
 }
 
