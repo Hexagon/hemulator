@@ -980,15 +980,25 @@ impl Ppu {
         // Brightness ranges from 0 (completely dark) to 15 (full brightness)
         let brightness = (self.screen_display & 0x0F) as u32;
 
-        // Apply brightness scaling to all pixels
-        // Formula: color_out = (color_in * brightness) / 15
-        // We scale each RGB channel independently
-        for pixel in frame.pixels.iter_mut() {
-            let a = (*pixel >> 24) & 0xFF;
-            let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
-            let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
-            let b = (*pixel & 0xFF) * brightness / 15;
-            *pixel = (a << 24) | (r << 16) | (g << 8) | b;
+        // Optimize: only apply scaling if brightness is not at full (15)
+        if brightness != 15 {
+            // Fast path for brightness 0: just clear all RGB channels to black
+            if brightness == 0 {
+                for pixel in frame.pixels.iter_mut() {
+                    *pixel = 0xFF000000; // Keep alpha, clear RGB
+                }
+            } else {
+                // Apply brightness scaling to all pixels
+                // Formula: color_out = (color_in * brightness) / 15
+                // We scale each RGB channel independently
+                for pixel in frame.pixels.iter_mut() {
+                    let a = (*pixel >> 24) & 0xFF;
+                    let r = ((*pixel >> 16) & 0xFF) * brightness / 15;
+                    let g = ((*pixel >> 8) & 0xFF) * brightness / 15;
+                    let b = (*pixel & 0xFF) * brightness / 15;
+                    *pixel = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+            }
         }
 
         log(LogCategory::PPU, LogLevel::Debug, || {
