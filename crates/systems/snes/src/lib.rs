@@ -18,6 +18,7 @@ mod debugger;
 mod ppu;
 pub mod ppu_renderer;
 
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 
 /// SNES controller button constants
@@ -215,9 +216,18 @@ impl System for SnesSystem {
 
             // Execute CPU until end of active display portion of scanline
             while self.current_cycles < scanline_target.saturating_sub(40) {
+                let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.cpu.bus_mut().tick_cycles(cycles);
+
+                // Record instruction if tracing is enabled
+                if self.instruction_tracer.is_enabled() {
+                    if let Some(instr) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
+                }
             }
 
             // Execute HDMA during H-blank (approximately 40 cycles)
@@ -225,9 +235,18 @@ impl System for SnesSystem {
 
             // Complete the scanline
             while self.current_cycles < scanline_target {
+                let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.cpu.bus_mut().tick_cycles(cycles);
+
+                // Record instruction if tracing is enabled
+                if self.instruction_tracer.is_enabled() {
+                    if let Some(instr) = self.disassemble_instruction(pc_before) {
+                        let cpu_state = self.get_cpu_state();
+                        self.instruction_tracer.trace(instr, cpu_state);
+                    }
+                }
             }
         }
 

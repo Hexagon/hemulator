@@ -4,6 +4,7 @@ use crate::bus::SmsMemory;
 use crate::psg::SmsPsg;
 use crate::vdp::Vdp;
 use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
 use emu_core::types::Frame;
@@ -135,8 +136,17 @@ impl System for SmsSystem {
             }
 
             // Execute one CPU instruction
+            let pc_before = self.cpu.pc as u32;
             let cpu_cycles = self.cpu.step() as u64;
             self.cycles += cpu_cycles;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
 
             // Update VDP scanline based on cycles
             // Each scanline takes approximately 228 cycles (~3.58MHz / 262 scanlines / 60Hz)
