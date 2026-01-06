@@ -137,11 +137,10 @@ impl<M: Memory65c816> Cpu65c816<M> {
     /// 5. Load PC from NMI vector
     /// 6. Set PBR to 0 (in native mode)
     pub fn trigger_nmi(&mut self) {
-        // Avoid nested NMIs
-        if self.in_nmi {
-            return;
-        }
-
+        // NMI is non-maskable and always triggers, even if already in an NMI handler.
+        // The in_nmi flag is kept for tracking purposes but doesn't prevent NMI.
+        // Real 65C816 behavior: NMIs can interrupt NMI handlers (edge-triggered).
+        
         // WAI instruction is released by any interrupt
         if self.waiting_for_interrupt {
             log(LogCategory::Interrupts, LogLevel::Info, || {
@@ -5232,7 +5231,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nmi_nested_prevention() {
+    fn test_nmi_nested_behavior() {
         let mut mem = ArrayMemory::new();
 
         // Set up NMI vector at $FFFA-$FFFB to point to $9000
@@ -5249,13 +5248,14 @@ mod tests {
         assert!(cpu.is_in_nmi());
         assert_eq!(cpu.pc, 0x9000);
 
-        let saved_pc = cpu.pc;
-
-        // Try to trigger NMI again while in NMI handler (should be ignored)
+        // Trigger NMI again while in NMI handler
+        // Real hardware allows this (NMI is edge-triggered)
+        // This is important for games like Micro Machines that sit in wait loops
         cpu.trigger_nmi();
 
-        // Verify nested NMI was prevented
-        assert_eq!(cpu.pc, saved_pc); // PC should not change
+        // PC should have changed again (NMI re-entered)
+        assert_eq!(cpu.pc, 0x9000); // Jumped to NMI vector again
+        assert!(cpu.is_in_nmi()); // Still in NMI
     }
 
     #[test]
