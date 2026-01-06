@@ -471,6 +471,9 @@ impl Sdl2EguiBackend {
     }
 
     /// Load and set window icon from embedded PNG data
+    ///
+    /// Attempts to load the embedded icon and set it on the window.
+    /// If loading fails, logs a warning but does not crash the application.
     fn set_window_icon(window: &mut sdl2::video::Window) {
         // Icon data is embedded at compile time
         // Use CARGO_MANIFEST_DIR to build path at compile time
@@ -491,6 +494,16 @@ impl Sdl2EguiBackend {
     }
 
     /// Load an SDL surface from PNG data
+    ///
+    /// Decodes PNG data and creates an SDL surface with the correct pixel format.
+    /// The PNG crate outputs RGBA data which is converted to ABGR8888 for SDL.
+    ///
+    /// # Arguments
+    /// * `png_data` - Raw PNG file data as bytes
+    ///
+    /// # Returns
+    /// * `Ok(Surface)` - SDL surface with decoded image data
+    /// * `Err(String)` - Error message if decoding or conversion fails
     fn load_icon_from_png(png_data: &[u8]) -> Result<sdl2::surface::Surface<'static>, String> {
         use std::io::Cursor;
 
