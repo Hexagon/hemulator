@@ -8,6 +8,7 @@
 mod bios;
 mod bus;
 mod cpu;
+mod debugger; // PC debugger implementation
 mod disk;
 mod dpmi; // DPMI (DOS Protected Mode Interface) driver
 mod font; // Shared IBM PC ROM font data
