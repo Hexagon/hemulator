@@ -1632,7 +1632,7 @@ fn apply_debug_options(sys: &mut EmulatorSystem, cli_args: &CliArgs) {
         EmulatorSystem::NES(nes) => {
             if cli_args.trace_instructions {
                 nes.set_instruction_tracing(true);
-                if let Some(limit) = cli_args.trace_limit {
+                if let Some(_limit) = cli_args.trace_limit {
                     // Note: InstructionTracer limit is set via TracerConfig during creation
                     // We can't change it after creation without adding a setter method
                     eprintln!(
