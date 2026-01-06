@@ -590,7 +590,7 @@ This emulator supports 8 different retro gaming systems. **NES emulation is full
 | **CHIP-8** | ✅ Fully Working | Complete CHIP-8/Super-CHIP/XO-CHIP | - | Playing CHIP-8 programs |
 | **Game Boy** | ✅ Fully Functional (GB) / 🚧 GBC WIP | Core features, MBC0/1/2/3/5 | Some edge cases, GBC features incomplete | Playing GB games |
 | **SMS** | ✅ Functional | Z80 CPU, VDP, PSG, ROM banking | Test ROM, full game testing | Testing/gameplay |
-| **SNES** | 🚧 In Development | CPU, basic infrastructure | PPU rendering, audio, input, visible output | Development only |
+| **SNES** | ✅ Functional (Graphics Working!) | CPU, PPU rendering, sprites, input | Audio, advanced graphics features | Playing most games (silent) |
 | **N64** | 🚧 In Development | 3D rendering, CPU | Full graphics, audio, games | Development/testing |
 | **PC/DOS** | 🧪 Experimental | Multi-slot mounts, disk controller, custom BIOS, CGA/EGA/VGA | Full disk I/O, boot | Development/testing |
 
@@ -886,44 +886,50 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 
 ### SNES (Super Nintendo Entertainment System)
 
-**Status**: 🚧 In Development (No visible output yet)  
-**Coverage**: Infrastructure in place - CPU complete, PPU partial, but does not currently render graphics
+**Status**: 🚧 In Development (**Graphics now working!**)  
+**Coverage**: Infrastructure in place - CPU complete, PPU functional with basic rendering
 
 **ROM Format**: SMC/SFC (.smc, .sfc files) - automatically detected
 
 **Features**:
-- 65C816 CPU core with 16-bit extensions (100% complete)
-- Basic memory bus (128KB WRAM + cartridge mapping)
-- LoROM cartridge mapping
-- SMC header detection and removal
-- PPU infrastructure partially implemented
-- Save states (F5/F6)
+- ✅ 65C816 CPU core with 16-bit extensions (100% complete)
+- ✅ PPU rendering for modes 0-7 (with brightness control)
+- ✅ Background layers (BG1-4) with priority rendering
+- ✅ Sprite rendering (128 sprites, 4bpp)
+- ✅ Scrolling support (all BG layers)
+- ✅ Basic memory bus (128KB WRAM + cartridge mapping)
+- ✅ LoROM and HiROM cartridge mapping
+- ✅ SMC header detection and removal
+- ✅ Controller input (12 buttons)
+- ✅ Save states (F5/F6)
 
 **Known Limitations**:
 - **Graphics**: 
-  - **No visible output currently** - PPU does not produce working display
-  - PPU infrastructure partially implemented but non-functional
-  - Modes 0-7 require significant work to produce output
-  - No sprites, backgrounds, or any visual rendering working yet
+  - ⚠️ Mode 7 rotation/scaling not implemented (renders as basic 8bpp)
+  - ⚠️ Windows and color math not implemented
+  - ⚠️ Hi-res modes (512px) render at 256px
+  - ⚠️ Offset-per-tile not implemented for modes 2, 4, 6
 - **Audio**: 
-  - SPC700 APU not fully implemented - silent gameplay
+  - ❌ SPC700 APU not fully implemented - **silent gameplay**
   - APU communication ports ($2140-$2143) use enhanced state machine stub
   - Supports multi-session upload protocols to allow games to boot and progress
   - Games receive proper APU handshake responses ($BBAA signature) and echo protocol
   - No actual audio processing or SPC700 code execution occurs
 - **Cartridge**: 
-  - Only basic LoROM mapping
-  - No HiROM, ExHiROM, or enhancement chips
+  - LoROM and HiROM supported
+  - ❌ No enhancement chips (SuperFX, SA-1, etc.)
 - **Input**:
-  - Controller infrastructure present but not tested
+  - Controller infrastructure functional (12 buttons per controller)
+  - Auto-joypad read during VBlank
 - **Timing**: 
   - Frame-based rendering - not cycle-accurate
   - NTSC timing only
-- **Status**: **Not playable** - SNES emulation is in early development with infrastructure in place but no working graphics output. Not recommended for use.
+- **Status**: **Playable with limitations** - Graphics now working! Most games should display, but audio is silent and some advanced graphics features are missing.
 
 **Recommended For**:
-- Development and testing only
-- Not suitable for playing games
+- Testing games that don't require enhancement chips
+- Playing Mode 0/1 games (most commercial games)
+- Not recommended for games requiring audio or advanced graphics features
 
 ### N64 (Nintendo 64)
 
