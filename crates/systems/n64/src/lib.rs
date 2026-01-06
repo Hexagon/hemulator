@@ -1146,4 +1146,18 @@ mod tests {
         // 5. RDP rasterization
         // This test validates the ROM structure and basic RSP integration
     }
+
+    #[test]
+    fn test_n64_renderer_name() {
+        // Test that renderer_name() reports the correct renderer
+        let sys = N64System::new();
+
+        // By default, should be using software renderer
+        let renderer_name = sys.renderer_name();
+        assert!(
+            renderer_name.contains("Software"),
+            "Expected Software renderer by default, got {}",
+            renderer_name
+        );
+    }
 }
