@@ -1,6 +1,7 @@
 //! Core emulator primitives and traits.
 
 pub mod apu;
+pub mod breakpoints;
 pub mod cpu_6502;
 pub mod cpu_65c816;
 pub mod cpu_8080;
@@ -20,6 +21,7 @@ pub mod disasm_lr35902;
 pub mod disasm_mips_r4300i;
 pub mod disasm_z80;
 pub mod graphics;
+pub mod instruction_tracer;
 pub mod logging;
 pub mod ppu;
 pub mod renderer;

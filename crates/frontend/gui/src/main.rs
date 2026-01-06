@@ -1170,6 +1170,12 @@ struct CliArgs {
     debug_dump_pc: Option<u32>,      // PC value to trigger debug dump
     debug_dump_cycles: Option<u64>,  // Cycle count to trigger debug dump
     debug_dump_file: Option<String>, // Output file for debug dump (default: debug_dump.txt)
+    // Instruction tracing configuration
+    trace_instructions: bool,                 // Enable instruction tracing
+    trace_limit: Option<usize>,               // Max instructions to keep in trace buffer
+    trace_dump_file: Option<String>,          // File to dump trace on breakpoint/exit
+    // Breakpoint configuration
+    breakpoints: Vec<u32>,                    // List of breakpoint addresses
 }
 
 impl CliArgs {
@@ -1329,6 +1335,50 @@ impl CliArgs {
                         std::process::exit(1);
                     }
                 }
+                "--trace-instructions" => {
+                    args.trace_instructions = true;
+                }
+                "--trace-limit" => {
+                    if let Some(value) = arg_iter.next() {
+                        match value.parse::<usize>() {
+                            Ok(limit) => args.trace_limit = Some(limit),
+                            Err(_) => {
+                                eprintln!("Error: --trace-limit requires a valid number.");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --trace-limit requires a number.");
+                        std::process::exit(1);
+                    }
+                }
+                "--trace-dump-file" => {
+                    if let Some(path) = arg_iter.next() {
+                        args.trace_dump_file = Some(path);
+                    } else {
+                        eprintln!("Error: --trace-dump-file requires a file path.");
+                        std::process::exit(1);
+                    }
+                }
+                "--breakpoint" | "-b" => {
+                    if let Some(value) = arg_iter.next() {
+                        let addr = if value.starts_with("0x") || value.starts_with("0X") {
+                            u32::from_str_radix(&value[2..], 16)
+                        } else {
+                            value.parse::<u32>()
+                        };
+                        match addr {
+                            Ok(address) => args.breakpoints.push(address),
+                            Err(_) => {
+                                eprintln!("Error: --breakpoint requires a valid address (hex: 0x8000 or decimal: 32768).");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        eprintln!("Error: --breakpoint requires an address.");
+                        std::process::exit(1);
+                    }
+                }
                 _ => {
                     // First non-flag argument is treated as ROM path for backward compatibility
                     if args.rom_path.is_none() && !arg.starts_with("--") {
@@ -1388,6 +1438,13 @@ impl CliArgs {
         );
         eprintln!("                           Dumps full disassembly and memory contents");
         eprintln!();
+        eprintln!("Instruction Tracing Options:");
+        eprintln!("  --trace-instructions     Enable instruction tracing (records executed instructions)");
+        eprintln!("  --trace-limit <N>        Max instructions to keep in trace buffer (default: 10000)");
+        eprintln!("  --trace-dump-file <PATH> File to dump trace when breakpoint hit (default: trace_dump.txt)");
+        eprintln!("  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)");
+        eprintln!("                           When hit, dumps trace and optionally exits");
+        eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
         eprintln!("  20m, 250m, 1g, 20g       Hard drive formats");
@@ -1416,6 +1473,18 @@ impl CliArgs {
         );
         eprintln!(
             "  hemu --debug-dump-cycles 10000 game.nes        # Dump debug info after 10000 cycles"
+        );
+        eprintln!(
+            "  hemu --trace-instructions --breakpoint 0x8100 game.nes"
+        );
+        eprintln!(
+            "                                                 # Trace execution until breakpoint hit"
+        );
+        eprintln!(
+            "  hemu --trace-instructions --trace-limit 5000 game.nes"
+        );
+        eprintln!(
+            "                                                 # Keep last 5000 instructions in trace"
         );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
