@@ -976,12 +976,14 @@ impl Ppu {
             }
         }
 
-        // Apply brightness (bits 0-3 of $2100)
-        // Brightness ranges from 0 (completely dark) to 15 (full brightness)
+        // Apply brightness (bits 0-3 of $2100) ONLY when force blank is OFF
+        // This preserves the behavior where we render during force blank for boot sequences
+        // Force blank is bit 7 of screen_display register
+        let force_blank = (self.screen_display & 0x80) != 0;
         let brightness = (self.screen_display & 0x0F) as u32;
 
-        // Optimize: only apply scaling if brightness is not at full (15)
-        if brightness != 15 {
+        // Only apply brightness scaling when screen is not force blanked
+        if !force_blank && brightness != 15 {
             // Fast path for brightness 0: just clear all RGB channels to black
             if brightness == 0 {
                 for pixel in frame.pixels.iter_mut() {
@@ -2112,6 +2114,9 @@ mod tests {
         ppu.write_register(0x2118, 0x00); // Tile 0
         ppu.write_register(0x2119, 0x00); // No flip, palette 0
 
+        // Enable screen with full brightness
+        ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
+
         // Render frame
         let frame = ppu.render_frame();
 
@@ -2377,6 +2382,9 @@ mod tests {
         ppu.tm = 0x10;
         ppu.obsel = 0;
 
+        // Enable screen with full brightness
+        ppu.screen_display = 0x0F; // Brightness 15, not blanked
+
         // Render
         let frame = ppu.render_frame();
 
@@ -2439,6 +2447,9 @@ mod tests {
         ppu.write_register(0x2117, 0x00);
         ppu.write_register(0x2118, 0x00); // Tile 0
         ppu.write_register(0x2119, 0x00);
+
+        // Enable screen with full brightness
+        ppu.write_register(0x2100, 0x0F); // Brightness 15, not blanked
 
         // Render frame
         let frame = ppu.render_frame();
