@@ -77,7 +77,7 @@
 //! - ✅ Full memory map with proper mirroring
 //! - ✅ VRAM access via PPU (8KB)
 //! - ✅ OAM access via PPU (160 bytes)
-//! - ✅ Work RAM (8KB)
+//! - ✅ Work RAM (32KB with banking in CGB mode)
 //! - ✅ High RAM (127 bytes)
 //! - ✅ Joypad register with matrix selection
 //! - ✅ PPU registers (LCDC, STAT, palettes, scroll, etc.)
@@ -89,12 +89,12 @@
 //! - ✅ Cartridge RAM with size detection
 //! - ✅ MBC0, MBC1, MBC2, MBC3, MBC5, HuC1 mappers
 //! - ✅ OAM DMA transfer (0xFF46)
-//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD, KEY1)
+//! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD, KEY1, SVBK)
 //! - ✅ Speed switching (KEY1 at 0xFF4D, CGB only)
+//! - ✅ WRAM banking (SVBK at 0xFF70, CGB only)
 //!
 //! ## Not Implemented
 //! - ❌ Serial transfer (0xFF01, 0xFF02)
-//! - ❌ WRAM banking (SVBK at 0xFF70, CGB only)
 //! - ❌ HDMA (0xFF51-0xFF55, CGB only)
 //! - ❌ Infrared port (RP at 0xFF56, CGB only)
 
@@ -106,8 +106,14 @@ use emu_core::cpu_lr35902::MemoryLr35902;
 
 /// Game Boy memory bus
 pub struct GbBus {
-    /// Work RAM (8KB)
-    wram: [u8; 0x2000],
+    /// Work RAM (32KB for CGB, 8 banks of 4KB each)
+    /// Bank 0 is always at 0xC000-0xCFFF
+    /// Banks 1-7 are switchable at 0xD000-0xDFFF via SVBK register
+    wram: [u8; 0x8000],
+    /// SVBK register (0xFF70) - WRAM bank select (CGB only)
+    /// Bits 0-2: WRAM bank (0-7, where 0 is mapped to bank 1)
+    /// Bits 3-7: Unused (read as 1)
+    svbk: u8,
     /// High RAM (127 bytes)
     hram: [u8; 0x7F],
     /// Interrupt Enable register
@@ -139,7 +145,8 @@ pub struct GbBus {
 impl GbBus {
     pub fn new() -> Self {
         Self {
-            wram: [0; 0x2000],
+            wram: [0; 0x8000],
+            svbk: 0,
             hram: [0; 0x7F],
             ie: 0,
             if_reg: 0,
@@ -209,6 +216,38 @@ impl GbBus {
         self.key1 &= 0xFE;
 
         true
+    }
+
+    /// Read SVBK register (0xFF70) - WRAM bank select (CGB only)
+    /// Bits 0-2: WRAM bank (0-7, where 0 is mapped to bank 1)
+    /// Bits 3-7: Unused (always read as 1)
+    fn read_svbk(&self) -> u8 {
+        // Return current bank selection with unused bits set to 1
+        (self.svbk & 0x07) | 0xF8
+    }
+
+    /// Write SVBK register (0xFF70) - WRAM bank select (CGB only)
+    /// Only bits 0-2 are writable
+    fn write_svbk(&mut self, val: u8) {
+        // Only bits 0-2 are writable
+        self.svbk = val & 0x07;
+    }
+
+    /// Get the actual WRAM bank for address range 0xD000-0xDFFF
+    /// Bank 0 in SVBK is mapped to bank 1
+    fn get_wram_bank(&self) -> usize {
+        if self.cgb_mode {
+            // In CGB mode, SVBK selects bank (0 maps to 1, 1-7 map directly)
+            let bank = self.svbk & 0x07;
+            if bank == 0 {
+                1 // Bank 0 maps to bank 1
+            } else {
+                bank as usize
+            }
+        } else {
+            // In DMG mode, always use bank 1
+            1
+        }
     }
 
     pub fn load_cart(&mut self, data: &[u8]) {
@@ -283,11 +322,30 @@ impl MemoryLr35902 for GbBus {
                     0xFF
                 }
             }
-            // Work RAM (8KB)
-            0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize],
-            // Echo RAM (mirror of C000-DDFF)
+            // Work RAM (8KB with banking in CGB mode)
+            // 0xC000-0xCFFF: Bank 0 (fixed)
+            // 0xD000-0xDFFF: Bank 1-7 (switchable via SVBK in CGB mode)
+            0xC000..=0xCFFF => {
+                // Bank 0 is always at 0xC000-0xCFFF
+                self.wram[(addr - 0xC000) as usize]
+            }
+            0xD000..=0xDFFF => {
+                // Switchable bank area (banks 1-7 in CGB mode, bank 1 in DMG mode)
+                let bank = self.get_wram_bank();
+                let offset = (bank * 0x1000) + (addr - 0xD000) as usize;
+                self.wram[offset]
+            }
             // Echo RAM (mirror of 0xC000-0xDDFF)
-            0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize],
+            0xE000..=0xEFFF => {
+                // Mirror of bank 0
+                self.wram[(addr - 0xE000) as usize]
+            }
+            0xF000..=0xFDFF => {
+                // Mirror of switchable bank area
+                let bank = self.get_wram_bank();
+                let offset = (bank * 0x1000) + (addr - 0xF000) as usize;
+                self.wram[offset]
+            }
             // OAM (Object Attribute Memory) - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.read_oam(addr - 0xFE00),
             // Not usable
@@ -336,6 +394,7 @@ impl MemoryLr35902 for GbBus {
                 0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
                 0xFF6A => self.ppu.read_obpi(),     // OCPS/OBPI - OBJ palette index
                 0xFF6B => self.ppu.read_obpd(),     // OCPD/OBPD - OBJ palette data
+                0xFF70 => self.read_svbk(),         // SVBK - WRAM bank (CGB only)
                 _ => 0xFF,
             },
             // High RAM
@@ -361,11 +420,30 @@ impl MemoryLr35902 for GbBus {
                     mapper.write_ram(addr, val);
                 }
             }
-            // Work RAM
-            0xC000..=0xDFFF => self.wram[(addr - 0xC000) as usize] = val,
-            // Echo RAM
+            // Work RAM (8KB with banking in CGB mode)
+            // 0xC000-0xCFFF: Bank 0 (fixed)
+            // 0xD000-0xDFFF: Bank 1-7 (switchable via SVBK in CGB mode)
+            0xC000..=0xCFFF => {
+                // Bank 0 is always at 0xC000-0xCFFF
+                self.wram[(addr - 0xC000) as usize] = val;
+            }
+            0xD000..=0xDFFF => {
+                // Switchable bank area (banks 1-7 in CGB mode, bank 1 in DMG mode)
+                let bank = self.get_wram_bank();
+                let offset = (bank * 0x1000) + (addr - 0xD000) as usize;
+                self.wram[offset] = val;
+            }
             // Echo RAM (mirror of 0xC000-0xDDFF)
-            0xE000..=0xFDFF => self.wram[(addr - 0xE000) as usize] = val,
+            0xE000..=0xEFFF => {
+                // Mirror of bank 0
+                self.wram[(addr - 0xE000) as usize] = val;
+            }
+            0xF000..=0xFDFF => {
+                // Mirror of switchable bank area
+                let bank = self.get_wram_bank();
+                let offset = (bank * 0x1000) + (addr - 0xF000) as usize;
+                self.wram[offset] = val;
+            }
             // OAM - delegate to PPU
             0xFE00..=0xFE9F => self.ppu.write_oam(addr - 0xFE00, val),
             // Not usable
@@ -408,6 +486,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
                     0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI
                     0xFF6B => self.ppu.write_obpd(val),    // OCPD/OBPD
+                    0xFF70 => self.write_svbk(val),        // SVBK - WRAM bank (CGB only)
                     0xFF50 => self.boot_rom_enabled = false, // Disable boot ROM
                     _ => {}
                 }
