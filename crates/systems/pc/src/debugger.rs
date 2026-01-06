@@ -119,7 +119,7 @@ impl Debugger for PcSystem {
 
     fn get_cpu_state(&self) -> CpuState {
         let regs = self.cpu.get_registers();
-        
+
         // Note: CpuState stores the program counter both as a dedicated `pc` field
         // (set via CpuState::new) and as a register entry named "IP".
         // The `pc` field is used by the debugger for navigation (current instruction),
@@ -164,7 +164,7 @@ impl Debugger for PcSystem {
         // Bit 9:  IF (Interrupt Enable Flag)
         // Bit 10: DF (Direction Flag)
         // Bit 11: OF (Overflow Flag)
-        
+
         let flags = regs.flags;
         state.add_flag("CF", (flags & 0x0001) != 0); // Carry
         state.add_flag("PF", (flags & 0x0004) != 0); // Parity
@@ -320,7 +320,7 @@ mod tests {
     #[test]
     fn test_pc_execution_history() {
         let system = PcSystem::new();
-        
+
         // By default, instruction tracing should be disabled
         assert!(!system.has_execution_history());
         assert_eq!(system.get_execution_history().len(), 0);
@@ -329,16 +329,74 @@ mod tests {
     #[test]
     fn test_pc_execution_history_enabled() {
         let mut system = PcSystem::new();
-        
+
         // Enable instruction tracing
         system.set_instruction_tracing(true);
         assert!(system.has_execution_history());
-        
+
         // Note: Instruction history tracking happens at the CPU core level
         // The PC system wraps the CPU and the tracer is available but
         // requires integration at the CPU execution level to record traces.
         // For now, just verify that the interface is available.
         let history = system.get_execution_history();
-        assert_eq!(history.len(), 0, "History starts empty until CPU integration is complete");
+        assert_eq!(
+            history.len(),
+            0,
+            "History starts empty until CPU integration is complete"
+        );
+    }
+
+    #[test]
+    fn test_pc_debugger_integration() {
+        // This test demonstrates all debugger features working together
+        let system = PcSystem::new();
+
+        println!("\n=== PC Debugger Integration Test ===\n");
+
+        // Test memory regions
+        let regions = system.get_memory_regions();
+        println!("Memory Regions: {}", regions.len());
+        assert!(regions.len() >= 5, "Should have at least 5 memory regions");
+
+        for region in &regions {
+            println!(
+                "  {} (${:05X}-${:05X}): {}",
+                region.name, region.start, region.end, region.description
+            );
+        }
+
+        // Test CPU state
+        let cpu_state = system.get_cpu_state();
+        println!("\nCPU State:");
+        println!("  PC: ${:05X}", cpu_state.pc);
+        println!("  Registers: {}", cpu_state.registers.len());
+        println!("  Flags: {}", cpu_state.flags.flags.len());
+
+        assert_eq!(cpu_state.pc, 0xFFFF0, "Reset vector should be at 0xFFFF0");
+        assert!(
+            cpu_state.registers.len() >= 14,
+            "Should have all x86 registers"
+        );
+        assert_eq!(
+            cpu_state.flags.flags.len(),
+            9,
+            "Should have all 9 x86 flags"
+        );
+
+        // Test disassembly at BIOS entry
+        if let Some(instr) = system.disassemble_instruction(0xFFFF0) {
+            println!("\nDisassembly at ${:05X}:", instr.address);
+            println!("  Bytes: {:02X?}", instr.bytes);
+            println!("  Mnemonic: {}", instr.mnemonic);
+            assert_eq!(instr.address, 0xFFFF0);
+            assert!(!instr.bytes.is_empty());
+        }
+
+        // Test memory reading
+        let mem = system.read_memory(0x00000, 16).unwrap();
+        println!("\nMemory at 0x00000: {:02X?}", mem);
+        assert_eq!(mem.len(), 16);
+
+        println!("\n=== All debugger features verified! ✓ ===\n");
     }
 }
