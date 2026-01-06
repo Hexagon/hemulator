@@ -129,29 +129,54 @@ impl Debugger for PcSystem {
         let linear_pc = ((regs.cs as u32) << 4) + regs.ip;
         let mut state = CpuState::new(linear_pc);
 
-        // Add general-purpose registers
-        state.add_register(CpuRegister::new_32bit("EAX", regs.ax));
-        state.add_register(CpuRegister::new_32bit("EBX", regs.bx));
-        state.add_register(CpuRegister::new_32bit("ECX", regs.cx));
-        state.add_register(CpuRegister::new_32bit("EDX", regs.dx));
+        // For x86 CPUs, register widths depend on the CPU model:
+        // - 8086/80186: 16-bit general-purpose registers
+        // - 80286: 16-bit general-purpose registers
+        // - 80386+: 32-bit general-purpose registers (EAX, EBX, etc.)
+        // We report registers with their architectural width based on the CPU model.
+        let is_32bit = matches!(
+            regs.model,
+            emu_core::cpu_8086::CpuModel::Intel80386
+                | emu_core::cpu_8086::CpuModel::Intel80486
+                | emu_core::cpu_8086::CpuModel::Intel80486SX
+                | emu_core::cpu_8086::CpuModel::Intel80486DX2
+                | emu_core::cpu_8086::CpuModel::Intel80486SX2
+                | emu_core::cpu_8086::CpuModel::Intel80486DX4
+                | emu_core::cpu_8086::CpuModel::IntelPentium
+                | emu_core::cpu_8086::CpuModel::IntelPentiumMMX
+        );
 
-        // Add index and pointer registers
-        state.add_register(CpuRegister::new_32bit("ESI", regs.si));
-        state.add_register(CpuRegister::new_32bit("EDI", regs.di));
-        state.add_register(CpuRegister::new_32bit("EBP", regs.bp));
-        state.add_register(CpuRegister::new_32bit("ESP", regs.sp));
+        if is_32bit {
+            // 32-bit registers (80386+)
+            state.add_register(CpuRegister::new_32bit("EAX", regs.ax));
+            state.add_register(CpuRegister::new_32bit("EBX", regs.bx));
+            state.add_register(CpuRegister::new_32bit("ECX", regs.cx));
+            state.add_register(CpuRegister::new_32bit("EDX", regs.dx));
+            state.add_register(CpuRegister::new_32bit("ESI", regs.si));
+            state.add_register(CpuRegister::new_32bit("EDI", regs.di));
+            state.add_register(CpuRegister::new_32bit("EBP", regs.bp));
+            state.add_register(CpuRegister::new_32bit("ESP", regs.sp));
+            state.add_register(CpuRegister::new_32bit("EIP", regs.ip));
+            state.add_register(CpuRegister::new_32bit("EFLAGS", regs.flags));
+        } else {
+            // 16-bit registers (8086/80186/80286)
+            state.add_register(CpuRegister::new_16bit("AX", regs.ax as u16));
+            state.add_register(CpuRegister::new_16bit("BX", regs.bx as u16));
+            state.add_register(CpuRegister::new_16bit("CX", regs.cx as u16));
+            state.add_register(CpuRegister::new_16bit("DX", regs.dx as u16));
+            state.add_register(CpuRegister::new_16bit("SI", regs.si as u16));
+            state.add_register(CpuRegister::new_16bit("DI", regs.di as u16));
+            state.add_register(CpuRegister::new_16bit("BP", regs.bp as u16));
+            state.add_register(CpuRegister::new_16bit("SP", regs.sp as u16));
+            state.add_register(CpuRegister::new_16bit("IP", regs.ip as u16));
+            state.add_register(CpuRegister::new_16bit("FLAGS", regs.flags as u16));
+        }
 
-        // Add segment registers (16-bit)
+        // Add segment registers (always 16-bit on all x86 CPUs)
         state.add_register(CpuRegister::new_16bit("CS", regs.cs));
         state.add_register(CpuRegister::new_16bit("DS", regs.ds));
         state.add_register(CpuRegister::new_16bit("ES", regs.es));
         state.add_register(CpuRegister::new_16bit("SS", regs.ss));
-
-        // Add instruction pointer
-        state.add_register(CpuRegister::new_32bit("EIP", regs.ip));
-
-        // Add FLAGS register as a whole (for reference)
-        state.add_register(CpuRegister::new_32bit("FLAGS", regs.flags));
 
         // Extract individual flags from the FLAGS register
         // x86 FLAGS format (16-bit, lower part of EFLAGS):
@@ -237,19 +262,20 @@ mod tests {
         assert_eq!(state.pc, 0xFFFF0);
 
         // Should have all standard x86 registers
-        assert!(state.registers.iter().any(|r| r.name == "EAX"));
-        assert!(state.registers.iter().any(|r| r.name == "EBX"));
-        assert!(state.registers.iter().any(|r| r.name == "ECX"));
-        assert!(state.registers.iter().any(|r| r.name == "EDX"));
-        assert!(state.registers.iter().any(|r| r.name == "ESI"));
-        assert!(state.registers.iter().any(|r| r.name == "EDI"));
-        assert!(state.registers.iter().any(|r| r.name == "EBP"));
-        assert!(state.registers.iter().any(|r| r.name == "ESP"));
+        // For 8086 (default), registers are 16-bit
+        assert!(state.registers.iter().any(|r| r.name == "AX"));
+        assert!(state.registers.iter().any(|r| r.name == "BX"));
+        assert!(state.registers.iter().any(|r| r.name == "CX"));
+        assert!(state.registers.iter().any(|r| r.name == "DX"));
+        assert!(state.registers.iter().any(|r| r.name == "SI"));
+        assert!(state.registers.iter().any(|r| r.name == "DI"));
+        assert!(state.registers.iter().any(|r| r.name == "BP"));
+        assert!(state.registers.iter().any(|r| r.name == "SP"));
         assert!(state.registers.iter().any(|r| r.name == "CS"));
         assert!(state.registers.iter().any(|r| r.name == "DS"));
         assert!(state.registers.iter().any(|r| r.name == "ES"));
         assert!(state.registers.iter().any(|r| r.name == "SS"));
-        assert!(state.registers.iter().any(|r| r.name == "EIP"));
+        assert!(state.registers.iter().any(|r| r.name == "IP"));
         assert!(state.registers.iter().any(|r| r.name == "FLAGS"));
 
         // Should have all x86 flags in correct order
