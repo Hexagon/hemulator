@@ -6,11 +6,11 @@ nav_order: 2
 
 Contributions are welcome! Please follow these guidelines.
 
-**For Users**: See [MANUAL.md](MANUAL.md) for usage instructions.
+**For Users**: See [User Manual](../user/manual.md) for usage instructions.
 
-**For Architecture Details**: See [ARCHITECTURE.md](ARCHITECTURE.md) for overall emulation system architecture.
+**For Architecture Details**: See [Architecture](architecture.md) for overall emulation system architecture.
 
-**For Implementation Guidelines**: See [AGENTS.md](../AGENTS.md) for detailed implementation patterns and CI requirements.
+**For Implementation Guidelines**: See [Agent Guidelines](agents.md) for detailed implementation patterns and CI requirements.
 
 ## Pre-Commit Checks (REQUIRED)
 

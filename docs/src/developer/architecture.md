@@ -7,18 +7,18 @@ nav_order: 1
 This document describes the overall architecture of the Hemulator multi-system console emulator.
 
 **Related Documentation**:
-- **[README.md](../README.md)**: Developer quick start, build instructions, project overview
-- **[MANUAL.md](MANUAL.md)**: End-user manual with controls, features, and system-specific information
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
-- **[AGENTS.md](../AGENTS.md)**: Implementation guidelines for automated agents and CI
+- **[README](https://github.com/Hexagon/hemulator/blob/master/README.md)**: Developer quick start, build instructions, project overview
+- **[User Manual](../user/manual.md)**: End-user manual with controls, features, and system-specific information
+- **[Contributing](contributing.md)**: Contribution workflow, pre-commit checks, coding standards
+- **[Agent Guidelines](agents.md)**: Implementation guidelines for automated agents and CI
 
 **System-Specific Details**:
-- **[NES](../crates/systems/nes/README.md)**: Nintendo Entertainment System implementation
-- **[Game Boy](../crates/systems/gb/README.md)**: Game Boy / Game Boy Color implementation
-- **[Atari 2600](../crates/systems/atari2600/README.md)**: Atari 2600 implementation
-- **[SNES](../crates/systems/snes/README.md)**: Super Nintendo Entertainment System implementation
-- **[N64](../crates/systems/n64/README.md)**: Nintendo 64 implementation
-- **[PC](../crates/systems/pc/README.md)**: IBM PC/XT implementation
+- **[NES](https://github.com/Hexagon/hemulator/blob/master/crates/systems/nes/README.md)**: Nintendo Entertainment System implementation
+- **[Game Boy](https://github.com/Hexagon/hemulator/blob/master/crates/systems/gb/README.md)**: Game Boy / Game Boy Color implementation
+- **[Atari 2600](https://github.com/Hexagon/hemulator/blob/master/crates/systems/atari2600/README.md)**: Atari 2600 implementation
+- **[SNES](https://github.com/Hexagon/hemulator/blob/master/crates/systems/snes/README.md)**: Super Nintendo Entertainment System implementation
+- **[N64](https://github.com/Hexagon/hemulator/blob/master/crates/systems/n64/README.md)**: Nintendo 64 implementation
+- **[PC](https://github.com/Hexagon/hemulator/blob/master/crates/systems/pc/README.md)**: IBM PC/XT implementation
 
 ---
 

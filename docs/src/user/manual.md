@@ -6,7 +6,7 @@ nav_order: 1
 
 Welcome to Hemulator, a cross-platform multi-system console emulator supporting NES, SNES, N64, Sega Master System, Atari 2600, Game Boy, and PC/DOS emulation.
 
-**For Developers**: See [README.md](../README.md) for build instructions, [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details, and individual system READMEs for implementation specifics.
+**For Developers**: See [README](https://github.com/Hexagon/hemulator/blob/master/README.md) for build instructions, [Architecture](../developer/architecture.md) for architecture details, and individual system READMEs for implementation specifics.
 
 ## Getting Started
 
