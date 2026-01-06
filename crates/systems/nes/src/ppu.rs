@@ -745,6 +745,10 @@ impl Ppu {
             // None = no sprite pixel, Some((rgb, behind_bg)) = sprite pixel with priority.
             let mut sprite_buffer: Vec<Option<(u32, bool)>> = vec![None; (width * height) as usize];
 
+            // NES PPU hardware limitation: maximum 8 sprites per scanline.
+            // Track how many sprites are on each scanline to enforce the limit.
+            let mut sprites_per_scanline: Vec<u8> = vec![0; height as usize];
+
             // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
             // First opaque pixel at each position wins.
             for i in 0..64usize {
@@ -767,6 +771,33 @@ impl Ppu {
                 } else {
                     (tile, sprite_pattern_base, 8)
                 };
+
+                // Check if this sprite can be rendered on its scanlines (8-sprite limit)
+                let mut can_render = true;
+                for row in 0..height_px {
+                    let y = y_pos + row as i16;
+                    if y >= 0 && y < height as i16 {
+                        let scanline_idx = y as usize;
+                        if sprites_per_scanline[scanline_idx] >= 8 {
+                            // NES hardware limit: only 8 sprites per scanline
+                            can_render = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Skip this sprite if it would exceed the 8-sprite limit on any scanline
+                if !can_render {
+                    continue;
+                }
+
+                // Mark scanlines as having this sprite
+                for row in 0..height_px {
+                    let y = y_pos + row as i16;
+                    if y >= 0 && y < height as i16 {
+                        sprites_per_scanline[y as usize] += 1;
+                    }
+                }
 
                 for row in 0..height_px {
                     let sy = if flip_v { height_px - 1 - row } else { row };
@@ -981,8 +1012,13 @@ impl Ppu {
             // None = no sprite pixel, Some((rgb, behind_bg, sprite_idx)) = sprite pixel with priority and index.
             let mut sprite_buffer: [Option<(u32, bool, usize)>; 256] = [None; 256];
 
+            // NES PPU hardware limitation: maximum 8 sprites per scanline.
+            // Track how many sprites are on this scanline to enforce the limit.
+            let mut sprites_on_scanline = 0;
+
             // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
             // First opaque pixel at each position wins.
+            // Stop after 8 sprites are found on this scanline (NES hardware limit).
             for i in 0..64usize {
                 let o = i * 4;
                 let y_pos = self.oam[o] as i16 + 1;
@@ -1006,6 +1042,14 @@ impl Ppu {
                 let row = (y as i16) - y_pos;
                 if row < 0 || row >= height_px {
                     continue;
+                }
+
+                // This sprite is on the current scanline
+                sprites_on_scanline += 1;
+                if sprites_on_scanline > 8 {
+                    // NES hardware limit: only 8 sprites can be rendered per scanline
+                    // Sprites beyond the 8th are skipped (sprite overflow flag is set by evaluate_sprites_for_scanline)
+                    break;
                 }
 
                 let sy = if flip_v { height_px - 1 - row } else { row };
