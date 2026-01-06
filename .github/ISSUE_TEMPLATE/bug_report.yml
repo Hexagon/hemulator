@@ -1,0 +1,118 @@
+name: 🐛 Bug Report
+description: Report a bug or issue with Hemulator
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please provide as much detail as possible to help us fix it.
+
+  - type: dropdown
+    id: system
+    attributes:
+      label: Which system is affected?
+      options:
+        - NES
+        - Game Boy / Game Boy Color
+        - Atari 2600
+        - SNES
+        - Nintendo 64
+        - PC/DOS
+        - Sega Master System
+        - CHIP-8
+        - GUI/Frontend
+        - Multiple systems
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is
+      placeholder: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Load ROM '...'
+        2. Press button '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: What should have happened instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Hemulator Version
+      description: Which version of Hemulator are you using?
+      placeholder: e.g., v0.1.0 or commit hash
+    validations:
+      required: true
+
+  - type: textarea
+    id: rom-info
+    attributes:
+      label: ROM Information (if applicable)
+      description: ROM name and any relevant details (do NOT share ROM files)
+      placeholder: Game name, ROM format, size, etc.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Messages / Logs
+      description: Any error messages or relevant log output
+      placeholder: Paste error messages or logs here
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Screenshots, videos, or any other helpful information
+      placeholder: Add any other context about the problem
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to make sure this isn't a duplicate
+          required: true
+        - label: I am using a legally obtained ROM file
+          required: true

@@ -19,12 +19,20 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 - **[User Manual](user/manual.md)** - Getting started, controls, features, and system-specific information
 - **[System Guides](systems/)** - Detailed information about each emulated system
 
+**Get Help & Contribute**:
+- **[🐛 Report a Bug](https://github.com/Hexagon/hemulator/issues/new?template=bug_report.yml)** - Found a problem? Let us know!
+- **[🚀 Request a Feature](https://github.com/Hexagon/hemulator/issues/new?template=feature_request.yml)** - Have an idea for a new feature?
+- **[💬 Discussions](https://github.com/Hexagon/hemulator/discussions)** - Ask questions and share ideas
+
 ### For Developers
 
 - **[Architecture Overview](developer/architecture.md)** - High-level system architecture and design patterns
   - Full details: [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in repository
 - **[Contributing](developer/contributing.md)** - Development workflow and contribution guidelines
 - **[CPU References](references/)** - Technical reference documentation for CPU implementations
+
+**Development Support**:
+- **[🔧 Technical Issue](https://github.com/Hexagon/hemulator/issues/new?template=developer_issue.yml)** - Report build issues, implementation problems, or ask technical questions
 
 ## Quick Links
 

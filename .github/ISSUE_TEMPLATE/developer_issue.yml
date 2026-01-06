@@ -1,0 +1,137 @@
+name: 🔧 Developer / Technical Issue
+description: Report technical issues, implementation problems, or development questions
+title: "[Dev]: "
+labels: ["technical"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is for developers and advanced users reporting technical issues, implementation problems, or asking development questions.
+        
+        **For general bugs**: Use the Bug Report template instead.
+        **For feature requests**: Use the Feature Request template instead.
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      options:
+        - Build / Compilation Issue
+        - Architecture / Design Question
+        - Implementation Bug
+        - Performance Issue
+        - Test Failure
+        - Documentation Issue
+        - Development Environment
+        - Other Technical Issue
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component / Area
+      multiple: true
+      options:
+        - Core CPU (6502, Z80, etc.)
+        - Core APU/Audio
+        - Core Renderer
+        - System Implementation
+        - Frontend/GUI
+        - Build System
+        - Tests
+        - CI/CD
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Issue Description
+      description: Detailed description of the technical issue
+      placeholder: What's the technical problem or question?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Development Environment
+      description: Your development setup
+      placeholder: |
+        - OS: 
+        - Rust version: 
+        - Cargo version:
+        - Build profile: (debug/release/release-quick)
+        - Other relevant tools:
+    validations:
+      required: true
+
+  - type: textarea
+    id: code-context
+    attributes:
+      label: Code / Context
+      description: Relevant code snippets, file paths, or technical details
+      placeholder: |
+        File: crates/systems/nes/src/...
+        Code snippet or relevant technical context
+      render: rust
+    validations:
+      required: false
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: Error Output / Logs
+      description: Compilation errors, test failures, or debug output
+      placeholder: Paste error messages, compiler output, or logs
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: attempted-solutions
+    attributes:
+      label: What Have You Tried?
+      description: Steps you've already taken to solve this
+      placeholder: Solutions or debugging steps you've attempted
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution (Optional)
+      description: If you have ideas on how to fix this
+      placeholder: Your thoughts on a potential solution
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links to documentation, datasheets, similar issues, etc.
+      placeholder: |
+        - Related issue: #123
+        - Documentation: https://...
+        - Technical reference: https://...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have read ARCHITECTURE.md and CONTRIBUTING.md
+          required: true
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have run pre-commit checks (cargo fmt, clippy, test)
+          required: false
+        - label: I am willing to submit a PR to fix this issue
+          required: false
