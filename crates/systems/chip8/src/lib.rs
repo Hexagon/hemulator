@@ -853,13 +853,15 @@ impl Chip8System {
     fn scroll_down(&mut self, n: usize) {
         for plane in &mut self.display_planes {
             let mut new_display = vec![false; self.display_width * self.display_height];
-            for y in n..self.display_height {
+            // Move pixels down: copy from row y to row y+n
+            for y in 0..(self.display_height - n) {
                 for x in 0..self.display_width {
                     let old_idx = y * self.display_width + x;
-                    let new_idx = (y - n) * self.display_width + x;
-                    new_display[old_idx] = plane[new_idx];
+                    let new_idx = (y + n) * self.display_width + x;
+                    new_display[new_idx] = plane[old_idx];
                 }
             }
+            // Top n rows remain blank (already initialized to false)
             *plane = new_display;
         }
         self.display_updated = true;
@@ -869,13 +871,15 @@ impl Chip8System {
     fn scroll_up(&mut self, n: usize) {
         for plane in &mut self.display_planes {
             let mut new_display = vec![false; self.display_width * self.display_height];
-            for y in 0..(self.display_height - n) {
+            // Move pixels up: copy from row y to row y-n
+            for y in n..self.display_height {
                 for x in 0..self.display_width {
                     let old_idx = y * self.display_width + x;
-                    let new_idx = (y + n) * self.display_width + x;
-                    new_display[old_idx] = plane[new_idx];
+                    let new_idx = (y - n) * self.display_width + x;
+                    new_display[new_idx] = plane[old_idx];
                 }
             }
+            // Bottom n rows remain blank (already initialized to false)
             *plane = new_display;
         }
         self.display_updated = true;
@@ -885,13 +889,15 @@ impl Chip8System {
     fn scroll_right(&mut self, n: usize) {
         for plane in &mut self.display_planes {
             let mut new_display = vec![false; self.display_width * self.display_height];
+            // Move pixels right: copy from column x to column x+n
             for y in 0..self.display_height {
-                for x in n..self.display_width {
+                for x in 0..(self.display_width - n) {
                     let old_idx = y * self.display_width + x;
-                    let new_idx = y * self.display_width + (x - n);
-                    new_display[old_idx] = plane[new_idx];
+                    let new_idx = y * self.display_width + (x + n);
+                    new_display[new_idx] = plane[old_idx];
                 }
             }
+            // Left n columns remain blank (already initialized to false)
             *plane = new_display;
         }
         self.display_updated = true;
@@ -901,13 +907,15 @@ impl Chip8System {
     fn scroll_left(&mut self, n: usize) {
         for plane in &mut self.display_planes {
             let mut new_display = vec![false; self.display_width * self.display_height];
+            // Move pixels left: copy from column x to column x-n
             for y in 0..self.display_height {
-                for x in 0..(self.display_width - n) {
+                for x in n..self.display_width {
                     let old_idx = y * self.display_width + x;
-                    let new_idx = y * self.display_width + (x + n);
-                    new_display[old_idx] = plane[new_idx];
+                    let new_idx = y * self.display_width + (x - n);
+                    new_display[new_idx] = plane[old_idx];
                 }
             }
+            // Right n columns remain blank (already initialized to false)
             *plane = new_display;
         }
         self.display_updated = true;
@@ -1426,5 +1434,111 @@ mod tests {
         // Check that at least some pixels are white (0xFFFFFFFF)
         let white_pixels = system.display_planes[0].iter().filter(|&&p| p).count();
         assert!(white_pixels > 0, "Test ROM should have drawn some pixels");
+    }
+
+    #[test]
+    fn test_scroll_down() {
+        let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+        system.program_loaded = true;
+
+        // Set up a simple pattern: first row has pixels
+        for x in 0..system.display_width {
+            system.display_planes[0][x] = true;
+        }
+
+        // Scroll down by 2 rows
+        system.scroll_down(2);
+
+        // First two rows should be blank
+        for x in 0..system.display_width {
+            assert!(!system.display_planes[0][x], "Row 0 should be blank");
+            assert!(!system.display_planes[0][system.display_width + x], "Row 1 should be blank");
+        }
+
+        // Third row (index 2) should have the pixels that were in row 0
+        for x in 0..system.display_width {
+            assert!(system.display_planes[0][2 * system.display_width + x], "Row 2 should have pixels");
+        }
+    }
+
+    #[test]
+    fn test_scroll_up() {
+        let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+        system.program_loaded = true;
+
+        // Set up a simple pattern: last row has pixels
+        let last_row_start = (system.display_height - 1) * system.display_width;
+        for x in 0..system.display_width {
+            system.display_planes[0][last_row_start + x] = true;
+        }
+
+        // Scroll up by 2 rows
+        system.scroll_up(2);
+
+        // Last two rows should be blank
+        let second_last_row = (system.display_height - 2) * system.display_width;
+        let last_row = (system.display_height - 1) * system.display_width;
+        for x in 0..system.display_width {
+            assert!(!system.display_planes[0][second_last_row + x], "Second-last row should be blank");
+            assert!(!system.display_planes[0][last_row + x], "Last row should be blank");
+        }
+
+        // Third-to-last row should have the pixels that were in the last row
+        let third_last_row = (system.display_height - 3) * system.display_width;
+        for x in 0..system.display_width {
+            assert!(system.display_planes[0][third_last_row + x], "Third-to-last row should have pixels");
+        }
+    }
+
+    #[test]
+    fn test_scroll_right() {
+        let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+        system.program_loaded = true;
+
+        // Set up a simple pattern: first column has pixels
+        for y in 0..system.display_height {
+            system.display_planes[0][y * system.display_width] = true;
+        }
+
+        // Scroll right by 4 pixels
+        system.scroll_right(4);
+
+        // First four columns should be blank
+        for y in 0..system.display_height {
+            for x in 0..4 {
+                assert!(!system.display_planes[0][y * system.display_width + x], "Column {} should be blank", x);
+            }
+        }
+
+        // Fifth column (index 4) should have the pixels that were in column 0
+        for y in 0..system.display_height {
+            assert!(system.display_planes[0][y * system.display_width + 4], "Column 4 should have pixels");
+        }
+    }
+
+    #[test]
+    fn test_scroll_left() {
+        let mut system = Chip8System::new_with_mode(Chip8Mode::SuperChip);
+        system.program_loaded = true;
+
+        // Set up a simple pattern: last column has pixels
+        for y in 0..system.display_height {
+            system.display_planes[0][y * system.display_width + (system.display_width - 1)] = true;
+        }
+
+        // Scroll left by 4 pixels
+        system.scroll_left(4);
+
+        // Last four columns should be blank
+        for y in 0..system.display_height {
+            for x in (system.display_width - 4)..system.display_width {
+                assert!(!system.display_planes[0][y * system.display_width + x], "Column {} should be blank", x);
+            }
+        }
+
+        // Fifth-to-last column should have the pixels that were in the last column
+        for y in 0..system.display_height {
+            assert!(system.display_planes[0][y * system.display_width + (system.display_width - 5)], "Column {} should have pixels", system.display_width - 5);
+        }
     }
 }
