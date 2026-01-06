@@ -359,12 +359,7 @@ impl System for Atari2600System {
 
         // Run until scanline wraps around, indicating frame completion
         while cpu_steps < MAX_CPU_STEPS {
-            let pc_before = self
-                .cpu
-                .cpu
-                .as_ref()
-                .map(|c| c.pc as u32)
-                .unwrap_or(0);
+            let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32).unwrap_or(0);
             let cycles = self.cpu.step();
             cpu_steps += 1;
 
