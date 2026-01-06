@@ -225,14 +225,17 @@ impl GbBus {
         let ram_size_code = data[0x149];
 
         // Check CGB flag at 0x143
-        // 0x80 = Works on both DMG and CGB
+        // 0x80 = Works on both DMG and CGB (compatibility mode)
         // 0xC0 = CGB only
         let cgb_flag = data[0x143];
         self.cgb_mode = cgb_flag == 0x80 || cgb_flag == 0xC0;
 
         // Enable CGB mode in PPU if CGB ROM
         if self.cgb_mode {
-            self.ppu.enable_cgb_mode();
+            // Pass compatibility_mode=true for 0x80 (DMG with CGB support)
+            // Pass compatibility_mode=false for 0xC0 (CGB only)
+            let compatibility_mode = cgb_flag == 0x80;
+            self.ppu.enable_cgb_mode(compatibility_mode);
         }
 
         let ram_size = match ram_size_code {
