@@ -85,6 +85,8 @@ use bus::NesBus;
 use cpu::NesCpu;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
+#[cfg(feature = "opengl")]
+use emu_core::renderer::Renderer;
 use emu_core::{apu::TimingMode, types::Frame, MountPointInfo, System};
 use ppu::Ppu;
 use ppu_renderer::{NesPpuRenderer, SoftwareNesPpuRenderer};
