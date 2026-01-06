@@ -15,7 +15,6 @@
 //! - Feature-gated behind `opengl` feature flag
 //! - Falls back to software renderer if GL context unavailable
 
-
 use super::rdp_renderer::{RdpRenderer, ScissorBox};
 
 use emu_core::types::Frame;
@@ -26,12 +25,9 @@ use glow::HasContext;
 /// Safety: OpenGL contexts are generally safe to send between threads as long as
 /// they're not actively being used on multiple threads simultaneously. The RDP
 /// renderer is only used from the emulation thread, so this is safe.
-
 struct SendContext(glow::Context);
 
-
 unsafe impl Send for SendContext {}
-
 
 impl std::ops::Deref for SendContext {
     type Target = glow::Context;
@@ -51,7 +47,6 @@ enum ShaderProgram {
 }
 
 /// OpenGL-based RDP renderer
-
 pub struct OpenGLRdpRenderer {
     gl: SendContext,
     width: u32,
@@ -81,7 +76,6 @@ pub struct OpenGLRdpRenderer {
     // Z-buffer state
     zbuffer_enabled: bool,
 }
-
 
 impl OpenGLRdpRenderer {
     /// Create a new OpenGL renderer with the given GL context
@@ -325,7 +319,6 @@ impl OpenGLRdpRenderer {
         );
     }
 }
-
 
 impl RdpRenderer for OpenGLRdpRenderer {
     fn init(&mut self, width: u32, height: u32) {
@@ -1070,7 +1063,6 @@ impl RdpRenderer for OpenGLRdpRenderer {
 }
 
 /// Helper function to compile a shader
-
 unsafe fn compile_shader(
     gl: &SendContext,
     shader_type: u32,
@@ -1093,7 +1085,6 @@ unsafe fn compile_shader(
 }
 
 /// Create flat shading program
-
 fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -1127,7 +1118,6 @@ fn create_flat_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Create Gouraud shading program
-
 fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader =
@@ -1161,7 +1151,6 @@ fn create_gouraud_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Create textured shading program
-
 fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
     unsafe {
         let vertex_shader = compile_shader(
@@ -1198,7 +1187,6 @@ fn create_textured_program(gl: &SendContext) -> Result<glow::Program, String> {
 }
 
 /// Implement Drop to clean up OpenGL resources
-
 impl Drop for OpenGLRdpRenderer {
     fn drop(&mut self) {
         unsafe {
@@ -1216,7 +1204,6 @@ impl Drop for OpenGLRdpRenderer {
 }
 
 #[cfg(test)]
-
 mod tests {
     #[allow(unused_imports)] // Test module for documentation purposes
     use super::*;
