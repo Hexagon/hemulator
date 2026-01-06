@@ -49,6 +49,7 @@
 
 mod debugger;
 
+use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
@@ -1091,8 +1092,17 @@ impl System for Chip8System {
         self.display_updated = false;
 
         for _ in 0..INSTRUCTIONS_PER_FRAME {
+            let pc_before = self.pc as u32;
             self.execute_instruction();
             self.cycles_this_frame += 1;
+
+            // Record instruction if tracing is enabled
+            if self.instruction_tracer.is_enabled() {
+                if let Some(instr) = self.disassemble_instruction(pc_before) {
+                    let cpu_state = self.get_cpu_state();
+                    self.instruction_tracer.trace(instr, cpu_state);
+                }
+            }
         }
 
         // Update timers (they count down at 60Hz)
