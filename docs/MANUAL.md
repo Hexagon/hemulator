@@ -782,6 +782,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **Game Boy Color (CGB) Support**:
   - Automatic CGB mode detection
   - 15-bit RGB color palettes (8 BG + 8 OBJ palettes)
+  - DMG-compatible default palette initialization for early CGB games (e.g., Pokemon Yellow)
   - VRAM banking (2 banks of 8KB)
   - Tile attributes (palette selection, VRAM banking, flipping)
   - Backward compatible with DMG games
