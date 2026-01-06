@@ -25,12 +25,28 @@ pub fn disassemble_65c816(memory: &[u8], address: u32) -> Option<DisassembledIns
     Some(DisassembledInstruction::new(address, bytes, mnemonic))
 }
 
-fn decode_instruction(opcode: u8, _memory: &[u8]) -> (String, usize) {
+fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
+    // Helper to get operand bytes
+    let get_u8 = |offset: usize| -> u8 {
+        memory.get(offset).copied().unwrap_or(0)
+    };
+    let get_u16 = |offset: usize| -> u16 {
+        let lo = get_u8(offset) as u16;
+        let hi = get_u8(offset + 1) as u16;
+        (hi << 8) | lo
+    };
+    let get_u24 = |offset: usize| -> u32 {
+        let lo = get_u8(offset) as u32;
+        let mid = get_u8(offset + 1) as u32;
+        let hi = get_u8(offset + 2) as u32;
+        (hi << 16) | (mid << 8) | lo
+    };
+
     match opcode {
         // BRK, COP, WDM
         0x00 => ("BRK".to_string(), 2),
-        0x02 => ("COP #$%02X".to_string(), 2),
-        0x42 => ("WDM #$%02X".to_string(), 2),
+        0x02 => (format!("COP #${:02X}", get_u8(1)), 2),
+        0x42 => (format!("WDM #${:02X}", get_u8(1)), 2),
 
         // Stack operations
         0x08 => ("PHP".to_string(), 1),
@@ -57,8 +73,8 @@ fn decode_instruction(opcode: u8, _memory: &[u8]) -> (String, usize) {
         0xD8 => ("CLD".to_string(), 1),
         0xF8 => ("SED".to_string(), 1),
         0xB8 => ("CLV".to_string(), 1),
-        0xC2 => ("REP #$%02X".to_string(), 2),
-        0xE2 => ("SEP #$%02X".to_string(), 2),
+        0xC2 => (format!("REP #${:02X}", get_u8(1)), 2),
+        0xE2 => (format!("SEP #${:02X}", get_u8(1)), 2),
 
         // Transfer operations
         0x8A => ("TXA".to_string(), 1),
@@ -89,221 +105,221 @@ fn decode_instruction(opcode: u8, _memory: &[u8]) -> (String, usize) {
         0xFB => ("XCE".to_string(), 1),
 
         // ORA instructions
-        0x09 => ("ORA #$%02X".to_string(), 2),
-        0x05 => ("ORA $%02X".to_string(), 2),
-        0x15 => ("ORA $%02X,X".to_string(), 2),
-        0x0D => ("ORA $%04X".to_string(), 3),
-        0x1D => ("ORA $%04X,X".to_string(), 3),
-        0x19 => ("ORA $%04X,Y".to_string(), 3),
-        0x01 => ("ORA ($%02X,X)".to_string(), 2),
-        0x11 => ("ORA ($%02X),Y".to_string(), 2),
-        0x07 => ("ORA [$%02X]".to_string(), 2),
-        0x17 => ("ORA [$%02X],Y".to_string(), 2),
-        0x03 => ("ORA $%02X,S".to_string(), 2),
-        0x13 => ("ORA ($%02X,S),Y".to_string(), 2),
+        0x09 => (format!("ORA #${:02X}", get_u8(1)), 2),
+        0x05 => (format!("ORA ${:02X}", get_u8(1)), 2),
+        0x15 => (format!("ORA ${:02X},X", get_u8(1)), 2),
+        0x0D => (format!("ORA ${:04X}", get_u16(1)), 3),
+        0x1D => (format!("ORA ${:04X},X", get_u16(1)), 3),
+        0x19 => (format!("ORA ${:04X},Y", get_u16(1)), 3),
+        0x01 => (format!("ORA (${:02X},X)", get_u8(1)), 2),
+        0x11 => (format!("ORA (${:02X}),Y", get_u8(1)), 2),
+        0x07 => (format!("ORA [${:02X}]", get_u8(1)), 2),
+        0x17 => (format!("ORA [${:02X}],Y", get_u8(1)), 2),
+        0x03 => (format!("ORA ${:02X},S", get_u8(1)), 2),
+        0x13 => (format!("ORA (${:02X},S),Y", get_u8(1)), 2),
 
         // AND instructions
-        0x29 => ("AND #$%02X".to_string(), 2),
-        0x25 => ("AND $%02X".to_string(), 2),
-        0x35 => ("AND $%02X,X".to_string(), 2),
-        0x2D => ("AND $%04X".to_string(), 3),
-        0x3D => ("AND $%04X,X".to_string(), 3),
-        0x39 => ("AND $%04X,Y".to_string(), 3),
-        0x21 => ("AND ($%02X,X)".to_string(), 2),
-        0x31 => ("AND ($%02X),Y".to_string(), 2),
-        0x27 => ("AND [$%02X]".to_string(), 2),
-        0x37 => ("AND [$%02X],Y".to_string(), 2),
-        0x23 => ("AND $%02X,S".to_string(), 2),
-        0x33 => ("AND ($%02X,S),Y".to_string(), 2),
+        0x29 => (format!("AND #${:02X}", get_u8(1)), 2),
+        0x25 => (format!("AND ${:02X}", get_u8(1)), 2),
+        0x35 => (format!("AND ${:02X},X", get_u8(1)), 2),
+        0x2D => (format!("AND ${:04X}", get_u16(1)), 3),
+        0x3D => (format!("AND ${:04X},X", get_u16(1)), 3),
+        0x39 => (format!("AND ${:04X},Y", get_u16(1)), 3),
+        0x21 => (format!("AND (${:02X},X)", get_u8(1)), 2),
+        0x31 => (format!("AND (${:02X}),Y", get_u8(1)), 2),
+        0x27 => (format!("AND [${:02X}]", get_u8(1)), 2),
+        0x37 => (format!("AND [${:02X}],Y", get_u8(1)), 2),
+        0x23 => (format!("AND ${:02X},S", get_u8(1)), 2),
+        0x33 => (format!("AND (${:02X},S),Y", get_u8(1)), 2),
 
         // EOR instructions
-        0x49 => ("EOR #$%02X".to_string(), 2),
-        0x45 => ("EOR $%02X".to_string(), 2),
-        0x55 => ("EOR $%02X,X".to_string(), 2),
-        0x4D => ("EOR $%04X".to_string(), 3),
-        0x5D => ("EOR $%04X,X".to_string(), 3),
-        0x59 => ("EOR $%04X,Y".to_string(), 3),
-        0x41 => ("EOR ($%02X,X)".to_string(), 2),
-        0x51 => ("EOR ($%02X),Y".to_string(), 2),
-        0x47 => ("EOR [$%02X]".to_string(), 2),
-        0x57 => ("EOR [$%02X],Y".to_string(), 2),
-        0x43 => ("EOR $%02X,S".to_string(), 2),
-        0x53 => ("EOR ($%02X,S),Y".to_string(), 2),
+        0x49 => (format!("EOR #${:02X}", get_u8(1)), 2),
+        0x45 => (format!("EOR ${:02X}", get_u8(1)), 2),
+        0x55 => (format!("EOR ${:02X},X", get_u8(1)), 2),
+        0x4D => (format!("EOR ${:04X}", get_u16(1)), 3),
+        0x5D => (format!("EOR ${:04X},X", get_u16(1)), 3),
+        0x59 => (format!("EOR ${:04X},Y", get_u16(1)), 3),
+        0x41 => (format!("EOR (${:02X},X)", get_u8(1)), 2),
+        0x51 => (format!("EOR (${:02X}),Y", get_u8(1)), 2),
+        0x47 => (format!("EOR [${:02X}]", get_u8(1)), 2),
+        0x57 => (format!("EOR [${:02X}],Y", get_u8(1)), 2),
+        0x43 => (format!("EOR ${:02X},S", get_u8(1)), 2),
+        0x53 => (format!("EOR (${:02X},S),Y", get_u8(1)), 2),
 
         // ADC instructions
-        0x69 => ("ADC #$%02X".to_string(), 2),
-        0x65 => ("ADC $%02X".to_string(), 2),
-        0x75 => ("ADC $%02X,X".to_string(), 2),
-        0x6D => ("ADC $%04X".to_string(), 3),
-        0x7D => ("ADC $%04X,X".to_string(), 3),
-        0x79 => ("ADC $%04X,Y".to_string(), 3),
-        0x61 => ("ADC ($%02X,X)".to_string(), 2),
-        0x71 => ("ADC ($%02X),Y".to_string(), 2),
-        0x67 => ("ADC [$%02X]".to_string(), 2),
-        0x77 => ("ADC [$%02X],Y".to_string(), 2),
-        0x63 => ("ADC $%02X,S".to_string(), 2),
-        0x73 => ("ADC ($%02X,S),Y".to_string(), 2),
+        0x69 => (format!("ADC #${:02X}", get_u8(1)), 2),
+        0x65 => (format!("ADC ${:02X}", get_u8(1)), 2),
+        0x75 => (format!("ADC ${:02X},X", get_u8(1)), 2),
+        0x6D => (format!("ADC ${:04X}", get_u16(1)), 3),
+        0x7D => (format!("ADC ${:04X},X", get_u16(1)), 3),
+        0x79 => (format!("ADC ${:04X},Y", get_u16(1)), 3),
+        0x61 => (format!("ADC (${:02X},X)", get_u8(1)), 2),
+        0x71 => (format!("ADC (${:02X}),Y", get_u8(1)), 2),
+        0x67 => (format!("ADC [${:02X}]", get_u8(1)), 2),
+        0x77 => (format!("ADC [${:02X}],Y", get_u8(1)), 2),
+        0x63 => (format!("ADC ${:02X},S", get_u8(1)), 2),
+        0x73 => (format!("ADC (${:02X},S),Y", get_u8(1)), 2),
 
         // SBC instructions
-        0xE9 => ("SBC #$%02X".to_string(), 2),
-        0xE5 => ("SBC $%02X".to_string(), 2),
-        0xF5 => ("SBC $%02X,X".to_string(), 2),
-        0xED => ("SBC $%04X".to_string(), 3),
-        0xFD => ("SBC $%04X,X".to_string(), 3),
-        0xF9 => ("SBC $%04X,Y".to_string(), 3),
-        0xE1 => ("SBC ($%02X,X)".to_string(), 2),
-        0xF1 => ("SBC ($%02X),Y".to_string(), 2),
-        0xE7 => ("SBC [$%02X]".to_string(), 2),
-        0xF7 => ("SBC [$%02X],Y".to_string(), 2),
-        0xE3 => ("SBC $%02X,S".to_string(), 2),
-        0xF3 => ("SBC ($%02X,S),Y".to_string(), 2),
+        0xE9 => (format!("SBC #${:02X}", get_u8(1)), 2),
+        0xE5 => (format!("SBC ${:02X}", get_u8(1)), 2),
+        0xF5 => (format!("SBC ${:02X},X", get_u8(1)), 2),
+        0xED => (format!("SBC ${:04X}", get_u16(1)), 3),
+        0xFD => (format!("SBC ${:04X},X", get_u16(1)), 3),
+        0xF9 => (format!("SBC ${:04X},Y", get_u16(1)), 3),
+        0xE1 => (format!("SBC (${:02X},X)", get_u8(1)), 2),
+        0xF1 => (format!("SBC (${:02X}),Y", get_u8(1)), 2),
+        0xE7 => (format!("SBC [${:02X}]", get_u8(1)), 2),
+        0xF7 => (format!("SBC [${:02X}],Y", get_u8(1)), 2),
+        0xE3 => (format!("SBC ${:02X},S", get_u8(1)), 2),
+        0xF3 => (format!("SBC (${:02X},S),Y", get_u8(1)), 2),
 
         // CMP instructions
-        0xC9 => ("CMP #$%02X".to_string(), 2),
-        0xC5 => ("CMP $%02X".to_string(), 2),
-        0xD5 => ("CMP $%02X,X".to_string(), 2),
-        0xCD => ("CMP $%04X".to_string(), 3),
-        0xDD => ("CMP $%04X,X".to_string(), 3),
-        0xD9 => ("CMP $%04X,Y".to_string(), 3),
-        0xC1 => ("CMP ($%02X,X)".to_string(), 2),
-        0xD1 => ("CMP ($%02X),Y".to_string(), 2),
-        0xC7 => ("CMP [$%02X]".to_string(), 2),
-        0xD7 => ("CMP [$%02X],Y".to_string(), 2),
-        0xC3 => ("CMP $%02X,S".to_string(), 2),
-        0xD3 => ("CMP ($%02X,S),Y".to_string(), 2),
+        0xC9 => (format!("CMP #${:02X}", get_u8(1)), 2),
+        0xC5 => (format!("CMP ${:02X}", get_u8(1)), 2),
+        0xD5 => (format!("CMP ${:02X},X", get_u8(1)), 2),
+        0xCD => (format!("CMP ${:04X}", get_u16(1)), 3),
+        0xDD => (format!("CMP ${:04X},X", get_u16(1)), 3),
+        0xD9 => (format!("CMP ${:04X},Y", get_u16(1)), 3),
+        0xC1 => (format!("CMP (${:02X},X)", get_u8(1)), 2),
+        0xD1 => (format!("CMP (${:02X}),Y", get_u8(1)), 2),
+        0xC7 => (format!("CMP [${:02X}]", get_u8(1)), 2),
+        0xD7 => (format!("CMP [${:02X}],Y", get_u8(1)), 2),
+        0xC3 => (format!("CMP ${:02X},S", get_u8(1)), 2),
+        0xD3 => (format!("CMP (${:02X},S),Y", get_u8(1)), 2),
 
         // CPX, CPY
-        0xE0 => ("CPX #$%02X".to_string(), 2),
-        0xE4 => ("CPX $%02X".to_string(), 2),
-        0xEC => ("CPX $%04X".to_string(), 3),
-        0xC0 => ("CPY #$%02X".to_string(), 2),
-        0xC4 => ("CPY $%02X".to_string(), 2),
-        0xCC => ("CPY $%04X".to_string(), 3),
+        0xE0 => (format!("CPX #${:02X}", get_u8(1)), 2),
+        0xE4 => (format!("CPX ${:02X}", get_u8(1)), 2),
+        0xEC => (format!("CPX ${:04X}", get_u16(1)), 3),
+        0xC0 => (format!("CPY #${:02X}", get_u8(1)), 2),
+        0xC4 => (format!("CPY ${:02X}", get_u8(1)), 2),
+        0xCC => (format!("CPY ${:04X}", get_u16(1)), 3),
 
         // LDA instructions
-        0xA9 => ("LDA #$%02X".to_string(), 2),
-        0xA5 => ("LDA $%02X".to_string(), 2),
-        0xB5 => ("LDA $%02X,X".to_string(), 2),
-        0xAD => ("LDA $%04X".to_string(), 3),
-        0xBD => ("LDA $%04X,X".to_string(), 3),
-        0xB9 => ("LDA $%04X,Y".to_string(), 3),
-        0xA1 => ("LDA ($%02X,X)".to_string(), 2),
-        0xB1 => ("LDA ($%02X),Y".to_string(), 2),
-        0xA7 => ("LDA [$%02X]".to_string(), 2),
-        0xB7 => ("LDA [$%02X],Y".to_string(), 2),
-        0xA3 => ("LDA $%02X,S".to_string(), 2),
-        0xB3 => ("LDA ($%02X,S),Y".to_string(), 2),
+        0xA9 => (format!("LDA #${:02X}", get_u8(1)), 2),
+        0xA5 => (format!("LDA ${:02X}", get_u8(1)), 2),
+        0xB5 => (format!("LDA ${:02X},X", get_u8(1)), 2),
+        0xAD => (format!("LDA ${:04X}", get_u16(1)), 3),
+        0xBD => (format!("LDA ${:04X},X", get_u16(1)), 3),
+        0xB9 => (format!("LDA ${:04X},Y", get_u16(1)), 3),
+        0xA1 => (format!("LDA (${:02X},X)", get_u8(1)), 2),
+        0xB1 => (format!("LDA (${:02X}),Y", get_u8(1)), 2),
+        0xA7 => (format!("LDA [${:02X}]", get_u8(1)), 2),
+        0xB7 => (format!("LDA [${:02X}],Y", get_u8(1)), 2),
+        0xA3 => (format!("LDA ${:02X},S", get_u8(1)), 2),
+        0xB3 => (format!("LDA (${:02X},S),Y", get_u8(1)), 2),
 
         // LDX, LDY
-        0xA2 => ("LDX #$%02X".to_string(), 2),
-        0xA6 => ("LDX $%02X".to_string(), 2),
-        0xB6 => ("LDX $%02X,Y".to_string(), 2),
-        0xAE => ("LDX $%04X".to_string(), 3),
-        0xBE => ("LDX $%04X,Y".to_string(), 3),
-        0xA0 => ("LDY #$%02X".to_string(), 2),
-        0xA4 => ("LDY $%02X".to_string(), 2),
-        0xB4 => ("LDY $%02X,X".to_string(), 2),
-        0xAC => ("LDY $%04X".to_string(), 3),
-        0xBC => ("LDY $%04X,X".to_string(), 3),
+        0xA2 => (format!("LDX #${:02X}", get_u8(1)), 2),
+        0xA6 => (format!("LDX ${:02X}", get_u8(1)), 2),
+        0xB6 => (format!("LDX ${:02X},Y", get_u8(1)), 2),
+        0xAE => (format!("LDX ${:04X}", get_u16(1)), 3),
+        0xBE => (format!("LDX ${:04X},Y", get_u16(1)), 3),
+        0xA0 => (format!("LDY #${:02X}", get_u8(1)), 2),
+        0xA4 => (format!("LDY ${:02X}", get_u8(1)), 2),
+        0xB4 => (format!("LDY ${:02X},X", get_u8(1)), 2),
+        0xAC => (format!("LDY ${:04X}", get_u16(1)), 3),
+        0xBC => (format!("LDY ${:04X},X", get_u16(1)), 3),
 
         // STA instructions
-        0x85 => ("STA $%02X".to_string(), 2),
-        0x95 => ("STA $%02X,X".to_string(), 2),
-        0x8D => ("STA $%04X".to_string(), 3),
-        0x9D => ("STA $%04X,X".to_string(), 3),
-        0x99 => ("STA $%04X,Y".to_string(), 3),
-        0x81 => ("STA ($%02X,X)".to_string(), 2),
-        0x91 => ("STA ($%02X),Y".to_string(), 2),
-        0x87 => ("STA [$%02X]".to_string(), 2),
-        0x97 => ("STA [$%02X],Y".to_string(), 2),
-        0x83 => ("STA $%02X,S".to_string(), 2),
-        0x93 => ("STA ($%02X,S),Y".to_string(), 2),
+        0x85 => (format!("STA ${:02X}", get_u8(1)), 2),
+        0x95 => (format!("STA ${:02X},X", get_u8(1)), 2),
+        0x8D => (format!("STA ${:04X}", get_u16(1)), 3),
+        0x9D => (format!("STA ${:04X},X", get_u16(1)), 3),
+        0x99 => (format!("STA ${:04X},Y", get_u16(1)), 3),
+        0x81 => (format!("STA (${:02X},X)", get_u8(1)), 2),
+        0x91 => (format!("STA (${:02X}),Y", get_u8(1)), 2),
+        0x87 => (format!("STA [${:02X}]", get_u8(1)), 2),
+        0x97 => (format!("STA [${:02X}],Y", get_u8(1)), 2),
+        0x83 => (format!("STA ${:02X},S", get_u8(1)), 2),
+        0x93 => (format!("STA (${:02X},S),Y", get_u8(1)), 2),
 
         // STX, STY, STZ
-        0x86 => ("STX $%02X".to_string(), 2),
-        0x96 => ("STX $%02X,Y".to_string(), 2),
-        0x8E => ("STX $%04X".to_string(), 3),
-        0x84 => ("STY $%02X".to_string(), 2),
-        0x94 => ("STY $%02X,X".to_string(), 2),
-        0x8C => ("STY $%04X".to_string(), 3),
-        0x64 => ("STZ $%02X".to_string(), 2),
-        0x74 => ("STZ $%02X,X".to_string(), 2),
-        0x9C => ("STZ $%04X".to_string(), 3),
-        0x9E => ("STZ $%04X,X".to_string(), 3),
+        0x86 => (format!("STX ${:02X}", get_u8(1)), 2),
+        0x96 => (format!("STX ${:02X},Y", get_u8(1)), 2),
+        0x8E => (format!("STX ${:04X}", get_u16(1)), 3),
+        0x84 => (format!("STY ${:02X}", get_u8(1)), 2),
+        0x94 => (format!("STY ${:02X},X", get_u8(1)), 2),
+        0x8C => (format!("STY ${:04X}", get_u16(1)), 3),
+        0x64 => (format!("STZ ${:02X}", get_u8(1)), 2),
+        0x74 => (format!("STZ ${:02X},X", get_u8(1)), 2),
+        0x9C => (format!("STZ ${:04X}", get_u16(1)), 3),
+        0x9E => (format!("STZ ${:04X},X", get_u16(1)), 3),
 
         // Shifts and rotates
         0x0A => ("ASL A".to_string(), 1),
-        0x06 => ("ASL $%02X".to_string(), 2),
-        0x16 => ("ASL $%02X,X".to_string(), 2),
-        0x0E => ("ASL $%04X".to_string(), 3),
-        0x1E => ("ASL $%04X,X".to_string(), 3),
+        0x06 => (format!("ASL ${:02X}", get_u8(1)), 2),
+        0x16 => (format!("ASL ${:02X},X", get_u8(1)), 2),
+        0x0E => (format!("ASL ${:04X}", get_u16(1)), 3),
+        0x1E => (format!("ASL ${:04X},X", get_u16(1)), 3),
         0x4A => ("LSR A".to_string(), 1),
-        0x46 => ("LSR $%02X".to_string(), 2),
-        0x56 => ("LSR $%02X,X".to_string(), 2),
-        0x4E => ("LSR $%04X".to_string(), 3),
-        0x5E => ("LSR $%04X,X".to_string(), 3),
+        0x46 => (format!("LSR ${:02X}", get_u8(1)), 2),
+        0x56 => (format!("LSR ${:02X},X", get_u8(1)), 2),
+        0x4E => (format!("LSR ${:04X}", get_u16(1)), 3),
+        0x5E => (format!("LSR ${:04X},X", get_u16(1)), 3),
         0x2A => ("ROL A".to_string(), 1),
-        0x26 => ("ROL $%02X".to_string(), 2),
-        0x36 => ("ROL $%02X,X".to_string(), 2),
-        0x2E => ("ROL $%04X".to_string(), 3),
-        0x3E => ("ROL $%04X,X".to_string(), 3),
+        0x26 => (format!("ROL ${:02X}", get_u8(1)), 2),
+        0x36 => (format!("ROL ${:02X},X", get_u8(1)), 2),
+        0x2E => (format!("ROL ${:04X}", get_u16(1)), 3),
+        0x3E => (format!("ROL ${:04X},X", get_u16(1)), 3),
         0x6A => ("ROR A".to_string(), 1),
-        0x66 => ("ROR $%02X".to_string(), 2),
-        0x76 => ("ROR $%02X,X".to_string(), 2),
-        0x6E => ("ROR $%04X".to_string(), 3),
-        0x7E => ("ROR $%04X,X".to_string(), 3),
+        0x66 => (format!("ROR ${:02X}", get_u8(1)), 2),
+        0x76 => (format!("ROR ${:02X},X", get_u8(1)), 2),
+        0x6E => (format!("ROR ${:04X}", get_u16(1)), 3),
+        0x7E => (format!("ROR ${:04X},X", get_u16(1)), 3),
 
         // Bit operations
-        0x89 => ("BIT #$%02X".to_string(), 2),
-        0x24 => ("BIT $%02X".to_string(), 2),
-        0x34 => ("BIT $%02X,X".to_string(), 2),
-        0x2C => ("BIT $%04X".to_string(), 3),
-        0x3C => ("BIT $%04X,X".to_string(), 3),
-        0x04 => ("TSB $%02X".to_string(), 2),
-        0x0C => ("TSB $%04X".to_string(), 3),
-        0x14 => ("TRB $%02X".to_string(), 2),
-        0x1C => ("TRB $%04X".to_string(), 3),
+        0x89 => (format!("BIT #${:02X}", get_u8(1)), 2),
+        0x24 => (format!("BIT ${:02X}", get_u8(1)), 2),
+        0x34 => (format!("BIT ${:02X},X", get_u8(1)), 2),
+        0x2C => (format!("BIT ${:04X}", get_u16(1)), 3),
+        0x3C => (format!("BIT ${:04X},X", get_u16(1)), 3),
+        0x04 => (format!("TSB ${:02X}", get_u8(1)), 2),
+        0x0C => (format!("TSB ${:04X}", get_u16(1)), 3),
+        0x14 => (format!("TRB ${:02X}", get_u8(1)), 2),
+        0x1C => (format!("TRB ${:04X}", get_u16(1)), 3),
 
         // Branches
-        0x10 => ("BPL $%02X".to_string(), 2),
-        0x30 => ("BMI $%02X".to_string(), 2),
-        0x50 => ("BVC $%02X".to_string(), 2),
-        0x70 => ("BVS $%02X".to_string(), 2),
-        0x80 => ("BRA $%02X".to_string(), 2),
-        0x82 => ("BRL $%04X".to_string(), 3),
-        0x90 => ("BCC $%02X".to_string(), 2),
-        0xB0 => ("BCS $%02X".to_string(), 2),
-        0xD0 => ("BNE $%02X".to_string(), 2),
-        0xF0 => ("BEQ $%02X".to_string(), 2),
+        0x10 => (format!("BPL ${:02X}", get_u8(1)), 2),
+        0x30 => (format!("BMI ${:02X}", get_u8(1)), 2),
+        0x50 => (format!("BVC ${:02X}", get_u8(1)), 2),
+        0x70 => (format!("BVS ${:02X}", get_u8(1)), 2),
+        0x80 => (format!("BRA ${:02X}", get_u8(1)), 2),
+        0x82 => (format!("BRL ${:04X}", get_u16(1)), 3),
+        0x90 => (format!("BCC ${:02X}", get_u8(1)), 2),
+        0xB0 => (format!("BCS ${:02X}", get_u8(1)), 2),
+        0xD0 => (format!("BNE ${:02X}", get_u8(1)), 2),
+        0xF0 => (format!("BEQ ${:02X}", get_u8(1)), 2),
 
         // Jumps and calls
-        0x4C => ("JMP $%04X".to_string(), 3),
-        0x5C => ("JML $%06X".to_string(), 4),
-        0x6C => ("JMP ($%04X)".to_string(), 3),
-        0x7C => ("JMP ($%04X,X)".to_string(), 3),
-        0xDC => ("JML [$%04X]".to_string(), 3),
-        0x20 => ("JSR $%04X".to_string(), 3),
-        0x22 => ("JSL $%06X".to_string(), 4),
-        0xFC => ("JSR ($%04X,X)".to_string(), 3),
+        0x4C => (format!("JMP ${:04X}", get_u16(1)), 3),
+        0x5C => (format!("JML ${:06X}", get_u24(1)), 4),
+        0x6C => (format!("JMP (${:04X})", get_u16(1)), 3),
+        0x7C => (format!("JMP (${:04X},X)", get_u16(1)), 3),
+        0xDC => (format!("JML [${:04X}]", get_u16(1)), 3),
+        0x20 => (format!("JSR ${:04X}", get_u16(1)), 3),
+        0x22 => (format!("JSL ${:06X}", get_u24(1)), 4),
+        0xFC => (format!("JSR (${:04X},X)", get_u16(1)), 3),
 
         // Block moves
-        0x44 => ("MVP $%02X,$%02X".to_string(), 3),
-        0x54 => ("MVN $%02X,$%02X".to_string(), 3),
+        0x44 => (format!("MVP ${:02X},${:02X}", get_u8(2), get_u8(1)), 3),
+        0x54 => (format!("MVN ${:02X},${:02X}", get_u8(2), get_u8(1)), 3),
 
         // PEI, PER, PEA
-        0xD4 => ("PEI ($%02X)".to_string(), 2),
-        0x62 => ("PER $%04X".to_string(), 3),
-        0xF4 => ("PEA $%04X".to_string(), 3),
+        0xD4 => (format!("PEI (${:02X})", get_u8(1)), 2),
+        0x62 => (format!("PER ${:04X}", get_u16(1)), 3),
+        0xF4 => (format!("PEA ${:04X}", get_u16(1)), 3),
 
         // INC, DEC absolute
-        0xE6 => ("INC $%02X".to_string(), 2),
-        0xF6 => ("INC $%02X,X".to_string(), 2),
-        0xEE => ("INC $%04X".to_string(), 3),
-        0xFE => ("INC $%04X,X".to_string(), 3),
-        0xC6 => ("DEC $%02X".to_string(), 2),
-        0xD6 => ("DEC $%02X,X".to_string(), 2),
-        0xCE => ("DEC $%04X".to_string(), 3),
-        0xDE => ("DEC $%04X,X".to_string(), 3),
+        0xE6 => (format!("INC ${:02X}", get_u8(1)), 2),
+        0xF6 => (format!("INC ${:02X},X", get_u8(1)), 2),
+        0xEE => (format!("INC ${:04X}", get_u16(1)), 3),
+        0xFE => (format!("INC ${:04X},X", get_u16(1)), 3),
+        0xC6 => (format!("DEC ${:02X}", get_u8(1)), 2),
+        0xD6 => (format!("DEC ${:02X},X", get_u8(1)), 2),
+        0xCE => (format!("DEC ${:04X}", get_u16(1)), 3),
+        0xDE => (format!("DEC ${:04X},X", get_u16(1)), 3),
 
         _ => (format!("??? ${:02X}", opcode), 1),
     }
@@ -326,7 +342,7 @@ mod tests {
     fn test_disassemble_lda_immediate() {
         let memory = [0xA9, 0x42];
         let instr = disassemble_65c816(&memory, 0x8000).unwrap();
-        assert_eq!(instr.mnemonic, "LDA #$%02X");
+        assert_eq!(instr.mnemonic, "LDA #$42");
         assert_eq!(instr.len(), 2);
     }
 
@@ -334,7 +350,7 @@ mod tests {
     fn test_disassemble_jmp_absolute() {
         let memory = [0x4C, 0x00, 0x80];
         let instr = disassemble_65c816(&memory, 0x8000).unwrap();
-        assert_eq!(instr.mnemonic, "JMP $%04X");
+        assert_eq!(instr.mnemonic, "JMP $8000");
         assert_eq!(instr.len(), 3);
     }
 
@@ -342,7 +358,7 @@ mod tests {
     fn test_disassemble_rep() {
         let memory = [0xC2, 0x30];
         let instr = disassemble_65c816(&memory, 0x8000).unwrap();
-        assert_eq!(instr.mnemonic, "REP #$%02X");
+        assert_eq!(instr.mnemonic, "REP #$30");
         assert_eq!(instr.len(), 2);
     }
 
@@ -350,7 +366,7 @@ mod tests {
     fn test_disassemble_jsl() {
         let memory = [0x22, 0x00, 0x80, 0x00];
         let instr = disassemble_65c816(&memory, 0x8000).unwrap();
-        assert_eq!(instr.mnemonic, "JSL $%06X");
+        assert_eq!(instr.mnemonic, "JSL $008000");
         assert_eq!(instr.len(), 4);
     }
 
