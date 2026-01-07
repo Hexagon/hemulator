@@ -1,5 +1,7 @@
 ---
 title: "System Documentation"
+description: "Complete overview of all emulated systems in Hemulator - NES, Game Boy, SNES, N64, Atari 2600, SMS, CHIP-8, and PC/DOS with implementation details and status."
+keywords: "NES emulator, Game Boy emulator, SNES emulator, N64 emulator, Atari 2600, retro gaming systems"
 nav_order: 2
 ---
 

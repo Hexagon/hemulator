@@ -1,5 +1,7 @@
 ---
 title: "Architecture Overview"
+description: "High-level architecture overview of Hemulator's modular emulation system - CPU implementations, audio components, graphics utilities, and system designs."
+keywords: "hemulator architecture, emulator design, CPU implementation, modular architecture, system design"
 nav_order: 1
 ---
 

@@ -1,8 +1,27 @@
 ---
 title: "Contributing"
+description: "Contributing guide for Hemulator - Learn how to contribute code, report bugs, and help improve this multi-system emulator project."
+keywords: "hemulator contributing, open source contribution, emulator development, pull requests, code review"
 nav_order: 2
 ---
 # Contributing to Hemulator
+
+**Hemulator is a free and open source community project** - built by volunteers who are passionate about retro gaming and emulation. We deeply value and appreciate every contribution, whether it's your first pull request or your hundredth.
+
+## Why Your Contribution Matters
+
+**Every contribution is crucial and invaluable** to Hemulator's success:
+
+- **Bug Reports**: Help us identify issues we might have missed
+- **Feature Requests**: Guide our development roadmap
+- **Code Contributions**: Add new features, fix bugs, improve performance
+- **Documentation**: Help users understand and use Hemulator better
+- **Testing**: Ensure compatibility across different systems and games
+- **Community Support**: Help other users in discussions and issues
+
+**No contribution is too small** - fixing a typo, reporting a bug, or suggesting an improvement all make a real difference.
+
+## Getting Started
 
 Contributions are welcome! Please follow these guidelines.
 

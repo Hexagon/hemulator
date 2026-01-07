@@ -1,5 +1,7 @@
 ---
 title: "User Manual"
+description: "Hemulator user manual - Getting started guide, controls, features, and system-specific information for NES, Game Boy, SNES, N64, and more."
+keywords: "hemulator manual, emulator guide, how to use hemulator, controls, save states, settings"
 nav_order: 1
 ---
 # Hemulator User Manual
