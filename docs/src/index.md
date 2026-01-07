@@ -47,31 +47,12 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 ## Features
 
-- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS
+- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS - [See all systems](systems/)
 - 💾 **Save States**: 5 slots per game with instant save/load
 - ⚙️ **Persistent Settings**: Customizable controls and window scaling
 - 🖥️ **Cross-Platform**: Windows, Linux, and macOS support
 - 🎨 **CRT Filters**: Hardware-accelerated shader-based effects
 - 🎵 **Audio Support**: Integrated audio playback for supported systems
-
-## System Status
-
-| System | Status | CPU | Graphics | Audio | Coverage |
-|--------|--------|-----|----------|-------|----------|
-| **NES** | ✅ Fully Working | 6502 | PPU | APU | ~90% of games |
-| **Game Boy** | ✅ Fully Functional | LR35902 | PPU | APU | ~99% of games |
-| **CHIP-8** | ✅ Fully Working | VM | Multi-mode | Beep | Complete |
-| **SMS** | ✅ Functional | Z80 | VDP | PSG | Testing needed |
-| **Atari 2600** | 🚧 In Development | 6502 | TIA | TIA | Rendering WIP |
-| **PC/DOS** | ⚠️ Experimental | 8086-80386 | CGA/EGA/VGA | ❌ | Basic support |
-| **SNES** | 🚧 In Development | 65C816 | PPU | SPC700 | No audio output |
-| **N64** | 🚧 In Development | R4300i | RDP/RSP | ❌ | Limited support |
-
-**Legend:**
-- ✅ Production ready - Comprehensive features and game coverage
-- ⚠️ Functional - Core features work, missing some capabilities
-- 🚧 In Development - Partial functionality, active work
-- ❌ Not implemented
 
 ## Open Source Community Project
 

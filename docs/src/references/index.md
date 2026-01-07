@@ -3,7 +3,7 @@ title: "CPU & Hardware References"
 description: "Technical reference documentation for CPU implementations - 6502, Z80, 65C816, MIPS R4300i, 8086, and more. Includes instruction sets and hardware specs."
 keywords: "6502 reference, Z80 CPU, 65C816, MIPS R4300i, 8086, CPU documentation, instruction set"
 has_children: true
-nav_order: 4
+nav_order: 6
 ---
 
 # Technical References
