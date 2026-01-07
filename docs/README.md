@@ -1,6 +1,6 @@
 # Hemulator Documentation Site
 
-This directory contains the source files for the Hemulator documentation site, built with [Lumocs](https://lumocs.56k.guru/) and deployed to [https://hexagon.github.io/hemulator/](https://hexagon.github.io/hemulator/).
+This directory contains the source files for the Hemulator documentation site, built with [Lumocs](https://lumocs.56k.guru/) and deployed to [https://hexagon.56k.guru](https://hexagon.56k.guru).
 
 ## Structure
 

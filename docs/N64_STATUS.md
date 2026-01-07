@@ -1,10 +1,10 @@
 # N64 Status
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.github.io/hemulator/developer/n64-status.html)**
+> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.56k.guru/developer/n64-status.html)**
 
 For the current N64 emulation development status and implementation details, please visit:
 
-**https://hexagon.github.io/hemulator/developer/n64-status.html**
+**https://hexagon.56k.guru/developer/n64-status.html**
 
 ---
 

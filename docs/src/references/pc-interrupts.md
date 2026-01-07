@@ -1,5 +1,6 @@
 ---
-title: "Pc Interrupts"
+title: "PC Interrupts"
+parent: "CPU & Hardware References"
 ---
 
 # PC BIOS Interrupt Reference

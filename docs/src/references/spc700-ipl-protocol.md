@@ -1,5 +1,6 @@
 ---
-title: "Spc700 Ipl Protocol"
+title: "SPC700 IPL Protocol"
+parent: "CPU & Hardware References"
 ---
 
 # SPC700 IPL ROM Upload Protocol

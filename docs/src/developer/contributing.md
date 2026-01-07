@@ -2,6 +2,7 @@
 title: "Contributing"
 description: "Contributing guide for Hemulator - Learn how to contribute code, report bugs, and help improve this multi-system emulator project."
 keywords: "hemulator contributing, open source contribution, emulator development, pull requests, code review"
+parent: "Developer"
 nav_order: 2
 ---
 # Contributing to Hemulator
