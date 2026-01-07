@@ -630,7 +630,7 @@ impl SmsMemory {
 ### 2. Test ROM
 Create minimal test ROM in `test_roms/sms/`:
 
-```assembly
+```asm
 ; test.asm - SMS test ROM
 .org $0000
 
