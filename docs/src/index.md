@@ -1,16 +1,13 @@
 ---
-title: "Hemulator Documentation"
+title: "Introduction"
 description: "Complete documentation for Hemulator - a cross-platform multi-system console emulator written in Rust. Supports NES, Game Boy, SNES, N64, Atari 2600, SMS, CHIP-8, and PC/DOS emulation."
 keywords: "hemulator, emulator, NES, Game Boy, SNES, N64, Atari 2600, retro gaming, Rust, cross-platform, documentation"
 nav_order: 1
 ---
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/Hexagon/hemulator/master/assets/icon.png" alt="Hemulator" width="150" height="150"><br>
-A cross-platform multi-system console emulator written in Rust
+<img src="https://raw.githubusercontent.com/Hexagon/hemulator/refs/heads/main/assets/icon_256.png" alt="Hemulator" width="150" height="150">
 </p>
-
-## Welcome
 
 Hemulator is a modern, modular emulator supporting multiple classic gaming systems including NES, Game Boy, Atari 2600, SNES, N64, Sega Master System, CHIP-8, and PC/DOS.
 

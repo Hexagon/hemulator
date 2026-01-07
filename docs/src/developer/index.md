@@ -1,10 +1,10 @@
 ---
-title: "Developer"
+title: "Developer Manual"
 has_children: true
 nav_order: 5
 ---
 
-# Developer Documentation
+# Developer Manual
 
 ---
 

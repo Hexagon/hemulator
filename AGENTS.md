@@ -4,7 +4,7 @@
 
 **Related Documentation**:
 - **[README.md](README.md)**: Developer quick start, build instructions, project overview
-- **[Documentation Site](https://hexagon.56k.guru)**: Complete documentation hosted via GitHub Pages
+- **[Documentation Site](https://hemulator.56k.guru)**: Complete documentation hosted via GitHub Pages
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
 - **[MANUAL.md](docs/MANUAL.md)**: End-user manual with controls, features, and system-specific information
 - **[CONTRIBUTING.md](docs/CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
@@ -25,7 +25,7 @@
 
 ### Documentation Structure
 
-The project uses a **Lumocs-based documentation site** hosted at https://hexagon.56k.guru
+The project uses a **Lumocs-based documentation site** hosted at https://hemulator.56k.guru
 
 **Documentation Organization**:
 - **User Documentation**: `docs/src/user/` - End-user guides and manuals
