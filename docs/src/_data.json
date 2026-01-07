@@ -1,0 +1,9 @@
+{
+  "metas": {
+    "title": "=title",
+    "site": "Hemulator",
+    "lang": "en",
+    "description": "Multi-System Console Emulator",
+    "icon": "https://github.com/Hexagon/hemulator/blob/main/assets/icon_256.png?raw=true"
+  }
+}

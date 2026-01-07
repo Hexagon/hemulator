@@ -1,6 +1,7 @@
 ---
 title: "N64 Status"
-nav_order: 4
+parent: "Developer"
+nav_order: 3
 ---
 # N64 Emulator Development Status
 

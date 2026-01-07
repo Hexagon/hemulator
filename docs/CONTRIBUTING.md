@@ -1,10 +1,10 @@
 # Contributing
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.github.io/hemulator/developer/contributing.html)**
+> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.56k.guru/developer/contributing.html)**
 
 For the complete contributing guide including pre-commit checks, development workflow, and coding standards, please visit:
 
-**https://hexagon.github.io/hemulator/developer/contributing.html**
+**https://hexagon.56k.guru/developer/contributing.html**
 
 ---
 

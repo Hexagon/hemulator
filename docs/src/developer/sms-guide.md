@@ -1,6 +1,7 @@
 ---
 title: "SMS Implementation Guide"
-nav_order: 6
+parent: "Developer"
+nav_order: 5
 ---
 # Sega Master System Implementation Guide
 

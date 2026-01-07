@@ -2,6 +2,7 @@
 title: "MIPS R4300i"
 description: "MIPS R4300i CPU reference - Nintendo 64 processor instruction set and implementation details."
 keywords: "MIPS R4300i, N64 CPU, Nintendo 64, MIPS processor, R4300i instruction set"
+parent: "CPU & Hardware References"
 ---
 
 # MIPS R4300i CPU Reference
