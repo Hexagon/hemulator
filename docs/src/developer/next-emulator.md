@@ -1,6 +1,6 @@
 ---
 title: "Next Emulator Recommendation"
-parent: "Developer"
+parent: "Developer Manual"
 nav_order: 4
 ---
 # Next Emulator Implementation Recommendation
