@@ -14,7 +14,7 @@ The SPC700 IPL (Initial Program Loader) ROM implements a multi-phase protocol fo
 ## Protocol Phases
 
 ### Phase 1: Initialization ($FFC0-$FFC8)
-```assembly
+```asm
 $FFC0: CD EF        MOV X, #$EF       ; Set X = $EF
 $FFC2: BD           MOV SP, X         ; Set stack pointer to $EF
 $FFC3: E8 00        MOV A, #$00       ; A = 0
@@ -29,7 +29,7 @@ $FFC7: D0 FC        BNE $FFC5         ; Loop until X = 0 (clears $00-$EF)
 - Takes ~2048 cycles
 
 ### Phase 2: Ready Signature ($FFC9-$FFCE)
-```assembly
+```asm
 $FFC9: 8F AA F4     MOV $F4, #$AA     ; Write $AA to port $F4
 $FFCC: 8F BB F5     MOV $F5, #$BB     ; Write $BB to port $F5
 ```
@@ -39,7 +39,7 @@ $FFCC: 8F BB F5     MOV $F5, #$BB     ; Write $BB to port $F5
 - Signals to main CPU: "SPC700 ready for commands"
 
 ### Phase 3: Command Wait ($FFCF-$FFD2)
-```assembly
+```asm
 $FFCF: 78 CC F4     CMP $F4, #$CC     ; Wait for $CC in port $F4
 $FFD2: D0 FB        BNE $FFCF         ; Loop until $CC received
 ```
@@ -49,7 +49,7 @@ $FFD2: D0 FB        BNE $FFCF         ; Loop until $CC received
 - This signals: "Main CPU ready to upload code"
 
 ### Phase 4: Branch to Entry Point Setup ($FFD4)
-```assembly
+```asm
 $FFD4: 2F 19        BRA $FFEF         ; Branch to $FFEF (entry point setup)
 ```
 
@@ -63,7 +63,7 @@ It's not reached via the normal flow from $FFC0, but can be entered by:
 - Jumping directly to $FFD6 after initial setup
 - Branching back from $FFE9/$FFED during multi-block uploads
 
-```assembly
+```asm
 ; Wait for non-zero index in Y
 $FFD6: EB F4        MOV Y, $F4        ; Y = port $F4 (index)
 $FFD8: D0 FC        BNE $FFD6         ; Loop while Y = 0
@@ -97,7 +97,7 @@ $FFED: 10 EB        BPL $FFDA         ; Continue if positive
 4. **Block termination**: When high byte bit 7 is set, fall through to $FFEF
 
 ### Phase 6: Entry Point Setup and Execution ($FFEF-$FFFF)
-```assembly
+```asm
 $FFEF: BA F6        MOVW YA, $F6      ; Read 16-bit entry point from ports $F6/$F7
 $FFF1: DA 00        MOVW $00, YA      ; Store entry point at $0000-$0001
 $FFF3: BA F4        MOVW YA, $F4      ; Read 16-bit mode value from ports $F4/$F5

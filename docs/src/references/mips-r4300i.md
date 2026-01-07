@@ -281,7 +281,7 @@ The R4300i has a 5-stage pipeline:
 
 MIPS has a branch delay slot - the instruction after a branch/jump always executes before the branch is taken:
 
-```assembly
+```asm
 BEQ r1, r2, target
 ADD r3, r4, r5      # Always executes (delay slot)
 target:
