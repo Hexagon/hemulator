@@ -1518,6 +1518,14 @@ For system requirements, see the [Download & Install](../download.html#system-re
 
 This emulator is for educational purposes. Users must provide their own legally obtained ROM files. The project does not include or distribute any copyrighted game data.
 
+## Support the Project
+
+Hemulator is **free and open source software**, maintained by volunteers. If you find it useful, consider supporting the developers:
+
+**[💝 Sponsor @Hexagon on GitHub](https://github.com/sponsors/Hexagon)**
+
+Your support helps sustain development and brings new features and improvements to Hemulator. Thank you!
+
 ## Getting Help
 
 If you encounter issues:

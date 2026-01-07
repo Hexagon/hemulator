@@ -69,6 +69,13 @@ Every contribution, no matter how small, helps make Hemulator better:
 
 **We deeply value every contribution and contributor** - from first-time contributors to long-time maintainers. If you're interested in contributing, see our [Contributing Guide](developer/contributing.md).
 
+**💝 Support the Project**
+
+If you find Hemulator useful and want to support its development, consider sponsoring the maintainers:
+- **[Sponsor @Hexagon on GitHub](https://github.com/sponsors/Hexagon)** - Your support helps sustain development and maintenance
+
+All donations go directly to supporting the developers who volunteer their time to make Hemulator better.
+
 ## Development Resources
 
 Hemulator's development relies on excellent documentation and resources from the emulation community:

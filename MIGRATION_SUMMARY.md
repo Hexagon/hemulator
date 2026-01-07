@@ -59,7 +59,7 @@ Key documentation files are maintained in the repository root:
 
 Created `.github/workflows/pages.yml` to automatically build and deploy the documentation site when changes are pushed to `master` or `main` branch.
 
-**Site URL**: https://hexagon.github.io/hemulator/
+**Site URL**: https://hexagon.56k.guru
 
 ### Updated Files
 
@@ -266,5 +266,5 @@ This migration transforms Hemulator's documentation from a collection of markdow
 ---
 
 **Migration Date**: January 6, 2026  
-**Site URL**: https://hexagon.github.io/hemulator/  
+**Site URL**: https://hexagon.56k.guru  
 **Repository**: https://github.com/Hexagon/hemulator
