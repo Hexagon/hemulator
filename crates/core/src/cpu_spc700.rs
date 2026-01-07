@@ -103,7 +103,7 @@ impl<M: MemorySpc700> CpuSpc700<M> {
         let opcode = self.fetch_byte();
 
         // Log execution from uploaded code regions (typically $0100-$0FFF)
-        if pc_before >= 0x0100 && pc_before < 0x1000 {
+        if (0x0100..0x1000).contains(&pc_before) {
             log(LogCategory::APU, LogLevel::Info, || {
                 format!("SPC700: Executing uploaded code at PC=${:04X} opcode=${:02X} A=${:02X} X=${:02X} Y=${:02X}", 
                     pc_before, opcode, self.a, self.x, self.y)

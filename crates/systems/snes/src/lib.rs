@@ -186,7 +186,7 @@ impl System for SnesSystem {
         self.cpu.reset();
         self.current_cycles = 0;
         self.total_cycles = 0;
-        
+
         // Pre-run the SPC700 APU to let it complete its boot sequence
         // The IPL ROM clears RAM and writes $AA/$BB signature (takes ~5000 cycles)
         // This ensures the ready signature is available when main CPU starts

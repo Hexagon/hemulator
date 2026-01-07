@@ -497,7 +497,7 @@ impl Memory65c816 for SnesBus {
                         } else {
                             self.apu_ports[port as usize]
                         };
-                        
+
                         log(LogCategory::Bus, LogLevel::Debug, || {
                             format!(
                                 "SNES Bus: Main CPU reads APU port ${:04X} = ${:02X}",
