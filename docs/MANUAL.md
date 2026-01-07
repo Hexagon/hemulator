@@ -1,10 +1,10 @@
 # User Manual
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.56k.guru/user/manual.html)**
+> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hemulator.56k.guru/user/)**
 
 For the complete user manual with controls, features, and system-specific information, please visit:
 
-**https://hexagon.56k.guru/user/manual.html**
+**https://hemulator.56k.guru/user/**
 
 ---
 

@@ -1,10 +1,10 @@
 # Next Emulator Recommendation
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.56k.guru/developer/next-emulator.html)**
+> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hemulator.56k.guru/developer/next-emulator.html)**
 
 For the analysis and recommendation of which emulator system to implement next, please visit:
 
-**https://hexagon.56k.guru/developer/next-emulator.html**
+**https://hemulator.56k.guru/developer/next-emulator.html**
 
 ---
 

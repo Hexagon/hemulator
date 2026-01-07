@@ -6,7 +6,7 @@ For the complete architecture documentation including system design patterns and
 
 **[ARCHITECTURE.md](../ARCHITECTURE.md)** in the repository root
 
-For a quick overview, see the [Architecture Overview](https://hexagon.56k.guru/developer/architecture.html) on the documentation site.
+For a quick overview, see the [Architecture Overview](https://hemulator.56k.guru/developer/architecture.html) on the documentation site.
 
 ---
 

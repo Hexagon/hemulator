@@ -1,10 +1,10 @@
 # SMS Implementation Guide
 
-> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hexagon.56k.guru/developer/sms-guide.html)**
+> **📚 This documentation has moved to the [Hemulator Documentation Site](https://hemulator.56k.guru/developer/sms-guide.html)**
 
 For the complete Sega Master System implementation guide with practical steps and specifications, please visit:
 
-**https://hexagon.56k.guru/developer/sms-guide.html**
+**https://hemulator.56k.guru/developer/sms-guide.html**
 
 ---
 

@@ -3,7 +3,7 @@ import lumocs from "lumocs/mod.ts";
 
 const site = lume({
   src: "src",
-  location: new URL("https://hexagon.56k.guru"),
+  location: new URL("https://hemulator.56k.guru"),
 });
 
 site.use(lumocs());

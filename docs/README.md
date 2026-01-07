@@ -1,6 +1,6 @@
 # Hemulator Documentation Site
 
-This directory contains the source files for the Hemulator documentation site, built with [Lumocs](https://lumocs.56k.guru/) and deployed to [https://hexagon.56k.guru](https://hexagon.56k.guru).
+This directory contains the source files for the Hemulator documentation site, built with [Lumocs](https://lumocs.56k.guru/) and deployed to [https://hemulator.56k.guru](https://hemulator.56k.guru).
 
 ## Structure
 
@@ -9,7 +9,15 @@ docs/
 ├── src/                    # Documentation source files
 │   ├── index.md           # Site homepage
 │   ├── user/              # User documentation
-│   │   └── manual.md      # Complete user manual
+│   │   ├── index.md       # User manual index
+│   │   ├── getting-started.md  # Getting started guide
+│   │   ├── controls.md         # Controls and input
+│   │   ├── configuration.md    # Configuration and settings
+│   │   ├── save-states.md      # Save state management
+│   │   ├── systems.md          # Supported systems
+│   │   ├── advanced.md         # Advanced features
+│   │   ├── troubleshooting.md  # Troubleshooting
+│   │   └── additional.md       # Additional information
 │   ├── developer/         # Developer documentation
 │   │   ├── architecture.md   # Architecture overview (refers to root ARCHITECTURE.md)
 │   │   ├── contributing.md   # Contributing guide

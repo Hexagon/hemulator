@@ -26,7 +26,7 @@ nav_order: 2
 
 Contributions are welcome! Please follow these guidelines.
 
-**For Users**: See [User Manual](../user/manual.md) for usage instructions.
+**For Users**: See [User Manual](../user/) for usage instructions.
 
 **For Architecture Details**: See [Architecture Overview](architecture.md) for high-level architecture, or [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in the repository for complete details.
 
