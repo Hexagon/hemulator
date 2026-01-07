@@ -1,0 +1,118 @@
+---
+title: "Hemulator Documentation"
+description: "Complete documentation for Hemulator - a cross-platform multi-system console emulator written in Rust. Supports NES, Game Boy, SNES, N64, Atari 2600, SMS, CHIP-8, and PC/DOS emulation."
+keywords: "hemulator, emulator, NES, Game Boy, SNES, N64, Atari 2600, retro gaming, Rust, cross-platform, documentation"
+nav_order: 1
+---
+
+<p align="center">
+<img src="https://raw.githubusercontent.com/Hexagon/hemulator/master/assets/icon.png" alt="Hemulator" width="150" height="150"><br>
+A cross-platform multi-system console emulator written in Rust
+</p>
+
+## Welcome
+
+Hemulator is a modern, modular emulator supporting multiple classic gaming systems including NES, Game Boy, Atari 2600, SNES, N64, Sega Master System, CHIP-8, and PC/DOS.
+
+## Documentation Sections
+
+### For Users
+
+- **[User Manual](user/manual.md)** - Getting started, controls, features, and system-specific information
+- **[System Guides](systems/)** - Detailed information about each emulated system
+
+**Get Help & Contribute**:
+- **[🐛 Report a Bug](https://github.com/Hexagon/hemulator/issues/new?template=bug_report.yml)** - Found a problem? Let us know!
+- **[🚀 Request a Feature](https://github.com/Hexagon/hemulator/issues/new?template=feature_request.yml)** - Have an idea for a new feature?
+- **[💬 Discussions](https://github.com/Hexagon/hemulator/discussions)** - Ask questions and share ideas
+
+### For Developers
+
+- **[Architecture Overview](developer/architecture.md)** - High-level system architecture and design patterns
+  - Full details: [ARCHITECTURE.md](https://github.com/Hexagon/hemulator/blob/master/ARCHITECTURE.md) in repository
+- **[Contributing](developer/contributing.md)** - Development workflow and contribution guidelines
+- **[CPU References](references/)** - Technical reference documentation for CPU implementations
+
+**Development Support**:
+- **[🔧 Technical Issue](https://github.com/Hexagon/hemulator/issues/new?template=developer_issue.yml)** - Report build issues, implementation problems, or ask technical questions
+
+## Quick Links
+
+- [GitHub Repository](https://github.com/Hexagon/hemulator)
+- [Latest Releases](https://github.com/Hexagon/hemulator/releases)
+- [Issue Tracker](https://github.com/Hexagon/hemulator/issues)
+
+## Features
+
+- 🎮 **Multiple Systems**: NES, Game Boy, Atari 2600, SNES, N64, SMS, CHIP-8, PC/DOS
+- 💾 **Save States**: 5 slots per game with instant save/load
+- ⚙️ **Persistent Settings**: Customizable controls and window scaling
+- 🖥️ **Cross-Platform**: Windows, Linux, and macOS support
+- 🎨 **CRT Filters**: Hardware-accelerated shader-based effects
+- 🎵 **Audio Support**: Integrated audio playback for supported systems
+
+## System Status
+
+| System | Status | CPU | Graphics | Audio | Coverage |
+|--------|--------|-----|----------|-------|----------|
+| **NES** | ✅ Fully Working | 6502 | PPU | APU | ~90% of games |
+| **Game Boy** | ✅ Fully Functional | LR35902 | PPU | APU | ~99% of games |
+| **CHIP-8** | ✅ Fully Working | VM | Multi-mode | Beep | Complete |
+| **SMS** | ✅ Functional | Z80 | VDP | PSG | Testing needed |
+| **Atari 2600** | 🚧 In Development | 6502 | TIA | TIA | Rendering WIP |
+| **PC/DOS** | ⚠️ Experimental | 8086-80386 | CGA/EGA/VGA | ❌ | Basic support |
+| **SNES** | 🚧 In Development | 65C816 | PPU | SPC700 | No audio output |
+| **N64** | 🚧 In Development | R4300i | RDP/RSP | ❌ | Limited support |
+
+**Legend:**
+- ✅ Production ready - Comprehensive features and game coverage
+- ⚠️ Functional - Core features work, missing some capabilities
+- 🚧 In Development - Partial functionality, active work
+- ❌ Not implemented
+
+## Open Source Community Project
+
+Hemulator is a **free and open source** community effort founded and maintained by GitHub users **[@Hexagon](https://github.com/Hexagon)** and **[@Oliodh](https://github.com/Oliodh)**. This project exists thanks to the passionate developers, contributors, and retro gaming enthusiasts who volunteer their time and expertise.
+
+**🤝 Contributions are Crucial and Invaluable**
+
+Every contribution, no matter how small, helps make Hemulator better:
+- Bug reports help us identify and fix issues
+- Feature requests guide development priorities
+- Code contributions add new features and improve quality
+- Documentation improvements help users and developers
+- Testing and feedback ensure compatibility and usability
+
+**We deeply value every contribution and contributor** - from first-time contributors to long-time maintainers. If you're interested in contributing, see our [Contributing Guide](developer/contributing.md).
+
+## Development Resources
+
+Hemulator's development relies on excellent documentation and resources from the emulation community:
+
+**Technical Documentation**:
+- [NESDev Wiki](https://www.nesdev.org/) - Comprehensive NES hardware documentation
+- [Pan Docs](https://gbdev.io/pandocs/) - Game Boy technical reference
+- [SMS Power!](https://www.smspower.org/) - Sega Master System documentation
+- [SNESdev Wiki](https://snes.nesdev.org/) - SNES hardware documentation
+- [N64brew](https://n64brew.dev/) - Nintendo 64 development resources
+- [OSDev Wiki](https://wiki.osdev.org/) - PC/x86 hardware documentation
+
+**Datasheets & Specifications**:
+- CPU datasheets (6502, Z80, 65C816, MIPS, x86)
+- Video and audio chip specifications
+- Original system manuals and developer documentation
+
+**Community Resources**:
+- Emulation development forums and Discord servers
+- Test ROMs and validation suites
+- Open source emulator projects for reference
+
+We are grateful to all these communities and resources that make emulation development possible. See our [CPU & Hardware References](references/) section for detailed source attribution.
+
+## License
+
+Hemulator is open source software. See the [LICENSE](https://github.com/Hexagon/hemulator/blob/master/LICENSE) file for details.
+
+## Educational Purpose
+
+This emulator is for educational purposes. Users must provide their own legally obtained ROM files. The project does not include or distribute any copyrighted game data.

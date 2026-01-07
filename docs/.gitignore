@@ -1,0 +1,6 @@
+# Lume build output
+_site/
+
+# Deno cache
+.deno/
+deno.lock
