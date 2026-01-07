@@ -12,7 +12,20 @@ impl Debugger for SnesSystem {
     fn disassemble_instruction(&self, address: u32) -> Option<DisassembledInstruction> {
         // Read up to 4 bytes for the instruction (max 65C816 instruction size)
         let memory = self.read_memory(address, 4)?;
-        disasm_65c816::disassemble_65c816(&memory, address)
+
+        // Get current CPU flags for accurate disassembly
+        let cpu = &self.cpu.cpu;
+        let m_flag = (cpu.status & 0x20) != 0; // Memory/Accumulator size: 1=8-bit
+        let x_flag = (cpu.status & 0x10) != 0; // Index register size: 1=8-bit
+
+        // In emulation mode, M and X are always 1 (8-bit)
+        let (m_flag, x_flag) = if cpu.emulation {
+            (true, true)
+        } else {
+            (m_flag, x_flag)
+        };
+
+        disasm_65c816::disassemble_65c816_with_flags(&memory, address, m_flag, x_flag)
     }
 
     fn read_memory(&self, address: u32, length: usize) -> Option<Vec<u8>> {

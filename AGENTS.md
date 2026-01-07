@@ -344,7 +344,20 @@ The generated dump file includes:
 
 ### Instruction Tracing
 
-The emulator now supports instruction tracing to avoid repeatedly restarting during debugging:
+The emulator supports instruction tracing to record executed instructions with full CPU state. This is essential for debugging complex issues where you need to see what code actually ran, not just static disassembly.
+
+**When to use instruction tracing:**
+- Debugging CPU execution flow issues (e.g., wrong branches, infinite loops)
+- Investigating why code doesn't reach a certain point
+- Analyzing register/flag states during execution
+- Understanding mode changes (e.g., 65C816 M/X flags after REP/SEP)
+- Comparing actual execution against expected behavior
+
+**Why tracing is better than static disassembly:**
+- **Accurate CPU state**: Each traced instruction includes the actual register values and flags at execution time
+- **Mode-aware**: For CPUs with variable instruction sizes (65C816), tracing captures the correct mode for each instruction
+- **Execution order**: Shows the actual path taken through code, including branches and jumps
+- **No ambiguity**: Static disassembly can't know if `REP #$30` was executed before `LDA #$0000`
 
 **Enable instruction tracing:**
 ```bash
@@ -366,13 +379,21 @@ hemu --trace-instructions --trace-dump-file trace.txt --breakpoint 0x8100 game.n
 hemu --trace-instructions --breakpoint 0x8000 --breakpoint 0x8100 --breakpoint 0x8200 game.nes
 ```
 
+**Combine with debug dump for comprehensive analysis:**
+```bash
+hemu --trace-instructions --debug-dump-cycles 100000 --log-cpu trace game.sfc
+```
+
 ### Instruction Trace Features
 
-- **Circular Buffer**: Keeps last N executed instructions in memory
+- **Circular Buffer**: Keeps last N executed instructions in memory (oldest discarded when full)
+- **Full CPU State**: Each trace entry includes all registers, flags, and the disassembled instruction
 - **Breakpoints**: Set execution breakpoints at specific addresses
-- **Automatic Dump**: Dumps trace when breakpoint is hit (when CPU integration is complete)
+- **Automatic Dump**: Dumps trace when breakpoint is hit
 - **Minimal Overhead**: Tracing is disabled by default for performance
-- **Cross-System**: Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64. PC requires Debugger trait implementation.
+- **Cross-System**: Fully functional for NES, Game Boy, Atari 2600, SMS, SNES, CHIP-8, and N64
+
+**Agent tip**: When debugging why code "isn't working", enable tracing first. The trace shows exactly what executed, making it easy to spot where execution diverged from expectations.
 
 ### Trace Output Format
 

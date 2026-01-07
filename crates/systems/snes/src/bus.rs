@@ -113,13 +113,6 @@ pub struct SnesBus {
     apu_session_id: u8,
     /// Optional real SPC700 APU (if None, uses stub)
     spc700: Option<Spc700>,
-    /// APU port read latch (for atomic 16-bit reads)
-    /// Uses Cell for interior mutability since read() takes &self
-    apu_port_latch: [Cell<u8>; 4],
-    /// Whether the APU port latch is active
-    apu_port_latch_active: Cell<bool>,
-    /// Cycle counter to clear latch after a short time
-    apu_port_latch_cycle: Cell<u32>,
 }
 
 impl SnesBus {
@@ -148,9 +141,6 @@ impl SnesBus {
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
             spc700: Some(Spc700::new()), // Enable real SPC700 APU by default
-            apu_port_latch: [Cell::new(0), Cell::new(0), Cell::new(0), Cell::new(0)],
-            apu_port_latch_active: Cell::new(false),
-            apu_port_latch_cycle: Cell::new(0),
         }
     }
 
@@ -199,6 +189,11 @@ impl SnesBus {
         &mut self.ppu
     }
 
+    /// Get mutable reference to SPC700 APU if enabled
+    pub fn spc700_mut(&mut self) -> Option<&mut Spc700> {
+        self.spc700.as_mut()
+    }
+
     pub fn tick_frame(&mut self) {
         self.frame_counter += 1;
         self.frame_cycle = 0; // Reset cycle counter at frame start
@@ -207,27 +202,6 @@ impl SnesBus {
     /// Update cycle counter within frame (called after each CPU step)
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
-
-        // Clear APU port latch after the instruction completes
-        // The latch ensures atomic 16-bit reads across ports $2140-$2141
-        // We clear it after the instruction finishes (when tick_cycles is called)
-        // Using a minimum threshold of 2 cycles to ensure multi-byte reads complete
-        if self.apu_port_latch_active.get() {
-            let latch_age = self
-                .frame_cycle
-                .wrapping_sub(self.apu_port_latch_cycle.get());
-            // Clear if latch has been active for at least the current instruction's cycles
-            // AND at least 2 cycles to ensure 16-bit reads (2 sequential 8-bit reads) complete
-            if latch_age >= cycles.max(2) {
-                self.apu_port_latch_active.set(false);
-                log(LogCategory::Bus, LogLevel::Debug, || {
-                    format!(
-                        "SNES Bus: APU port latch cleared at cycle {} (age: {} cycles)",
-                        self.frame_cycle, latch_age
-                    )
-                });
-            }
-        }
 
         // Run SPC700 for the same number of cycles
         if let Some(ref mut spc700) = self.spc700 {
@@ -512,47 +486,22 @@ impl Memory65c816 for SnesBus {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize],
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
+                    // Main CPU reads what SPC700 has written (apu_out ports)
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
 
-                        // Implement port read latching for atomic 16-bit reads
-                        // On first APU port read (when latch inactive), capture all port values
-                        // This prevents the SPC700 from updating ports mid-read
-                        if !self.apu_port_latch_active.get() {
-                            // Latch all 4 ports atomically
-                            if let Some(ref spc700) = self.spc700 {
-                                for i in 0..4u8 {
-                                    self.apu_port_latch[i as usize].set(spc700.read_port(i));
-                                }
-                            } else {
-                                for i in 0..4usize {
-                                    self.apu_port_latch[i].set(self.apu_ports[i]);
-                                }
-                            }
-                            self.apu_port_latch_active.set(true);
-                            self.apu_port_latch_cycle.set(self.frame_cycle);
-
-                            log(LogCategory::Bus, LogLevel::Debug, || {
-                                format!(
-                                    "SNES Bus: APU port latch activated at cycle {}, ports = ${:02X} ${:02X} ${:02X} ${:02X}",
-                                    self.frame_cycle,
-                                    self.apu_port_latch[0].get(),
-                                    self.apu_port_latch[1].get(),
-                                    self.apu_port_latch[2].get(),
-                                    self.apu_port_latch[3].get()
-                                )
-                            });
-                        }
-
-                        // Return latched value
-                        let val = self.apu_port_latch[port as usize].get();
-                        log(LogCategory::Bus, LogLevel::Trace, || {
+                        // Simply read the current port value - no latching needed
+                        // Real SNES hardware has no latching for APU port reads
+                        let val = if let Some(ref spc700) = self.spc700 {
+                            spc700.read_port(port)
+                        } else {
+                            self.apu_ports[port as usize]
+                        };
+                        
+                        log(LogCategory::Bus, LogLevel::Debug, || {
                             format!(
-                                "SNES Bus: Read APU port ${:04X} (APUIO{}) = ${:02X} (latched={})",
-                                offset,
-                                port,
-                                val,
-                                self.apu_port_latch_active.get()
+                                "SNES Bus: Main CPU reads APU port ${:04X} = ${:02X}",
+                                offset, val
                             )
                         });
                         val

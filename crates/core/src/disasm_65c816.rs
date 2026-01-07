@@ -2,30 +2,90 @@
 //!
 //! Provides disassembly for the WDC 65C816 CPU used in SNES.
 //! The 65C816 is a 16-bit extension of the 6502 with additional addressing modes
-//! and instructions. This implementation assumes native mode (not emulation mode).
+//! and instructions.
 
 use crate::debug::DisassembledInstruction;
 
-/// Disassemble a single 65C816 instruction from memory
+/// Disassemble a single 65C816 instruction from memory (legacy version assuming 8-bit mode)
 ///
-/// Note: This implementation assumes native mode. The 65C816 has mode-dependent
-/// instruction sizes (M and X flags affect immediate operand width), but for
-/// debugging purposes we assume 8-bit mode which matches most SNES usage.
+/// Note: This implementation assumes 8-bit mode for M and X flags.
+/// For accurate disassembly, use `disassemble_65c816_with_flags` instead.
 pub fn disassemble_65c816(memory: &[u8], address: u32) -> Option<DisassembledInstruction> {
+    // Default to 8-bit mode (m=1, x=1)
+    disassemble_65c816_with_flags(memory, address, true, true)
+}
+
+/// Disassemble a single 65C816 instruction from memory with CPU flags
+///
+/// # Arguments
+/// * `memory` - Memory slice starting at the instruction
+/// * `address` - Address of the instruction for display
+/// * `m_flag` - Memory/Accumulator size flag (true = 8-bit, false = 16-bit)
+/// * `x_flag` - Index register size flag (true = 8-bit, false = 16-bit)
+///
+/// # Returns
+/// A tuple of (DisassembledInstruction, new_m_flag, new_x_flag) to track mode changes
+pub fn disassemble_65c816_with_flags(
+    memory: &[u8],
+    address: u32,
+    m_flag: bool,
+    x_flag: bool,
+) -> Option<DisassembledInstruction> {
+    disassemble_65c816_tracking_flags(memory, address, m_flag, x_flag).map(|(instr, _, _)| instr)
+}
+
+/// Disassemble a single 65C816 instruction and return updated flags
+///
+/// This version returns the new M and X flag values after the instruction,
+/// which is useful for disassembling a range of instructions that may contain
+/// REP/SEP instructions that change the processor mode.
+pub fn disassemble_65c816_tracking_flags(
+    memory: &[u8],
+    address: u32,
+    m_flag: bool,
+    x_flag: bool,
+) -> Option<(DisassembledInstruction, bool, bool)> {
     if memory.is_empty() {
         return None;
     }
 
     let opcode = memory[0];
 
-    // Decode instruction based on opcode
-    let (mnemonic, len) = decode_instruction(opcode, memory);
+    // Check for REP/SEP instructions that change flags
+    let (new_m_flag, new_x_flag) = match opcode {
+        0xC2 => {
+            // REP - Reset Processor status bits
+            let operand = memory.get(1).copied().unwrap_or(0);
+            let new_m = if operand & 0x20 != 0 { false } else { m_flag }; // Clear M if bit 5 set
+            let new_x = if operand & 0x10 != 0 { false } else { x_flag }; // Clear X if bit 4 set
+            (new_m, new_x)
+        }
+        0xE2 => {
+            // SEP - Set Processor status bits
+            let operand = memory.get(1).copied().unwrap_or(0);
+            let new_m = if operand & 0x20 != 0 { true } else { m_flag }; // Set M if bit 5 set
+            let new_x = if operand & 0x10 != 0 { true } else { x_flag }; // Set X if bit 4 set
+            (new_m, new_x)
+        }
+        0xFB => {
+            // XCE - Exchange Carry and Emulation flags
+            // After XCE, if entering emulation mode, M and X become 1
+            // We can't know the carry flag, so assume no change for now
+            (m_flag, x_flag)
+        }
+        _ => (m_flag, x_flag),
+    };
+
+    // Decode instruction based on opcode and flags
+    let (mnemonic, len) = decode_instruction(opcode, memory, m_flag, x_flag);
 
     let bytes: Vec<u8> = memory.iter().take(len).copied().collect();
-    Some(DisassembledInstruction::new(address, bytes, mnemonic))
+    let instr = DisassembledInstruction::new(address, bytes, mnemonic);
+
+    Some((instr, new_m_flag, new_x_flag))
 }
 
-fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
+fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> (String, usize) {
     // Helper to get operand bytes
     let get_u8 = |offset: usize| -> u8 { memory.get(offset).copied().unwrap_or(0) };
     let get_u16 = |offset: usize| -> u16 {
@@ -38,6 +98,24 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         let mid = get_u8(offset + 1) as u32;
         let hi = get_u8(offset + 2) as u32;
         (hi << 16) | (mid << 8) | lo
+    };
+
+    // Helper for M-flag dependent immediate operands (LDA, ORA, AND, EOR, ADC, SBC, CMP, BIT)
+    let imm_m = |mnemonic: &str| -> (String, usize) {
+        if m_flag {
+            (format!("{} #${:02X}", mnemonic, get_u8(1)), 2)
+        } else {
+            (format!("{} #${:04X}", mnemonic, get_u16(1)), 3)
+        }
+    };
+
+    // Helper for X-flag dependent immediate operands (LDX, LDY, CPX, CPY)
+    let imm_x = |mnemonic: &str| -> (String, usize) {
+        if x_flag {
+            (format!("{} #${:02X}", mnemonic, get_u8(1)), 2)
+        } else {
+            (format!("{} #${:04X}", mnemonic, get_u16(1)), 3)
+        }
     };
 
     match opcode {
@@ -103,7 +181,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0xFB => ("XCE".to_string(), 1),
 
         // ORA instructions
-        0x09 => (format!("ORA #${:02X}", get_u8(1)), 2),
+        0x09 => imm_m("ORA"),
         0x05 => (format!("ORA ${:02X}", get_u8(1)), 2),
         0x15 => (format!("ORA ${:02X},X", get_u8(1)), 2),
         0x0D => (format!("ORA ${:04X}", get_u16(1)), 3),
@@ -117,7 +195,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0x13 => (format!("ORA (${:02X},S),Y", get_u8(1)), 2),
 
         // AND instructions
-        0x29 => (format!("AND #${:02X}", get_u8(1)), 2),
+        0x29 => imm_m("AND"),
         0x25 => (format!("AND ${:02X}", get_u8(1)), 2),
         0x35 => (format!("AND ${:02X},X", get_u8(1)), 2),
         0x2D => (format!("AND ${:04X}", get_u16(1)), 3),
@@ -131,7 +209,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0x33 => (format!("AND (${:02X},S),Y", get_u8(1)), 2),
 
         // EOR instructions
-        0x49 => (format!("EOR #${:02X}", get_u8(1)), 2),
+        0x49 => imm_m("EOR"),
         0x45 => (format!("EOR ${:02X}", get_u8(1)), 2),
         0x55 => (format!("EOR ${:02X},X", get_u8(1)), 2),
         0x4D => (format!("EOR ${:04X}", get_u16(1)), 3),
@@ -145,7 +223,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0x53 => (format!("EOR (${:02X},S),Y", get_u8(1)), 2),
 
         // ADC instructions
-        0x69 => (format!("ADC #${:02X}", get_u8(1)), 2),
+        0x69 => imm_m("ADC"),
         0x65 => (format!("ADC ${:02X}", get_u8(1)), 2),
         0x75 => (format!("ADC ${:02X},X", get_u8(1)), 2),
         0x6D => (format!("ADC ${:04X}", get_u16(1)), 3),
@@ -159,7 +237,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0x73 => (format!("ADC (${:02X},S),Y", get_u8(1)), 2),
 
         // SBC instructions
-        0xE9 => (format!("SBC #${:02X}", get_u8(1)), 2),
+        0xE9 => imm_m("SBC"),
         0xE5 => (format!("SBC ${:02X}", get_u8(1)), 2),
         0xF5 => (format!("SBC ${:02X},X", get_u8(1)), 2),
         0xED => (format!("SBC ${:04X}", get_u16(1)), 3),
@@ -173,7 +251,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0xF3 => (format!("SBC (${:02X},S),Y", get_u8(1)), 2),
 
         // CMP instructions
-        0xC9 => (format!("CMP #${:02X}", get_u8(1)), 2),
+        0xC9 => imm_m("CMP"),
         0xC5 => (format!("CMP ${:02X}", get_u8(1)), 2),
         0xD5 => (format!("CMP ${:02X},X", get_u8(1)), 2),
         0xCD => (format!("CMP ${:04X}", get_u16(1)), 3),
@@ -187,15 +265,15 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0xD3 => (format!("CMP (${:02X},S),Y", get_u8(1)), 2),
 
         // CPX, CPY
-        0xE0 => (format!("CPX #${:02X}", get_u8(1)), 2),
+        0xE0 => imm_x("CPX"),
         0xE4 => (format!("CPX ${:02X}", get_u8(1)), 2),
         0xEC => (format!("CPX ${:04X}", get_u16(1)), 3),
-        0xC0 => (format!("CPY #${:02X}", get_u8(1)), 2),
+        0xC0 => imm_x("CPY"),
         0xC4 => (format!("CPY ${:02X}", get_u8(1)), 2),
         0xCC => (format!("CPY ${:04X}", get_u16(1)), 3),
 
         // LDA instructions
-        0xA9 => (format!("LDA #${:02X}", get_u8(1)), 2),
+        0xA9 => imm_m("LDA"),
         0xA5 => (format!("LDA ${:02X}", get_u8(1)), 2),
         0xB5 => (format!("LDA ${:02X},X", get_u8(1)), 2),
         0xAD => (format!("LDA ${:04X}", get_u16(1)), 3),
@@ -209,12 +287,12 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0xB3 => (format!("LDA (${:02X},S),Y", get_u8(1)), 2),
 
         // LDX, LDY
-        0xA2 => (format!("LDX #${:02X}", get_u8(1)), 2),
+        0xA2 => imm_x("LDX"),
         0xA6 => (format!("LDX ${:02X}", get_u8(1)), 2),
         0xB6 => (format!("LDX ${:02X},Y", get_u8(1)), 2),
         0xAE => (format!("LDX ${:04X}", get_u16(1)), 3),
         0xBE => (format!("LDX ${:04X},Y", get_u16(1)), 3),
-        0xA0 => (format!("LDY #${:02X}", get_u8(1)), 2),
+        0xA0 => imm_x("LDY"),
         0xA4 => (format!("LDY ${:02X}", get_u8(1)), 2),
         0xB4 => (format!("LDY ${:02X},X", get_u8(1)), 2),
         0xAC => (format!("LDY ${:04X}", get_u16(1)), 3),
@@ -268,7 +346,7 @@ fn decode_instruction(opcode: u8, memory: &[u8]) -> (String, usize) {
         0x7E => (format!("ROR ${:04X},X", get_u16(1)), 3),
 
         // Bit operations
-        0x89 => (format!("BIT #${:02X}", get_u8(1)), 2),
+        0x89 => imm_m("BIT"),
         0x24 => (format!("BIT ${:02X}", get_u8(1)), 2),
         0x34 => (format!("BIT ${:02X},X", get_u8(1)), 2),
         0x2C => (format!("BIT ${:04X}", get_u16(1)), 3),

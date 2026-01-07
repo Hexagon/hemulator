@@ -15,6 +15,8 @@
 //! The IPL ROM implements a boot protocol where it waits for the main CPU
 //! to upload code via the communication ports, then executes it.
 
+use std::cell::Cell;
+
 use crate::apu::{AudioChip, TimingMode};
 use crate::cpu_spc700::{CpuSpc700, MemorySpc700};
 use crate::logging::{log, LogCategory, LogLevel};
@@ -85,13 +87,12 @@ struct Spc700Memory {
     /// 64KB RAM
     ram: Box<[u8; 0x10000]>,
     /// Control register ($F1)
-    /// Bit 7: Enable timers 0 and 1
-    /// Bit 6: Enable timer 2
-    /// Bit 5: Unused
-    /// Bit 4: Clear ports $F4-$F5
-    /// Bit 3: Clear ports $F6-$F7
-    /// Bit 2-1: Unused
-    /// Bit 0: Enable IPL ROM
+    /// Bit 7: IPL ROM enable (1 = enabled, maps $FFC0-$FFFF to IPL ROM)
+    /// Bit 5: Clear ports $F6-$F7 (write-only, auto-clears)
+    /// Bit 4: Clear ports $F4-$F5 (write-only, auto-clears)
+    /// Bit 2: Timer 2 enable
+    /// Bit 1: Timer 1 enable
+    /// Bit 0: Timer 0 enable
     control: u8,
     /// Communication ports (shared with main CPU)
     /// These are written by main CPU, read by SPC700
@@ -99,10 +100,18 @@ struct Spc700Memory {
     /// Ports written by SPC700, read by main CPU
     /// (Separate from cpuio for bidirectional communication)
     apu_out: [u8; 4],
-    /// Timer divisors
+    /// Timer divisors (written to $FA-$FC)
+    /// Value 0 means 256
     timer_divisor: [u8; 3],
-    /// Timer counters (incremented by timer tick)
-    timer_counter: [u8; 3],
+    /// Timer output counters (read from $FD-$FF, 4-bit, cleared on read)
+    /// Uses Cell for interior mutability since reads clear the counter
+    timer_counter: [Cell<u8>; 3],
+    /// Timer internal prescalers (count cycles before timer tick)
+    /// Timer 0 & 1: tick every 128 cycles (8 kHz at 1.024 MHz)
+    /// Timer 2: tick every 16 cycles (64 kHz at 1.024 MHz)
+    timer_prescaler: [u16; 3],
+    /// Timer internal counters (count ticks up to divisor)
+    timer_internal: [u8; 3],
     /// DSP registers (128 bytes)
     dsp_regs: [u8; 128],
     /// DSP address register
@@ -117,9 +126,62 @@ impl Spc700Memory {
             cpuio: [0; 4],
             apu_out: [0; 4], // IPL ROM will write $AA/$BB signature
             timer_divisor: [0; 3],
-            timer_counter: [0; 3],
+            timer_counter: [Cell::new(0), Cell::new(0), Cell::new(0)],
+            timer_prescaler: [0; 3],
+            timer_internal: [0; 3],
             dsp_regs: [0; 128],
             dsp_addr: 0,
+        }
+    }
+
+    /// Update timers based on cycles elapsed
+    /// Called from run_cycles for each CPU step
+    fn tick_timers(&mut self, cycles: u32) {
+        // Timer 0 & 1: prescaler period is 128 cycles (8 kHz)
+        // Timer 2: prescaler period is 16 cycles (64 kHz)
+        const PRESCALER_0_1: u16 = 128;
+        const PRESCALER_2: u16 = 16;
+
+        for timer in 0..3 {
+            // Check if timer is enabled (bits 0-2 of control register)
+            if self.control & (1 << timer) == 0 {
+                continue;
+            }
+
+            let prescaler_period = if timer == 2 {
+                PRESCALER_2
+            } else {
+                PRESCALER_0_1
+            };
+
+            // Add cycles to prescaler
+            self.timer_prescaler[timer] += cycles as u16;
+
+            // Process prescaler overflows (timer ticks)
+            while self.timer_prescaler[timer] >= prescaler_period {
+                self.timer_prescaler[timer] -= prescaler_period;
+
+                // Increment internal counter
+                let divisor = if self.timer_divisor[timer] == 0 {
+                    256u16
+                } else {
+                    self.timer_divisor[timer] as u16
+                };
+
+                self.timer_internal[timer] = self.timer_internal[timer].wrapping_add(1);
+
+                // Check if internal counter reached divisor
+                if self.timer_internal[timer] as u16 >= divisor {
+                    self.timer_internal[timer] = 0;
+                    // Increment output counter (4-bit, wraps at 15)
+                    let old = self.timer_counter[timer].get();
+                    let new_val = (old + 1) & 0x0F;
+                    self.timer_counter[timer].set(new_val);
+                    log(LogCategory::APU, LogLevel::Debug, || {
+                        format!("SPC700: Timer {} counter incremented: {} -> {}", timer, old, new_val)
+                    });
+                }
+            }
         }
     }
 
@@ -159,23 +221,29 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 let val = self.cpuio[port];
-                // Log all port reads during upload (when IPL ROM is enabled)
-                if self.control & 0x80 != 0 {
-                    log(LogCategory::APU, LogLevel::Debug, || {
-                        format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (IPL enabled, all ports: ${:02X} ${:02X} ${:02X} ${:02X})", 
-                            4 + port, val, self.cpuio[0], self.cpuio[1], self.cpuio[2], self.cpuio[3])
-                    });
-                }
+                // Log all port reads during IPL ROM execution
+                log(LogCategory::APU, LogLevel::Info, || {
+                    format!("SPC700: Read port $F{} (CPUIO) = ${:02X} (all ports: ${:02X} ${:02X} ${:02X} ${:02X})", 
+                        4 + port, val, self.cpuio[0], self.cpuio[1], self.cpuio[2], self.cpuio[3])
+                });
                 val
             }
-            // Timer counters
+            // Timer counters - reading clears the counter
             COUNTER0 => {
-                // Reading counter clears it (on real hardware)
-                // We'll implement this when timers are active
-                self.timer_counter[0]
+                let val = self.timer_counter[0].get();
+                self.timer_counter[0].set(0);
+                val
             }
-            COUNTER1 => self.timer_counter[1],
-            COUNTER2 => self.timer_counter[2],
+            COUNTER1 => {
+                let val = self.timer_counter[1].get();
+                self.timer_counter[1].set(0);
+                val
+            }
+            COUNTER2 => {
+                let val = self.timer_counter[2].get();
+                self.timer_counter[2].set(0);
+                val
+            }
             // DSP data register
             DSP_DATA => {
                 if (self.dsp_addr as usize) < self.dsp_regs.len() {
@@ -196,7 +264,6 @@ impl MemorySpc700 for Spc700Memory {
             _ => self.ram[addr as usize],
         }
     }
-
     fn write(&mut self, addr: u16, val: u8) {
         match addr {
             // IPL ROM region is read-only
@@ -210,7 +277,7 @@ impl MemorySpc700 for Spc700Memory {
             CPUIO0..=CPUIO3 => {
                 let port = (addr - CPUIO0) as usize;
                 self.apu_out[port] = val;
-                log(LogCategory::APU, LogLevel::Debug, || {
+                log(LogCategory::APU, LogLevel::Info, || {
                     format!("SPC700: Write port $F{} = ${:02X} (apu_out now: ${:02X} ${:02X} ${:02X} ${:02X})", 
                         4 + port, val, self.apu_out[0], self.apu_out[1], self.apu_out[2], self.apu_out[3])
                 });
@@ -235,6 +302,20 @@ impl MemorySpc700 for Spc700Memory {
                     });
                 }
 
+                // When a timer is enabled (bit transitions from 0 to 1),
+                // reset its internal counter and output counter
+                for timer in 0..3 {
+                    let mask = 1 << timer;
+                    if (old_control & mask) == 0 && (val & mask) != 0 {
+                        self.timer_prescaler[timer] = 0;
+                        self.timer_internal[timer] = 0;
+                        self.timer_counter[timer].set(0);
+                        log(LogCategory::APU, LogLevel::Debug, || {
+                            format!("SPC700: Timer {} enabled, counters reset", timer)
+                        });
+                    }
+                }
+
                 if val & 0x10 != 0 {
                     // Clear ports $F4-$F5
                     self.cpuio[0] = 0;
@@ -257,9 +338,24 @@ impl MemorySpc700 for Spc700Memory {
                 }
             }
             // Timer divisors
-            TIMER0 => self.timer_divisor[0] = val,
-            TIMER1 => self.timer_divisor[1] = val,
-            TIMER2 => self.timer_divisor[2] = val,
+            TIMER0 => {
+                self.timer_divisor[0] = val;
+                log(LogCategory::APU, LogLevel::Info, || {
+                    format!("SPC700: Timer 0 divisor set to ${:02X} ({})", val, if val == 0 { 256 } else { val as u16 })
+                });
+            }
+            TIMER1 => {
+                self.timer_divisor[1] = val;
+                log(LogCategory::APU, LogLevel::Info, || {
+                    format!("SPC700: Timer 1 divisor set to ${:02X} ({})", val, if val == 0 { 256 } else { val as u16 })
+                });
+            }
+            TIMER2 => {
+                self.timer_divisor[2] = val;
+                log(LogCategory::APU, LogLevel::Info, || {
+                    format!("SPC700: Timer 2 divisor set to ${:02X} ({})", val, if val == 0 { 256 } else { val as u16 })
+                });
+            }
             // Test register and counters are read-only
             TEST_REG | COUNTER0 | COUNTER1 | COUNTER2 | AUX_IO4 | AUX_IO5 => {}
             // RAM
@@ -304,6 +400,10 @@ pub struct Spc700 {
     cycle_acc: f64,
     /// Cycles per audio sample
     cycles_per_sample: f64,
+    /// Total cycles requested from run_cycles (for debugging)
+    total_cycles_requested: u64,
+    /// Number of run_cycles calls (for debugging)
+    run_cycles_call_count: u64,
 }
 
 impl Spc700 {
@@ -322,6 +422,8 @@ impl Spc700 {
             timing: TimingMode::Ntsc,
             cycle_acc: 0.0,
             cycles_per_sample: apu_clock_hz / sample_rate,
+            total_cycles_requested: 0,
+            run_cycles_call_count: 0,
         }
     }
 
@@ -335,7 +437,12 @@ impl Spc700 {
     /// Read from a communication port (main CPU side)
     pub fn read_port(&self, port: u8) -> u8 {
         if port < 4 {
-            self.cpu.memory.read_apu_out(port as usize)
+            let val = self.cpu.memory.read_apu_out(port as usize);
+            log(LogCategory::APU, LogLevel::Debug, || {
+                format!("SPC700: Main CPU reads port {} = ${:02X}",
+                    port, val)
+            });
+            val
         } else {
             0
         }
@@ -343,19 +450,31 @@ impl Spc700 {
 
     /// Execute CPU for a number of cycles
     pub fn run_cycles(&mut self, cycles: u32) {
+        // Track statistics
+        self.run_cycles_call_count += 1;
+        self.total_cycles_requested += cycles as u64;
+        
+        // Log summary every 10000 calls to avoid spam
+        if self.run_cycles_call_count.is_multiple_of(10000) {
+            log(LogCategory::APU, LogLevel::Info, || {
+                format!(
+                    "SPC700: run_cycles called {} times, total_requested={}, SPC700_cycles={}, PC=${:04X}",
+                    self.run_cycles_call_count, self.total_cycles_requested, self.cpu.cycles, self.cpu.pc
+                )
+            });
+        }
+        
         // Track if we're in critical IPL ROM areas
         let was_in_upload_loop = self.cpu.pc >= 0xFFD6 && self.cpu.pc <= 0xFFEE;
         let was_in_entry_setup = self.cpu.pc >= 0xFFEF;
 
-        // Log first few calls to verify this is being called
-        if self.cpu.cycles < 1000 {
-            log(LogCategory::APU, LogLevel::Info, || {
-                format!(
-                    "SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}",
-                    cycles, self.cpu.pc, self.cpu.cycles
-                )
-            });
-        }
+        // Log calls to verify this is being called (debug level)
+        log(LogCategory::APU, LogLevel::Debug, || {
+            format!(
+                "SPC700: run_cycles({}) called, PC=${:04X}, total_cycles={}",
+                cycles, self.cpu.pc, self.cpu.cycles
+            )
+        });
 
         let mut remaining = cycles;
         while remaining > 0 {
@@ -400,6 +519,9 @@ impl Spc700 {
                     log(LogCategory::APU, LogLevel::Info, || dump);
                 }
             }
+
+            // Update timers based on executed cycles
+            self.cpu.memory.tick_timers(executed);
 
             remaining = remaining.saturating_sub(executed);
         }
@@ -1001,5 +1123,195 @@ mod tests {
         apu.cpu.memory.write(CONTROL_REG, 0x20);
         assert_eq!(apu.cpu.memory.cpuio[2], 0x00, "Port 2 should be cleared");
         assert_eq!(apu.cpu.memory.cpuio[3], 0x00, "Port 3 should be cleared");
+    }
+
+    /// Test that reproduces the multi-session upload issue from Super Mario World.
+    ///
+    /// **The Issue:**
+    /// After the first upload session completes and the uploaded code executes,
+    /// the main CPU expects the SPC700 to write $AA/$BB to signal readiness for
+    /// a second upload session. However, the uploaded audio driver code often
+    /// waits for a timer before responding, causing the main CPU to be stuck
+    /// in a loop waiting for $AA at $2140.
+    ///
+    /// **Expected Behavior:**
+    /// When the uploaded code uses timers, the timers must tick properly so the
+    /// code can progress and eventually respond to the main CPU.
+    ///
+    /// This test simulates:
+    /// 1. First upload session (IPL ROM -> uploaded driver)
+    /// 2. Uploaded driver uses Timer 0 to wait before responding
+    /// 3. Main CPU waits for response (would be stuck if timers don't work)
+    #[test]
+    fn test_multi_session_upload_with_timer_wait() {
+        let mut apu = Spc700::new();
+
+        // === Phase 1: Wait for IPL ROM ready signal ===
+        apu.run_cycles(3000);
+        assert_eq!(apu.read_port(0), 0xAA, "IPL should signal $AA");
+        assert_eq!(apu.read_port(1), 0xBB, "IPL should signal $BB");
+
+        // === Phase 2: Start first upload session ===
+        apu.write_port(2, 0x00); // Low byte of address
+        apu.write_port(3, 0x02); // High byte: $0200
+        apu.write_port(1, 0x01); // Non-zero = more data coming
+        apu.write_port(0, 0xCC); // Start signal
+        apu.run_cycles(100);
+        assert_eq!(apu.read_port(0), 0xCC, "SPC700 should acknowledge with $CC");
+
+        // === Phase 3: Upload a driver that uses Timer 0 to delay response ===
+        // This simulates real audio drivers that wait for a timer before responding.
+        //
+        // Uploaded code at $0200:
+        //   MOV $FA, #$FF     ; Set Timer 0 divisor to 255 (slowest)
+        //   MOV $F1, #$01     ; Enable Timer 0
+        //   wait_loop:
+        //     MOV A, $FD      ; Read Timer 0 counter
+        //     BEQ wait_loop   ; Loop while counter is 0
+        //   MOV $F4, #$AA     ; Write $AA to port 0 (ready for second session)
+        //   MOV $F5, #$BB     ; Write $BB to port 1
+        //   loop_forever:
+        //     BRA loop_forever
+        let timer_driver = [
+            // MOV $FA, #$FF (Set Timer 0 divisor)
+            0x8F, 0xFF, 0xFA,
+            // MOV $F1, #$81 (Enable Timer 0 + keep IPL ROM enabled)
+            0x8F, 0x81, 0xF1,
+            // wait_loop: MOV A, $FD (Read Timer 0 counter)
+            0xE4, 0xFD,
+            // BEQ wait_loop (Loop while A == 0) - branch offset -4
+            0xF0, 0xFC,
+            // MOV $F4, #$AA (Write $AA to port 0)
+            0x8F, 0xAA, 0xF4,
+            // MOV $F5, #$BB (Write $BB to port 1)
+            0x8F, 0xBB, 0xF5,
+            // BRA loop_forever (infinite loop) - branch offset -2
+            0x2F, 0xFE,
+        ];
+
+        for (i, &byte) in timer_driver.iter().enumerate() {
+            apu.write_port(1, byte);
+            apu.write_port(0, i as u8);
+            apu.run_cycles(50);
+            assert_eq!(
+                apu.read_port(0),
+                i as u8,
+                "Index {} should be echoed",
+                i
+            );
+        }
+
+        // === Phase 4: Execute uploaded code ===
+        apu.write_port(2, 0x00); // Entry point low
+        apu.write_port(3, 0x02); // Entry point high
+        apu.write_port(1, 0x00); // Zero = execute
+        let final_index = (timer_driver.len() as u8).wrapping_add(2);
+        apu.write_port(0, final_index);
+        apu.run_cycles(50);
+
+        // Verify SPC700 is now executing at uploaded code location
+        // (It may be in the timer wait loop)
+        println!("SPC700 PC after execution command: ${:04X}", apu.cpu.pc);
+
+        // === Phase 5: This is where the bug manifests ===
+        // The uploaded driver is now waiting for Timer 0 to tick.
+        // If timers don't work, the SPC700 will be stuck forever.
+        //
+        // Main CPU would be polling port 0, expecting $AA.
+        // Let's run enough cycles for the timer to tick and the driver to respond.
+
+        // Timer 0 ticks at 8 kHz (every 128 SPC700 cycles)
+        // With divisor $FF (255), output counter increments every 255 * 128 = 32,640 cycles
+        // We need at least one timer tick for the BEQ to fail
+
+        // But the counter just needs to go from 0 to 1, which happens after divisor+1 prescaler ticks
+        // Divisor = $FF = 255, so internal counter overflows after 255 * 128 = 32640 cycles
+
+        // Actually, let's check what port 0 is right now
+        let port0_before = apu.read_port(0);
+        println!("Port 0 before timer wait: ${:02X}", port0_before);
+
+        // Run for ~35,000 cycles to ensure timer ticks
+        apu.run_cycles(35000);
+
+        let port0_after = apu.read_port(0);
+        let port1_after = apu.read_port(1);
+        println!(
+            "Port 0 after timer wait: ${:02X}, Port 1: ${:02X}",
+            port0_after, port1_after
+        );
+        println!("SPC700 PC: ${:04X}", apu.cpu.pc);
+
+        // The driver should have written $AA/$BB by now
+        assert_eq!(
+            port0_after, 0xAA,
+            "After timer ticks, driver should write $AA to port 0. \
+             If this fails, timers are not ticking properly!"
+        );
+        assert_eq!(
+            port1_after, 0xBB,
+            "After timer ticks, driver should write $BB to port 1"
+        );
+
+        println!("✓ Multi-session upload with timer wait works correctly!");
+    }
+
+    /// Test that Timer 0 actually ticks and increments the counter
+    #[test]
+    fn test_timer0_ticks() {
+        let mut apu = Spc700::new();
+
+        // Disable IPL ROM and set up for direct testing
+        apu.cpu.memory.write(CONTROL_REG, 0x00); // Disable IPL ROM
+        
+        // Set Timer 0 divisor to 1 (fastest: output increments every 128 cycles)
+        apu.cpu.memory.write(TIMER0, 0x01);
+        
+        // Enable Timer 0 (bit 0 of control register)
+        apu.cpu.memory.write(CONTROL_REG, 0x01);
+
+        // Read initial counter value (should be 0)
+        let initial = apu.cpu.memory.timer_counter[0].get();
+        assert_eq!(initial, 0, "Timer 0 counter should start at 0");
+
+        // Run for 128 cycles (one prescaler period) - counter should increment once
+        apu.run_cycles(128);
+
+        // Read counter (this clears it!)
+        let after_128 = apu.cpu.memory.timer_counter[0].get();
+        println!("Timer 0 counter after 128 cycles: {}", after_128);
+        
+        // With divisor=1, after 128 cycles, internal counter overflows and output increments
+        assert!(
+            after_128 >= 1,
+            "Timer 0 counter should be >= 1 after 128 cycles with divisor=1, got {}",
+            after_128
+        );
+    }
+
+    /// Test timer counter clear-on-read behavior
+    #[test]
+    fn test_timer_counter_clear_on_read() {
+        let mut apu = Spc700::new();
+
+        // Disable IPL ROM
+        apu.cpu.memory.write(CONTROL_REG, 0x00);
+        
+        // Set Timer 0 divisor to 1 and enable
+        apu.cpu.memory.write(TIMER0, 0x01);
+        apu.cpu.memory.write(CONTROL_REG, 0x01);
+
+        // Run for 256 cycles (should get 2 counter increments)
+        apu.run_cycles(256);
+
+        // First read should return count
+        let first_read = apu.cpu.memory.read(COUNTER0);
+        println!("First read of Timer 0 counter: {}", first_read);
+        assert!(first_read >= 1, "Timer should have ticked");
+
+        // Second read should return 0 (counter was cleared)
+        let second_read = apu.cpu.memory.read(COUNTER0);
+        println!("Second read of Timer 0 counter: {}", second_read);
+        assert_eq!(second_read, 0, "Counter should be cleared after read");
     }
 }

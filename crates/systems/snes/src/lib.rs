@@ -69,6 +69,8 @@ pub struct SnesSystem {
     cpu: SnesCpu,
     frame_cycles: u32,
     current_cycles: u32,
+    /// Total CPU cycles executed since reset
+    total_cycles: u64,
     renderer: Box<dyn SnesPpuRenderer>,
     /// Instruction tracer for debugging
     pub(crate) instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
@@ -89,6 +91,7 @@ impl SnesSystem {
             cpu: SnesCpu::new(bus),
             frame_cycles: SNES_FRAME_CYCLES,
             current_cycles: 0,
+            total_cycles: 0,
             renderer: Box::new(SoftwareSnesPpuRenderer::new()),
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
@@ -182,6 +185,17 @@ impl System for SnesSystem {
         });
         self.cpu.reset();
         self.current_cycles = 0;
+        self.total_cycles = 0;
+        
+        // Pre-run the SPC700 APU to let it complete its boot sequence
+        // The IPL ROM clears RAM and writes $AA/$BB signature (takes ~5000 cycles)
+        // This ensures the ready signature is available when main CPU starts
+        if let Some(ref mut spc700) = self.cpu.bus_mut().spc700_mut() {
+            log(LogCategory::APU, LogLevel::Info, || {
+                "SNES: Pre-running SPC700 for boot sequence".to_string()
+            });
+            spc700.run_cycles(6000);
+        }
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
@@ -219,6 +233,7 @@ impl System for SnesSystem {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+                self.total_cycles += cycles as u64;
                 self.cpu.bus_mut().tick_cycles(cycles);
 
                 // Record instruction if tracing is enabled
@@ -238,6 +253,7 @@ impl System for SnesSystem {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
+                self.total_cycles += cycles as u64;
                 self.cpu.bus_mut().tick_cycles(cycles);
 
                 // Record instruction if tracing is enabled
@@ -275,6 +291,7 @@ impl System for SnesSystem {
         while self.current_cycles < self.frame_cycles {
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
+            self.total_cycles += cycles as u64;
             self.cpu.bus_mut().tick_cycles(cycles);
 
             // Check for additional NMI requests during VBlank
@@ -381,6 +398,10 @@ impl System for SnesSystem {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.total_cycles
     }
 }
 
