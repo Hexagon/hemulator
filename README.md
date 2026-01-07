@@ -360,7 +360,15 @@ For architecture details and implementation guidelines, see **[AGENTS.md](AGENTS
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
+Hemulator is open source software licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## Project Maintainers
+
+Hemulator is founded and maintained by:
+- **[@Hexagon](https://github.com/Hexagon)**
+- **[@Oliodh](https://github.com/Oliodh)**
+
+This is a free and open source community project. Contributions from the community are crucial and invaluable to the project's success.
 
 ## Acknowledgments
 

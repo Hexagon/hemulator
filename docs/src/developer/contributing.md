@@ -6,7 +6,7 @@ nav_order: 2
 ---
 # Contributing to Hemulator
 
-**Hemulator is a free and open source community project** - built by volunteers who are passionate about retro gaming and emulation. We deeply value and appreciate every contribution, whether it's your first pull request or your hundredth.
+**Hemulator is a free and open source community project** founded and maintained by **[@Hexagon](https://github.com/Hexagon)** and **[@Oliodh](https://github.com/Oliodh)** - built by volunteers who are passionate about retro gaming and emulation. We deeply value and appreciate every contribution, whether it's your first pull request or your hundredth.
 
 ## Why Your Contribution Matters
 

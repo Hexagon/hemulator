@@ -72,7 +72,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 
 ## Open Source Community Project
 
-Hemulator is a **free and open source** community effort. This project exists thanks to the passionate developers, contributors, and retro gaming enthusiasts who volunteer their time and expertise.
+Hemulator is a **free and open source** community effort founded and maintained by GitHub users **[@Hexagon](https://github.com/Hexagon)** and **[@Oliodh](https://github.com/Oliodh)**. This project exists thanks to the passionate developers, contributors, and retro gaming enthusiasts who volunteer their time and expertise.
 
 **🤝 Contributions are Crucial and Invaluable**
 
