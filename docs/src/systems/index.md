@@ -158,6 +158,6 @@ For developers interested in future system implementations:
 
 ## Related Documentation
 
-- [User Manual](../user/manual.md) - Controls and usage information
+- [User Manual](../user/) - Controls and usage information
 - [Architecture](../developer/architecture.md) - Overall system architecture
 - [CPU References](../references/) - Technical CPU documentation

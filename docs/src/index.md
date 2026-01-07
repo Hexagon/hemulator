@@ -18,7 +18,7 @@ Hemulator is a modern, modular emulator supporting multiple classic gaming syste
 ### For Users
 
 - **[Download & Install](download.md)** - Get the latest release for Windows or Linux
-- **[User Manual](user/manual.md)** - Getting started, controls, features, and system-specific information
+- **[User Manual](user/)** - Getting started, controls, features, and system-specific information
 - **[System Guides](systems/)** - Detailed information about each emulated system
 
 **Get Help & Contribute**:
