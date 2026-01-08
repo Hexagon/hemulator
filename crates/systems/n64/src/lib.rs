@@ -66,6 +66,10 @@ pub struct DebugInfo {
     pub rdp_status: u32,
     /// Frame buffer resolution
     pub framebuffer_resolution: String,
+    /// CPU cycle count
+    pub cpu_cycles: u64,
+    /// Current frame cycles
+    pub frame_cycles: u32,
 }
 
 /// N64 system implementation
@@ -184,6 +188,8 @@ impl N64System {
             rsp_vertex_count,
             rdp_status,
             framebuffer_resolution,
+            cpu_cycles: self.cpu.cpu.cycles,
+            frame_cycles: self.current_cycles,
         }
     }
 
@@ -230,6 +236,11 @@ impl N64System {
     /// Get the breakpoint manager
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
+    }
+
+    /// Get debugger interface for this system
+    pub fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
+        Some(self)
     }
 }
 
