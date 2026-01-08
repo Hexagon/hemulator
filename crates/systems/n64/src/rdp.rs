@@ -505,10 +505,12 @@ impl Rdp {
 
     /// Process display list commands from RDRAM
     pub fn process_display_list(&mut self, rdram: &[u8]) {
-        log(LogCategory::PPU, LogLevel::Debug, || {
+        log(LogCategory::PPU, LogLevel::Info, || {
             format!(
-                "N64 RDP: Processing display list from 0x{:08X} to 0x{:08X}",
-                self.dpc_start, self.dpc_end
+                "N64 RDP: Processing display list from 0x{:08X} to 0x{:08X} ({} bytes, {} commands)",
+                self.dpc_start, self.dpc_end,
+                self.dpc_end.saturating_sub(self.dpc_start),
+                self.dpc_end.saturating_sub(self.dpc_start) / 8
             )
         });
 
@@ -1001,12 +1003,22 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "N64 RDP: FILL_RECTANGLE x={}-{} y={}-{} ({}x{}) color=0x{:08X}",
+                        xl, xh, yl, yh, width, height, self.fill_color
+                    )
+                });
+
                 self.fill_rect(xl, yl, width, height);
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
                 // word1 contains the fill color (RGBA)
                 self.fill_color = word1;
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("N64 RDP: SET_FILL_COLOR = 0x{:08X}", word1)
+                });
             }
             // SET_SCISSOR (0x2D)
             0x2D => {
@@ -1207,7 +1219,10 @@ impl Rdp {
             // SYNC_FULL (0x29)
             0x29 => {
                 // Full synchronization - wait for all rendering to complete
-                // In frame-based implementation, this is a no-op
+                // In frame-based implementation, this is a no-op but we log it
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    "N64 RDP: SYNC_FULL - pipeline sync complete".to_string()
+                });
             }
             // SET_FOG_COLOR (0x38)
             0x38 => {
