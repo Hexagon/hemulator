@@ -64,7 +64,7 @@ impl Vdp {
             line_counter: 0,
             sprite_overflow: false,
             sprite_collision: false,
-            scanline: 262,  // Start at end of frame so first set_scanline(0) wraps around
+            scanline: 262, // Start at end of frame so first set_scanline(0) wraps around
         }
     }
 
@@ -188,12 +188,12 @@ impl Vdp {
     /// Set current scanline (for cycle-accurate timing)
     pub fn set_scanline(&mut self, scanline: u16) {
         let old_scanline = self.scanline;
-        
+
         // Only update if scanline has actually changed
         if scanline == old_scanline {
             return;
         }
-        
+
         self.scanline = scanline;
 
         // Render any scanlines that were crossed

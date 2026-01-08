@@ -126,8 +126,8 @@ const MAX_GRP_CHANGES: usize = 8;
 /// A mid-scanline graphics change: (pixel position, value)
 #[derive(Debug, Clone, Copy, Default)]
 struct GrpChange {
-    pixel: u8,  // Horizontal pixel position (0-159) when the change occurred
-    value: u8,  // The graphics value written
+    pixel: u8, // Horizontal pixel position (0-159) when the change occurred
+    value: u8, // The graphics value written
 }
 
 /// Per-scanline snapshot of TIA state for rendering
@@ -639,7 +639,7 @@ impl Tia {
             grp1_changes: self.current_grp1_changes,
             grp1_change_count: self.current_grp1_change_count,
         };
-        
+
         // Clear current scanline's changes for the next scanline
         self.current_grp0_change_count = 0;
         self.current_grp1_change_count = 0;
@@ -862,7 +862,10 @@ impl Tia {
                 if val != 0 {
                     self.writes_grp0_nonzero = self.writes_grp0_nonzero.saturating_add(1);
                     if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                        eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {} pixel {}", val, self.scanline, self.pixel);
+                        eprintln!(
+                            "[TIA] GRP0 = 0x{:02X} at scanline {} pixel {}",
+                            val, self.scanline, self.pixel
+                        );
                     }
                 }
                 self.grp0 = val;
@@ -878,7 +881,10 @@ impl Tia {
                     } else {
                         0
                     };
-                    self.current_grp0_changes[idx] = GrpChange { pixel: visible_pixel, value: val };
+                    self.current_grp0_changes[idx] = GrpChange {
+                        pixel: visible_pixel,
+                        value: val,
+                    };
                     self.current_grp0_change_count += 1;
                 }
             }
@@ -887,7 +893,10 @@ impl Tia {
                 if val != 0 {
                     self.writes_grp1_nonzero = self.writes_grp1_nonzero.saturating_add(1);
                     if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                        eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {} pixel {}", val, self.scanline, self.pixel);
+                        eprintln!(
+                            "[TIA] GRP1 = 0x{:02X} at scanline {} pixel {}",
+                            val, self.scanline, self.pixel
+                        );
                     }
                 }
                 self.grp1 = val;
@@ -905,7 +914,10 @@ impl Tia {
                     } else {
                         0
                     };
-                    self.current_grp1_changes[idx] = GrpChange { pixel: visible_pixel, value: val };
+                    self.current_grp1_changes[idx] = GrpChange {
+                        pixel: visible_pixel,
+                        value: val,
+                    };
                     self.current_grp1_change_count += 1;
                 }
             }
@@ -1464,12 +1476,12 @@ impl Tia {
 
         // For racing-the-beam displays, find the GRP value that was in effect at position x
         // The changes array contains writes during the scanline in chronological order
-        
+
         // Find the most recent change at or before this pixel position
         // Start with the value from before the first change (typically the delayed value if VDELP,
         // or 0 if no VDELP - the scanline starts "fresh")
         let mut result = if state.vdelp0 { state.grp0_delayed } else { 0 };
-        
+
         for i in 0..state.grp0_change_count as usize {
             if state.grp0_changes[i].pixel as usize <= x {
                 result = state.grp0_changes[i].value;
@@ -1490,7 +1502,7 @@ impl Tia {
 
         // Find the most recent change at or before this pixel position
         let mut result = if state.vdelp1 { state.grp1_delayed } else { 0 };
-        
+
         for i in 0..state.grp1_change_count as usize {
             if state.grp1_changes[i].pixel as usize <= x {
                 result = state.grp1_changes[i].value;
@@ -1504,17 +1516,9 @@ impl Tia {
     /// Check if a player pixel is visible at the given x position
     fn is_player_pixel(state: &ScanlineState, player: usize, x: usize) -> bool {
         let (pos, reflect, nusiz) = if player == 0 {
-            (
-                state.player0_x,
-                state.player0_reflect,
-                state.nusiz0,
-            )
+            (state.player0_x, state.player0_reflect, state.nusiz0)
         } else {
-            (
-                state.player1_x,
-                state.player1_reflect,
-                state.nusiz1,
-            )
+            (state.player1_x, state.player1_reflect, state.nusiz1)
         };
 
         // Get the graphics value that was in effect at this pixel position

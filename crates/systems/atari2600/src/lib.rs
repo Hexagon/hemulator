@@ -347,10 +347,10 @@ impl System for Atari2600System {
         // This ensures we capture exactly one frame's worth of emulation
         while cpu_steps < MAX_CPU_STEPS {
             let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32);
-            
+
             // Check VSYNC state before the CPU step
             let vsync_before = self.cpu.bus().map(|b| b.tia.vsync()).unwrap_or(false);
-            
+
             let cycles = self.cpu.step();
             cpu_steps += 1;
 
@@ -377,12 +377,12 @@ impl System for Atari2600System {
 
                 // Check for VSYNC transitions
                 let vsync_after = bus.tia.vsync();
-                
+
                 // Track VSYNC ON
                 if vsync_after && !vsync_before {
                     saw_vsync_on = true;
                 }
-                
+
                 // Detect VSYNC OFF after we've seen VSYNC ON - this is the frame boundary
                 if saw_vsync_on && vsync_before && !vsync_after {
                     if debug_vsync {

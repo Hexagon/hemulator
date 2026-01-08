@@ -586,4 +586,3 @@ mod tests {
         assert_eq!(samples.len(), 100);
     }
 }
-
