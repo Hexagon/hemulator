@@ -14,18 +14,36 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
   - GPU-accelerated using OpenGL 3.3 Core Profile
   - 3D triangle rasterization (flat, Gouraud shading, textured triangles)
   - Hardware Z-buffer for depth testing
-  - Display list processing
-  - Basic RDP commands (fill, scissor, sync, texture operations)
+  - Display list processing with comprehensive command support:
+    - FILL_RECTANGLE (0x36) - Solid color rectangles
+    - SET_FILL_COLOR (0x37) - Set fill color
+    - SYNC_FULL (0x29) - Pipeline synchronization
+    - SET_SCISSOR (0x2D) - Clipping rectangle
+    - Triangle commands (0x08-0x0F) - Various triangle rendering modes
+    - Texture commands (SET_TILE, SET_TEXTURE_IMAGE, LOAD_BLOCK, LOAD_TILE)
+  - Proper RDRAM display list reading and execution
+  - OpenGL framebuffer readback for display
 - ✅ **Cartridge Loading** - Z64/N64/V64 formats with byte-order conversion
 - ✅ **Save States** - Full state serialization
+- ✅ **Debug Logging** - Comprehensive logging for RDP operations
+- ✅ **Test ROMs** - Multiple test ROMs for validation
 
 ### What's Missing
 
-- ⏳ **RSP (Reality Signal Processor)** - Geometry processing, microcode execution
-- ⏳ **Texture Mapping** - TMEM structure in place, sampling not fully implemented
+- ⏳ **RSP (Reality Signal Processor)** - Geometry processing, microcode execution (HLE implemented but needs enhancement)
+- ⏳ **Texture Mapping** - TMEM structure in place, sampling partially implemented
 - ⏳ **Audio** - Audio interface not implemented
-- ⏳ **Controller Input** - Input system not implemented
+- ⏳ **Controller Input** - Input system not implemented  
 - ⏳ **Memory Management** - No TLB, cache, or accurate timing
+
+### Recent Improvements (January 2026)
+
+- ✅ **Enhanced RDP Logging** - Added INFO-level logging for debugging:
+  - Display list processing shows command count and byte size
+  - FILL_RECTANGLE operations log coordinates, dimensions, and color
+  - SET_FILL_COLOR operations log color values
+  - SYNC_FULL operations confirm pipeline synchronization
+- ✅ **Better Debugging Visibility** - Critical operations moved to INFO level for runtime monitoring
 
 ## Renderer Architecture
 
