@@ -353,34 +353,45 @@ mod tests {
         assert_eq!(frame.height, 192);
 
         // The test ROM should produce a checkerboard pattern
-        // Check that we have non-zero pixels (display is working)
-        let pixels = &frame.pixels;
-        let non_zero_count = pixels.iter().filter(|&&p| p != 0).count();
+        // Count unique colors and their distribution
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
 
-        // We should have a significant number of white pixels from the checkerboard
-        // The exact count depends on VDP implementation, but it should be > 0
-        assert!(
-            non_zero_count > 0,
-            "Expected visible output from test ROM, got {} non-zero pixels",
-            non_zero_count
+        // We expect exactly 2 colors: white (0xFFFFFFFF) and black (0xFF000000)
+        assert_eq!(
+            color_counts.len(),
+            2,
+            "Expected 2 colors (checkerboard), got {}",
+            color_counts.len()
         );
 
-        // For a proper checkerboard, approximately half the pixels should be white
-        // Allow a wide tolerance since the exact rendering depends on tile implementation
-        let total_pixels = pixels.len();
-        let white_percentage = (non_zero_count as f32 / total_pixels as f32) * 100.0;
+        // Count white and black pixels
+        let white_count = *color_counts.get(&0xFFFFFFFF).unwrap_or(&0);
+        let black_count = *color_counts.get(&0xFF000000).unwrap_or(&0);
+        let total_pixels = frame.pixels.len();
+
+        let white_percentage = (white_count as f32 / total_pixels as f32) * 100.0;
+        let black_percentage = (black_count as f32 / total_pixels as f32) * 100.0;
 
         println!(
-            "Test ROM produced {:.1}% white pixels (expected ~50% for checkerboard)",
-            white_percentage
+            "Test ROM: {:.1}% white, {:.1}% black (expected ~50% each for checkerboard)",
+            white_percentage, black_percentage
         );
 
-        // Very loose check - just ensure SOME pixels are rendered
-        // (More strict checking would require full VDP implementation)
+        // For a perfect checkerboard, we expect exactly 50% white and 50% black
+        // Allow small tolerance for rounding
         assert!(
-            white_percentage > 1.0,
-            "Expected at least some visible pixels, got {:.1}%",
+            (white_percentage - 50.0).abs() < 1.0,
+            "Expected ~50% white pixels, got {:.1}%",
             white_percentage
+        );
+        assert!(
+            (black_percentage - 50.0).abs() < 1.0,
+            "Expected ~50% black pixels, got {:.1}%",
+            black_percentage
         );
     }
 
@@ -575,3 +586,4 @@ mod tests {
         assert_eq!(samples.len(), 100);
     }
 }
+

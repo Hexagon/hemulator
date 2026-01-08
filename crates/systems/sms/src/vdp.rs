@@ -64,7 +64,7 @@ impl Vdp {
             line_counter: 0,
             sprite_overflow: false,
             sprite_collision: false,
-            scanline: 0,
+            scanline: 262,  // Start at end of frame so first set_scanline(0) wraps around
         }
     }
 
@@ -188,31 +188,36 @@ impl Vdp {
     /// Set current scanline (for cycle-accurate timing)
     pub fn set_scanline(&mut self, scanline: u16) {
         let old_scanline = self.scanline;
+        
+        // Only update if scanline has actually changed
+        if scanline == old_scanline {
+            return;
+        }
+        
         self.scanline = scanline;
 
         // Render any scanlines that were crossed
         if scanline < old_scanline {
             // Wrapped around to new frame
-            // Render remaining scanlines from old_scanline to 192 (end of visible area)
-            // Note: If old_scanline > 192, this range is empty (which is correct)
+            // Render remaining scanlines from old_scanline to end of visible area (192)
             for line in old_scanline..192 {
-                if line < 192 {
-                    self.render_scanline(line as u8);
-                }
+                self.render_scanline(line as u8);
             }
-            for line in 0..scanline.min(192) {
+            // Render scanlines from start of new frame up to and including current scanline
+            for line in 0..=scanline.min(191) {
                 self.render_scanline(line as u8);
             }
             // Check for frame interrupt at scanline 192
-            if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
+            if (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
         } else {
             // Normal forward progress within same frame
-            for line in old_scanline..scanline.min(192) {
+            // Render all scanlines from old_scanline+1 up to and including scanline
+            for line in (old_scanline + 1)..=scanline.min(191) {
                 self.render_scanline(line as u8);
             }
-            // Check for frame interrupt at scanline 192
+            // Check for frame interrupt when crossing scanline 192
             if old_scanline < 192 && scanline >= 192 && (self.registers[1] & 0x20) != 0 {
                 self.frame_interrupt_pending = true;
             }
