@@ -2,7 +2,9 @@
 
 This crate implements Atari 2600 emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+**Documentation**:
+- [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) - Overall emulation architecture
+- [TIA Hardware Reference](../../../docs/src/references/tia.md) - TIA register specification
 
 ## Current Status
 
@@ -431,71 +433,34 @@ Only standard schemes supported: 2K, 4K, F8, FA, F6, F4. Missing formats:
 
 ### Timing and Rendering
 
-#### Timing Modes
+#### Cycle-Accurate Rendering
 
-✅ **Configurable**
+The emulator uses **cycle-accurate TIA emulation**:
 
-The emulator supports two timing modes, configurable via settings:
-
-##### Cycle-Accurate Mode (Default)
 - Renders each pixel as it's generated (228 color clocks per scanline)
 - Mid-scanline register updates affect remaining pixels on that line
 - HMOVE effects happen at exact color clock boundaries
-- "Racing the beam" techniques work exactly as on hardware
-- **Performance**: Slightly more CPU-intensive but still runs at full speed on modern hardware
+- "Racing the beam" techniques work as on hardware
+- **Performance**: Runs at full speed on modern hardware
 - **Compatibility**: Maximum - handles all timing-sensitive games correctly
 
-##### Frame-Based Mode (Legacy)
-- State is latched once per scanline
-- Rendering happens after the scanline is complete
-- **Performance**: Fastest - optimized for speed
-- **Compatibility**: High - works for 95%+ of games
-- May not handle rapid mid-scanline updates perfectly
+#### Visible Window Detection
 
-**Configuration**: Add `"atari_timing_mode": "cycle_accurate"` or `"atari_timing_mode": "frame_based"` to `config.json` in the `extra` section. The default is `cycle_accurate` for maximum compatibility.
+The emulator caches the first detected visible window start position to prevent frame-to-frame variation:
+- VBLANK timing variations are handled gracefully
+- Visible area remains stable across frames
 
-**Example config.json**:
-```json
-{
-  "atari_timing_mode": "cycle_accurate",
-  "window_width": 640,
-  "window_height": 480
-}
-```
+#### Known Timing Limitations
 
-#### Visible Window Stability
+⚠️ **Non-Standard Frame Timing**: Some homebrew games use non-standard scanline counts (e.g., 250 or 280 lines instead of 262). These may not render correctly.
 
-✅ **Fixed**
-
-The emulator now caches the first detected visible window start position to prevent frame-to-frame variation:
-- **Issue**: VBLANK timing variations caused visible_start to jump between frames (e.g., 77→83), resulting in vertical instability
-- **Fix**: Cache the first detected visible_start and use it for all subsequent frames
-- **Impact**: High - eliminates vertical jumping in games with variable VBLANK timing
-- **Test Coverage**: `test_visible_window_stability` ensures consistent rendering across frames
-
-#### Non-Standard Frame Timing
-
-⚠️ **May Not Work**
-
-Implementation assumes 262 scanlines per frame (NTSC standard). Some homebrew games use non-standard scanline counts (e.g., 250 or 280 lines).
-
-- **Impact**: Low - affects only exotic homebrew ROMs
-
-#### Input DDR Enforcement
-
-⚠️ **Stored But Not Enforced**
-
-SWACNT/SWBCNT Data Direction Registers are stored but not used to filter reads. Input always returns joystick state regardless of DDR.
-
-- **Impact**: Low - most games set DDR correctly
+⚠️ **Input DDR Enforcement**: SWACNT/SWBCNT Data Direction Registers are stored but not used to filter reads. Most games work correctly.
 
 ## Performance
 
 - **Target**: ~60 FPS (NTSC)
-- **Typical**: Runs at full speed on modern CPUs in both timing modes
+- **Typical**: Runs at full speed on modern CPUs
 - **Single-threaded**: Uses one CPU core
-- **Timing Modes**:
-  - Cycle-Accurate: ~3-5% more CPU usage than frame-based
   - Frame-Based: Fastest, optimized for speed
 
 ## Future Improvements
@@ -515,10 +480,16 @@ When adding Atari 2600 features:
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#atari-2600)
-- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
-- **Stella Programmer's Guide**: Classic Atari 2600 documentation
+### Project Documentation
+- [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) - Overall emulation architecture
+- [MANUAL.md](../../../docs/MANUAL.md#atari-2600) - User manual
+- [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md) - Contribution guidelines
+- [TIA Hardware Reference](../../../docs/src/references/tia.md) - TIA register specification
+
+### External References
+- [problemkaputt.de 2k6specs](https://problemkaputt.de/2k6specs.htm) - Comprehensive hardware specification
+- [Stella Programmer's Guide](https://alienbill.com/2600/101/docs/stella.html) - Classic programming reference
+- [AtariAge Programming Resources](https://www.atariage.com/2600/programming/index.html) - Community documentation
 
 ## License
 

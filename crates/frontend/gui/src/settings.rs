@@ -331,27 +331,6 @@ impl Settings {
     pub fn clear_recent_files(&mut self) {
         self.recent_files.clear();
     }
-
-    /// Get Atari 2600 timing mode from settings
-    /// Returns "cycle_accurate" or "frame_based"
-    /// Defaults to "cycle_accurate" if not set
-    pub fn get_atari_timing_mode(&self) -> String {
-        self.extra
-            .get("atari_timing_mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("cycle_accurate")
-            .to_string()
-    }
-
-    /// Set Atari 2600 timing mode in settings
-    /// Valid values: "cycle_accurate", "frame_based"
-    #[allow(dead_code)] // Kept for API completeness
-    pub fn set_atari_timing_mode(&mut self, mode: &str) {
-        self.extra.insert(
-            "atari_timing_mode".to_string(),
-            Value::String(mode.to_string()),
-        );
-    }
 }
 
 #[cfg(test)]

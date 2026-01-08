@@ -27,6 +27,7 @@ Hemulator implements several CPU architectures as reusable components. Each CPU 
 
 ## Hardware Component References
 
+- [TIA (Television Interface Adapter)](tia.md) - Atari 2600 video/audio chip
 - [PC Interrupts](pc-interrupts.md) - Comprehensive interrupt handling documentation for PC/DOS
 - [SPC700 IPL Protocol](spc700-ipl.md) - SNES audio processor boot protocol
 

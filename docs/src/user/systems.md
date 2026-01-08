@@ -70,10 +70,7 @@ The emulator supports the following cartridge banking schemes:
 
 **Features**:
 - TIA (Television Interface Adapter) video emulation with playfield rendering
-- **Configurable Timing Modes**:
-  - **Cycle-Accurate Mode (Default)**: Renders each pixel as generated, handles mid-scanline register changes, perfect for "racing the beam" techniques
-  - **Frame-Based Mode**: Faster rendering by latching state once per scanline, suitable for 95%+ of games
-  - Configure via `config.json`: `"atari_timing_mode": "cycle_accurate"` or `"frame_based"`
+- **Cycle-Accurate Rendering**: Renders each pixel as generated, handles mid-scanline register changes, supports "racing the beam" techniques
 - **Player/Missile Sizing (NUSIZ)**: Full support for sprite sizing (1x, 2x, 4x) and duplication modes
 - **Ball Sizing**: Full support for ball sizing (1, 2, 4, or 8 pixels) via CTRLPF bits 4-5
 - **Collision Detection**: All 8 collision registers implemented with pixel-perfect detection
@@ -90,7 +87,6 @@ The emulator supports the following cartridge banking schemes:
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
 
 **Recent Fixes**:
-- **Configurable Timing Modes**: Added cycle-accurate and frame-based timing modes (default: cycle-accurate)
 - **Vertical Stability**: Fixed vertical jumping issue by caching the visible window start position across frames
 - **Frame Consistency**: Enhanced test ROMs to catch timing-related rendering issues
 - **Bus Address Mapping**: Fixed address range 0x40-0x7F to write to both TIA and RIOT RAM (hardware-accurate dual-write behavior)

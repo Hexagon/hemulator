@@ -118,8 +118,17 @@ use emu_core::apu::PolynomialCounter;
 use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 use serde::{Deserialize, Serialize};
 
-use crate::timing_mode::TimingMode;
 use crate::video_mode::VideoMode;
+
+/// Maximum number of mid-scanline graphics changes we track per scanline
+const MAX_GRP_CHANGES: usize = 8;
+
+/// A mid-scanline graphics change: (pixel position, value)
+#[derive(Debug, Clone, Copy, Default)]
+struct GrpChange {
+    pixel: u8,  // Horizontal pixel position (0-159) when the change occurred
+    value: u8,  // The graphics value written
+}
 
 /// Per-scanline snapshot of TIA state for rendering
 #[derive(Debug, Clone, Copy, Default)]
@@ -157,6 +166,11 @@ struct ScanlineState {
     enabl: bool,
     ball_x: u8,
     ball_size: u8, // Ball size (1, 2, 4, or 8 pixels)
+    // Mid-scanline graphics changes for racing-the-beam effects
+    grp0_changes: [GrpChange; MAX_GRP_CHANGES],
+    grp0_change_count: u8,
+    grp1_changes: [GrpChange; MAX_GRP_CHANGES],
+    grp1_change_count: u8,
 }
 
 /// TIA chip state
@@ -248,6 +262,16 @@ pub struct Tia {
     scanline: u16,
     pixel: u16,
 
+    // Mid-scanline graphics change tracking for current scanline
+    #[serde(skip)]
+    current_grp0_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_grp0_change_count: u8,
+    #[serde(skip)]
+    current_grp1_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_grp1_change_count: u8,
+
     // Monotonic scanline counter for debug/telemetry (does not wrap)
     #[serde(skip)]
     scanline_counter: u64,
@@ -300,10 +324,6 @@ pub struct Tia {
 
     // Video mode (NTSC/PAL)
     video_mode: VideoMode,
-
-    // Timing mode (cycle-accurate or frame-based)
-    #[serde(skip)]
-    timing_mode: TimingMode,
 }
 
 impl Default for Tia {
@@ -323,10 +343,16 @@ impl Tia {
     }
 
     /// Apply horizontal motion to a position
+    /// Note: TIA horizontal motion is inverted from what you'd expect:
+    /// - Positive values (+1 to +7) move LEFT (decrease x position)
+    /// - Negative values (-1 to -8) move RIGHT (increase x position)
     fn apply_motion(&self, pos: u8, motion: i8) -> u8 {
         let p = pos as i16;
         let m = motion as i16;
-        let result = p + m;
+        // Subtract motion because TIA motion values are inverted:
+        // +7 means "move left 7 clocks" (subtract from position)
+        // -8 means "move right 8 clocks" (add to position)
+        let result = p - m;
         // Wrap around the 160-pixel screen width
         // The TIA hardware wraps positions, not clamps them
         if result < 0 {
@@ -336,18 +362,13 @@ impl Tia {
         }
     }
 
-    /// Create a new TIA chip with default NTSC video mode and cycle-accurate timing
+    /// Create a new TIA chip with default NTSC video mode
     pub fn new() -> Self {
-        Self::with_video_mode_and_timing(VideoMode::default(), TimingMode::default())
+        Self::with_video_mode(VideoMode::default())
     }
 
-    /// Create a new TIA chip with specified video mode and default timing
+    /// Create a new TIA chip with specified video mode
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
-        Self::with_video_mode_and_timing(video_mode, TimingMode::default())
-    }
-
-    /// Create a new TIA chip with specified video mode and timing mode
-    pub fn with_video_mode_and_timing(video_mode: VideoMode, timing_mode: TimingMode) -> Self {
         let total_scanlines = video_mode.scanlines_per_frame() as usize;
 
         Self {
@@ -412,6 +433,11 @@ impl Tia {
             scanline: 0,
             pixel: 0,
 
+            current_grp0_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_grp0_change_count: 0,
+            current_grp1_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_grp1_change_count: 0,
+
             scanline_counter: 0,
 
             scanline_states: vec![ScanlineState::default(); total_scanlines],
@@ -441,7 +467,6 @@ impl Tia {
             cached_visible_start: None,
 
             video_mode,
-            timing_mode,
         }
     }
 
@@ -608,7 +633,16 @@ impl Tia {
             },
             ball_x: self.ball_x,
             ball_size: self.ball_size,
+            // Copy mid-scanline graphics changes
+            grp0_changes: self.current_grp0_changes,
+            grp0_change_count: self.current_grp0_change_count,
+            grp1_changes: self.current_grp1_changes,
+            grp1_change_count: self.current_grp1_change_count,
         };
+        
+        // Clear current scanline's changes for the next scanline
+        self.current_grp0_change_count = 0;
+        self.current_grp1_change_count = 0;
     }
 
     /// Reset TIA to power-on state
@@ -633,7 +667,23 @@ impl Tia {
         match addr {
             0x00 => {
                 self.writes_vsync = self.writes_vsync.saturating_add(1);
-                self.vsync = (val & 0x02) != 0;
+                let new_vsync = (val & 0x02) != 0;
+
+                // Detect VSYNC falling edge (ON -> OFF transition)
+                // This is when a new frame begins - the game has finished VSYNC
+                // and is about to start the vertical blank period
+                if self.vsync && !new_vsync {
+                    // Reset scanline counter to 0 at the start of a new frame
+                    // This synchronizes our timing with the game's frame structure
+                    self.scanline = 0;
+                    self.pixel = 0;
+
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                        eprintln!("[TIA] VSYNC falling edge: reset scanline to 0");
+                    }
+                }
+
+                self.vsync = new_vsync;
             }
             0x01 => {
                 self.writes_vblank = self.writes_vblank.saturating_add(1);
@@ -746,21 +796,36 @@ impl Tia {
             }
 
             // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
-            0x10 => self.player0_x = self.current_visible_x(),
-            0x11 => self.player1_x = self.current_visible_x(),
+            // The TIA has a hardware delay of approximately 4-5 color clocks
+            // between the strobe and when the position counter actually resets.
+            // This effectively adds 4-5 pixels to the x position.
+            0x10 => {
+                let x = self.current_visible_x();
+                // Add 4 pixel delay for positioning (accounts for TIA hardware delay)
+                self.player0_x = (x.saturating_add(4)).min(159);
+            }
+            0x11 => {
+                let x = self.current_visible_x();
+                self.player1_x = (x.saturating_add(4)).min(159);
+            }
             0x12 => {
                 if !self.resmp0 {
                     // Only set position if not locked to player
-                    self.missile0_x = self.current_visible_x();
+                    let x = self.current_visible_x();
+                    self.missile0_x = (x.saturating_add(4)).min(159);
                 }
             }
             0x13 => {
                 if !self.resmp1 {
                     // Only set position if not locked to player
-                    self.missile1_x = self.current_visible_x();
+                    let x = self.current_visible_x();
+                    self.missile1_x = (x.saturating_add(4)).min(159);
                 }
             }
-            0x14 => self.ball_x = self.current_visible_x(),
+            0x14 => {
+                let x = self.current_visible_x();
+                self.ball_x = (x.saturating_add(4)).min(159);
+            }
 
             // Audio
             0x15 => {
@@ -789,34 +854,66 @@ impl Tia {
             }
 
             // Player graphics
+            // Per Stella Programmer's Guide: Writing GRP0 also loads the delayed register
+            // for player 1 from the current GRP1 value (and vice versa).
+            // This allows 6-digit displays using both players with vertical delay.
             0x1B => {
                 self.writes_grp0 = self.writes_grp0.saturating_add(1);
                 if val != 0 {
                     self.writes_grp0_nonzero = self.writes_grp0_nonzero.saturating_add(1);
                     if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                        eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {}", val, self.scanline);
+                        eprintln!("[TIA] GRP0 = 0x{:02X} at scanline {} pixel {}", val, self.scanline, self.pixel);
                     }
                 }
-                self.grp0_old = self.grp0; // Save old value before writing new
                 self.grp0 = val;
+                // Writing GRP0 copies GRP1 to GRP1_OLD (delayed register for player 1)
+                self.grp1_old = self.grp1;
+                // Record mid-scanline change for racing-the-beam rendering
+                if (self.current_grp0_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_grp0_change_count as usize;
+                    // Convert color clock position to visible pixel (0-159)
+                    // Visible area starts at color clock 68
+                    let visible_pixel = if self.pixel >= 68 {
+                        ((self.pixel - 68) as u8).min(159)
+                    } else {
+                        0
+                    };
+                    self.current_grp0_changes[idx] = GrpChange { pixel: visible_pixel, value: val };
+                    self.current_grp0_change_count += 1;
+                }
             }
             0x1C => {
                 self.writes_grp1 = self.writes_grp1.saturating_add(1);
                 if val != 0 {
                     self.writes_grp1_nonzero = self.writes_grp1_nonzero.saturating_add(1);
                     if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                        eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {}", val, self.scanline);
+                        eprintln!("[TIA] GRP1 = 0x{:02X} at scanline {} pixel {}", val, self.scanline, self.pixel);
                     }
                 }
-                self.grp1_old = self.grp1; // Save old value before writing new
                 self.grp1 = val;
+                // Writing GRP1 copies GRP0 to GRP0_OLD (delayed register for player 0)
+                // and also copies ENABL to ENABL_OLD (delayed register for ball)
+                self.grp0_old = self.grp0;
+                self.enabl_old = if self.enabl { 0x02 } else { 0x00 };
+                // Record mid-scanline change for racing-the-beam rendering
+                if (self.current_grp1_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_grp1_change_count as usize;
+                    // Convert color clock position to visible pixel (0-159)
+                    // Visible area starts at color clock 68
+                    let visible_pixel = if self.pixel >= 68 {
+                        ((self.pixel - 68) as u8).min(159)
+                    } else {
+                        0
+                    };
+                    self.current_grp1_changes[idx] = GrpChange { pixel: visible_pixel, value: val };
+                    self.current_grp1_change_count += 1;
+                }
             }
 
             // Enable missiles and ball
             0x1D => self.enam0 = (val & 0x02) != 0,
             0x1E => self.enam1 = (val & 0x02) != 0,
             0x1F => {
-                self.enabl_old = if self.enabl { 0x02 } else { 0x00 }; // Save old value
                 self.enabl = (val & 0x02) != 0;
             }
 
@@ -901,44 +998,10 @@ impl Tia {
         // Update paddle capacitor charging (every color clock)
         self.update_paddle_charging();
 
-        match self.timing_mode {
-            TimingMode::CycleAccurate => {
-                // Cycle-accurate: Process each color clock individually
-                // This ensures mid-scanline register changes affect pixels correctly
-                for _ in 0..3 {
-                    self.clock_color_clock();
-                }
-            }
-            TimingMode::FrameBased => {
-                // Frame-based: Just advance pixel counter and latch at scanline boundaries
-                self.pixel += 3; // 3 color clocks per CPU cycle
-
-                if self.pixel >= 228 {
-                    self.pixel -= 228;
-                    let old_scanline = self.scanline;
-
-                    // Latch the state of the OLD scanline BEFORE advancing to the new one
-                    self.latch_scanline_state(old_scanline);
-
-                    self.scanline += 1;
-                    self.scanline_counter = self.scanline_counter.saturating_add(1);
-
-                    let total_scanlines = self.video_mode.scanlines_per_frame();
-                    if self.scanline >= total_scanlines {
-                        self.scanline = 0;
-                    }
-
-                    // Debug logging
-                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug)
-                        && (old_scanline == 261 || self.scanline <= 1)
-                    {
-                        eprintln!(
-                            "[TIA CLOCK] Scanline {} -> {} (latched {})",
-                            old_scanline, self.scanline, old_scanline
-                        );
-                    }
-                }
-            }
+        // Cycle-accurate: Process each color clock individually
+        // This ensures mid-scanline register changes affect pixels correctly
+        for _ in 0..3 {
+            self.clock_color_clock();
         }
     }
 
@@ -1079,19 +1142,41 @@ impl Tia {
 
         let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
 
+        // Debug: dump VBLANK pattern on first detection
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            self.debug_vblank_pattern();
+        }
+
+        // Standard Atari 2600 frame structure:
+        // - Scanlines 0-2: VSYNC (3 lines)
+        // - Scanlines 3-39: VBLANK (37 lines)
+        // - Scanlines 40-231: Visible (192 lines)
+        // - Scanlines 232-261: Overscan (30 lines)
+        //
+        // We look for VBLANK turning OFF, but only consider transitions
+        // after scanline 10 to avoid false positives from early VBLANK changes.
+        // The visible area typically starts between scanlines 30-50.
+
         // First detection: find where VBLANK transitions from true to false
-        for i in 1..total_scanlines {
+        // Skip the first 10 scanlines to avoid noise during VSYNC period
+        for i in 10..total_scanlines.min(80) {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
 
             if prev.vblank && !cur.vblank {
                 // Cache and return the first detected transition
+                if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                    eprintln!("[TIA] visible_window_start detected at scanline {}", i);
+                }
                 self.cached_visible_start = Some(i as u16);
                 return i as u16;
             }
         }
 
         // Fallback: common visible start is around scanline ~40
+        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            eprintln!("[TIA] visible_window_start fallback to scanline 40");
+        }
         self.cached_visible_start = Some(40);
         40
     }
@@ -1143,6 +1228,35 @@ impl Tia {
         }
 
         (scanlines_with_pf, scanlines_with_grp)
+    }
+
+    /// Debug helper: dump VBLANK pattern to understand visible window detection
+    pub fn debug_vblank_pattern(&self) {
+        let total_scanlines = self.video_mode.scanlines_per_frame() as usize;
+        let mut transitions: Vec<(usize, bool, bool)> = Vec::new();
+
+        for i in 1..total_scanlines {
+            let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
+            let cur = self.scanline_states.get(i).copied().unwrap_or_default();
+            if prev.vblank != cur.vblank {
+                transitions.push((i, prev.vblank, cur.vblank));
+            }
+        }
+
+        eprintln!("[TIA DEBUG] VBLANK transitions:");
+        for (scanline, prev, cur) in &transitions {
+            eprintln!(
+                "  Scanline {}: {} -> {}",
+                scanline,
+                if *prev { "VBLANK" } else { "visible" },
+                if *cur { "VBLANK" } else { "visible" }
+            );
+        }
+        if transitions.is_empty() {
+            eprintln!("  (no transitions found - all scanlines have same VBLANK state)");
+            let first_state = self.scanline_states.first().copied().unwrap_or_default();
+            eprintln!("  First scanline VBLANK = {}", first_state.vblank);
+        }
     }
 
     /// Render a single visible scanline using latched state
@@ -1339,22 +1453,76 @@ impl Tia {
         palette_to_rgb(state.colubk, video_mode)
     }
 
+    /// Get the GRP0 value that was in effect at a given horizontal pixel position
+    /// This handles mid-scanline graphics changes for racing-the-beam effects
+    fn get_grp0_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        // If there are no mid-scanline changes, use the latched value
+        // (which has VDELP already applied in latch_scanline_state)
+        if state.grp0_change_count == 0 {
+            return state.grp0;
+        }
+
+        // For racing-the-beam displays, find the GRP value that was in effect at position x
+        // The changes array contains writes during the scanline in chronological order
+        
+        // Find the most recent change at or before this pixel position
+        // Start with the value from before the first change (typically the delayed value if VDELP,
+        // or 0 if no VDELP - the scanline starts "fresh")
+        let mut result = if state.vdelp0 { state.grp0_delayed } else { 0 };
+        
+        for i in 0..state.grp0_change_count as usize {
+            if state.grp0_changes[i].pixel as usize <= x {
+                result = state.grp0_changes[i].value;
+            } else {
+                break; // Changes are in order, no need to check further
+            }
+        }
+        result
+    }
+
+    /// Get the GRP1 value that was in effect at a given horizontal pixel position
+    /// This handles mid-scanline graphics changes for racing-the-beam effects
+    fn get_grp1_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        // If there are no mid-scanline changes, use the latched value
+        if state.grp1_change_count == 0 {
+            return state.grp1;
+        }
+
+        // Find the most recent change at or before this pixel position
+        let mut result = if state.vdelp1 { state.grp1_delayed } else { 0 };
+        
+        for i in 0..state.grp1_change_count as usize {
+            if state.grp1_changes[i].pixel as usize <= x {
+                result = state.grp1_changes[i].value;
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
     /// Check if a player pixel is visible at the given x position
     fn is_player_pixel(state: &ScanlineState, player: usize, x: usize) -> bool {
-        let (grp, pos, reflect, nusiz) = if player == 0 {
+        let (pos, reflect, nusiz) = if player == 0 {
             (
-                state.grp0,
                 state.player0_x,
                 state.player0_reflect,
                 state.nusiz0,
             )
         } else {
             (
-                state.grp1,
                 state.player1_x,
                 state.player1_reflect,
                 state.nusiz1,
             )
+        };
+
+        // Get the graphics value that was in effect at this pixel position
+        // This handles racing-the-beam effects where GRP changes mid-scanline
+        let grp = if player == 0 {
+            Self::get_grp0_at_pixel(state, x)
+        } else {
+            Self::get_grp1_at_pixel(state, x)
         };
 
         // NUSIZ bits 0-2 control number and size

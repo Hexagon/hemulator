@@ -137,7 +137,6 @@ mod debugger;
 mod riot;
 mod tia;
 pub mod tia_renderer;
-mod timing_mode;
 mod video_mode;
 
 use bus::Atari2600Bus;
@@ -147,7 +146,6 @@ use emu_core::{types::Frame, MountPointInfo, System};
 use serde_json::Value;
 use thiserror::Error;
 use tia_renderer::{SoftwareTiaRenderer, TiaRenderer};
-pub use timing_mode::TimingMode;
 pub use video_mode::VideoMode;
 
 #[derive(Debug, Error)]
@@ -166,8 +164,6 @@ pub struct Atari2600System {
     cycles: u64,
     renderer: Box<dyn TiaRenderer>,
     video_mode: VideoMode,
-    #[allow(dead_code)] // Stored for future use and API consistency
-    timing_mode: TimingMode,
     /// Instruction tracer for debugging
     instruction_tracer: emu_core::instruction_tracer::InstructionTracer,
     /// Breakpoint manager for debugging
@@ -181,19 +177,14 @@ impl Default for Atari2600System {
 }
 
 impl Atari2600System {
-    /// Create a new Atari 2600 system with default NTSC video mode and cycle-accurate timing
+    /// Create a new Atari 2600 system with default NTSC video mode
     pub fn new() -> Self {
-        Self::with_video_mode_and_timing(VideoMode::default(), TimingMode::default())
+        Self::with_video_mode(VideoMode::default())
     }
 
-    /// Create a new Atari 2600 system with specified video mode and default timing
+    /// Create a new Atari 2600 system with specified video mode
     pub fn with_video_mode(video_mode: VideoMode) -> Self {
-        Self::with_video_mode_and_timing(video_mode, TimingMode::default())
-    }
-
-    /// Create a new Atari 2600 system with specified video mode and timing mode
-    pub fn with_video_mode_and_timing(video_mode: VideoMode, timing_mode: TimingMode) -> Self {
-        let bus = Atari2600Bus::with_video_mode_and_timing(video_mode, timing_mode);
+        let bus = Atari2600Bus::with_video_mode(video_mode);
         let cpu = Atari2600Cpu::new(bus);
 
         Self {
@@ -201,7 +192,6 @@ impl Atari2600System {
             cycles: 0,
             renderer: Box::new(SoftwareTiaRenderer::new()),
             video_mode,
-            timing_mode,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
@@ -338,7 +328,7 @@ impl System for Atari2600System {
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Atari 2600 frames vary by video mode:
         // NTSC: 262 scanlines, PAL: 312 scanlines
-        // We detect frame boundaries by watching for scanline wraparound.
+        // We detect frame boundaries by watching for VSYNC falling edge.
 
         // Clear per-frame debug stats
         if let Some(bus) = self.cpu.bus_mut() {
@@ -347,19 +337,20 @@ impl System for Atari2600System {
         }
 
         let start_scanline = self.cpu.bus().map(|b| b.tia.get_scanline()).unwrap_or(0);
-        let mut last_scanline = start_scanline;
         let mut cpu_steps = 0u64;
+        let mut saw_vsync_on = false;
         const MAX_CPU_STEPS: u64 = 50_000; // Safety limit
 
         let debug_vsync = LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug);
 
-        // Threshold for detecting scanline wraparound (last ~12 scanlines)
-        let total_scanlines = self.video_mode.scanlines_per_frame();
-        let wraparound_threshold = total_scanlines - 12;
-
-        // Run until scanline wraps around, indicating frame completion
+        // Run until we see a complete VSYNC cycle (ON then OFF)
+        // This ensures we capture exactly one frame's worth of emulation
         while cpu_steps < MAX_CPU_STEPS {
             let pc_before = self.cpu.cpu.as_ref().map(|c| c.pc as u32);
+            
+            // Check VSYNC state before the CPU step
+            let vsync_before = self.cpu.bus().map(|b| b.tia.vsync()).unwrap_or(false);
+            
             let cycles = self.cpu.step();
             cpu_steps += 1;
 
@@ -384,24 +375,24 @@ impl System for Atari2600System {
                     self.cycles += extra as u64;
                 }
 
-                let current_scanline = bus.tia.get_scanline();
-
-                // Detect frame completion: scanline wrapped from high to low
-                // This works for both NTSC (261→0) and PAL (311→0)
-                if current_scanline < last_scanline
-                    && last_scanline > wraparound_threshold
-                    && current_scanline < 10
-                {
+                // Check for VSYNC transitions
+                let vsync_after = bus.tia.vsync();
+                
+                // Track VSYNC ON
+                if vsync_after && !vsync_before {
+                    saw_vsync_on = true;
+                }
+                
+                // Detect VSYNC OFF after we've seen VSYNC ON - this is the frame boundary
+                if saw_vsync_on && vsync_before && !vsync_after {
                     if debug_vsync {
                         eprintln!(
-                            "[ATARI] Frame complete: scanline {} -> {} after {} CPU steps",
-                            last_scanline, current_scanline, cpu_steps
+                            "[ATARI] Frame complete: VSYNC cycle detected after {} CPU steps",
+                            cpu_steps
                         );
                     }
                     break;
                 }
-
-                last_scanline = current_scanline;
             } else {
                 // No bus -> can't advance time; bail rather than spinning forever
                 break;
@@ -630,6 +621,10 @@ impl System for Atari2600System {
 
     fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
+    }
+
+    fn get_total_cycles(&self) -> u64 {
+        self.cycles
     }
 }
 
@@ -1421,57 +1416,19 @@ mod tests {
     }
 
     #[test]
-    fn test_cycle_accurate_timing_mode() {
-        let sys = Atari2600System::with_video_mode_and_timing(
-            VideoMode::default(),
-            TimingMode::CycleAccurate,
-        );
+    fn test_system_produces_frames() {
+        let mut sys = Atari2600System::new();
 
-        // Verify system was created successfully
-        assert_eq!(sys.cycles, 0);
-        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
-    }
+        // Load a minimal ROM
+        let rom = vec![0xFF; 4096];
+        sys.mount("Cartridge", &rom).unwrap();
 
-    #[test]
-    fn test_frame_based_timing_mode() {
-        let sys = Atari2600System::with_video_mode_and_timing(
-            VideoMode::default(),
-            TimingMode::FrameBased,
-        );
+        // Execute one frame - should not panic
+        let frame = sys.step_frame();
+        assert!(frame.is_ok(), "Failed to produce frame");
 
-        // Verify system was created successfully
-        assert_eq!(sys.cycles, 0);
-        assert_eq!(sys.timing_mode, TimingMode::FrameBased);
-    }
-
-    #[test]
-    fn test_default_timing_mode_is_cycle_accurate() {
-        let sys = Atari2600System::new();
-        assert_eq!(sys.timing_mode, TimingMode::CycleAccurate);
-    }
-
-    #[test]
-    fn test_both_timing_modes_produce_frames() {
-        // Test that both timing modes can execute and produce frames
-        for timing_mode in [TimingMode::CycleAccurate, TimingMode::FrameBased] {
-            let mut sys =
-                Atari2600System::with_video_mode_and_timing(VideoMode::default(), timing_mode);
-
-            // Load a minimal ROM
-            let rom = vec![0xFF; 4096];
-            sys.mount("Cartridge", &rom).unwrap();
-
-            // Execute one frame - should not panic
-            let frame = sys.step_frame();
-            assert!(
-                frame.is_ok(),
-                "Failed to produce frame with {:?} timing mode",
-                timing_mode
-            );
-
-            let frame = frame.unwrap();
-            assert_eq!(frame.width, 160);
-            assert_eq!(frame.height, 192);
-        }
+        let frame = frame.unwrap();
+        assert_eq!(frame.width, 160);
+        assert_eq!(frame.height, 192);
     }
 }

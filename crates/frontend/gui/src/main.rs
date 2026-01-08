@@ -1558,17 +1558,9 @@ Please ensure your system supports hardware-accelerated OpenGL and that the grap
     }
 }
 
-/// Create an Atari 2600 system with the appropriate timing mode based on settings
-fn create_atari2600_system(settings: &Settings) -> emu_atari2600::Atari2600System {
-    let timing_mode_str = settings.get_atari_timing_mode();
-    let timing_mode = emu_atari2600::TimingMode::parse(&timing_mode_str).unwrap_or_default();
-
-    eprintln!("Atari 2600: Using {} timing mode", timing_mode.name());
-
-    emu_atari2600::Atari2600System::with_video_mode_and_timing(
-        emu_atari2600::VideoMode::default(),
-        timing_mode,
-    )
+/// Create an Atari 2600 system
+fn create_atari2600_system(_settings: &Settings) -> emu_atari2600::Atari2600System {
+    emu_atari2600::Atari2600System::new()
 }
 
 /// Helper function to create EnhancedDebugState from a Debugger
