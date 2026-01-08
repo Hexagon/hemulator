@@ -1177,8 +1177,8 @@ impl Tia {
         // This is more reliable than a hard-coded value
         for i in 10..total_scanlines.min(80) {
             let state = self.scanline_states.get(i).copied().unwrap_or_default();
-            // Check if this scanline has any playfield or player graphics
-            if state.pf0 != 0 || state.pf1 != 0 || state.pf2 != 0 || state.grp0 != 0 || state.grp1 != 0 {
+            // Check if this scanline has any playfield or player graphics, but only when VBLANK is off
+            if !state.vblank && (state.pf0 != 0 || state.pf1 != 0 || state.pf2 != 0 || state.grp0 != 0 || state.grp1 != 0) {
                 if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                     eprintln!("[TIA] visible_window_start content-based fallback to scanline {}", i);
                 }
