@@ -1466,9 +1466,9 @@ impl Tia {
         // The changes array contains writes during the scanline in chronological order
         
         // Find the most recent change at or before this pixel position
-        // Start with the value from before the first change (typically the delayed value if VDELP,
-        // or 0 if no VDELP - the scanline starts "fresh")
-        let mut result = if state.vdelp0 { state.grp0_delayed } else { 0 };
+        // Start with the value that was latched at the beginning of the scanline
+        // (state.grp0 already has VDELP applied from latch_scanline_state)
+        let mut result = state.grp0;
         
         for i in 0..state.grp0_change_count as usize {
             if state.grp0_changes[i].pixel as usize <= x {
@@ -1489,7 +1489,9 @@ impl Tia {
         }
 
         // Find the most recent change at or before this pixel position
-        let mut result = if state.vdelp1 { state.grp1_delayed } else { 0 };
+        // Start with the value that was latched at the beginning of the scanline
+        // (state.grp1 already has VDELP applied from latch_scanline_state)
+        let mut result = state.grp1;
         
         for i in 0..state.grp1_change_count as usize {
             if state.grp1_changes[i].pixel as usize <= x {
