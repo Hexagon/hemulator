@@ -3144,4 +3144,136 @@ mod tests {
             "Vertical: attribute tables should mirror like regular nametable data"
         );
     }
+
+    #[test]
+    fn test_nametable_read_write_all_four_comprehensive() {
+        // Comprehensive test that writes and reads all four nametables
+        // using PPU registers, simulating how Camerica and other mappers access nametables
+
+        // Test with Horizontal mirroring
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write distinct values to all four nametables at the same offset (0x24)
+        // to verify mirroring behavior
+        ppu.write_register(6, 0x20); // $2024 - NT0
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xAA);
+
+        ppu.write_register(6, 0x24); // $2424 - NT1
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xBB);
+
+        ppu.write_register(6, 0x28); // $2824 - NT2
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xCC);
+
+        ppu.write_register(6, 0x2C); // $2C24 - NT3
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xDD);
+
+        // Read back and verify Horizontal mirroring:
+        // NT0 and NT1 should mirror (both show 0xBB - last write to pair)
+        // NT2 and NT3 should mirror (both show 0xDD - last write to pair)
+
+        ppu.vram_addr.set(0x2024);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_nt0 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2424);
+        let _ = ppu.read_register(7);
+        let val_nt1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2824);
+        let _ = ppu.read_register(7);
+        let val_nt2 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C24);
+        let _ = ppu.read_register(7);
+        let val_nt3 = ppu.read_register(7);
+
+        assert_eq!(val_nt0, 0xBB, "Horizontal: NT0 should mirror with NT1");
+        assert_eq!(val_nt1, 0xBB, "Horizontal: NT1 should mirror with NT0");
+        assert_eq!(val_nt2, 0xDD, "Horizontal: NT2 should mirror with NT3");
+        assert_eq!(val_nt3, 0xDD, "Horizontal: NT3 should mirror with NT2");
+
+        // Now test with Vertical mirroring
+        ppu.set_mirroring(Mirroring::Vertical);
+
+        // Clear VRAM and write again
+        ppu.vram = vec![0; 0x800];
+
+        ppu.write_register(6, 0x20); // $2024 - NT0
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0x11);
+
+        ppu.write_register(6, 0x24); // $2424 - NT1
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0x22);
+
+        ppu.write_register(6, 0x28); // $2824 - NT2
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0x33);
+
+        ppu.write_register(6, 0x2C); // $2C24 - NT3
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0x44);
+
+        // Read back and verify Vertical mirroring:
+        // NT0 and NT2 should mirror (both show 0x33 - last write to pair)
+        // NT1 and NT3 should mirror (both show 0x44 - last write to pair)
+
+        ppu.vram_addr.set(0x2024);
+        let _ = ppu.read_register(7);
+        let val_nt0 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2424);
+        let _ = ppu.read_register(7);
+        let val_nt1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2824);
+        let _ = ppu.read_register(7);
+        let val_nt2 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C24);
+        let _ = ppu.read_register(7);
+        let val_nt3 = ppu.read_register(7);
+
+        assert_eq!(val_nt0, 0x33, "Vertical: NT0 should mirror with NT2");
+        assert_eq!(val_nt1, 0x44, "Vertical: NT1 should mirror with NT3");
+        assert_eq!(val_nt2, 0x33, "Vertical: NT2 should mirror with NT0");
+        assert_eq!(val_nt3, 0x44, "Vertical: NT3 should mirror with NT1");
+
+        // Test with SingleScreenLower
+        ppu.set_mirroring(Mirroring::SingleScreenLower);
+
+        // All four writes should go to the same location
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xFF);
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xEE);
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xDD);
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xCC);
+
+        // All reads should return 0xCC (last write)
+        for addr in [0x2024u16, 0x2424, 0x2824, 0x2C24] {
+            ppu.vram_addr.set(addr);
+            let _ = ppu.read_register(7);
+            let val = ppu.read_register(7);
+            assert_eq!(
+                val, 0xCC,
+                "SingleScreenLower: all nametables should share same data (addr ${:04X})",
+                addr
+            );
+        }
+    }
 }

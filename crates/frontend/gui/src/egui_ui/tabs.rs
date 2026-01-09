@@ -2102,6 +2102,38 @@ impl TabManager {
         }
     }
 
+    /// Map a nametable address ($2000-$2FFF) to physical VRAM index
+    /// This replicates the PPU's mirroring logic for the tile viewer
+    fn map_nametable_addr_for_viewer(&self, addr: u16, vram_size: usize, mirroring: &str) -> usize {
+        let a = addr & 0x0FFF; // 0x0000..0x0FFF
+        let table = a / 0x0400; // 0..3
+        let offset = a % 0x0400;
+
+        let physical_table = match mirroring {
+            "FourScreen" => {
+                // With 4KB VRAM, each nametable is independent (no mirroring)
+                table
+            }
+            "Vertical" => match table {
+                0 | 2 => 0,
+                1 | 3 => 1,
+                _ => 0,
+            },
+            "Horizontal" => match table {
+                0 | 1 => 0,
+                2 | 3 => 1,
+                _ => 0,
+            },
+            "SingleScreenLower" => 0,
+            "SingleScreenUpper" => 1,
+            _ => 0, // Unknown mirroring, default to lower screen
+        };
+
+        let addr = (physical_table * 0x0400 + offset) as usize;
+        // Mask to VRAM size (0x7FF for 2KB, 0xFFF for 4KB)
+        addr & (vram_size - 1)
+    }
+
     fn render_nametables(&self, ui: &mut Ui, data: &TileViewerData) {
         // Nametable layout: render all four nametables in a 2x2 grid
         // Each nametable is 32x30 tiles = 256x240 pixels
@@ -2193,16 +2225,26 @@ impl TabManager {
             for tile_row in 0..30 {
                 for tile_col in 0..32 {
                     let nt_offset = tile_row * 32 + tile_col;
-                    // Handle VRAM wraparound for nametables 2 and 3 with 2KB VRAM
-                    let vram_idx = (nt_base + nt_offset) & 0x7FF;
+                    // Map logical nametable address to physical VRAM index using mirroring
+                    let logical_addr = (0x2000 + nt_base + nt_offset) as u16;
+                    let vram_idx = self.map_nametable_addr_for_viewer(
+                        logical_addr,
+                        data.vram.len(),
+                        &data.mirroring,
+                    );
                     let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0) as usize;
 
                     // Get attribute byte for this 16x16 pixel area (4 tiles)
                     let attr_col = tile_col / 4;
                     let attr_row = tile_row / 4;
                     let attr_offset = attr_row * 8 + attr_col;
-                    // Handle VRAM wraparound for attribute table access
-                    let attr_vram_idx = (attr_base + attr_offset) & 0x7FF;
+                    // Map attribute table address using mirroring
+                    let attr_logical_addr = (0x2000 + attr_base + attr_offset) as u16;
+                    let attr_vram_idx = self.map_nametable_addr_for_viewer(
+                        attr_logical_addr,
+                        data.vram.len(),
+                        &data.mirroring,
+                    );
                     let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                     // Extract 2-bit palette index for this 16x16 pixel quadrant
@@ -2296,7 +2338,13 @@ impl TabManager {
                     if tile_col < 32 && tile_row < 30 {
                         let nt_base = nt_idx * 0x400;
                         let nt_offset = tile_row * 32 + tile_col;
-                        let vram_idx = (nt_base + nt_offset) & 0x7FF;
+                        // Map logical nametable address to physical VRAM index
+                        let logical_addr = (0x2000 + nt_base + nt_offset) as u16;
+                        let vram_idx = self.map_nametable_addr_for_viewer(
+                            logical_addr,
+                            data.vram.len(),
+                            &data.mirroring,
+                        );
                         let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0);
 
                         // Get attribute info
@@ -2304,7 +2352,12 @@ impl TabManager {
                         let attr_col = tile_col / 4;
                         let attr_row = tile_row / 4;
                         let attr_offset = attr_row * 8 + attr_col;
-                        let attr_vram_idx = (attr_base + attr_offset) & 0x7FF;
+                        let attr_logical_addr = (0x2000 + attr_base + attr_offset) as u16;
+                        let attr_vram_idx = self.map_nametable_addr_for_viewer(
+                            attr_logical_addr,
+                            data.vram.len(),
+                            &data.mirroring,
+                        );
                         let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                         let quadrant_x = (tile_col / 2) % 2;
