@@ -322,6 +322,10 @@ pub struct Tia {
     #[serde(skip)]
     cached_visible_start: Option<u16>,
 
+    // Frame counter for visible window detection stability
+    #[serde(skip)]
+    visible_window_frame_count: u32,
+
     // Video mode (NTSC/PAL)
     video_mode: VideoMode,
 }
@@ -465,6 +469,7 @@ impl Tia {
             writes_colors_nonzero: 0,
 
             cached_visible_start: None,
+            visible_window_frame_count: 0,
 
             video_mode,
         }
@@ -1143,9 +1148,12 @@ impl Tia {
     /// Try to infer the start of the visible picture area based on VBLANK timing
     ///
     /// This method caches the first detected visible start to prevent vertical jumping
-    /// between frames. Once a valid VBLANK transition is detected, that value is used
-    /// for all subsequent frames to ensure stable rendering.
+    /// between frames. However, it waits for a few frames to ensure stable detection
+    /// before caching the value.
     pub fn visible_window_start_scanline(&mut self) -> u16 {
+        // Increment frame counter for detection stability
+        self.visible_window_frame_count = self.visible_window_frame_count.saturating_add(1);
+
         // If we already have a cached value, always use it for stability
         // This prevents vertical jumping even if VBLANK timing varies slightly
         if let Some(cached) = self.cached_visible_start {
@@ -1171,49 +1179,70 @@ impl Tia {
 
         // First detection: find where VBLANK transitions from true to false
         // Skip the first 10 scanlines to avoid noise during VSYNC period
+        let mut detected_scanline: Option<u16> = None;
+
         for i in 10..total_scanlines.min(80) {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
 
             if prev.vblank && !cur.vblank {
-                // Cache and return the first detected transition
-                if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                    eprintln!("[TIA] visible_window_start detected at scanline {}", i);
-                }
-                self.cached_visible_start = Some(i as u16);
-                return i as u16;
-            }
-        }
-
-        // Fallback: If no VBLANK transition found, look for first scanline with graphics content
-        // This is more reliable than a hard-coded value
-        for i in 10..total_scanlines.min(80) {
-            let state = self.scanline_states.get(i).copied().unwrap_or_default();
-            // Check if this scanline has any playfield or player graphics, but only when VBLANK is off
-            if !state.vblank
-                && (state.pf0 != 0
-                    || state.pf1 != 0
-                    || state.pf2 != 0
-                    || state.grp0 != 0
-                    || state.grp1 != 0)
-            {
+                detected_scanline = Some(i as u16);
                 if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
                     eprintln!(
-                        "[TIA] visible_window_start content-based fallback to scanline {}",
+                        "[TIA] visible_window_start VBLANK transition detected at scanline {}",
                         i
                     );
                 }
-                self.cached_visible_start = Some(i as u16);
-                return i as u16;
+                break;
             }
         }
 
-        // Final fallback: common visible start is around scanline ~40
-        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-            eprintln!("[TIA] visible_window_start hard-coded fallback to scanline 40");
+        // If no VBLANK transition found, try content-based detection
+        if detected_scanline.is_none() {
+            for i in 10..total_scanlines.min(80) {
+                let state = self.scanline_states.get(i).copied().unwrap_or_default();
+                // Check if this scanline has any playfield or player graphics, but only when VBLANK is off
+                if !state.vblank
+                    && (state.pf0 != 0
+                        || state.pf1 != 0
+                        || state.pf2 != 0
+                        || state.grp0 != 0
+                        || state.grp1 != 0)
+                {
+                    detected_scanline = Some(i as u16);
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                        eprintln!(
+                            "[TIA] visible_window_start content-based fallback to scanline {}",
+                            i
+                        );
+                    }
+                    break;
+                }
+            }
         }
-        self.cached_visible_start = Some(40);
-        40
+
+        // Use detected scanline or fallback to 40
+        let scanline = detected_scanline.unwrap_or(40);
+
+        // Only cache after we've seen a few frames to ensure stable detection
+        // This prevents caching an incorrect value from the first incomplete frame
+        const FRAMES_BEFORE_CACHE: u32 = 3;
+        if self.visible_window_frame_count >= FRAMES_BEFORE_CACHE {
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                eprintln!(
+                    "[TIA] Caching visible_window_start at scanline {} (frame {})",
+                    scanline, self.visible_window_frame_count
+                );
+            }
+            self.cached_visible_start = Some(scanline);
+        } else if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            eprintln!(
+                "[TIA] visible_window_start at scanline {} (frame {}, not caching yet)",
+                scanline, self.visible_window_frame_count
+            );
+        }
+
+        scanline
     }
 
     /// Debug helper: count how many of the visible scanlines have any playfield/player bits.
@@ -1546,14 +1575,6 @@ impl Tia {
             (state.player1_x, state.player1_reflect, state.nusiz1)
         };
 
-        // Get the graphics value that was in effect at this pixel position
-        // This handles racing-the-beam effects where GRP changes mid-scanline
-        let grp = if player == 0 {
-            Self::get_grp0_at_pixel(state, x)
-        } else {
-            Self::get_grp1_at_pixel(state, x)
-        };
-
         // NUSIZ bits 0-2 control number and size
         // Bits 0-2: 000=one, 001=two close, 010=two medium, 011=three close,
         //           100=two wide, 101=double size, 110=three medium, 111=quad size
@@ -1586,6 +1607,14 @@ impl Tia {
             // Check if x is within this copy's range
             if x >= copy_pos && x < copy_pos + 8 * player_size {
                 let offset = x - copy_pos;
+
+                // Get the graphics value at the START of this copy's position
+                // This is critical for racing-the-beam effects with multiple copies
+                let grp = if player == 0 {
+                    Self::get_grp0_at_pixel(state, copy_pos)
+                } else {
+                    Self::get_grp1_at_pixel(state, copy_pos)
+                };
 
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
