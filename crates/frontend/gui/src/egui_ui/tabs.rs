@@ -2140,47 +2140,70 @@ impl TabManager {
             0x0000
         };
 
-        // Draw labels
+        // Draw labels for all four nametables
+        let label_y = rect.min.y + 8.0;
         painter.text(
-            egui::Pos2::new(rect.min.x + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Pos2::new(rect.min.x + nt_width / 2.0, label_y),
             egui::Align2::CENTER_CENTER,
             "Nametable 0 ($2000)",
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );
         painter.text(
-            egui::Pos2::new(
-                rect.min.x + nt_width + spacing + nt_width / 2.0,
-                rect.min.y + 8.0,
-            ),
+            egui::Pos2::new(rect.min.x + nt_width + spacing + nt_width / 2.0, label_y),
             egui::Align2::CENTER_CENTER,
             "Nametable 1 ($2400)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::Pos2::new(rect.min.x + nt_width / 2.0, label_y + nt_height + spacing),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 2 ($2800)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::Pos2::new(
+                rect.min.x + nt_width + spacing + nt_width / 2.0,
+                label_y + nt_height + spacing,
+            ),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 3 ($2C00)",
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );
 
         let nt_start_y = rect.min.y + 18.0;
 
-        // Render both nametables
-        for nt_idx in 0..2 {
-            let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
+        // Render all four nametables in 2x2 grid
+        for nt_idx in 0..4 {
+            // Calculate position in 2x2 grid
+            let grid_x = nt_idx % 2;
+            let grid_y = nt_idx / 2;
+            let nt_start_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+            let nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
 
             // Nametable base address in VRAM
-            // VRAM layout depends on mirroring, but we show logical nametables 0 and 1
-            let nt_base = nt_idx * 0x400; // 0x000 or 0x400 in VRAM
+            // VRAM layout depends on mirroring, but we show logical nametables 0-3
+            let nt_base = nt_idx * 0x400; // 0x000, 0x400, 0x800, or 0xC00 in VRAM (but wraps with 2KB)
             let attr_base = nt_base + 0x3C0; // Attribute table at end of each nametable
 
             // Render 32x30 tiles
             for tile_row in 0..30 {
                 for tile_col in 0..32 {
                     let nt_offset = tile_row * 32 + tile_col;
-                    let tile_idx = data.vram[nt_base + nt_offset] as usize;
+                    // Handle VRAM wraparound for nametables 2 and 3 with 2KB VRAM
+                    let vram_idx = (nt_base + nt_offset) & 0x7FF;
+                    let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0) as usize;
 
                     // Get attribute byte for this 16x16 pixel area (4 tiles)
                     let attr_col = tile_col / 4;
                     let attr_row = tile_row / 4;
                     let attr_offset = attr_row * 8 + attr_col;
-                    let attr_byte = data.vram[attr_base + attr_offset];
+                    // Handle VRAM wraparound for attribute table access
+                    let attr_vram_idx = (attr_base + attr_offset) & 0x7FF;
+                    let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                     // Extract 2-bit palette index for this 16x16 pixel quadrant
                     let quadrant_x = (tile_col / 2) % 2;
@@ -2211,7 +2234,7 @@ impl TabManager {
                     // Get tile data from CHR
                     let chr_addr = bg_pattern_table + tile_idx * 16;
                     let tile_x = nt_start_x + tile_col as f32 * tile_size;
-                    let tile_y = nt_start_y + tile_row as f32 * tile_size;
+                    let tile_y = nt_y + tile_row as f32 * tile_size;
 
                     // Render 8x8 tile pixels
                     for py in 0..8 {
@@ -2243,7 +2266,7 @@ impl TabManager {
 
             // Draw nametable border
             let nt_rect = egui::Rect::from_min_size(
-                egui::Pos2::new(nt_start_x, nt_start_y),
+                egui::Pos2::new(nt_start_x, nt_y),
                 egui::Vec2::new(nt_width, nt_height),
             );
             painter.rect_stroke(
@@ -2256,12 +2279,15 @@ impl TabManager {
 
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {
-            let rel_y = hover_pos.y - nt_start_y;
-
-            // Check which nametable we're hovering over
-            for nt_idx in 0..2 {
-                let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
+            // Check which nametable we're hovering over (2x2 grid)
+            for nt_idx in 0..4 {
+                let grid_x = nt_idx % 2;
+                let grid_y = nt_idx / 2;
+                let nt_start_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+                let nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
+                
                 let rel_x = hover_pos.x - nt_start_x;
+                let rel_y = hover_pos.y - nt_y;
 
                 if rel_x >= 0.0 && rel_x < nt_width && rel_y >= 0.0 && rel_y < nt_height {
                     let tile_col = (rel_x / tile_size) as usize;
@@ -2270,14 +2296,16 @@ impl TabManager {
                     if tile_col < 32 && tile_row < 30 {
                         let nt_base = nt_idx * 0x400;
                         let nt_offset = tile_row * 32 + tile_col;
-                        let tile_idx = data.vram[nt_base + nt_offset];
+                        let vram_idx = (nt_base + nt_offset) & 0x7FF;
+                        let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0);
 
                         // Get attribute info
                         let attr_base = nt_base + 0x3C0;
                         let attr_col = tile_col / 4;
                         let attr_row = tile_row / 4;
                         let attr_offset = attr_row * 8 + attr_col;
-                        let attr_byte = data.vram[attr_base + attr_offset];
+                        let attr_vram_idx = (attr_base + attr_offset) & 0x7FF;
+                        let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                         let quadrant_x = (tile_col / 2) % 2;
                         let quadrant_y = (tile_row / 2) % 2;
