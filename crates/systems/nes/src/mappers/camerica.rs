@@ -268,30 +268,30 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Header says Horizontal (will be respected)
+            mirroring: Mirroring::Horizontal, // Header says Horizontal (but will be ignored)
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Vertical); // Initialized with Vertical
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal); // Initialized with Horizontal
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Should initialize with Horizontal mirroring (from header), respecting hard-wired PCB
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+        // Should initialize with Vertical mirroring (hard-wired on Camerica PCBs), ignoring header
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
 
         camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         // Since all writes were to $8000-$8FFF and $C000-$FFFF (not $9000-$9FFF),
-        // mirroring should remain as the initial value (horizontal from header)
+        // mirroring should remain as the initial value (vertical hard-wired on PCB)
     }
 
     #[test]

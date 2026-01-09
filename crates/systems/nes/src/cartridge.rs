@@ -41,9 +41,10 @@ impl Cartridge {
             // AxROM (007): Always uses single-screen mirroring, header is meaningless
             7 => Mirroring::SingleScreenLower,
 
-            // Camerica (071): Respect header mirroring for hard-wired mirroring on cartridge.
+            // Camerica (071): Use Vertical mirroring (hard-wired on most cartridges).
+            // ROM headers are often incorrect for Camerica games.
             // Games can override to single-screen via $9000 writes if needed (e.g., Fire Hawk).
-            71 => self.mirroring,
+            71 => Mirroring::Vertical,
 
             // All other mappers: Use header mirroring
             _ => self.mirroring,
