@@ -114,7 +114,7 @@ fn palette_mirror_index(i: usize) -> usize {
 pub struct Ppu {
     pub chr: Vec<u8>,
     chr_is_ram: bool,
-    pub vram: [u8; 0x800], // 2KB internal VRAM (nametables)
+    pub vram: Vec<u8>, // 2KB or 4KB internal VRAM (nametables) - 4KB for FourScreen mirroring
     pub palette: [u8; 32],
     pub oam: [u8; 256],
     mirroring: Mirroring,
@@ -156,10 +156,16 @@ impl Ppu {
         } else {
             (chr, false)
         };
+        // Allocate 4KB VRAM for FourScreen mirroring, 2KB for all other modes
+        let vram_size = if mirroring == Mirroring::FourScreen {
+            0x1000 // 4KB for independent nametables
+        } else {
+            0x800 // 2KB for mirrored nametables
+        };
         Self {
             chr,
             chr_is_ram,
-            vram: [0; 0x800],
+            vram: vec![0; vram_size],
             palette: [0; 32],
             oam: [0; 256],
             mirroring,
@@ -188,14 +194,18 @@ impl Ppu {
     }
 
     fn map_nametable_addr(&self, addr: u16) -> usize {
-        // Map $2000-$2FFF into internal 2KB VRAM using cartridge mirroring.
+        // Map $2000-$2FFF into internal VRAM using cartridge mirroring.
         let a = addr & 0x0FFF; // 0x0000..0x0FFF
         let table = (a / 0x0400) as u16; // 0..3
         let offset = (a % 0x0400) as u16;
 
-        // For now, treat FourScreen as Vertical (we only have 2KB).
         let physical_table = match self.mirroring {
-            Mirroring::Vertical | Mirroring::FourScreen => match table {
+            Mirroring::FourScreen => {
+                // With 4KB VRAM, each nametable is independent (no mirroring)
+                // Table 0 at 0x000, Table 1 at 0x400, Table 2 at 0x800, Table 3 at 0xC00
+                table
+            }
+            Mirroring::Vertical => match table {
                 0 | 2 => 0,
                 1 | 3 => 1,
                 _ => 0,
@@ -209,10 +219,30 @@ impl Ppu {
             Mirroring::SingleScreenUpper => 1,
         };
 
-        (physical_table * 0x0400 + offset) as usize & 0x07FF
+        let addr = (physical_table * 0x0400 + offset) as usize;
+        // Mask to VRAM size (0x7FF for 2KB, 0xFFF for 4KB)
+        addr & (self.vram.len() - 1)
     }
 
     pub fn set_mirroring(&mut self, mirroring: Mirroring) {
+        // If switching to/from FourScreen, resize VRAM appropriately
+        let old_needs_4kb = self.mirroring == Mirroring::FourScreen;
+        let new_needs_4kb = mirroring == Mirroring::FourScreen;
+
+        if old_needs_4kb != new_needs_4kb {
+            let new_size = if new_needs_4kb { 0x1000 } else { 0x800 };
+            let old_size = self.vram.len();
+
+            // Preserve as much data as possible when resizing
+            if new_size > old_size {
+                // Expanding: keep existing data, zero-fill the rest
+                self.vram.resize(new_size, 0);
+            } else {
+                // Shrinking: keep only the first new_size bytes
+                self.vram.truncate(new_size);
+            }
+        }
+
         self.mirroring = mirroring;
     }
 
@@ -2536,9 +2566,11 @@ mod tests {
 
         // Set up different tiles in each nametable
         // Nametable 0 (0x2000): tile 0x01
-        ppu.vram[ppu.map_nametable_addr(0x2000)] = 0x01;
+        let addr_nt0 = ppu.map_nametable_addr(0x2000);
+        ppu.vram[addr_nt0] = 0x01;
         // Nametable 1 (0x2400): tile 0x02
-        ppu.vram[ppu.map_nametable_addr(0x2400)] = 0x02;
+        let addr_nt1 = ppu.map_nametable_addr(0x2400);
+        ppu.vram[addr_nt1] = 0x02;
 
         // Create distinct tile patterns in CHR-RAM
         // Tile 0x01: all color 1
@@ -2605,7 +2637,7 @@ mod tests {
         // With vertical mirroring: 0->phys0, 1->phys1, 2->phys0, 3->phys1
 
         // Clear and set up again with base nametable 1
-        ppu.vram = [0; 0x800];
+        ppu.vram = vec![0; 0x800];
 
         // For vertical mirroring, logical NT 1 (0x2400) maps to physical offset 0x0400
         // Set tile at start of NT 1
@@ -2910,10 +2942,16 @@ mod tests {
 
     #[test]
     fn test_four_screen_mirroring_requires_4kb_vram() {
-        // Four-screen mirroring requires 4KB VRAM (all four nametables independent)
-        // Currently falls back to Vertical with only 2KB VRAM
+        // Four-screen mirroring uses 4KB VRAM (all four nametables independent)
         let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::FourScreen);
         ppu.clear_first_frame_lock();
+
+        // Verify 4KB VRAM was allocated
+        assert_eq!(
+            ppu.vram.len(),
+            0x1000,
+            "FourScreen mirroring should allocate 4KB VRAM"
+        );
 
         // Write unique values to all four logical nametables
         ppu.write_register(6, 0x20); // $2000
@@ -2932,10 +2970,7 @@ mod tests {
         ppu.write_register(6, 0x00);
         ppu.write_register(7, 0xDD);
 
-        // With current 2KB implementation, FourScreen falls back to Vertical
-        // So $2000 and $2800 will mirror, $2400 and $2C00 will mirror
-        // Once we implement 4KB VRAM, all four should be independent
-
+        // With 4KB VRAM, all four nametables should be independent
         ppu.vram_addr.set(0x2000);
         let _ = ppu.read_register(7);
         let val_2000 = ppu.read_register(7);
@@ -2952,29 +2987,11 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_2c00 = ppu.read_register(7);
 
-        // TODO: Once 4KB VRAM is implemented, these assertions should change:
-        // assert_eq!(val_2000, 0xAA, "FourScreen: $2000 should be independent");
-        // assert_eq!(val_2400, 0xBB, "FourScreen: $2400 should be independent");
-        // assert_eq!(val_2800, 0xCC, "FourScreen: $2800 should be independent");
-        // assert_eq!(val_2c00, 0xDD, "FourScreen: $2C00 should be independent");
-
-        // Current behavior (falls back to Vertical):
-        assert_eq!(
-            val_2000, 0xCC,
-            "FourScreen (2KB): $2000 currently mirrors to $2800 (Vertical fallback)"
-        );
-        assert_eq!(
-            val_2400, 0xDD,
-            "FourScreen (2KB): $2400 currently mirrors to $2C00 (Vertical fallback)"
-        );
-        assert_eq!(
-            val_2800, 0xCC,
-            "FourScreen (2KB): $2800 currently mirrors to $2000 (Vertical fallback)"
-        );
-        assert_eq!(
-            val_2c00, 0xDD,
-            "FourScreen (2KB): $2C00 currently mirrors to $2400 (Vertical fallback)"
-        );
+        // All four nametables should be independent with 4KB VRAM
+        assert_eq!(val_2000, 0xAA, "FourScreen: $2000 should be independent");
+        assert_eq!(val_2400, 0xBB, "FourScreen: $2400 should be independent");
+        assert_eq!(val_2800, 0xCC, "FourScreen: $2800 should be independent");
+        assert_eq!(val_2c00, 0xDD, "FourScreen: $2C00 should be independent");
     }
 
     #[test]

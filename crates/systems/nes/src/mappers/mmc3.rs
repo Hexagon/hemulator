@@ -1241,8 +1241,7 @@ mod tests {
 
     #[test]
     fn mmc3_nametable_mirroring_four_screen() {
-        // Test that MMC3 4-screen mirroring setup works
-        // Note: With current 2KB VRAM, this falls back to Vertical mirroring
+        // Test that MMC3 4-screen mirroring works with 4KB VRAM
         // Games like Rad Racer II use 4-screen mirroring with MMC3
         let cart = Cartridge {
             prg_rom: vec![0; 0x8000],
@@ -1255,6 +1254,13 @@ mod tests {
         let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
         ppu.clear_first_frame_lock();
         let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify 4KB VRAM was allocated
+        assert_eq!(
+            ppu.vram.len(),
+            0x1000,
+            "FourScreen mirroring should allocate 4KB VRAM"
+        );
 
         // Write unique values to all four nametables
         ppu.write_register(6, 0x20);
@@ -1273,8 +1279,7 @@ mod tests {
         ppu.write_register(6, 0x00);
         ppu.write_register(7, 0xDD);
 
-        // With current 2KB VRAM implementation, FourScreen falls back to Vertical
-        // So $2000 and $2800 mirror, $2400 and $2C00 mirror
+        // With 4KB VRAM, all four nametables should be independent
         ppu.vram_addr.set(0x2000);
         let _ = ppu.read_register(7);
         let val_2000 = ppu.read_register(7);
@@ -1291,28 +1296,22 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_2c00 = ppu.read_register(7);
 
-        // TODO: Once 4KB VRAM is implemented, these should be:
-        // assert_eq!(val_2000, 0xAA, "FourScreen: $2000 should be independent");
-        // assert_eq!(val_2400, 0xBB, "FourScreen: $2400 should be independent");
-        // assert_eq!(val_2800, 0xCC, "FourScreen: $2800 should be independent");
-        // assert_eq!(val_2c00, 0xDD, "FourScreen: $2C00 should be independent");
-
-        // Current behavior (falls back to Vertical):
+        // All four nametables should be independent with 4KB VRAM
         assert_eq!(
-            val_2000, 0xCC,
-            "MMC3 FourScreen (2KB): $2000 currently mirrors to $2800 (Vertical fallback)"
+            val_2000, 0xAA,
+            "MMC3 FourScreen: $2000 should be independent"
+        );
+        assert_eq!(
+            val_2400, 0xBB,
+            "MMC3 FourScreen: $2400 should be independent"
         );
         assert_eq!(
             val_2800, 0xCC,
-            "MMC3 FourScreen (2KB): $2800 currently mirrors to $2000 (Vertical fallback)"
-        );
-        assert_eq!(
-            val_2400, 0xDD,
-            "MMC3 FourScreen (2KB): $2400 currently mirrors to $2C00 (Vertical fallback)"
+            "MMC3 FourScreen: $2800 should be independent"
         );
         assert_eq!(
             val_2c00, 0xDD,
-            "MMC3 FourScreen (2KB): $2C00 currently mirrors to $2400 (Vertical fallback)"
+            "MMC3 FourScreen: $2C00 should be independent"
         );
     }
 
