@@ -12,6 +12,7 @@
 
 #![allow(clippy::upper_case_acronyms)]
 
+mod ai;
 mod bus;
 mod cartridge;
 mod cpu;

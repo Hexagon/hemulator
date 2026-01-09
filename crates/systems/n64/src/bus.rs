@@ -1,5 +1,6 @@
 //! N64 memory bus implementation
 
+use crate::ai::AudioInterface;
 use crate::cartridge::Cartridge;
 use crate::mi::MipsInterface;
 use crate::pif::Pif;
@@ -26,6 +27,8 @@ pub struct N64Bus {
     vi: VideoInterface,
     /// MI (MIPS Interface - interrupt controller)
     mi: MipsInterface,
+    /// AI (Audio Interface)
+    ai: AudioInterface,
     /// Entry point from ROM header (set during cartridge load)
     entry_point: Option<u64>,
 }
@@ -44,6 +47,7 @@ impl N64Bus {
             rsp: Rsp::new(),
             vi: VideoInterface::new(),
             mi: MipsInterface::new(),
+            ai: AudioInterface::new(),
             entry_point: None,
         };
 
@@ -147,6 +151,16 @@ impl N64Bus {
     #[allow(dead_code)] // Reserved for future use when VI is integrated with frame rendering
     pub fn vi_mut(&mut self) -> &mut VideoInterface {
         &mut self.vi
+    }
+
+    #[allow(dead_code)] // Reserved for audio output integration
+    pub fn ai(&self) -> &AudioInterface {
+        &self.ai
+    }
+
+    #[allow(dead_code)] // Reserved for audio output integration
+    pub fn ai_mut(&mut self) -> &mut AudioInterface {
+        &mut self.ai
     }
 
     #[allow(dead_code)] // Reserved for future use
@@ -282,6 +296,11 @@ impl MemoryMips for N64Bus {
                 let offset = phys_addr & 0x3F;
                 self.vi.read_register(offset)
             }
+            // AI registers (0x04500000 - 0x04500017)
+            0x0450_0000..=0x0450_0017 => {
+                let offset = phys_addr & 0x1F;
+                self.ai.read_register(offset)
+            }
             // Cartridge ROM
             0x1000_0000..=0x1FBF_FFFF => {
                 if let Some(ref cart) = self.cartridge {
@@ -402,6 +421,19 @@ impl MemoryMips for N64Bus {
             0x0440_0000..=0x0440_0037 => {
                 let offset = phys_addr & 0x3F;
                 self.vi.write_register(offset, val);
+            }
+            // AI registers (0x04500000 - 0x04500017)
+            0x0450_0000..=0x0450_0017 => {
+                let offset = phys_addr & 0x1F;
+                self.ai.write_register(offset, val, &self.rdram);
+                
+                // Check if AI interrupt is pending
+                if self.ai.is_interrupt_pending() {
+                    self.mi.set_interrupt(crate::mi::MI_INTR_AI);
+                    log(LogCategory::Interrupts, LogLevel::Info, || {
+                        "N64 Bus: AI interrupt triggered".to_string()
+                    });
+                }
             }
             _ => {
                 let bytes = val.to_be_bytes();
