@@ -1575,14 +1575,6 @@ impl Tia {
             (state.player1_x, state.player1_reflect, state.nusiz1)
         };
 
-        // Get the graphics value that was in effect at this pixel position
-        // This handles racing-the-beam effects where GRP changes mid-scanline
-        let grp = if player == 0 {
-            Self::get_grp0_at_pixel(state, x)
-        } else {
-            Self::get_grp1_at_pixel(state, x)
-        };
-
         // NUSIZ bits 0-2 control number and size
         // Bits 0-2: 000=one, 001=two close, 010=two medium, 011=three close,
         //           100=two wide, 101=double size, 110=three medium, 111=quad size
@@ -1615,6 +1607,14 @@ impl Tia {
             // Check if x is within this copy's range
             if x >= copy_pos && x < copy_pos + 8 * player_size {
                 let offset = x - copy_pos;
+
+                // Get the graphics value at the START of this copy's position
+                // This is critical for racing-the-beam effects with multiple copies
+                let grp = if player == 0 {
+                    Self::get_grp0_at_pixel(state, copy_pos)
+                } else {
+                    Self::get_grp1_at_pixel(state, copy_pos)
+                };
 
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
