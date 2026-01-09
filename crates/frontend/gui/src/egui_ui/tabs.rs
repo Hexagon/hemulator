@@ -15,8 +15,35 @@ pub enum Tab {
     Log,
     Help,
     Debug,
+    Tiles, // Tile/palette viewer for PPU debugging
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
     About,
+}
+
+/// Data for the tile viewer tab
+#[derive(Clone)]
+pub struct TileViewerData {
+    /// CHR data (pattern tables) - 8KB for NES
+    pub chr_data: Vec<u8>,
+    /// Palette data - 32 bytes for NES (4 colors x 8 palettes)
+    pub palette: Vec<u8>,
+    /// NES master palette for color lookup
+    pub master_palette: Vec<u32>,
+    /// OAM data - 256 bytes (64 sprites x 4 bytes each)
+    pub oam: Vec<u8>,
+    /// VRAM data - 2KB nametables
+    pub vram: Vec<u8>,
+    /// Whether this is CHR-RAM (true) or CHR-ROM (false)
+    pub chr_is_ram: bool,
+    /// Current PPUCTRL value (for pattern table selection info)
+    pub ppuctrl: u8,
+    /// Current PPUMASK value
+    pub ppumask: u8,
+    /// Current scroll values
+    pub scroll_x: u8,
+    pub scroll_y: u8,
+    /// Current mirroring mode
+    pub mirroring: String,
 }
 
 /// Actions that can be triggered from tabs
@@ -51,10 +78,12 @@ pub struct TabManager {
     pub log_messages: Vec<String>,
     pub help_visible: bool,
     pub debug_visible: bool,
+    pub tiles_visible: bool,
     pub pc_config_visible: bool,
     pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
+    pub tile_viewer_data: Option<TileViewerData>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -71,10 +100,12 @@ impl TabManager {
             log_messages: Vec::new(),
             help_visible: false,
             debug_visible: false,
+            tiles_visible: false,
             pc_config_visible: false,
             about_visible: false,
             debug_info: None,
             enhanced_debug_state: None,
+            tile_viewer_data: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -91,6 +122,15 @@ impl TabManager {
         if self.log_messages.len() > 1000 {
             self.log_messages.remove(0);
         }
+    }
+
+    pub fn show_tiles_tab(&mut self) {
+        self.tiles_visible = true;
+        self.active_tab = Tab::Tiles;
+    }
+
+    pub fn update_tile_viewer_data(&mut self, data: TileViewerData) {
+        self.tile_viewer_data = Some(data);
     }
 
     pub fn show_pc_config_tab(&mut self) {
@@ -210,6 +250,24 @@ impl TabManager {
                 }
             }
 
+            if self.tiles_visible {
+                ui.selectable_value(&mut self.active_tab, Tab::Tiles, "🎨 Tiles");
+                let close_button = egui::Button::new(
+                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
+                )
+                .small();
+                if ui
+                    .add(close_button)
+                    .on_hover_text("Close Tiles tab")
+                    .clicked()
+                {
+                    self.tiles_visible = false;
+                    if self.active_tab == Tab::Tiles {
+                        self.active_tab = Tab::Emulator;
+                    }
+                }
+            }
+
             if self.about_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ️ About");
                 // Use a colored button for the close icon to ensure visibility
@@ -246,6 +304,7 @@ impl TabManager {
             Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::Debug => self.render_debug_tab(ui),
+            Tab::Tiles => self.render_tiles_tab(ui),
             Tab::About => self.render_about_tab(ui),
             // Keep PcConfig render for backward compat, but it won't be accessible
             Tab::PcConfig => self.render_pc_config_tab(ui),
@@ -1283,6 +1342,739 @@ impl TabManager {
                     ui.label("This tab is only available when a PC system is loaded");
                 }
             });
+    }
+
+    fn render_tiles_tab(&self, ui: &mut Ui) {
+        let available_height = ui.available_height();
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .max_height(available_height)
+            .show(ui, |ui| {
+                if let Some(ref data) = self.tile_viewer_data {
+                    // Header with PPU state info
+                    ui.heading("🎨 NES Tile Viewer");
+                    ui.separator();
+
+                    // PPU state summary
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl)).monospace(),
+                        );
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask)).monospace(),
+                        );
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Scroll: ({}, {})",
+                                data.scroll_x, data.scroll_y
+                            ))
+                            .monospace(),
+                        );
+                        ui.separator();
+                        ui.label(egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace());
+                    });
+
+                    ui.add_space(5.0);
+
+                    // CHR type indicator
+                    let chr_type = if data.chr_is_ram { "CHR-RAM" } else { "CHR-ROM" };
+                    let chr_size = data.chr_data.len();
+                    ui.label(format!("{} ({} bytes / {} KB)", chr_type, chr_size, chr_size / 1024));
+
+                    ui.add_space(10.0);
+
+                    // Pattern Tables section
+                    ui.heading("Pattern Tables");
+                    ui.separator();
+
+                    // Render both pattern tables side by side
+                    ui.horizontal(|ui| {
+                        // Pattern Table 0 ($0000-$0FFF)
+                        ui.vertical(|ui| {
+                            let bg_table = (data.ppuctrl & 0x10) != 0;
+                            let label = if !bg_table { "◄ BG" } else { "" };
+                            ui.label(format!("Pattern Table 0 (CHR $0000-$0FFF) {}", label));
+                            self.render_pattern_table(ui, data, 0);
+                        });
+
+                        ui.add_space(20.0);
+
+                        // Pattern Table 1 ($1000-$1FFF)
+                        ui.vertical(|ui| {
+                            let bg_table = (data.ppuctrl & 0x10) != 0;
+                            let label = if bg_table { "◄ BG" } else { "" };
+                            ui.label(format!("Pattern Table 1 (CHR $1000-$1FFF) {}", label));
+                            self.render_pattern_table(ui, data, 1);
+                        });
+                    });
+
+                    ui.add_space(15.0);
+
+                    // Palette section
+                    ui.heading("Palettes");
+                    ui.separator();
+
+                    // Background palettes
+                    ui.label("Background Palettes ($3F00-$3F0F):");
+                    self.render_palettes(ui, data, 0);
+
+                    ui.add_space(5.0);
+
+                    // Sprite palettes
+                    ui.label("Sprite Palettes ($3F10-$3F1F):");
+                    self.render_palettes(ui, data, 4);
+
+                    ui.add_space(15.0);
+
+                    // Sprites (OAM) section
+                    ui.heading("Sprites (OAM)");
+                    ui.separator();
+
+                    // Sprite info
+                    let sprite_size = if (data.ppuctrl & 0x20) != 0 { "8x16" } else { "8x8" };
+                    let sprite_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
+                    
+                    // Count visible sprites
+                    let visible_count = if data.oam.len() >= 256 {
+                        (0..64).filter(|&i| {
+                            let y = data.oam[i * 4];
+                            if sprite_size == "8x16" { y < 0xE7 } else { y < 0xEF }
+                        }).count()
+                    } else {
+                        0
+                    };
+                    
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Sprite Size: {}", sprite_size));
+                        ui.separator();
+                        if sprite_size == "8x8" {
+                            ui.label(format!("Pattern Table: {} (CHR ${:04X})", sprite_table, sprite_table * 0x1000));
+                        } else {
+                            ui.label("Pattern Table: Per-sprite (tile bit 0)");
+                        }
+                        ui.separator();
+                        ui.label(format!("Visible: {}/64", visible_count));
+                        ui.separator();
+                        ui.label(format!("OAM: {} bytes", data.oam.len()));
+                    });
+
+                    ui.add_space(5.0);
+
+                    // Render sprite grid
+                    self.render_sprites(ui, data);
+
+                    ui.add_space(15.0);
+
+                    // Nametable (Background) section
+                    ui.heading("Nametables (Background)");
+                    ui.separator();
+
+                    let bg_table = if (data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
+                    ui.horizontal(|ui| {
+                        ui.label(format!("BG Pattern Table: {} (CHR ${:04X})", bg_table, bg_table * 0x1000));
+                        ui.separator();
+                        ui.label(format!("Mirroring: {}", data.mirroring));
+                        ui.separator();
+                        ui.label(format!("VRAM: {} bytes", data.vram.len()));
+                    });
+
+                    ui.add_space(5.0);
+
+                    // Render nametable preview
+                    self.render_nametables(ui, data);
+                } else {
+                    // No tile data available
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🎨").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("No Tile Data Available");
+                        ui.add_space(10.0);
+                        ui.label("Load an NES ROM to see tile and palette data");
+                    });
+                }
+            });
+    }
+
+    fn render_pattern_table(&self, ui: &mut Ui, data: &TileViewerData, table_num: usize) {
+        // Pattern table is 16x16 tiles = 256 tiles
+        // Each tile is 8x8 pixels
+        // Render as a grid with hover tooltips
+
+        let base_addr = table_num * 0x1000;
+        let tile_size = 10.0; // pixels per tile in the viewer (scaled up for visibility)
+
+        // Create the grid frame
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(16.0 * tile_size, 16.0 * tile_size),
+            egui::Sense::hover(),
+        );
+
+        let rect = response.rect;
+
+        // Draw grid background
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(30, 30, 30));
+
+        // Draw each tile
+        for tile_row in 0..16 {
+            for tile_col in 0..16 {
+                let tile_index = tile_row * 16 + tile_col;
+                let chr_addr = base_addr + tile_index * 16; // Each tile is 16 bytes
+
+                // Get tile position in the viewer
+                let tile_x = rect.min.x + tile_col as f32 * tile_size;
+                let tile_y = rect.min.y + tile_row as f32 * tile_size;
+                let tile_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(tile_x, tile_y),
+                    egui::Vec2::new(tile_size, tile_size),
+                );
+
+                // Calculate average brightness for the tile to show a preview
+                let mut total_value = 0u32;
+                for byte_idx in 0..16 {
+                    if chr_addr + byte_idx < data.chr_data.len() {
+                        let b = data.chr_data[chr_addr + byte_idx];
+                        total_value += b.count_ones();
+                    }
+                }
+                let brightness = ((total_value as f32 / 128.0) * 180.0) as u8;
+                let tile_color = egui::Color32::from_rgb(brightness, brightness, brightness);
+
+                painter.rect_filled(tile_rect, 0.0, tile_color);
+
+                // Draw grid lines
+                painter.rect_stroke(tile_rect, 0.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Inside);
+            }
+        }
+
+        // Handle hover tooltip
+        if let Some(hover_pos) = response.hover_pos() {
+            let rel_x = hover_pos.x - rect.min.x;
+            let rel_y = hover_pos.y - rect.min.y;
+
+            if rel_x >= 0.0 && rel_y >= 0.0 {
+                let tile_col = (rel_x / tile_size) as usize;
+                let tile_row = (rel_y / tile_size) as usize;
+
+                if tile_col < 16 && tile_row < 16 {
+                    let tile_index = tile_row * 16 + tile_col;
+                    let chr_addr = base_addr + tile_index * 16;
+
+                    // Show tooltip with memory info
+                    let mut low_bytes = String::new();
+                    let mut high_bytes = String::new();
+                    for i in 0..8 {
+                        if chr_addr + i < data.chr_data.len() {
+                            low_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + i]));
+                        }
+                        if chr_addr + 8 + i < data.chr_data.len() {
+                            high_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + 8 + i]));
+                        }
+                    }
+
+                    response.clone().on_hover_ui(|ui| {
+                        ui.label(egui::RichText::new(format!("Tile ${:02X} ({})", tile_index, tile_index)).strong());
+                        ui.label(format!("CHR Address: ${:04X}-${:04X}", chr_addr, chr_addr + 15));
+                        ui.label(format!("Pattern Table: {}", table_num));
+                        ui.label(format!("Row: {}, Col: {}", tile_row, tile_col));
+                        ui.separator();
+                        ui.label("Tile Data (Low plane / High plane):");
+                        ui.label(egui::RichText::new(format!("Low:  {}", low_bytes.trim())).monospace().size(11.0));
+                        ui.label(egui::RichText::new(format!("High: {}", high_bytes.trim())).monospace().size(11.0));
+                    });
+                }
+            }
+        }
+    }
+
+    fn render_palettes(&self, ui: &mut Ui, data: &TileViewerData, start_palette: usize) {
+        let color_size = 24.0;
+        let palette_spacing = 8.0;
+
+        ui.horizontal(|ui| {
+            for pal_num in 0..4 {
+                let palette_index = start_palette + pal_num;
+                let pal_addr_base = if start_palette == 0 { 0x3F00 } else { 0x3F10 };
+                let pal_addr = pal_addr_base + pal_num * 4;
+
+                ui.vertical(|ui| {
+                    ui.label(format!("Palette {}", palette_index));
+
+                    ui.horizontal(|ui| {
+                        for color_num in 0..4 {
+                            let pal_offset = (palette_index * 4 + color_num) % data.palette.len();
+                            let color_index = data.palette[pal_offset] as usize;
+                            let rgb = if color_index < data.master_palette.len() {
+                                data.master_palette[color_index]
+                            } else {
+                                0xFF000000 // Black fallback
+                            };
+
+                            let r = ((rgb >> 16) & 0xFF) as u8;
+                            let g = ((rgb >> 8) & 0xFF) as u8;
+                            let b = (rgb & 0xFF) as u8;
+                            let color = egui::Color32::from_rgb(r, g, b);
+
+                            let (response, painter) = ui.allocate_painter(
+                                egui::Vec2::new(color_size, color_size),
+                                egui::Sense::hover(),
+                            );
+                            let rect = response.rect;
+
+                            painter.rect_filled(rect, 2.0, color);
+                            painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::WHITE), egui::StrokeKind::Inside);
+
+                            response.on_hover_ui(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Palette {} Color {}",
+                                        palette_index, color_num
+                                    ))
+                                    .strong(),
+                                );
+                                ui.label(format!(
+                                    "Address: ${:04X}",
+                                    pal_addr + color_num
+                                ));
+                                ui.label(format!(
+                                    "NES Color Index: ${:02X} ({})",
+                                    color_index, color_index
+                                ));
+                                ui.label(format!("RGB: #{:02X}{:02X}{:02X}", r, g, b));
+                            });
+                        }
+                    });
+                });
+
+                if pal_num < 3 {
+                    ui.add_space(palette_spacing);
+                }
+            }
+        });
+    }
+
+    fn render_sprites(&self, ui: &mut Ui, data: &TileViewerData) {
+        if data.oam.len() < 256 {
+            ui.label(egui::RichText::new("OAM data not available").weak());
+            return;
+        }
+
+        let sprite_size_8x16 = (data.ppuctrl & 0x20) != 0;
+        let sprite_pattern_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
+        let tile_height = if sprite_size_8x16 { 16 } else { 8 };
+
+        // Render sprites in a grid (8 columns x 8 rows = 64 sprites)
+        // Each cell shows the actual 8x8 or 8x16 sprite tile scaled up
+        let scale = 2.0; // Scale factor for visibility
+        let cell_width = 8.0 * scale + 6.0; // 8 pixels wide + padding
+        let cell_height = tile_height as f32 * scale + 14.0; // 8 or 16 pixels tall + padding for label
+        let grid_cols = 16; // 16 columns
+        let grid_rows = 4; // 4 rows = 64 sprites
+
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(grid_cols as f32 * cell_width, grid_rows as f32 * cell_height),
+            egui::Sense::hover(),
+        );
+
+        let rect = response.rect;
+
+        // Draw grid background
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(30, 30, 40));
+
+        // Draw each sprite
+        for sprite_idx in 0..64 {
+            let oam_offset = sprite_idx * 4;
+            let y_pos = data.oam[oam_offset];
+            let tile_idx = data.oam[oam_offset + 1];
+            let attributes = data.oam[oam_offset + 2];
+            let _x_pos = data.oam[oam_offset + 3];
+
+            let col = sprite_idx % grid_cols;
+            let row = sprite_idx / grid_cols;
+
+            let cell_x = rect.min.x + col as f32 * cell_width + 3.0;
+            let cell_y = rect.min.y + row as f32 * cell_height + 2.0;
+
+            // Check if sprite is visible
+            let is_visible = if sprite_size_8x16 {
+                y_pos < 0xE7
+            } else {
+                y_pos < 0xEF
+            };
+
+            // Draw sprite cell background
+            let sprite_bg_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(cell_x - 1.0, cell_y - 1.0),
+                egui::Vec2::new(8.0 * scale + 2.0, tile_height as f32 * scale + 2.0),
+            );
+            let bg_color = if is_visible {
+                egui::Color32::from_rgb(60, 60, 80)
+            } else {
+                egui::Color32::from_rgb(40, 40, 50)
+            };
+            painter.rect_filled(sprite_bg_rect, 2.0, bg_color);
+
+            // Draw sprite index below the sprite
+            let label = format!("{:02X}", sprite_idx);
+            let label_pos = egui::Pos2::new(
+                cell_x + 8.0 * scale / 2.0,
+                cell_y + tile_height as f32 * scale + 4.0,
+            );
+            painter.text(
+                label_pos,
+                egui::Align2::CENTER_TOP,
+                label,
+                egui::FontId::monospace(8.0),
+                if is_visible {
+                    egui::Color32::from_rgb(180, 180, 200)
+                } else {
+                    egui::Color32::from_rgb(100, 100, 120)
+                },
+            );
+
+            // Get sprite palette (attribute bits 0-1 + 4 for sprite palettes)
+            let palette_idx = ((attributes & 0x03) + 4) as usize;
+            let flip_h = (attributes & 0x40) != 0;
+            let flip_v = (attributes & 0x80) != 0;
+
+            // Calculate CHR address
+            let chr_addr = if sprite_size_8x16 {
+                let table = (tile_idx & 0x01) as usize;
+                let tile = (tile_idx & 0xFE) as usize;
+                table * 0x1000 + tile * 16
+            } else {
+                sprite_pattern_table * 0x1000 + (tile_idx as usize) * 16
+            };
+
+            // Draw the sprite tile pixels
+            let tiles_to_draw = if sprite_size_8x16 { 2 } else { 1 };
+            
+            for tile_part in 0..tiles_to_draw {
+                let tile_chr_addr = chr_addr + tile_part * 16;
+                
+                for py in 0..8 {
+                    if tile_chr_addr + py + 8 >= data.chr_data.len() {
+                        continue;
+                    }
+                    
+                    let low_byte = data.chr_data[tile_chr_addr + py];
+                    let high_byte = data.chr_data[tile_chr_addr + py + 8];
+
+                    for px in 0..8 {
+                        let bit = 7 - px;
+                        let low_bit = (low_byte >> bit) & 1;
+                        let high_bit = (high_byte >> bit) & 1;
+                        let color_idx = (high_bit << 1) | low_bit;
+
+                        // Color 0 is transparent for sprites
+                        if color_idx == 0 {
+                            continue;
+                        }
+
+                        // Get palette color
+                        let pal_offset = palette_idx * 4 + color_idx as usize;
+                        let nes_color = if pal_offset < data.palette.len() {
+                            data.palette[pal_offset] as usize
+                        } else {
+                            0
+                        };
+                        let rgb = if nes_color < data.master_palette.len() {
+                            data.master_palette[nes_color]
+                        } else {
+                            0xFF000000
+                        };
+
+                        let r = ((rgb >> 16) & 0xFF) as u8;
+                        let g = ((rgb >> 8) & 0xFF) as u8;
+                        let b = (rgb & 0xFF) as u8;
+
+                        // Apply visibility dimming
+                        let color = if is_visible {
+                            egui::Color32::from_rgb(r, g, b)
+                        } else {
+                            egui::Color32::from_rgb(r / 2, g / 2, b / 2)
+                        };
+
+                        // Calculate pixel position with flipping
+                        let draw_px = if flip_h { 7 - px } else { px };
+                        let draw_py = if flip_v { 
+                            (tile_height - 1) - (tile_part * 8 + py) 
+                        } else { 
+                            tile_part * 8 + py 
+                        };
+
+                        let pixel_rect = egui::Rect::from_min_size(
+                            egui::Pos2::new(
+                                cell_x + draw_px as f32 * scale,
+                                cell_y + draw_py as f32 * scale,
+                            ),
+                            egui::Vec2::new(scale, scale),
+                        );
+                        painter.rect_filled(pixel_rect, 0.0, color);
+                    }
+                }
+            }
+
+            // Draw cell border
+            let cell_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(cell_x - 1.0, cell_y - 1.0),
+                egui::Vec2::new(8.0 * scale + 2.0, tile_height as f32 * scale + 2.0),
+            );
+            let border_color = if is_visible {
+                egui::Color32::from_rgb(80, 80, 100)
+            } else {
+                egui::Color32::from_rgb(50, 50, 60)
+            };
+            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, border_color), egui::StrokeKind::Outside);
+        }
+
+        // Handle hover tooltip
+        if let Some(hover_pos) = response.hover_pos() {
+            let rel_x = hover_pos.x - rect.min.x;
+            let rel_y = hover_pos.y - rect.min.y;
+
+            if rel_x >= 0.0 && rel_y >= 0.0 {
+                let col = (rel_x / cell_width) as usize;
+                let row = (rel_y / cell_height) as usize;
+
+                if col < grid_cols && row < grid_rows {
+                    let sprite_idx = row * grid_cols + col;
+                    if sprite_idx < 64 {
+                        let oam_offset = sprite_idx * 4;
+
+                        let y_pos = data.oam[oam_offset];
+                        let tile_idx = data.oam[oam_offset + 1];
+                        let attributes = data.oam[oam_offset + 2];
+                        let x_pos = data.oam[oam_offset + 3];
+
+                        // Decode attributes
+                        let palette_num = attributes & 0x03;
+                        let priority = if (attributes & 0x20) != 0 { "Behind BG" } else { "In front" };
+                        let flip_h = (attributes & 0x40) != 0;
+                        let flip_v = (attributes & 0x80) != 0;
+
+                        // Calculate CHR address
+                        let chr_addr = if sprite_size_8x16 {
+                            let table = (tile_idx & 0x01) as usize;
+                            let tile = (tile_idx & 0xFE) as usize;
+                            table * 0x1000 + tile * 16
+                        } else {
+                            sprite_pattern_table * 0x1000 + (tile_idx as usize) * 16
+                        };
+
+                        response.clone().on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new(format!("Sprite {} (OAM ${:02X})", sprite_idx, oam_offset)).strong());
+                            ui.separator();
+                            ui.label(format!("Position: ({}, {})", x_pos, y_pos));
+                            ui.label(format!("Tile: ${:02X} ({})", tile_idx, tile_idx));
+                            ui.label(format!("CHR Address: ${:04X}", chr_addr));
+                            ui.separator();
+                            ui.label(format!("Palette: {} ($3F{:02X})", palette_num, 0x10 + palette_num * 4));
+                            ui.label(format!("Priority: {}", priority));
+                            ui.label(format!("Flip: H={} V={}", if flip_h { "Yes" } else { "No" }, if flip_v { "Yes" } else { "No" }));
+                            ui.separator();
+                            ui.label(egui::RichText::new(format!(
+                                "OAM: Y=${:02X} Tile=${:02X} Attr=${:02X} X=${:02X}",
+                                y_pos, tile_idx, attributes, x_pos
+                            )).monospace().size(11.0));
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_nametables(&self, ui: &mut Ui, data: &TileViewerData) {
+        // Nametable layout: render both nametables side by side
+        // Each nametable is 32x30 tiles = 256x240 pixels
+        let scale = 1.5; // Scale down to fit both nametables
+        let tile_size = 8.0 * scale;
+        let nt_width = 32.0 * tile_size;
+        let nt_height = 30.0 * tile_size;
+        let spacing = 10.0;
+
+        // Calculate total size for both nametables side by side
+        let total_width = nt_width * 2.0 + spacing;
+        let total_height = nt_height + 20.0; // Extra for labels
+
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(total_width, total_height),
+            egui::Sense::hover(),
+        );
+        let rect = response.rect;
+
+        // Check if we have valid data
+        if data.chr_data.is_empty() || data.vram.len() < 2048 {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Nametable data not available",
+                egui::FontId::default(),
+                egui::Color32::GRAY,
+            );
+            return;
+        }
+
+        // Background pattern table (selected by PPUCTRL bit 4)
+        let bg_pattern_table = if (data.ppuctrl & 0x10) != 0 { 0x1000 } else { 0x0000 };
+
+        // Draw labels
+        painter.text(
+            egui::Pos2::new(rect.min.x + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 0 ($2000)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::Pos2::new(rect.min.x + nt_width + spacing + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 1 ($2400)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+
+        let nt_start_y = rect.min.y + 18.0;
+
+        // Render both nametables
+        for nt_idx in 0..2 {
+            let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
+            
+            // Nametable base address in VRAM
+            // VRAM layout depends on mirroring, but we show logical nametables 0 and 1
+            let nt_base = nt_idx * 0x400; // 0x000 or 0x400 in VRAM
+            let attr_base = nt_base + 0x3C0; // Attribute table at end of each nametable
+
+            // Render 32x30 tiles
+            for tile_row in 0..30 {
+                for tile_col in 0..32 {
+                    let nt_offset = tile_row * 32 + tile_col;
+                    let tile_idx = data.vram[nt_base + nt_offset] as usize;
+
+                    // Get attribute byte for this 16x16 pixel area (4 tiles)
+                    let attr_col = tile_col / 4;
+                    let attr_row = tile_row / 4;
+                    let attr_offset = attr_row * 8 + attr_col;
+                    let attr_byte = data.vram[attr_base + attr_offset];
+
+                    // Extract 2-bit palette index for this 16x16 pixel quadrant
+                    let quadrant_x = (tile_col / 2) % 2;
+                    let quadrant_y = (tile_row / 2) % 2;
+                    let shift = (quadrant_y * 2 + quadrant_x) * 2;
+                    let palette_idx = ((attr_byte >> shift) & 0x03) as usize;
+
+                    // Get palette colors for this tile (BG palettes at $3F00)
+                    let palette_base = palette_idx * 4;
+                    
+                    // Helper to convert packed RGB to Color32
+                    let get_color = |pal_offset: usize| {
+                        let idx = data.palette.get(pal_offset).copied().unwrap_or(0) as usize;
+                        let rgb = data.master_palette.get(idx).copied().unwrap_or(0);
+                        let r = ((rgb >> 16) & 0xFF) as u8;
+                        let g = ((rgb >> 8) & 0xFF) as u8;
+                        let b = (rgb & 0xFF) as u8;
+                        egui::Color32::from_rgb(r, g, b)
+                    };
+                    
+                    let colors: [egui::Color32; 4] = [
+                        get_color(0), // Color 0 is always the universal background ($3F00)
+                        get_color(palette_base + 1),
+                        get_color(palette_base + 2),
+                        get_color(palette_base + 3),
+                    ];
+
+                    // Get tile data from CHR
+                    let chr_addr = bg_pattern_table + tile_idx * 16;
+                    let tile_x = nt_start_x + tile_col as f32 * tile_size;
+                    let tile_y = nt_start_y + tile_row as f32 * tile_size;
+
+                    // Render 8x8 tile pixels
+                    for py in 0..8 {
+                        let plane0_addr = chr_addr + py;
+                        let plane1_addr = chr_addr + py + 8;
+
+                        let plane0 = data.chr_data.get(plane0_addr).copied().unwrap_or(0);
+                        let plane1 = data.chr_data.get(plane1_addr).copied().unwrap_or(0);
+
+                        for px in 0..8 {
+                            let bit0 = (plane0 >> (7 - px)) & 1;
+                            let bit1 = (plane1 >> (7 - px)) & 1;
+                            let color_idx = ((bit1 << 1) | bit0) as usize;
+
+                            let color = colors[color_idx];
+
+                            let pixel_rect = egui::Rect::from_min_size(
+                                egui::Pos2::new(tile_x + px as f32 * scale, tile_y + py as f32 * scale),
+                                egui::Vec2::new(scale, scale),
+                            );
+                            painter.rect_filled(pixel_rect, 0.0, color);
+                        }
+                    }
+                }
+            }
+
+            // Draw nametable border
+            let nt_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(nt_start_x, nt_start_y),
+                egui::Vec2::new(nt_width, nt_height),
+            );
+            painter.rect_stroke(nt_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)), egui::StrokeKind::Outside);
+        }
+
+        // Handle hover tooltip
+        if let Some(hover_pos) = response.hover_pos() {
+            let rel_y = hover_pos.y - nt_start_y;
+            
+            // Check which nametable we're hovering over
+            for nt_idx in 0..2 {
+                let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
+                let rel_x = hover_pos.x - nt_start_x;
+
+                if rel_x >= 0.0 && rel_x < nt_width && rel_y >= 0.0 && rel_y < nt_height {
+                    let tile_col = (rel_x / tile_size) as usize;
+                    let tile_row = (rel_y / tile_size) as usize;
+
+                    if tile_col < 32 && tile_row < 30 {
+                        let nt_base = nt_idx * 0x400;
+                        let nt_offset = tile_row * 32 + tile_col;
+                        let tile_idx = data.vram[nt_base + nt_offset];
+
+                        // Get attribute info
+                        let attr_base = nt_base + 0x3C0;
+                        let attr_col = tile_col / 4;
+                        let attr_row = tile_row / 4;
+                        let attr_offset = attr_row * 8 + attr_col;
+                        let attr_byte = data.vram[attr_base + attr_offset];
+
+                        let quadrant_x = (tile_col / 2) % 2;
+                        let quadrant_y = (tile_row / 2) % 2;
+                        let shift = (quadrant_y * 2 + quadrant_x) * 2;
+                        let palette_idx = (attr_byte >> shift) & 0x03;
+
+                        let chr_addr = bg_pattern_table + (tile_idx as usize) * 16;
+                        let nt_addr = 0x2000 + nt_base + nt_offset;
+                        let attr_addr = 0x2000 + attr_base + attr_offset;
+
+                        response.clone().on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new(format!(
+                                "Nametable {} ({}, {})", nt_idx, tile_col, tile_row
+                            )).strong());
+                            ui.separator();
+                            ui.label(format!("NT Address: ${:04X}", nt_addr));
+                            ui.label(format!("Tile Index: ${:02X} ({})", tile_idx, tile_idx));
+                            ui.label(format!("CHR Address: ${:04X}", chr_addr));
+                            ui.separator();
+                            ui.label(format!("Attr Address: ${:04X}", attr_addr));
+                            ui.label(format!("Attr Byte: ${:02X}", attr_byte));
+                            ui.label(format!("Palette: {} (quadrant {}, {})", palette_idx, quadrant_x, quadrant_y));
+                        });
+                    }
+                    break; // Found the nametable we're over
+                }
+            }
+        }
     }
 
     fn render_about_tab(&self, ui: &mut Ui) {

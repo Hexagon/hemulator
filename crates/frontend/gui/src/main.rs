@@ -3153,6 +3153,27 @@ fn main() {
             }
         }
 
+        // Update tile viewer data only if tiles tab is active
+        if egui_app.tab_manager.active_tab == egui_ui::Tab::Tiles {
+            if let EmulatorSystem::NES(s) = &sys {
+                let nes_data = s.get_tile_viewer_data();
+                let tile_data = egui_ui::TileViewerData {
+                    chr_data: nes_data.chr_data,
+                    palette: nes_data.palette,
+                    master_palette: nes_data.master_palette,
+                    oam: nes_data.oam,
+                    vram: nes_data.vram,
+                    chr_is_ram: nes_data.chr_is_ram,
+                    ppuctrl: nes_data.ppuctrl,
+                    ppumask: nes_data.ppumask,
+                    scroll_x: nes_data.scroll_x,
+                    scroll_y: nes_data.scroll_y,
+                    mirroring: nes_data.mirroring,
+                };
+                egui_app.tab_manager.update_tile_viewer_data(tile_data);
+            }
+        }
+
         // Render egui UI
         egui_app.ui(egui_backend.egui_ctx(), settings.scaling_mode);
 
@@ -4254,6 +4275,9 @@ fn main() {
                 }
                 MenuAction::ShowDebug => {
                     egui_app.tab_manager.show_debug_tab();
+                }
+                MenuAction::ShowTiles => {
+                    egui_app.tab_manager.show_tiles_tab();
                 }
                 MenuAction::OpenProject => {
                     // Open .hemu project file dialog

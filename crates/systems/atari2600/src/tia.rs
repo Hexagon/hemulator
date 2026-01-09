@@ -322,6 +322,10 @@ pub struct Tia {
     #[serde(skip)]
     cached_visible_start: Option<u16>,
 
+    // Frame counter for visible window detection stability
+    #[serde(skip)]
+    visible_window_frame_count: u32,
+
     // Video mode (NTSC/PAL)
     video_mode: VideoMode,
 }
@@ -465,6 +469,7 @@ impl Tia {
             writes_colors_nonzero: 0,
 
             cached_visible_start: None,
+            visible_window_frame_count: 0,
 
             video_mode,
         }
@@ -1143,9 +1148,12 @@ impl Tia {
     /// Try to infer the start of the visible picture area based on VBLANK timing
     ///
     /// This method caches the first detected visible start to prevent vertical jumping
-    /// between frames. Once a valid VBLANK transition is detected, that value is used
-    /// for all subsequent frames to ensure stable rendering.
+    /// between frames. However, it waits for a few frames to ensure stable detection
+    /// before caching the value.
     pub fn visible_window_start_scanline(&mut self) -> u16 {
+        // Increment frame counter for detection stability
+        self.visible_window_frame_count = self.visible_window_frame_count.saturating_add(1);
+
         // If we already have a cached value, always use it for stability
         // This prevents vertical jumping even if VBLANK timing varies slightly
         if let Some(cached) = self.cached_visible_start {
@@ -1171,26 +1179,70 @@ impl Tia {
 
         // First detection: find where VBLANK transitions from true to false
         // Skip the first 10 scanlines to avoid noise during VSYNC period
+        let mut detected_scanline: Option<u16> = None;
+
         for i in 10..total_scanlines.min(80) {
             let prev = self.scanline_states.get(i - 1).copied().unwrap_or_default();
             let cur = self.scanline_states.get(i).copied().unwrap_or_default();
 
             if prev.vblank && !cur.vblank {
-                // Cache and return the first detected transition
+                detected_scanline = Some(i as u16);
                 if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-                    eprintln!("[TIA] visible_window_start detected at scanline {}", i);
+                    eprintln!(
+                        "[TIA] visible_window_start VBLANK transition detected at scanline {}",
+                        i
+                    );
                 }
-                self.cached_visible_start = Some(i as u16);
-                return i as u16;
+                break;
             }
         }
 
-        // Fallback: common visible start is around scanline ~40
-        if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
-            eprintln!("[TIA] visible_window_start fallback to scanline 40");
+        // If no VBLANK transition found, try content-based detection
+        if detected_scanline.is_none() {
+            for i in 10..total_scanlines.min(80) {
+                let state = self.scanline_states.get(i).copied().unwrap_or_default();
+                // Check if this scanline has any playfield or player graphics, but only when VBLANK is off
+                if !state.vblank
+                    && (state.pf0 != 0
+                        || state.pf1 != 0
+                        || state.pf2 != 0
+                        || state.grp0 != 0
+                        || state.grp1 != 0)
+                {
+                    detected_scanline = Some(i as u16);
+                    if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                        eprintln!(
+                            "[TIA] visible_window_start content-based fallback to scanline {}",
+                            i
+                        );
+                    }
+                    break;
+                }
+            }
         }
-        self.cached_visible_start = Some(40);
-        40
+
+        // Use detected scanline or fallback to 40
+        let scanline = detected_scanline.unwrap_or(40);
+
+        // Only cache after we've seen a few frames to ensure stable detection
+        // This prevents caching an incorrect value from the first incomplete frame
+        const FRAMES_BEFORE_CACHE: u32 = 3;
+        if self.visible_window_frame_count >= FRAMES_BEFORE_CACHE {
+            if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+                eprintln!(
+                    "[TIA] Caching visible_window_start at scanline {} (frame {})",
+                    scanline, self.visible_window_frame_count
+                );
+            }
+            self.cached_visible_start = Some(scanline);
+        } else if LogConfig::global().should_log(LogCategory::PPU, LogLevel::Debug) {
+            eprintln!(
+                "[TIA] visible_window_start at scanline {} (frame {}, not caching yet)",
+                scanline, self.visible_window_frame_count
+            );
+        }
+
+        scanline
     }
 
     /// Debug helper: count how many of the visible scanlines have any playfield/player bits.
@@ -1478,9 +1530,9 @@ impl Tia {
         // The changes array contains writes during the scanline in chronological order
 
         // Find the most recent change at or before this pixel position
-        // Start with the value from before the first change (typically the delayed value if VDELP,
-        // or 0 if no VDELP - the scanline starts "fresh")
-        let mut result = if state.vdelp0 { state.grp0_delayed } else { 0 };
+        // Start with the value that was latched at the beginning of the scanline
+        // (state.grp0 already has VDELP applied from latch_scanline_state)
+        let mut result = state.grp0;
 
         for i in 0..state.grp0_change_count as usize {
             if state.grp0_changes[i].pixel as usize <= x {
@@ -1501,7 +1553,9 @@ impl Tia {
         }
 
         // Find the most recent change at or before this pixel position
-        let mut result = if state.vdelp1 { state.grp1_delayed } else { 0 };
+        // Start with the value that was latched at the beginning of the scanline
+        // (state.grp1 already has VDELP applied from latch_scanline_state)
+        let mut result = state.grp1;
 
         for i in 0..state.grp1_change_count as usize {
             if state.grp1_changes[i].pixel as usize <= x {
@@ -1519,14 +1573,6 @@ impl Tia {
             (state.player0_x, state.player0_reflect, state.nusiz0)
         } else {
             (state.player1_x, state.player1_reflect, state.nusiz1)
-        };
-
-        // Get the graphics value that was in effect at this pixel position
-        // This handles racing-the-beam effects where GRP changes mid-scanline
-        let grp = if player == 0 {
-            Self::get_grp0_at_pixel(state, x)
-        } else {
-            Self::get_grp1_at_pixel(state, x)
         };
 
         // NUSIZ bits 0-2 control number and size
@@ -1561,6 +1607,14 @@ impl Tia {
             // Check if x is within this copy's range
             if x >= copy_pos && x < copy_pos + 8 * player_size {
                 let offset = x - copy_pos;
+
+                // Get the graphics value at the START of this copy's position
+                // This is critical for racing-the-beam effects with multiple copies
+                let grp = if player == 0 {
+                    Self::get_grp0_at_pixel(state, copy_pos)
+                } else {
+                    Self::get_grp1_at_pixel(state, copy_pos)
+                };
 
                 // Which pixel of the 8-pixel sprite?
                 let sprite_pixel = offset / player_size;
@@ -2002,7 +2056,7 @@ mod tests {
     fn test_tia_ball_size() {
         let mut tia = Tia::new();
 
-        tia.write(0x14, 0x00); // RESBL - position ball at x=0
+        tia.write(0x14, 0x00); // RESBL - position ball (hardware adds 4-pixel delay)
         tia.write(0x1F, 0x02); // ENABL - enable ball
 
         // Test 1-pixel ball (CTRLPF bits 4-5 = 00)
@@ -2010,35 +2064,36 @@ mod tests {
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 1);
-        assert!(Tia::is_ball_pixel(&state, 0));
-        assert!(!Tia::is_ball_pixel(&state, 1));
+        // Ball is at position 4 due to hardware delay
+        assert!(Tia::is_ball_pixel(&state, 4));
+        assert!(!Tia::is_ball_pixel(&state, 5));
 
         // Test 2-pixel ball (CTRLPF bits 4-5 = 01)
         tia.write(0x0A, 0x10);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 2);
-        assert!(Tia::is_ball_pixel(&state, 0));
-        assert!(Tia::is_ball_pixel(&state, 1));
-        assert!(!Tia::is_ball_pixel(&state, 2));
+        assert!(Tia::is_ball_pixel(&state, 4));
+        assert!(Tia::is_ball_pixel(&state, 5));
+        assert!(!Tia::is_ball_pixel(&state, 6));
 
         // Test 4-pixel ball (CTRLPF bits 4-5 = 10)
         tia.write(0x0A, 0x20);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 4);
-        assert!(Tia::is_ball_pixel(&state, 0));
-        assert!(Tia::is_ball_pixel(&state, 3));
-        assert!(!Tia::is_ball_pixel(&state, 4));
+        assert!(Tia::is_ball_pixel(&state, 4));
+        assert!(Tia::is_ball_pixel(&state, 7));
+        assert!(!Tia::is_ball_pixel(&state, 8));
 
         // Test 8-pixel ball (CTRLPF bits 4-5 = 11)
         tia.write(0x0A, 0x30);
         tia.latch_scanline_state(0);
         let state = tia.scanline_states[0];
         assert_eq!(state.ball_size, 8);
-        assert!(Tia::is_ball_pixel(&state, 0));
-        assert!(Tia::is_ball_pixel(&state, 7));
-        assert!(!Tia::is_ball_pixel(&state, 8));
+        assert!(Tia::is_ball_pixel(&state, 4));
+        assert!(Tia::is_ball_pixel(&state, 11));
+        assert!(!Tia::is_ball_pixel(&state, 12));
     }
 
     #[test]
@@ -2058,11 +2113,12 @@ mod tests {
         // With VDELBL, should still be using old value (which was 0 at start)
         assert!(!state.enabl);
 
-        // Write again to trigger the delay
-        tia.write(0x1F, 0x02); // ENABL = 1 again
+        // Write to GRP1 to trigger the delayed ball update
+        // According to TIA spec, writing GRP1 updates the delayed ball state
+        tia.write(0x1C, 0x00); // GRP1
         tia.latch_scanline_state(1);
         let state = tia.scanline_states[1];
-        // Now it should show the previous write's enabled state
+        // Now it should show the previous ENABL write's enabled state
         assert!(state.enabl);
 
         // Disable ball
@@ -2072,8 +2128,8 @@ mod tests {
         // Should still be enabled (showing previous state)
         assert!(state.enabl);
 
-        // Write again to update the delay
-        tia.write(0x1F, 0x00); // ENABL = 0 again
+        // Write to GRP1 again to update the delayed ball state
+        tia.write(0x1C, 0x00); // GRP1
         tia.latch_scanline_state(3);
         let state = tia.scanline_states[3];
         // Now it should be disabled
@@ -2093,27 +2149,29 @@ mod tests {
 
         // Position missile 0 at x=10 initially (without RESMP)
         tia.pixel = 68 + 10;
+        // Hardware adds 4-pixel delay to positioning
         tia.write(0x12, 0x00); // RESM0
-        assert_eq!(tia.missile0_x, 10);
+        assert_eq!(tia.missile0_x, 14); // 10 + 4
 
         // Enable RESMP0 - lock missile to player
         tia.write(0x28, 0x02); // RESMP0
         tia.latch_scanline_state(0);
 
         // Missile should now be at player position + 4 (center of 8-pixel player)
-        assert_eq!(tia.missile0_x, 54); // 50 + 4
+        // Player is at 50 + 4 = 54, missile at 54 + 4 = 58
+        assert_eq!(tia.missile0_x, 58);
 
         // Try to move missile - should be ignored when RESMP is on
         tia.pixel = 68 + 100;
         tia.write(0x12, 0x00); // RESM0 - should be ignored
         tia.latch_scanline_state(1);
-        assert_eq!(tia.missile0_x, 54); // Still locked to player
+        assert_eq!(tia.missile0_x, 58); // Still locked to player + 4
 
         // Disable RESMP0
         tia.write(0x28, 0x00); // RESMP0 = 0
         tia.pixel = 68 + 20;
         tia.write(0x12, 0x00); // RESM0 - should work now
-        assert_eq!(tia.missile0_x, 20); // Free to move again
+        assert_eq!(tia.missile0_x, 24); // Free to move again (20 + 4)
     }
 
     #[test]
@@ -2384,12 +2442,17 @@ mod tests {
         // Write initial graphics
         tia.write(0x1B, 0xAA); // GRP0 = 0xAA
         assert_eq!(tia.grp0, 0xAA);
-        assert_eq!(tia.grp0_old, 0x00); // Old value is 0
+        assert_eq!(tia.grp0_old, 0x00); // Old value is 0 (not updated by writing GRP0)
 
-        // Write new graphics - old value should be saved
+        // Write to GRP1 to trigger the delayed register update for GRP0
+        // According to TIA spec, writing GRP1 copies current GRP0 to GRP0_OLD
+        tia.write(0x1C, 0x55); // GRP1 = 0x55
+        assert_eq!(tia.grp0, 0xAA); // GRP0 unchanged
+        assert_eq!(tia.grp0_old, 0xAA); // Now GRP0_OLD has the GRP0 value
+
+        // Write new graphics to GRP0
         tia.write(0x1B, 0xFF); // GRP0 = 0xFF
         assert_eq!(tia.grp0, 0xFF);
-        assert_eq!(tia.grp0_old, 0xAA); // Old value saved
 
         // Enable delayed graphics
         tia.write(0x25, 0x01); // VDELP0
