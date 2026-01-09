@@ -15,7 +15,7 @@ pub enum Tab {
     Log,
     Help,
     Debug,
-    Tiles, // Tile/palette viewer for PPU debugging
+    Tiles,    // Tile/palette viewer for PPU debugging
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
     About,
 }
@@ -1358,11 +1358,13 @@ impl TabManager {
                     // PPU state summary
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl)).monospace(),
+                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl))
+                                .monospace(),
                         );
                         ui.separator();
                         ui.label(
-                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask)).monospace(),
+                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask))
+                                .monospace(),
                         );
                         ui.separator();
                         ui.label(
@@ -1373,15 +1375,26 @@ impl TabManager {
                             .monospace(),
                         );
                         ui.separator();
-                        ui.label(egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace());
+                        ui.label(
+                            egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace(),
+                        );
                     });
 
                     ui.add_space(5.0);
 
                     // CHR type indicator
-                    let chr_type = if data.chr_is_ram { "CHR-RAM" } else { "CHR-ROM" };
+                    let chr_type = if data.chr_is_ram {
+                        "CHR-RAM"
+                    } else {
+                        "CHR-ROM"
+                    };
                     let chr_size = data.chr_data.len();
-                    ui.label(format!("{} ({} bytes / {} KB)", chr_type, chr_size, chr_size / 1024));
+                    ui.label(format!(
+                        "{} ({} bytes / {} KB)",
+                        chr_type,
+                        chr_size,
+                        chr_size / 1024
+                    ));
 
                     ui.add_space(10.0);
 
@@ -1433,24 +1446,38 @@ impl TabManager {
                     ui.separator();
 
                     // Sprite info
-                    let sprite_size = if (data.ppuctrl & 0x20) != 0 { "8x16" } else { "8x8" };
+                    let sprite_size = if (data.ppuctrl & 0x20) != 0 {
+                        "8x16"
+                    } else {
+                        "8x8"
+                    };
                     let sprite_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
-                    
+
                     // Count visible sprites
                     let visible_count = if data.oam.len() >= 256 {
-                        (0..64).filter(|&i| {
-                            let y = data.oam[i * 4];
-                            if sprite_size == "8x16" { y < 0xE7 } else { y < 0xEF }
-                        }).count()
+                        (0..64)
+                            .filter(|&i| {
+                                let y = data.oam[i * 4];
+                                if sprite_size == "8x16" {
+                                    y < 0xE7
+                                } else {
+                                    y < 0xEF
+                                }
+                            })
+                            .count()
                     } else {
                         0
                     };
-                    
+
                     ui.horizontal(|ui| {
                         ui.label(format!("Sprite Size: {}", sprite_size));
                         ui.separator();
                         if sprite_size == "8x8" {
-                            ui.label(format!("Pattern Table: {} (CHR ${:04X})", sprite_table, sprite_table * 0x1000));
+                            ui.label(format!(
+                                "Pattern Table: {} (CHR ${:04X})",
+                                sprite_table,
+                                sprite_table * 0x1000
+                            ));
                         } else {
                             ui.label("Pattern Table: Per-sprite (tile bit 0)");
                         }
@@ -1473,7 +1500,11 @@ impl TabManager {
 
                     let bg_table = if (data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
                     ui.horizontal(|ui| {
-                        ui.label(format!("BG Pattern Table: {} (CHR ${:04X})", bg_table, bg_table * 0x1000));
+                        ui.label(format!(
+                            "BG Pattern Table: {} (CHR ${:04X})",
+                            bg_table,
+                            bg_table * 0x1000
+                        ));
                         ui.separator();
                         ui.label(format!("Mirroring: {}", data.mirroring));
                         ui.separator();
@@ -1545,7 +1576,12 @@ impl TabManager {
                 painter.rect_filled(tile_rect, 0.0, tile_color);
 
                 // Draw grid lines
-                painter.rect_stroke(tile_rect, 0.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Inside);
+                painter.rect_stroke(
+                    tile_rect,
+                    0.0,
+                    egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
 
@@ -1570,19 +1606,38 @@ impl TabManager {
                             low_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + i]));
                         }
                         if chr_addr + 8 + i < data.chr_data.len() {
-                            high_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + 8 + i]));
+                            high_bytes
+                                .push_str(&format!("{:02X} ", data.chr_data[chr_addr + 8 + i]));
                         }
                     }
 
                     response.clone().on_hover_ui(|ui| {
-                        ui.label(egui::RichText::new(format!("Tile ${:02X} ({})", tile_index, tile_index)).strong());
-                        ui.label(format!("CHR Address: ${:04X}-${:04X}", chr_addr, chr_addr + 15));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Tile ${:02X} ({})",
+                                tile_index, tile_index
+                            ))
+                            .strong(),
+                        );
+                        ui.label(format!(
+                            "CHR Address: ${:04X}-${:04X}",
+                            chr_addr,
+                            chr_addr + 15
+                        ));
                         ui.label(format!("Pattern Table: {}", table_num));
                         ui.label(format!("Row: {}, Col: {}", tile_row, tile_col));
                         ui.separator();
                         ui.label("Tile Data (Low plane / High plane):");
-                        ui.label(egui::RichText::new(format!("Low:  {}", low_bytes.trim())).monospace().size(11.0));
-                        ui.label(egui::RichText::new(format!("High: {}", high_bytes.trim())).monospace().size(11.0));
+                        ui.label(
+                            egui::RichText::new(format!("Low:  {}", low_bytes.trim()))
+                                .monospace()
+                                .size(11.0),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("High: {}", high_bytes.trim()))
+                                .monospace()
+                                .size(11.0),
+                        );
                     });
                 }
             }
@@ -1624,7 +1679,12 @@ impl TabManager {
                             let rect = response.rect;
 
                             painter.rect_filled(rect, 2.0, color);
-                            painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::WHITE), egui::StrokeKind::Inside);
+                            painter.rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0, egui::Color32::WHITE),
+                                egui::StrokeKind::Inside,
+                            );
 
                             response.on_hover_ui(|ui| {
                                 ui.label(
@@ -1634,10 +1694,7 @@ impl TabManager {
                                     ))
                                     .strong(),
                                 );
-                                ui.label(format!(
-                                    "Address: ${:04X}",
-                                    pal_addr + color_num
-                                ));
+                                ui.label(format!("Address: ${:04X}", pal_addr + color_num));
                                 ui.label(format!(
                                     "NES Color Index: ${:02X} ({})",
                                     color_index, color_index
@@ -1674,7 +1731,10 @@ impl TabManager {
         let grid_rows = 4; // 4 rows = 64 sprites
 
         let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(grid_cols as f32 * cell_width, grid_rows as f32 * cell_height),
+            egui::Vec2::new(
+                grid_cols as f32 * cell_width,
+                grid_rows as f32 * cell_height,
+            ),
             egui::Sense::hover(),
         );
 
@@ -1750,15 +1810,15 @@ impl TabManager {
 
             // Draw the sprite tile pixels
             let tiles_to_draw = if sprite_size_8x16 { 2 } else { 1 };
-            
+
             for tile_part in 0..tiles_to_draw {
                 let tile_chr_addr = chr_addr + tile_part * 16;
-                
+
                 for py in 0..8 {
                     if tile_chr_addr + py + 8 >= data.chr_data.len() {
                         continue;
                     }
-                    
+
                     let low_byte = data.chr_data[tile_chr_addr + py];
                     let high_byte = data.chr_data[tile_chr_addr + py + 8];
 
@@ -1799,10 +1859,10 @@ impl TabManager {
 
                         // Calculate pixel position with flipping
                         let draw_px = if flip_h { 7 - px } else { px };
-                        let draw_py = if flip_v { 
-                            (tile_height - 1) - (tile_part * 8 + py) 
-                        } else { 
-                            tile_part * 8 + py 
+                        let draw_py = if flip_v {
+                            (tile_height - 1) - (tile_part * 8 + py)
+                        } else {
+                            tile_part * 8 + py
                         };
 
                         let pixel_rect = egui::Rect::from_min_size(
@@ -1827,7 +1887,12 @@ impl TabManager {
             } else {
                 egui::Color32::from_rgb(50, 50, 60)
             };
-            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, border_color), egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                cell_rect,
+                0.0,
+                egui::Stroke::new(1.0, border_color),
+                egui::StrokeKind::Outside,
+            );
         }
 
         // Handle hover tooltip
@@ -1851,7 +1916,11 @@ impl TabManager {
 
                         // Decode attributes
                         let palette_num = attributes & 0x03;
-                        let priority = if (attributes & 0x20) != 0 { "Behind BG" } else { "In front" };
+                        let priority = if (attributes & 0x20) != 0 {
+                            "Behind BG"
+                        } else {
+                            "In front"
+                        };
                         let flip_h = (attributes & 0x40) != 0;
                         let flip_v = (attributes & 0x80) != 0;
 
@@ -1865,20 +1934,38 @@ impl TabManager {
                         };
 
                         response.clone().on_hover_ui(|ui| {
-                            ui.label(egui::RichText::new(format!("Sprite {} (OAM ${:02X})", sprite_idx, oam_offset)).strong());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Sprite {} (OAM ${:02X})",
+                                    sprite_idx, oam_offset
+                                ))
+                                .strong(),
+                            );
                             ui.separator();
                             ui.label(format!("Position: ({}, {})", x_pos, y_pos));
                             ui.label(format!("Tile: ${:02X} ({})", tile_idx, tile_idx));
                             ui.label(format!("CHR Address: ${:04X}", chr_addr));
                             ui.separator();
-                            ui.label(format!("Palette: {} ($3F{:02X})", palette_num, 0x10 + palette_num * 4));
+                            ui.label(format!(
+                                "Palette: {} ($3F{:02X})",
+                                palette_num,
+                                0x10 + palette_num * 4
+                            ));
                             ui.label(format!("Priority: {}", priority));
-                            ui.label(format!("Flip: H={} V={}", if flip_h { "Yes" } else { "No" }, if flip_v { "Yes" } else { "No" }));
+                            ui.label(format!(
+                                "Flip: H={} V={}",
+                                if flip_h { "Yes" } else { "No" },
+                                if flip_v { "Yes" } else { "No" }
+                            ));
                             ui.separator();
-                            ui.label(egui::RichText::new(format!(
-                                "OAM: Y=${:02X} Tile=${:02X} Attr=${:02X} X=${:02X}",
-                                y_pos, tile_idx, attributes, x_pos
-                            )).monospace().size(11.0));
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "OAM: Y=${:02X} Tile=${:02X} Attr=${:02X} X=${:02X}",
+                                    y_pos, tile_idx, attributes, x_pos
+                                ))
+                                .monospace()
+                                .size(11.0),
+                            );
                         });
                     }
                 }
@@ -1918,7 +2005,11 @@ impl TabManager {
         }
 
         // Background pattern table (selected by PPUCTRL bit 4)
-        let bg_pattern_table = if (data.ppuctrl & 0x10) != 0 { 0x1000 } else { 0x0000 };
+        let bg_pattern_table = if (data.ppuctrl & 0x10) != 0 {
+            0x1000
+        } else {
+            0x0000
+        };
 
         // Draw labels
         painter.text(
@@ -1929,7 +2020,10 @@ impl TabManager {
             egui::Color32::WHITE,
         );
         painter.text(
-            egui::Pos2::new(rect.min.x + nt_width + spacing + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Pos2::new(
+                rect.min.x + nt_width + spacing + nt_width / 2.0,
+                rect.min.y + 8.0,
+            ),
             egui::Align2::CENTER_CENTER,
             "Nametable 1 ($2400)",
             egui::FontId::proportional(11.0),
@@ -1941,7 +2035,7 @@ impl TabManager {
         // Render both nametables
         for nt_idx in 0..2 {
             let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
-            
+
             // Nametable base address in VRAM
             // VRAM layout depends on mirroring, but we show logical nametables 0 and 1
             let nt_base = nt_idx * 0x400; // 0x000 or 0x400 in VRAM
@@ -1967,7 +2061,7 @@ impl TabManager {
 
                     // Get palette colors for this tile (BG palettes at $3F00)
                     let palette_base = palette_idx * 4;
-                    
+
                     // Helper to convert packed RGB to Color32
                     let get_color = |pal_offset: usize| {
                         let idx = data.palette.get(pal_offset).copied().unwrap_or(0) as usize;
@@ -1977,7 +2071,7 @@ impl TabManager {
                         let b = (rgb & 0xFF) as u8;
                         egui::Color32::from_rgb(r, g, b)
                     };
-                    
+
                     let colors: [egui::Color32; 4] = [
                         get_color(0), // Color 0 is always the universal background ($3F00)
                         get_color(palette_base + 1),
@@ -2006,7 +2100,10 @@ impl TabManager {
                             let color = colors[color_idx];
 
                             let pixel_rect = egui::Rect::from_min_size(
-                                egui::Pos2::new(tile_x + px as f32 * scale, tile_y + py as f32 * scale),
+                                egui::Pos2::new(
+                                    tile_x + px as f32 * scale,
+                                    tile_y + py as f32 * scale,
+                                ),
                                 egui::Vec2::new(scale, scale),
                             );
                             painter.rect_filled(pixel_rect, 0.0, color);
@@ -2020,13 +2117,18 @@ impl TabManager {
                 egui::Pos2::new(nt_start_x, nt_start_y),
                 egui::Vec2::new(nt_width, nt_height),
             );
-            painter.rect_stroke(nt_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)), egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                nt_rect,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)),
+                egui::StrokeKind::Outside,
+            );
         }
 
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {
             let rel_y = hover_pos.y - nt_start_y;
-            
+
             // Check which nametable we're hovering over
             for nt_idx in 0..2 {
                 let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
@@ -2058,9 +2160,13 @@ impl TabManager {
                         let attr_addr = 0x2000 + attr_base + attr_offset;
 
                         response.clone().on_hover_ui(|ui| {
-                            ui.label(egui::RichText::new(format!(
-                                "Nametable {} ({}, {})", nt_idx, tile_col, tile_row
-                            )).strong());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Nametable {} ({}, {})",
+                                    nt_idx, tile_col, tile_row
+                                ))
+                                .strong(),
+                            );
                             ui.separator();
                             ui.label(format!("NT Address: ${:04X}", nt_addr));
                             ui.label(format!("Tile Index: ${:02X} ({})", tile_idx, tile_idx));
@@ -2068,7 +2174,10 @@ impl TabManager {
                             ui.separator();
                             ui.label(format!("Attr Address: ${:04X}", attr_addr));
                             ui.label(format!("Attr Byte: ${:02X}", attr_byte));
-                            ui.label(format!("Palette: {} (quadrant {}, {})", palette_idx, quadrant_x, quadrant_y));
+                            ui.label(format!(
+                                "Palette: {} (quadrant {}, {})",
+                                palette_idx, quadrant_x, quadrant_y
+                            ));
                         });
                     }
                     break; // Found the nametable we're over
