@@ -3276,4 +3276,48 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_horizontal_mirroring_2024_vs_2424() {
+        // Specific test for the reported issue: $2024 vs $2424 with Horizontal mirroring
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write to $2024 (NT0, offset 0x24)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xAA);
+
+        // Write to $2424 (NT1, offset 0x24)
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x24);
+        ppu.write_register(7, 0xBB);
+
+        // With Horizontal mirroring, NT0 and NT1 map to same physical location
+        // So both should read back 0xBB (the last write)
+        ppu.vram_addr.set(0x2024);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2024 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2424);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2424 = ppu.read_register(7);
+
+        // Check physical VRAM directly
+        let idx_2024 = ppu.map_nametable_addr(0x2024);
+        let idx_2424 = ppu.map_nametable_addr(0x2424);
+
+        assert_eq!(
+            val_2024, 0xBB,
+            "$2024 should mirror to $2424 with Horizontal mirroring"
+        );
+        assert_eq!(
+            val_2424, 0xBB,
+            "$2424 should mirror to $2024 with Horizontal mirroring"
+        );
+        assert_eq!(
+            idx_2024, idx_2424,
+            "Both addresses should map to same physical VRAM location"
+        );
+    }
 }
