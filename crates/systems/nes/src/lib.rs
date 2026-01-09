@@ -110,6 +110,35 @@ pub struct DebugInfo {
     pub chr_banks: usize,
 }
 
+/// Tile viewer data for debugging PPU graphics.
+///
+/// Contains CHR data, palettes, and PPU state for visualization.
+#[derive(Debug, Clone)]
+pub struct TileViewerData {
+    /// CHR data (pattern tables) - typically 8KB for NES
+    pub chr_data: Vec<u8>,
+    /// Palette data - 32 bytes (4 colors x 8 palettes)
+    pub palette: Vec<u8>,
+    /// NES master palette for color lookup (64 colors, RGB as 0xFFRRGGBB)
+    pub master_palette: Vec<u32>,
+    /// OAM data - 256 bytes (64 sprites x 4 bytes each)
+    pub oam: Vec<u8>,
+    /// VRAM data - 2KB nametables
+    pub vram: Vec<u8>,
+    /// Whether this is CHR-RAM (true) or CHR-ROM (false)
+    pub chr_is_ram: bool,
+    /// Current PPUCTRL value
+    pub ppuctrl: u8,
+    /// Current PPUMASK value
+    pub ppumask: u8,
+    /// Current X scroll value
+    pub scroll_x: u8,
+    /// Current Y scroll value
+    pub scroll_y: u8,
+    /// Current mirroring mode as string
+    pub mirroring: String,
+}
+
 /// Program counter hotspot tracking for performance analysis.
 ///
 /// Tracks the most frequently executed addresses to help identify
@@ -251,6 +280,43 @@ impl NesSystem {
             mapper_number,
             prg_banks,
             chr_banks,
+        }
+    }
+
+    /// Get tile viewer data for debugging PPU graphics.
+    ///
+    /// Returns CHR data, palette, and PPU state for visualization in a tile viewer.
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        if let Some(b) = self.cpu.bus() {
+            let mirroring_str = format!("{:?}", b.ppu.get_mirroring());
+            TileViewerData {
+                chr_data: b.ppu.chr.clone(),
+                palette: b.ppu.palette.to_vec(),
+                master_palette: Ppu::get_master_palette(),
+                oam: b.ppu.oam.to_vec(),
+                vram: b.ppu.vram.to_vec(),
+                chr_is_ram: b.ppu.chr_is_ram(),
+                ppuctrl: b.ppu.ctrl(),
+                ppumask: b.ppu.mask(),
+                scroll_x: b.ppu.scroll_x(),
+                scroll_y: b.ppu.scroll_y(),
+                mirroring: mirroring_str,
+            }
+        } else {
+            // Return empty data if no bus is available
+            TileViewerData {
+                chr_data: Vec::new(),
+                palette: Vec::new(),
+                master_palette: Ppu::get_master_palette(),
+                oam: Vec::new(),
+                vram: Vec::new(),
+                chr_is_ram: false,
+                ppuctrl: 0,
+                ppumask: 0,
+                scroll_x: 0,
+                scroll_y: 0,
+                mirroring: "Unknown".to_string(),
+            }
         }
     }
 
