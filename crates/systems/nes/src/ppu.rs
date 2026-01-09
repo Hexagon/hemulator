@@ -702,7 +702,8 @@ impl Ppu {
                     // Choose nametable based on base XOR scroll crossing.
                     // This matches real NES PPU behavior: the nametable bits are XORed
                     // with the coarse scroll overflow to select the correct nametable.
-                    let nt = base_nt ^ nt_x ^ (nt_y << 1);
+                    // NOTE: X affects bit 1, Y affects bit 0 (swapped from intuitive mapping)
+                    let nt = base_nt ^ (nt_x << 1) ^ nt_y;
 
                     let world_x = wx % 256;
                     let world_y = wy % 240;
@@ -997,7 +998,8 @@ impl Ppu {
                 // Choose nametable based on base XOR scroll crossing.
                 // This matches real NES PPU behavior: the nametable bits are XORed
                 // with the coarse scroll overflow to select the correct nametable.
-                let nt = base_nt ^ nt_x ^ (nt_y << 1);
+                // NOTE: X affects bit 1, Y affects bit 0 (swapped from intuitive mapping)
+                let nt = base_nt ^ (nt_x << 1) ^ nt_y;
 
                 let world_x = wx % 256;
                 let world_y = wy % 240;

@@ -32,9 +32,8 @@ impl Cartridge {
     /// - Mapper 004 (MMC3): Supports H/V via $A000 - use header mirroring
     /// - Mapper 007 (AxROM): Always single-screen via $8000 - ignore header, use SingleScreenLower
     /// - Mapper 071 (Camerica): Most games have hard-wired Vertical mirroring on the cartridge
-    ///   board, even though some ROM headers incorrectly specify Horizontal (e.g., bee52).
+    ///   board.
     ///   Games can optionally use mapper-controlled single-screen mirroring via $9000 writes.
-    ///   Default to Vertical mirroring to match actual cartridge hardware.
     ///
     /// For other mappers, returns the header mirroring unchanged.
     pub fn get_initial_mirroring(&self) -> Mirroring {
@@ -42,11 +41,9 @@ impl Cartridge {
             // AxROM (007): Always uses single-screen mirroring, header is meaningless
             7 => Mirroring::SingleScreenLower,
 
-            // Camerica (071): Most games use hard-wired Vertical mirroring on the cartridge.
-            // ROM headers are often wrong (e.g., bee52 header says Horizontal but cartridge
-            // is hard-wired to Vertical). Default to Vertical to match actual hardware.
-            // Games that need single-screen can override via $9000 writes (e.g., Fire Hawk).
-            71 => Mirroring::Vertical,
+            // Camerica (071): Respect header mirroring for hard-wired mirroring on cartridge.
+            // Games can override to single-screen via $9000 writes if needed (e.g., Fire Hawk).
+            71 => self.mirroring,
 
             // All other mappers: Use header mirroring
             _ => self.mirroring,

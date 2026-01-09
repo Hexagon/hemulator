@@ -258,9 +258,9 @@ mod tests {
         // Test that games not using mapper-controlled mirroring keep their initial mirroring
         // This simulates Micro Machines behavior: writes to $8000 for bank switching only
         //
-        // NOTE: Camerica mapper defaults to Vertical mirroring (hard-wired on most cartridges),
-        // even if the ROM header incorrectly specifies Horizontal. The header is often wrong
-        // for Camerica games (e.g., bee52).
+        // NOTE: Camerica mapper respects header mirroring for hard-wired mirroring on cartridge.
+        // For example, bee52 has Horizontal mirroring hard-wired on the PCB, correctly reflected
+        // in its ROM header. Games can optionally override to single-screen via $9000 writes.
         let prg = vec![0; 0x8000]; // 2 banks
 
         let cart = Cartridge {
@@ -268,30 +268,30 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Header says Horizontal (but will be ignored)
+            mirroring: Mirroring::Horizontal, // Header says Horizontal (will be respected)
         };
 
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical); // Initialized with Vertical
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Should initialize with Vertical mirroring (Camerica default), not header value
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
+        // Should initialize with Horizontal mirroring (from header), respecting hard-wired PCB
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
 
         camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        // Since all writes were to $8000-$8FFF and $C000-$FFFF,
-        // mirroring should remain as the initial value (vertical)
+        // Since all writes were to $8000-$8FFF and $C000-$FFFF (not $9000-$9FFF),
+        // mirroring should remain as the initial value (horizontal from header)
     }
 
     #[test]
