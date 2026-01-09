@@ -2114,12 +2114,12 @@ impl TabManager {
                 // With 4KB VRAM, each nametable is independent (no mirroring)
                 table
             }
-            "Vertical" => match table {
+            "Horizontal" => match table {
                 0 | 2 => 0,
                 1 | 3 => 1,
                 _ => 0,
             },
-            "Horizontal" => match table {
+            "Vertical" => match table {
                 0 | 1 => 0,
                 2 | 3 => 1,
                 _ => 0,
