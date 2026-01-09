@@ -49,29 +49,29 @@ const AI_STATUS_FULL: u32 = 0x80000000; // Audio buffer full
 pub struct AudioInterface {
     /// DMA source address in RDRAM
     dram_addr: u32,
-    
+
     /// Transfer length in bytes
     len: u32,
-    
+
     /// Audio control register
     control: u32,
-    
+
     /// Audio status flags
     status: u32,
-    
+
     /// DAC sample rate (CPU cycles per sample)
     dacrate: u32,
-    
+
     /// Bit rate control
     bitrate: u32,
-    
+
     /// Audio buffer for samples (stereo 16-bit PCM)
     /// Max buffer size: 128KB for smooth playback
     audio_buffer: Vec<i16>,
-    
+
     /// Current playback position in buffer
     playback_position: usize,
-    
+
     /// DMA completion pending (triggers AI interrupt)
     dma_complete_pending: bool,
 }
@@ -91,7 +91,7 @@ impl AudioInterface {
             dma_complete_pending: false,
         }
     }
-    
+
     /// Reset to initial state
     #[allow(dead_code)] // Public API for future audio reset
     pub fn reset(&mut self) {
@@ -105,7 +105,7 @@ impl AudioInterface {
         self.playback_position = 0;
         self.dma_complete_pending = false;
     }
-    
+
     /// Read from AI register
     pub fn read_register(&self, offset: u32) -> u32 {
         match offset {
@@ -123,7 +123,7 @@ impl AudioInterface {
             }
         }
     }
-    
+
     /// Write to AI register
     pub fn write_register(&mut self, offset: u32, value: u32, rdram: &[u8]) {
         match offset {
@@ -141,7 +141,7 @@ impl AudioInterface {
                         self.dram_addr, self.len
                     )
                 });
-                
+
                 // Trigger DMA transfer when length is written
                 self.transfer_audio_dma(rdram);
             }
@@ -184,29 +184,29 @@ impl AudioInterface {
             }
         }
     }
-    
+
     /// Transfer audio samples from RDRAM via DMA
     fn transfer_audio_dma(&mut self, rdram: &[u8]) {
         if self.len == 0 {
             return;
         }
-        
+
         // Set busy flag
         self.status |= AI_STATUS_DMA_BUSY;
-        
+
         let addr = (self.dram_addr & 0x00FFFFFF) as usize;
         let len = self.len as usize;
-        
+
         // Audio samples are 16-bit stereo (4 bytes per sample pair)
         // Transfer samples from RDRAM to audio buffer
         if addr + len <= rdram.len() {
             // Convert bytes to 16-bit samples (big-endian)
             let num_samples = len / 2; // 2 bytes per 16-bit sample
-            
+
             // Prevent buffer overflow - max 256K samples (512KB)
             const MAX_BUFFER_SAMPLES: usize = 256 * 1024;
             let available_space = MAX_BUFFER_SAMPLES.saturating_sub(self.audio_buffer.len());
-            
+
             if available_space == 0 {
                 // Buffer is full - set full flag and skip transfer
                 self.status |= AI_STATUS_FULL;
@@ -216,25 +216,22 @@ impl AudioInterface {
                 });
                 return;
             }
-            
+
             let samples_to_transfer = num_samples.min(available_space);
-            
+
             for i in 0..samples_to_transfer {
                 let byte_offset = addr + (i * 2);
                 if byte_offset + 1 < rdram.len() {
-                    let sample = i16::from_be_bytes([
-                        rdram[byte_offset],
-                        rdram[byte_offset + 1],
-                    ]);
+                    let sample = i16::from_be_bytes([rdram[byte_offset], rdram[byte_offset + 1]]);
                     self.audio_buffer.push(sample);
                 }
             }
-            
+
             // Set full flag if buffer is near capacity
             if self.audio_buffer.len() >= MAX_BUFFER_SAMPLES - 1024 {
                 self.status |= AI_STATUS_FULL;
             }
-            
+
             log(LogCategory::PPU, LogLevel::Debug, || {
                 format!(
                     "N64 AI: Transferred {} samples ({} bytes) from RDRAM 0x{:08X}",
@@ -249,60 +246,60 @@ impl AudioInterface {
                 )
             });
         }
-        
+
         // Clear busy flag and set completion
         self.status &= !AI_STATUS_DMA_BUSY;
         self.dma_complete_pending = true;
     }
-    
+
     /// Calculate sample rate from DAC rate register
     /// CPU frequency is ~93.75 MHz, DAC rate divides this
     fn calculate_sample_rate(&self) -> u32 {
         if self.dacrate == 0 {
             return 44100; // Default
         }
-        
+
         // N64 CPU frequency: 93750000 Hz
         // Sample rate = CPU freq / (dacrate + 1)
         const CPU_FREQ: u32 = 93750000;
         CPU_FREQ / (self.dacrate + 1)
     }
-    
+
     /// Get audio samples for playback
     /// Returns up to `count` stereo samples and removes them from the buffer
     #[allow(dead_code)] // Public API for future audio output
     pub fn get_audio_samples(&mut self, count: usize) -> Vec<i16> {
         let available = self.audio_buffer.len();
         let to_take = count.min(available);
-        
+
         // Take samples from the front of the buffer
         let samples: Vec<i16> = self.audio_buffer.drain(..to_take).collect();
-        
+
         // Update buffer status
         if self.audio_buffer.len() < 1024 {
             self.status &= !AI_STATUS_FULL;
         }
-        
+
         samples
     }
-    
+
     /// Check if AI interrupt is pending
     pub fn is_interrupt_pending(&self) -> bool {
         self.dma_complete_pending
     }
-    
+
     /// Clear AI interrupt
     #[allow(dead_code)] // Public API for interrupt handling
     pub fn clear_interrupt(&mut self) {
         self.dma_complete_pending = false;
     }
-    
+
     /// Get current sample rate
     #[allow(dead_code)] // Public API for audio configuration
     pub fn get_sample_rate(&self) -> u32 {
         self.calculate_sample_rate()
     }
-    
+
     /// Get number of buffered samples
     #[allow(dead_code)] // Public API for buffer monitoring
     pub fn buffered_samples(&self) -> usize {
@@ -319,7 +316,7 @@ impl Default for AudioInterface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_ai_creation() {
         let ai = AudioInterface::new();
@@ -327,67 +324,67 @@ mod tests {
         assert_eq!(ai.len, 0);
         assert_eq!(ai.status, 0);
     }
-    
+
     #[test]
     fn test_ai_reset() {
         let mut ai = AudioInterface::new();
         ai.dram_addr = 0x1000;
         ai.len = 0x400;
         ai.status = AI_STATUS_DMA_BUSY;
-        
+
         ai.reset();
-        
+
         assert_eq!(ai.dram_addr, 0);
         assert_eq!(ai.len, 0);
         assert_eq!(ai.status, 0);
     }
-    
+
     #[test]
     fn test_sample_rate_calculation() {
         let mut ai = AudioInterface::new();
-        
+
         // Test common sample rates
         // 48000 Hz: 93750000 / 48000 = 1953.125 ≈ 1953
         ai.dacrate = 1952; // (dacrate + 1) = 1953
         let rate = ai.calculate_sample_rate();
-        assert!(rate >= 47900 && rate <= 48100); // Allow small rounding error
-        
+        assert!((47900..=48100).contains(&rate)); // Allow small rounding error
+
         // 44100 Hz: 93750000 / 44100 = 2125.85 ≈ 2126
         ai.dacrate = 2125; // (dacrate + 1) = 2126
         let rate = ai.calculate_sample_rate();
-        assert!(rate >= 44000 && rate <= 44200); // Allow small rounding error
+        assert!((44000..=44200).contains(&rate)); // Allow small rounding error
     }
-    
+
     #[test]
     fn test_audio_dma_transfer() {
         let mut ai = AudioInterface::new();
         let mut rdram = vec![0u8; 0x400000]; // 4MB
-        
+
         // Write test samples to RDRAM (16-bit big-endian)
         rdram[0x1000] = 0x12;
         rdram[0x1001] = 0x34;
         rdram[0x1002] = 0x56;
         rdram[0x1003] = 0x78;
-        
+
         // Set up DMA transfer
         ai.dram_addr = 0x1000;
         ai.len = 4; // 4 bytes = 2 samples
         ai.transfer_audio_dma(&rdram);
-        
+
         // Check samples were transferred
         assert_eq!(ai.audio_buffer.len(), 2);
         assert_eq!(ai.audio_buffer[0], 0x1234i16);
         assert_eq!(ai.audio_buffer[1], 0x5678i16);
         assert!(ai.is_interrupt_pending());
     }
-    
+
     #[test]
     fn test_get_audio_samples() {
         let mut ai = AudioInterface::new();
         ai.audio_buffer = vec![100, 200, 300, 400, 500];
-        
+
         let samples = ai.get_audio_samples(3);
-        
+
         assert_eq!(samples.len(), 3);
         assert_eq!(samples, vec![100, 200, 300]);
         assert_eq!(ai.audio_buffer.len(), 2);

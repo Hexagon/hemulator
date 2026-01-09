@@ -167,6 +167,31 @@ mod timer;
 use bus::GbBus;
 use ppu_renderer::{PpuRenderer, SoftwarePpuRenderer};
 
+/// Data for the tile viewer tab (Game Boy)
+#[derive(Clone)]
+pub struct TileViewerData {
+    /// VRAM Bank 0 data (8KB)
+    pub vram_bank0: Vec<u8>,
+    /// VRAM Bank 1 data (8KB, CGB only - tile attributes)
+    pub vram_bank1: Vec<u8>,
+    /// OAM data - 160 bytes (40 sprites x 4 bytes each)
+    pub oam: Vec<u8>,
+    /// Background palette (DMG: 1 palette, CGB: 8 palettes x 4 colors)
+    pub bg_palettes: Vec<u32>,
+    /// Object palettes (DMG: 2 palettes, CGB: 8 palettes x 4 colors)
+    pub obj_palettes: Vec<u32>,
+    /// Current LCDC value
+    pub lcdc: u8,
+    /// Current scroll values
+    pub scx: u8,
+    pub scy: u8,
+    /// Window position
+    pub wx: u8,
+    pub wy: u8,
+    /// Whether this is CGB mode
+    pub is_cgb_mode: bool,
+}
+
 pub struct GbSystem {
     cpu: CpuLr35902<GbBus>,
     cart_loaded: bool,
@@ -299,6 +324,55 @@ impl GbSystem {
     /// Get the breakpoint manager
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
+    }
+
+    /// Get tile viewer data for debugging
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        let ppu = &self.cpu.memory.ppu;
+
+        // Convert GB palettes to RGB colors
+        let mut bg_palettes = Vec::new();
+        let mut obj_palettes = Vec::new();
+
+        if ppu.is_cgb_mode() {
+            // CGB mode: 8 BG palettes + 8 OBJ palettes, 4 colors each
+            for pal_idx in 0..8 {
+                for color_idx in 0..4 {
+                    let rgb = ppu.get_cgb_bg_color(pal_idx, color_idx);
+                    bg_palettes.push(rgb);
+                }
+            }
+            for pal_idx in 0..8 {
+                for color_idx in 0..4 {
+                    let rgb = ppu.get_cgb_obj_color(pal_idx, color_idx);
+                    obj_palettes.push(rgb);
+                }
+            }
+        } else {
+            // DMG mode: 1 BG palette + 2 OBJ palettes
+            for color_idx in 0..4 {
+                bg_palettes.push(ppu.get_dmg_bg_color(color_idx));
+            }
+            for pal_idx in 0..2 {
+                for color_idx in 0..4 {
+                    obj_palettes.push(ppu.get_dmg_obj_color(pal_idx, color_idx));
+                }
+            }
+        }
+
+        TileViewerData {
+            vram_bank0: ppu.get_vram_bank0().to_vec(),
+            vram_bank1: ppu.get_vram_bank1().to_vec(),
+            oam: ppu.get_oam().to_vec(),
+            bg_palettes,
+            obj_palettes,
+            lcdc: ppu.lcdc,
+            scx: ppu.scx,
+            scy: ppu.scy,
+            wx: ppu.wx,
+            wy: ppu.wy,
+            is_cgb_mode: ppu.is_cgb_mode(),
+        }
     }
 }
 

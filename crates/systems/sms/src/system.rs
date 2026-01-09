@@ -21,6 +21,19 @@ pub enum SmsError {
     InvalidMountPoint,
 }
 
+/// Data for the tile viewer tab (SMS)
+#[derive(Clone)]
+pub struct TileViewerData {
+    /// VRAM data (16KB)
+    pub vram: Vec<u8>,
+    /// Color RAM (32 bytes for palette)
+    pub cram: Vec<u8>,
+    /// Palette colors as RGB (32 colors)
+    pub palette: Vec<u32>,
+    /// VDP registers
+    pub registers: Vec<u8>,
+}
+
 /// Sega Master System emulator
 pub struct SmsSystem {
     // CPU
@@ -281,6 +294,11 @@ impl SmsSystem {
     /// Get the breakpoint manager
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
+    }
+
+    /// Get tile viewer data for debugging
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        self.vdp.borrow().get_tile_viewer_data()
     }
 }
 

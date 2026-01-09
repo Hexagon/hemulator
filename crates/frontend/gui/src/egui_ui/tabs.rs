@@ -15,12 +15,83 @@ pub enum Tab {
     Log,
     Help,
     Debug,
-    Tiles, // Tile/palette viewer for PPU debugging
+    Tiles,    // Tile/palette viewer for PPU debugging
     PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
     About,
 }
 
-/// Data for the tile viewer tab
+/// System-specific tile viewer data
+#[derive(Clone)]
+pub enum SystemTileData {
+    NES(NesTileData),
+    GameBoy(GbTileData),
+    SMS(SmsTileData),
+    SNES(SnesTileData),
+}
+
+/// NES tile viewer data
+#[derive(Clone)]
+pub struct NesTileData {
+    /// CHR data (pattern tables) - 8KB for NES
+    pub chr_data: Vec<u8>,
+    /// Palette data - 32 bytes for NES (4 colors x 8 palettes)
+    pub palette: Vec<u8>,
+    /// NES master palette for color lookup
+    pub master_palette: Vec<u32>,
+    /// OAM data - 256 bytes (64 sprites x 4 bytes each)
+    pub oam: Vec<u8>,
+    /// VRAM data - 2KB nametables
+    pub vram: Vec<u8>,
+    /// Whether this is CHR-RAM (true) or CHR-ROM (false)
+    pub chr_is_ram: bool,
+    /// Current PPUCTRL value (for pattern table selection info)
+    pub ppuctrl: u8,
+    /// Current PPUMASK value
+    pub ppumask: u8,
+    /// Current scroll values
+    pub scroll_x: u8,
+    pub scroll_y: u8,
+    /// Current mirroring mode
+    pub mirroring: String,
+}
+
+/// Game Boy tile viewer data
+#[derive(Clone)]
+pub struct GbTileData {
+    pub vram_bank0: Vec<u8>,
+    pub vram_bank1: Vec<u8>,
+    pub oam: Vec<u8>,
+    pub bg_palettes: Vec<u32>,
+    pub obj_palettes: Vec<u32>,
+    pub lcdc: u8,
+    pub scx: u8,
+    pub scy: u8,
+    pub wx: u8,
+    pub wy: u8,
+    pub is_cgb_mode: bool,
+}
+
+/// SMS tile viewer data
+#[derive(Clone)]
+pub struct SmsTileData {
+    pub vram: Vec<u8>,
+    pub cram: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// SNES tile viewer data
+#[derive(Clone)]
+pub struct SnesTileData {
+    pub vram: Vec<u8>,
+    pub cgram: Vec<u8>,
+    pub oam: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub bg_mode: u8,
+    pub screen_enabled: bool,
+}
+
+/// Data for the tile viewer tab (legacy - kept for backward compatibility)
 #[derive(Clone)]
 pub struct TileViewerData {
     /// CHR data (pattern tables) - 8KB for NES
@@ -84,6 +155,7 @@ pub struct TabManager {
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub tile_viewer_data: Option<TileViewerData>,
+    pub system_tile_data: Option<SystemTileData>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -106,6 +178,7 @@ impl TabManager {
             debug_info: None,
             enhanced_debug_state: None,
             tile_viewer_data: None,
+            system_tile_data: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -131,6 +204,10 @@ impl TabManager {
 
     pub fn update_tile_viewer_data(&mut self, data: TileViewerData) {
         self.tile_viewer_data = Some(data);
+    }
+
+    pub fn update_system_tile_data(&mut self, data: SystemTileData) {
+        self.system_tile_data = Some(data);
     }
 
     pub fn show_pc_config_tab(&mut self) {
@@ -1358,11 +1435,13 @@ impl TabManager {
                     // PPU state summary
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl)).monospace(),
+                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl))
+                                .monospace(),
                         );
                         ui.separator();
                         ui.label(
-                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask)).monospace(),
+                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask))
+                                .monospace(),
                         );
                         ui.separator();
                         ui.label(
@@ -1373,15 +1452,26 @@ impl TabManager {
                             .monospace(),
                         );
                         ui.separator();
-                        ui.label(egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace());
+                        ui.label(
+                            egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace(),
+                        );
                     });
 
                     ui.add_space(5.0);
 
                     // CHR type indicator
-                    let chr_type = if data.chr_is_ram { "CHR-RAM" } else { "CHR-ROM" };
+                    let chr_type = if data.chr_is_ram {
+                        "CHR-RAM"
+                    } else {
+                        "CHR-ROM"
+                    };
                     let chr_size = data.chr_data.len();
-                    ui.label(format!("{} ({} bytes / {} KB)", chr_type, chr_size, chr_size / 1024));
+                    ui.label(format!(
+                        "{} ({} bytes / {} KB)",
+                        chr_type,
+                        chr_size,
+                        chr_size / 1024
+                    ));
 
                     ui.add_space(10.0);
 
@@ -1433,24 +1523,38 @@ impl TabManager {
                     ui.separator();
 
                     // Sprite info
-                    let sprite_size = if (data.ppuctrl & 0x20) != 0 { "8x16" } else { "8x8" };
+                    let sprite_size = if (data.ppuctrl & 0x20) != 0 {
+                        "8x16"
+                    } else {
+                        "8x8"
+                    };
                     let sprite_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
-                    
+
                     // Count visible sprites
                     let visible_count = if data.oam.len() >= 256 {
-                        (0..64).filter(|&i| {
-                            let y = data.oam[i * 4];
-                            if sprite_size == "8x16" { y < 0xE7 } else { y < 0xEF }
-                        }).count()
+                        (0..64)
+                            .filter(|&i| {
+                                let y = data.oam[i * 4];
+                                if sprite_size == "8x16" {
+                                    y < 0xE7
+                                } else {
+                                    y < 0xEF
+                                }
+                            })
+                            .count()
                     } else {
                         0
                     };
-                    
+
                     ui.horizontal(|ui| {
                         ui.label(format!("Sprite Size: {}", sprite_size));
                         ui.separator();
                         if sprite_size == "8x8" {
-                            ui.label(format!("Pattern Table: {} (CHR ${:04X})", sprite_table, sprite_table * 0x1000));
+                            ui.label(format!(
+                                "Pattern Table: {} (CHR ${:04X})",
+                                sprite_table,
+                                sprite_table * 0x1000
+                            ));
                         } else {
                             ui.label("Pattern Table: Per-sprite (tile bit 0)");
                         }
@@ -1473,7 +1577,11 @@ impl TabManager {
 
                     let bg_table = if (data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
                     ui.horizontal(|ui| {
-                        ui.label(format!("BG Pattern Table: {} (CHR ${:04X})", bg_table, bg_table * 0x1000));
+                        ui.label(format!(
+                            "BG Pattern Table: {} (CHR ${:04X})",
+                            bg_table,
+                            bg_table * 0x1000
+                        ));
                         ui.separator();
                         ui.label(format!("Mirroring: {}", data.mirroring));
                         ui.separator();
@@ -1484,6 +1592,58 @@ impl TabManager {
 
                     // Render nametable preview
                     self.render_nametables(ui, data);
+                } else if let Some(ref sys_data) = self.system_tile_data {
+                    // Render system-specific tile viewers
+                    match sys_data {
+                        SystemTileData::GameBoy(gb_data) => {
+                            ui.heading(format!(
+                                "🎮 Game Boy Tile Viewer ({})",
+                                if gb_data.is_cgb_mode { "CGB" } else { "DMG" }
+                            ));
+                            ui.separator();
+                            ui.label(format!("LCDC: ${:02X}", gb_data.lcdc));
+                            ui.label(format!(
+                                "Scroll: ({}, {}) Window: ({}, {})",
+                                gb_data.scx, gb_data.scy, gb_data.wx, gb_data.wy
+                            ));
+                            ui.label(format!("VRAM: {} KB", gb_data.vram_bank0.len() / 1024));
+                            ui.label(format!("OAM: {} bytes (40 sprites)", gb_data.oam.len()));
+                            ui.label(format!("BG Palettes: {} colors", gb_data.bg_palettes.len()));
+                            ui.label(format!(
+                                "OBJ Palettes: {} colors",
+                                gb_data.obj_palettes.len()
+                            ));
+                        }
+                        SystemTileData::SMS(sms_data) => {
+                            ui.heading("🎮 SMS Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("VRAM: {} KB", sms_data.vram.len() / 1024));
+                            ui.label(format!("CRAM: {} bytes", sms_data.cram.len()));
+                            ui.label(format!("Palette: {} colors", sms_data.palette.len()));
+                            ui.label(format!("Registers: {:?}", sms_data.registers));
+                        }
+                        SystemTileData::SNES(snes_data) => {
+                            ui.heading("🎮 SNES Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("BG Mode: {}", snes_data.bg_mode));
+                            ui.label(format!(
+                                "Screen: {}",
+                                if snes_data.screen_enabled {
+                                    "Enabled"
+                                } else {
+                                    "Disabled"
+                                }
+                            ));
+                            ui.label(format!("VRAM: {} KB", snes_data.vram.len() / 1024));
+                            ui.label(format!("CGRAM: {} bytes", snes_data.cgram.len()));
+                            ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
+                            ui.label(format!("Palette: {} colors", snes_data.palette.len()));
+                        }
+                        SystemTileData::NES(_) => {
+                            // Shouldn't happen - NES uses legacy TileViewerData
+                            ui.label("NES tile data - please use NES-specific viewer");
+                        }
+                    }
                 } else {
                     // No tile data available
                     ui.vertical_centered(|ui| {
@@ -1492,7 +1652,7 @@ impl TabManager {
                         ui.add_space(10.0);
                         ui.heading("No Tile Data Available");
                         ui.add_space(10.0);
-                        ui.label("Load an NES ROM to see tile and palette data");
+                        ui.label("Load a ROM to see tile and palette data");
                     });
                 }
             });
@@ -1545,7 +1705,12 @@ impl TabManager {
                 painter.rect_filled(tile_rect, 0.0, tile_color);
 
                 // Draw grid lines
-                painter.rect_stroke(tile_rect, 0.0, egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)), egui::StrokeKind::Inside);
+                painter.rect_stroke(
+                    tile_rect,
+                    0.0,
+                    egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
 
@@ -1570,19 +1735,38 @@ impl TabManager {
                             low_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + i]));
                         }
                         if chr_addr + 8 + i < data.chr_data.len() {
-                            high_bytes.push_str(&format!("{:02X} ", data.chr_data[chr_addr + 8 + i]));
+                            high_bytes
+                                .push_str(&format!("{:02X} ", data.chr_data[chr_addr + 8 + i]));
                         }
                     }
 
                     response.clone().on_hover_ui(|ui| {
-                        ui.label(egui::RichText::new(format!("Tile ${:02X} ({})", tile_index, tile_index)).strong());
-                        ui.label(format!("CHR Address: ${:04X}-${:04X}", chr_addr, chr_addr + 15));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Tile ${:02X} ({})",
+                                tile_index, tile_index
+                            ))
+                            .strong(),
+                        );
+                        ui.label(format!(
+                            "CHR Address: ${:04X}-${:04X}",
+                            chr_addr,
+                            chr_addr + 15
+                        ));
                         ui.label(format!("Pattern Table: {}", table_num));
                         ui.label(format!("Row: {}, Col: {}", tile_row, tile_col));
                         ui.separator();
                         ui.label("Tile Data (Low plane / High plane):");
-                        ui.label(egui::RichText::new(format!("Low:  {}", low_bytes.trim())).monospace().size(11.0));
-                        ui.label(egui::RichText::new(format!("High: {}", high_bytes.trim())).monospace().size(11.0));
+                        ui.label(
+                            egui::RichText::new(format!("Low:  {}", low_bytes.trim()))
+                                .monospace()
+                                .size(11.0),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("High: {}", high_bytes.trim()))
+                                .monospace()
+                                .size(11.0),
+                        );
                     });
                 }
             }
@@ -1624,7 +1808,12 @@ impl TabManager {
                             let rect = response.rect;
 
                             painter.rect_filled(rect, 2.0, color);
-                            painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::WHITE), egui::StrokeKind::Inside);
+                            painter.rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0, egui::Color32::WHITE),
+                                egui::StrokeKind::Inside,
+                            );
 
                             response.on_hover_ui(|ui| {
                                 ui.label(
@@ -1634,10 +1823,7 @@ impl TabManager {
                                     ))
                                     .strong(),
                                 );
-                                ui.label(format!(
-                                    "Address: ${:04X}",
-                                    pal_addr + color_num
-                                ));
+                                ui.label(format!("Address: ${:04X}", pal_addr + color_num));
                                 ui.label(format!(
                                     "NES Color Index: ${:02X} ({})",
                                     color_index, color_index
@@ -1674,7 +1860,10 @@ impl TabManager {
         let grid_rows = 4; // 4 rows = 64 sprites
 
         let (response, painter) = ui.allocate_painter(
-            egui::Vec2::new(grid_cols as f32 * cell_width, grid_rows as f32 * cell_height),
+            egui::Vec2::new(
+                grid_cols as f32 * cell_width,
+                grid_rows as f32 * cell_height,
+            ),
             egui::Sense::hover(),
         );
 
@@ -1750,15 +1939,15 @@ impl TabManager {
 
             // Draw the sprite tile pixels
             let tiles_to_draw = if sprite_size_8x16 { 2 } else { 1 };
-            
+
             for tile_part in 0..tiles_to_draw {
                 let tile_chr_addr = chr_addr + tile_part * 16;
-                
+
                 for py in 0..8 {
                     if tile_chr_addr + py + 8 >= data.chr_data.len() {
                         continue;
                     }
-                    
+
                     let low_byte = data.chr_data[tile_chr_addr + py];
                     let high_byte = data.chr_data[tile_chr_addr + py + 8];
 
@@ -1799,10 +1988,10 @@ impl TabManager {
 
                         // Calculate pixel position with flipping
                         let draw_px = if flip_h { 7 - px } else { px };
-                        let draw_py = if flip_v { 
-                            (tile_height - 1) - (tile_part * 8 + py) 
-                        } else { 
-                            tile_part * 8 + py 
+                        let draw_py = if flip_v {
+                            (tile_height - 1) - (tile_part * 8 + py)
+                        } else {
+                            tile_part * 8 + py
                         };
 
                         let pixel_rect = egui::Rect::from_min_size(
@@ -1827,7 +2016,12 @@ impl TabManager {
             } else {
                 egui::Color32::from_rgb(50, 50, 60)
             };
-            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, border_color), egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                cell_rect,
+                0.0,
+                egui::Stroke::new(1.0, border_color),
+                egui::StrokeKind::Outside,
+            );
         }
 
         // Handle hover tooltip
@@ -1851,7 +2045,11 @@ impl TabManager {
 
                         // Decode attributes
                         let palette_num = attributes & 0x03;
-                        let priority = if (attributes & 0x20) != 0 { "Behind BG" } else { "In front" };
+                        let priority = if (attributes & 0x20) != 0 {
+                            "Behind BG"
+                        } else {
+                            "In front"
+                        };
                         let flip_h = (attributes & 0x40) != 0;
                         let flip_v = (attributes & 0x80) != 0;
 
@@ -1865,20 +2063,38 @@ impl TabManager {
                         };
 
                         response.clone().on_hover_ui(|ui| {
-                            ui.label(egui::RichText::new(format!("Sprite {} (OAM ${:02X})", sprite_idx, oam_offset)).strong());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Sprite {} (OAM ${:02X})",
+                                    sprite_idx, oam_offset
+                                ))
+                                .strong(),
+                            );
                             ui.separator();
                             ui.label(format!("Position: ({}, {})", x_pos, y_pos));
                             ui.label(format!("Tile: ${:02X} ({})", tile_idx, tile_idx));
                             ui.label(format!("CHR Address: ${:04X}", chr_addr));
                             ui.separator();
-                            ui.label(format!("Palette: {} ($3F{:02X})", palette_num, 0x10 + palette_num * 4));
+                            ui.label(format!(
+                                "Palette: {} ($3F{:02X})",
+                                palette_num,
+                                0x10 + palette_num * 4
+                            ));
                             ui.label(format!("Priority: {}", priority));
-                            ui.label(format!("Flip: H={} V={}", if flip_h { "Yes" } else { "No" }, if flip_v { "Yes" } else { "No" }));
+                            ui.label(format!(
+                                "Flip: H={} V={}",
+                                if flip_h { "Yes" } else { "No" },
+                                if flip_v { "Yes" } else { "No" }
+                            ));
                             ui.separator();
-                            ui.label(egui::RichText::new(format!(
-                                "OAM: Y=${:02X} Tile=${:02X} Attr=${:02X} X=${:02X}",
-                                y_pos, tile_idx, attributes, x_pos
-                            )).monospace().size(11.0));
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "OAM: Y=${:02X} Tile=${:02X} Attr=${:02X} X=${:02X}",
+                                    y_pos, tile_idx, attributes, x_pos
+                                ))
+                                .monospace()
+                                .size(11.0),
+                            );
                         });
                     }
                 }
@@ -1918,7 +2134,11 @@ impl TabManager {
         }
 
         // Background pattern table (selected by PPUCTRL bit 4)
-        let bg_pattern_table = if (data.ppuctrl & 0x10) != 0 { 0x1000 } else { 0x0000 };
+        let bg_pattern_table = if (data.ppuctrl & 0x10) != 0 {
+            0x1000
+        } else {
+            0x0000
+        };
 
         // Draw labels
         painter.text(
@@ -1929,7 +2149,10 @@ impl TabManager {
             egui::Color32::WHITE,
         );
         painter.text(
-            egui::Pos2::new(rect.min.x + nt_width + spacing + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Pos2::new(
+                rect.min.x + nt_width + spacing + nt_width / 2.0,
+                rect.min.y + 8.0,
+            ),
             egui::Align2::CENTER_CENTER,
             "Nametable 1 ($2400)",
             egui::FontId::proportional(11.0),
@@ -1941,7 +2164,7 @@ impl TabManager {
         // Render both nametables
         for nt_idx in 0..2 {
             let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
-            
+
             // Nametable base address in VRAM
             // VRAM layout depends on mirroring, but we show logical nametables 0 and 1
             let nt_base = nt_idx * 0x400; // 0x000 or 0x400 in VRAM
@@ -1967,7 +2190,7 @@ impl TabManager {
 
                     // Get palette colors for this tile (BG palettes at $3F00)
                     let palette_base = palette_idx * 4;
-                    
+
                     // Helper to convert packed RGB to Color32
                     let get_color = |pal_offset: usize| {
                         let idx = data.palette.get(pal_offset).copied().unwrap_or(0) as usize;
@@ -1977,7 +2200,7 @@ impl TabManager {
                         let b = (rgb & 0xFF) as u8;
                         egui::Color32::from_rgb(r, g, b)
                     };
-                    
+
                     let colors: [egui::Color32; 4] = [
                         get_color(0), // Color 0 is always the universal background ($3F00)
                         get_color(palette_base + 1),
@@ -2006,7 +2229,10 @@ impl TabManager {
                             let color = colors[color_idx];
 
                             let pixel_rect = egui::Rect::from_min_size(
-                                egui::Pos2::new(tile_x + px as f32 * scale, tile_y + py as f32 * scale),
+                                egui::Pos2::new(
+                                    tile_x + px as f32 * scale,
+                                    tile_y + py as f32 * scale,
+                                ),
                                 egui::Vec2::new(scale, scale),
                             );
                             painter.rect_filled(pixel_rect, 0.0, color);
@@ -2020,13 +2246,18 @@ impl TabManager {
                 egui::Pos2::new(nt_start_x, nt_start_y),
                 egui::Vec2::new(nt_width, nt_height),
             );
-            painter.rect_stroke(nt_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)), egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                nt_rect,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 120)),
+                egui::StrokeKind::Outside,
+            );
         }
 
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {
             let rel_y = hover_pos.y - nt_start_y;
-            
+
             // Check which nametable we're hovering over
             for nt_idx in 0..2 {
                 let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
@@ -2058,9 +2289,13 @@ impl TabManager {
                         let attr_addr = 0x2000 + attr_base + attr_offset;
 
                         response.clone().on_hover_ui(|ui| {
-                            ui.label(egui::RichText::new(format!(
-                                "Nametable {} ({}, {})", nt_idx, tile_col, tile_row
-                            )).strong());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Nametable {} ({}, {})",
+                                    nt_idx, tile_col, tile_row
+                                ))
+                                .strong(),
+                            );
                             ui.separator();
                             ui.label(format!("NT Address: ${:04X}", nt_addr));
                             ui.label(format!("Tile Index: ${:02X} ({})", tile_idx, tile_idx));
@@ -2068,7 +2303,10 @@ impl TabManager {
                             ui.separator();
                             ui.label(format!("Attr Address: ${:04X}", attr_addr));
                             ui.label(format!("Attr Byte: ${:02X}", attr_byte));
-                            ui.label(format!("Palette: {} (quadrant {}, {})", palette_idx, quadrant_x, quadrant_y));
+                            ui.label(format!(
+                                "Palette: {} (quadrant {}, {})",
+                                palette_idx, quadrant_x, quadrant_y
+                            ));
                         });
                     }
                     break; // Found the nametable we're over

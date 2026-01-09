@@ -3155,22 +3155,66 @@ fn main() {
 
         // Update tile viewer data only if tiles tab is active
         if egui_app.tab_manager.active_tab == egui_ui::Tab::Tiles {
-            if let EmulatorSystem::NES(s) = &sys {
-                let nes_data = s.get_tile_viewer_data();
-                let tile_data = egui_ui::TileViewerData {
-                    chr_data: nes_data.chr_data,
-                    palette: nes_data.palette,
-                    master_palette: nes_data.master_palette,
-                    oam: nes_data.oam,
-                    vram: nes_data.vram,
-                    chr_is_ram: nes_data.chr_is_ram,
-                    ppuctrl: nes_data.ppuctrl,
-                    ppumask: nes_data.ppumask,
-                    scroll_x: nes_data.scroll_x,
-                    scroll_y: nes_data.scroll_y,
-                    mirroring: nes_data.mirroring,
-                };
-                egui_app.tab_manager.update_tile_viewer_data(tile_data);
+            match &sys {
+                EmulatorSystem::NES(s) => {
+                    let nes_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::TileViewerData {
+                        chr_data: nes_data.chr_data,
+                        palette: nes_data.palette,
+                        master_palette: nes_data.master_palette,
+                        oam: nes_data.oam,
+                        vram: nes_data.vram,
+                        chr_is_ram: nes_data.chr_is_ram,
+                        ppuctrl: nes_data.ppuctrl,
+                        ppumask: nes_data.ppumask,
+                        scroll_x: nes_data.scroll_x,
+                        scroll_y: nes_data.scroll_y,
+                        mirroring: nes_data.mirroring,
+                    };
+                    egui_app.tab_manager.update_tile_viewer_data(tile_data);
+                }
+                EmulatorSystem::GameBoy(s) => {
+                    let gb_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::SystemTileData::GameBoy(egui_ui::GbTileData {
+                        vram_bank0: gb_data.vram_bank0,
+                        vram_bank1: gb_data.vram_bank1,
+                        oam: gb_data.oam,
+                        bg_palettes: gb_data.bg_palettes,
+                        obj_palettes: gb_data.obj_palettes,
+                        lcdc: gb_data.lcdc,
+                        scx: gb_data.scx,
+                        scy: gb_data.scy,
+                        wx: gb_data.wx,
+                        wy: gb_data.wy,
+                        is_cgb_mode: gb_data.is_cgb_mode,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::SMS(s) => {
+                    let sms_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::SystemTileData::SMS(egui_ui::SmsTileData {
+                        vram: sms_data.vram,
+                        cram: sms_data.cram,
+                        palette: sms_data.palette,
+                        registers: sms_data.registers,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                EmulatorSystem::SNES(s) => {
+                    let snes_data = s.get_tile_viewer_data();
+                    let tile_data = egui_ui::SystemTileData::SNES(egui_ui::SnesTileData {
+                        vram: snes_data.vram,
+                        cgram: snes_data.cgram,
+                        oam: snes_data.oam,
+                        palette: snes_data.palette,
+                        bg_mode: snes_data.bg_mode,
+                        screen_enabled: snes_data.screen_enabled,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
+                _ => {
+                    // Other systems don't have tile viewers yet
+                }
             }
         }
 

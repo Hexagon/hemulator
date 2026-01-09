@@ -15,4 +15,7 @@ mod tabs;
 
 pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
-pub use tabs::{DebugAction, PcConfigInfo, Tab, TabAction, TileViewerData};
+pub use tabs::{
+    DebugAction, GbTileData, NesTileData, PcConfigInfo, SmsTileData, SnesTileData, SystemTileData,
+    Tab, TabAction, TileViewerData,
+};

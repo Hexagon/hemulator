@@ -945,6 +945,75 @@ impl Ppu {
         // Set mode bits
         self.stat |= mode;
     }
+
+    // Tile viewer helper methods
+
+    /// Get VRAM bank 0 data
+    pub fn get_vram_bank0(&self) -> &[u8; 0x2000] {
+        &self.vram_bank0
+    }
+
+    /// Get VRAM bank 1 data
+    pub fn get_vram_bank1(&self) -> &[u8; 0x2000] {
+        &self.vram_bank1
+    }
+
+    /// Get OAM data
+    pub fn get_oam(&self) -> &[u8; 0xA0] {
+        &self.oam
+    }
+
+    /// Get CGB background color (15-bit BGR to 32-bit ARGB)
+    pub fn get_cgb_bg_color(&self, palette: usize, color: usize) -> u32 {
+        let idx = (palette * 8) + (color * 2);
+        if idx + 1 < self.bg_palette_data.len() {
+            let low = self.bg_palette_data[idx];
+            let high = self.bg_palette_data[idx + 1];
+            self.cgb_color_to_rgb(low, high)
+        } else {
+            0xFF000000 // Black
+        }
+    }
+
+    /// Get CGB object color (15-bit BGR to 32-bit ARGB)
+    pub fn get_cgb_obj_color(&self, palette: usize, color: usize) -> u32 {
+        let idx = (palette * 8) + (color * 2);
+        if idx + 1 < self.obj_palette_data.len() {
+            let low = self.obj_palette_data[idx];
+            let high = self.obj_palette_data[idx + 1];
+            self.cgb_color_to_rgb(low, high)
+        } else {
+            0xFF000000 // Black
+        }
+    }
+
+    /// Get DMG background color
+    pub fn get_dmg_bg_color(&self, color: usize) -> u32 {
+        let palette = self.bgp;
+        let shade = (palette >> (color * 2)) & 0x03;
+        match shade {
+            0 => 0xFFFFFFFF, // White
+            1 => 0xFFAAAAAA, // Light gray
+            2 => 0xFF555555, // Dark gray
+            _ => 0xFF000000, // Black
+        }
+    }
+
+    /// Get DMG object color
+    pub fn get_dmg_obj_color(&self, palette_idx: usize, color: usize) -> u32 {
+        let palette = if palette_idx == 0 {
+            self.obp0
+        } else {
+            self.obp1
+        };
+        let shade = (palette >> (color * 2)) & 0x03;
+        match shade {
+            0 => 0xFFFFFFFF, // White (transparent for sprites, but we'll show it)
+            1 => 0xFFAAAAAA, // Light gray
+            2 => 0xFF555555, // Dark gray
+            _ => 0xFF000000, // Black
+        }
+    }
 }
 
 #[cfg(test)]

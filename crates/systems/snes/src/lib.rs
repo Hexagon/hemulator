@@ -64,6 +64,23 @@ pub struct DebugInfo {
     pub emulation_mode: bool,
 }
 
+/// Data for the tile viewer tab (SNES)
+#[derive(Clone)]
+pub struct TileViewerData {
+    /// VRAM data (64KB)
+    pub vram: Vec<u8>,
+    /// CGRAM data (512 bytes - 256 colors x 2 bytes each)
+    pub cgram: Vec<u8>,
+    /// OAM data (544 bytes - 512 main + 32 high table)
+    pub oam: Vec<u8>,
+    /// Palette colors as RGB (256 colors)
+    pub palette: Vec<u32>,
+    /// Current BG mode (0-7)
+    pub bg_mode: u8,
+    /// Screen enable status
+    pub screen_enabled: bool,
+}
+
 /// SNES system implementation
 pub struct SnesSystem {
     cpu: SnesCpu,
@@ -167,6 +184,11 @@ impl SnesSystem {
     /// Get the breakpoint manager
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
+    }
+
+    /// Get tile viewer data for debugging
+    pub fn get_tile_viewer_data(&self) -> TileViewerData {
+        self.cpu.bus().ppu().get_tile_viewer_data()
     }
 }
 

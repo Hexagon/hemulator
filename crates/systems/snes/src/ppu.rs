@@ -1058,6 +1058,41 @@ impl Ppu {
         self.nmi_flag.set(false);
     }
 
+    /// Get tile viewer data for debugging
+    pub fn get_tile_viewer_data(&self) -> crate::TileViewerData {
+        // Convert CGRAM colors to RGB
+        let mut palette = Vec::new();
+        for i in 0..256 {
+            let idx = i * 2;
+            if idx + 1 < self.cgram.len() {
+                let low = self.cgram[idx] as u16;
+                let high = self.cgram[idx + 1] as u16;
+                let bgr15 = low | (high << 8);
+
+                // Convert 15-bit BGR to 32-bit ARGB
+                let r = ((bgr15 & 0x1F) as u32) << 3;
+                let g = (((bgr15 >> 5) & 0x1F) as u32) << 3;
+                let b = (((bgr15 >> 10) & 0x1F) as u32) << 3;
+                // Expand 5-bit to 8-bit
+                let r = r | (r >> 5);
+                let g = g | (g >> 5);
+                let b = b | (b >> 5);
+                palette.push(0xFF000000 | (r << 16) | (g << 8) | b);
+            } else {
+                palette.push(0xFF000000); // Black
+            }
+        }
+
+        crate::TileViewerData {
+            vram: self.vram.to_vec(),
+            cgram: self.cgram.to_vec(),
+            oam: self.oam.to_vec(),
+            palette,
+            bg_mode: self.bgmode & 0x07,
+            screen_enabled: (self.screen_display & 0x80) == 0,
+        }
+    }
+
     /// Check if VRAM is accessible (during VBlank or force blank)
     /// SNES hardware only allows VRAM access during VBlank or when screen is force blanked
     fn is_vram_accessible(&self) -> bool {

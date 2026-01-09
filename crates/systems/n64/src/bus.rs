@@ -210,7 +210,7 @@ impl N64Bus {
         // Use TLB for address translation
         // Convert 32-bit address to 64-bit for TLB lookup
         let virt_addr = addr as u64;
-        
+
         match self.tlb.translate(virt_addr) {
             Some((phys_addr, _is_cached)) => phys_addr,
             None => {
@@ -221,7 +221,7 @@ impl N64Bus {
             }
         }
     }
-    
+
     /// Get mutable reference to TLB for CP0 TLB instructions
     #[allow(dead_code)] // Reserved for future CP0 TLB instruction implementation
     pub fn tlb_mut(&mut self) -> &mut Tlb {
@@ -447,7 +447,7 @@ impl MemoryMips for N64Bus {
             0x0450_0000..=0x0450_0017 => {
                 let offset = phys_addr & 0x1F;
                 self.ai.write_register(offset, val, &self.rdram);
-                
+
                 // Check if AI interrupt is pending
                 if self.ai.is_interrupt_pending() {
                     self.mi.set_interrupt(crate::mi::MI_INTR_AI);

@@ -244,6 +244,27 @@ impl Vdp {
         self.line_interrupt_pending = false;
     }
 
+    /// Get tile viewer data for debugging
+    pub fn get_tile_viewer_data(&self) -> crate::system::TileViewerData {
+        // Convert CRAM colors to RGB
+        let mut palette = Vec::new();
+        for i in 0..32 {
+            let cram_value = self.cram[i];
+            // SMS color format: --BBGGRR (2 bits per channel)
+            let r = ((cram_value & 0x03) as u32) * 85; // 0-3 -> 0-255
+            let g = (((cram_value >> 2) & 0x03) as u32) * 85;
+            let b = (((cram_value >> 4) & 0x03) as u32) * 85;
+            palette.push(0xFF000000 | (r << 16) | (g << 8) | b);
+        }
+
+        crate::system::TileViewerData {
+            vram: self.vram.to_vec(),
+            cram: self.cram.to_vec(),
+            palette,
+            registers: self.registers.to_vec(),
+        }
+    }
+
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
         // Handle line counter and line interrupts
