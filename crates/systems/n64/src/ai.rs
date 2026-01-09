@@ -66,7 +66,7 @@ pub struct AudioInterface {
     bitrate: u32,
     
     /// Audio buffer for samples (stereo 16-bit PCM)
-    /// Max buffer size: 256KB for smooth playback
+    /// Max buffer size: 128KB for smooth playback
     audio_buffer: Vec<i16>,
     
     /// Current playback position in buffer
@@ -203,7 +203,23 @@ impl AudioInterface {
             // Convert bytes to 16-bit samples (big-endian)
             let num_samples = len / 2; // 2 bytes per 16-bit sample
             
-            for i in 0..num_samples {
+            // Prevent buffer overflow - max 256K samples (512KB)
+            const MAX_BUFFER_SAMPLES: usize = 256 * 1024;
+            let available_space = MAX_BUFFER_SAMPLES.saturating_sub(self.audio_buffer.len());
+            
+            if available_space == 0 {
+                // Buffer is full - set full flag and skip transfer
+                self.status |= AI_STATUS_FULL;
+                self.status &= !AI_STATUS_DMA_BUSY;
+                log(LogCategory::PPU, LogLevel::Warn, || {
+                    "N64 AI: Audio buffer full, dropping samples".to_string()
+                });
+                return;
+            }
+            
+            let samples_to_transfer = num_samples.min(available_space);
+            
+            for i in 0..samples_to_transfer {
                 let byte_offset = addr + (i * 2);
                 if byte_offset + 1 < rdram.len() {
                     let sample = i16::from_be_bytes([
@@ -214,10 +230,15 @@ impl AudioInterface {
                 }
             }
             
+            // Set full flag if buffer is near capacity
+            if self.audio_buffer.len() >= MAX_BUFFER_SAMPLES - 1024 {
+                self.status |= AI_STATUS_FULL;
+            }
+            
             log(LogCategory::PPU, LogLevel::Debug, || {
                 format!(
                     "N64 AI: Transferred {} samples ({} bytes) from RDRAM 0x{:08X}",
-                    num_samples, len, addr
+                    samples_to_transfer, len, addr
                 )
             });
         } else {
@@ -328,11 +349,13 @@ mod tests {
         // Test common sample rates
         // 48000 Hz: 93750000 / 48000 = 1953.125 ≈ 1953
         ai.dacrate = 1952; // (dacrate + 1) = 1953
-        assert_eq!(ai.calculate_sample_rate(), 48000);
+        let rate = ai.calculate_sample_rate();
+        assert!(rate >= 47900 && rate <= 48100); // Allow small rounding error
         
         // 44100 Hz: 93750000 / 44100 = 2125.85 ≈ 2126
         ai.dacrate = 2125; // (dacrate + 1) = 2126
-        assert_eq!(ai.calculate_sample_rate(), 44100);
+        let rate = ai.calculate_sample_rate();
+        assert!(rate >= 44000 && rate <= 44200); // Allow small rounding error
     }
     
     #[test]

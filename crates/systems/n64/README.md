@@ -47,8 +47,8 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 ### What's Missing for Full Compatibility
 
-- ⏳ **Audio Interface** - No audio output implementation yet
-- ⏳ **Memory Management** - No TLB or cache (direct-mapped only)
+- ⏳ **Audio Output Integration** - AI hardware module implemented (DMA transfer, sample rate control, interrupts, 16-bit stereo PCM), but connection to the frontend audio backend is still pending
+- ⏳ **Memory Management** - TLB implemented (32-entry, ASID-aware), but CPU cache is still direct-mapped and CP0 TLB instructions/MMU behavior are not fully integrated
 - ⏳ **Cycle Accuracy** - Frame-based timing, not cycle-accurate
 - ⏳ **Some RDP Commands** - Missing some advanced blend/combine modes
 - ⏳ **RSP Microcode** - Only common F3DEX/F3DEX2 commands implemented (some games may use less common commands)
@@ -211,8 +211,8 @@ N64System
 See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Main limitations preventing full game compatibility**:
-1. **Audio** - No audio interface (silent emulation)
-2. **Memory Management** - No TLB/virtual memory translation (direct-mapped only)
+1. **Audio Output** - AI hardware implemented but frontend audio output integration pending
+2. **Memory Management** - TLB implemented but cache is direct-mapped and CP0 TLB/MMU integration incomplete
 3. **Cycle Accuracy** - Frame-based timing may cause issues with precise timing-dependent games
 4. **Missing RDP Commands** - Some advanced blend/combine modes not implemented
 5. **RSP Coverage** - HLE works for common F3DEX commands but may not cover all microcode variants
@@ -220,8 +220,8 @@ See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list o
 ## Future Development
 
 ### Critical for Commercial Games
-1. **Audio Interface** - Implement audio output (biggest gap for user experience)
-2. **TLB/Virtual Memory** - Implement proper virtual memory translation
+1. **Audio Output Integration** - Connect AI module to frontend audio backend (SDL2/rodio)
+2. **CP0 TLB/MMU Integration** - Wire TLB instructions (TLBWI, TLBWR, TLBR, TLBP) to CPU
 3. **Cycle-Accurate Timing** - Improve timing precision for games that depend on it
 
 ### Nice to Have
@@ -229,7 +229,7 @@ See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list o
 2. Expand RSP HLE coverage for less common microcode variants
 3. Memory card support in PIF
 4. EEPROM save data support
-3. Controller input support
+5. Extended controller features (e.g., rumble, accessory support)
 
 ### Long Term
 1. Full OpenGL renderer with GL context integration
