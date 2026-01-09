@@ -56,6 +56,9 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 ### Recent Improvements (January 2026)
 
 - ✅ **Performance Optimization** (January 9, 2026) - Reduced frame cycles from 1,562,500 to 50,000 for ~30x better performance (~1fps → ~30-60fps)
+  - **Additional optimizations**: Moved interrupt checking from per-instruction to per-scanline (~190x fewer checks)
+  - **Configurable cycles**: Added `set_frame_cycles()` method for runtime performance tuning
+  - **System-specific settings**: Frame cycles can be configured via `config.json` using `"n64_frame_cycles"` key
 - ✅ **Enhanced RDP Logging** - Added INFO-level logging for debugging:
   - Display list processing shows command count and byte size
   - FILL_RECTANGLE operations log coordinates, dimensions, and color
@@ -203,9 +206,37 @@ N64System
 
 The N64 emulator uses a **reduced cycle count** for practical performance:
 - Hardware: 93.75 MHz (1,562,500 cycles/frame at 60Hz)
-- Emulator: **50,000 cycles/frame** for ~30x better performance
+- Emulator: **50,000 cycles/frame** by default for ~30x better performance
 - Maintains proper timing for interrupts and frame rendering
 - Trade-off: Not cycle-accurate, may have timing issues with some games
+
+### Performance Tuning
+
+The frame cycles can be adjusted for different performance/accuracy trade-offs:
+
+**Via Code**:
+```rust
+let mut n64 = N64System::new(gl)?;
+n64.set_frame_cycles(100000); // Increase for better accuracy
+```
+
+**Via Configuration File** (`config.json`):
+```json
+{
+  "n64_frame_cycles": 100000
+}
+```
+
+**Recommended Values**:
+- **50,000** (default): Best performance, good for most games
+- **100,000**: Better accuracy, still good performance
+- **200,000**: Higher accuracy, moderate performance impact
+- **1,562,500**: Hardware-accurate, very slow (~1fps)
+
+### Additional Optimizations
+
+- **Interrupt checking**: Optimized to once per scanline (262 times/frame) instead of per instruction (~50,000 times/frame)
+- **This allows higher frame_cycles values** with less performance impact
 
 **OpenGL Renderer** (required):
 - GPU-accelerated rasterization

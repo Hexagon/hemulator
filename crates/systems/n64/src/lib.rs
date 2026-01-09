@@ -247,6 +247,32 @@ impl N64System {
     pub fn debugger(&self) -> Option<&dyn emu_core::debug::Debugger> {
         Some(self)
     }
+
+    /// Get the current frame_cycles setting
+    pub fn get_frame_cycles(&self) -> u32 {
+        self.frame_cycles
+    }
+
+    /// Set the frame_cycles for performance tuning
+    ///
+    /// # Arguments
+    /// * `cycles` - Number of CPU cycles to execute per frame (recommended: 50,000 - 200,000)
+    ///
+    /// # Notes
+    /// - Lower values: Better performance, less accurate timing
+    /// - Higher values: Worse performance, more accurate timing
+    /// - Hardware accurate: 1,562,500 cycles/frame (93.75MHz / 60Hz)
+    /// - Default: 50,000 cycles/frame for good performance
+    pub fn set_frame_cycles(&mut self, cycles: u32) {
+        self.frame_cycles = cycles;
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!(
+                "N64: Frame cycles set to {} (~{:.2} MHz effective at 60fps)",
+                cycles,
+                (cycles as f64 * 60.0) / 1_000_000.0
+            )
+        });
+    }
 }
 
 impl System for N64System {
@@ -296,24 +322,25 @@ impl System for N64System {
                         self.instruction_tracer.trace(instruction, cpu_state);
                     }
                 }
+            }
 
-                // Check for pending interrupts in MI and route them to CPU
-                let bus = self.cpu.bus();
-                let pending = bus.mi().get_pending_interrupts();
-                if pending != 0 {
-                    // Map MI interrupt bits to MIPS interrupt lines
-                    // SP (bit 0) -> IP2 (interrupt 2)
-                    if pending & crate::mi::MI_INTR_SP != 0 {
-                        self.cpu.cpu.set_interrupt(2);
-                    }
-                    // VI (bit 3) -> IP3 (interrupt 3)
-                    if pending & crate::mi::MI_INTR_VI != 0 {
-                        self.cpu.cpu.set_interrupt(3);
-                    }
-                    // DP (bit 5) -> IP5 (interrupt 5)
-                    if pending & crate::mi::MI_INTR_DP != 0 {
-                        self.cpu.cpu.set_interrupt(5);
-                    }
+            // Check for pending interrupts once per scanline (performance optimization)
+            // This is much faster than checking every instruction
+            let bus = self.cpu.bus();
+            let pending = bus.mi().get_pending_interrupts();
+            if pending != 0 {
+                // Map MI interrupt bits to MIPS interrupt lines
+                // SP (bit 0) -> IP2 (interrupt 2)
+                if pending & crate::mi::MI_INTR_SP != 0 {
+                    self.cpu.cpu.set_interrupt(2);
+                }
+                // VI (bit 3) -> IP3 (interrupt 3)
+                if pending & crate::mi::MI_INTR_VI != 0 {
+                    self.cpu.cpu.set_interrupt(3);
+                }
+                // DP (bit 5) -> IP5 (interrupt 5)
+                if pending & crate::mi::MI_INTR_DP != 0 {
+                    self.cpu.cpu.set_interrupt(5);
                 }
             }
 
