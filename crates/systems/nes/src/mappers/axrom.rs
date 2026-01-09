@@ -16,8 +16,8 @@ pub struct Axrom {
 
 impl Axrom {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // AxROM uses single-screen mirroring, default to lower screen
-        ppu.set_mirroring(Mirroring::SingleScreenLower);
+        // AxROM always uses single-screen mirroring (header is ignored)
+        ppu.set_mirroring(cart.get_initial_mirroring());
         Self {
             prg_rom: cart.prg_rom,
             prg_bank: 0,

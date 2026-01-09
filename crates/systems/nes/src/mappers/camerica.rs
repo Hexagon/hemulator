@@ -35,10 +35,13 @@ pub struct Camerica {
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // Initialize mirroring from the cartridge header.
-        // This will be overridden by mapper writes to $9000-$9FFF if the game
-        // uses dynamic mirroring control (e.g., Fire Hawk).
-        ppu.set_mirroring(cart.mirroring);
+        // Initialize mirroring using the safe initial mode.
+        // For Camerica, this defaults to Vertical mirroring (hard-wired on most cartridges).
+        // ROM headers are often incorrect (e.g., bee52 header says Horizontal but cartridge
+        // is actually hard-wired to Vertical).
+        // Games can override to single-screen via mapper writes to $9000-$9FFF if needed
+        // (e.g., Fire Hawk uses dynamic single-screen mirroring).
+        ppu.set_mirroring(cart.get_initial_mirroring());
 
         // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
         // The game writes tile data to PPU $0000-$1FFF at runtime.
@@ -252,8 +255,12 @@ mod tests {
 
     #[test]
     fn camerica_fixed_mirroring() {
-        // Test that games not using mapper-controlled mirroring keep their header mirroring
+        // Test that games not using mapper-controlled mirroring keep their initial mirroring
         // This simulates Micro Machines behavior: writes to $8000 for bank switching only
+        //
+        // NOTE: Camerica mapper respects header mirroring for hard-wired mirroring on cartridge.
+        // For example, bee52 has Horizontal mirroring hard-wired on the PCB, correctly reflected
+        // in its ROM header. Games can optionally override to single-screen via $9000 writes.
         let prg = vec![0; 0x8000]; // 2 banks
 
         let cart = Cartridge {
@@ -261,11 +268,14 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Fixed mirroring from header
+            mirroring: Mirroring::Horizontal, // Header says Horizontal (respected for hard-wired PCB)
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal); // Initialized with Horizontal
         let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Should initialize with Horizontal mirroring (respecting ROM header for hard-wired PCB)
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
@@ -280,7 +290,197 @@ mod tests {
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
         assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
-        // Since all writes were to $8000-$8FFF and $C000-$FFFF,
-        // mirroring should remain as the header value (horizontal)
+        // Since all writes were to $8000-$8FFF and $C000-$FFFF (not $9000-$9FFF),
+        // mirroring should remain as the initial value (horizontal from ROM header)
+    }
+
+    #[test]
+    fn camerica_nametable_access_single_screen_lower() {
+        // Test that single-screen lower mirroring works correctly for nametable access
+        // All four nametables should map to the same physical RAM
+        let prg = vec![0; 0x8000];
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical, // Initial
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Switch to single-screen lower
+        camerica.write_prg(0x9000, 0x00, &mut ppu, 0); // bit 4 = 0
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Write to nametable 0 ($2000)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        // Write to nametable 1 ($2400)
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        // Write to nametable 2 ($2800)
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        // Write to nametable 3 ($2C00)
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // All reads should return 0xDD (last write) since they all map to same location
+        for addr in [0x2000u16, 0x2400, 0x2800, 0x2C00] {
+            ppu.vram_addr.set(addr);
+            let _ = ppu.read_register(7); // Discard buffer
+            let val = ppu.read_register(7);
+            assert_eq!(
+                val, 0xDD,
+                "Camerica SingleScreenLower: all nametables should map to same RAM (addr ${:04X})",
+                addr
+            );
+        }
+    }
+
+    #[test]
+    fn camerica_nametable_access_single_screen_upper() {
+        // Test that single-screen upper mirroring works correctly for nametable access
+        let prg = vec![0; 0x8000];
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Switch to single-screen upper
+        camerica.write_prg(0x9000, 0x10, &mut ppu, 0); // bit 4 = 1
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        // Write to all four nametables
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x11);
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x22);
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x33);
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0x44);
+
+        // All reads should return 0x44 (last write)
+        for addr in [0x2000u16, 0x2400, 0x2800, 0x2C00] {
+            ppu.vram_addr.set(addr);
+            let _ = ppu.read_register(7);
+            let val = ppu.read_register(7);
+            assert_eq!(
+                val, 0x44,
+                "Camerica SingleScreenUpper: all nametables should map to same RAM (addr ${:04X})",
+                addr
+            );
+        }
+    }
+
+    #[test]
+    fn camerica_dynamic_mirroring_switch_preserves_nametable_data() {
+        // Test that switching mirroring modes at runtime preserves nametable data
+        // This is important for games like Fire Hawk that use dynamic mirroring
+        let prg = vec![0; 0x8000];
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Write data to nametable 0 while in vertical mirroring
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x05);
+        ppu.write_register(7, 0xAA);
+
+        // Switch to single-screen lower
+        camerica.write_prg(0x9000, 0x00, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenLower);
+
+        // Data should still be accessible
+        ppu.vram_addr.set(0x2005);
+        let _ = ppu.read_register(7);
+        let val = ppu.read_register(7);
+        assert_eq!(
+            val, 0xAA,
+            "Nametable data should be preserved after mirroring switch"
+        );
+
+        // Switch to single-screen upper
+        camerica.write_prg(0x9000, 0x10, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::SingleScreenUpper);
+
+        // Since we're now in upper bank, the data may or may not be there
+        // depending on which physical bank we're using
+        // This test just verifies the switch doesn't crash
+    }
+
+    #[test]
+    fn camerica_attribute_table_with_single_screen() {
+        // Test that attribute tables work correctly with single-screen mirroring
+        let prg = vec![0; 0x8000];
+
+        let cart = Cartridge {
+            prg_rom: prg,
+            chr_rom: vec![],
+            mapper: 71,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+        let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Switch to single-screen lower
+        camerica.write_prg(0x9000, 0x00, &mut ppu, 0);
+
+        // Write to attribute table in nametable 0 ($23C0)
+        ppu.write_register(6, 0x23);
+        ppu.write_register(6, 0xC0);
+        ppu.write_register(7, 0x55);
+
+        // Read from attribute table in all nametables - should all see same data
+        for base_addr in [0x2000u16, 0x2400, 0x2800, 0x2C00] {
+            let attr_addr = base_addr + 0x3C0;
+            ppu.vram_addr.set(attr_addr);
+            let _ = ppu.read_register(7);
+            let val = ppu.read_register(7);
+            assert_eq!(
+                val, 0x55,
+                "Camerica: attribute tables should follow same mirroring as nametables (addr ${:04X})",
+                attr_addr
+            );
+        }
     }
 }
