@@ -306,7 +306,17 @@ impl Pif {
             self.write_controller_state(0x7CB, &state);
         }
 
-        // Controller 3 and 4 similar (not implemented yet - rarely used)
+        // Controller 3 command at offset 0x7D0 (8 bytes per channel)
+        if self.ram[0x7D0] == 0x01 && self.ram[0x7D1] == 0x04 && self.ram[0x7D2] == 0x01 {
+            let state = self.controller3;
+            self.write_controller_state(0x7D3, &state);
+        }
+
+        // Controller 4 command at offset 0x7D8 (8 bytes per channel)
+        if self.ram[0x7D8] == 0x01 && self.ram[0x7D9] == 0x04 && self.ram[0x7DA] == 0x01 {
+            let state = self.controller4;
+            self.write_controller_state(0x7DB, &state);
+        }
     }
 
     /// Write controller state to PIF RAM response block

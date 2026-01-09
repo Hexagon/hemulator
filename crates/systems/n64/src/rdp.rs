@@ -505,10 +505,12 @@ impl Rdp {
 
     /// Process display list commands from RDRAM
     pub fn process_display_list(&mut self, rdram: &[u8]) {
-        log(LogCategory::PPU, LogLevel::Debug, || {
+        log(LogCategory::PPU, LogLevel::Info, || {
             format!(
-                "N64 RDP: Processing display list from 0x{:08X} to 0x{:08X}",
-                self.dpc_start, self.dpc_end
+                "N64 RDP: Processing display list from 0x{:08X} to 0x{:08X} ({} bytes, {} commands)",
+                self.dpc_start, self.dpc_end,
+                self.dpc_end.saturating_sub(self.dpc_start),
+                self.dpc_end.saturating_sub(self.dpc_start) / 8
             )
         });
 
@@ -1001,12 +1003,22 @@ impl Rdp {
                 let width = xh.saturating_sub(xl);
                 let height = yh.saturating_sub(yl);
 
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!(
+                        "N64 RDP: FILL_RECTANGLE x={}-{} y={}-{} ({}x{}) color=0x{:08X}",
+                        xl, xh, yl, yh, width, height, self.fill_color
+                    )
+                });
+
                 self.fill_rect(xl, yl, width, height);
             }
             // SET_FILL_COLOR (0x37)
             0x37 => {
                 // word1 contains the fill color (RGBA)
                 self.fill_color = word1;
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    format!("N64 RDP: SET_FILL_COLOR = 0x{:08X}", word1)
+                });
             }
             // SET_SCISSOR (0x2D)
             0x2D => {
@@ -1067,6 +1079,63 @@ impl Rdp {
                                 // Calculate texture coordinates (simple mapping)
                                 let s = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63
                                 let t = ((y * 64) / height.max(1)) & 0x3F;
+
+                                // Sample texture
+                                let color = self.sample_texture(tile, s, t);
+
+                                // Draw pixel using renderer
+                                self.renderer.set_pixel(px, py, color);
+                            }
+                        }
+                    }
+                } else {
+                    // Fallback to solid fill if texture is not available
+                    self.fill_rect(xl, yl, width, height);
+                }
+            }
+            // TEXTURE_RECTANGLE_FLIP (0x25)
+            0x25 => {
+                // Flipped texture rectangle - same as 0x24 but with S/T swapped
+                // word0: cmd | XH(12) | YH(12)
+                // word1: tile(3) | XL(12) | YL(12)
+                // Followed by another 64-bit word with texture coordinates:
+                // word2: S(16) | T(16)
+                // word3: DSDX(16) | DTDY(16)
+                let xh = ((word0 >> 12) & 0xFFF) / 4;
+                let yh = (word0 & 0xFFF) / 4;
+                let xl = ((word1 >> 12) & 0xFFF) / 4;
+                let yl = (word1 & 0xFFF) / 4;
+                let tile = ((word1 >> 24) & 0x07) as usize;
+
+                log(LogCategory::Stubs, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: TEXTURE_RECTANGLE_FLIP - rendering flipped textured rect (xl={}, yl={}, xh={}, yh={}, tile={})",
+                        xl, yl, xh, yh, tile
+                    )
+                });
+
+                let width = xh.saturating_sub(xl);
+                let height = yh.saturating_sub(yl);
+
+                // Check if tile has valid texture data in TMEM
+                let has_texture = if tile < 8 {
+                    let tmem_addr = self.tiles[tile].tmem_addr as usize;
+                    tmem_addr < self.tmem.len() && self.tmem[tmem_addr] != 0
+                } else {
+                    false
+                };
+
+                // Render flipped textured rectangle if texture data is available
+                if has_texture && width > 0 && height > 0 {
+                    for y in 0..height {
+                        for x in 0..width {
+                            let px = xl + x;
+                            let py = yl + y;
+
+                            if px < self.width && py < self.height {
+                                // Calculate texture coordinates (flipped: S/T swapped)
+                                let s = ((y * 64) / height.max(1)) & 0x3F; // Map to 0-63 (from Y)
+                                let t = ((x * 64) / width.max(1)) & 0x3F; // Map to 0-63 (from X)
 
                                 // Sample texture
                                 let color = self.sample_texture(tile, s, t);
@@ -1149,6 +1218,29 @@ impl Rdp {
                 // Load texture data from RDRAM to TMEM
                 self.load_texture_to_tmem(rdram, tile, uls, ult, lrs, lrt);
             }
+            // SET_TILE_SIZE (0x32)
+            0x32 => {
+                // Set the size of a texture tile (used for clamping/wrapping)
+                // word0: cmd | uls(12) | ult(12)
+                // word1: tile(3) | lrs(12) | lrt(12)
+                let uls = (word0 >> 12) & 0xFFF; // S coordinate (upper-left)
+                let ult = word0 & 0xFFF; // T coordinate (upper-left)
+                let tile = ((word1 >> 24) & 0x07) as usize;
+                let lrs = (word1 >> 12) & 0xFFF; // S coordinate (lower-right)
+                let lrt = word1 & 0xFFF; // T coordinate (lower-right)
+
+                log(LogCategory::PPU, LogLevel::Debug, || {
+                    format!(
+                        "N64 RDP: SET_TILE_SIZE - tile={}, uls={}, ult={}, lrs={}, lrt={}",
+                        tile, uls, ult, lrs, lrt
+                    )
+                });
+
+                // For HLE, we don't strictly need to store tile size separately
+                // as the tile descriptor already has this info from SET_TILE
+                // This command is mainly for hardware to set up texture coordinate clamping
+                // We acknowledge it but don't need special handling in HLE
+            }
             // LOAD_TILE (0x34)
             0x34 => {
                 // Load texture tile from DRAM to TMEM
@@ -1207,7 +1299,10 @@ impl Rdp {
             // SYNC_FULL (0x29)
             0x29 => {
                 // Full synchronization - wait for all rendering to complete
-                // In frame-based implementation, this is a no-op
+                // In frame-based implementation, this is a no-op but we log it
+                log(LogCategory::PPU, LogLevel::Info, || {
+                    "N64 RDP: SYNC_FULL - pipeline sync complete".to_string()
+                });
             }
             // SET_FOG_COLOR (0x38)
             0x38 => {
