@@ -2103,17 +2103,17 @@ impl TabManager {
     }
 
     fn render_nametables(&self, ui: &mut Ui, data: &TileViewerData) {
-        // Nametable layout: render both nametables side by side
+        // Nametable layout: render all four nametables in a 2x2 grid
         // Each nametable is 32x30 tiles = 256x240 pixels
-        let scale = 1.5; // Scale down to fit both nametables
+        let scale = 1.2; // Scale down to fit four nametables
         let tile_size = 8.0 * scale;
         let nt_width = 32.0 * tile_size;
         let nt_height = 30.0 * tile_size;
         let spacing = 10.0;
 
-        // Calculate total size for both nametables side by side
+        // Calculate total size for all four nametables in 2x2 grid
         let total_width = nt_width * 2.0 + spacing;
-        let total_height = nt_height + 20.0; // Extra for labels
+        let total_height = nt_height * 2.0 + spacing + 20.0; // Extra for labels
 
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(total_width, total_height),

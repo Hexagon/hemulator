@@ -1099,4 +1099,301 @@ mod tests {
         assert!(enabled, "PRG RAM should be enabled when bit 7 is 1");
         assert!(writable, "PRG RAM writes should be allowed when bit 6 is 0");
     }
+
+    #[test]
+    fn mmc3_nametable_mirroring_horizontal() {
+        // Test that MMC3 horizontal mirroring works correctly for nametable access
+        // Horizontal: $2000 and $2400 map together, $2800 and $2C00 map together
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Write to nametable 0 ($2000)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        // Write to nametable 1 ($2400) - should mirror to same location as NT0
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        // Write to nametable 2 ($2800)
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        // Write to nametable 3 ($2C00) - should mirror to same location as NT2
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // Read and verify mirroring
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7);
+        let val_2000 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_2800 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7);
+        let val_2c00 = ppu.read_register(7);
+
+        assert_eq!(
+            val_2000, 0xBB,
+            "MMC3 Horizontal: $2000 should mirror to $2400"
+        );
+        assert_eq!(
+            val_2400, 0xBB,
+            "MMC3 Horizontal: $2400 should mirror to $2000"
+        );
+        assert_eq!(
+            val_2800, 0xDD,
+            "MMC3 Horizontal: $2800 should mirror to $2C00"
+        );
+        assert_eq!(
+            val_2c00, 0xDD,
+            "MMC3 Horizontal: $2C00 should mirror to $2800"
+        );
+    }
+
+    #[test]
+    fn mmc3_nametable_mirroring_vertical() {
+        // Test that MMC3 vertical mirroring works correctly for nametable access
+        // Vertical: $2000 and $2800 map together, $2400 and $2C00 map together
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Vertical,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+        let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Write to all four nametables
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // Read and verify vertical mirroring
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7);
+        let val_2000 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_2800 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7);
+        let val_2c00 = ppu.read_register(7);
+
+        assert_eq!(
+            val_2000, 0xCC,
+            "MMC3 Vertical: $2000 should mirror to $2800"
+        );
+        assert_eq!(
+            val_2800, 0xCC,
+            "MMC3 Vertical: $2800 should mirror to $2000"
+        );
+        assert_eq!(
+            val_2400, 0xDD,
+            "MMC3 Vertical: $2400 should mirror to $2C00"
+        );
+        assert_eq!(
+            val_2c00, 0xDD,
+            "MMC3 Vertical: $2C00 should mirror to $2400"
+        );
+    }
+
+    #[test]
+    fn mmc3_nametable_mirroring_four_screen() {
+        // Test that MMC3 4-screen mirroring setup works
+        // Note: With current 2KB VRAM, this falls back to Vertical mirroring
+        // Games like Rad Racer II use 4-screen mirroring with MMC3
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::FourScreen,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        ppu.clear_first_frame_lock();
+        let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Write unique values to all four nametables
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // With current 2KB VRAM implementation, FourScreen falls back to Vertical
+        // So $2000 and $2800 mirror, $2400 and $2C00 mirror
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7);
+        let val_2000 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_2800 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7);
+        let val_2c00 = ppu.read_register(7);
+
+        // TODO: Once 4KB VRAM is implemented, these should be:
+        // assert_eq!(val_2000, 0xAA, "FourScreen: $2000 should be independent");
+        // assert_eq!(val_2400, 0xBB, "FourScreen: $2400 should be independent");
+        // assert_eq!(val_2800, 0xCC, "FourScreen: $2800 should be independent");
+        // assert_eq!(val_2c00, 0xDD, "FourScreen: $2C00 should be independent");
+
+        // Current behavior (falls back to Vertical):
+        assert_eq!(
+            val_2000, 0xCC,
+            "MMC3 FourScreen (2KB): $2000 currently mirrors to $2800 (Vertical fallback)"
+        );
+        assert_eq!(
+            val_2800, 0xCC,
+            "MMC3 FourScreen (2KB): $2800 currently mirrors to $2000 (Vertical fallback)"
+        );
+        assert_eq!(
+            val_2400, 0xDD,
+            "MMC3 FourScreen (2KB): $2400 currently mirrors to $2C00 (Vertical fallback)"
+        );
+        assert_eq!(
+            val_2c00, 0xDD,
+            "MMC3 FourScreen (2KB): $2C00 currently mirrors to $2400 (Vertical fallback)"
+        );
+    }
+
+    #[test]
+    fn mmc3_dynamic_mirroring_control() {
+        // Test MMC3's ability to switch mirroring modes at runtime via $A000
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal, // Initial from header
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify initial mirroring is horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+
+        // Write to $A000 to switch to vertical (bit 0 = 0)
+        mmc3.write_prg(0xA000, 0x00, &mut ppu, 0);
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::Vertical,
+            "MMC3 should switch to vertical mirroring when bit 0 = 0"
+        );
+
+        // Write to nametable while in vertical mode
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x10);
+        ppu.write_register(7, 0x55);
+
+        // Switch back to horizontal (bit 0 = 1)
+        mmc3.write_prg(0xA000, 0x01, &mut ppu, 0);
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::Horizontal,
+            "MMC3 should switch to horizontal mirroring when bit 0 = 1"
+        );
+
+        // Data should still be accessible
+        ppu.vram_addr.set(0x2010);
+        let _ = ppu.read_register(7);
+        let val = ppu.read_register(7);
+        assert_eq!(
+            val, 0x55,
+            "Nametable data should be preserved after mirroring switch"
+        );
+    }
+
+    #[test]
+    fn mmc3_attribute_table_mirroring() {
+        // Test that MMC3 attribute tables follow the same mirroring rules
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Write to attribute table in nametable 0 ($23C0)
+        ppu.write_register(6, 0x23);
+        ppu.write_register(6, 0xC0);
+        ppu.write_register(7, 0xAA);
+
+        // Read from attribute table in nametable 1 (should mirror)
+        ppu.vram_addr.set(0x27C0);
+        let _ = ppu.read_register(7);
+        let val = ppu.read_register(7);
+
+        assert_eq!(
+            val, 0xAA,
+            "MMC3 Horizontal: attribute tables should mirror like nametables"
+        );
+    }
 }
+
