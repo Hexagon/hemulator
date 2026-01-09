@@ -368,6 +368,10 @@ impl Ppu {
                 // 2. Clears any pending NMI (NMI suppression)
                 // 3. Resets the address latch for PPUSCROLL/PPUADDR
                 //
+                // IMPORTANT: Reading PPUSTATUS does NOT clear sprite flags (bits 5-6):
+                // - Sprite overflow (bit 5) is only cleared at dot 1 of pre-render scanline
+                // - Sprite 0 hit (bit 6) is only cleared at dot 1 of pre-render scanline
+                //
                 // NMI suppression is critical: if a game reads PPUSTATUS right when VBlank
                 // starts, the NMI must be prevented. This is described in NESdev wiki and
                 // tested by many games.
@@ -1455,6 +1459,17 @@ mod tests {
         // Reading PPUSTATUS should return sprite overflow bit (bit 5)
         let status = ppu.read_register(2);
         assert_eq!(status & 0x20, 0x20);
+
+        // CRITICAL: Reading PPUSTATUS should NOT clear sprite overflow flag
+        // (Unlike VBlank flag which IS cleared by reading $2002)
+        assert!(
+            ppu.sprite_overflow.get(),
+            "Sprite overflow flag should persist after reading PPUSTATUS"
+        );
+
+        // Reading again should still return the flag
+        let status2 = ppu.read_register(2);
+        assert_eq!(status2 & 0x20, 0x20, "Sprite overflow should still be set");
     }
 
     #[test]
@@ -2200,6 +2215,64 @@ mod tests {
         ppu.clear_sprite_flags();
         assert!(!ppu.sprite_0_hit.get());
         assert!(!ppu.sprite_overflow.get());
+    }
+
+    #[test]
+    fn regression_sprite_overflow_not_cleared_by_ppustatus_read() {
+        // REGRESSION TEST: Reading PPUSTATUS ($2002) should NOT clear sprite overflow flag
+        // Reference: NESdev wiki - sprite overflow is only cleared at dot 1 of pre-render scanline
+        // This is different from VBlank flag (bit 7) which IS cleared by reading $2002
+        let ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Set sprite overflow flag
+        ppu.sprite_overflow.set(true);
+
+        // Also set VBlank for comparison
+        ppu.set_vblank(true);
+
+        // Read PPUSTATUS
+        let status = ppu.read_register(2);
+        assert_eq!(status & 0x80, 0x80, "VBlank should be set in status");
+        assert_eq!(
+            status & 0x20,
+            0x20,
+            "Sprite overflow should be set in status"
+        );
+
+        // After read: VBlank should be cleared, but sprite overflow should NOT be cleared
+        assert!(
+            !ppu.vblank_flag(),
+            "VBlank flag SHOULD be cleared by reading PPUSTATUS"
+        );
+        assert!(
+            ppu.sprite_overflow.get(),
+            "CRITICAL: Sprite overflow flag MUST NOT be cleared by reading PPUSTATUS!"
+        );
+
+        // Reading again should show VBlank cleared but sprite overflow still set
+        let status2 = ppu.read_register(2);
+        assert_eq!(
+            status2 & 0x80,
+            0x00,
+            "VBlank should remain cleared after second read"
+        );
+        assert_eq!(
+            status2 & 0x20,
+            0x20,
+            "Sprite overflow should still be set after second read"
+        );
+
+        // Only clear_sprite_flags() should clear sprite overflow
+        ppu.clear_sprite_flags();
+        assert!(!ppu.sprite_overflow.get());
+
+        let status3 = ppu.read_register(2);
+        assert_eq!(
+            status3 & 0x20,
+            0x00,
+            "Sprite overflow should be cleared after clear_sprite_flags()"
+        );
     }
 
     #[test]
