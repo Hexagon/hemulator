@@ -21,6 +21,9 @@ pub struct Mmc1 {
 
 impl Mmc1 {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
+        // Get initial mirroring before moving cart
+        let initial_mirroring = cart.get_initial_mirroring();
+
         let mut m = Self {
             prg_rom: cart.prg_rom,
             chr_rom: cart.chr_rom,
@@ -34,8 +37,8 @@ impl Mmc1 {
             chr_banks: [0, 1],
             last_write_cycle: 0,
         };
-        // Respect header mirroring until mapper writes override it.
-        ppu.set_mirroring(cart.mirroring);
+        // Use safe initial mirroring (respects header for MMC1)
+        ppu.set_mirroring(initial_mirroring);
         m.apply_banks(ppu);
         m
     }

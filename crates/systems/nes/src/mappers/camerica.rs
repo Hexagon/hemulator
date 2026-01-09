@@ -35,10 +35,11 @@ pub struct Camerica {
 
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
-        // Initialize mirroring from the cartridge header.
+        // Initialize mirroring using the safe initial mode.
+        // For Camerica, this respects the header mirroring (e.g., Horizontal for bee52).
         // This will be overridden by mapper writes to $9000-$9FFF if the game
-        // uses dynamic mirroring control (e.g., Fire Hawk).
-        ppu.set_mirroring(cart.mirroring);
+        // uses dynamic mirroring control (e.g., Fire Hawk switching to single-screen).
+        ppu.set_mirroring(cart.get_initial_mirroring());
 
         // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
         // The game writes tile data to PPU $0000-$1FFF at runtime.

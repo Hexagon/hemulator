@@ -23,6 +23,32 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
+    /// Get a safe initial mirroring mode for mappers with mapper-controlled mirroring.
+    ///
+    /// Some mappers support dynamic mirroring control via register writes. This function
+    /// returns the appropriate initial mirroring mode:
+    ///
+    /// - Mapper 001 (MMC1): Supports H/V/single-screen via $8000-$9FFF - use header mirroring
+    /// - Mapper 004 (MMC3): Supports H/V via $A000 - use header mirroring
+    /// - Mapper 007 (AxROM): Always single-screen via $8000 - ignore header, use SingleScreenLower
+    /// - Mapper 071 (Camerica): Supports fixed H/V from header OR mapper-controlled single-screen
+    ///   via $9000. Games like bee52 use fixed Horizontal mirroring from header. Games like
+    ///   Fire Hawk use mapper-controlled single-screen. Always respect header mirroring.
+    ///
+    /// For other mappers, returns the header mirroring unchanged.
+    pub fn get_initial_mirroring(&self) -> Mirroring {
+        match self.mapper {
+            // AxROM (007): Always uses single-screen mirroring, header is meaningless
+            7 => Mirroring::SingleScreenLower,
+
+            // All other mappers (including Camerica 071): Use header mirroring
+            // Camerica supports both fixed mirroring and optional mapper-controlled mirroring
+            _ => self.mirroring,
+        }
+    }
+}
+
+impl Cartridge {
     /// Load iNES ROM from bytes
     pub fn from_bytes(data: &[u8]) -> std::io::Result<Self> {
         if data.len() < 16 {
