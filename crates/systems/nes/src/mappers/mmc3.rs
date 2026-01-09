@@ -1103,7 +1103,7 @@ mod tests {
     #[test]
     fn mmc3_nametable_mirroring_horizontal() {
         // Test that MMC3 horizontal mirroring works correctly for nametable access
-        // Horizontal: $2000 and $2800 map together, $2400 and $2C00 map together
+        // Horizontal: $2000 and $2400 map together, $2800 and $2C00 map together
         let cart = Cartridge {
             prg_rom: vec![0; 0x8000],
             chr_rom: vec![],
@@ -1121,17 +1121,17 @@ mod tests {
         ppu.write_register(6, 0x00);
         ppu.write_register(7, 0xAA);
 
-        // Write to nametable 2 ($2800) - should mirror to same location as NT0
-        ppu.write_register(6, 0x28);
-        ppu.write_register(6, 0x00);
-        ppu.write_register(7, 0xCC);
-
-        // Write to nametable 1 ($2400)
+        // Write to nametable 1 ($2400) - should mirror to same location as NT0
         ppu.write_register(6, 0x24);
         ppu.write_register(6, 0x00);
         ppu.write_register(7, 0xBB);
 
-        // Write to nametable 3 ($2C00) - should mirror to same location as NT1
+        // Write to nametable 2 ($2800)
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        // Write to nametable 3 ($2C00) - should mirror to same location as NT2
         ppu.write_register(6, 0x2C);
         ppu.write_register(6, 0x00);
         ppu.write_register(7, 0xDD);
@@ -1141,40 +1141,40 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_2000 = ppu.read_register(7);
 
-        ppu.vram_addr.set(0x2800);
-        let _ = ppu.read_register(7);
-        let val_2800 = ppu.read_register(7);
-
         ppu.vram_addr.set(0x2400);
         let _ = ppu.read_register(7);
         let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_2800 = ppu.read_register(7);
 
         ppu.vram_addr.set(0x2C00);
         let _ = ppu.read_register(7);
         let val_2c00 = ppu.read_register(7);
 
         assert_eq!(
-            val_2000, 0xCC,
-            "MMC3 Horizontal: $2000 should mirror to $2800"
+            val_2000, 0xBB,
+            "MMC3 Horizontal: $2000 should mirror to $2400"
         );
         assert_eq!(
-            val_2800, 0xCC,
-            "MMC3 Horizontal: $2800 should mirror to $2000"
+            val_2400, 0xBB,
+            "MMC3 Horizontal: $2400 should mirror to $2000"
         );
         assert_eq!(
-            val_2400, 0xDD,
-            "MMC3 Horizontal: $2400 should mirror to $2C00"
+            val_2800, 0xDD,
+            "MMC3 Horizontal: $2800 should mirror to $2C00"
         );
         assert_eq!(
             val_2c00, 0xDD,
-            "MMC3 Horizontal: $2C00 should mirror to $2400"
+            "MMC3 Horizontal: $2C00 should mirror to $2800"
         );
     }
 
     #[test]
     fn mmc3_nametable_mirroring_vertical() {
         // Test that MMC3 vertical mirroring works correctly for nametable access
-        // Vertical: $2000 and $2400 map together, $2800 and $2C00 map together
+        // Vertical: $2000 and $2800 map together, $2400 and $2C00 map together
         let cart = Cartridge {
             prg_rom: vec![0; 0x8000],
             chr_rom: vec![],
@@ -1209,33 +1209,33 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_2000 = ppu.read_register(7);
 
-        ppu.vram_addr.set(0x2400);
-        let _ = ppu.read_register(7);
-        let val_2400 = ppu.read_register(7);
-
         ppu.vram_addr.set(0x2800);
         let _ = ppu.read_register(7);
         let val_2800 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_2400 = ppu.read_register(7);
 
         ppu.vram_addr.set(0x2C00);
         let _ = ppu.read_register(7);
         let val_2c00 = ppu.read_register(7);
 
         assert_eq!(
-            val_2000, 0xBB,
-            "MMC3 Vertical: $2000 should mirror to $2400"
+            val_2000, 0xCC,
+            "MMC3 Vertical: $2000 should mirror to $2800"
         );
         assert_eq!(
-            val_2400, 0xBB,
-            "MMC3 Vertical: $2400 should mirror to $2000"
+            val_2800, 0xCC,
+            "MMC3 Vertical: $2800 should mirror to $2000"
         );
         assert_eq!(
-            val_2800, 0xDD,
-            "MMC3 Vertical: $2800 should mirror to $2C00"
+            val_2400, 0xDD,
+            "MMC3 Vertical: $2400 should mirror to $2C00"
         );
         assert_eq!(
             val_2c00, 0xDD,
-            "MMC3 Vertical: $2C00 should mirror to $2800"
+            "MMC3 Vertical: $2C00 should mirror to $2400"
         );
     }
 
@@ -1384,8 +1384,8 @@ mod tests {
         ppu.write_register(6, 0xC0);
         ppu.write_register(7, 0xAA);
 
-        // Read from attribute table in nametable 2 (should mirror with Horizontal)
-        ppu.vram_addr.set(0x2BC0);
+        // Read from attribute table in nametable 1 (should mirror)
+        ppu.vram_addr.set(0x27C0);
         let _ = ppu.read_register(7);
         let val = ppu.read_register(7);
 

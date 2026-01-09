@@ -205,12 +205,12 @@ impl Ppu {
                 // Table 0 at 0x000, Table 1 at 0x400, Table 2 at 0x800, Table 3 at 0xC00
                 table
             }
-            Mirroring::Horizontal => match table {
+            Mirroring::Vertical => match table {
                 0 | 2 => 0,
                 1 | 3 => 1,
                 _ => 0,
             },
-            Mirroring::Vertical => match table {
+            Mirroring::Horizontal => match table {
                 0 | 1 => 0,
                 2 | 3 => 1,
                 _ => 0,
@@ -2560,13 +2560,11 @@ mod tests {
         // This test verifies that nametable selection uses XOR, not addition,
         // when scrolling crosses nametable boundaries. This is critical for
         // games like Turbo Racing that use scrolling across nametable boundaries.
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
         ppu.chr_is_ram = true;
 
         // Set up different tiles in each nametable
-        // With Horizontal mirroring: NT0 and NT2 mirror, NT1 and NT3 mirror
-        // So NT0 and NT1 are in different physical banks and can have different content
         // Nametable 0 (0x2000): tile 0x01
         let addr_nt0 = ppu.map_nametable_addr(0x2000);
         ppu.vram[addr_nt0] = 0x01;
@@ -2628,18 +2626,20 @@ mod tests {
         // ADD: (1 + 1 + 0) & 3 = 2
         // This is the critical difference!
 
-        // For horizontal mirroring: nametables 0 and 2 map to same physical, 1 and 3 map to same
+        // For vertical mirroring: nametables 0 and 1 are distinct
+        // So with base=1 and X scroll crossing, XOR gives 0 (left), ADD gives 2 (which mirrors to 0)
+        // Actually with vertical mirroring, nametables 0,2 map to same physical, 1,3 map to same
         // So ADD giving 2 vs XOR giving 0 WOULD show different content if we set them up differently
 
         // Let's set up nametables more carefully:
         // Physical nametable 0: used by logical NT 0 and 2
         // Physical nametable 1: used by logical NT 1 and 3
-        // With horizontal mirroring: 0->phys0, 1->phys1, 2->phys0, 3->phys1
+        // With vertical mirroring: 0->phys0, 1->phys1, 2->phys0, 3->phys1
 
         // Clear and set up again with base nametable 1
         ppu.vram = vec![0; 0x800];
 
-        // For horizontal mirroring, logical NT 1 (0x2400) maps to physical offset 0x0400
+        // For vertical mirroring, logical NT 1 (0x2400) maps to physical offset 0x0400
         // Set tile at start of NT 1
         let addr_nt1 = ppu.map_nametable_addr(0x2400);
         ppu.vram[addr_nt1] = 0x02; // Tile 0x02
@@ -2820,70 +2820,9 @@ mod tests {
 
     #[test]
     fn test_horizontal_mirroring_all_four_nametables() {
-        // Horizontal mirroring: $2000 and $2800 map to same physical RAM
-        //                       $2400 and $2C00 map to same physical RAM
+        // Horizontal mirroring: $2000 and $2400 map to same physical RAM
+        //                       $2800 and $2C00 map to same physical RAM
         let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
-        ppu.clear_first_frame_lock();
-
-        // Write unique values to all four logical nametables
-        ppu.write_register(6, 0x20); // $2000
-        ppu.write_register(6, 0x00);
-        ppu.write_register(7, 0xAA);
-
-        ppu.write_register(6, 0x24); // $2400
-        ppu.write_register(6, 0x00);
-        ppu.write_register(7, 0xBB);
-
-        ppu.write_register(6, 0x28); // $2800
-        ppu.write_register(6, 0x00);
-        ppu.write_register(7, 0xCC);
-
-        ppu.write_register(6, 0x2C); // $2C00
-        ppu.write_register(6, 0x00);
-        ppu.write_register(7, 0xDD);
-
-        // Read back and verify mirroring
-        // $2000 and $2800 should both have 0xCC (last write to first pair)
-        ppu.vram_addr.set(0x2000);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2000 = ppu.read_register(7);
-
-        ppu.vram_addr.set(0x2800);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2800 = ppu.read_register(7);
-
-        // $2400 and $2C00 should both have 0xDD (last write to second pair)
-        ppu.vram_addr.set(0x2400);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2400 = ppu.read_register(7);
-
-        ppu.vram_addr.set(0x2C00);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2c00 = ppu.read_register(7);
-
-        assert_eq!(
-            val_2000, 0xCC,
-            "Horizontal: $2000 should mirror to same location as $2800"
-        );
-        assert_eq!(
-            val_2800, 0xCC,
-            "Horizontal: $2800 should mirror to same location as $2000"
-        );
-        assert_eq!(
-            val_2400, 0xDD,
-            "Horizontal: $2400 should mirror to same location as $2C00"
-        );
-        assert_eq!(
-            val_2c00, 0xDD,
-            "Horizontal: $2C00 should mirror to same location as $2400"
-        );
-    }
-
-    #[test]
-    fn test_vertical_mirroring_all_four_nametables() {
-        // Vertical mirroring: $2000 and $2400 map to same physical RAM
-        //                     $2800 and $2C00 map to same physical RAM
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
         ppu.clear_first_frame_lock();
 
         // Write unique values to all four logical nametables
@@ -2924,19 +2863,80 @@ mod tests {
 
         assert_eq!(
             val_2000, 0xBB,
-            "Vertical: $2000 should mirror to same location as $2400"
+            "Horizontal: $2000 should mirror to same location as $2400"
         );
         assert_eq!(
             val_2400, 0xBB,
-            "Vertical: $2400 should mirror to same location as $2000"
+            "Horizontal: $2400 should mirror to same location as $2000"
         );
         assert_eq!(
             val_2800, 0xDD,
-            "Vertical: $2800 should mirror to same location as $2C00"
+            "Horizontal: $2800 should mirror to same location as $2C00"
         );
         assert_eq!(
             val_2c00, 0xDD,
-            "Vertical: $2C00 should mirror to same location as $2800"
+            "Horizontal: $2C00 should mirror to same location as $2800"
+        );
+    }
+
+    #[test]
+    fn test_vertical_mirroring_all_four_nametables() {
+        // Vertical mirroring: $2000 and $2800 map to same physical RAM
+        //                     $2400 and $2C00 map to same physical RAM
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Vertical);
+        ppu.clear_first_frame_lock();
+
+        // Write unique values to all four logical nametables
+        ppu.write_register(6, 0x20); // $2000
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        ppu.write_register(6, 0x24); // $2400
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        ppu.write_register(6, 0x28); // $2800
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        ppu.write_register(6, 0x2C); // $2C00
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // Read back and verify mirroring
+        // $2000 and $2800 should both have 0xCC (last write to first pair)
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2000 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2800 = ppu.read_register(7);
+
+        // $2400 and $2C00 should both have 0xDD (last write to second pair)
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7); // Discard buffer
+        let val_2c00 = ppu.read_register(7);
+
+        assert_eq!(
+            val_2000, 0xCC,
+            "Vertical: $2000 should mirror to same location as $2800"
+        );
+        assert_eq!(
+            val_2800, 0xCC,
+            "Vertical: $2800 should mirror to same location as $2000"
+        );
+        assert_eq!(
+            val_2400, 0xDD,
+            "Vertical: $2400 should mirror to same location as $2C00"
+        );
+        assert_eq!(
+            val_2c00, 0xDD,
+            "Vertical: $2C00 should mirror to same location as $2400"
         );
     }
 
@@ -3005,8 +3005,8 @@ mod tests {
         ppu.write_register(6, 0x50);
         ppu.write_register(7, 0x11);
 
-        // Read from $2850 (same offset in nametable 2, should mirror with Horizontal)
-        ppu.vram_addr.set(0x2850);
+        // Read from $2450 (same offset in nametable 1, should mirror)
+        ppu.vram_addr.set(0x2450);
         let _ = ppu.read_register(7);
         let val = ppu.read_register(7);
 
@@ -3022,8 +3022,8 @@ mod tests {
         ppu.write_register(6, 0x75);
         ppu.write_register(7, 0x22);
 
-        // Read from $2475 (same offset in nametable 1, should mirror with Vertical)
-        ppu.vram_addr.set(0x2475);
+        // Read from $2875 (same offset in nametable 2, should mirror)
+        ppu.vram_addr.set(0x2875);
         let _ = ppu.read_register(7);
         let val = ppu.read_register(7);
 
@@ -3117,8 +3117,8 @@ mod tests {
         ppu.write_register(6, 0xC0);
         ppu.write_register(7, 0xAA);
 
-        // Read from attribute table in nametable 2 (should mirror with Horizontal)
-        ppu.vram_addr.set(0x2BC0); // $2BC0 = attribute table for NT 2
+        // Read from attribute table in nametable 1 (should mirror)
+        ppu.vram_addr.set(0x27C0); // $27C0 = attribute table for NT 1
         let _ = ppu.read_register(7);
         let val = ppu.read_register(7);
 
@@ -3134,8 +3134,8 @@ mod tests {
         ppu.write_register(6, 0xC0);
         ppu.write_register(7, 0xBB);
 
-        // Read from attribute table in nametable 0 (should mirror with Vertical)
-        ppu.vram_addr.set(0x23C0); // $23C0 = attribute table for NT 0
+        // Read from attribute table in nametable 3 (should mirror)
+        ppu.vram_addr.set(0x2FC0); // $2FC0 = attribute table for NT 3
         let _ = ppu.read_register(7);
         let val = ppu.read_register(7);
 
@@ -3173,8 +3173,8 @@ mod tests {
         ppu.write_register(7, 0xDD);
 
         // Read back and verify Horizontal mirroring:
-        // NT0 and NT2 should mirror (both show 0xCC - last write to pair)
-        // NT1 and NT3 should mirror (both show 0xDD - last write to pair)
+        // NT0 and NT1 should mirror (both show 0xBB - last write to pair)
+        // NT2 and NT3 should mirror (both show 0xDD - last write to pair)
 
         ppu.vram_addr.set(0x2024);
         let _ = ppu.read_register(7); // Discard buffer
@@ -3192,10 +3192,10 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_nt3 = ppu.read_register(7);
 
-        assert_eq!(val_nt0, 0xCC, "Horizontal: NT0 should mirror with NT2");
-        assert_eq!(val_nt1, 0xDD, "Horizontal: NT1 should mirror with NT3");
-        assert_eq!(val_nt2, 0xCC, "Horizontal: NT2 should mirror with NT0");
-        assert_eq!(val_nt3, 0xDD, "Horizontal: NT3 should mirror with NT1");
+        assert_eq!(val_nt0, 0xBB, "Horizontal: NT0 should mirror with NT1");
+        assert_eq!(val_nt1, 0xBB, "Horizontal: NT1 should mirror with NT0");
+        assert_eq!(val_nt2, 0xDD, "Horizontal: NT2 should mirror with NT3");
+        assert_eq!(val_nt3, 0xDD, "Horizontal: NT3 should mirror with NT2");
 
         // Now test with Vertical mirroring
         ppu.set_mirroring(Mirroring::Vertical);
@@ -3220,8 +3220,8 @@ mod tests {
         ppu.write_register(7, 0x44);
 
         // Read back and verify Vertical mirroring:
-        // NT0 and NT1 should mirror (both show 0x22 - last write to pair)
-        // NT2 and NT3 should mirror (both show 0x44 - last write to pair)
+        // NT0 and NT2 should mirror (both show 0x33 - last write to pair)
+        // NT1 and NT3 should mirror (both show 0x44 - last write to pair)
 
         ppu.vram_addr.set(0x2024);
         let _ = ppu.read_register(7);
@@ -3239,10 +3239,10 @@ mod tests {
         let _ = ppu.read_register(7);
         let val_nt3 = ppu.read_register(7);
 
-        assert_eq!(val_nt0, 0x22, "Vertical: NT0 should mirror with NT1");
-        assert_eq!(val_nt1, 0x22, "Vertical: NT1 should mirror with NT0");
-        assert_eq!(val_nt2, 0x44, "Vertical: NT2 should mirror with NT3");
-        assert_eq!(val_nt3, 0x44, "Vertical: NT3 should mirror with NT2");
+        assert_eq!(val_nt0, 0x33, "Vertical: NT0 should mirror with NT2");
+        assert_eq!(val_nt1, 0x44, "Vertical: NT1 should mirror with NT3");
+        assert_eq!(val_nt2, 0x33, "Vertical: NT2 should mirror with NT0");
+        assert_eq!(val_nt3, 0x44, "Vertical: NT3 should mirror with NT1");
 
         // Test with SingleScreenLower
         ppu.set_mirroring(Mirroring::SingleScreenLower);
@@ -3275,49 +3275,5 @@ mod tests {
                 addr
             );
         }
-    }
-
-    #[test]
-    fn test_horizontal_mirroring_2024_vs_2424() {
-        // Specific test for Horizontal mirroring: $2024 vs $2824
-        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
-        ppu.clear_first_frame_lock();
-
-        // Write to $2024 (NT0, offset 0x24)
-        ppu.write_register(6, 0x20);
-        ppu.write_register(6, 0x24);
-        ppu.write_register(7, 0xAA);
-
-        // Write to $2824 (NT2, offset 0x24)
-        ppu.write_register(6, 0x28);
-        ppu.write_register(6, 0x24);
-        ppu.write_register(7, 0xBB);
-
-        // With Horizontal mirroring, NT0 and NT2 map to same physical location
-        // So both should read back 0xBB (the last write)
-        ppu.vram_addr.set(0x2024);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2024 = ppu.read_register(7);
-
-        ppu.vram_addr.set(0x2824);
-        let _ = ppu.read_register(7); // Discard buffer
-        let val_2824 = ppu.read_register(7);
-
-        // Check physical VRAM directly
-        let idx_2024 = ppu.map_nametable_addr(0x2024);
-        let idx_2824 = ppu.map_nametable_addr(0x2824);
-
-        assert_eq!(
-            val_2024, 0xBB,
-            "$2024 should mirror to $2824 with Horizontal mirroring"
-        );
-        assert_eq!(
-            val_2824, 0xBB,
-            "$2824 should mirror to $2024 with Horizontal mirroring"
-        );
-        assert_eq!(
-            idx_2024, idx_2824,
-            "Both addresses should map to same physical VRAM location"
-        );
     }
 }

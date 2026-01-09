@@ -810,22 +810,12 @@ void main() {
         let offset = (a % 0x0400) as u16;
 
         let physical_table = match mirroring {
-            Mirroring::FourScreen => {
-                // TODO: OpenGL renderer doesn't support 4KB VRAM yet
-                // For now, fall back to Vertical mirroring behavior (like old code did)
-                // This will cause incorrect rendering for true 4-screen games
-                match table {
-                    0 | 1 => 0,
-                    2 | 3 => 1,
-                    _ => 0,
-                }
-            }
-            Mirroring::Horizontal => match table {
+            Mirroring::Vertical | Mirroring::FourScreen => match table {
                 0 | 2 => 0,
                 1 | 3 => 1,
                 _ => 0,
             },
-            Mirroring::Vertical => match table {
+            Mirroring::Horizontal => match table {
                 0 | 1 => 0,
                 2 | 3 => 1,
                 _ => 0,
@@ -834,7 +824,6 @@ void main() {
             Mirroring::SingleScreenUpper => 1,
         };
 
-        // Mask to 2KB VRAM size
         (physical_table * 0x0400 + offset) as usize & 0x07FF
     }
 }
@@ -1381,52 +1370,8 @@ mod tests {
 
     #[test]
     fn test_map_nametable_addr_vertical() {
-        // Vertical mirroring: [0 0]
-        //                     [1 1]
-        // NT0 and NT1 -> physical table 0 (top row)
-        // NT2 and NT3 -> physical table 1 (bottom row)
+        // Vertical mirroring: [0 1] [0 1]
         let mirroring = Mirroring::Vertical;
-
-        // Nametable 0 ($2000-$23FF) maps to physical table 0
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x23FF, mirroring),
-            0x03FF
-        );
-
-        // Nametable 1 ($2400-$27FF) also maps to physical table 0 (mirrors NT0)
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x27FF, mirroring),
-            0x03FF
-        );
-
-        // Nametable 2 ($2800-$2BFF) maps to physical table 1
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
-            0x0400
-        );
-
-        // Nametable 3 ($2C00-$2FFF) also maps to physical table 1 (mirrors NT2)
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
-            0x0400
-        );
-    }
-
-    #[test]
-    fn test_map_nametable_addr_horizontal() {
-        // Horizontal mirroring: [0 1]
-        //                       [0 1]
-        // NT0 and NT2 -> physical table 0 (left column)
-        // NT1 and NT3 -> physical table 1 (right column)
-        let mirroring = Mirroring::Horizontal;
 
         // Nametable 0 ($2000-$23FF) maps to physical table 0
         assert_eq!(
@@ -1448,13 +1393,53 @@ mod tests {
             0x07FF
         );
 
-        // Nametable 2 ($2800-$2BFF) also maps to physical table 0 (mirrors NT0)
+        // Nametable 2 ($2800-$2BFF) mirrors nametable 0
         assert_eq!(
             OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
             0x0000
         );
 
-        // Nametable 3 ($2C00-$2FFF) also maps to physical table 1 (mirrors NT1)
+        // Nametable 3 ($2C00-$2FFF) mirrors nametable 1
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
+            0x0400
+        );
+    }
+
+    #[test]
+    fn test_map_nametable_addr_horizontal() {
+        // Horizontal mirroring: [0 0] [1 1]
+        // NT0 and NT1 -> physical table 0
+        // NT2 and NT3 -> physical table 1
+        let mirroring = Mirroring::Horizontal;
+
+        // Nametable 0 ($2000-$23FF) maps to physical table 0
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
+            0x0000
+        );
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x23FF, mirroring),
+            0x03FF
+        );
+
+        // Nametable 1 ($2400-$27FF) also maps to physical table 0
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
+            0x0000
+        );
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x27FF, mirroring),
+            0x03FF
+        );
+
+        // Nametable 2 ($2800-$2BFF) maps to physical table 1
+        assert_eq!(
+            OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
+            0x0400
+        );
+
+        // Nametable 3 ($2C00-$2FFF) also maps to physical table 1
         assert_eq!(
             OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
             0x0400
