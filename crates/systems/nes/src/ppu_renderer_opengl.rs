@@ -811,8 +811,14 @@ void main() {
 
         let physical_table = match mirroring {
             Mirroring::FourScreen => {
-                // With 4KB VRAM, each nametable is independent (no mirroring)
-                table
+                // TODO: OpenGL renderer doesn't support 4KB VRAM yet
+                // For now, fall back to Vertical mirroring behavior (like old code did)
+                // This will cause incorrect rendering for true 4-screen games
+                match table {
+                    0 | 1 => 0,
+                    2 | 3 => 1,
+                    _ => 0,
+                }
             }
             Mirroring::Horizontal => match table {
                 0 | 2 => 0,
@@ -828,8 +834,7 @@ void main() {
             Mirroring::SingleScreenUpper => 1,
         };
 
-        // For now, mask to 2KB since OpenGL renderer doesn't support 4KB VRAM yet
-        // TODO: Add 4KB VRAM support to OpenGL renderer
+        // Mask to 2KB VRAM size
         (physical_table * 0x0400 + offset) as usize & 0x07FF
     }
 }
