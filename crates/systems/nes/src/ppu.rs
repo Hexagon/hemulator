@@ -296,6 +296,10 @@ impl Ppu {
     /// IMPORTANT: This should be called at the start of the pre-render scanline (scanline -1/261),
     /// NOT when VBlank starts or ends. This is the correct NES hardware behavior.
     ///
+    /// NOTE: These flags are NOT cleared by reading PPUSTATUS ($2002). Only VBlank flag and
+    /// NMI pending are cleared by reading $2002. Sprite flags persist until cleared by
+    /// this function at the start of the pre-render scanline.
+    ///
     /// Reference: Mesen2 NesPpu.cpp ProcessScanlineImpl() - flags cleared on pre-render scanline
     /// Reference: NESdev wiki - sprite flags persist through VBlank
     #[allow(dead_code)] // Will be used when frame-based rendering is replaced with scanline-based
@@ -581,9 +585,22 @@ impl Ppu {
     /// Evaluate sprites for a scanline to determine sprite overflow.
     ///
     /// The NES PPU can only display 8 sprites per scanline. If more than 8 sprites
-    /// are on the same scanline, the sprite overflow flag is set.
+    /// are on the same scanline, the sprite overflow flag (PPUSTATUS bit 5) is set.
     ///
-    /// This is a simplified version of the hardware sprite evaluation process.
+    /// # Hardware Behavior
+    ///
+    /// - **When set**: During sprite evaluation when the 9th sprite on a scanline is found
+    /// - **When cleared**: Only at dot 1 of the pre-render scanline (scanline 261/-1)
+    /// - **NOT cleared by**: Reading PPUSTATUS ($2002) - unlike VBlank flag
+    /// - **Hardware bugs**: Real NES PPU has quirks that can cause false positives/negatives
+    ///
+    /// This is a simplified version of the hardware sprite evaluation process that doesn't
+    /// emulate the exact hardware bugs, but correctly sets the flag when >8 sprites are found.
+    ///
+    /// # References
+    ///
+    /// - NESdev wiki: https://www.nesdev.org/wiki/PPU_sprite_evaluation
+    /// - PPUSTATUS register: https://www.nesdev.org/wiki/PPU_registers#PPUSTATUS
     fn evaluate_sprites_for_scanline(&self, scanline: u32) {
         let sprite_size_16 = (self.ctrl & 0x20) != 0;
         let sprite_height = if sprite_size_16 { 16 } else { 8 };
