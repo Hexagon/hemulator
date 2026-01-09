@@ -2285,7 +2285,7 @@ impl TabManager {
                 let grid_y = nt_idx / 2;
                 let nt_start_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
                 let nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
-                
+
                 let rel_x = hover_pos.x - nt_start_x;
                 let rel_y = hover_pos.y - nt_y;
 
