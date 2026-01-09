@@ -585,56 +585,56 @@ mod tests {
         let samples = system.get_audio_samples(100);
         assert_eq!(samples.len(), 100);
     }
-}
 
-#[test]
-fn test_cycle_counting() {
-    let mut system = SmsSystem::new();
+    #[test]
+    fn test_cycle_counting() {
+        let mut system = SmsSystem::new();
 
-    // Load a simple ROM with known instruction cycles
-    let mut rom = vec![0; 0x8000];
-    rom[0x0000] = 0x00; // NOP (4 cycles)
-    rom[0x0001] = 0x00; // NOP (4 cycles)
-    rom[0x0002] = 0xC3; // JP 0x0000 (10 cycles)
-    rom[0x0003] = 0x00;
-    rom[0x0004] = 0x00;
+        // Load a simple ROM with known instruction cycles
+        let mut rom = vec![0; 0x8000];
+        rom[0x0000] = 0x00; // NOP (4 cycles)
+        rom[0x0001] = 0x00; // NOP (4 cycles)
+        rom[0x0002] = 0xC3; // JP 0x0000 (10 cycles)
+        rom[0x0003] = 0x00;
+        rom[0x0004] = 0x00;
 
-    system.load_rom(rom);
-    system.reset();
+        system.load_rom(rom);
+        system.reset();
 
-    // Initial cycles should be 0
-    assert_eq!(system.cycles, 0, "Initial cycles should be 0");
+        // Initial cycles should be 0
+        assert_eq!(system.cycles, 0, "Initial cycles should be 0");
 
-    // Execute one NOP (4 cycles)
-    let cycles = system.cpu.step() as u64;
-    system.cycles += cycles;
-    assert_eq!(cycles, 4, "NOP should take 4 cycles");
-    assert_eq!(system.cycles, 4, "Total cycles should be 4 after one NOP");
+        // Execute one NOP (4 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(cycles, 4, "NOP should take 4 cycles");
+        assert_eq!(system.cycles, 4, "Total cycles should be 4 after one NOP");
 
-    // Execute another NOP (4 cycles)
-    let cycles = system.cpu.step() as u64;
-    system.cycles += cycles;
-    assert_eq!(system.cycles, 8, "Total cycles should be 8 after two NOPs");
+        // Execute another NOP (4 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(system.cycles, 8, "Total cycles should be 8 after two NOPs");
 
-    // Execute JP instruction (10 cycles)
-    let cycles = system.cpu.step() as u64;
-    system.cycles += cycles;
-    assert_eq!(cycles, 10, "JP should take 10 cycles");
-    assert_eq!(system.cycles, 18, "Total cycles should be 18");
-}
+        // Execute JP instruction (10 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(cycles, 10, "JP should take 10 cycles");
+        assert_eq!(system.cycles, 18, "Total cycles should be 18");
+    }
 
-#[test]
-fn test_frame_cycle_target() {
-    // Verify the target cycles for one frame matches SMS NTSC specs
-    // SMS NTSC: 3.579545 MHz / 60 Hz ≈ 59659 cycles per frame
-    let target_cycles = 59659;
-    let expected = 3_579_545.0 / 60.0;
+    #[test]
+    fn test_frame_cycle_target() {
+        // Verify the target cycles for one frame matches SMS NTSC specs
+        // SMS NTSC: 3.579545 MHz / 60 Hz ≈ 59659 cycles per frame
+        let target_cycles = 59659;
+        let expected = 3_579_545.0 / 60.0;
 
-    // Allow 1 cycle tolerance due to rounding
-    assert!(
-        (target_cycles as f64 - expected).abs() < 1.0,
-        "Target cycles {} should be close to expected {}",
-        target_cycles,
-        expected
-    );
+        // Allow 1 cycle tolerance due to rounding
+        assert!(
+            (target_cycles as f64 - expected).abs() < 1.0,
+            "Target cycles {} should be close to expected {}",
+            target_cycles,
+            expected
+        );
+    }
 }
