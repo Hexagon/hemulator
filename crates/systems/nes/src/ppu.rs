@@ -240,6 +240,16 @@ impl Ppu {
         self.scroll_y
     }
 
+    /// Check if CHR is RAM (writable) or ROM
+    pub fn chr_is_ram(&self) -> bool {
+        self.chr_is_ram
+    }
+
+    /// Get the master palette as a vector of RGB values
+    pub fn get_master_palette() -> Vec<u32> {
+        NES_MASTER_PALETTE.to_vec()
+    }
+
     /// Set/clear the VBlank flag (PPUSTATUS bit 7).
     ///
     /// CRITICAL: VBlank and NMI timing (DO NOT CHANGE)
@@ -892,6 +902,17 @@ impl Ppu {
     pub fn render_scanline(&self, y: u32, frame: &mut Frame) {
         if y >= 240 {
             return;
+        }
+
+        // Debug: log scroll and mirroring for first few scanlines
+        if y < 3 {
+            use emu_core::logging::{log, LogCategory, LogLevel};
+            log(LogCategory::PPU, LogLevel::Info, || {
+                format!(
+                    "Scanline {}: scroll=({},{}), ctrl=0x{:02X}, mirroring={:?}",
+                    y, self.scroll_x, self.scroll_y, self.ctrl, self.mirroring
+                )
+            });
         }
 
         let prev_suppress = self.suppress_a12.replace(true);

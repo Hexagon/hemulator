@@ -39,6 +39,13 @@ impl Camerica {
         // This will be overridden by mapper writes to $9000-$9FFF if the game
         // uses dynamic mirroring control (e.g., Fire Hawk).
         ppu.set_mirroring(cart.mirroring);
+
+        // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
+        // The game writes tile data to PPU $0000-$1FFF at runtime.
+        if ppu.chr.len() < 0x2000 {
+            ppu.chr.resize(0x2000, 0);
+        }
+
         Self {
             prg_rom: cart.prg_rom,
             bank_select: 0,

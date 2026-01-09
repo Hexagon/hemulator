@@ -29,6 +29,7 @@ pub enum MenuAction {
     FullscreenWithGui,
     ShowLog,
     ShowDebug,
+    ShowTiles,
 
     // Help menu
     ShowHelp,
@@ -233,6 +234,14 @@ impl MenuBar {
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::ShowDebug);
+                    ui.close();
+                }
+                if ui
+                    .button("🎨 Tiles")
+                    .on_hover_text("Show tile and palette viewer (NES)")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::ShowTiles);
                     ui.close();
                 }
 
