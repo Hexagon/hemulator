@@ -268,30 +268,30 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Header says Horizontal (but will be ignored)
+            mirroring: Mirroring::Horizontal, // Header says Horizontal (respected for hard-wired PCB)
         };
 
         let mut ppu = Ppu::new(vec![], Mirroring::Horizontal); // Initialized with Horizontal
         let mut camerica = Camerica::new(cart, &mut ppu);
 
-        // Should initialize with Vertical mirroring (hard-wired on Camerica PCBs), ignoring header
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
+        // Should initialize with Horizontal mirroring (respecting ROM header for hard-wired PCB)
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
 
         camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
 
         // Since all writes were to $8000-$8FFF and $C000-$FFFF (not $9000-$9FFF),
-        // mirroring should remain as the initial value (vertical hard-wired on PCB)
+        // mirroring should remain as the initial value (horizontal from ROM header)
     }
 
     #[test]

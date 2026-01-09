@@ -2319,6 +2319,56 @@ impl TabManager {
             );
         }
 
+        // Highlight the scroll window (256x240 viewport)
+        // Calculate which nametable the scroll position starts in
+        let scroll_x = data.scroll_x as f32;
+        let scroll_y = data.scroll_y as f32;
+
+        // Base nametable selection from PPUCTRL bits 0-1
+        let base_nt = (data.ppuctrl & 0x03) as usize;
+
+        // Determine which nametable(s) the scroll window covers
+        // The scroll window is 256x240 pixels (32x30 tiles)
+        let viewport_width = 256.0;
+        let viewport_height = 240.0;
+
+        // Calculate nametable selection based on scroll position
+        // Bit 0 controls vertical (Y), bit 1 controls horizontal (X) per NES hardware
+        let nt_x = if scroll_x >= 255.0 { 1 } else { 0 };
+        let nt_y = if scroll_y >= 239.0 { 1 } else { 0 };
+        let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
+
+        // Calculate the position of the scroll window in the grid
+        let grid_x = scroll_nt % 2;
+        let grid_y = scroll_nt / 2;
+        let scroll_nt_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+        let scroll_nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
+
+        // Calculate the scroll window position within the nametable
+        let scroll_pixel_x = (scroll_x % 256.0) * scale;
+        let scroll_pixel_y = (scroll_y % 240.0) * scale;
+
+        // Draw the scroll window highlight
+        let scroll_window_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(scroll_nt_x + scroll_pixel_x, scroll_nt_y + scroll_pixel_y),
+            egui::Vec2::new(viewport_width * scale, viewport_height * scale),
+        );
+
+        // Draw semi-transparent overlay for the visible area
+        painter.rect_stroke(
+            scroll_window_rect,
+            0.0,
+            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 0, 200)),
+            egui::StrokeKind::Outside,
+        );
+
+        // Add a subtle fill to show the active viewport
+        painter.rect_filled(
+            scroll_window_rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 0, 20),
+        );
+
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {
             // Check which nametable we're hovering over (2x2 grid)
