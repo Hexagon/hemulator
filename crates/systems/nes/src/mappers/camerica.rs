@@ -36,9 +36,11 @@ pub struct Camerica {
 impl Camerica {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
         // Initialize mirroring using the safe initial mode.
-        // For Camerica, this respects the header mirroring (e.g., Horizontal for bee52).
-        // This will be overridden by mapper writes to $9000-$9FFF if the game
-        // uses dynamic mirroring control (e.g., Fire Hawk switching to single-screen).
+        // For Camerica, this defaults to Vertical mirroring (hard-wired on most cartridges).
+        // ROM headers are often incorrect (e.g., bee52 header says Horizontal but cartridge
+        // is actually hard-wired to Vertical).
+        // Games can override to single-screen via mapper writes to $9000-$9FFF if needed
+        // (e.g., Fire Hawk uses dynamic single-screen mirroring).
         ppu.set_mirroring(cart.get_initial_mirroring());
 
         // Camerica uses 8KB CHR-RAM (no CHR-ROM in cartridge).
@@ -253,8 +255,12 @@ mod tests {
 
     #[test]
     fn camerica_fixed_mirroring() {
-        // Test that games not using mapper-controlled mirroring keep their header mirroring
+        // Test that games not using mapper-controlled mirroring keep their initial mirroring
         // This simulates Micro Machines behavior: writes to $8000 for bank switching only
+        //
+        // NOTE: Camerica mapper defaults to Vertical mirroring (hard-wired on most cartridges),
+        // even if the ROM header incorrectly specifies Horizontal. The header is often wrong
+        // for Camerica games (e.g., bee52).
         let prg = vec![0; 0x8000]; // 2 banks
 
         let cart = Cartridge {
@@ -262,27 +268,30 @@ mod tests {
             chr_rom: vec![],
             mapper: 71,
             timing: TimingMode::Ntsc,
-            mirroring: Mirroring::Horizontal, // Fixed mirroring from header
+            mirroring: Mirroring::Horizontal, // Header says Horizontal (but will be ignored)
         };
 
-        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        let mut ppu = Ppu::new(vec![], Mirroring::Vertical); // Initialized with Vertical
         let mut camerica = Camerica::new(cart, &mut ppu);
+
+        // Should initialize with Vertical mirroring (Camerica default), not header value
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical);
 
         // Write multiple times to $8000 (typical Micro Machines behavior)
         camerica.write_prg(0x8000, 0x00, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Stays horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Stays vertical
 
         camerica.write_prg(0x8000, 0x01, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         camerica.write_prg(0x8000, 0x10, &mut ppu, 0); // bit 4 = 1
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         camerica.write_prg(0xC000, 0x02, &mut ppu, 0); // bit 4 = 0
-        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal); // Still horizontal
+        assert_eq!(ppu.get_mirroring(), Mirroring::Vertical); // Still vertical
 
         // Since all writes were to $8000-$8FFF and $C000-$FFFF,
-        // mirroring should remain as the header value (horizontal)
+        // mirroring should remain as the initial value (vertical)
     }
 
     #[test]
