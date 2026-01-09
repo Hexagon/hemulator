@@ -1,0 +1,21 @@
+{
+  "window_width": 800,
+  "window_height": 600,
+  "video_backend": "software",
+  "scaling_mode": "Fit",
+  "log_rate_limit": 60,
+  "input": {
+    "player1": {
+      "a": "Z",
+      "b": "X",
+      "select": "LeftShift",
+      "start": "Enter",
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right"
+    }
+  },
+  "recent_files": [],
+  "n64_frame_cycles": 50000
+}
