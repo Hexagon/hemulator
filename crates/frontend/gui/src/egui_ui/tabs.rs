@@ -20,7 +20,78 @@ pub enum Tab {
     About,
 }
 
-/// Data for the tile viewer tab
+/// System-specific tile viewer data
+#[derive(Clone)]
+pub enum SystemTileData {
+    NES(NesTileData),
+    GameBoy(GbTileData),
+    SMS(SmsTileData),
+    SNES(SnesTileData),
+}
+
+/// NES tile viewer data
+#[derive(Clone)]
+pub struct NesTileData {
+    /// CHR data (pattern tables) - 8KB for NES
+    pub chr_data: Vec<u8>,
+    /// Palette data - 32 bytes for NES (4 colors x 8 palettes)
+    pub palette: Vec<u8>,
+    /// NES master palette for color lookup
+    pub master_palette: Vec<u32>,
+    /// OAM data - 256 bytes (64 sprites x 4 bytes each)
+    pub oam: Vec<u8>,
+    /// VRAM data - 2KB nametables
+    pub vram: Vec<u8>,
+    /// Whether this is CHR-RAM (true) or CHR-ROM (false)
+    pub chr_is_ram: bool,
+    /// Current PPUCTRL value (for pattern table selection info)
+    pub ppuctrl: u8,
+    /// Current PPUMASK value
+    pub ppumask: u8,
+    /// Current scroll values
+    pub scroll_x: u8,
+    pub scroll_y: u8,
+    /// Current mirroring mode
+    pub mirroring: String,
+}
+
+/// Game Boy tile viewer data
+#[derive(Clone)]
+pub struct GbTileData {
+    pub vram_bank0: Vec<u8>,
+    pub vram_bank1: Vec<u8>,
+    pub oam: Vec<u8>,
+    pub bg_palettes: Vec<u32>,
+    pub obj_palettes: Vec<u32>,
+    pub lcdc: u8,
+    pub scx: u8,
+    pub scy: u8,
+    pub wx: u8,
+    pub wy: u8,
+    pub is_cgb_mode: bool,
+}
+
+/// SMS tile viewer data
+#[derive(Clone)]
+pub struct SmsTileData {
+    pub vram: Vec<u8>,
+    pub cram: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// SNES tile viewer data
+#[derive(Clone)]
+pub struct SnesTileData {
+    pub vram: Vec<u8>,
+    pub cgram: Vec<u8>,
+    pub oam: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub bg_mode: u8,
+    pub screen_enabled: bool,
+}
+
+/// Data for the tile viewer tab (legacy - kept for backward compatibility)
 #[derive(Clone)]
 pub struct TileViewerData {
     /// CHR data (pattern tables) - 8KB for NES
@@ -84,6 +155,7 @@ pub struct TabManager {
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub tile_viewer_data: Option<TileViewerData>,
+    pub system_tile_data: Option<SystemTileData>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -106,6 +178,7 @@ impl TabManager {
             debug_info: None,
             enhanced_debug_state: None,
             tile_viewer_data: None,
+            system_tile_data: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -131,6 +204,10 @@ impl TabManager {
 
     pub fn update_tile_viewer_data(&mut self, data: TileViewerData) {
         self.tile_viewer_data = Some(data);
+    }
+
+    pub fn update_system_tile_data(&mut self, data: SystemTileData) {
+        self.system_tile_data = Some(data);
     }
 
     pub fn show_pc_config_tab(&mut self) {
@@ -1515,6 +1592,58 @@ impl TabManager {
 
                     // Render nametable preview
                     self.render_nametables(ui, data);
+                } else if let Some(ref sys_data) = self.system_tile_data {
+                    // Render system-specific tile viewers
+                    match sys_data {
+                        SystemTileData::GameBoy(gb_data) => {
+                            ui.heading(format!(
+                                "🎮 Game Boy Tile Viewer ({})",
+                                if gb_data.is_cgb_mode { "CGB" } else { "DMG" }
+                            ));
+                            ui.separator();
+                            ui.label(format!("LCDC: ${:02X}", gb_data.lcdc));
+                            ui.label(format!(
+                                "Scroll: ({}, {}) Window: ({}, {})",
+                                gb_data.scx, gb_data.scy, gb_data.wx, gb_data.wy
+                            ));
+                            ui.label(format!("VRAM: {} KB", gb_data.vram_bank0.len() / 1024));
+                            ui.label(format!("OAM: {} bytes (40 sprites)", gb_data.oam.len()));
+                            ui.label(format!("BG Palettes: {} colors", gb_data.bg_palettes.len()));
+                            ui.label(format!(
+                                "OBJ Palettes: {} colors",
+                                gb_data.obj_palettes.len()
+                            ));
+                        }
+                        SystemTileData::SMS(sms_data) => {
+                            ui.heading("🎮 SMS Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("VRAM: {} KB", sms_data.vram.len() / 1024));
+                            ui.label(format!("CRAM: {} bytes", sms_data.cram.len()));
+                            ui.label(format!("Palette: {} colors", sms_data.palette.len()));
+                            ui.label(format!("Registers: {:?}", sms_data.registers));
+                        }
+                        SystemTileData::SNES(snes_data) => {
+                            ui.heading("🎮 SNES Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("BG Mode: {}", snes_data.bg_mode));
+                            ui.label(format!(
+                                "Screen: {}",
+                                if snes_data.screen_enabled {
+                                    "Enabled"
+                                } else {
+                                    "Disabled"
+                                }
+                            ));
+                            ui.label(format!("VRAM: {} KB", snes_data.vram.len() / 1024));
+                            ui.label(format!("CGRAM: {} bytes", snes_data.cgram.len()));
+                            ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
+                            ui.label(format!("Palette: {} colors", snes_data.palette.len()));
+                        }
+                        SystemTileData::NES(_) => {
+                            // Shouldn't happen - NES uses legacy TileViewerData
+                            ui.label("NES tile data - please use NES-specific viewer");
+                        }
+                    }
                 } else {
                     // No tile data available
                     ui.vertical_centered(|ui| {
@@ -1523,7 +1652,7 @@ impl TabManager {
                         ui.add_space(10.0);
                         ui.heading("No Tile Data Available");
                         ui.add_space(10.0);
-                        ui.label("Load an NES ROM to see tile and palette data");
+                        ui.label("Load a ROM to see tile and palette data");
                     });
                 }
             });

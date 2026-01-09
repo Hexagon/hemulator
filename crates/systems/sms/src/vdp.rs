@@ -256,7 +256,7 @@ impl Vdp {
             let b = (((cram_value >> 4) & 0x03) as u32) * 85;
             palette.push(0xFF000000 | (r << 16) | (g << 8) | b);
         }
-        
+
         crate::system::TileViewerData {
             vram: self.vram.to_vec(),
             cram: self.cram.to_vec(),

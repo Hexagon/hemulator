@@ -1068,7 +1068,7 @@ impl Ppu {
                 let low = self.cgram[idx] as u16;
                 let high = self.cgram[idx + 1] as u16;
                 let bgr15 = low | (high << 8);
-                
+
                 // Convert 15-bit BGR to 32-bit ARGB
                 let r = ((bgr15 & 0x1F) as u32) << 3;
                 let g = (((bgr15 >> 5) & 0x1F) as u32) << 3;
@@ -1082,7 +1082,7 @@ impl Ppu {
                 palette.push(0xFF000000); // Black
             }
         }
-        
+
         crate::TileViewerData {
             vram: self.vram.to_vec(),
             cgram: self.cgram.to_vec(),

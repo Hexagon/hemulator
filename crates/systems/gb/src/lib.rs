@@ -329,11 +329,11 @@ impl GbSystem {
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         let ppu = &self.cpu.memory.ppu;
-        
+
         // Convert GB palettes to RGB colors
         let mut bg_palettes = Vec::new();
         let mut obj_palettes = Vec::new();
-        
+
         if ppu.is_cgb_mode() {
             // CGB mode: 8 BG palettes + 8 OBJ palettes, 4 colors each
             for pal_idx in 0..8 {
@@ -359,7 +359,7 @@ impl GbSystem {
                 }
             }
         }
-        
+
         TileViewerData {
             vram_bank0: ppu.get_vram_bank0().to_vec(),
             vram_bank1: ppu.get_vram_bank1().to_vec(),
