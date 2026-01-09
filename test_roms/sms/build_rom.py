@@ -60,10 +60,10 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Register 1: Mode Control 2 - $20 (display on, mode 4)
+    # Register 1: Mode Control 2 - $60 (display on, frame interrupt enable, mode 4)
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x20  # Mode control value (bit 6 = display enable)
+    rom[pc] = 0x60  # Mode control value (bit 6 = display enable, bit 5 = frame interrupt)
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
@@ -168,36 +168,62 @@ def assemble_z80(rom):
     rom[pc] = 0xBF  # VDP control port
     pc += 1
     
-    # Write tile 0: All white pixels (32 bytes of $FF)
-    # B = counter
+    # Write tile 0: Pixel value 1 (white when using CRAM[1])
+    # Each row is 4 bytes: bit0=FF, bit1=00, bit2=00, bit3=00
+    # This gives pixel value: 1|0|0|0 = 1
     rom[pc] = 0x06  # LD B, n
     pc += 1
-    rom[pc] = 32  # 32 bytes
+    rom[pc] = 8  # 8 rows
     pc += 1
+    # Loop start
+    tile0_loop = pc
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0xFF  # White pixel
+    rom[pc] = 0xFF  # Bit plane 0: all 1s
     pc += 1
-    # Loop start at current pc
-    tile0_loop = pc
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
     rom[pc] = 0xBE  # VDP data port
     pc += 1
-    rom[pc] = 0x10  # DJNZ (relative jump)
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0x00  # Bit plane 1: all 0s
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBE  # VDP data port
+    pc += 1
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0x00  # Bit plane 2: all 0s
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBE  # VDP data port
+    pc += 1
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0x00  # Bit plane 3: all 0s
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBE  # VDP data port
+    pc += 1
+    rom[pc] = 0x10  # DJNZ (decrement B and loop if not zero)
     pc += 1
     offset = tile0_loop - (pc + 1)
     rom[pc] = offset & 0xFF  # Relative offset (signed byte)
     pc += 1
     
-    # Write tile 1: All black pixels (32 bytes of $00)
+    # Write tile 1: Pixel value 0 (transparent)
+    # All bytes are 0x00
     rom[pc] = 0x06  # LD B, n
     pc += 1
     rom[pc] = 32  # 32 bytes
     pc += 1
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x00  # Black pixel
+    rom[pc] = 0x00  # All zeros
     pc += 1
     # Loop start
     tile1_loop = pc
@@ -230,56 +256,73 @@ def assemble_z80(rom):
     pc += 1
     
     # Fill name table with checkerboard pattern (32x24 tiles)
-    # Outer loop: 24 rows
-    rom[pc] = 0x16  # LD D, n
-    pc += 1
-    rom[pc] = 24  # 24 rows
-    pc += 1
+    # Each nametable entry is 2 bytes: [tile_index_low, tile_index_high | flags]
+    # We'll write 768 entries (32 cols x 24 rows) = 1536 bytes total
     
-    row_loop = pc
-    # Inner loop: 32 columns
-    rom[pc] = 0x0E  # LD C, n
+    # Use HL as counter for total entries (768 = 0x0300)
+    rom[pc] = 0x21  # LD HL, nn
     pc += 1
-    rom[pc] = 32  # 32 columns
-    pc += 1
+    write_word(rom, pc, 768)  # 32 x 24 tiles
+    pc += 2
     
-    # Get pattern: alternating based on (row + col) & 1
-    rom[pc] = 0x3E  # LD A, n
+    # Use B as toggle state (start with 0)
+    rom[pc] = 0x06  # LD B, n
     pc += 1
     rom[pc] = 0x00  # Start with tile 0
     pc += 1
     
-    col_loop = pc
+    tile_loop = pc
+    # Write tile index (B register)
+    rom[pc] = 0x78  # LD A, B
+    pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
     rom[pc] = 0xBE  # VDP data port
+    pc += 1
+    
+    # Write tile flags (high byte) - all zeros (no flip, palette 0)
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0x00  # Flags = 0
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBE  # VDP data port
+    pc += 1
+    
+    # Toggle B between 0 and 1
+    rom[pc] = 0x78  # LD A, B
     pc += 1
     rom[pc] = 0xEE  # XOR n
     pc += 1
-    rom[pc] = 0x01  # Toggle between 0 and 1
+    rom[pc] = 0x01  # XOR with 1
     pc += 1
-    rom[pc] = 0x0D  # DEC C
+    rom[pc] = 0x47  # LD B, A (save back to B)
+    pc += 1
+    
+    # Decrement counter HL
+    rom[pc] = 0x2B  # DEC HL
+    pc += 1
+    
+    # Check if HL == 0
+    rom[pc] = 0x7C  # LD A, H
+    pc += 1
+    rom[pc] = 0xB5  # OR L
     pc += 1
     rom[pc] = 0x20  # JR NZ, offset
     pc += 1
-    offset = col_loop - (pc + 1)
+    offset = tile_loop - (pc + 1)
     rom[pc] = offset & 0xFF  # Relative offset (signed byte)
     pc += 1
     
-    # Next row
-    rom[pc] = 0x15  # DEC D
-    pc += 1
-    rom[pc] = 0x20  # JR NZ, offset
-    pc += 1
-    offset = row_loop - (pc + 1)
-    rom[pc] = offset & 0xFF  # Relative offset (signed byte)
-    pc += 1
+    # Set palette colors
+    # Tile 0 uses pixel value 1, Tile 1 uses pixel value 0 (transparent)
+    # So we need: CRAM[1] = white, CRAM[16] = black (backdrop)
     
-    # Set palette: White = $3F (max brightness), Black = $00
-    # CRAM write address $0000
+    # Write CRAM[1] = white
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x00  # Low byte
+    rom[pc] = 0x01  # CRAM address 1
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
@@ -287,28 +330,41 @@ def assemble_z80(rom):
     pc += 1
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0xC0  # CRAM write (0xC0)
+    rom[pc] = 0xC0  # CRAM write mode
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
     rom[pc] = 0xBF  # VDP control port
     pc += 1
-    
-    # Write palette entries
-    # Entry 0: White (RGB: 3,3,3)
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x3F  # White
+    rom[pc] = 0x3F  # White color
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1
     rom[pc] = 0xBE  # VDP data port
     pc += 1
     
-    # Entry 1: Black (RGB: 0,0,0)
+    # Write CRAM[16] = black (backdrop)
     rom[pc] = 0x3E  # LD A, n
     pc += 1
-    rom[pc] = 0x00  # Black
+    rom[pc] = 0x10  # CRAM address 16
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBF  # VDP control port
+    pc += 1
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0xC0  # CRAM write mode
+    pc += 1
+    rom[pc] = 0xD3  # OUT (n), A
+    pc += 1
+    rom[pc] = 0xBF  # VDP control port
+    pc += 1
+    rom[pc] = 0x3E  # LD A, n
+    pc += 1
+    rom[pc] = 0x00  # Black color
     pc += 1
     rom[pc] = 0xD3  # OUT (n), A
     pc += 1

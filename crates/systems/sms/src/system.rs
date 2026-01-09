@@ -353,34 +353,45 @@ mod tests {
         assert_eq!(frame.height, 192);
 
         // The test ROM should produce a checkerboard pattern
-        // Check that we have non-zero pixels (display is working)
-        let pixels = &frame.pixels;
-        let non_zero_count = pixels.iter().filter(|&&p| p != 0).count();
+        // Count unique colors and their distribution
+        use std::collections::HashMap;
+        let mut color_counts: HashMap<u32, usize> = HashMap::new();
+        for &pixel in &frame.pixels {
+            *color_counts.entry(pixel).or_insert(0) += 1;
+        }
 
-        // We should have a significant number of white pixels from the checkerboard
-        // The exact count depends on VDP implementation, but it should be > 0
-        assert!(
-            non_zero_count > 0,
-            "Expected visible output from test ROM, got {} non-zero pixels",
-            non_zero_count
+        // We expect exactly 2 colors: white (0xFFFFFFFF) and black (0xFF000000)
+        assert_eq!(
+            color_counts.len(),
+            2,
+            "Expected 2 colors (checkerboard), got {}",
+            color_counts.len()
         );
 
-        // For a proper checkerboard, approximately half the pixels should be white
-        // Allow a wide tolerance since the exact rendering depends on tile implementation
-        let total_pixels = pixels.len();
-        let white_percentage = (non_zero_count as f32 / total_pixels as f32) * 100.0;
+        // Count white and black pixels
+        let white_count = *color_counts.get(&0xFFFFFFFF).unwrap_or(&0);
+        let black_count = *color_counts.get(&0xFF000000).unwrap_or(&0);
+        let total_pixels = frame.pixels.len();
+
+        let white_percentage = (white_count as f32 / total_pixels as f32) * 100.0;
+        let black_percentage = (black_count as f32 / total_pixels as f32) * 100.0;
 
         println!(
-            "Test ROM produced {:.1}% white pixels (expected ~50% for checkerboard)",
-            white_percentage
+            "Test ROM: {:.1}% white, {:.1}% black (expected ~50% each for checkerboard)",
+            white_percentage, black_percentage
         );
 
-        // Very loose check - just ensure SOME pixels are rendered
-        // (More strict checking would require full VDP implementation)
+        // For a perfect checkerboard, we expect exactly 50% white and 50% black
+        // Allow small tolerance for rounding
         assert!(
-            white_percentage > 1.0,
-            "Expected at least some visible pixels, got {:.1}%",
+            (white_percentage - 50.0).abs() < 1.0,
+            "Expected ~50% white pixels, got {:.1}%",
             white_percentage
+        );
+        assert!(
+            (black_percentage - 50.0).abs() < 1.0,
+            "Expected ~50% black pixels, got {:.1}%",
+            black_percentage
         );
     }
 
@@ -573,5 +584,57 @@ mod tests {
 
         let samples = system.get_audio_samples(100);
         assert_eq!(samples.len(), 100);
+    }
+
+    #[test]
+    fn test_cycle_counting() {
+        let mut system = SmsSystem::new();
+
+        // Load a simple ROM with known instruction cycles
+        let mut rom = vec![0; 0x8000];
+        rom[0x0000] = 0x00; // NOP (4 cycles)
+        rom[0x0001] = 0x00; // NOP (4 cycles)
+        rom[0x0002] = 0xC3; // JP 0x0000 (10 cycles)
+        rom[0x0003] = 0x00;
+        rom[0x0004] = 0x00;
+
+        system.load_rom(rom);
+        system.reset();
+
+        // Initial cycles should be 0
+        assert_eq!(system.cycles, 0, "Initial cycles should be 0");
+
+        // Execute one NOP (4 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(cycles, 4, "NOP should take 4 cycles");
+        assert_eq!(system.cycles, 4, "Total cycles should be 4 after one NOP");
+
+        // Execute another NOP (4 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(system.cycles, 8, "Total cycles should be 8 after two NOPs");
+
+        // Execute JP instruction (10 cycles)
+        let cycles = system.cpu.step() as u64;
+        system.cycles += cycles;
+        assert_eq!(cycles, 10, "JP should take 10 cycles");
+        assert_eq!(system.cycles, 18, "Total cycles should be 18");
+    }
+
+    #[test]
+    fn test_frame_cycle_target() {
+        // Verify the target cycles for one frame matches SMS NTSC specs
+        // SMS NTSC: 3.579545 MHz / 60 Hz ≈ 59659 cycles per frame
+        let target_cycles = 59659;
+        let expected = 3_579_545.0 / 60.0;
+
+        // Allow 1 cycle tolerance due to rounding
+        assert!(
+            (target_cycles as f64 - expected).abs() < 1.0,
+            "Target cycles {} should be close to expected {}",
+            target_cycles,
+            expected
+        );
     }
 }

@@ -3121,9 +3121,12 @@ fn main() {
                 EmulatorSystem::PC(s) => SystemDebugInfo::from_pc(&s.debug_info()),
                 EmulatorSystem::SNES(s) => SystemDebugInfo::from_snes(&s.get_debug_info()),
                 EmulatorSystem::N64(s) => SystemDebugInfo::from_n64(&s.get_debug_info()),
-                EmulatorSystem::SMS(_) => {
-                    // Z80 CPU not yet implemented
-                    SystemDebugInfo::new("Sega Master System".to_string())
+                EmulatorSystem::SMS(s) => {
+                    if let Some(debugger) = s.debugger() {
+                        SystemDebugInfo::from_debugger("Sega Master System", debugger)
+                    } else {
+                        SystemDebugInfo::new("Sega Master System".to_string())
+                    }
                 }
                 EmulatorSystem::Chip8(s) => SystemDebugInfo::from_chip8(&s.debug_info()),
             };
@@ -3135,6 +3138,10 @@ fn main() {
                 EmulatorSystem::NES(s) => {
                     let debugger: &dyn Debugger = s.as_ref();
                     Some(create_enhanced_debug_state("NES", debugger))
+                }
+                EmulatorSystem::SMS(s) => {
+                    let debugger: &dyn Debugger = s.as_ref();
+                    Some(create_enhanced_debug_state("SMS", debugger))
                 }
                 _ => None, // Other systems don't have debugger implemented yet
             };

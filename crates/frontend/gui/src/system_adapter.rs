@@ -153,6 +153,33 @@ impl SystemDebugInfo {
         debug_info.add_field("Sound Timer".to_string(), format!("{}", info.sound_timer));
         debug_info
     }
+
+    /// Create debug info from a system implementing the Debugger trait
+    /// This is a fallback for systems that don't have a custom DebugInfo struct
+    pub fn from_debugger(
+        system_name: impl Into<String>,
+        debugger: &dyn emu_core::debug::Debugger,
+    ) -> Self {
+        let mut debug_info = Self::new(system_name.into());
+        let cpu_state = debugger.get_cpu_state();
+
+        // Add PC
+        debug_info.add_field("PC".to_string(), format!("${:04X}", cpu_state.pc));
+
+        // Add all registers
+        for reg in &cpu_state.registers {
+            let formatted_value = match reg.width {
+                8 => format!("${:02X}", reg.value),
+                16 => format!("${:04X}", reg.value),
+                32 => format!("${:08X}", reg.value),
+                64 => format!("${:016X}", reg.value),
+                _ => format!("${:X}", reg.value),
+            };
+            debug_info.add_field(reg.name.clone(), formatted_value);
+        }
+
+        debug_info
+    }
 }
 
 /// Configuration options for different system types
