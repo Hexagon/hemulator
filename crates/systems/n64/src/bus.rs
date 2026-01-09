@@ -6,6 +6,7 @@ use crate::mi::MipsInterface;
 use crate::pif::Pif;
 use crate::rdp::Rdp;
 use crate::rsp::Rsp;
+use crate::tlb::Tlb;
 use crate::vi::VideoInterface;
 use crate::N64Error;
 use emu_core::cpu_mips_r4300i::MemoryMips;
@@ -29,6 +30,8 @@ pub struct N64Bus {
     mi: MipsInterface,
     /// AI (Audio Interface)
     ai: AudioInterface,
+    /// TLB (Translation Lookaside Buffer)
+    tlb: Tlb,
     /// Entry point from ROM header (set during cartridge load)
     entry_point: Option<u64>,
 }
@@ -48,6 +51,7 @@ impl N64Bus {
             vi: VideoInterface::new(),
             mi: MipsInterface::new(),
             ai: AudioInterface::new(),
+            tlb: Tlb::new(),
             entry_point: None,
         };
 
@@ -203,8 +207,25 @@ impl N64Bus {
     }
 
     fn translate_address(&self, addr: u32) -> u32 {
-        // Simple address translation (unmapped addresses)
-        addr & 0x1FFFFFFF
+        // Use TLB for address translation
+        // Convert 32-bit address to 64-bit for TLB lookup
+        let virt_addr = addr as u64;
+        
+        match self.tlb.translate(virt_addr) {
+            Some((phys_addr, _is_cached)) => phys_addr,
+            None => {
+                // TLB miss - fallback to simple unmapped translation
+                // This handles KSEG0/KSEG1 which should already be handled by TLB,
+                // but provides a safety net
+                addr & 0x1FFFFFFF
+            }
+        }
+    }
+    
+    /// Get mutable reference to TLB for CP0 TLB instructions
+    #[allow(dead_code)] // Reserved for future CP0 TLB instruction implementation
+    pub fn tlb_mut(&mut self) -> &mut Tlb {
+        &mut self.tlb
     }
 }
 

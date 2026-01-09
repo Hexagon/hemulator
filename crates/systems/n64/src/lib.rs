@@ -24,6 +24,7 @@ mod rdp_renderer;
 mod rdp_renderer_opengl;
 mod rsp;
 mod rsp_hle;
+mod tlb;
 mod vi;
 
 use bus::N64Bus;
