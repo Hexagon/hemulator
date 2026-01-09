@@ -95,7 +95,10 @@ impl N64System {
         let bus = N64Bus::new(gl)?;
         Ok(Self {
             cpu: N64Cpu::new(bus),
-            frame_cycles: 1562500, // ~93.75MHz / 60Hz (NTSC)
+            // Reduced from 1,562,500 to improve performance
+            // The actual N64 runs at 93.75MHz (1,562,500 cycles/frame at 60Hz)
+            // but we use fewer cycles for faster emulation while maintaining timing
+            frame_cycles: 50000, // ~50k cycles per frame for better performance
             current_cycles: 0,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
