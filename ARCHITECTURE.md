@@ -327,45 +327,86 @@ Test ROMs are located in `test_roms/<system>/` and built from assembly source.
 
 ## GUI Frontend
 
-The GUI frontend (`crates/frontend/gui/`) provides a cross-platform interface using SDL2 with an in-app menu system and status bar:
+The GUI frontend (`crates/frontend/gui/`) provides a modern cross-platform interface using SDL2 with egui for the UI:
 
 ### Architecture
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ Window (SDL2)                                          │
-│  ├─ Menu Bar (24px, top)                               │
-│  │   └─ File | Emulation | State | View | Help         │
-│  ├─ Game Display (middle, scales with window)          │
-│  │   └─ Emulated system framebuffer                    │
-│  └─ Status Bar (20px, bottom)                          │
-│      └─ System | State | Messages | FPS | IP | Cycles  │
-└────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Window (SDL2 + egui)                                         │
+│  ├─ Menu Bar (egui, top)                                     │
+│  │   └─ File | Emulation | View | Help                       │
+│  ├─ Main Content Area (center)                               │
+│  │   ├─ Emulator Tab (game framebuffer, default)             │
+│  │   ├─ New Project Tab (closeable)                          │
+│  │   ├─ Help Tab (closeable)                                 │
+│  │   └─ About Tab (closeable)                                │
+│  ├─ Inspector Dock (bottom, resizable, moveable)             │
+│  │   ├─ Generic Tabs (always):                               │
+│  │   │   ├─ Log (with live message capture)                  │
+│  │   │   ├─ Debug (CPU state, memory, disassembly)           │
+│  │   │   └─ Memory (generic memory viewer)                   │
+│  │   └─ System-Specific Tabs (dynamic):                      │
+│  │       ├─ NES: Tiles, Palettes, Nametables                 │
+│  │       ├─ GB: Tiles, Palettes                              │
+│  │       ├─ SMS: Tiles, Palettes                             │
+│  │       ├─ SNES: Tiles, Palettes, Layers                    │
+│  │       └─ PC: BDA/EBDA Inspector                           │
+│  ├─ Property Pane (right, resizable, moveable)               │
+│  │   └─ Machine Metrics, Settings, Mounts, Save States       │
+│  └─ Status Bar (bottom, fixed)                               │
+│      └─ System | State | Messages | FPS                      │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
 
-- **Menu Bar** (`src/menu.rs`): In-app rendered menu system with mouse and keyboard support
-  - Dropdown menus on click
+- **Menu Bar** (`src/egui_ui/menu_bar.rs`): egui-based menu system
+  - Dropdown menus with keyboard shortcuts
   - Dynamic enable/disable based on emulator state
-  - Fixed 24px height, 8x8 pixel font
+  - Single "Inspector" toggle (replaces separate Debug/Log/Tiles items)
   
-- **Status Bar** (`src/status_bar.rs`): Real-time status display
-  - System name, pause/speed state, messages
-  - FPS counter, instruction pointer (IP), CPU cycles
-  - Fixed 20px height, 8x8 pixel font
+- **Inspector Dock** (`src/egui_ui/inspector_tabs.rs`, `src/egui_ui/dock_layout.rs`): System-aware debugging panel
+  - **Generic tabs** (always available):
+    - Log: Live log message capture from core logging system with level controls
+    - Debug: CPU state, memory viewer, disassembly (comprehensive 3-panel view)
+    - Memory: Generic memory inspector
+  - **System-specific tabs** (dynamic based on loaded ROM):
+    - Tabs automatically update when ROM is loaded/unloaded
+    - Each system gets appropriate debugging tools (Tiles, Palettes, etc.)
+  - Dockable using egui_dock (resizable, moveable)
+  - Hidden by default, toggle with View → Inspector
+  - All tabs non-closeable and always visible when dock is open
+  
+- **Property Pane** (`src/egui_ui/property_pane.rs`): System configuration and state
+  - Machine metrics (FPS, CPU frequency, BDA for PC)
+  - Project settings (renderer, display filter, emulation speed, input config)
+  - Mount points (disk/ROM mounting)
+  - Save state management (5 slots per game)
+  - Dockable using egui_dock (resizable, moveable)
+  
+- **Status Bar** (`src/egui_ui/status_bar.rs`): Real-time status display
+  - System name, pause/speed state, messages, FPS counter
 
-- **Window Backend** (`src/window_backend/`): SDL2 abstraction
-  - Event handling (keyboard, mouse)
-  - Frame presentation
+- **Tab System** (`src/egui_ui/tabs.rs`): Main content area tabs
+  - Emulator tab (game display with scaling modes)
+  - New Project tab (system selection)
+  - Help tab (keyboard controls)
+  - About tab (version info)
+
+- **Window Backend** (`src/window_backend/`): SDL2 + egui abstraction
+  - Event handling (keyboard, mouse, gamepad)
+  - Frame presentation with egui overlay
   - Window management
 
 ### Design Decisions
 
-- **In-app rendering**: No native OS menu dependencies (no GTK/Win32/Cocoa required)
-- **Fixed pixel sizes**: Menu bar and status bar use fixed heights for consistency
-- **Framebuffer rendering**: All UI elements rendered as overlays on game buffer
+- **egui framework**: Modern immediate-mode GUI for responsive, developer-friendly UI
+- **Docking system**: egui_dock enables flexible, customizable layout
+- **System-aware Inspector**: Tabs dynamically adapt to loaded system's debugging needs
+- **Live logging**: Message capture buffer (1000 messages) for real-time log display
 - **Cross-platform**: Works identically on Windows, macOS, and Linux
+- **No native dependencies**: Pure Rust + SDL2, no GTK/Win32/Cocoa required
 
 For user-facing controls and features, see [MANUAL.md](MANUAL.md).
 

@@ -59,6 +59,18 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
   - **Binary**: The GUI crate builds as `hemu` (not `emu_gui`)
   - **CLI removed**: There is no CLI frontend, only the GUI
   - **Core architecture**: Reusable CPU implementations in `crates/core/` (e.g., `cpu_6502`)
+  - **GUI Framework**: egui-based immediate-mode UI with system-aware Inspector dock
+
+- **GUI Inspector System**:
+  - **Inspector Dock** (`crates/frontend/gui/src/egui_ui/inspector_tabs.rs`): Bottom dockable panel with debugging tools
+    - **Generic tabs** (always available): Log, Debug, Memory
+    - **System-specific tabs** (dynamic): Tiles, Palettes, Nametables (NES), BDA/EBDA (PC), etc.
+    - Tabs automatically update based on loaded ROM/system
+    - All tabs non-closeable and always visible when Inspector is open
+    - Toggle with View → Inspector menu item
+  - **Log tab**: Live message capture from `emu_core::logging` with level controls
+  - **Debug tab**: CPU state, memory viewer, disassembly (comprehensive 3-panel view)
+  - **System-specific tabs**: Each system gets appropriate debugging tools based on its architecture
 
 - **Agent tasks**:
   - Run `cargo fmt` and `cargo clippy --workspace --all-targets -- -D warnings` on PRs.
