@@ -2333,7 +2333,7 @@ impl TabManager {
         let viewport_height = 240.0;
 
         // Calculate nametable selection based on scroll position
-        // PPUCTRL bit 0 selects Y nametable, bit 1 selects X nametable
+        // NES hardware uses non-intuitive bit mapping: X affects bit 1, Y affects bit 0
         // Scrolling crosses nametable boundaries at 256 pixels (X) and 240 pixels (Y)
         let nt_x = ((scroll_x / 256.0) as usize) & 1;
         let nt_y = ((scroll_y / 240.0) as usize) & 1;
