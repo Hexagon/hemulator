@@ -1,27 +1,11 @@
 //! Docking layout for Inspector panel and Property pane
 
+use super::inspector_tabs::{get_tabs_for_system, render_inspector_tab, InspectorTab};
 use super::property_pane::PropertyPane;
 use super::tabs::TabManager;
+use crate::rom_detect::SystemType;
 use egui::Ui;
 use egui_dock::{DockState, TabViewer};
-
-/// Tabs available in the Inspector dock
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum InspectorTab {
-    Debug,
-    Log,
-    Tiles,
-}
-
-impl InspectorTab {
-    pub fn title(&self) -> &'static str {
-        match self {
-            InspectorTab::Debug => "🔧 Debug",
-            InspectorTab::Log => "📋 Log",
-            InspectorTab::Tiles => "🎨 Tiles",
-        }
-    }
-}
 
 /// Tabs available in the Property dock
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +21,7 @@ impl PropertyTab {
 
 /// State for the docking system
 pub struct DockLayout {
-    /// Inspector dock state (contains Debug, Log, Tiles tabs)
+    /// Inspector dock state (contains system-specific tabs)
     pub inspector_state: DockState<InspectorTab>,
 
     /// Property pane dock state
@@ -45,16 +29,15 @@ pub struct DockLayout {
 
     /// Whether the inspector dock is visible
     pub inspector_visible: bool,
+
+    /// Current system type (determines which tabs are shown)
+    pub current_system: Option<SystemType>,
 }
 
 impl DockLayout {
     pub fn new() -> Self {
-        // Create inspector dock with 3 tabs always present
-        let inspector_state = DockState::new(vec![
-            InspectorTab::Debug,
-            InspectorTab::Log,
-            InspectorTab::Tiles,
-        ]);
+        // Start with just generic tabs (Log, Memory)
+        let inspector_state = DockState::new(get_tabs_for_system(None));
 
         // Create property pane dock with a single Properties tab
         let property_state = DockState::new(vec![PropertyTab::Properties]);
@@ -63,6 +46,25 @@ impl DockLayout {
             inspector_state,
             property_state,
             inspector_visible: false, // Hidden by default
+            current_system: None,
+        }
+    }
+
+    /// Update the inspector tabs based on the current system
+    pub fn update_system(&mut self, system_type: SystemType) {
+        if self.current_system.as_ref() != Some(&system_type) {
+            self.current_system = Some(system_type.clone());
+            // Rebuild the inspector with tabs for this system
+            self.inspector_state = DockState::new(get_tabs_for_system(Some(&system_type)));
+        }
+    }
+
+    /// Clear the current system (show only generic tabs)
+    pub fn clear_system(&mut self) {
+        if self.current_system.is_some() {
+            self.current_system = None;
+            // Rebuild with only generic tabs
+            self.inspector_state = DockState::new(get_tabs_for_system(None));
         }
     }
 
@@ -98,17 +100,7 @@ impl<'a> TabViewer for InspectorTabViewer<'a> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
-        match tab {
-            InspectorTab::Debug => {
-                self.tab_manager.render_debug_tab(ui);
-            }
-            InspectorTab::Log => {
-                self.tab_manager.render_log_tab(ui);
-            }
-            InspectorTab::Tiles => {
-                self.tab_manager.render_tiles_tab(ui);
-            }
-        }
+        render_inspector_tab(tab, ui, self.tab_manager);
     }
 
     // Prevent closing tabs - they're always visible

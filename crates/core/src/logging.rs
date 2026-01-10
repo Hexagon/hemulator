@@ -258,6 +258,15 @@ impl RateLimiter {
     }
 }
 
+/// A single log message with metadata
+#[derive(Debug, Clone)]
+pub struct LogMessage {
+    pub category: LogCategory,
+    pub level: LogLevel,
+    pub message: String,
+    pub timestamp: Instant,
+}
+
 /// Global logging configuration
 pub struct LogConfig {
     /// Global log level (applies to all categories unless overridden)
@@ -280,6 +289,10 @@ pub struct LogConfig {
     file_logging_enabled: AtomicBool,
     /// Rate limiter for controlling log output frequency
     rate_limiter: RateLimiter,
+    /// Message buffer for GUI display (circular buffer, max 1000 messages)
+    message_buffer: Mutex<VecDeque<LogMessage>>,
+    /// Flag indicating if GUI message capture is enabled
+    gui_capture_enabled: AtomicBool,
 }
 
 impl LogConfig {
@@ -296,6 +309,8 @@ impl LogConfig {
             log_sender: Mutex::new(None),
             file_logging_enabled: AtomicBool::new(false),
             rate_limiter: RateLimiter::new(60), // Default: 60 logs per second
+            message_buffer: Mutex::new(VecDeque::with_capacity(1000)),
+            gui_capture_enabled: AtomicBool::new(false),
         }
     }
 
@@ -425,11 +440,59 @@ impl LogConfig {
         // Thread will automatically stop when sender is dropped
     }
 
+    /// Enable GUI message capture
+    pub fn enable_gui_capture(&self) {
+        self.gui_capture_enabled.store(true, Ordering::Relaxed);
+    }
+
+    /// Disable GUI message capture
+    pub fn disable_gui_capture(&self) {
+        self.gui_capture_enabled.store(false, Ordering::Relaxed);
+    }
+
+    /// Get all captured messages (clears the buffer)
+    pub fn take_messages(&self) -> Vec<LogMessage> {
+        let mut buffer = self.message_buffer.lock().unwrap();
+        buffer.drain(..).collect()
+    }
+
+    /// Get messages without clearing the buffer
+    pub fn get_messages(&self) -> Vec<LogMessage> {
+        let buffer = self.message_buffer.lock().unwrap();
+        buffer.iter().cloned().collect()
+    }
+
+    /// Clear the message buffer
+    pub fn clear_messages(&self) {
+        let mut buffer = self.message_buffer.lock().unwrap();
+        buffer.clear();
+    }
+
+    /// Add a message to the GUI buffer (internal use)
+    fn capture_message(&self, category: LogCategory, level: LogLevel, message: String) {
+        if self.gui_capture_enabled.load(Ordering::Relaxed) {
+            let mut buffer = self.message_buffer.lock().unwrap();
+            buffer.push_back(LogMessage {
+                category,
+                level,
+                message,
+                timestamp: Instant::now(),
+            });
+            // Keep only last 1000 messages
+            if buffer.len() > 1000 {
+                buffer.pop_front();
+            }
+        }
+    }
+
     /// Write a message to the configured output (file or stderr)
     ///
     /// This is an internal method used by the public log() function.
     /// Uses async I/O for file logging to prevent blocking.
-    fn write_message(&self, message: &str) {
+    fn write_message(&self, category: LogCategory, level: LogLevel, message: &str) {
+        // Capture for GUI if enabled
+        self.capture_message(category, level, message.to_string());
+
         if self.file_logging_enabled.load(Ordering::Relaxed) {
             // Try to send to background thread (non-blocking)
             let log_sender = self.log_sender.lock().unwrap();
@@ -505,14 +568,14 @@ where
                     "[{:?} {:?}] WARNING: Rate limit exceeded, {} log message(s) dropped in the last second",
                     category, level, count
                 );
-                config.write_message(&warning);
+                config.write_message(category, level, &warning);
             }
         }
 
         // Only evaluate and log the message if allowed by rate limiter
         if allowed {
             let message = message_fn();
-            config.write_message(&message);
+            config.write_message(category, level, &message);
         }
     }
 }
