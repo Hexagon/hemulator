@@ -1178,4 +1178,77 @@ mod tests {
             restarted_level
         );
     }
+
+    #[test]
+    fn test_dmc_basic_operation() {
+        let mut apu = APU::new();
+
+        // Configure DMC: IRQ disabled, no loop, rate index 0
+        apu.write_register(0x4010, 0x00);
+
+        // Set direct load to 64
+        apu.write_register(0x4011, 0x40);
+        assert_eq!(apu.dmc.output_level, 0x40);
+
+        // Set sample address: 0xC000 + 0x10 * 64 = 0xC400
+        apu.write_register(0x4012, 0x10);
+        assert_eq!(apu.dmc.sample_address, 0xC400);
+
+        // Set sample length: 0x10 * 16 + 1 = 257 bytes
+        apu.write_register(0x4013, 0x10);
+        assert_eq!(apu.dmc.sample_length, 257);
+
+        // Enable DMC
+        apu.write_register(0x4015, 0x10);
+        assert!(apu.dmc.enabled);
+        assert!(apu.dmc.has_bytes_remaining());
+    }
+
+    #[test]
+    fn test_dmc_memory_read_request() {
+        let mut apu = APU::new();
+
+        // Configure and enable DMC
+        apu.write_register(0x4010, 0x00);
+        apu.write_register(0x4012, 0x00); // Address = 0xC000
+        apu.write_register(0x4013, 0x01); // Length = 17 bytes
+        apu.write_register(0x4015, 0x10); // Enable DMC
+
+        // Clock DMC until it requests a memory read
+        let mut read_requested = false;
+        for _ in 0..1000 {
+            if let Some(addr) = apu.clock_dmc() {
+                read_requested = true;
+                // Simulate memory read: load a byte with pattern 0b10101010
+                apu.load_dmc_sample(0b10101010);
+                assert_eq!(addr, 0xC000, "First read should be from sample address");
+                break;
+            }
+        }
+        assert!(read_requested, "DMC should request memory read");
+    }
+
+    #[test]
+    fn test_dmc_irq_generation() {
+        let mut apu = APU::new();
+
+        // Configure DMC with IRQ enabled, no loop
+        apu.write_register(0x4010, 0x80); // IRQ enabled
+        apu.write_register(0x4012, 0x00); // Address = 0xC000
+        apu.write_register(0x4013, 0x00); // Length = 1 byte (minimum)
+        apu.write_register(0x4015, 0x10); // Enable DMC
+
+        // Clock DMC and process the sample
+        for _ in 0..2000 {
+            if let Some(_addr) = apu.clock_dmc() {
+                apu.load_dmc_sample(0xFF);
+            }
+        }
+
+        // After sample completes, IRQ should be pending
+        assert!(
+            apu.dmc.irq_pending,
+            "DMC IRQ should be set after sample completes"
+        );
+    }
 }
