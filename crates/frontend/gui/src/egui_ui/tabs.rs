@@ -2333,9 +2333,10 @@ impl TabManager {
         let viewport_height = 240.0;
 
         // Calculate nametable selection based on scroll position
-        // Bit 0 controls vertical (Y), bit 1 controls horizontal (X) per NES hardware
-        let nt_x = if scroll_x >= 255.0 { 1 } else { 0 };
-        let nt_y = if scroll_y >= 239.0 { 1 } else { 0 };
+        // NES hardware uses non-intuitive bit mapping: X affects bit 1, Y affects bit 0
+        // Scrolling crosses nametable boundaries at 256 pixels (X) and 240 pixels (Y)
+        let nt_x = ((scroll_x / 256.0) as usize) & 1;
+        let nt_y = ((scroll_y / 240.0) as usize) & 1;
         let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
 
         // Calculate the position of the scroll window in the grid
