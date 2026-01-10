@@ -12,11 +12,8 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum Tab {
     Emulator,
     NewProject,
-    Log,
     Help,
-    Debug,
-    Tiles,    // Tile/palette viewer for PPU debugging
-    PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter)
+    PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter) - deprecated
     About,
 }
 
@@ -148,9 +145,6 @@ pub struct TabManager {
     pub active_tab: Tab,
     pub log_messages: Vec<String>,
     pub help_visible: bool,
-    pub debug_visible: bool,
-    pub tiles_visible: bool,
-    pub pc_config_visible: bool,
     pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
@@ -171,9 +165,6 @@ impl TabManager {
             active_tab: Tab::Emulator,
             log_messages: Vec::new(),
             help_visible: false,
-            debug_visible: false,
-            tiles_visible: false,
-            pc_config_visible: false,
             about_visible: false,
             debug_info: None,
             enhanced_debug_state: None,
@@ -197,22 +188,12 @@ impl TabManager {
         }
     }
 
-    pub fn show_tiles_tab(&mut self) {
-        self.tiles_visible = true;
-        self.active_tab = Tab::Tiles;
-    }
-
     pub fn update_tile_viewer_data(&mut self, data: TileViewerData) {
         self.tile_viewer_data = Some(data);
     }
 
     pub fn update_system_tile_data(&mut self, data: SystemTileData) {
         self.system_tile_data = Some(data);
-    }
-
-    pub fn show_pc_config_tab(&mut self) {
-        self.pc_config_visible = true;
-        self.active_tab = Tab::PcConfig;
     }
 
     pub fn update_pc_config_info(&mut self, info: PcConfigInfo) {
@@ -222,11 +203,6 @@ impl TabManager {
     pub fn show_help_tab(&mut self) {
         self.help_visible = true;
         self.active_tab = Tab::Help;
-    }
-
-    pub fn show_debug_tab(&mut self) {
-        self.debug_visible = true;
-        self.active_tab = Tab::Debug;
     }
 
     pub fn show_about_tab(&mut self) {
@@ -286,9 +262,6 @@ impl TabManager {
                 }
             }
 
-            // Log tab is always clickable
-            ui.selectable_value(&mut self.active_tab, Tab::Log, "📋 Log");
-
             if self.help_visible {
                 ui.selectable_value(&mut self.active_tab, Tab::Help, "❓ Help");
                 // Use a colored button for the close icon to ensure visibility
@@ -303,43 +276,6 @@ impl TabManager {
                 {
                     self.help_visible = false;
                     if self.active_tab == Tab::Help {
-                        self.active_tab = Tab::Emulator;
-                    }
-                }
-            }
-
-            if self.debug_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::Debug, "🔧 Debug");
-                // Use a colored button for the close icon to ensure visibility
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                )
-                .small();
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close Debug tab")
-                    .clicked()
-                {
-                    self.debug_visible = false;
-                    if self.active_tab == Tab::Debug {
-                        self.active_tab = Tab::Emulator;
-                    }
-                }
-            }
-
-            if self.tiles_visible {
-                ui.selectable_value(&mut self.active_tab, Tab::Tiles, "🎨 Tiles");
-                let close_button = egui::Button::new(
-                    egui::RichText::new("✖").color(egui::Color32::from_rgb(220, 220, 220)),
-                )
-                .small();
-                if ui
-                    .add(close_button)
-                    .on_hover_text("Close Tiles tab")
-                    .clicked()
-                {
-                    self.tiles_visible = false;
-                    if self.active_tab == Tab::Tiles {
                         self.active_tab = Tab::Emulator;
                     }
                 }
@@ -378,10 +314,7 @@ impl TabManager {
         match self.active_tab {
             Tab::Emulator => self.render_emulator_tab(ui, emulator_texture, scaling_mode),
             Tab::NewProject => self.render_new_project_tab(ui),
-            Tab::Log => self.render_log_tab(ui),
             Tab::Help => self.render_help_tab(ui),
-            Tab::Debug => self.render_debug_tab(ui),
-            Tab::Tiles => self.render_tiles_tab(ui),
             Tab::About => self.render_about_tab(ui),
             // Keep PcConfig render for backward compat, but it won't be accessible
             Tab::PcConfig => self.render_pc_config_tab(ui),
@@ -512,7 +445,7 @@ impl TabManager {
         });
     }
 
-    fn render_log_tab(&self, ui: &mut Ui) {
+    pub fn render_log_tab(&self, ui: &mut Ui) {
         use emu_core::logging::{LogCategory, LogConfig, LogLevel};
 
         let log_config = LogConfig::global();
@@ -934,7 +867,7 @@ impl TabManager {
             });
     }
 
-    fn render_debug_tab(&mut self, ui: &mut Ui) {
+    pub fn render_debug_tab(&mut self, ui: &mut Ui) {
         // If we have enhanced debug state, show the comprehensive 3-panel view
         if let Some(state) = self.enhanced_debug_state.clone() {
             self.render_enhanced_debug_view(ui, &state);
@@ -1421,7 +1354,7 @@ impl TabManager {
             });
     }
 
-    fn render_tiles_tab(&self, ui: &mut Ui) {
+    pub fn render_tiles_tab(&self, ui: &mut Ui) {
         let available_height = ui.available_height();
         ScrollArea::vertical()
             .auto_shrink([false; 2])

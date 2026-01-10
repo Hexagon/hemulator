@@ -2,9 +2,9 @@
 //!
 //! This module implements a modern, modular UI layout with:
 //! - Menu bar at the top
-//! - Two-column layout:
-//!   - Left: Tabbed interface (Emulator, Log, Help, Debug)
-//!   - Right: Property pane (Metrics, Settings, Mounts, Save States)
+//! - Main content area with tabs (Emulator, NewProject, Help, About)
+//! - Inspector dock (bottom, moveable) with Debug, Log, Tiles tabs
+//! - Property pane dock (right, moveable)
 //! - Status bar at the bottom
 
 mod layout;
@@ -12,6 +12,7 @@ pub mod menu_bar;
 pub mod property_pane;
 mod status_bar;
 mod tabs;
+mod dock_layout;
 
 pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
