@@ -7,7 +7,7 @@
 //! - Tile/Pattern viewer
 //! - Palette viewer
 
-use crate::system_adapter::{EnhancedDebugState, SystemDebugInfo};
+use crate::system_adapter::EnhancedDebugState;
 use egui::{Context, ScrollArea, Ui, ViewportBuilder, ViewportId};
 
 use super::tabs::SystemTileData;
@@ -20,26 +20,14 @@ pub struct InspectorWindow {
     /// The viewport ID for the inspector window
     viewport_id: ViewportId,
     
-    /// Active inspector tab
-    active_tab: InspectorTab,
-    
     /// Log messages
     log_messages: Vec<String>,
-    
-    /// Debug information from the system
-    debug_info: Option<SystemDebugInfo>,
     
     /// Enhanced debug state (CPU, memory, disassembly)
     enhanced_debug_state: Option<EnhancedDebugState>,
     
     /// Tile viewer data
     system_tile_data: Option<SystemTileData>,
-    
-    /// Selected memory region index for memory viewer
-    selected_memory_region_index: usize,
-    
-    /// Current memory view address
-    memory_view_address: u32,
 }
 
 /// Inspector window tabs
@@ -56,13 +44,9 @@ impl InspectorWindow {
         Self {
             is_open: false,
             viewport_id: ViewportId::from_hash_of("inspector_window"),
-            active_tab: InspectorTab::Log,
             log_messages: Vec::new(),
-            debug_info: None,
             enhanced_debug_state: None,
             system_tile_data: None,
-            selected_memory_region_index: 0,
-            memory_view_address: 0,
         }
     }
     
@@ -83,11 +67,6 @@ impl InspectorWindow {
         if self.log_messages.len() > 1000 {
             self.log_messages.remove(0);
         }
-    }
-    
-    /// Update debug info
-    pub fn update_debug_info(&mut self, info: SystemDebugInfo) {
-        self.debug_info = Some(info);
     }
     
     /// Update enhanced debug state
