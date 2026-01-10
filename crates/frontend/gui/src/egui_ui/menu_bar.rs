@@ -30,6 +30,7 @@ pub enum MenuAction {
     ShowLog,
     ShowDebug,
     ShowTiles,
+    ToggleInspector, // NEW: Toggle the Inspector window
 
     // Help menu
     ShowHelp,
@@ -221,8 +222,19 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
+                    .button("🔍 Inspector (F12)")
+                    .on_hover_text("Toggle Inspector window (logs, debugger, tiles, memory)")
+                    .clicked()
+                {
+                    self.pending_action = Some(MenuAction::ToggleInspector);
+                    ui.close();
+                }
+
+                ui.separator();
+
+                if ui
                     .button("📋 Log")
-                    .on_hover_text("Show emulation log messages")
+                    .on_hover_text("Show emulation log messages (deprecated - use Inspector)")
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::ShowLog);
@@ -230,7 +242,7 @@ impl MenuBar {
                 }
                 if ui
                     .button("🔧 Debug")
-                    .on_hover_text("Show system debug information")
+                    .on_hover_text("Show system debug information (deprecated - use Inspector)")
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::ShowDebug);
@@ -238,7 +250,7 @@ impl MenuBar {
                 }
                 if ui
                     .button("🎨 Tiles")
-                    .on_hover_text("Show tile and palette viewer (NES)")
+                    .on_hover_text("Show tile and palette viewer (deprecated - use Inspector)")
                     .clicked()
                 {
                     self.pending_action = Some(MenuAction::ShowTiles);

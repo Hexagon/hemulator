@@ -4,6 +4,7 @@ use super::menu_bar::MenuBar;
 use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
+use super::InspectorWindow;
 use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
 
@@ -32,6 +33,7 @@ pub struct EguiApp {
     pub tab_manager: TabManager,
     pub property_pane: PropertyPane,
     pub status_bar: StatusBarWidget,
+    pub inspector_window: InspectorWindow,
 
     /// Frame texture for emulator display
     pub emulator_texture: Option<egui::TextureHandle>,
@@ -44,6 +46,7 @@ impl EguiApp {
             tab_manager: TabManager::new(),
             property_pane: PropertyPane::new(),
             status_bar: StatusBarWidget::new(),
+            inspector_window: InspectorWindow::new(),
             emulator_texture: None,
         }
     }
@@ -97,6 +100,9 @@ impl EguiApp {
 
     /// Render the UI
     pub fn ui(&mut self, ctx: &Context, scaling_mode: ScalingMode) {
+        // Show the inspector window if it's open
+        self.inspector_window.show(ctx);
+        
         // Set brighter text color globally
         let mut style = (*ctx.style()).clone();
         style.visuals.override_text_color = Some(color_from_rgb(204, 204, 204));

@@ -4323,6 +4323,15 @@ fn main() {
                 MenuAction::ShowTiles => {
                     egui_app.tab_manager.show_tiles_tab();
                 }
+                MenuAction::ToggleInspector => {
+                    egui_app.inspector_window.toggle();
+                    let msg = if egui_app.inspector_window.is_open {
+                        "Inspector window opened"
+                    } else {
+                        "Inspector window closed"
+                    };
+                    egui_app.status_bar.set_message(msg.to_string());
+                }
                 MenuAction::OpenProject => {
                     // Open .hemu project file dialog
                     if let Some(path) = rfd::FileDialog::new()
@@ -5039,6 +5048,17 @@ fn main() {
                     }
                 }
             }
+        }
+
+        // Handle F12 key for Inspector toggle
+        if egui_backend.is_key_pressed(Key::F12, false) {
+            egui_app.inspector_window.toggle();
+            let msg = if egui_app.inspector_window.is_open {
+                "Inspector window opened"
+            } else {
+                "Inspector window closed"
+            };
+            egui_app.status_bar.set_message(msg.to_string());
         }
 
         // Handle host key + fullscreen toggle (switch between Fullscreen and Fullscreen with GUI)
