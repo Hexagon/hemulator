@@ -45,11 +45,14 @@
 //! - **Sweep units** for frequency modulation (pitch bending) on both pulse channels
 //! - Triangle channel with 32-step waveform
 //! - Noise channel with pseudo-random LFSR
+//! - DMC channel with full sample playback support
+//!   - Memory reads from CPU address space
+//!   - IRQ generation on completion
+//!   - Loop support
 //! - Length counter and envelope support
 //! - Frame counter (4-step and 5-step modes)
-//! - APU IRQ support (frame counter)
-//! - 44.1 kHz audio output
-//! - Note: DMC channel not yet implemented
+//! - APU IRQ support (frame counter and DMC)
+//! - 44.1 kHz audio output with non-linear mixing
 //!
 //! ## Timing Model
 //!

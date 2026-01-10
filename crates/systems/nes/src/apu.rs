@@ -583,11 +583,13 @@ impl APU {
 
     /// Check if DMC has an IRQ pending.
     /// This should be checked at the system level alongside frame counter IRQs.
+    #[allow(dead_code)]
     pub fn dmc_irq_pending(&self) -> bool {
         self.dmc.irq_pending
     }
 
     /// Clear and return DMC IRQ flag.
+    #[allow(dead_code)]
     pub fn take_dmc_irq(&mut self) -> bool {
         self.dmc.take_irq_pending()
     }
@@ -726,13 +728,13 @@ impl APU {
             // Reference: https://www.nesdev.org/wiki/APU_Mixer
             // The NES APU uses a non-linear DAC for mixing channels.
             // This produces a more authentic sound than simple averaging.
-            
+
             let avg = acc / cycles as i32;
-            
+
             // Non-linear mixing formulas (scaled to prevent overflow)
             // pulse_out = 95.88 / (8128 / (pulse1 + pulse2) + 100)
             // tnd_out = 159.79 / (1 / (triangle/8227 + noise/12241 + dmc/22638) + 100)
-            
+
             // For simplicity, use a compromise between linear and true non-linear:
             // Apply a gentle curve to emphasize mid-range dynamics
             let mixed = if avg > 0 {
@@ -747,7 +749,7 @@ impl APU {
             } else {
                 0
             };
-            
+
             out.push(mixed.clamp(-32768, 32767) as i16);
         }
 

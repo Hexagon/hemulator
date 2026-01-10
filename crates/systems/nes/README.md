@@ -98,11 +98,18 @@ Uses reusable components from `emu_core::apu`:
 - **Pulse 2** (`PulseChannel`): Square wave
 - **Triangle** (`TriangleChannel`): 32-step triangle wave
 - **Noise** (`NoiseChannel`): LFSR-based noise
-- **DMC**: Delta modulation channel (basic implementation)
+- **DMC**: Delta modulation channel with full memory read support
+  - Sample playback from CPU memory via DMA
+  - Automatic memory reads at configurable sample rates
+  - IRQ generation on sample completion
+  - Loop support for continuous playback
 
 **Frame Sequencer**: 240Hz timing for envelopes, length counters, and sweep
 
-**Audio Output**: 44.1 kHz sample rate, mixed to stereo
+**Audio Output**: 44.1 kHz sample rate with improved non-linear mixing
+- Non-linear APU mixer for authentic NES sound
+- Gentle dynamic compression curve
+- Enhanced mid-range dynamics
 
 ### Mapper System
 
@@ -192,7 +199,7 @@ See [MANUAL.md](../../../docs/MANUAL.md#nes-nintendo-entertainment-system) for u
 - Cycle-accurate PPU rendering
 - Additional mappers (MMC5, VRC6, etc.)
 - Accurate sprite evaluation timing
-- Enhanced audio (DMC improvements, better filtering)
+- High-pass and low-pass audio filters for even better sound quality
 
 ## Contributing
 
