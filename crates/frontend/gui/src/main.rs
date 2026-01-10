@@ -1549,9 +1549,22 @@ fn create_nes_system(
 
 /// Create an N64 system with OpenGL hardware renderer
 /// Returns an error if GL context is not available or renderer initialization fails
-fn create_n64_system(gl_context: Option<glow::Context>) -> Result<emu_n64::N64System, String> {
+fn create_n64_system(
+    gl_context: Option<glow::Context>,
+    settings: &Settings,
+) -> Result<emu_n64::N64System, String> {
     if let Some(gl) = gl_context {
-        emu_n64::N64System::new(gl)
+        let mut system = emu_n64::N64System::new(gl)?;
+
+        // Apply system-specific settings from config.json "extra" field
+        // Example: "n64_frame_cycles": 100000 in config.json
+        if let Some(cycles_value) = settings.extra.get("n64_frame_cycles") {
+            if let Some(cycles) = cycles_value.as_u64() {
+                system.set_frame_cycles(cycles as u32);
+            }
+        }
+
+        Ok(system)
     } else {
         Err("OpenGL context required for N64 emulation: no GL context was created by the frontend or windowing system. \
 Please ensure your system supports hardware-accelerated OpenGL and that the graphics/video backend is configured to create an OpenGL context for the N64 renderer.".to_string())
@@ -3476,7 +3489,7 @@ fn main() {
                                     Ok(SystemType::N64) => {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let gl_ctx = egui_backend.gl_context();
-                                        match create_n64_system(gl_ctx) {
+                                        match create_n64_system(gl_ctx, &settings) {
                                             Ok(mut n64_sys) => {
                                                 if let Err(e) = n64_sys.mount("Cartridge", &data) {
                                                     egui_app
@@ -4039,7 +4052,7 @@ fn main() {
                                         rom_hash = Some(GameSaves::rom_hash(&data));
                                         let gl_ctx = egui_backend.gl_context();
 
-                                        match create_n64_system(gl_ctx) {
+                                        match create_n64_system(gl_ctx, &settings) {
                                             Ok(mut n64_sys) => {
                                                 if let Err(e) = n64_sys.mount("Cartridge", &data) {
                                                     egui_app
@@ -4946,7 +4959,7 @@ fn main() {
                         }
                         "N64" => {
                             let gl_ctx = egui_backend.gl_context();
-                            match create_n64_system(gl_ctx) {
+                            match create_n64_system(gl_ctx, &settings) {
                                 Ok(n64_sys) => {
                                     sys = EmulatorSystem::N64(Box::new(n64_sys));
                                     rom_loaded = false;
