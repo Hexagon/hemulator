@@ -728,12 +728,21 @@ impl Ppu {
 
     /// Render a frame
     pub fn render_frame(&self) -> Frame {
-        let mut frame = Frame::new(256, 224); // SNES resolution
+        // Determine frame width based on BG mode
+        // Modes 5 and 6 support hi-res (512px wide)
+        let bg_mode = self.bgmode & 0x07;
+        let frame_width = if bg_mode == 5 || bg_mode == 6 {
+            512 // Hi-res mode
+        } else {
+            256 // Standard resolution
+        };
+
+        let mut frame = Frame::new(frame_width, 224);
 
         // Priority buffer: tracks the priority level of each pixel
         // Priority levels: 0 (backdrop) to 7 (highest sprite priority)
         // We use 255 as "unset" since it's higher than any valid priority
-        let mut priority_buffer = vec![255u8; 256 * 224];
+        let mut priority_buffer = vec![255u8; frame_width as usize * 224];
 
         // NOTE: We render even when screen is blanked (bit 7 set)
         // This is not hardware-accurate but allows commercial ROMs to display
@@ -956,14 +965,13 @@ impl Ppu {
                 }
             }
             // Mode 5: 2 BG layers, hi-res (512px wide), BG1 4bpp, BG2 2bpp
-            // Note: True hi-res would require a 512px wide frame, we'll render at 256px for now
             5 => {
-                // Render priority 0 BG layers
+                // Render priority 0 BG layers using hi-res functions
                 if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 0);
+                    self.render_bg_layer_2bpp_hires(&mut frame, &mut priority_buffer, 1, 0);
                 }
                 if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
+                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 0);
                 }
 
                 // Render sprites with priority 0-1
@@ -973,10 +981,10 @@ impl Ppu {
 
                 // Render priority 1 BG layers
                 if self.tm & 0x02 != 0 {
-                    self.render_bg_layer_2bpp_priority(&mut frame, &mut priority_buffer, 1, 1);
+                    self.render_bg_layer_2bpp_hires(&mut frame, &mut priority_buffer, 1, 1);
                 }
                 if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 1);
                 }
 
                 // Render sprites with priority 2-3
@@ -985,11 +993,10 @@ impl Ppu {
                 }
             }
             // Mode 6: 1 BG layer, hi-res (512px wide), 4bpp, offset-per-tile capability
-            // Note: True hi-res would require a 512px wide frame, we'll render at 256px for now
             6 => {
-                // Render priority 0 BG layer
+                // Render priority 0 BG layer using hi-res function
                 if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 0);
+                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 0);
                 }
 
                 // Render sprites with priority 0-1
@@ -999,7 +1006,7 @@ impl Ppu {
 
                 // Render priority 1 BG layer
                 if self.tm & 0x01 != 0 {
-                    self.render_bg_layer_4bpp_priority(&mut frame, &mut priority_buffer, 0, 1);
+                    self.render_bg_layer_4bpp_hires(&mut frame, &mut priority_buffer, 0, 1);
                 }
 
                 // Render sprites with priority 2-3
@@ -2034,6 +2041,206 @@ impl Ppu {
         }
     }
 
+    /// Render a single BG layer in 4bpp mode with hi-res (512px) support
+    /// Used in Modes 5 and 6
+    fn render_bg_layer_4bpp_hires(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        bg_index: usize,
+        filter_priority: u8,
+    ) {
+        // Get tilemap and CHR base addresses for this BG
+        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            _ => (0, 0),
+        };
+
+        // Render all visible tiles at 512px width
+        // In hi-res mode, each logical pixel is rendered as 2 physical pixels horizontally
+        for screen_y in 0..224 {
+            for screen_x in 0..512 {
+                // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
+                let logical_x = screen_x / 2;
+
+                // Get offset-per-tile if enabled (Mode 6)
+                let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
+                    self.get_offset_per_tile(logical_x, screen_y)
+                } else {
+                    (0, 0)
+                };
+
+                // Calculate world position with scrolling and offset-per-tile
+                let world_x = ((logical_x as i32 + hofs as i32 + h_offset as i32)
+                    .rem_euclid(tilemap_pixel_width as i32))
+                    as usize;
+                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                    .rem_euclid(tilemap_pixel_height as i32))
+                    as usize;
+
+                // Get tile and pixel position
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
+
+                // Get tilemap entry
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
+                let tilemap_addr = tilemap_base + tilemap_offset;
+
+                if tilemap_addr + 1 >= VRAM_SIZE {
+                    continue;
+                }
+
+                // Read tile entry
+                let tile_low = self.vram[tilemap_addr];
+                let tile_high = self.vram[tilemap_addr + 1];
+
+                let tile_index = tile_low;
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+                let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
+
+                // Skip if this tile doesn't match the priority we're rendering
+                if priority != filter_priority {
+                    continue;
+                }
+
+                // Get pixel color from tile (4bpp)
+                let color = self.get_tile_pixel_4bpp(
+                    tile_index,
+                    chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
+                    palette,
+                    flip_x,
+                    flip_y,
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Calculate rendering priority
+                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Draw pixel at hi-res position
+                let frame_offset = screen_y * 512 + screen_x;
+                if render_priority <= priority_buffer[frame_offset] {
+                    frame.pixels[frame_offset] = self.get_color(color);
+                    priority_buffer[frame_offset] = render_priority;
+                }
+            }
+        }
+    }
+
+    /// Render a single BG layer in 2bpp mode with hi-res (512px) support
+    /// Used in Mode 5
+    fn render_bg_layer_2bpp_hires(
+        &self,
+        frame: &mut Frame,
+        priority_buffer: &mut [u8],
+        bg_index: usize,
+        filter_priority: u8,
+    ) {
+        // Get tilemap and CHR base addresses for this BG
+        let (tilemap_base, chr_base) = self.get_bg_addresses(bg_index);
+
+        // Get tilemap size for this layer
+        let (tilemap_width, tilemap_height) = self.get_tilemap_size(bg_index);
+        let tilemap_pixel_width = tilemap_width * 8;
+        let tilemap_pixel_height = tilemap_height * 8;
+
+        // Get scroll offsets for this layer
+        let (hofs, vofs) = match bg_index {
+            0 => (self.bg1_hofs, self.bg1_vofs),
+            1 => (self.bg2_hofs, self.bg2_vofs),
+            _ => (0, 0),
+        };
+
+        // Render all visible tiles at 512px width
+        for screen_y in 0..224 {
+            for screen_x in 0..512 {
+                // In hi-res, divide screen_x by 2 to get the logical pixel coordinate
+                let logical_x = screen_x / 2;
+
+                // Calculate world position with scrolling
+                let world_x = ((logical_x as i32 + hofs as i32)
+                    .rem_euclid(tilemap_pixel_width as i32))
+                    as usize;
+                let world_y =
+                    ((screen_y as i32 + vofs as i32).rem_euclid(tilemap_pixel_height as i32))
+                        as usize;
+
+                // Get tile and pixel position
+                let tile_x = world_x / 8;
+                let tile_y = world_y / 8;
+                let pixel_x_in_tile = world_x % 8;
+                let pixel_y_in_tile = world_y % 8;
+
+                // Get tilemap entry
+                let tilemap_offset = self.get_tilemap_offset(tile_x, tile_y, tilemap_width);
+                let tilemap_addr = tilemap_base + tilemap_offset;
+
+                if tilemap_addr + 1 >= VRAM_SIZE {
+                    continue;
+                }
+
+                // Read tile entry
+                let tile_low = self.vram[tilemap_addr];
+                let tile_high = self.vram[tilemap_addr + 1];
+
+                let tile_index = tile_low;
+                let palette = ((tile_high >> 2) & 0x07) as usize;
+                let flip_x = (tile_high & 0x40) != 0;
+                let flip_y = (tile_high & 0x80) != 0;
+                let priority = if (tile_high & 0x20) != 0 { 1 } else { 0 };
+
+                // Skip if this tile doesn't match the priority we're rendering
+                if priority != filter_priority {
+                    continue;
+                }
+
+                // Get pixel color from tile (2bpp)
+                let color = self.get_tile_pixel_mode0(
+                    tile_index,
+                    chr_base,
+                    pixel_x_in_tile,
+                    pixel_y_in_tile,
+                    palette,
+                    flip_x,
+                    flip_y,
+                );
+
+                // Skip transparent pixels (color 0)
+                if color == 0 {
+                    continue;
+                }
+
+                // Calculate rendering priority
+                let render_priority = if filter_priority == 0 { 1 } else { 3 };
+
+                // Draw pixel at hi-res position
+                let frame_offset = screen_y * 512 + screen_x;
+                if render_priority <= priority_buffer[frame_offset] {
+                    frame.pixels[frame_offset] = self.get_color(color);
+                    priority_buffer[frame_offset] = render_priority;
+                }
+            }
+        }
+    }
+
     /// Render sprites with priority filtering
     fn render_sprites_priority(
         &self,
@@ -2245,7 +2452,7 @@ impl Ppu {
                         let color = self.get_color(cgram_index);
 
                         // Draw pixel if it has equal or higher priority
-                        let frame_offset = screen_y as usize * 256 + screen_x as usize;
+                        let frame_offset = screen_y as usize * frame.width as usize + screen_x as usize;
                         if frame_offset < frame.pixels.len()
                             && render_priority <= priority_buffer[frame_offset]
                         {
@@ -3230,6 +3437,39 @@ mod tests {
         // Offsets are returned as tile offsets (not pixel offsets)
         assert_eq!(h_off, 16, "Horizontal offset should be 16 tiles");
         assert_eq!(v_off, 8, "Vertical offset should be 8 tiles");
+    }
+
+    #[test]
+    fn test_hires_mode_frame_size() {
+        let mut ppu = Ppu::new();
+
+        // Test Mode 5 (hi-res)
+        ppu.write_register(0x2105, 0x05); // Mode 5
+        ppu.write_register(0x2100, 0x0F); // Screen on
+        ppu.write_register(0x212C, 0x01); // BG1 enabled
+
+        let frame = ppu.render_frame();
+        assert_eq!(
+            frame.width, 512,
+            "Mode 5 should render at 512px width (hi-res)"
+        );
+        assert_eq!(frame.height, 224, "Height should remain 224px");
+
+        // Test Mode 6 (hi-res)
+        ppu.write_register(0x2105, 0x06); // Mode 6
+        let frame = ppu.render_frame();
+        assert_eq!(
+            frame.width, 512,
+            "Mode 6 should render at 512px width (hi-res)"
+        );
+
+        // Test Mode 0 (standard res)
+        ppu.write_register(0x2105, 0x00); // Mode 0
+        let frame = ppu.render_frame();
+        assert_eq!(
+            frame.width, 256,
+            "Mode 0 should render at 256px width (standard)"
+        );
     }
 
     #[test]
