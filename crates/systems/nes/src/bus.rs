@@ -95,6 +95,7 @@ impl NesBus {
         } else {
             false
         };
+        // Combine mapper IRQ, APU frame counter IRQ, and DMC IRQ
         mapper_irq || self.apu.irq_pending()
     }
 
@@ -254,7 +255,7 @@ impl Bus for NesBus {
             }
             0x4000..=0x4017 => {
                 // APU registers and controller strobe
-                if (0x4000..=0x4007).contains(&addr) || addr == 0x4015 || addr == 0x4017 {
+                if (0x4000..=0x4013).contains(&addr) || addr == 0x4015 || addr == 0x4017 {
                     log(LogCategory::APU, LogLevel::Debug, || {
                         format!("APU WRITE: addr=0x{:04X} val=0x{:02X}", addr, val)
                     });

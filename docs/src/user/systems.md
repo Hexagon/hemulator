@@ -50,7 +50,6 @@ The emulator supports the following NES mappers:
 
 **Known Limitations**:
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games but may not handle edge cases requiring precise PPU timing
-- **DMC Channel**: Delta modulation channel not yet implemented - games using DMC samples may have incomplete audio
 - **Unsupported Mappers**: Games using mappers beyond the supported 14 will not work (affects ~10% of games)
 
 ### Atari 2600

@@ -45,11 +45,14 @@
 //! - **Sweep units** for frequency modulation (pitch bending) on both pulse channels
 //! - Triangle channel with 32-step waveform
 //! - Noise channel with pseudo-random LFSR
+//! - DMC channel with full sample playback support
+//!   - Memory reads from CPU address space
+//!   - IRQ generation on completion
+//!   - Loop support
 //! - Length counter and envelope support
 //! - Frame counter (4-step and 5-step modes)
-//! - APU IRQ support (frame counter)
-//! - 44.1 kHz audio output
-//! - Note: DMC channel not yet implemented
+//! - APU IRQ support (frame counter and DMC)
+//! - 44.1 kHz audio output with non-linear mixing
 //!
 //! ## Timing Model
 //!
@@ -561,6 +564,19 @@ impl System for NesSystem {
                 b.apu.clock_irq(used);
             }
 
+            // Clock DMC channel and handle memory reads
+            if let Some(b) = self.cpu.bus_mut() {
+                // Clock DMC for the number of CPU cycles just executed
+                for _ in 0..used {
+                    if let Some(addr) = b.apu.clock_dmc() {
+                        // DMC needs to read a byte from memory
+                        // Use the Bus::read trait method to properly access memory
+                        let byte = b.read(addr);
+                        b.apu.load_dmc_sample(byte);
+                    }
+                }
+            }
+
             let mut irq_to_fire = false;
             let mut nmi_to_fire = false;
 
@@ -664,6 +680,22 @@ impl System for NesSystem {
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
                 b.add_cycles(used);
+            }
+
+            // Clock APU IRQ counter during VBlank too
+            if let Some(b) = self.cpu.bus_mut() {
+                b.apu.clock_irq(used);
+            }
+
+            // Clock DMC channel during VBlank
+            if let Some(b) = self.cpu.bus_mut() {
+                for _ in 0..used {
+                    if let Some(addr) = b.apu.clock_dmc() {
+                        // Use the Bus::read trait method to properly access memory
+                        let byte = b.read(addr);
+                        b.apu.load_dmc_sample(byte);
+                    }
+                }
             }
 
             // Check for mapper IRQs during VBlank as well.
