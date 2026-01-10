@@ -561,6 +561,19 @@ impl System for NesSystem {
                 b.apu.clock_irq(used);
             }
 
+            // Clock DMC channel and handle memory reads
+            if let Some(b) = self.cpu.bus_mut() {
+                // Clock DMC for the number of CPU cycles just executed
+                for _ in 0..used {
+                    if let Some(addr) = b.apu.clock_dmc() {
+                        // DMC needs to read a byte from memory
+                        // Use the Bus::read trait method to properly access memory
+                        let byte = b.read(addr);
+                        b.apu.load_dmc_sample(byte);
+                    }
+                }
+            }
+
             let mut irq_to_fire = false;
             let mut nmi_to_fire = false;
 
@@ -664,6 +677,22 @@ impl System for NesSystem {
             // Update bus cycle counter for mapper timing
             if let Some(b) = self.cpu.bus_mut() {
                 b.add_cycles(used);
+            }
+
+            // Clock APU IRQ counter during VBlank too
+            if let Some(b) = self.cpu.bus_mut() {
+                b.apu.clock_irq(used);
+            }
+
+            // Clock DMC channel during VBlank
+            if let Some(b) = self.cpu.bus_mut() {
+                for _ in 0..used {
+                    if let Some(addr) = b.apu.clock_dmc() {
+                        // Use the Bus::read trait method to properly access memory
+                        let byte = b.read(addr);
+                        b.apu.load_dmc_sample(byte);
+                    }
+                }
             }
 
             // Check for mapper IRQs during VBlank as well.
