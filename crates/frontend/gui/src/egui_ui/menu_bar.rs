@@ -233,33 +233,6 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("📋 Log")
-                    .on_hover_text("Show emulation log messages (deprecated - use Inspector)")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::ShowLog);
-                    ui.close();
-                }
-                if ui
-                    .button("🔧 Debug")
-                    .on_hover_text("Show system debug information (deprecated - use Inspector)")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::ShowDebug);
-                    ui.close();
-                }
-                if ui
-                    .button("🎨 Tiles")
-                    .on_hover_text("Show tile and palette viewer (deprecated - use Inspector)")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::ShowTiles);
-                    ui.close();
-                }
-
-                ui.separator();
-
-                if ui
                     .button("📸 Screenshot (F4)")
                     .on_hover_text("Save a screenshot of the current frame")
                     .clicked()
