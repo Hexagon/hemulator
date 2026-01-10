@@ -3035,7 +3035,7 @@ fn main() {
                     // Read BDA values
                     use egui_ui::property_pane::PcBdaValues;
                     let bda = pc_sys.read_bda_values();
-                    egui_app.property_pane.pc_bda_values = Some(PcBdaValues {
+                    let bda_values = PcBdaValues {
                         equipment_word: bda.equipment_word,
                         memory_size_kb: bda.memory_size_kb,
                         video_mode: bda.video_mode,
@@ -3043,7 +3043,9 @@ fn main() {
                         num_serial_ports: bda.num_serial_ports,
                         num_parallel_ports: bda.num_parallel_ports,
                         num_hard_drives: bda.num_hard_drives,
-                    });
+                    };
+                    egui_app.property_pane.pc_bda_values = Some(bda_values.clone());
+                    egui_app.inspector_window.update_pc_bda(bda_values);
 
                     // Set PC CPU model for dropdown
                     let cpu_model_str = match pc_sys.cpu_model() {
@@ -3071,6 +3073,11 @@ fn main() {
                     egui_app.property_pane.pc_cpu_model = None;
                     egui_app.property_pane.pc_memory_kb = None;
                 }
+            }
+            
+            // Update Inspector window with current system name
+            if rom_loaded {
+                egui_app.inspector_window.set_system(sys.system_name().to_string());
             }
 
             // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
@@ -3113,7 +3120,8 @@ fn main() {
                         floppy_b_mounted: runtime_state.get_mount("FloppyB").is_some(),
                         hdd_mounted: runtime_state.get_mount("HardDrive").is_some(),
                     };
-                    egui_app.tab_manager.update_pc_config_info(config);
+                    egui_app.tab_manager.update_pc_config_info(config.clone());
+                    egui_app.inspector_window.update_pc_config(config);
                 }
             }
         }
@@ -3171,7 +3179,7 @@ fn main() {
             match &sys {
                 EmulatorSystem::NES(s) => {
                     let nes_data = s.get_tile_viewer_data();
-                    let tile_data = egui_ui::TileViewerData {
+                    let nes_tile_data = egui_ui::NesTileData {
                         chr_data: nes_data.chr_data,
                         palette: nes_data.palette,
                         master_palette: nes_data.master_palette,
@@ -3184,7 +3192,21 @@ fn main() {
                         scroll_y: nes_data.scroll_y,
                         mirroring: nes_data.mirroring,
                     };
+                    let tile_data = egui_ui::TileViewerData {
+                        chr_data: nes_tile_data.chr_data.clone(),
+                        palette: nes_tile_data.palette.clone(),
+                        master_palette: nes_tile_data.master_palette.clone(),
+                        oam: nes_tile_data.oam.clone(),
+                        vram: nes_tile_data.vram.clone(),
+                        chr_is_ram: nes_tile_data.chr_is_ram,
+                        ppuctrl: nes_tile_data.ppuctrl,
+                        ppumask: nes_tile_data.ppumask,
+                        scroll_x: nes_tile_data.scroll_x,
+                        scroll_y: nes_tile_data.scroll_y,
+                        mirroring: nes_tile_data.mirroring.clone(),
+                    };
                     egui_app.tab_manager.update_tile_viewer_data(tile_data);
+                    egui_app.inspector_window.update_tile_data(egui_ui::SystemTileData::NES(nes_tile_data));
                 }
                 EmulatorSystem::GameBoy(s) => {
                     let gb_data = s.get_tile_viewer_data();
@@ -3201,7 +3223,8 @@ fn main() {
                         wy: gb_data.wy,
                         is_cgb_mode: gb_data.is_cgb_mode,
                     });
-                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                    egui_app.tab_manager.update_system_tile_data(tile_data.clone());
+                    egui_app.inspector_window.update_tile_data(tile_data);
                 }
                 EmulatorSystem::SMS(s) => {
                     let sms_data = s.get_tile_viewer_data();
@@ -3211,7 +3234,8 @@ fn main() {
                         palette: sms_data.palette,
                         registers: sms_data.registers,
                     });
-                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                    egui_app.tab_manager.update_system_tile_data(tile_data.clone());
+                    egui_app.inspector_window.update_tile_data(tile_data);
                 }
                 EmulatorSystem::SNES(s) => {
                     let snes_data = s.get_tile_viewer_data();
@@ -3223,7 +3247,8 @@ fn main() {
                         bg_mode: snes_data.bg_mode,
                         screen_enabled: snes_data.screen_enabled,
                     });
-                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                    egui_app.tab_manager.update_system_tile_data(tile_data.clone());
+                    egui_app.inspector_window.update_tile_data(tile_data);
                 }
                 _ => {
                     // Other systems don't have tile viewers yet
