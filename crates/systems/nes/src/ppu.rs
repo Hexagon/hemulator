@@ -723,8 +723,8 @@ impl Ppu {
                     // Choose nametable based on base XOR scroll crossing.
                     // This matches real NES PPU behavior: the nametable bits are XORed
                     // with the coarse scroll overflow to select the correct nametable.
-                    // NOTE: X affects bit 1, Y affects bit 0 (swapped from intuitive mapping)
-                    let nt = base_nt ^ (nt_x << 1) ^ nt_y;
+                    // Bit 0 of nametable = horizontal offset, Bit 1 = vertical offset
+                    let nt = base_nt ^ nt_x ^ (nt_y << 1);
 
                     let world_x = wx % 256;
                     let world_y = wy % 240;
@@ -1019,8 +1019,8 @@ impl Ppu {
                 // Choose nametable based on base XOR scroll crossing.
                 // This matches real NES PPU behavior: the nametable bits are XORed
                 // with the coarse scroll overflow to select the correct nametable.
-                // NOTE: X affects bit 1, Y affects bit 0 (swapped from intuitive mapping)
-                let nt = base_nt ^ (nt_x << 1) ^ nt_y;
+                // Bit 0 of nametable = horizontal offset, Bit 1 = vertical offset
+                let nt = base_nt ^ nt_x ^ (nt_y << 1);
 
                 let world_x = wx % 256;
                 let world_y = wy % 240;
@@ -2666,11 +2666,11 @@ mod tests {
         // The actual boundary crossing behavior is tested at the world coordinate level
         // within render_frame() using (wx / 256) and (wy / 240) calculations.
         //
-        // Critical XOR behavior: base_nt ^ (nt_x << 1) ^ nt_y
-        // - If base=0, crossing X gives nt=2 (0^2^0=2)
-        // - If base=1, crossing X gives nt=3 (1^2^0=3)
-        // - If base=2, crossing X gives nt=0 (2^2^0=0)
-        // - If base=3, crossing X gives nt=1 (3^2^0=1)
+        // Critical XOR behavior: base_nt ^ nt_x ^ (nt_y << 1)
+        // - If base=0, crossing X gives nt=1 (0^1^0=1) - correct!
+        // - If base=0, crossing Y gives nt=2 (0^0^2=2) - correct!
+        // - If base=1, crossing X gives nt=0 (1^1^0=0) - correct!
+        // - If base=2, crossing Y gives nt=0 (2^0^2=0) - correct!
         //
         // This ensures proper nametable selection for games using scrolling.
         // The rendering code applies this XOR logic correctly at lines 727 and 1023.
