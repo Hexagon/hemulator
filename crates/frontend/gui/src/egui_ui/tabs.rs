@@ -2102,18 +2102,50 @@ impl TabManager {
         }
     }
 
+    /// Map a nametable address ($2000-$2FFF) to physical VRAM index
+    /// This replicates the PPU's mirroring logic for the tile viewer
+    fn map_nametable_addr_for_viewer(&self, addr: u16, vram_size: usize, mirroring: &str) -> usize {
+        let a = addr & 0x0FFF; // 0x0000..0x0FFF
+        let table = a / 0x0400; // 0..3
+        let offset = a % 0x0400;
+
+        let physical_table = match mirroring {
+            "FourScreen" => {
+                // With 4KB VRAM, each nametable is independent (no mirroring)
+                table
+            }
+            "Vertical" => match table {
+                0 | 2 => 0,
+                1 | 3 => 1,
+                _ => 0,
+            },
+            "Horizontal" => match table {
+                0 | 1 => 0,
+                2 | 3 => 1,
+                _ => 0,
+            },
+            "SingleScreenLower" => 0,
+            "SingleScreenUpper" => 1,
+            _ => 0, // Unknown mirroring, default to lower screen
+        };
+
+        let addr = (physical_table * 0x0400 + offset) as usize;
+        // Mask to VRAM size (0x7FF for 2KB, 0xFFF for 4KB)
+        addr & (vram_size - 1)
+    }
+
     fn render_nametables(&self, ui: &mut Ui, data: &TileViewerData) {
-        // Nametable layout: render both nametables side by side
+        // Nametable layout: render all four nametables in a 2x2 grid
         // Each nametable is 32x30 tiles = 256x240 pixels
-        let scale = 1.5; // Scale down to fit both nametables
+        let scale = 1.2; // Scale down to fit four nametables
         let tile_size = 8.0 * scale;
         let nt_width = 32.0 * tile_size;
         let nt_height = 30.0 * tile_size;
         let spacing = 10.0;
 
-        // Calculate total size for both nametables side by side
+        // Calculate total size for all four nametables in 2x2 grid
         let total_width = nt_width * 2.0 + spacing;
-        let total_height = nt_height + 20.0; // Extra for labels
+        let total_height = nt_height * 2.0 + spacing + 20.0; // Extra for labels
 
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(total_width, total_height),
@@ -2140,47 +2172,80 @@ impl TabManager {
             0x0000
         };
 
-        // Draw labels
+        // Draw labels for all four nametables
+        let label_y = rect.min.y + 8.0;
         painter.text(
-            egui::Pos2::new(rect.min.x + nt_width / 2.0, rect.min.y + 8.0),
+            egui::Pos2::new(rect.min.x + nt_width / 2.0, label_y),
             egui::Align2::CENTER_CENTER,
             "Nametable 0 ($2000)",
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );
         painter.text(
-            egui::Pos2::new(
-                rect.min.x + nt_width + spacing + nt_width / 2.0,
-                rect.min.y + 8.0,
-            ),
+            egui::Pos2::new(rect.min.x + nt_width + spacing + nt_width / 2.0, label_y),
             egui::Align2::CENTER_CENTER,
             "Nametable 1 ($2400)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::Pos2::new(rect.min.x + nt_width / 2.0, label_y + nt_height + spacing),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 2 ($2800)",
+            egui::FontId::proportional(11.0),
+            egui::Color32::WHITE,
+        );
+        painter.text(
+            egui::Pos2::new(
+                rect.min.x + nt_width + spacing + nt_width / 2.0,
+                label_y + nt_height + spacing,
+            ),
+            egui::Align2::CENTER_CENTER,
+            "Nametable 3 ($2C00)",
             egui::FontId::proportional(11.0),
             egui::Color32::WHITE,
         );
 
         let nt_start_y = rect.min.y + 18.0;
 
-        // Render both nametables
-        for nt_idx in 0..2 {
-            let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
+        // Render all four nametables in 2x2 grid
+        for nt_idx in 0..4 {
+            // Calculate position in 2x2 grid
+            let grid_x = nt_idx % 2;
+            let grid_y = nt_idx / 2;
+            let nt_start_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+            let nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
 
             // Nametable base address in VRAM
-            // VRAM layout depends on mirroring, but we show logical nametables 0 and 1
-            let nt_base = nt_idx * 0x400; // 0x000 or 0x400 in VRAM
+            // VRAM layout depends on mirroring, but we show logical nametables 0-3
+            let nt_base = nt_idx * 0x400; // 0x000, 0x400, 0x800, or 0xC00 in VRAM (but wraps with 2KB)
             let attr_base = nt_base + 0x3C0; // Attribute table at end of each nametable
 
             // Render 32x30 tiles
             for tile_row in 0..30 {
                 for tile_col in 0..32 {
                     let nt_offset = tile_row * 32 + tile_col;
-                    let tile_idx = data.vram[nt_base + nt_offset] as usize;
+                    // Map logical nametable address to physical VRAM index using mirroring
+                    let logical_addr = (0x2000 + nt_base + nt_offset) as u16;
+                    let vram_idx = self.map_nametable_addr_for_viewer(
+                        logical_addr,
+                        data.vram.len(),
+                        &data.mirroring,
+                    );
+                    let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0) as usize;
 
                     // Get attribute byte for this 16x16 pixel area (4 tiles)
                     let attr_col = tile_col / 4;
                     let attr_row = tile_row / 4;
                     let attr_offset = attr_row * 8 + attr_col;
-                    let attr_byte = data.vram[attr_base + attr_offset];
+                    // Map attribute table address using mirroring
+                    let attr_logical_addr = (0x2000 + attr_base + attr_offset) as u16;
+                    let attr_vram_idx = self.map_nametable_addr_for_viewer(
+                        attr_logical_addr,
+                        data.vram.len(),
+                        &data.mirroring,
+                    );
+                    let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                     // Extract 2-bit palette index for this 16x16 pixel quadrant
                     let quadrant_x = (tile_col / 2) % 2;
@@ -2211,7 +2276,7 @@ impl TabManager {
                     // Get tile data from CHR
                     let chr_addr = bg_pattern_table + tile_idx * 16;
                     let tile_x = nt_start_x + tile_col as f32 * tile_size;
-                    let tile_y = nt_start_y + tile_row as f32 * tile_size;
+                    let tile_y = nt_y + tile_row as f32 * tile_size;
 
                     // Render 8x8 tile pixels
                     for py in 0..8 {
@@ -2243,7 +2308,7 @@ impl TabManager {
 
             // Draw nametable border
             let nt_rect = egui::Rect::from_min_size(
-                egui::Pos2::new(nt_start_x, nt_start_y),
+                egui::Pos2::new(nt_start_x, nt_y),
                 egui::Vec2::new(nt_width, nt_height),
             );
             painter.rect_stroke(
@@ -2254,14 +2319,68 @@ impl TabManager {
             );
         }
 
+        // Highlight the scroll window (256x240 viewport)
+        // Calculate which nametable the scroll position starts in
+        let scroll_x = data.scroll_x as f32;
+        let scroll_y = data.scroll_y as f32;
+
+        // Base nametable selection from PPUCTRL bits 0-1
+        let base_nt = (data.ppuctrl & 0x03) as usize;
+
+        // Determine which nametable(s) the scroll window covers
+        // The scroll window is 256x240 pixels (32x30 tiles)
+        let viewport_width = 256.0;
+        let viewport_height = 240.0;
+
+        // Calculate nametable selection based on scroll position
+        // NES hardware uses non-intuitive bit mapping: X affects bit 1, Y affects bit 0
+        // Scrolling crosses nametable boundaries at 256 pixels (X) and 240 pixels (Y)
+        let nt_x = ((scroll_x / 256.0) as usize) & 1;
+        let nt_y = ((scroll_y / 240.0) as usize) & 1;
+        let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
+
+        // Calculate the position of the scroll window in the grid
+        let grid_x = scroll_nt % 2;
+        let grid_y = scroll_nt / 2;
+        let scroll_nt_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+        let scroll_nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
+
+        // Calculate the scroll window position within the nametable
+        let scroll_pixel_x = (scroll_x % 256.0) * scale;
+        let scroll_pixel_y = (scroll_y % 240.0) * scale;
+
+        // Draw the scroll window highlight
+        let scroll_window_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(scroll_nt_x + scroll_pixel_x, scroll_nt_y + scroll_pixel_y),
+            egui::Vec2::new(viewport_width * scale, viewport_height * scale),
+        );
+
+        // Draw semi-transparent overlay for the visible area
+        painter.rect_stroke(
+            scroll_window_rect,
+            0.0,
+            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 0, 200)),
+            egui::StrokeKind::Outside,
+        );
+
+        // Add a subtle fill to show the active viewport
+        painter.rect_filled(
+            scroll_window_rect,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 0, 20),
+        );
+
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {
-            let rel_y = hover_pos.y - nt_start_y;
+            // Check which nametable we're hovering over (2x2 grid)
+            for nt_idx in 0..4 {
+                let grid_x = nt_idx % 2;
+                let grid_y = nt_idx / 2;
+                let nt_start_x = rect.min.x + (nt_width + spacing) * grid_x as f32;
+                let nt_y = nt_start_y + (nt_height + spacing) * grid_y as f32;
 
-            // Check which nametable we're hovering over
-            for nt_idx in 0..2 {
-                let nt_start_x = rect.min.x + (nt_width + spacing) * nt_idx as f32;
                 let rel_x = hover_pos.x - nt_start_x;
+                let rel_y = hover_pos.y - nt_y;
 
                 if rel_x >= 0.0 && rel_x < nt_width && rel_y >= 0.0 && rel_y < nt_height {
                     let tile_col = (rel_x / tile_size) as usize;
@@ -2270,14 +2389,27 @@ impl TabManager {
                     if tile_col < 32 && tile_row < 30 {
                         let nt_base = nt_idx * 0x400;
                         let nt_offset = tile_row * 32 + tile_col;
-                        let tile_idx = data.vram[nt_base + nt_offset];
+                        // Map logical nametable address to physical VRAM index
+                        let logical_addr = (0x2000 + nt_base + nt_offset) as u16;
+                        let vram_idx = self.map_nametable_addr_for_viewer(
+                            logical_addr,
+                            data.vram.len(),
+                            &data.mirroring,
+                        );
+                        let tile_idx = data.vram.get(vram_idx).copied().unwrap_or(0);
 
                         // Get attribute info
                         let attr_base = nt_base + 0x3C0;
                         let attr_col = tile_col / 4;
                         let attr_row = tile_row / 4;
                         let attr_offset = attr_row * 8 + attr_col;
-                        let attr_byte = data.vram[attr_base + attr_offset];
+                        let attr_logical_addr = (0x2000 + attr_base + attr_offset) as u16;
+                        let attr_vram_idx = self.map_nametable_addr_for_viewer(
+                            attr_logical_addr,
+                            data.vram.len(),
+                            &data.mirroring,
+                        );
+                        let attr_byte = data.vram.get(attr_vram_idx).copied().unwrap_or(0);
 
                         let quadrant_x = (tile_col / 2) % 2;
                         let quadrant_y = (tile_row / 2) % 2;
