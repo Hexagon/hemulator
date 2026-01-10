@@ -49,12 +49,16 @@ The N64 emulator is a **basic implementation** with functional RDP graphics proc
 
 - ⏳ **Audio Output Integration** - AI hardware module implemented (DMA transfer, sample rate control, interrupts, 16-bit stereo PCM), but connection to the frontend audio backend is still pending
 - ⏳ **Memory Management** - TLB implemented (32-entry, ASID-aware), but CPU cache is still direct-mapped and CP0 TLB instructions/MMU behavior are not fully integrated
-- ⏳ **Cycle Accuracy** - Frame-based timing, not cycle-accurate
+- ⏳ **Cycle Accuracy** - Uses reduced cycle count (50,000 cycles/frame instead of hardware-accurate 1,562,500) for performance; frame-based timing, not cycle-accurate
 - ⏳ **Some RDP Commands** - Missing some advanced blend/combine modes
 - ⏳ **RSP Microcode** - Only common F3DEX/F3DEX2 commands implemented (some games may use less common commands)
 
 ### Recent Improvements (January 2026)
 
+- ✅ **Performance Optimization** (January 9, 2026) - Reduced frame cycles from 1,562,500 to 50,000 for ~30x better performance (~1fps → ~30-60fps)
+  - **Additional optimizations**: Moved interrupt checking from per-instruction to per-scanline (~190x fewer checks)
+  - **Configurable cycles**: Added `set_frame_cycles()` method for runtime performance tuning
+  - **System-specific settings**: Frame cycles can be configured via `config.json` using `"n64_frame_cycles"` key
 - ✅ **Enhanced RDP Logging** - Added INFO-level logging for debugging:
   - Display list processing shows command count and byte size
   - FILL_RECTANGLE operations log coordinates, dimensions, and color
@@ -200,6 +204,40 @@ N64System
 
 ## Performance
 
+The N64 emulator uses a **reduced cycle count** for practical performance:
+- Hardware: 93.75 MHz (1,562,500 cycles/frame at 60Hz)
+- Emulator: **50,000 cycles/frame** by default for ~30x better performance
+- Maintains proper timing for interrupts and frame rendering
+- Trade-off: Not cycle-accurate, may have timing issues with some games
+
+### Performance Tuning
+
+The frame cycles can be adjusted for different performance/accuracy trade-offs:
+
+**Via Code**:
+```rust
+let mut n64 = N64System::new(gl)?;
+n64.set_frame_cycles(100000); // Increase for better accuracy
+```
+
+**Via Configuration File** (`config.json`):
+```json
+{
+  "n64_frame_cycles": 100000
+}
+```
+
+**Recommended Values**:
+- **50,000** (default): Best performance, good for most games
+- **100,000**: Better accuracy, still good performance
+- **200,000**: Higher accuracy, moderate performance impact
+- **1,562,500**: Hardware-accurate, very slow (~1fps)
+
+### Additional Optimizations
+
+- **Interrupt checking**: Optimized to once per scanline (262 times/frame) instead of per instruction (~50,000 times/frame)
+- **This allows higher frame_cycles values** with less performance impact
+
 **OpenGL Renderer** (required):
 - GPU-accelerated rasterization
 - Hardware depth testing
@@ -213,7 +251,7 @@ See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list o
 **Main limitations preventing full game compatibility**:
 1. **Audio Output** - AI hardware implemented but frontend audio output integration pending
 2. **Memory Management** - TLB implemented but cache is direct-mapped and CP0 TLB/MMU integration incomplete
-3. **Cycle Accuracy** - Frame-based timing may cause issues with precise timing-dependent games
+3. **Cycle Accuracy** - Uses 50,000 cycles/frame (vs hardware's 1,562,500) for performance; may cause issues with precise timing-dependent games
 4. **Missing RDP Commands** - Some advanced blend/combine modes not implemented
 5. **RSP Coverage** - HLE works for common F3DEX commands but may not cover all microcode variants
 
