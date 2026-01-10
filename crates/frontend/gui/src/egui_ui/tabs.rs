@@ -2172,6 +2172,26 @@ impl TabManager {
             0x0000
         };
 
+        // Calculate scroll window boundaries for graying out tiles outside viewport
+        // This needs to be done before rendering tiles
+        let scroll_x = data.scroll_x as f32;
+        let scroll_y = data.scroll_y as f32;
+        let base_nt = (data.ppuctrl & 0x03) as usize;
+        let viewport_width = 256.0;
+        let viewport_height = 240.0;
+
+        // Calculate which nametable the scroll starts in
+        let nt_x = ((scroll_x / 256.0) as usize) & 1;
+        let nt_y = ((scroll_y / 240.0) as usize) & 1;
+        let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
+
+        // Calculate scroll window position in logical pixel space (512x480 for 2x2 grid)
+        // Map scroll position to the 2x2 nametable grid
+        let scroll_grid_x = scroll_nt % 2;
+        let scroll_grid_y = scroll_nt / 2;
+        let scroll_logical_x = (scroll_grid_x as f32 * 256.0) + (scroll_x % 256.0);
+        let scroll_logical_y = (scroll_grid_y as f32 * 240.0) + (scroll_y % 240.0);
+
         // Draw labels for all four nametables
         let label_y = rect.min.y + 8.0;
         painter.text(
@@ -2302,6 +2322,36 @@ impl TabManager {
                             );
                             painter.rect_filled(pixel_rect, 0.0, color);
                         }
+                    }
+
+                    // Check if this tile is outside the scroll window and gray it out
+                    // Calculate tile position in logical pixel space (0-511 for X, 0-479 for Y)
+                    let tile_logical_x = (grid_x as f32 * 256.0) + (tile_col as f32 * 8.0);
+                    let tile_logical_y = (grid_y as f32 * 240.0) + (tile_row as f32 * 8.0);
+
+                    // Check if tile is outside the scroll window
+                    let tile_right = tile_logical_x + 8.0;
+                    let tile_bottom = tile_logical_y + 8.0;
+                    let scroll_right = scroll_logical_x + viewport_width;
+                    let scroll_bottom = scroll_logical_y + viewport_height;
+
+                    // Tile is outside if it doesn't intersect with the scroll window
+                    let is_outside = tile_right <= scroll_logical_x
+                        || tile_logical_x >= scroll_right
+                        || tile_bottom <= scroll_logical_y
+                        || tile_logical_y >= scroll_bottom;
+
+                    if is_outside {
+                        // Apply gray overlay to tiles outside the visible area
+                        let tile_rect = egui::Rect::from_min_size(
+                            egui::Pos2::new(tile_x, tile_y),
+                            egui::Vec2::new(tile_size, tile_size),
+                        );
+                        painter.rect_filled(
+                            tile_rect,
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+                        );
                     }
                 }
             }
