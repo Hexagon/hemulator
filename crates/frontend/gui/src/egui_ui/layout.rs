@@ -1,10 +1,10 @@
 //! Main egui application layout with docking support
 
+use super::dock_layout::{DockLayout, InspectorTabViewer, PropertyTabViewer};
 use super::menu_bar::MenuBar;
 use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
-use super::dock_layout::{DockLayout, InspectorTabViewer, PropertyTabViewer};
 use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, TopBottomPanel};
 use egui_dock::{DockArea, Style};
@@ -138,7 +138,7 @@ impl EguiApp {
                     let mut inspector_viewer = InspectorTabViewer {
                         tab_manager: &mut self.tab_manager,
                     };
-                    
+
                     DockArea::new(&mut self.dock_layout.inspector_state)
                         .style(Style::from_egui(ui.style().as_ref()))
                         .show_inside(ui, &mut inspector_viewer);
@@ -156,7 +156,7 @@ impl EguiApp {
                 let mut property_viewer = PropertyTabViewer {
                     property_pane: &mut self.property_pane,
                 };
-                
+
                 DockArea::new(&mut self.dock_layout.property_state)
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_inside(ui, &mut property_viewer);

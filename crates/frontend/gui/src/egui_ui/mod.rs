@@ -7,12 +7,12 @@
 //! - Property pane dock (right, moveable)
 //! - Status bar at the bottom
 
+mod dock_layout;
 mod layout;
 pub mod menu_bar;
 pub mod property_pane;
 mod status_bar;
 mod tabs;
-mod dock_layout;
 
 pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
