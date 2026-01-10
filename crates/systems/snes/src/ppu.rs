@@ -1248,6 +1248,71 @@ impl Ppu {
         block_offset + in_block_offset
     }
 
+    /// Check if offset-per-tile mode is enabled
+    /// Bit 3 of BGMODE ($2105) enables offset-per-tile for modes 2, 4, 6
+    fn is_offset_per_tile_enabled(&self) -> bool {
+        (self.bgmode & 0x08) != 0
+    }
+
+    /// Get offset-per-tile value from BG3 tilemap
+    /// Returns (horizontal_offset, vertical_offset) as i16 values
+    /// Offset-per-tile reads from BG3's tilemap:
+    /// - Horizontal offsets: even columns (x & 1 == 0)
+    /// - Vertical offsets: odd columns (x & 1 == 1)
+    fn get_offset_per_tile(&self, screen_x: usize, screen_y: usize) -> (i16, i16) {
+        if !self.is_offset_per_tile_enabled() {
+            return (0, 0);
+        }
+
+        // BG3 tilemap configuration
+        let bg3_tilemap_base = ((self.bg3sc >> 2) as usize) << 11;
+        let (bg3_tilemap_width, _) = self.get_tilemap_size(2); // BG3 is index 2
+
+        // Calculate which tile in BG3 we're looking at
+        let tile_x = screen_x / 8;
+        let tile_y = screen_y / 8;
+
+        // Horizontal offset comes from even columns, vertical from odd columns
+        let h_tile_x = (tile_x & !1) + 0; // Even column
+        let v_tile_x = (tile_x & !1) + 1; // Odd column
+
+        // Get horizontal offset
+        let h_offset_addr =
+            bg3_tilemap_base + self.get_tilemap_offset(h_tile_x, tile_y, bg3_tilemap_width);
+        let h_offset = if h_offset_addr + 1 < VRAM_SIZE {
+            let low = self.vram[h_offset_addr] as u16;
+            let high = self.vram[h_offset_addr + 1] as u16;
+            let offset_val = ((high & 0x1F) << 8) | low; // 13-bit value
+                                                         // Sign extend from 13 bits
+            if offset_val & 0x1000 != 0 {
+                ((offset_val | 0xE000) as i16) >> 3 // Sign extend and divide by 8 to get tile offset
+            } else {
+                (offset_val as i16) >> 3
+            }
+        } else {
+            0
+        };
+
+        // Get vertical offset
+        let v_offset_addr =
+            bg3_tilemap_base + self.get_tilemap_offset(v_tile_x, tile_y, bg3_tilemap_width);
+        let v_offset = if v_offset_addr + 1 < VRAM_SIZE {
+            let low = self.vram[v_offset_addr] as u16;
+            let high = self.vram[v_offset_addr + 1] as u16;
+            let offset_val = ((high & 0x1F) << 8) | low; // 13-bit value
+                                                         // Sign extend from 13 bits
+            if offset_val & 0x1000 != 0 {
+                ((offset_val | 0xE000) as i16) >> 3 // Sign extend and divide by 8 to get tile offset
+            } else {
+                (offset_val as i16) >> 3
+            }
+        } else {
+            0
+        };
+
+        (h_offset, v_offset)
+    }
+
     /// Get a single pixel color index from a tile in Mode 0 (2bpp)
     /// Returns CGRAM color index (0-255) or 0 for transparent
     #[allow(clippy::too_many_arguments)]
@@ -1657,9 +1722,21 @@ impl Ppu {
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Calculate world position with scrolling
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+                // Get offset-per-tile if enabled (Modes 2, 4, 6)
+                let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index < 2 {
+                    // Offset-per-tile only applies to BG1 and BG2
+                    self.get_offset_per_tile(screen_x, screen_y)
+                } else {
+                    (0, 0)
+                };
+
+                // Calculate world position with scrolling and offset-per-tile
+                let world_x = ((screen_x as i32 + hofs as i32 + h_offset as i32)
+                    .rem_euclid(tilemap_pixel_width as i32))
+                    as usize;
+                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                    .rem_euclid(tilemap_pixel_height as i32))
+                    as usize;
 
                 // Get tile and pixel position
                 let tile_x = world_x / 8;
@@ -1753,9 +1830,21 @@ impl Ppu {
         // Render all visible tiles
         for screen_y in 0..224 {
             for screen_x in 0..256 {
-                // Calculate world position with scrolling
-                let world_x = ((screen_x as u16 + hofs) % tilemap_pixel_width as u16) as usize;
-                let world_y = ((screen_y as u16 + vofs) % tilemap_pixel_height as u16) as usize;
+                // Get offset-per-tile if enabled (Mode 4)
+                let (h_offset, v_offset) = if self.is_offset_per_tile_enabled() && bg_index == 0 {
+                    // In Mode 4, offset-per-tile only applies to BG1
+                    self.get_offset_per_tile(screen_x, screen_y)
+                } else {
+                    (0, 0)
+                };
+
+                // Calculate world position with scrolling and offset-per-tile
+                let world_x = ((screen_x as i32 + hofs as i32 + h_offset as i32)
+                    .rem_euclid(tilemap_pixel_width as i32))
+                    as usize;
+                let world_y = ((screen_y as i32 + vofs as i32 + v_offset as i32)
+                    .rem_euclid(tilemap_pixel_height as i32))
+                    as usize;
 
                 // Get tile and pixel position
                 let tile_x = world_x / 8;
@@ -3103,6 +3192,44 @@ mod tests {
         // Test M7SEL register
         ppu.write_register(0x211A, 0x03); // Flip H and V
         assert_eq!(ppu.m7sel, 0x03, "M7SEL should be 0x03");
+    }
+
+    #[test]
+    fn test_offset_per_tile_mode() {
+        let mut ppu = Ppu::new();
+
+        // Test that offset-per-tile is disabled by default
+        assert!(!ppu.is_offset_per_tile_enabled());
+
+        // Enable offset-per-tile (bit 3 of BGMODE)
+        ppu.write_register(0x2105, 0x0A); // Mode 2, offset-per-tile enabled
+        assert!(ppu.is_offset_per_tile_enabled());
+        assert_eq!(ppu.bgmode & 0x07, 2, "Should be Mode 2");
+
+        // Set up BG3 tilemap (for offset data)
+        ppu.write_register(0x2109, 0x00); // BG3 tilemap at VRAM $0000
+
+        // Write offset data to BG3 tilemap
+        // Horizontal offset at column 0, vertical offset at column 1
+        // Tilemap entry format: 13-bit value (lower 13 bits)
+        // Let's set horizontal offset = 16 pixels (2 tiles)
+        let h_offset_pixels = 16;
+        let h_offset_val = h_offset_pixels << 3; // Multiply by 8 for tile offset
+        ppu.vram[0] = (h_offset_val & 0xFF) as u8; // Low byte
+        ppu.vram[1] = ((h_offset_val >> 8) & 0x1F) as u8; // High byte (13-bit value)
+
+        // Set vertical offset = 8 pixels (1 tile)
+        let v_offset_pixels = 8;
+        let v_offset_val = v_offset_pixels << 3;
+        ppu.vram[2] = (v_offset_val & 0xFF) as u8; // Low byte (odd column)
+        ppu.vram[3] = ((v_offset_val >> 8) & 0x1F) as u8; // High byte
+
+        // Get offset for screen pixel (0, 0)
+        let (h_off, v_off) = ppu.get_offset_per_tile(0, 0);
+
+        // Offsets are returned as tile offsets (not pixel offsets)
+        assert_eq!(h_off, 16, "Horizontal offset should be 16 tiles");
+        assert_eq!(v_off, 8, "Vertical offset should be 8 tiles");
     }
 
     #[test]
