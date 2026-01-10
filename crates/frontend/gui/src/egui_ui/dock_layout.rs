@@ -1,8 +1,9 @@
-//! Docking layout for Inspector panel
+//! Docking layout for Inspector panel and Property pane
 
 use egui_dock::{DockState, TabViewer};
 use egui::Ui;
 use super::tabs::TabManager;
+use super::property_pane::PropertyPane;
 
 /// Tabs available in the Inspector dock
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,10 +23,25 @@ impl InspectorTab {
     }
 }
 
+/// Tabs available in the Property dock
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PropertyTab {
+    Properties,
+}
+
+impl PropertyTab {
+    pub fn title(&self) -> &'static str {
+        "⚙️ Properties"
+    }
+}
+
 /// State for the docking system
 pub struct DockLayout {
     /// Inspector dock state (contains Debug, Log, Tiles tabs)
     pub inspector_state: DockState<InspectorTab>,
+    
+    /// Property pane dock state
+    pub property_state: DockState<PropertyTab>,
     
     /// Whether the inspector dock is visible
     pub inspector_visible: bool,
@@ -40,8 +56,12 @@ impl DockLayout {
             InspectorTab::Tiles,
         ]);
         
+        // Create property pane dock with a single Properties tab
+        let property_state = DockState::new(vec![PropertyTab::Properties]);
+        
         Self {
             inspector_state,
+            property_state,
             inspector_visible: false, // Hidden by default
         }
     }
@@ -92,6 +112,28 @@ impl<'a> TabViewer for InspectorTabViewer<'a> {
     }
     
     // Prevent closing tabs - they're always visible
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        false
+    }
+}
+
+/// TabViewer implementation for Property pane
+pub struct PropertyTabViewer<'a> {
+    pub property_pane: &'a mut PropertyPane,
+}
+
+impl<'a> TabViewer for PropertyTabViewer<'a> {
+    type Tab = PropertyTab;
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        tab.title().into()
+    }
+
+    fn ui(&mut self, ui: &mut Ui, _tab: &mut Self::Tab) {
+        self.property_pane.ui(ui);
+    }
+    
+    // Prevent closing the property pane tab
     fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
         false
     }

@@ -4,7 +4,7 @@ use super::menu_bar::MenuBar;
 use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
-use super::dock_layout::{DockLayout, InspectorTabViewer};
+use super::dock_layout::{DockLayout, InspectorTabViewer, PropertyTabViewer};
 use crate::settings::ScalingMode;
 use egui::{CentralPanel, Context, TopBottomPanel};
 use egui_dock::{DockArea, Style};
@@ -153,7 +153,13 @@ impl EguiApp {
             .resizable(true)
             .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
             .show(ctx, |ui| {
-                self.property_pane.ui(ui);
+                let mut property_viewer = PropertyTabViewer {
+                    property_pane: &mut self.property_pane,
+                };
+                
+                DockArea::new(&mut self.dock_layout.property_state)
+                    .style(Style::from_egui(ui.style().as_ref()))
+                    .show_inside(ui, &mut property_viewer);
             });
 
         // Central panel with main tabs (Emulator, NewProject, Help, About)
