@@ -11,7 +11,7 @@ use crate::system_adapter::EnhancedDebugState;
 use egui::{Context, ScrollArea, Ui, ViewportBuilder, ViewportId};
 
 use super::property_pane::PcBdaValues;
-use super::tabs::{PcConfigInfo, SystemTileData};
+use super::tabs::{NesTileData, PcConfigInfo, SystemTileData, TileViewerData};
 
 /// Inspector window state and configuration
 pub struct InspectorWindow {
@@ -337,22 +337,170 @@ fn render_memory_tab(ui: &mut Ui) {
 
 /// Render tiles tab
 fn render_tiles_tab(ui: &mut Ui, system_tile_data: &Option<SystemTileData>) {
-    ui.heading("🎨 Tile/Pattern Viewer");
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(ref sys_data) = system_tile_data {
+                match sys_data {
+                    SystemTileData::NES(nes_data) => {
+                        render_nes_tile_viewer(ui, nes_data);
+                    }
+                    SystemTileData::GameBoy(gb_data) => {
+                        ui.heading("🎮 Game Boy Tile Viewer");
+                        ui.separator();
+                        ui.label(format!("LCDC: ${:02X}", gb_data.lcdc));
+                        ui.label(format!(
+                            "Mode: {}",
+                            if gb_data.is_cgb_mode { "Game Boy Color" } else { "Game Boy" }
+                        ));
+                        ui.label(format!(
+                            "Scroll: ({}, {}) Window: ({}, {})",
+                            gb_data.scx, gb_data.scy, gb_data.wx, gb_data.wy
+                        ));
+                        ui.label(format!("VRAM Bank 0: {} KB", gb_data.vram_bank0.len() / 1024));
+                        ui.label(format!("VRAM Bank 1: {} KB", gb_data.vram_bank1.len() / 1024));
+                        ui.label(format!("OAM: {} bytes (40 sprites)", gb_data.oam.len()));
+                    }
+                    SystemTileData::SMS(sms_data) => {
+                        ui.heading("🎮 SMS Tile Viewer");
+                        ui.separator();
+                        ui.label(format!("VRAM: {} KB", sms_data.vram.len() / 1024));
+                        ui.label(format!("CRAM: {} bytes", sms_data.cram.len()));
+                        ui.label(format!("Palette: {} colors", sms_data.palette.len()));
+                    }
+                    SystemTileData::SNES(snes_data) => {
+                        ui.heading("🎮 SNES Tile Viewer");
+                        ui.separator();
+                        ui.label(format!("BG Mode: {}", snes_data.bg_mode));
+                        ui.label(format!(
+                            "Screen: {}",
+                            if snes_data.screen_enabled {
+                                "Enabled"
+                            } else {
+                                "Disabled"
+                            }
+                        ));
+                        ui.label(format!("VRAM: {} KB", snes_data.vram.len() / 1024));
+                        ui.label(format!("CGRAM: {} bytes", snes_data.cgram.len()));
+                        ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
+                    }
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎨").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No Tile Data Available");
+                    ui.add_space(10.0);
+                    ui.label("Load a ROM with graphics to view tiles and palettes");
+                });
+            }
+        });
+}
+
+/// Render full NES tile viewer with pattern tables, palettes, sprites, and nametables
+fn render_nes_tile_viewer(ui: &mut Ui, nes_data: &NesTileData) {
+    // Convert NesTileData to TileViewerData for compatibility with existing rendering functions
+    let data = TileViewerData {
+        chr_data: nes_data.chr_data.clone(),
+        palette: nes_data.palette.clone(),
+        master_palette: nes_data.master_palette.clone(),
+        oam: nes_data.oam.clone(),
+        vram: nes_data.vram.clone(),
+        chr_is_ram: nes_data.chr_is_ram,
+        ppuctrl: nes_data.ppuctrl,
+        ppumask: nes_data.ppumask,
+        scroll_x: nes_data.scroll_x,
+        scroll_y: nes_data.scroll_y,
+        mirroring: nes_data.mirroring.clone(),
+    };
+    
+    ui.heading("🎨 NES Tile & Palette Viewer");
     ui.separator();
     
-    if system_tile_data.is_some() {
-        // TODO: Add tile viewer implementation
-        ui.label("Tile viewer (implementation in progress)");
-    } else {
-        ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.label(egui::RichText::new("🎨").size(48.0));
-            ui.add_space(10.0);
-            ui.heading("No Tile Data Available");
-            ui.add_space(10.0);
-            ui.label("Load a ROM with graphics to view tiles and palettes");
+    // PPU state summary
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl)).monospace());
+        ui.separator();
+        ui.label(egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask)).monospace());
+        ui.separator();
+        ui.label(egui::RichText::new(format!("Scroll: ({}, {})", data.scroll_x, data.scroll_y)).monospace());
+        ui.separator();
+        ui.label(egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace());
+    });
+    
+    ui.add_space(5.0);
+    
+    // CHR type indicator
+    let chr_type = if data.chr_is_ram { "CHR-RAM" } else { "CHR-ROM" };
+    let chr_size = data.chr_data.len();
+    ui.label(format!("{} ({} bytes / {} KB)", chr_type, chr_size, chr_size / 1024));
+    
+    ui.add_space(10.0);
+    
+    // Pattern Tables section
+    ui.heading("Pattern Tables");
+    ui.separator();
+    
+    ui.horizontal(|ui| {
+        // Pattern Table 0
+        ui.vertical(|ui| {
+            let bg_table = (data.ppuctrl & 0x10) != 0;
+            let label = if !bg_table { "◄ BG" } else { "" };
+            ui.label(format!("Pattern Table 0 (CHR $0000-$0FFF) {}", label));
+            render_pattern_table(ui, &data, 0);
         });
-    }
+        
+        ui.add_space(20.0);
+        
+        // Pattern Table 1
+        ui.vertical(|ui| {
+            let bg_table = (data.ppuctrl & 0x10) != 0;
+            let label = if bg_table { "◄ BG" } else { "" };
+            ui.label(format!("Pattern Table 1 (CHR $1000-$1FFF) {}", label));
+            render_pattern_table(ui, &data, 1);
+        });
+    });
+    
+    ui.add_space(15.0);
+    
+    // Palettes section
+    ui.heading("Palettes");
+    ui.separator();
+    
+    ui.label("Background Palettes ($3F00-$3F0F):");
+    render_palettes(ui, &data, 0);
+    
+    ui.add_space(5.0);
+    
+    ui.label("Sprite Palettes ($3F10-$3F1F):");
+    render_palettes(ui, &data, 4);
+    
+    ui.add_space(15.0);
+    
+    // Sprites (OAM) section
+    ui.heading("Sprites (OAM)");
+    ui.separator();
+    
+    let sprite_size = if (data.ppuctrl & 0x20) != 0 { "8x16" } else { "8x8" };
+    let sprite_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
+    
+    ui.horizontal(|ui| {
+        ui.label(format!("Sprite Size: {}", sprite_size));
+        ui.separator();
+        if sprite_size == "8x8" {
+            ui.label(format!("Pattern Table: {} (CHR ${:04X})", sprite_table, sprite_table * 0x1000));
+        } else {
+            ui.label("Pattern Table: Per-sprite (tile bit 0)");
+        }
+        ui.separator();
+        ui.label(format!("OAM: {} bytes", data.oam.len()));
+    });
+    
+    ui.add_space(5.0);
+    render_sprites(ui, &data);
 }
 
 /// Render PC BDA (BIOS Data Area) tab
@@ -818,6 +966,292 @@ fn render_snes_status_tab(ui: &mut Ui, system_tile_data: &Option<SystemTileData>
             ui.add_space(10.0);
             ui.label("Load a SNES ROM to view PPU status");
         });
+    }
+}
+
+/// Helper function to render a pattern table (256 tiles in 16x16 grid)
+fn render_pattern_table(ui: &mut Ui, data: &TileViewerData, table_num: usize) {
+    let base_addr = table_num * 0x1000;
+    let tile_size = 10.0;
+    
+    let (response, painter) = ui.allocate_painter(
+        egui::Vec2::new(16.0 * tile_size, 16.0 * tile_size),
+        egui::Sense::hover(),
+    );
+    
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(30, 30, 30));
+    
+    // Draw each tile
+    for tile_row in 0..16 {
+        for tile_col in 0..16 {
+            let tile_index = tile_row * 16 + tile_col;
+            let chr_addr = base_addr + tile_index * 16;
+            
+            let tile_x = rect.min.x + tile_col as f32 * tile_size;
+            let tile_y = rect.min.y + tile_row as f32 * tile_size;
+            let tile_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(tile_x, tile_y),
+                egui::Vec2::new(tile_size, tile_size),
+            );
+            
+            // Calculate brightness for preview
+            let mut total_value = 0u32;
+            for byte_idx in 0..16 {
+                if chr_addr + byte_idx < data.chr_data.len() {
+                    total_value += data.chr_data[chr_addr + byte_idx].count_ones();
+                }
+            }
+            let brightness = ((total_value as f32 / 128.0) * 180.0) as u8;
+            let tile_color = egui::Color32::from_rgb(brightness, brightness, brightness);
+            
+            painter.rect_filled(tile_rect, 0.0, tile_color);
+            painter.rect_stroke(
+                tile_rect,
+                0.0,
+                egui::Stroke::new(0.5, egui::Color32::from_rgb(60, 60, 60)),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    
+    // Tooltip on hover
+    if let Some(hover_pos) = response.hover_pos() {
+        let rel_x = hover_pos.x - rect.min.x;
+        let rel_y = hover_pos.y - rect.min.y;
+        
+        if rel_x >= 0.0 && rel_y >= 0.0 {
+            let tile_col = (rel_x / tile_size) as usize;
+            let tile_row = (rel_y / tile_size) as usize;
+            
+            if tile_col < 16 && tile_row < 16 {
+                let tile_index = tile_row * 16 + tile_col;
+                let chr_addr = base_addr + tile_index * 16;
+                
+                response.clone().on_hover_ui(|ui| {
+                    ui.label(egui::RichText::new(format!("Tile ${:02X} ({})", tile_index, tile_index)).strong());
+                    ui.label(format!("CHR Address: ${:04X}-${:04X}", chr_addr, chr_addr + 15));
+                    ui.label(format!("Pattern Table: {}", table_num));
+                    ui.label(format!("Row: {}, Col: {}", tile_row, tile_col));
+                });
+            }
+        }
+    }
+}
+
+/// Helper function to render palettes (4 palettes of 4 colors each)
+fn render_palettes(ui: &mut Ui, data: &TileViewerData, start_palette: usize) {
+    let color_size = 24.0;
+    let palette_spacing = 8.0;
+    
+    ui.horizontal(|ui| {
+        for pal_num in 0..4 {
+            let palette_index = start_palette + pal_num;
+            let pal_addr_base = if start_palette == 0 { 0x3F00 } else { 0x3F10 };
+            let pal_addr = pal_addr_base + pal_num * 4;
+            
+            ui.vertical(|ui| {
+                ui.label(format!("Palette {}", palette_index));
+                
+                ui.horizontal(|ui| {
+                    for color_num in 0..4 {
+                        let pal_offset = (palette_index * 4 + color_num) % data.palette.len();
+                        let color_index = data.palette[pal_offset] as usize;
+                        let rgb = if color_index < data.master_palette.len() {
+                            data.master_palette[color_index]
+                        } else {
+                            0xFF000000
+                        };
+                        
+                        let r = ((rgb >> 16) & 0xFF) as u8;
+                        let g = ((rgb >> 8) & 0xFF) as u8;
+                        let b = (rgb & 0xFF) as u8;
+                        let color = egui::Color32::from_rgb(r, g, b);
+                        
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(color_size, color_size),
+                            egui::Sense::hover(),
+                        );
+                        let rect = response.rect;
+                        
+                        painter.rect_filled(rect, 2.0, color);
+                        painter.rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(1.0, egui::Color32::WHITE),
+                            egui::StrokeKind::Inside,
+                        );
+                        
+                        response.on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new(format!("Palette {} Color {}", palette_index, color_num)).strong());
+                            ui.label(format!("Address: ${:04X}", pal_addr + color_num));
+                            ui.label(format!("NES Color Index: ${:02X} ({})", color_index, color_index));
+                            ui.label(format!("RGB: #{:02X}{:02X}{:02X}", r, g, b));
+                        });
+                    }
+                });
+            });
+            
+            if pal_num < 3 {
+                ui.add_space(palette_spacing);
+            }
+        }
+    });
+}
+
+/// Helper function to render sprites (OAM data)
+fn render_sprites(ui: &mut Ui, data: &TileViewerData) {
+    if data.oam.len() < 256 {
+        ui.label(egui::RichText::new("OAM data not available").weak());
+        return;
+    }
+    
+    let sprite_size_8x16 = (data.ppuctrl & 0x20) != 0;
+    let sprite_pattern_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
+    let tile_height = if sprite_size_8x16 { 16 } else { 8 };
+    
+    let scale = 2.0;
+    let cell_width = 8.0 * scale + 6.0;
+    let cell_height = tile_height as f32 * scale + 14.0;
+    let grid_cols = 16;
+    let grid_rows = 4;
+    
+    let (response, painter) = ui.allocate_painter(
+        egui::Vec2::new(
+            grid_cols as f32 * cell_width,
+            grid_rows as f32 * cell_height,
+        ),
+        egui::Sense::hover(),
+    );
+    
+    let rect = response.rect;
+    painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(30, 30, 40));
+    
+    // Draw each sprite
+    for sprite_idx in 0..64 {
+        let oam_offset = sprite_idx * 4;
+        let y_pos = data.oam[oam_offset];
+        let tile_idx = data.oam[oam_offset + 1];
+        let attributes = data.oam[oam_offset + 2];
+        
+        let col = sprite_idx % grid_cols;
+        let row = sprite_idx / grid_cols;
+        
+        let cell_x = rect.min.x + col as f32 * cell_width + 3.0;
+        let cell_y = rect.min.y + row as f32 * cell_height + 2.0;
+        
+        let is_visible = if sprite_size_8x16 { y_pos < 0xE7 } else { y_pos < 0xEF };
+        
+        // Draw sprite cell background
+        let sprite_bg_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(cell_x - 1.0, cell_y - 1.0),
+            egui::Vec2::new(8.0 * scale + 2.0, tile_height as f32 * scale + 2.0),
+        );
+        let bg_color = if is_visible {
+            egui::Color32::from_rgb(60, 60, 80)
+        } else {
+            egui::Color32::from_rgb(40, 40, 50)
+        };
+        painter.rect_filled(sprite_bg_rect, 2.0, bg_color);
+        
+        // Draw sprite index
+        let label = format!("{:02X}", sprite_idx);
+        let label_pos = egui::Pos2::new(
+            cell_x + 8.0 * scale / 2.0,
+            cell_y + tile_height as f32 * scale + 4.0,
+        );
+        painter.text(
+            label_pos,
+            egui::Align2::CENTER_TOP,
+            label,
+            egui::FontId::monospace(8.0),
+            if is_visible {
+                egui::Color32::from_rgb(180, 180, 200)
+            } else {
+                egui::Color32::from_rgb(100, 100, 120)
+            },
+        );
+        
+        // Get palette and flip flags
+        let palette_idx = ((attributes & 0x03) + 4) as usize;
+        let flip_h = (attributes & 0x40) != 0;
+        let flip_v = (attributes & 0x80) != 0;
+        
+        // Calculate CHR address
+        let chr_addr = if sprite_size_8x16 {
+            let table = (tile_idx & 0x01) as usize;
+            let tile = (tile_idx & 0xFE) as usize;
+            table * 0x1000 + tile * 16
+        } else {
+            sprite_pattern_table * 0x1000 + (tile_idx as usize) * 16
+        };
+        
+        // Draw sprite pixels
+        let tiles_to_draw = if sprite_size_8x16 { 2 } else { 1 };
+        
+        for tile_part in 0..tiles_to_draw {
+            let tile_chr_addr = chr_addr + tile_part * 16;
+            
+            for py in 0..8 {
+                if tile_chr_addr + py + 8 >= data.chr_data.len() {
+                    continue;
+                }
+                
+                let low_byte = data.chr_data[tile_chr_addr + py];
+                let high_byte = data.chr_data[tile_chr_addr + py + 8];
+                
+                for px in 0..8 {
+                    let bit = 7 - px;
+                    let low_bit = (low_byte >> bit) & 1;
+                    let high_bit = (high_byte >> bit) & 1;
+                    let color_idx = (high_bit << 1) | low_bit;
+                    
+                    if color_idx == 0 {
+                        continue; // Transparent
+                    }
+                    
+                    // Get palette color
+                    let pal_offset = palette_idx * 4 + color_idx as usize;
+                    let nes_color = if pal_offset < data.palette.len() {
+                        data.palette[pal_offset] as usize
+                    } else {
+                        0
+                    };
+                    let rgb = if nes_color < data.master_palette.len() {
+                        data.master_palette[nes_color]
+                    } else {
+                        0xFF000000
+                    };
+                    
+                    let r = ((rgb >> 16) & 0xFF) as u8;
+                    let g = ((rgb >> 8) & 0xFF) as u8;
+                    let b = (rgb & 0xFF) as u8;
+                    
+                    let color = if is_visible {
+                        egui::Color32::from_rgb(r, g, b)
+                    } else {
+                        egui::Color32::from_rgb(r / 2, g / 2, b / 2)
+                    };
+                    
+                    // Apply flipping
+                    let draw_px = if flip_h { 7 - px } else { px };
+                    let draw_py = if flip_v {
+                        (tile_height - 1) - (tile_part * 8 + py)
+                    } else {
+                        tile_part * 8 + py
+                    };
+                    
+                    let pixel_rect = egui::Rect::from_min_size(
+                        egui::Pos2::new(
+                            cell_x + draw_px as f32 * scale,
+                            cell_y + draw_py as f32 * scale,
+                        ),
+                        egui::Vec2::new(scale, scale),
+                    );
+                    painter.rect_filled(pixel_rect, 0.0, color);
+                }
+            }
+        }
     }
 }
 
