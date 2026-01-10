@@ -120,14 +120,23 @@ impl InspectorWindow {
             return;
         }
         
-        // Create a separate native OS window for the inspector
-        ctx.show_viewport_immediate(
-            self.viewport_id,
+        // Clone necessary data for the closure
+        let log_messages = self.log_messages.clone();
+        let enhanced_debug_state = self.enhanced_debug_state.clone();
+        let system_tile_data = self.system_tile_data.clone();
+        let current_system = self.current_system.clone();
+        let pc_bda_values = self.pc_bda_values.clone();
+        let pc_config_info = self.pc_config_info.clone();
+        let viewport_id = self.viewport_id;
+        
+        // Create a separate viewport for the inspector window
+        ctx.show_viewport_deferred(
+            viewport_id,
             ViewportBuilder::default()
                 .with_title("Hemulator Inspector")
                 .with_inner_size([900.0, 700.0])
                 .with_resizable(true),
-            |ctx, _class| {
+            move |ctx, _class| {
                 // Render the inspector window content
                 egui::CentralPanel::default().show(ctx, |ui| {
                     // Use persistent UI state for active tab
@@ -145,7 +154,7 @@ impl InspectorWindow {
                         ui.selectable_value(&mut active_tab, InspectorTab::Tiles, "🎨 Tiles");
                         
                         // System-specific tabs
-                        if let Some(ref system) = &self.current_system {
+                        if let Some(ref system) = current_system {
                             ui.separator();
                             match system.as_str() {
                                 "PC" => {
@@ -173,16 +182,16 @@ impl InspectorWindow {
                     
                     // Tab content
                     match active_tab {
-                        InspectorTab::Log => render_log_tab(ui, &self.log_messages),
-                        InspectorTab::Debugger => render_debugger_tab(ui, &self.enhanced_debug_state),
+                        InspectorTab::Log => render_log_tab(ui, &log_messages),
+                        InspectorTab::Debugger => render_debugger_tab(ui, &enhanced_debug_state),
                         InspectorTab::Memory => render_memory_tab(ui),
-                        InspectorTab::Tiles => render_tiles_tab(ui, &self.system_tile_data),
-                        InspectorTab::PcBda => render_pc_bda_tab(ui, &self.pc_bda_values),
-                        InspectorTab::PcConfig => render_pc_config_tab(ui, &self.pc_config_info),
-                        InspectorTab::NesStatus => render_nes_status_tab(ui, &self.system_tile_data),
-                        InspectorTab::GbStatus => render_gb_status_tab(ui, &self.system_tile_data),
-                        InspectorTab::SmsStatus => render_sms_status_tab(ui, &self.system_tile_data),
-                        InspectorTab::SnesStatus => render_snes_status_tab(ui, &self.system_tile_data),
+                        InspectorTab::Tiles => render_tiles_tab(ui, &system_tile_data),
+                        InspectorTab::PcBda => render_pc_bda_tab(ui, &pc_bda_values),
+                        InspectorTab::PcConfig => render_pc_config_tab(ui, &pc_config_info),
+                        InspectorTab::NesStatus => render_nes_status_tab(ui, &system_tile_data),
+                        InspectorTab::GbStatus => render_gb_status_tab(ui, &system_tile_data),
+                        InspectorTab::SmsStatus => render_sms_status_tab(ui, &system_tile_data),
+                        InspectorTab::SnesStatus => render_snes_status_tab(ui, &system_tile_data),
                     }
                     
                     // Persist active tab
