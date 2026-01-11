@@ -54,6 +54,13 @@ RESET:
     lda #$CC
     sta $2140
     
+    ; CRITICAL: Give SPC700 time to process $CC command!
+    ; The SPC700 needs ~20 cycles to read $CC, exit wait loop, and branch to upload routine
+    ; With clock ratio of 0.286, main CPU needs ~70 cycles
+    ldy #$0020              ; Delay loop
+:   dey
+    bne :-
+    
     ; Step 3: Send destination address ($0200) to ports 2/3
     lda #$00
     sta $2142               ; Low byte
