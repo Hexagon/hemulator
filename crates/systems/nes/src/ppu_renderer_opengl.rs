@@ -787,55 +787,6 @@ void main() {
     }
 
     /// Helper to get NES master palette color
-    fn nes_palette_rgb(index: u8) -> u32 {
-        const NES_MASTER_PALETTE: [u32; 64] = [
-            0xFF545454, 0xFF001E74, 0xFF081090, 0xFF300088, 0xFF440064, 0xFF5C0030, 0xFF540400,
-            0xFF3C1800, 0xFF202A00, 0xFF083A00, 0xFF004000, 0xFF003C00, 0xFF00323C, 0xFF000000,
-            0xFF000000, 0xFF000000, 0xFF989698, 0xFF084CC4, 0xFF3032EC, 0xFF5C1EE4, 0xFF8814B0,
-            0xFFA01464, 0xFF982220, 0xFF783C00, 0xFF545A00, 0xFF287200, 0xFF087C00, 0xFF007628,
-            0xFF006678, 0xFF000000, 0xFF000000, 0xFF000000, 0xFFECEEEC, 0xFF4C9AEC, 0xFF787CEC,
-            0xFFB062EC, 0xFFE454EC, 0xFFEC58B4, 0xFFEC6A64, 0xFFD48820, 0xFFA0AA00, 0xFF74C400,
-            0xFF4CD020, 0xFF38CC6C, 0xFF38B4CC, 0xFF3C3C3C, 0xFF000000, 0xFF000000, 0xFFECEEEC,
-            0xFFA8CCEC, 0xFFBCBCEC, 0xFFD4B2EC, 0xFFECAEEC, 0xFFECAED4, 0xFFECC4B0, 0xFFE4D4A0,
-            0xFFCCDCA0, 0xFFB4E4A0, 0xFFA8E4B4, 0xFFA0E4CC, 0xFFA0D4E4, 0xFFA0A2A0, 0xFF000000,
-            0xFF000000,
-        ];
-        NES_MASTER_PALETTE[(index & 0x3F) as usize]
-    }
-
-    /// Helper to map nametable addresses (same logic as Ppu::map_nametable_addr)
-    fn map_nametable_addr(addr: u16, mirroring: Mirroring) -> usize {
-        let a = addr & 0x0FFF;
-        let table = (a / 0x0400) as u16;
-        let offset = (a % 0x0400) as u16;
-
-        let physical_table = match mirroring {
-            Mirroring::Vertical | Mirroring::FourScreen => match table {
-                0 | 2 => 0,
-                1 | 3 => 1,
-                _ => 0,
-            },
-            Mirroring::Horizontal => match table {
-                0 | 1 => 0,
-                2 | 3 => 1,
-                _ => 0,
-            },
-            Mirroring::SingleScreenLower => 0,
-            Mirroring::SingleScreenUpper => 1,
-        };
-
-        (physical_table * 0x0400 + offset) as usize & 0x07FF
-    }
-}
-
-#[cfg(feature = "opengl")]
-impl Renderer for OpenGLNesPpuRenderer {
-    fn get_frame(&self) -> &Frame {
-        &self.framebuffer
-    }
-
-    fn clear(&mut self, color: u32) {
-        unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             let r = ((color >> 16) & 0xFF) as f32 / 255.0;
             let g = ((color >> 8) & 0xFF) as f32 / 255.0;
@@ -915,7 +866,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
         // A future optimization could batch scanline data and upload to GPU,
         // but that would require careful handling of mid-frame CHR/scroll changes.
     }
-
+}
 
 #[cfg(feature = "opengl")]
 impl Drop for OpenGLNesPpuRenderer {
