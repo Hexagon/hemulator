@@ -123,17 +123,30 @@ pub struct Ppu {
     sprite_0_hit: Cell<bool>,
     sprite_overflow: Cell<bool>,
     nmi_pending: Cell<bool>,
-    // PPUADDR latch
+    // PPUADDR latch (shared with PPUSCROLL)
     addr_latch: Cell<bool>,
-    pub vram_addr: Cell<u16>,
+    // Loopy registers for proper PPU scrolling behavior
+    // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+    // v: Current VRAM address (15 bits) - also used for $2007 reads/writes
+    // t: Temporary VRAM address (15 bits) - updated by $2005/$2006 writes
+    // x: Fine X scroll (3 bits) - separate from v register
+    //
+    // Register layout (both v and t):
+    // Bit:  14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    // Use:  -- FY FY FY NT NT CY CY CY CY CY CX CX CX CX CX
+    //       |  |        |     |                 |
+    //       |  Fine Y   |     Coarse Y          Coarse X
+    //       |           Nametable select
+    //       Unused (bit 14 is unused, bit 15 doesn't exist)
+    pub vram_addr: Cell<u16>,  // v register (current VRAM address)
+    temp_vram_addr: Cell<u16>, // t register (temporary VRAM address)
+    fine_x: Cell<u8>,          // x register (fine X scroll, 3 bits)
     read_buffer: Cell<u8>,
     #[allow(clippy::type_complexity)]
     a12_callback: RefCell<Option<Box<dyn FnMut(bool)>>>,
     #[allow(clippy::type_complexity)]
     chr_read_callback: RefCell<Option<Box<dyn FnMut(u16)>>>,
     suppress_a12: Cell<bool>,
-    scroll_x: u8,
-    scroll_y: u8,
     oam_addr: Cell<u8>,
     /// Track if we're in the first frame after reset (for register locking)
     /// Registers $2000, $2001, $2005, $2006 are write-protected during first frame
@@ -179,13 +192,13 @@ impl Ppu {
             sprite_overflow: Cell::new(false),
             nmi_pending: Cell::new(false),
             addr_latch: Cell::new(false),
-            vram_addr: Cell::new(0),
+            vram_addr: Cell::new(0),      // v register
+            temp_vram_addr: Cell::new(0), // t register
+            fine_x: Cell::new(0),         // x register (3 bits)
             read_buffer: Cell::new(0),
             a12_callback: RefCell::new(None),
             chr_read_callback: RefCell::new(None),
             suppress_a12: Cell::new(false),
-            scroll_x: 0,
-            scroll_y: 0,
             oam_addr: Cell::new(0),
             first_frame_after_reset: Cell::new(true),
         }
@@ -260,12 +273,23 @@ impl Ppu {
         self.mask
     }
 
+    /// Extract scroll values from loopy registers for potential future use.
+    /// Compute scroll_x from loopy registers on-demand.
+    /// Returns the horizontal scroll position (0-255) derived from temp_vram_addr and fine_x.
     pub fn scroll_x(&self) -> u8 {
-        self.scroll_x
+        let t = self.temp_vram_addr.get();
+        let coarse_x = (t & 0x001F) as u8;
+        let fine_x = self.fine_x.get();
+        (coarse_x * 8) + fine_x
     }
 
+    /// Compute scroll_y from loopy registers on-demand.
+    /// Returns the vertical scroll position (0-255) derived from temp_vram_addr.
     pub fn scroll_y(&self) -> u8 {
-        self.scroll_y
+        let t = self.temp_vram_addr.get();
+        let coarse_y = ((t >> 5) & 0x001F) as u8;
+        let fine_y = ((t >> 12) & 0x0007) as u8;
+        (coarse_y * 8) + fine_y
     }
 
     /// Check if CHR is RAM (writable) or ROM
@@ -469,6 +493,7 @@ impl Ppu {
                 // PPUCTRL
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2000 write blocked (first frame)".to_string()
@@ -479,6 +504,13 @@ impl Ppu {
                 let old_nmi = (self.ctrl & 0x80) != 0;
                 self.ctrl = val;
                 let new_nmi = (self.ctrl & 0x80) != 0;
+
+                // PPUCTRL bits 0-1 select the base nametable, which updates t register bits 10-11
+                // t: ....BA.. ........ = d: ......BA
+                let t = self.temp_vram_addr.get();
+                let nt_select = (val & 0x03) as u16;
+                self.temp_vram_addr.set((t & !0x0C00) | (nt_select << 10));
+
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!(
                         "PPUCTRL write: 0x{:02X} (NMI: {})",
@@ -524,6 +556,7 @@ impl Ppu {
                 // PPUSCROLL (write x then y), shares latch with PPUADDR.
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2005 write blocked (first frame)".to_string()
@@ -532,13 +565,37 @@ impl Ppu {
                 }
 
                 if !self.addr_latch.get() {
-                    self.scroll_x = val;
+                    // First write (w=0): set horizontal scroll
+                    // t: ........ ...HGFED = d: HGFED...
+                    // x:               CBA = d: .....CBA
+                    // w:                   = 1
+                    let t = self.temp_vram_addr.get();
+                    let coarse_x = (val >> 3) as u16; // Bits 3-7 become coarse X (bits 0-4 of t)
+                    let fine_x_val = val & 0x07; // Bits 0-2 become fine X
+
+                    // Update t: clear bits 0-4, set new coarse X
+                    self.temp_vram_addr.set((t & 0xFFE0) | coarse_x);
+                    self.fine_x.set(fine_x_val);
                     self.addr_latch.set(true);
                 } else {
-                    self.scroll_y = val;
+                    // Second write (w=1): set vertical scroll
+                    // t: .CBA..HG FED..... = d: HGFEDCBA
+                    // w:                   = 0
+                    let t = self.temp_vram_addr.get();
+                    let coarse_y = ((val >> 3) & 0x1F) as u16; // Bits 3-7 become coarse Y (bits 5-9 of t)
+                    let fine_y = (val & 0x07) as u16; // Bits 0-2 become fine Y (bits 12-14 of t)
+
+                    // Update t: clear bits 5-9 and 12-14, set new coarse Y and fine Y
+                    self.temp_vram_addr
+                        .set((t & 0x8C1F) | (coarse_y << 5) | (fine_y << 12));
                     self.addr_latch.set(false);
+
                     log(LogCategory::PPU, LogLevel::Trace, || {
-                        format!("PPUSCROLL set: X={}, Y={}", self.scroll_x, self.scroll_y)
+                        format!(
+                            "PPUSCROLL set: X={}, Y={}",
+                            self.scroll_x(),
+                            self.scroll_y()
+                        )
                     });
                 }
             }
@@ -546,6 +603,14 @@ impl Ppu {
                 // PPUADDR (write high then low)
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+                //
+                // Hardware-accurate behavior:
+                // - First write (w=0): Updates ONLY t register bits 8-13, clears bit 14
+                // - Second write (w=1): Updates t register bits 0-7, then copies t to v
+                //
+                // This is critical for mid-frame scroll changes (e.g., SMB3 HUD split).
+                // Games expect v to only change on the second write.
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2006 write blocked (first frame)".to_string()
@@ -554,12 +619,29 @@ impl Ppu {
                 }
 
                 if !self.addr_latch.get() {
-                    let lo = self.vram_addr.get() & 0x00FF;
-                    self.vram_addr.set(((val as u16) << 8) | lo);
+                    // First write (w=0): set high byte of t register ONLY
+                    // t: .FEDCBA ........ <- val: ..FEDCBA
+                    // t: X...... ........ <- 0 (bit 14 is cleared)
+                    let hi_masked = (val & 0x3F) as u16; // Only bits 0-5 are used
+                    let t = self.temp_vram_addr.get();
+                    // Clear bit 14, set bits 8-13 from val
+                    self.temp_vram_addr.set((t & 0x00FF) | (hi_masked << 8));
+
+                    // NOTE: v (vram_addr) is NOT updated on first write!
+                    // This is crucial for mid-frame scroll splits to work correctly.
+
                     self.addr_latch.set(true);
                 } else {
-                    let hi = self.vram_addr.get() & 0xFF00;
-                    self.vram_addr.set(hi | val as u16);
+                    // Second write (w=1): set low byte of t, then copy t to v
+                    // t: ........ HGFEDCBA <- val: HGFEDCBA
+                    // v: <------- t ------- (copy t to v)
+                    let t = self.temp_vram_addr.get();
+                    let new_t = (t & 0xFF00) | (val as u16);
+                    self.temp_vram_addr.set(new_t);
+
+                    // Copy complete t register to v (this is when scroll takes effect)
+                    self.vram_addr.set(new_t);
+
                     self.addr_latch.set(false);
                 }
             }
@@ -696,7 +778,11 @@ impl Ppu {
             log(LogCategory::PPU, LogLevel::Info, || {
                 format!(
                     "Scanline {}: scroll=({},{}), ctrl=0x{:02X}, mirroring={:?}",
-                    y, self.scroll_x, self.scroll_y, self.ctrl, self.mirroring
+                    y,
+                    self.scroll_x(),
+                    self.scroll_y(),
+                    self.ctrl,
+                    self.mirroring
                 )
             });
         }
@@ -716,6 +802,36 @@ impl Ppu {
         let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
         let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
+        // Simulate hardware v register updates from t register at scanline boundaries.
+        // This is critical for split-screen effects like SMB3's HUD.
+        //
+        // In real hardware (matching Mesen2 implementation):
+        // - At dot 257 of each visible scanline: v horizontal bits ← t horizontal bits
+        // - At dots 280-304 of pre-render scanline: v vertical bits ← t vertical bits
+        //
+        // For our frame-based renderer, we simulate this by updating v from t at the
+        // start of each scanline. This ensures mid-frame $2005 writes (which update t)
+        // take effect at scanline boundaries, not immediately.
+        let rendering_enabled = bg_enabled || sprites_enabled;
+        if rendering_enabled {
+            let t = self.temp_vram_addr.get();
+            let v = self.vram_addr.get();
+
+            // At scanline 0: copy both vertical and horizontal bits from t to v
+            // (simulates pre-render scanline dot 280-304 + dot 257 behavior)
+            if y == 0 {
+                // Vertical bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
+                let mut new_v = (v & !0x7BE0) | (t & 0x7BE0);
+                // Horizontal bits: 0-4 (coarse X), 10 (nametable X)
+                new_v = (new_v & !0x041F) | (t & 0x041F);
+                self.vram_addr.set(new_v);
+            } else {
+                // Copy horizontal scroll bits from t to v at start of every other scanline
+                // (simulates dot 257 behavior)
+                self.vram_addr.set((v & !0x041F) | (t & 0x041F));
+            }
+        }
+
         // Perform sprite evaluation for this scanline to determine sprite overflow
         if sprites_enabled {
             self.evaluate_sprites_for_scanline(y);
@@ -726,7 +842,6 @@ impl Ppu {
         } else {
             0x0000
         };
-        let base_nt = (self.ctrl & 0x03) as u8;
 
         let mut universal_bg_idx = self.palette[palette_mirror_index(0)];
         if (self.mask & 0x01) != 0 {
@@ -734,39 +849,59 @@ impl Ppu {
         }
         let universal_bg = nes_palette_rgb(universal_bg_idx);
 
-        let sx = self.scroll_x as u32;
-        let sy = self.scroll_y as u32;
+        // Extract scroll values from v register for this scanline.
+        // The v register contains the current scroll position and is updated incrementally:
+        // - At scanline 0: v is loaded from t (both vertical and horizontal bits)
+        // - At each scanline boundary: horizontal bits are refreshed from t
+        // - After rendering each scanline: fine_y (and vertical bits) are incremented
+        // - Mid-frame $2006 writes directly set v, allowing scroll splits (e.g., SMB3 HUD)
+        //
+        // We use v's coarse_y/fine_y DIRECTLY without adding the screen scanline number.
+        // The v register is incremented after each scanline to "walk through" the nametable.
+        let v = self.vram_addr.get();
+        let fine_x_val = self.fine_x.get();
+
+        let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
+        let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
+        let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
+        let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
+        let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
+
+        // Use v register values directly - no screen scanline offset!
+        // The v register already points to the correct nametable position for this scanline.
+        let tile_y_wrapped = coarse_y;
+        let fine_y_in_tile = fine_y as usize;
+        let nt_y_adjusted = nt_y;
 
         // Track background priority for this scanline (for sprite priority).
         let mut bg_priority = [false; 256];
 
         // Background pixels for this scanline.
         if bg_enabled {
-            for x in 0..width {
+            for screen_x in 0..width {
                 // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
-                let should_render_bg = show_bg_left || x >= 8;
+                let should_render_bg = show_bg_left || screen_x >= 8;
 
-                // Calculate scroll position - let it overflow naturally
-                // The overflow bits will be used for nametable selection
-                let wx = x + sx;
-                let wy = y + sy;
+                // Calculate which pixel within the scrolling world to render.
+                // The fine_x offset determines which pixel we start at within the first tile.
+                let pixel_x = screen_x + fine_x_val as u32;
 
-                // NES PPU nametable selection: base_nt XOR scroll overflow bits
-                // nt_x = 1 when scrolled past 256 pixels horizontally
-                // nt_y = 1 when scrolled past 240 pixels vertically
-                // This formula matches hardware behavior and GUI visualization
-                let nt_x = ((wx / 256) & 1) as u8;
-                let nt_y = ((wy / 240) & 1) as u8;
-                let nt = base_nt ^ nt_x ^ (nt_y << 1);
+                // Determine which tile we're in (relative to current nametable)
+                let tile_x = (coarse_x as u32 + (pixel_x / 8)) as u8;
+                let fine_x_in_tile = (pixel_x % 8) as usize;
 
-                // Now wrap the position within the nametable (256x240)
-                let world_x = wx % 256;
-                let world_y = wy % 240;
+                // Handle horizontal wrapping: when tile_x >= 32, flip nametable X and wrap
+                let (tile_x_wrapped, nt_x_adjusted) = if tile_x >= 32 {
+                    (tile_x - 32, nt_x ^ 1)
+                } else {
+                    (tile_x, nt_x)
+                };
 
-                let tx = (world_x / 8) as usize;
-                let ty = (world_y / 8) as usize;
-                let fine_x = (world_x % 8) as usize;
-                let fine_y = (world_y % 8) as usize;
+                // Nametable selection from v register bits
+                let nt = nt_x_adjusted | (nt_y_adjusted << 1);
+
+                let tx = tile_x_wrapped as usize;
+                let ty = tile_y_wrapped as usize;
 
                 let nt_addr = 0x2000u16 + (nt as u16) * 0x0400;
                 let tile_addr = nt_addr + (ty as u16) * 32 + (tx as u16);
@@ -781,24 +916,24 @@ impl Ppu {
                 let palette_idx = (attr_byte >> shift) & 0x03;
 
                 let tile_addr = bg_pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch(tile_addr + fine_y);
-                let hi = self.chr_fetch(tile_addr + fine_y + 8);
-                let bit = 7 - fine_x;
+                let lo = self.chr_fetch(tile_addr + fine_y_in_tile);
+                let hi = self.chr_fetch(tile_addr + fine_y_in_tile + 8);
+                let bit = 7 - fine_x_in_tile;
                 let lo_bit = (lo >> bit) & 1;
                 let hi_bit = (hi >> bit) & 1;
                 let color_in_tile = (hi_bit << 1) | lo_bit;
 
-                let idx = (y * width + x) as usize;
+                let idx = (y * width + screen_x) as usize;
                 let out = if !should_render_bg {
                     // Leftmost 8 pixels are clipped - use black
-                    bg_priority[x as usize] = false;
+                    bg_priority[screen_x as usize] = false;
                     0x00000000 // Black
                 } else if color_in_tile == 0 {
                     // Tile color is 0 (backdrop)
-                    bg_priority[x as usize] = false;
+                    bg_priority[screen_x as usize] = false;
                     universal_bg
                 } else {
-                    bg_priority[x as usize] = true;
+                    bg_priority[screen_x as usize] = true;
                     let pal_base = (palette_idx as usize) * 4;
                     let mut pal_entry =
                         self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
@@ -949,6 +1084,38 @@ impl Ppu {
                     }
                 }
             }
+        }
+
+        // Increment v register's fine_y after rendering this scanline (simulates dot 256).
+        // This is critical for proper mid-frame scroll splits (e.g., SMB3 HUD).
+        // When fine_y overflows from 7 to 0, coarse_y is incremented.
+        // When coarse_y reaches 30, it wraps to 0 and nametable Y is toggled.
+        if rendering_enabled {
+            let mut v = self.vram_addr.get();
+            let fine_y = (v >> 12) & 0x0007;
+
+            if fine_y < 7 {
+                // Simple case: just increment fine_y
+                v = (v & !0x7000) | ((fine_y + 1) << 12);
+            } else {
+                // fine_y was 7, now wraps to 0
+                v &= !0x7000; // Clear fine_y bits
+
+                let coarse_y = (v >> 5) & 0x001F;
+                let new_coarse_y = if coarse_y == 29 {
+                    // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
+                    v ^= 0x0800; // Toggle nametable Y bit
+                    0
+                } else if coarse_y == 31 {
+                    // Edge case: if coarse_y is already 31, just wrap to 0 without toggling
+                    0
+                } else {
+                    coarse_y + 1
+                };
+                v = (v & !0x03E0) | (new_coarse_y << 5);
+            }
+
+            self.vram_addr.set(v);
         }
 
         self.suppress_a12.set(prev_suppress);
@@ -1558,11 +1725,12 @@ mod tests {
         ppu.chr_is_ram = true;
 
         // Write to an address > 0x3FFF and verify it wraps
-        ppu.write_register(6, 0xFF); // High byte (0xFF00)
-        ppu.write_register(6, 0xFF); // Low byte (0xFFFF)
+        // Hardware-accurate: first write only affects t, second write copies t to v
+        ppu.write_register(6, 0x3F); // High byte (0x3F00 - masked to 6 bits)
+        ppu.write_register(6, 0xFF); // Low byte (0x3FFF)
 
-        // Address should wrap to 0x3FFF due to masking
-        assert_eq!(ppu.vram_addr.get(), 0xFFFF);
+        // Address should be 0x3FFF (high byte masked to 6 bits: 0x3F, low byte 0xFF)
+        assert_eq!(ppu.vram_addr.get(), 0x3FFF);
 
         // Write a value - this should write to wrapped address (0x3FFF & 0x3FFF = 0x3FFF)
         ppu.write_register(7, 0x12);
@@ -1620,17 +1788,17 @@ mod tests {
 
         // First write sets X scroll
         ppu.write_register(5, 0x12);
-        assert_eq!(ppu.scroll_x, 0x12);
+        assert_eq!(ppu.scroll_x(), 0x12);
         assert!(ppu.addr_latch.get(), "First write should set latch");
 
         // Second write sets Y scroll
         ppu.write_register(5, 0x34);
-        assert_eq!(ppu.scroll_y, 0x34);
+        assert_eq!(ppu.scroll_y(), 0x34);
         assert!(!ppu.addr_latch.get(), "Second write should clear latch");
 
         // Third write should start over (X scroll)
         ppu.write_register(5, 0x56);
-        assert_eq!(ppu.scroll_x, 0x56);
+        assert_eq!(ppu.scroll_x(), 0x56);
         assert!(ppu.addr_latch.get(), "Third write should set latch again");
     }
 
@@ -1639,20 +1807,44 @@ mod tests {
         let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
         ppu.clear_first_frame_lock(); // Bypass first frame register lock for tests
 
-        // First write sets high byte
+        // Hardware-accurate behavior: first write ONLY affects t register, not v
+        // v is only updated on the second write when t is copied to v
+
+        // First write sets high byte of t only - v unchanged
         ppu.write_register(6, 0x20);
-        assert_eq!(ppu.vram_addr.get() & 0xFF00, 0x2000);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x0000,
+            "v should not change on first write"
+        );
+        assert_eq!(
+            ppu.temp_vram_addr.get() & 0x3F00,
+            0x2000,
+            "t high byte should be set"
+        );
         assert!(ppu.addr_latch.get(), "First write should set latch");
 
-        // Second write sets low byte
+        // Second write sets low byte and copies t to v
         ppu.write_register(6, 0x50);
-        assert_eq!(ppu.vram_addr.get(), 0x2050);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2050,
+            "v should now have full address"
+        );
         assert!(!ppu.addr_latch.get(), "Second write should clear latch");
 
-        // Third write should start over (high byte)
+        // Third write should start over (high byte) - only affects t
         ppu.write_register(6, 0x3F);
-        assert_eq!(ppu.vram_addr.get() & 0xFF00, 0x3F00);
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2050,
+            "v should not change on first write of new sequence"
+        );
         assert!(ppu.addr_latch.get(), "Third write should set latch again");
+
+        // Fourth write completes the sequence and updates v
+        ppu.write_register(6, 0x00);
+        assert_eq!(ppu.vram_addr.get(), 0x3F00, "v should now have new address");
     }
 
     #[test]
@@ -1679,7 +1871,7 @@ mod tests {
         // Since latch is true, this should write Y scroll
         ppu.write_register(5, 0x30);
         assert!(!ppu.addr_latch.get());
-        assert_eq!(ppu.scroll_y, 0x30, "Y scroll should be set");
+        assert_eq!(ppu.scroll_y(), 0x30, "Y scroll should be set");
     }
 
     #[test]
@@ -2377,9 +2569,9 @@ mod tests {
 
         // Test 1: Base nametable 0, no scroll
         // Should read from nametable 0
-        ppu.ctrl = 0x00; // Base nametable = 0
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2389,9 +2581,9 @@ mod tests {
         );
 
         // Test 2: Base nametable 1, no scroll - should use NT1
-        ppu.ctrl = 0x01; // Base nametable = 1
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(0, 0x01); // PPUCTRL: nametable 1
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2455,9 +2647,9 @@ mod tests {
 
         // Test 1: Base nametable 0 (PPUCTRL bits 0-1 = 00), no scroll
         // Should read from nametable 0
-        ppu.ctrl = 0x00;
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2468,9 +2660,9 @@ mod tests {
 
         // Test 2: Base nametable 2 (PPUCTRL bits 0-1 = 10), no scroll
         // Should read from nametable 2 due to base nametable Y bit being set
-        ppu.ctrl = 0x02; // Base nametable = 2 (bit 1 set = Y offset)
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(0, 0x02); // PPUCTRL: nametable 2 (bit 1 set = Y offset)
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2479,31 +2671,38 @@ mod tests {
             "Base NT2, no scroll: should show NT2 (color 2) due to base Y offset"
         );
 
-        // Test 3: Base nametable 0, with Y scroll = 240 (cross to next nametable vertically)
-        // Should read from nametable 2 (same as base NT2, no scroll)
-        ppu.ctrl = 0x00; // Base nametable = 0
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
-        let frame = ppu.render_frame();
-        let pixel = frame.pixels[0];
+        // Test 3: Mid-frame PPUCTRL write updates t register bits 10-11
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0 (bits 10-11 = 00)
+        ppu.write_register(5, 0); // X scroll = 0
+        ppu.write_register(5, 0); // Y scroll = 0
+        let t1 = ppu.temp_vram_addr.get();
         assert_eq!(
-            pixel,
-            nes_palette_rgb(0x16),
-            "Base NT0, scroll_y=240: should show NT2 (color 2) after crossing Y boundary"
+            t1 & 0x0C00,
+            0x0000,
+            "PPUCTRL nametable 0 should set t bits 10-11 to 00"
         );
 
-        // Test 4: Base nametable 2, with Y scroll = 240
-        // Should wrap around to nametable 0 (Y offset cancels out)
-        ppu.ctrl = 0x02; // Base nametable = 2
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
-        let frame = ppu.render_frame();
-        let pixel = frame.pixels[0];
+        ppu.write_register(0, 0x03); // PPUCTRL: nametable 3 (bits 10-11 = 11)
+        let t2 = ppu.temp_vram_addr.get();
         assert_eq!(
-            pixel,
-            nes_palette_rgb(0x30),
-            "Base NT2, scroll_y=240: should wrap to NT0 (color 1)"
+            t2 & 0x0C00,
+            0x0C00,
+            "PPUCTRL nametable 3 should set t bits 10-11 to 11"
         );
+
+        // Test 4: Scroll combination (X=16, Y=16) updates loopy registers correctly
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
+        ppu.write_register(5, 16); // X scroll = 16 (coarse_x=2, fine_x=0)
+        ppu.write_register(5, 16); // Y scroll = 16 (coarse_y=2, fine_y=0)
+        let t = ppu.temp_vram_addr.get();
+        let coarse_x = t & 0x001F;
+        let coarse_y = (t >> 5) & 0x001F;
+        let fine_y = (t >> 12) & 0x0007;
+        let fine_x = ppu.fine_x.get();
+        assert_eq!(coarse_x, 2, "X scroll 16 should set coarse_x to 2");
+        assert_eq!(fine_x, 0, "X scroll 16 should set fine_x to 0");
+        assert_eq!(coarse_y, 2, "Y scroll 16 should set coarse_y to 2");
+        assert_eq!(fine_y, 0, "Y scroll 16 should set fine_y to 0");
     }
 
     #[test]
@@ -3090,21 +3289,6 @@ mod tests {
         // Top-left pixel should come from NT0 (0xAA pattern)
         // We can't easily verify the pixel color, but we can check the frame rendered
 
-        // Scroll to (256, 0) - should use NT1
-        ppu.write_register(5, 0);
-        ppu.write_register(5, 0);
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
-        // After scrolling 256 pixels horizontally, we should see NT1
-
-        // Scroll to (0, 240) - should use NT2
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
-
-        // Scroll to (256, 240) - should use NT3
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
-
         // The key is that with 4-screen mode, the nametable selection should be:
         // - Position (x < 256, y < 240): NT0
         // - Position (x >= 256, y < 240): NT1
@@ -3210,5 +3394,291 @@ mod tests {
                 logical_start_y
             );
         }
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_first_write() {
+        // Test that first $2005 write updates temp register and fine_x correctly
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write scroll X = 123 ($7B)
+        // Expected: coarse X = 123 / 8 = 15 ($0F)
+        //           fine X = 123 % 8 = 3
+        ppu.write_register(5, 123);
+
+        let t = ppu.temp_vram_addr.get();
+        let coarse_x = t & 0x001F;
+        let fine_x = ppu.fine_x.get();
+
+        assert_eq!(coarse_x, 15, "Coarse X should be 15");
+        assert_eq!(fine_x, 3, "Fine X should be 3");
+        assert_eq!(ppu.scroll_x(), 123, "Legacy scroll_x should be 123");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_second_write() {
+        // Test that second $2005 write updates coarse Y and fine Y correctly
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // First write (X scroll)
+        ppu.write_register(5, 0);
+
+        // Second write: Y scroll = 195 ($C3)
+        // Expected: coarse Y = 195 / 8 = 24 ($18)
+        //           fine Y = 195 % 8 = 3
+        ppu.write_register(5, 195);
+
+        let t = ppu.temp_vram_addr.get();
+        let coarse_y = (t >> 5) & 0x001F;
+        let fine_y = (t >> 12) & 0x0007;
+
+        assert_eq!(coarse_y, 24, "Coarse Y should be 24");
+        assert_eq!(fine_y, 3, "Fine Y should be 3");
+        assert_eq!(ppu.scroll_y(), 195, "Legacy scroll_y should be 195");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuaddr_first_write() {
+        // Test that first $2006 write updates temp register high byte
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write high byte = $23
+        ppu.write_register(6, 0x23);
+
+        let t = ppu.temp_vram_addr.get();
+        assert_eq!(
+            (t >> 8) & 0xFF,
+            0x23,
+            "Temp register high byte should be $23"
+        );
+    }
+
+    #[test]
+    fn test_loopy_register_ppuaddr_second_write() {
+        // Test that second $2006 write updates temp register low byte
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write address $2345
+        ppu.write_register(6, 0x23);
+        ppu.write_register(6, 0x45);
+
+        let t = ppu.temp_vram_addr.get();
+        assert_eq!(t, 0x2345, "Temp register should be $2345");
+        assert_eq!(ppu.vram_addr.get(), 0x2345, "VRAM addr should be $2345");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_ppuaddr_interaction() {
+        // Test that $2005 and $2006 properly share the temp register
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Set scroll to (8, 16)
+        ppu.write_register(5, 8); // X scroll
+        ppu.write_register(5, 16); // Y scroll
+
+        let t_after_scroll = ppu.temp_vram_addr.get();
+
+        // Coarse X = 8/8 = 1, Fine X = 0
+        // Coarse Y = 16/8 = 2, Fine Y = 0
+        // Expected t bits: coarse_x=1, coarse_y=2, fine_y=0
+        let coarse_x = t_after_scroll & 0x001F;
+        let coarse_y = (t_after_scroll >> 5) & 0x001F;
+
+        assert_eq!(coarse_x, 1, "Coarse X should be 1");
+        assert_eq!(coarse_y, 2, "Coarse Y should be 2");
+
+        // Now write to PPUADDR - this should update temp register
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+
+        let t_after_addr = ppu.temp_vram_addr.get();
+        assert_eq!(
+            t_after_addr, 0x2000,
+            "PPUADDR should update temp register to $2000"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_edge_cases() {
+        // Test sprite 0 hit detection edge cases
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at position (16, 16) - aligned with tile boundary
+        ppu.oam[0] = 16 - 1; // Y position (subtract 1 as per OAM format)
+        ppu.oam[1] = 1; // Tile index
+        ppu.oam[2] = 0; // Attributes (front priority, palette 0)
+        ppu.oam[3] = 16; // X position
+
+        // Create sprite tile pattern with opaque pixels (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF; // Low bit plane - all 1s
+            ppu.chr[0x18 + i] = 0x00; // High bit plane - all 0s = color 1
+        }
+
+        // Set up background tile at position (2, 2) which covers screen (16-23, 16-23)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2; // Tile at (2,2) = tile index 2
+
+        // Background tile pattern with opaque pixels (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        // Set up palettes so pixels are visible
+        ppu.palette[0] = 0x0F; // Backdrop
+        ppu.palette[1] = 0x30; // BG color 1
+        ppu.palette[0x11] = 0x16; // Sprite color 1
+
+        // Enable rendering
+        ppu.mask = 0x1E; // Show bg + sprites, show in leftmost 8 pixels
+
+        // Set up v register so scanline 16 renders tile row 2 (which has our BG tile)
+        // v register format: yyy NN YYYYY XXXXX (fine_y, nametable, coarse_y, coarse_x)
+        // For scanline 16: coarse_y = 2, fine_y = 0
+        ppu.vram_addr.set(0x0040); // coarse_y = 2, everything else 0
+        ppu.temp_vram_addr.set(0x0040);
+
+        // Render scanline 16 where sprite 0 should overlap background
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+
+        // Sprite 0 hit should be set
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should be set when opaque pixels overlap"
+        );
+
+        // Test that sprite 0 hit doesn't occur at x=255
+        ppu.sprite_0_hit.set(false);
+        ppu.oam[3] = 255; // Move sprite 0 to x=255
+        ppu.render_scanline(16, &mut frame);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur at x=255"
+        );
+
+        // Test that sprite 0 hit doesn't occur if background is disabled
+        ppu.sprite_0_hit.set(false);
+        ppu.oam[3] = 16; // Move back to x=16
+        ppu.mask = 0x10; // Only sprites enabled
+        ppu.render_scanline(16, &mut frame);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when background is disabled"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_with_clipping() {
+        // Test that sprite 0 hit respects left clipping
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at position (4, 8) - partially in the clipped region
+        ppu.oam[0] = 8 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 4;
+
+        // Create opaque sprite tile pattern (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Background tile at position (0, 1) which covers screen (0-7, 8-15)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 32] = 2; // Row 1, column 0
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        // Set up palettes
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        // Set up v register so scanline 8 renders tile row 1 (which has our BG tile)
+        ppu.vram_addr.set(0x0020); // coarse_y = 1, everything else 0
+        ppu.temp_vram_addr.set(0x0020);
+
+        // Enable rendering but disable leftmost 8 pixels
+        ppu.mask = 0x18; // Show bg + sprites, hide leftmost 8 pixels
+
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(8, &mut frame);
+
+        // Sprite 0 hit should NOT occur because all overlapping pixels are in clipped region
+        // The sprite spans x=4-11, but leftmost 8 pixels (x=0-7) are clipped
+        // So only x=8-11 are visible, and at x=8-11 the background tile at (0,1) is also visible
+        // But according to NES hardware, sprite 0 hit doesn't trigger if either the sprite
+        // or background pixel is in a clipped region. Since x=4-7 would be clipped and
+        // x=8-11 are not clipped, we should get a hit at x=8.
+        // Actually, wait - the background tile is at (0,1) which covers x=0-7, y=8-15
+        // So at x=8-11, there's no background tile (it would be the next tile)
+
+        // Let me reconsider: sprite at x=4 covers x=4-11
+        // Background at tile (0,1) covers x=0-7
+        // Overlap is at x=4-7, which is in the clipped region when leftmost 8 pixels are hidden
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur in clipped region"
+        );
+
+        // Now enable leftmost 8 pixels
+        ppu.mask = 0x1E; // Show bg + sprites, show leftmost 8 pixels
+        ppu.sprite_0_hit.set(false);
+        // Reset v register for this scanline (simulating t->v copy at scanline start)
+        ppu.vram_addr.set(0x0020); // coarse_y = 1
+        ppu.render_scanline(8, &mut frame);
+
+        // Now sprite 0 hit should occur because overlap at x=4-7 is visible
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur when leftmost pixels are shown"
+        );
+    }
+
+    #[test]
+    fn test_sprite_evaluation_exactly_8_sprites() {
+        // Test that sprite overflow is NOT set when exactly 8 sprites are on scanline
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Place exactly 8 sprites on scanline 100
+        for i in 0..8 {
+            ppu.oam[i * 4] = 99; // Y position (100 - 1)
+            ppu.oam[i * 4 + 1] = 0;
+            ppu.oam[i * 4 + 2] = 0;
+            ppu.oam[i * 4 + 3] = (i * 16) as u8;
+        }
+
+        // Evaluate sprites for scanline 100
+        ppu.evaluate_sprites_for_scanline(100);
+
+        assert!(
+            !ppu.sprite_overflow.get(),
+            "Sprite overflow should NOT be set with exactly 8 sprites"
+        );
+
+        // Add 9th sprite (sprite index 8, OAM offset = 8 * 4 bytes per sprite entry)
+        const SPRITE_8_OAM_OFFSET: usize = 8 * 4;
+        ppu.oam[SPRITE_8_OAM_OFFSET] = 99;
+        ppu.evaluate_sprites_for_scanline(100);
+
+        assert!(
+            ppu.sprite_overflow.get(),
+            "Sprite overflow should be set with 9 sprites"
+        );
     }
 }
