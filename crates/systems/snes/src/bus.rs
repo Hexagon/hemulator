@@ -697,8 +697,8 @@ impl Memory65c816 for SnesBus {
                                 )
                             });
                             spc700.write_port(port, val);
-                            // Run a few SPC700 cycles to process the write
-                            spc700.run_cycles(10);
+                            // Note: SPC700 synchronization happens via tick_cycles() called after each CPU step
+                            // No need to run extra cycles here - it could desync the timing
                         } else {
                             // Use stub protocol
                             let port = port as usize;
