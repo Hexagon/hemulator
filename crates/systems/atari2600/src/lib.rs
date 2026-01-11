@@ -315,7 +315,7 @@ impl Atari2600System {
             playfield_reflect: bus.tia.playfield_reflect(),
             playfield_score_mode: bus.tia.playfield_score_mode(),
             playfield_priority: bus.tia.playfield_priority(),
-            
+
             // Player graphics and positions
             grp0: bus.tia.grp0(),
             grp1: bus.tia.grp1(),
@@ -325,7 +325,7 @@ impl Atari2600System {
             player1_reflect: bus.tia.player1_reflect(),
             nusiz0: bus.tia.nusiz0(),
             nusiz1: bus.tia.nusiz1(),
-            
+
             // Missiles and ball
             enam0: bus.tia.enam0(),
             enam1: bus.tia.enam1(),
@@ -334,13 +334,13 @@ impl Atari2600System {
             enabl: bus.tia.enabl(),
             ball_x: bus.tia.ball_x(),
             ball_size: bus.tia.ball_size(),
-            
+
             // Colors
             colubk: bus.tia.colubk(),
             colupf: bus.tia.colupf(),
             colup0: bus.tia.colup0(),
             colup1: bus.tia.colup1(),
-            
+
             // Collision registers
             cxm0p: bus.tia.cxm0p(),
             cxm1p: bus.tia.cxm1p(),
@@ -350,7 +350,7 @@ impl Atari2600System {
             cxm1fb: bus.tia.cxm1fb(),
             cxblpf: bus.tia.cxblpf(),
             cxppmm: bus.tia.cxppmm(),
-            
+
             // Video state
             vblank: bus.tia.vblank(),
             vsync: bus.tia.vsync(),

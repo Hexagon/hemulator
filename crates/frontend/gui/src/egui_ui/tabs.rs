@@ -122,14 +122,14 @@ pub struct Atari2600TileData {
     pub ball_x: u8,
     pub ball_size: u8,
     /// Color registers
-    pub colubk: u8,  // Background
-    pub colupf: u8,  // Playfield
-    pub colup0: u8,  // Player 0
-    pub colup1: u8,  // Player 1
+    pub colubk: u8, // Background
+    pub colupf: u8, // Playfield
+    pub colup0: u8, // Player 0
+    pub colup1: u8, // Player 1
     /// NTSC palette (128 colors) - static reference to avoid allocations
     pub master_palette: &'static [u32; 128],
     /// Collision detection registers
-    pub cxm0p: u8,  // Missile 0 to Player
+    pub cxm0p: u8, // Missile 0 to Player
     pub cxm1p: u8,  // Missile 1 to Player
     pub cxp0fb: u8, // Player 0 to Playfield/Ball
     pub cxp1fb: u8, // Player 1 to Playfield/Ball
@@ -1626,14 +1626,14 @@ impl TabManager {
                         SystemTileData::Atari2600(a2600_data) => {
                             ui.heading("🕹️ Atari 2600 Inspector");
                             ui.separator();
-                            
+
                             // Show basic status
                             ui.horizontal(|ui| {
                                 ui.label(format!("VSYNC: {}", if a2600_data.vsync { "ON" } else { "OFF" }));
                                 ui.separator();
                                 ui.label(format!("VBLANK: {}", if a2600_data.vblank { "ON" } else { "OFF" }));
                             });
-                            
+
                             ui.add_space(5.0);
                             ui.label("See Playfield, Sprites, Palette, and Collision tabs for detailed views");
                         }
@@ -2835,7 +2835,10 @@ impl TabManager {
                         .striped(true)
                         .show(ui, |ui| {
                             ui.label("PF0:");
-                            ui.label(egui::RichText::new(format!("${:02X} (bits 7-4)", data.pf0)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X} (bits 7-4)", data.pf0))
+                                    .monospace(),
+                            );
                             ui.end_row();
 
                             ui.label("PF1:");
@@ -2857,15 +2860,27 @@ impl TabManager {
                         .striped(true)
                         .show(ui, |ui| {
                             ui.label("Reflection:");
-                            ui.label(if data.playfield_reflect { "ON (mirrored)" } else { "OFF (repeated)" });
+                            ui.label(if data.playfield_reflect {
+                                "ON (mirrored)"
+                            } else {
+                                "OFF (repeated)"
+                            });
                             ui.end_row();
 
                             ui.label("Score Mode:");
-                            ui.label(if data.playfield_score_mode { "ON (left=P0, right=P1 color)" } else { "OFF" });
+                            ui.label(if data.playfield_score_mode {
+                                "ON (left=P0, right=P1 color)"
+                            } else {
+                                "OFF"
+                            });
                             ui.end_row();
 
                             ui.label("Priority:");
-                            ui.label(if data.playfield_priority { "IN FRONT of players" } else { "BEHIND players" });
+                            ui.label(if data.playfield_priority {
+                                "IN FRONT of players"
+                            } else {
+                                "BEHIND players"
+                            });
                             ui.end_row();
                         });
 
@@ -2874,25 +2889,29 @@ impl TabManager {
                     // Visual playfield representation
                     ui.label(egui::RichText::new("Visual Playfield (40 bits)").strong());
                     ui.label("Each bit represents 4 pixels horizontally");
-                    
+
                     let (response, painter) = ui.allocate_painter(
                         egui::Vec2::new(ui.available_width().min(640.0), 100.0),
                         egui::Sense::hover(),
                     );
-                    
+
                     let rect = response.rect;
                     let cell_width = rect.width() / 40.0;
                     let cell_height = rect.height();
-                    
+
                     // Get playfield color
                     let pf_color_idx = (data.colupf >> 1) as usize & 0x7F;
-                    let pf_rgb = data.master_palette.get(pf_color_idx).copied().unwrap_or(0xFFFFFF);
+                    let pf_rgb = data
+                        .master_palette
+                        .get(pf_color_idx)
+                        .copied()
+                        .unwrap_or(0xFFFFFF);
                     let pf_color = egui::Color32::from_rgb(
                         ((pf_rgb >> 16) & 0xFF) as u8,
                         ((pf_rgb >> 8) & 0xFF) as u8,
                         (pf_rgb & 0xFF) as u8,
                     );
-                    
+
                     // Draw playfield bits (left half)
                     // PF0 bits 7-4 (reversed), PF1 bits 7-0, PF2 bits 0-7
                     for i in 0..20 {
@@ -2906,22 +2925,31 @@ impl TabManager {
                             // PF2 bits 0-7
                             (data.pf2 >> (i - 12)) & 1
                         };
-                        
+
                         let x = rect.min.x + i as f32 * cell_width;
                         let cell_rect = egui::Rect::from_min_size(
                             egui::pos2(x, rect.min.y),
                             egui::vec2(cell_width, cell_height),
                         );
-                        
-                        let color = if bit != 0 { pf_color } else { egui::Color32::from_rgb(32, 32, 32) };
+
+                        let color = if bit != 0 {
+                            pf_color
+                        } else {
+                            egui::Color32::from_rgb(32, 32, 32)
+                        };
                         painter.rect_filled(cell_rect, 0.0, color);
-                        painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                        painter.rect_stroke(
+                            cell_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                            egui::StrokeKind::Inside,
+                        );
                     }
-                    
+
                     // Draw playfield bits (right half - reflection or repeat)
                     for i in 0..20 {
                         let source_i = if data.playfield_reflect { 19 - i } else { i };
-                        
+
                         let bit = if source_i < 4 {
                             (data.pf0 >> (4 + source_i)) & 1
                         } else if source_i < 12 {
@@ -2929,26 +2957,41 @@ impl TabManager {
                         } else {
                             (data.pf2 >> (source_i - 12)) & 1
                         };
-                        
+
                         let x = rect.min.x + (20 + i) as f32 * cell_width;
                         let cell_rect = egui::Rect::from_min_size(
                             egui::pos2(x, rect.min.y),
                             egui::vec2(cell_width, cell_height),
                         );
-                        
-                        let color = if bit != 0 { pf_color } else { egui::Color32::from_rgb(32, 32, 32) };
+
+                        let color = if bit != 0 {
+                            pf_color
+                        } else {
+                            egui::Color32::from_rgb(32, 32, 32)
+                        };
                         painter.rect_filled(cell_rect, 0.0, color);
-                        painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                        painter.rect_stroke(
+                            cell_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                            egui::StrokeKind::Inside,
+                        );
                     }
 
                     ui.add_space(10.0);
                     ui.label(egui::RichText::new("Left Half").weak());
                     ui.label("PF0[4-7] (4 bits) → PF1[7-0] (8 bits) → PF2[0-7] (8 bits)");
-                    ui.label(egui::RichText::new(format!(
-                        "Right Half: {}",
-                        if data.playfield_reflect { "Mirrored from left half (REFL=1)" } else { "Repeated from left half (REFL=0)" }
-                    )).weak());
-                    
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Right Half: {}",
+                            if data.playfield_reflect {
+                                "Mirrored from left half (REFL=1)"
+                            } else {
+                                "Repeated from left half (REFL=0)"
+                            }
+                        ))
+                        .weak(),
+                    );
                 } else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
@@ -2979,7 +3022,13 @@ impl TabManager {
                         .striped(true)
                         .show(ui, |ui| {
                             ui.label("Graphics:");
-                            ui.label(egui::RichText::new(format!("${:02X} = %{:08b}", data.grp0, data.grp0)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "${:02X} = %{:08b}",
+                                    data.grp0, data.grp0
+                                ))
+                                .monospace(),
+                            );
                             ui.end_row();
 
                             ui.label("Position:");
@@ -2987,11 +3036,17 @@ impl TabManager {
                             ui.end_row();
 
                             ui.label("Reflect:");
-                            ui.label(if data.player0_reflect { "Yes (mirrored)" } else { "No" });
+                            ui.label(if data.player0_reflect {
+                                "Yes (mirrored)"
+                            } else {
+                                "No"
+                            });
                             ui.end_row();
 
                             ui.label("NUSIZ:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.nusiz0)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.nusiz0)).monospace(),
+                            );
                             ui.end_row();
                         });
 
@@ -3002,31 +3057,44 @@ impl TabManager {
                             egui::Vec2::new(ui.available_width().min(200.0), 30.0),
                             egui::Sense::hover(),
                         );
-                        
+
                         let rect = response.rect;
                         let pixel_width = rect.width() / 8.0;
-                        
+
                         let p0_color_idx = (data.colup0 >> 1) as usize & 0x7F;
-                        let p0_rgb = data.master_palette.get(p0_color_idx).copied().unwrap_or(0xFFFFFF);
+                        let p0_rgb = data
+                            .master_palette
+                            .get(p0_color_idx)
+                            .copied()
+                            .unwrap_or(0xFFFFFF);
                         let p0_color = egui::Color32::from_rgb(
                             ((p0_rgb >> 16) & 0xFF) as u8,
                             ((p0_rgb >> 8) & 0xFF) as u8,
                             (p0_rgb & 0xFF) as u8,
                         );
-                        
+
                         for i in 0..8 {
                             let bit_pos = if data.player0_reflect { i } else { 7 - i };
                             let bit = (data.grp0 >> bit_pos) & 1;
-                            
+
                             let x = rect.min.x + i as f32 * pixel_width;
                             let pixel_rect = egui::Rect::from_min_size(
                                 egui::pos2(x, rect.min.y),
                                 egui::vec2(pixel_width, rect.height()),
                             );
-                            
-                            let color = if bit != 0 { p0_color } else { egui::Color32::from_rgb(32, 32, 32) };
+
+                            let color = if bit != 0 {
+                                p0_color
+                            } else {
+                                egui::Color32::from_rgb(32, 32, 32)
+                            };
                             painter.rect_filled(pixel_rect, 0.0, color);
-                            painter.rect_stroke(pixel_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                            painter.rect_stroke(
+                                pixel_rect,
+                                0.0,
+                                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                                egui::StrokeKind::Inside,
+                            );
                         }
                     }
 
@@ -3040,7 +3108,13 @@ impl TabManager {
                         .striped(true)
                         .show(ui, |ui| {
                             ui.label("Graphics:");
-                            ui.label(egui::RichText::new(format!("${:02X} = %{:08b}", data.grp1, data.grp1)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "${:02X} = %{:08b}",
+                                    data.grp1, data.grp1
+                                ))
+                                .monospace(),
+                            );
                             ui.end_row();
 
                             ui.label("Position:");
@@ -3048,11 +3122,17 @@ impl TabManager {
                             ui.end_row();
 
                             ui.label("Reflect:");
-                            ui.label(if data.player1_reflect { "Yes (mirrored)" } else { "No" });
+                            ui.label(if data.player1_reflect {
+                                "Yes (mirrored)"
+                            } else {
+                                "No"
+                            });
                             ui.end_row();
 
                             ui.label("NUSIZ:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.nusiz1)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.nusiz1)).monospace(),
+                            );
                             ui.end_row();
                         });
 
@@ -3063,31 +3143,44 @@ impl TabManager {
                             egui::Vec2::new(ui.available_width().min(200.0), 30.0),
                             egui::Sense::hover(),
                         );
-                        
+
                         let rect = response.rect;
                         let pixel_width = rect.width() / 8.0;
-                        
+
                         let p1_color_idx = (data.colup1 >> 1) as usize & 0x7F;
-                        let p1_rgb = data.master_palette.get(p1_color_idx).copied().unwrap_or(0xFFFFFF);
+                        let p1_rgb = data
+                            .master_palette
+                            .get(p1_color_idx)
+                            .copied()
+                            .unwrap_or(0xFFFFFF);
                         let p1_color = egui::Color32::from_rgb(
                             ((p1_rgb >> 16) & 0xFF) as u8,
                             ((p1_rgb >> 8) & 0xFF) as u8,
                             (p1_rgb & 0xFF) as u8,
                         );
-                        
+
                         for i in 0..8 {
                             let bit_pos = if data.player1_reflect { i } else { 7 - i };
                             let bit = (data.grp1 >> bit_pos) & 1;
-                            
+
                             let x = rect.min.x + i as f32 * pixel_width;
                             let pixel_rect = egui::Rect::from_min_size(
                                 egui::pos2(x, rect.min.y),
                                 egui::vec2(pixel_width, rect.height()),
                             );
-                            
-                            let color = if bit != 0 { p1_color } else { egui::Color32::from_rgb(32, 32, 32) };
+
+                            let color = if bit != 0 {
+                                p1_color
+                            } else {
+                                egui::Color32::from_rgb(32, 32, 32)
+                            };
                             painter.rect_filled(pixel_rect, 0.0, color);
-                            painter.rect_stroke(pixel_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                            painter.rect_stroke(
+                                pixel_rect,
+                                0.0,
+                                egui::Stroke::new(1.0, egui::Color32::DARK_GRAY),
+                                egui::StrokeKind::Inside,
+                            );
                         }
                     }
 
@@ -3120,7 +3213,6 @@ impl TabManager {
                             ui.label(format!("X = {}, Size = {}", data.ball_x, data.ball_size));
                             ui.end_row();
                         });
-
                 } else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
@@ -3152,7 +3244,9 @@ impl TabManager {
                         .show(ui, |ui| {
                             // Background
                             ui.label("Background:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.colubk)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.colubk)).monospace(),
+                            );
                             let bg_idx = (data.colubk >> 1) as usize & 0x7F;
                             let bg_rgb = data.master_palette.get(bg_idx).copied().unwrap_or(0);
                             let mut bg_color = egui::Color32::from_rgb(
@@ -3165,7 +3259,9 @@ impl TabManager {
 
                             // Playfield
                             ui.label("Playfield:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.colupf)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.colupf)).monospace(),
+                            );
                             let pf_idx = (data.colupf >> 1) as usize & 0x7F;
                             let pf_rgb = data.master_palette.get(pf_idx).copied().unwrap_or(0);
                             let mut pf_color = egui::Color32::from_rgb(
@@ -3178,7 +3274,9 @@ impl TabManager {
 
                             // Player 0
                             ui.label("Player 0:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.colup0)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.colup0)).monospace(),
+                            );
                             let p0_idx = (data.colup0 >> 1) as usize & 0x7F;
                             let p0_rgb = data.master_palette.get(p0_idx).copied().unwrap_or(0);
                             let mut p0_color = egui::Color32::from_rgb(
@@ -3191,7 +3289,9 @@ impl TabManager {
 
                             // Player 1
                             ui.label("Player 1:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.colup1)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.colup1)).monospace(),
+                            );
                             let p1_idx = (data.colup1 >> 1) as usize & 0x7F;
                             let p1_rgb = data.master_palette.get(p1_idx).copied().unwrap_or(0);
                             let mut p1_color = egui::Color32::from_rgb(
@@ -3236,10 +3336,14 @@ impl TabManager {
                             );
 
                             painter.rect_filled(cell_rect, 0.0, color);
-                            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(0.5, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                            painter.rect_stroke(
+                                cell_rect,
+                                0.0,
+                                egui::Stroke::new(0.5, egui::Color32::DARK_GRAY),
+                                egui::StrokeKind::Inside,
+                            );
                         }
                     }
-
                 } else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
@@ -3279,71 +3383,116 @@ impl TabManager {
 
                             // CXM0P - Missile 0 to Players
                             ui.label("CXM0P:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm0p)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxm0p)).monospace(),
+                            );
                             let m0p0 = (data.cxm0p & 0x80) != 0;
                             let m0p1 = (data.cxm0p & 0x40) != 0;
-                            ui.label(format!("M0-P0: {} | M0-P1: {}", if m0p0 { "✓" } else { "✗" }, if m0p1 { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "M0-P0: {} | M0-P1: {}",
+                                if m0p0 { "✓" } else { "✗" },
+                                if m0p1 { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXM1P - Missile 1 to Players
                             ui.label("CXM1P:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm1p)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxm1p)).monospace(),
+                            );
                             let m1p0 = (data.cxm1p & 0x80) != 0;
                             let m1p1 = (data.cxm1p & 0x40) != 0;
-                            ui.label(format!("M1-P0: {} | M1-P1: {}", if m1p0 { "✓" } else { "✗" }, if m1p1 { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "M1-P0: {} | M1-P1: {}",
+                                if m1p0 { "✓" } else { "✗" },
+                                if m1p1 { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXP0FB - Player 0 to Playfield/Ball
                             ui.label("CXP0FB:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxp0fb)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxp0fb)).monospace(),
+                            );
                             let p0pf = (data.cxp0fb & 0x80) != 0;
                             let p0bl = (data.cxp0fb & 0x40) != 0;
-                            ui.label(format!("P0-PF: {} | P0-BL: {}", if p0pf { "✓" } else { "✗" }, if p0bl { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "P0-PF: {} | P0-BL: {}",
+                                if p0pf { "✓" } else { "✗" },
+                                if p0bl { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXP1FB - Player 1 to Playfield/Ball
                             ui.label("CXP1FB:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxp1fb)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxp1fb)).monospace(),
+                            );
                             let p1pf = (data.cxp1fb & 0x80) != 0;
                             let p1bl = (data.cxp1fb & 0x40) != 0;
-                            ui.label(format!("P1-PF: {} | P1-BL: {}", if p1pf { "✓" } else { "✗" }, if p1bl { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "P1-PF: {} | P1-BL: {}",
+                                if p1pf { "✓" } else { "✗" },
+                                if p1bl { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXM0FB - Missile 0 to Playfield/Ball
                             ui.label("CXM0FB:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm0fb)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxm0fb)).monospace(),
+                            );
                             let m0pf = (data.cxm0fb & 0x80) != 0;
                             let m0bl = (data.cxm0fb & 0x40) != 0;
-                            ui.label(format!("M0-PF: {} | M0-BL: {}", if m0pf { "✓" } else { "✗" }, if m0bl { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "M0-PF: {} | M0-BL: {}",
+                                if m0pf { "✓" } else { "✗" },
+                                if m0bl { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXM1FB - Missile 1 to Playfield/Ball
                             ui.label("CXM1FB:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm1fb)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxm1fb)).monospace(),
+                            );
                             let m1pf = (data.cxm1fb & 0x80) != 0;
                             let m1bl = (data.cxm1fb & 0x40) != 0;
-                            ui.label(format!("M1-PF: {} | M1-BL: {}", if m1pf { "✓" } else { "✗" }, if m1bl { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "M1-PF: {} | M1-BL: {}",
+                                if m1pf { "✓" } else { "✗" },
+                                if m1bl { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
 
                             // CXBLPF - Ball to Playfield
                             ui.label("CXBLPF:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxblpf)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxblpf)).monospace(),
+                            );
                             let blpf = (data.cxblpf & 0x80) != 0;
                             ui.label(format!("BL-PF: {}", if blpf { "✓" } else { "✗" }));
                             ui.end_row();
 
                             // CXPPMM - Player/Missile collisions
                             ui.label("CXPPMM:");
-                            ui.label(egui::RichText::new(format!("${:02X}", data.cxppmm)).monospace());
+                            ui.label(
+                                egui::RichText::new(format!("${:02X}", data.cxppmm)).monospace(),
+                            );
                             let m0m1 = (data.cxppmm & 0x80) != 0;
                             let p0p1 = (data.cxppmm & 0x40) != 0;
-                            ui.label(format!("M0-M1: {} | P0-P1: {}", if m0m1 { "✓" } else { "✗" }, if p0p1 { "✓" } else { "✗" }));
+                            ui.label(format!(
+                                "M0-M1: {} | P0-P1: {}",
+                                if m0m1 { "✓" } else { "✗" },
+                                if p0p1 { "✓" } else { "✗" }
+                            ));
                             ui.end_row();
                         });
 
                     ui.add_space(10.0);
-                    ui.label(egui::RichText::new("✓ = Collision detected | ✗ = No collision").weak());
-
+                    ui.label(
+                        egui::RichText::new("✓ = Collision detected | ✗ = No collision").weak(),
+                    );
                 } else {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
@@ -3355,6 +3504,8 @@ impl TabManager {
                     });
                 }
             });
+    }
+
     fn render_gb_tilemaps(&self, ui: &mut Ui, data: &GbTileData) {
         // Game Boy has two 32x32 tilemaps (Background and Window)
         // Each tilemap is 32x32 tiles = 256x256 pixels
