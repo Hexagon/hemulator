@@ -41,12 +41,6 @@ docs/
 ├── _config.ts             # Lumocs configuration
 ├── deno.json              # Deno tasks and dependencies
 ├── .gitignore            # Excludes _site build output
-├── ARCHITECTURE.md        # Redirect to site
-├── CONTRIBUTING.md        # Redirect to site
-├── MANUAL.md              # Redirect to site
-├── N64_STATUS.md          # Redirect to site
-├── NEXT_EMULATOR_RECOMMENDATION.md  # Redirect to site
-├── SMS_IMPLEMENTATION_GUIDE.md      # Redirect to site
 └── README.md              # This file
 ```
 
@@ -67,12 +61,6 @@ Overview of all emulated systems with links to system-specific READMEs in `crate
 
 ### Reference Documentation (`src/references/`)
 Technical references for CPUs, hardware components, and protocols. Includes instruction sets, addressing modes, and implementation notes with sources.
-
-### Root Documentation Files (`docs/*.md`)
-Most files in the root `docs/` directory are **simple redirects** for backward compatibility:
-- `MANUAL.md`, `CONTRIBUTING.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → redirect to site
-- `ARCHITECTURE.md` → redirects to repository root ARCHITECTURE.md
-- `README.md` → this file, documenting the site itself
 
 ### Repository Root Documentation
 - **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Complete architecture documentation (repository root)
@@ -145,13 +133,9 @@ nav_order: 1  # Optional: controls navigation order
 
 ## Maintaining Consistency
 
-**Root Documentation Files**: Most files in the `docs/` directory are now **simple redirects** to the documentation site:
-- `ARCHITECTURE.md`, `CONTRIBUTING.md`, `MANUAL.md`, `N64_STATUS.md`, `NEXT_EMULATOR_RECOMMENDATION.md`, `SMS_IMPLEMENTATION_GUIDE.md` → Redirect files
-- `README.md` → Documentation about the site itself
-
 **The authoritative source is `docs/src/`** - all documentation edits should be made there.
 
 When updating documentation:
 1. Edit files in `docs/src/` (this is the single source of truth)
 2. Push to master/main to automatically deploy to the site
-3. Do NOT edit the redirect files in `docs/` root
+3. All documentation is now served from the documentation site at https://hemulator.56k.guru

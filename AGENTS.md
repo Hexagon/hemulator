@@ -6,8 +6,6 @@
 - **[README.md](README.md)**: Developer quick start, build instructions, project overview
 - **[Documentation Site](https://hemulator.56k.guru)**: Complete documentation hosted via GitHub Pages
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Overall emulation system architecture and design patterns
-- **[MANUAL.md](docs/MANUAL.md)**: End-user manual with controls, features, and system-specific information
-- **[CONTRIBUTING.md](docs/CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
 
 **System-Specific Implementation Details**:
 - **[NES](crates/systems/nes/README.md)**: Nintendo Entertainment System
@@ -35,12 +33,11 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
 
 **Repository Documentation**:
 - **System READMEs** (`crates/systems/*/README.md`): Keep repository-specific implementation details here
-- **Root Documentation** (`docs/*.md`): Maintained for backward compatibility and direct access
-- **Site Source** (`docs/src/`): Lumocs source files with frontmatter metadata
+- **Site Source** (`docs/src/`): Lumocs source files with frontmatter metadata - all user and developer documentation
 
 **When Adding/Updating Documentation**:
-1. **User-facing content**: Update `docs/src/user/` and mirror changes to `docs/MANUAL.md`
-2. **Developer content**: Update `docs/src/developer/` and mirror changes to corresponding root docs
+1. **User-facing content**: Update `docs/src/user/`
+2. **Developer content**: Update `docs/src/developer/`
 3. **System-specific**: Update `crates/systems/*/README.md` and ensure `docs/src/systems/index.md` links are current
 4. **References**: Add CPU/hardware references to `docs/src/references/` with proper frontmatter
 5. **Always include sources**: Reference datasheets, wikis, and documentation in implementation docs
@@ -51,7 +48,7 @@ The project uses a **Lumocs-based documentation site** hosted at https://hemulat
 - Build locally: `cd docs && deno task build`
 - View output in `docs/_site/` (excluded from git)
 
-- **Keep track of known limitations**: Document known limitations and missing features in docs/MANUAL.md under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
+- **Keep track of known limitations**: Document known limitations and missing features in the documentation site under each system's "Known Limitations" section. When making changes related to a system, review and update its limitations list if any are fixed.
 
 - **Document development references**: All technical references, datasheets, wikis, and documentation used during system development MUST be tracked in each system's README.md "References" section. When implementing or debugging system features, add references to the sources consulted. This helps future developers understand the technical basis for implementation decisions and locate authoritative documentation. See PC and SMS READMEs for examples of well-documented reference sections.
 
