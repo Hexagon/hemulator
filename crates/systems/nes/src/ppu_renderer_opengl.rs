@@ -37,8 +37,6 @@ use super::ppu::Ppu;
 #[cfg(feature = "opengl")]
 use super::ppu_renderer::NesPpuRenderer;
 #[cfg(feature = "opengl")]
-use crate::cartridge::Mirroring;
-#[cfg(feature = "opengl")]
 use emu_core::renderer::Renderer;
 #[cfg(feature = "opengl")]
 use emu_core::types::Frame;
@@ -785,8 +783,16 @@ void main() {
             }
         }
     }
+}
 
-    /// Helper to get NES master palette color
+#[cfg(feature = "opengl")]
+impl Renderer for OpenGLNesPpuRenderer {
+    fn get_frame(&self) -> &Frame {
+        &self.framebuffer
+    }
+
+    fn clear(&mut self, color: u32) {
+        unsafe {
             self.gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             let r = ((color >> 16) & 0xFF) as f32 / 255.0;
             let g = ((color >> 8) & 0xFF) as f32 / 255.0;
@@ -861,7 +867,7 @@ impl NesPpuRenderer for OpenGLNesPpuRenderer {
         // The PPU's render_scanline() method handles all the complex logic
         // for scrolling, sprite evaluation, and priority correctly.
         ppu.render_scanline(scanline, &mut self.framebuffer);
-        
+
         // Note: This uses CPU rendering instead of GPU for correctness.
         // A future optimization could batch scanline data and upload to GPU,
         // but that would require careful handling of mid-frame CHR/scroll changes.
@@ -915,147 +921,4 @@ mod bytemuck {
             )
         }
     }
-}
-
-#[cfg(all(test, feature = "opengl"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_nes_palette_rgb() {
-        // Test a few known palette colors
-        assert_eq!(OpenGLNesPpuRenderer::nes_palette_rgb(0x0F), 0xFF000000); // Black
-        assert_eq!(OpenGLNesPpuRenderer::nes_palette_rgb(0x30), 0xFFECEEEC); // White
-        assert_eq!(OpenGLNesPpuRenderer::nes_palette_rgb(0x16), 0xFF982220); // Red
-        assert_eq!(OpenGLNesPpuRenderer::nes_palette_rgb(0x2A), 0xFF4CD020); // Green
-        assert_eq!(OpenGLNesPpuRenderer::nes_palette_rgb(0x12), 0xFF3032EC); // Blue
-    }
-
-    #[test]
-    fn test_nes_palette_rgb_wrapping() {
-        // Test that palette wraps at 0x3F
-        assert_eq!(
-            OpenGLNesPpuRenderer::nes_palette_rgb(0x00),
-            OpenGLNesPpuRenderer::nes_palette_rgb(0x40)
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::nes_palette_rgb(0x3F),
-            OpenGLNesPpuRenderer::nes_palette_rgb(0x7F)
-        );
-    }
-
-    #[test]
-    fn test_map_nametable_addr_vertical() {
-        // Vertical mirroring: [0 1] [0 1]
-        let mirroring = Mirroring::Vertical;
-
-        // Nametable 0 ($2000-$23FF) maps to physical table 0
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x23FF, mirroring),
-            0x03FF
-        );
-
-        // Nametable 1 ($2400-$27FF) maps to physical table 1
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
-            0x0400
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x27FF, mirroring),
-            0x07FF
-        );
-
-        // Nametable 2 ($2800-$2BFF) mirrors nametable 0
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
-            0x0000
-        );
-
-        // Nametable 3 ($2C00-$2FFF) mirrors nametable 1
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
-            0x0400
-        );
-    }
-
-    #[test]
-    fn test_map_nametable_addr_horizontal() {
-        // Horizontal mirroring: [0 0] [1 1]
-        // NT0 and NT1 -> physical table 0
-        // NT2 and NT3 -> physical table 1
-        let mirroring = Mirroring::Horizontal;
-
-        // Nametable 0 ($2000-$23FF) maps to physical table 0
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x23FF, mirroring),
-            0x03FF
-        );
-
-        // Nametable 1 ($2400-$27FF) also maps to physical table 0
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x27FF, mirroring),
-            0x03FF
-        );
-
-        // Nametable 2 ($2800-$2BFF) maps to physical table 1
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
-            0x0400
-        );
-
-        // Nametable 3 ($2C00-$2FFF) also maps to physical table 1
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
-            0x0400
-        );
-    }
-
-    #[test]
-    fn test_map_nametable_addr_single_screen() {
-        // Single screen lower: all map to physical table 0
-        let mirroring = Mirroring::SingleScreenLower;
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2800, mirroring),
-            0x0000
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2C00, mirroring),
-            0x0000
-        );
-
-        // Single screen upper: all map to physical table 1
-        let mirroring = Mirroring::SingleScreenUpper;
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2000, mirroring),
-            0x0400
-        );
-        assert_eq!(
-            OpenGLNesPpuRenderer::map_nametable_addr(0x2400, mirroring),
-            0x0400
-        );
-    }
-
-    // Note: Full renderer tests (shader execution, texture uploads, etc.)
-    // would require a GL context and are better suited for integration tests.
-    // The tests above cover the pure computation logic that doesn't depend on GL.
 }

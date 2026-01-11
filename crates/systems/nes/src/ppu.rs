@@ -745,14 +745,14 @@ impl Ppu {
             for x in 0..width {
                 // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
                 let should_render_bg = show_bg_left || x >= 8;
-                
+
                 // Calculate world position considering base nametable from PPUCTRL
                 // PPUCTRL bits 0-1 select base nametable, which provides an offset in the virtual nametable space
                 // Bit 0 = horizontal offset (256 pixels)
                 // Bit 1 = vertical offset (240 pixels)
                 let base_x_offset = (base_nt & 1) as u32 * 256;
                 let base_y_offset = ((base_nt >> 1) & 1) as u32 * 240;
-                
+
                 let wx = x + sx + base_x_offset;
                 let wy = y + sy + base_y_offset;
 
@@ -761,7 +761,7 @@ impl Ppu {
                 // Vertical: nametable bit flips every 240 pixels (30 tiles * 8 pixels)
                 let nt_x = ((wx / 256) & 1) as u8;
                 let nt_y = ((wy / 240) & 1) as u8;
-                
+
                 // Choose nametable based on mirroring mode and scroll position
                 let nt = if self.mirroring == Mirroring::FourScreen {
                     // 4-screen mode: Direct nametable selection
