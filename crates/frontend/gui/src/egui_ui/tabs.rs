@@ -2201,26 +2201,149 @@ impl TabManager {
         let scroll_pixel_x = (scroll_x % 256.0) * scale;
         let scroll_pixel_y = (scroll_y % 240.0) * scale;
 
-        // Draw the scroll window highlight
-        let scroll_window_rect = egui::Rect::from_min_size(
-            egui::Pos2::new(scroll_nt_x + scroll_pixel_x, scroll_nt_y + scroll_pixel_y),
-            egui::Vec2::new(viewport_width * scale, viewport_height * scale),
-        );
+        // The scroll window is 256x240 pixels and can wrap across nametable boundaries
+        // We need to draw it in up to 4 pieces to handle wrapping correctly
+        let viewport_width_scaled = viewport_width * scale;
+        let viewport_height_scaled = viewport_height * scale;
 
-        // Draw semi-transparent overlay for the visible area
-        painter.rect_stroke(
-            scroll_window_rect,
-            0.0,
-            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 0, 200)),
-            egui::StrokeKind::Outside,
-        );
+        // Check if the window wraps horizontally
+        let wraps_x = scroll_pixel_x + viewport_width_scaled > nt_width;
+        // Check if the window wraps vertically
+        let wraps_y = scroll_pixel_y + viewport_height_scaled > nt_height;
 
-        // Add a subtle fill to show the active viewport
-        painter.rect_filled(
-            scroll_window_rect,
-            0.0,
-            egui::Color32::from_rgba_unmultiplied(255, 255, 0, 20),
-        );
+        // Helper function to draw a scroll window rectangle segment
+        let draw_scroll_rect = |painter: &egui::Painter, x: f32, y: f32, w: f32, h: f32| {
+            let rect = egui::Rect::from_min_size(egui::Pos2::new(x, y), egui::Vec2::new(w, h));
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(255, 255, 0, 200)),
+                egui::StrokeKind::Outside,
+            );
+            painter.rect_filled(
+                rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 0, 20),
+            );
+        };
+
+        // Draw the scroll window in up to 4 segments to handle wrapping
+        match (wraps_x, wraps_y) {
+            (false, false) => {
+                // No wrapping - draw single rectangle
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    viewport_width_scaled,
+                    viewport_height_scaled,
+                );
+            }
+            (true, false) => {
+                // Wraps horizontally only
+                let width_first = nt_width - scroll_pixel_x;
+                let width_second = viewport_width_scaled - width_first;
+
+                // First segment (right side of current nametable)
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    width_first,
+                    viewport_height_scaled,
+                );
+
+                // Second segment (left side of next nametable)
+                let next_nt_x = if grid_x == 0 {
+                    scroll_nt_x + nt_width + spacing
+                } else {
+                    scroll_nt_x - nt_width - spacing
+                };
+                draw_scroll_rect(
+                    &painter,
+                    next_nt_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    width_second,
+                    viewport_height_scaled,
+                );
+            }
+            (false, true) => {
+                // Wraps vertically only
+                let height_first = nt_height - scroll_pixel_y;
+                let height_second = viewport_height_scaled - height_first;
+
+                // First segment (bottom of current nametable)
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    viewport_width_scaled,
+                    height_first,
+                );
+
+                // Second segment (top of next nametable)
+                let next_nt_y = if grid_y == 0 {
+                    scroll_nt_y + nt_height + spacing
+                } else {
+                    scroll_nt_y - nt_height - spacing
+                };
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    next_nt_y,
+                    viewport_width_scaled,
+                    height_second,
+                );
+            }
+            (true, true) => {
+                // Wraps both horizontally and vertically - draw 4 segments
+                let width_first = nt_width - scroll_pixel_x;
+                let width_second = viewport_width_scaled - width_first;
+                let height_first = nt_height - scroll_pixel_y;
+                let height_second = viewport_height_scaled - height_first;
+
+                let next_nt_x = if grid_x == 0 {
+                    scroll_nt_x + nt_width + spacing
+                } else {
+                    scroll_nt_x - nt_width - spacing
+                };
+                let next_nt_y = if grid_y == 0 {
+                    scroll_nt_y + nt_height + spacing
+                } else {
+                    scroll_nt_y - nt_height - spacing
+                };
+
+                // Bottom-right of current nametable
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    width_first,
+                    height_first,
+                );
+
+                // Bottom-left of horizontally adjacent nametable
+                draw_scroll_rect(
+                    &painter,
+                    next_nt_x,
+                    scroll_nt_y + scroll_pixel_y,
+                    width_second,
+                    height_first,
+                );
+
+                // Top-right of vertically adjacent nametable
+                draw_scroll_rect(
+                    &painter,
+                    scroll_nt_x + scroll_pixel_x,
+                    next_nt_y,
+                    width_first,
+                    height_second,
+                );
+
+                // Top-left of diagonally adjacent nametable
+                draw_scroll_rect(&painter, next_nt_x, next_nt_y, width_second, height_second);
+            }
+        }
 
         // Handle hover tooltip
         if let Some(hover_pos) = response.hover_pos() {

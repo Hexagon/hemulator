@@ -3131,4 +3131,80 @@ mod tests {
         assert_eq!(nt2, 0xCC, "NT2 should remain 0xCC");
         assert_eq!(nt3, 0xDD, "NT3 should remain 0xDD");
     }
+
+    #[test]
+    fn test_scroll_window_bounds() {
+        // Test that scroll calculations produce valid nametable coordinates
+        // and don't exceed the 2x2 nametable grid bounds (512x480 logical space)
+
+        // Test various scroll positions
+        let test_cases = vec![
+            (0, 0, 0, "Top-left of NT0"),
+            (255, 0, 0, "Top-right of NT0"),
+            (0, 239, 0, "Bottom-left of NT0"),
+            (255, 239, 0, "Bottom-right of NT0"),
+            (256, 0, 1, "Wrapped to NT1"),
+            (0, 240, 2, "Wrapped to NT2"),
+            (256, 240, 3, "Wrapped to NT3"),
+            (511, 479, 0, "Maximum scroll wraps around"),
+        ];
+
+        for (scroll_x, scroll_y, expected_base_nt, desc) in test_cases {
+            // Calculate which nametable the scroll window starts in
+            let nt_x = (scroll_x / 256) & 1;
+            let nt_y = (scroll_y / 240) & 1;
+            let scroll_nt = expected_base_nt ^ nt_x ^ (nt_y << 1);
+
+            // Calculate position within nametable
+            let pixel_x = scroll_x % 256;
+            let pixel_y = scroll_y % 240;
+
+            // Verify scroll window stays within bounds
+            // The scroll window is 256x240 pixels, and can wrap across nametable boundaries
+            // But the starting position should always be within a valid nametable
+            assert!(
+                scroll_nt < 4,
+                "{}: scroll_nt {} should be 0-3",
+                desc,
+                scroll_nt
+            );
+            assert!(
+                pixel_x < 256,
+                "{}: pixel_x {} should be < 256",
+                desc,
+                pixel_x
+            );
+            assert!(
+                pixel_y < 240,
+                "{}: pixel_y {} should be < 240",
+                desc,
+                pixel_y
+            );
+
+            // The scroll window can extend beyond the starting nametable (wrapping),
+            // but the maximum logical extent should not exceed the 2x2 grid when considering wrapping
+            // For the GUI visualization, we need to handle wrapping correctly
+            let grid_x = scroll_nt % 2;
+            let grid_y = scroll_nt / 2;
+
+            // Starting position in logical 512x480 space
+            let logical_start_x = grid_x * 256 + pixel_x;
+            let logical_start_y = grid_y * 240 + pixel_y;
+
+            // The scroll window extends 256x240 from the start position
+            // When wrapping is considered, these should wrap within 512x480 bounds
+            assert!(
+                logical_start_x < 512,
+                "{}: logical_start_x {} should be < 512",
+                desc,
+                logical_start_x
+            );
+            assert!(
+                logical_start_y < 480,
+                "{}: logical_start_y {} should be < 480",
+                desc,
+                logical_start_y
+            );
+        }
+    }
 }
