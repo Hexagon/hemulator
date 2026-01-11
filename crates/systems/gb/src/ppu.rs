@@ -1276,7 +1276,7 @@ mod tests {
         // CGB: Only OAM order matters, X coordinate is irrelevant
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
-        ppu.enable_cgb_mode(false); // CGB-only mode
+        ppu.enable_cgb_mode(false); // CGB-only mode (compatibility_mode=false means flag 0xC0)
 
         // Create two overlapping sprites at the same Y and X positions
         // In CGB mode, OAM order determines priority (lower index = higher priority)
