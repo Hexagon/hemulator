@@ -1552,14 +1552,13 @@ impl TabManager {
             });
     }
 
-    pub fn render_nametables_tab(&self, ui: &mut Ui) {
+    pub fn render_tilemaps_tab(&self, ui: &mut Ui) {
         let available_height = ui.available_height();
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .max_height(available_height)
             .show(ui, |ui| {
                 if let Some(ref sys_data) = self.system_tile_data {
-                    // Only render for NES system
                     match sys_data {
                         SystemTileData::NES(nes_data) => {
                             // Header
@@ -1585,15 +1584,40 @@ impl TabManager {
                             // Render nametable preview
                             self.render_nametables(ui, nes_data);
                         }
+                        SystemTileData::GameBoy(gb_data) => {
+                            // Header
+                            ui.heading("🗺️ Game Boy Tilemap Viewer");
+                            ui.separator();
+
+                            // PPU state summary
+                            ui.horizontal(|ui| {
+                                ui.label(format!("LCDC: 0x{:02X}", gb_data.lcdc));
+                                ui.separator();
+                                ui.label(format!("SCX: {}, SCY: {}", gb_data.scx, gb_data.scy));
+                                ui.separator();
+                                ui.label(format!("WX: {}, WY: {}", gb_data.wx, gb_data.wy));
+                                ui.separator();
+                                ui.label(if gb_data.is_cgb_mode {
+                                    "CGB Mode"
+                                } else {
+                                    "DMG Mode"
+                                });
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Render tilemap preview
+                            self.render_gb_tilemaps(ui, gb_data);
+                        }
                         _ => {
-                            // Not a NES system - show message
+                            // Not supported for this system
                             ui.vertical_centered(|ui| {
                                 ui.add_space(40.0);
                                 ui.label(egui::RichText::new("🗺️").size(48.0));
                                 ui.add_space(10.0);
-                                ui.heading("Nametables");
+                                ui.heading("Tilemaps");
                                 ui.add_space(10.0);
-                                ui.label("Only available for NES");
+                                ui.label("Only available for NES and Game Boy");
                             });
                         }
                     }
@@ -1603,10 +1627,10 @@ impl TabManager {
                         ui.add_space(40.0);
                         ui.label(egui::RichText::new("🗺️").size(48.0));
                         ui.add_space(10.0);
-                        ui.heading("Nametables");
+                        ui.heading("Tilemaps");
                         ui.add_space(10.0);
-                        ui.label("NES nametable viewer");
-                        ui.label("Load a NES ROM to see nametable data");
+                        ui.label("Tilemap viewer for NES and Game Boy");
+                        ui.label("Load a ROM to see tilemap data");
                     });
                 }
             });
@@ -2692,6 +2716,232 @@ impl TabManager {
                     );
                 });
             });
+    }
+
+    fn render_gb_tilemaps(&self, ui: &mut Ui, data: &GbTileData) {
+        // Game Boy has two 32x32 tilemaps (Background and Window)
+        // Each tilemap is 32x32 tiles = 256x256 pixels
+        let scale = 1.5; // Scale for better visibility
+        let tile_size = 8.0 * scale;
+        let tilemap_width = 32.0 * tile_size;
+        let tilemap_height = 32.0 * tile_size;
+        let spacing = 15.0;
+
+        // Show both Background and Window tilemaps side by side
+        let total_width = tilemap_width * 2.0 + spacing * 2.0;
+        let total_height = tilemap_height + 40.0; // Extra for labels
+
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(total_width, total_height),
+            egui::Sense::hover(),
+        );
+        let rect = response.rect;
+
+        // Check if we have valid data
+        if data.vram_bank0.len() < 0x2000 {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Tilemap data not available",
+                egui::FontId::default(),
+                egui::Color32::GRAY,
+            );
+            return;
+        }
+
+        // Determine tile data addressing mode from LCDC bit 4
+        let tile_data_select = (data.lcdc & 0x10) != 0; // 0=0x8800-0x97FF, 1=0x8000-0x8FFF
+
+        // Background tilemap base (LCDC bit 3)
+        let bg_tilemap_base = if (data.lcdc & 0x08) != 0 {
+            0x1C00 // $9C00-$9FFF
+        } else {
+            0x1800 // $9800-$9BFF
+        };
+
+        // Window tilemap base (LCDC bit 6)
+        let win_tilemap_base = if (data.lcdc & 0x40) != 0 {
+            0x1C00 // $9C00-$9FFF
+        } else {
+            0x1800 // $9800-$9BFF
+        };
+
+        // Render Background tilemap
+        let bg_x = rect.min.x;
+        let bg_y = rect.min.y + 20.0;
+        painter.text(
+            egui::Pos2::new(bg_x + tilemap_width / 2.0, rect.min.y + 5.0),
+            egui::Align2::CENTER_TOP,
+            format!("Background (${:04X})", 0x8000 + bg_tilemap_base),
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
+
+        self.render_gb_tilemap(
+            &painter,
+            data,
+            egui::Pos2::new(bg_x, bg_y),
+            tile_size,
+            bg_tilemap_base,
+            tile_data_select,
+            data.scx,
+            data.scy,
+        );
+
+        // Render Window tilemap
+        let win_x = rect.min.x + tilemap_width + spacing;
+        let win_y = bg_y;
+        painter.text(
+            egui::Pos2::new(win_x + tilemap_width / 2.0, rect.min.y + 5.0),
+            egui::Align2::CENTER_TOP,
+            format!("Window (${:04X})", 0x8000 + win_tilemap_base),
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
+
+        self.render_gb_tilemap(
+            &painter,
+            data,
+            egui::Pos2::new(win_x, win_y),
+            tile_size,
+            win_tilemap_base,
+            tile_data_select,
+            data.wx.saturating_sub(7),
+            data.wy,
+        );
+
+        // Draw scroll overlay on background tilemap
+        let scroll_rect = egui::Rect::from_min_size(
+            egui::Pos2::new(
+                bg_x + (data.scx as f32) * scale,
+                bg_y + (data.scy as f32) * scale,
+            ),
+            egui::Vec2::new(160.0 * scale, 144.0 * scale),
+        );
+        painter.rect_stroke(
+            scroll_rect,
+            0.0,
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 255, 0)),
+            egui::StrokeKind::Inside,
+        );
+
+        // Label the viewport
+        painter.text(
+            scroll_rect.left_top() + egui::Vec2::new(5.0, 5.0),
+            egui::Align2::LEFT_TOP,
+            "Viewport",
+            egui::FontId::proportional(10.0),
+            egui::Color32::YELLOW,
+        );
+    }
+
+    fn render_gb_tilemap(
+        &self,
+        painter: &egui::Painter,
+        data: &GbTileData,
+        start_pos: egui::Pos2,
+        tile_size: f32,
+        tilemap_base: usize,
+        tile_data_select: bool,
+        _scroll_x: u8,
+        _scroll_y: u8,
+    ) {
+        // Render a 32x32 tilemap
+        for tile_y in 0..32 {
+            for tile_x in 0..32 {
+                let tilemap_addr = tilemap_base + (tile_y * 32) + tile_x;
+                let tile_index = data.vram_bank0[tilemap_addr];
+
+                // Calculate tile data address based on addressing mode
+                let tile_addr = if tile_data_select {
+                    // Unsigned mode: 0x8000-0x8FFF (0x0000-0x0FFF in VRAM array)
+                    (tile_index as usize) * 16
+                } else {
+                    // Signed mode: 0x8800-0x97FF (0x0800-0x17FF in VRAM array)
+                    let signed_index = tile_index as i8;
+                    (0x0800_usize).wrapping_add(((signed_index as i16 + 128) as usize) * 16)
+                };
+
+                // Get tile attributes from VRAM bank 1 (CGB only)
+                let tile_attr = if data.is_cgb_mode {
+                    data.vram_bank1[tilemap_addr]
+                } else {
+                    0
+                };
+
+                let palette_num = (tile_attr & 0x07) as usize;
+                let flip_x = (tile_attr & 0x20) != 0;
+                let flip_y = (tile_attr & 0x40) != 0;
+
+                // Render the tile
+                let tile_pos_x = start_pos.x + (tile_x as f32) * tile_size;
+                let tile_pos_y = start_pos.y + (tile_y as f32) * tile_size;
+
+                // Draw tile pixels
+                for py in 0..8 {
+                    let actual_py = if flip_y { 7 - py } else { py };
+                    let row_addr = tile_addr + (actual_py * 2);
+
+                    if row_addr + 1 >= data.vram_bank0.len() {
+                        continue;
+                    }
+
+                    let byte1 = data.vram_bank0[row_addr];
+                    let byte2 = data.vram_bank0[row_addr + 1];
+
+                    for px in 0..8 {
+                        let actual_px = if flip_x { 7 - px } else { px };
+                        let bit = 7 - actual_px;
+                        let color_index = (((byte2 >> bit) & 1) << 1) | ((byte1 >> bit) & 1);
+
+                        // Get color from palette
+                        let color = if data.is_cgb_mode {
+                            let pal_index = (palette_num * 4 + color_index as usize).min(31);
+                            data.bg_palettes[pal_index]
+                        } else {
+                            // DMG mode: use simple grayscale
+                            match color_index {
+                                0 => 0xFFFFFFFF,
+                                1 => 0xFFAAAAAA,
+                                2 => 0xFF555555,
+                                3 => 0xFF000000,
+                                _ => 0xFF000000,
+                            }
+                        };
+
+                        let pixel_x = tile_pos_x + (px as f32) * (tile_size / 8.0);
+                        let pixel_y = tile_pos_y + (py as f32) * (tile_size / 8.0);
+                        let pixel_size = tile_size / 8.0;
+
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::Pos2::new(pixel_x, pixel_y),
+                                egui::Vec2::new(pixel_size, pixel_size),
+                            ),
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(
+                                ((color >> 16) & 0xFF) as u8,
+                                ((color >> 8) & 0xFF) as u8,
+                                (color & 0xFF) as u8,
+                                255,
+                            ),
+                        );
+                    }
+                }
+
+                // Draw tile grid
+                let tile_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(tile_pos_x, tile_pos_y),
+                    egui::Vec2::new(tile_size, tile_size),
+                );
+                painter.rect_stroke(
+                    tile_rect,
+                    0.0,
+                    egui::Stroke::new(0.5, egui::Color32::from_gray(64)),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
     }
 }
 
