@@ -246,7 +246,7 @@ n64.set_frame_cycles(100000); // Increase for better accuracy
 
 ## Known Limitations
 
-See [MANUAL.md](../../../docs/MANUAL.md#n64-nintendo-64) for the complete list of user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/manual.html#n64-nintendo-64) for the complete list of user-facing limitations.
 
 **Main limitations preventing full game compatibility**:
 1. **Audio Output** - AI hardware implemented but frontend audio output integration pending
@@ -281,12 +281,12 @@ When adding features to the N64 emulator:
 
 1. **Follow the renderer pattern**: Keep renderers separate from RDP state
 2. **Write tests**: Add unit tests for new functionality (mark GL-dependent tests with `#[ignore]`)
-3. **Document limitations**: Update `docs/MANUAL.md` when fixing issues
+3. **Document limitations**: Update the User Manual when fixing issues
 4. **GPU optimization**: OpenGL renderer provides hardware-accelerated performance
 
 ## References
 
-- **Project Documentation**: See [README.md](../../../README.md), [MANUAL.md](../../../docs/MANUAL.md), and [AGENTS.md](../../../AGENTS.md)
+- **Project Documentation**: See [README.md](../../../README.md), [User Manual](https://hemulator.56k.guru/user/manual.html), and [AGENTS.md](../../../AGENTS.md)
 - **RDP Commands**: Documented in `rdp.rs`
 - **Test ROMs**: See `../../../test_roms/README.md`
 

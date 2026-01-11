@@ -4,8 +4,8 @@ This document describes the overall architecture of the Hemulator multi-system c
 
 **Related Documentation**:
 - **[README](README.md)**: Developer quick start, build instructions, project overview
-- **[User Manual](docs/MANUAL.md)**: End-user manual with controls, features, and system-specific information
-- **[Contributing](docs/CONTRIBUTING.md)**: Contribution workflow, pre-commit checks, coding standards
+- **[User Manual](https://hemulator.56k.guru/user/)**: End-user manual with controls, features, and system-specific information
+- **[Contributing](https://hemulator.56k.guru/developer/contributing.html)**: Contribution workflow, pre-commit checks, coding standards
 - **[Agent Guidelines](AGENTS.md)**: Implementation guidelines for automated agents and CI
 
 **System-Specific Details**:

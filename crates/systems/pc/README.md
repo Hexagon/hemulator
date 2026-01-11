@@ -2,7 +2,7 @@
 
 This crate implements IBM PC/XT emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
 
 ## Current Status
 
@@ -227,7 +227,7 @@ Without modifier, function keys go to DOS program.
 
 ## Known Limitations
 
-See [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/manual.html#pcdos-ibm-pcxt) for user-facing limitations.
 
 **Technical Limitations**:
 - **No save states**: PC systems don't use save states like ROM-based consoles
@@ -271,7 +271,7 @@ The CPU core currently supports 16-bit operations (8086/80186/80286). Full 32-bi
 4. **Extended Instructions**: 80386+ specific instructions (MOVZX, MOVSX, SHLD/SHRD, etc.)
 5. **Integration**: Testing and validation with real 386+ software
 
-For detailed implementation plans, see `docs/references/cpu_8086.md` for CPU architecture details.
+For detailed implementation plans, see the [8086 CPU Reference](https://hemulator.56k.guru/references/8086.html) for CPU architecture details.
 
 ## Future Improvements
 
@@ -296,15 +296,15 @@ When adding PC features:
 1. **Video Adapters**: Add to `src/video_adapter*.rs`
 2. **BIOS Interrupts**: Add to `src/bios.rs` (when created)
 3. **Tests**: Add unit tests for new functionality
-4. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
+4. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#pcdos-ibm-pcxt)
-- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
-- **CPU Reference**: [cpu_8086.md](../../../docs/references/cpu_8086.md)
-- **Interrupt Reference**: [pc_interrupts.md](../../../docs/references/pc_interrupts.md)
+- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+- **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#pcdos-ibm-pcxt)
+- **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
+- **CPU Reference**: [8086 CPU Reference](https://hemulator.56k.guru/references/8086.html)
+- **Interrupt Reference**: [PC Interrupts Reference](https://hemulator.56k.guru/references/pc-interrupts.html)
 - **OSDev Wiki**: https://wiki.osdev.org/
 
 ## License
