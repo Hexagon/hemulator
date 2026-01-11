@@ -689,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: This test reveals a remaining issue with rapid APU port writes
+    #[ignore] // TODO: Upload protocol needs further investigation - SPC700 isn't echoing indices
     fn test_apu_upload_protocol() {
         // This test simulates the FULL commercial game APU upload protocol:
         // 1. Wait for IPL ready ($BBAA)

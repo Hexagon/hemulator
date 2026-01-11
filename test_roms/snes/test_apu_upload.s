@@ -61,7 +61,9 @@ RESET:
     sta $2143               ; High byte
     
     ; Step 4: Upload some bytes
-    ldx #$0000
+    ; Note: SPC700 IPL ROM waits for NON-ZERO index at $FFD6-$FFD8
+    ; So we start with index 1, not 0
+    ldx #$0001              ; Start with index 1, not 0!
 upload_loop1:
     ; Send index to port 0
     txa
@@ -71,6 +73,12 @@ upload_loop1:
     lda test_data, x
     sta $2141
     
+    ; Small delay to give SPC700 time to process
+    ; (Real games have code here that provides natural delays)
+    ldy #$0020              ; Larger delay
+:   dey
+    bne :-
+    
     ; Wait for SPC700 to echo the index
     .a8
 :   txa                     ; Get index back into A for comparison
@@ -78,7 +86,7 @@ upload_loop1:
     bne :-
     
     inx
-    cpx #$0010              ; Upload 16 bytes
+    cpx #$0010              ; Upload 15 bytes (indices 1-15)
     bne upload_loop1
     
     lda #$02
