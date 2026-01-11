@@ -19,6 +19,7 @@ pub enum InspectorTab {
 
     GbTiles,
     GbPalettes,
+    GbTilemaps, // Background/Window tilemaps
 
     SmsTiles,
     SmsPalettes,
@@ -42,6 +43,7 @@ impl InspectorTab {
             InspectorTab::NesNametables => "🗺️ Nametables",
             InspectorTab::GbTiles => "🎨 Tiles",
             InspectorTab::GbPalettes => "🎨 Palettes",
+            InspectorTab::GbTilemaps => "🗺️ Tilemaps",
             InspectorTab::SmsTiles => "🎨 Tiles",
             InspectorTab::SmsPalettes => "🎨 Palettes",
             InspectorTab::SnesTiles => "🎨 Tiles",
@@ -74,7 +76,11 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                 ]);
             }
             SystemType::GameBoy => {
-                tabs.extend_from_slice(&[InspectorTab::GbTiles, InspectorTab::GbPalettes]);
+                tabs.extend_from_slice(&[
+                    InspectorTab::GbTiles,
+                    InspectorTab::GbPalettes,
+                    InspectorTab::GbTilemaps,
+                ]);
             }
             SystemType::SMS => {
                 tabs.extend_from_slice(&[InspectorTab::SmsTiles, InspectorTab::SmsPalettes]);
@@ -120,8 +126,8 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         | InspectorTab::SnesPalettes => {
             render_palettes_tab(ui);
         }
-        InspectorTab::NesNametables => {
-            tab_manager.render_nametables_tab(ui);
+        InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
+            tab_manager.render_tilemaps_tab(ui);
         }
         InspectorTab::SnesLayers => {
             render_snes_layers_tab(ui);
