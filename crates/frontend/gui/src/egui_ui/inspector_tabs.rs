@@ -407,11 +407,19 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     .striped(true)
                     .show(ui, |ui| {
                         ui.label("Bit 0: Floppy drives installed");
-                        ui.label(if (eq & 0x0001) != 0 { "✓ Yes" } else { "✗ No" });
+                        ui.label(if (eq & 0x0001) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
                         ui.end_row();
 
                         ui.label("Bit 1: Math coprocessor");
-                        ui.label(if (eq & 0x0002) != 0 { "✓ Yes" } else { "✗ No" });
+                        ui.label(if (eq & 0x0002) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
                         ui.end_row();
 
                         ui.label("Bits 2-3: System RAM");
@@ -446,7 +454,11 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         ui.end_row();
 
                         ui.label("Bit 8: DMA installed");
-                        ui.label(if (eq & 0x0100) == 0 { "✓ Yes" } else { "✗ No (bit = 0)" });
+                        ui.label(if (eq & 0x0100) == 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No (bit = 0)"
+                        });
                         ui.end_row();
 
                         ui.label("Bits 9-11: Serial ports");
@@ -454,11 +466,19 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         ui.end_row();
 
                         ui.label("Bit 12: Game port");
-                        ui.label(if (eq & 0x1000) != 0 { "✓ Yes" } else { "✗ No" });
+                        ui.label(if (eq & 0x1000) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
                         ui.end_row();
 
                         ui.label("Bit 13: Serial printer");
-                        ui.label(if (eq & 0x2000) != 0 { "✓ Yes" } else { "✗ No" });
+                        ui.label(if (eq & 0x2000) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
                         ui.end_row();
 
                         ui.label("Bits 14-15: Parallel ports");
@@ -663,7 +683,7 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                                             ui.monospace(format!("{:02X} ", byte));
 
                                             // ASCII representation
-                                            if byte >= 0x20 && byte <= 0x7E {
+                                            if (0x20..=0x7E).contains(&byte) {
                                                 ascii_str.push(byte as char);
                                             } else {
                                                 ascii_str.push('.');
@@ -690,44 +710,46 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                     ui.label("1KB Extended BIOS Data Area:");
                     ui.add_space(5.0);
 
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            ui.monospace("Offset  ");
-                            for i in 0..16 {
-                                ui.monospace(format!("{:02X} ", i));
-                            }
-                            ui.monospace("  ASCII");
-                        });
-
-                        for row in 0..64 {
-                            // 1KB = 64 rows of 16 bytes
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
-                                ui.monospace(format!("0x{:04X}  ", row * 16));
-
-                                let mut ascii_str = String::new();
-                                for col in 0..16 {
-                                    let idx = row * 16 + col;
-                                    if idx < bda_data.ebda_raw.len() {
-                                        let byte = bda_data.ebda_raw[idx];
-                                        ui.monospace(format!("{:02X} ", byte));
-
-                                        // ASCII representation
-                                        if byte >= 0x20 && byte <= 0x7E {
-                                            ascii_str.push(byte as char);
-                                        } else {
-                                            ascii_str.push('.');
-                                        }
-                                    } else {
-                                        ui.monospace("   ");
-                                        ascii_str.push(' ');
-                                    }
+                                ui.monospace("Offset  ");
+                                for i in 0..16 {
+                                    ui.monospace(format!("{:02X} ", i));
                                 }
-                                ui.monospace(format!("  {}", ascii_str));
+                                ui.monospace("  ASCII");
                             });
-                        }
-                    });
+
+                            for row in 0..64 {
+                                // 1KB = 64 rows of 16 bytes
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.monospace(format!("0x{:04X}  ", row * 16));
+
+                                    let mut ascii_str = String::new();
+                                    for col in 0..16 {
+                                        let idx = row * 16 + col;
+                                        if idx < bda_data.ebda_raw.len() {
+                                            let byte = bda_data.ebda_raw[idx];
+                                            ui.monospace(format!("{:02X} ", byte));
+
+                                            // ASCII representation
+                                            if (0x20..=0x7E).contains(&byte) {
+                                                ascii_str.push(byte as char);
+                                            } else {
+                                                ascii_str.push('.');
+                                            }
+                                        } else {
+                                            ui.monospace("   ");
+                                            ascii_str.push(' ');
+                                        }
+                                    }
+                                    ui.monospace(format!("  {}", ascii_str));
+                                });
+                            }
+                        });
                 });
 
                 ui.add_space(10.0);
