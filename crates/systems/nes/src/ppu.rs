@@ -720,7 +720,7 @@ impl Ppu {
 
                     let nt_x = ((wx / 256) & 1) as u8;
                     let nt_y = ((wy / 240) & 1) as u8;
-                    
+
                     // Choose nametable based on mirroring mode and scroll position
                     let nt = if self.mirroring == Mirroring::FourScreen {
                         // 4-screen mode: Direct nametable selection without XOR
