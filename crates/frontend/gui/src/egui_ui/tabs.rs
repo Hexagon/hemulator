@@ -1492,30 +1492,6 @@ impl TabManager {
 
                             // Render sprite grid
                             self.render_sprites(ui, nes_data);
-
-                            ui.add_space(15.0);
-
-                            // Nametable (Background) section
-                            ui.heading("Nametables (Background)");
-                            ui.separator();
-
-                            let bg_table = if (nes_data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
-                            ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "BG Pattern Table: {} (CHR ${:04X})",
-                                    bg_table,
-                                    bg_table * 0x1000
-                                ));
-                                ui.separator();
-                                ui.label(format!("Mirroring: {}", nes_data.mirroring));
-                                ui.separator();
-                                ui.label(format!("VRAM: {} bytes", nes_data.vram.len()));
-                            });
-
-                            ui.add_space(5.0);
-
-                            // Render nametable preview
-                            self.render_nametables(ui, nes_data);
                         }
                         SystemTileData::GameBoy(gb_data) => {
                             ui.heading(format!(
@@ -1571,6 +1547,66 @@ impl TabManager {
                         ui.heading("No Tile Data Available");
                         ui.add_space(10.0);
                         ui.label("Load a ROM to see tile and palette data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_nametables_tab(&self, ui: &mut Ui) {
+        let available_height = ui.available_height();
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .max_height(available_height)
+            .show(ui, |ui| {
+                if let Some(ref sys_data) = self.system_tile_data {
+                    // Only render for NES system
+                    match sys_data {
+                        SystemTileData::NES(nes_data) => {
+                            // Header
+                            ui.heading("🗺️ NES Nametable Viewer");
+                            ui.separator();
+
+                            // PPU state summary
+                            let bg_table = if (nes_data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "BG Pattern Table: {} (CHR ${:04X})",
+                                    bg_table,
+                                    bg_table * 0x1000
+                                ));
+                                ui.separator();
+                                ui.label(format!("Mirroring: {}", nes_data.mirroring));
+                                ui.separator();
+                                ui.label(format!("VRAM: {} bytes", nes_data.vram.len()));
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Render nametable preview
+                            self.render_nametables(ui, nes_data);
+                        }
+                        _ => {
+                            // Not a NES system - show message
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(40.0);
+                                ui.label(egui::RichText::new("🗺️").size(48.0));
+                                ui.add_space(10.0);
+                                ui.heading("Nametables");
+                                ui.add_space(10.0);
+                                ui.label("Only available for NES");
+                            });
+                        }
+                    }
+                } else {
+                    // No tile data available
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🗺️").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Nametables");
+                        ui.add_space(10.0);
+                        ui.label("NES nametable viewer");
+                        ui.label("Load a NES ROM to see nametable data");
                     });
                 }
             });
