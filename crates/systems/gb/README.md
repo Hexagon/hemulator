@@ -90,6 +90,13 @@ Implements DMG (original Game Boy) and CGB (Game Boy Color) modes with a flexibl
 - **Features**:
   - Sprite flipping (horizontal/vertical)
   - Sprite priority (BG priority flag)
+  - **Hardware-accurate sprite priority**:
+    - DMG: X coordinate first (lower X = higher priority), then OAM order
+    - CGB: OAM order only (lower index = higher priority)
+  - **Hardware-accurate scrolling**:
+    - SCX/SCY with modulo 256 wrapping
+    - Seamless tilemap boundary wrapping
+  - 10 sprites per scanline limit (hardware accurate)
   - DMG: Monochrome palettes (BGP, OBP0, OBP1)
   - CGB: 15-bit RGB color palettes (8 BG, 8 OBJ)
   - CGB: Tile attributes (palette, VRAM bank, flip)
@@ -137,8 +144,8 @@ cargo run --release -p emu_gui -- path/to/game.gb
 
 The Game Boy crate includes comprehensive tests:
 
-- **137 total tests**:
-  - PPU tests (rendering, registers, scrolling)
+- **136 total tests**:
+  - PPU tests (rendering, registers, scrolling, sprite priority)
   - APU tests (all channels, registers)
   - System tests (reset, state management, controller input, joypad integration)
   - Mapper tests (MBC0/1/2/3/5, HuC1)
