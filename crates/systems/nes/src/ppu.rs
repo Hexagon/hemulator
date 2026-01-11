@@ -823,6 +823,35 @@ impl Ppu {
         let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
         let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
+        // Simulate hardware v register updates from t register at scanline boundaries.
+        // This is critical for split-screen effects like SMB3's HUD.
+        //
+        // In real hardware (matching Mesen2 implementation):
+        // - At dot 257 of each visible scanline: v horizontal bits ← t horizontal bits
+        // - At dots 280-304 of pre-render scanline: v vertical bits ← t vertical bits
+        //
+        // For our frame-based renderer, we simulate this by updating v from t at the
+        // start of each scanline. This ensures mid-frame $2005 writes (which update t)
+        // take effect at scanline boundaries, not immediately.
+        let rendering_enabled = bg_enabled || sprites_enabled;
+        if rendering_enabled {
+            // At scanline 0: copy vertical bits from t to v
+            // (simulates pre-render scanline dot 280-304 behavior)
+            // Bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
+            if y == 0 {
+                let v = self.vram_addr.get();
+                let t = self.temp_vram_addr.get();
+                self.vram_addr.set((v & !0x7BE0) | (t & 0x7BE0));
+            }
+            
+            // Copy horizontal scroll bits from t to v at start of every scanline
+            // (simulates dot 257 behavior)
+            // Bits: 0-4 (coarse X), 10 (nametable X)
+            let v = self.vram_addr.get();
+            let t = self.temp_vram_addr.get();
+            self.vram_addr.set((v & !0x041F) | (t & 0x041F));
+        }
+
         // Perform sprite evaluation for this scanline to determine sprite overflow
         if sprites_enabled {
             self.evaluate_sprites_for_scanline(y);
@@ -844,26 +873,21 @@ impl Ppu {
         }
         let universal_bg = nes_palette_rgb(universal_bg_idx);
 
-        // Extract scroll values from loopy registers for this scanline.
+        // Extract scroll values from v register for this scanline.
+        // The v register was just updated from t at the start of this scanline (above),
+        // so it reflects the scroll state that should be used for rendering.
+        //
         // This is critical for games like SMB3 that change scroll mid-frame via IRQ handlers.
-        // We capture the scroll state from temp_vram_addr at scanline start, simulating
-        // how real hardware loads v from t at specific points during rendering.
-        //
-        // In real hardware:
-        // - v (vram_addr) is used for rendering
-        // - t (temp_vram_addr) is updated by $2005/$2006 writes
-        // - v horizontal bits are reloaded from t at dot 257 of each scanline
-        // - v vertical bits are reloaded from t during pre-render scanline
-        //
-        // For frame-based rendering, we simulate this by reading from t at scanline start,
-        // which means mid-frame $2005 writes (like SMB3's HUD split) affect the next scanline.
-        let t = self.temp_vram_addr.get();
+        // When the IRQ handler writes to $2005, it updates t (temp_vram_addr).
+        // Those changes are copied to v (vram_addr) at the start of the NEXT scanline,
+        // matching real hardware behavior.
+        let v = self.vram_addr.get();
         let fine_x_val = self.fine_x.get();
         
-        // Extract scroll components from temp register
-        let coarse_x = (t & 0x001F) as u8;           // Bits 0-4: tile column (0-31)
-        let coarse_y = ((t >> 5) & 0x001F) as u8;    // Bits 5-9: tile row (0-31)
-        let fine_y = ((t >> 12) & 0x0007) as u8;     // Bits 12-14: fine Y scroll (0-7)
+        // Extract scroll components from v register
+        let coarse_x = (v & 0x001F) as u8;           // Bits 0-4: tile column (0-31)
+        let coarse_y = ((v >> 5) & 0x001F) as u8;    // Bits 5-9: tile row (0-31)
+        let fine_y = ((v >> 12) & 0x0007) as u8;     // Bits 12-14: fine Y scroll (0-7)
         
         // Compute pixel scroll values
         let sx = (coarse_x as u32 * 8) + fine_x_val as u32;  // Horizontal scroll in pixels
