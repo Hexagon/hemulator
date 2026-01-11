@@ -135,7 +135,7 @@ mod cartridge;
 mod cpu;
 mod debugger;
 mod riot;
-mod tia;
+pub mod tia;
 pub mod tia_renderer;
 mod video_mode;
 
@@ -304,6 +304,98 @@ impl Atari2600System {
     pub fn get_breakpoint_manager(&self) -> &emu_core::breakpoints::BreakpointManager {
         &self.breakpoint_manager
     }
+
+    /// Get inspector data for the GUI
+    pub fn get_inspector_data(&self) -> Option<InspectorData> {
+        self.cpu.bus().map(|bus| InspectorData {
+            // Playfield registers
+            pf0: bus.tia.pf0(),
+            pf1: bus.tia.pf1(),
+            pf2: bus.tia.pf2(),
+            playfield_reflect: bus.tia.playfield_reflect(),
+            playfield_score_mode: bus.tia.playfield_score_mode(),
+            playfield_priority: bus.tia.playfield_priority(),
+
+            // Player graphics and positions
+            grp0: bus.tia.grp0(),
+            grp1: bus.tia.grp1(),
+            player0_x: bus.tia.player0_x(),
+            player1_x: bus.tia.player1_x(),
+            player0_reflect: bus.tia.player0_reflect(),
+            player1_reflect: bus.tia.player1_reflect(),
+            nusiz0: bus.tia.nusiz0(),
+            nusiz1: bus.tia.nusiz1(),
+
+            // Missiles and ball
+            enam0: bus.tia.enam0(),
+            enam1: bus.tia.enam1(),
+            missile0_x: bus.tia.missile0_x(),
+            missile1_x: bus.tia.missile1_x(),
+            enabl: bus.tia.enabl(),
+            ball_x: bus.tia.ball_x(),
+            ball_size: bus.tia.ball_size(),
+
+            // Colors
+            colubk: bus.tia.colubk(),
+            colupf: bus.tia.colupf(),
+            colup0: bus.tia.colup0(),
+            colup1: bus.tia.colup1(),
+
+            // Collision registers
+            cxm0p: bus.tia.cxm0p(),
+            cxm1p: bus.tia.cxm1p(),
+            cxp0fb: bus.tia.cxp0fb(),
+            cxp1fb: bus.tia.cxp1fb(),
+            cxm0fb: bus.tia.cxm0fb(),
+            cxm1fb: bus.tia.cxm1fb(),
+            cxblpf: bus.tia.cxblpf(),
+            cxppmm: bus.tia.cxppmm(),
+
+            // Video state
+            vblank: bus.tia.vblank(),
+            vsync: bus.tia.vsync(),
+        })
+    }
+}
+
+/// Inspector data for the GUI
+#[derive(Debug, Clone)]
+pub struct InspectorData {
+    pub pf0: u8,
+    pub pf1: u8,
+    pub pf2: u8,
+    pub playfield_reflect: bool,
+    pub playfield_score_mode: bool,
+    pub playfield_priority: bool,
+    pub grp0: u8,
+    pub grp1: u8,
+    pub player0_x: u8,
+    pub player1_x: u8,
+    pub player0_reflect: bool,
+    pub player1_reflect: bool,
+    pub nusiz0: u8,
+    pub nusiz1: u8,
+    pub enam0: bool,
+    pub enam1: bool,
+    pub missile0_x: u8,
+    pub missile1_x: u8,
+    pub enabl: bool,
+    pub ball_x: u8,
+    pub ball_size: u8,
+    pub colubk: u8,
+    pub colupf: u8,
+    pub colup0: u8,
+    pub colup1: u8,
+    pub cxm0p: u8,
+    pub cxm1p: u8,
+    pub cxp0fb: u8,
+    pub cxp1fb: u8,
+    pub cxm0fb: u8,
+    pub cxm1fb: u8,
+    pub cxblpf: u8,
+    pub cxppmm: u8,
+    pub vblank: bool,
+    pub vsync: bool,
 }
 
 #[derive(Debug, Clone)]
