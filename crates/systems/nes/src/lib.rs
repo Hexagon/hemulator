@@ -4,7 +4,7 @@
 //! from `emu_core`, along with NES-specific components:
 //!
 //! - **CPU**: Ricoh 2A03 (6502 without decimal mode)
-//! - **PPU**: 2C02 Picture Processing Unit with frame-based rendering
+//! - **PPU**: 2C02 Picture Processing Unit with scanline-based rendering
 //! - **APU**: Audio Processing Unit with 2 pulse channels (expandable)
 //! - **Mappers**: 14 cartridge mappers covering ~90%+ of NES games
 //! - **Controllers**: Standard NES controller support (D-pad, A, B, Select, Start)
@@ -37,7 +37,7 @@
 //! - Sprite rendering (8x8 and 8x16 modes)
 //! - Sprite priority and flipping
 //! - Sprite 0 hit detection (basic)
-//! - Frame-based rendering (not cycle-accurate)
+//! - Scanline-based rendering (handles mid-frame register changes)
 //!
 //! ## APU Features
 //!
