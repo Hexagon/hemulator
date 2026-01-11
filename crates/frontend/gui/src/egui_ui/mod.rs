@@ -18,5 +18,6 @@ mod tabs;
 pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
-    DebugAction, GbTileData, NesTileData, SmsTileData, SnesTileData, SystemTileData, Tab, TabAction,
+    DebugAction, GbTileData, NesTileData, PcBdaData, SmsTileData, SnesTileData, SystemTileData,
+    Tab, TabAction,
 };

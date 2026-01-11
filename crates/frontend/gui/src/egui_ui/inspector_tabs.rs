@@ -133,7 +133,7 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
             render_snes_layers_tab(ui);
         }
         InspectorTab::PcBda => {
-            render_pc_bda_tab(ui);
+            render_pc_bda_tab(ui, tab_manager);
         }
     }
 }
@@ -340,16 +340,435 @@ fn render_snes_layers_tab(ui: &mut Ui) {
 }
 
 /// Render the PC BDA/EBDA tab
-fn render_pc_bda_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("🖥️").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("BIOS Data Area");
-        ui.add_space(10.0);
-        ui.label("PC BDA/EBDA inspector");
-        ui.label(
-            egui::RichText::new("(To be implemented - will show BIOS data area contents)").weak(),
-        );
-    });
+fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(ref bda_data) = tab_manager.pc_bda_data {
+                // Header
+                ui.heading("🖥️ PC BIOS Data Area (BDA) Inspector");
+                ui.separator();
+                ui.add_space(10.0);
+
+                // System Information Summary
+                ui.heading("System Information");
+                ui.add_space(5.0);
+
+                egui::Grid::new("bda_summary_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Memory Size:").strong());
+                        ui.label(format!("{} KB", bda_data.memory_size_kb));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Video Mode:").strong());
+                        ui.label(format!("0x{:02X}", bda_data.video_mode));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Video Columns:").strong());
+                        ui.label(format!("{}", bda_data.video_columns));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Serial Ports:").strong());
+                        ui.label(format!("{}", bda_data.num_serial_ports));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Parallel Ports:").strong());
+                        ui.label(format!("{}", bda_data.num_parallel_ports));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Hard Drives:").strong());
+                        ui.label(format!("{}", bda_data.num_hard_drives));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Equipment Word:").strong());
+                        ui.label(format!("0x{:04X}", bda_data.equipment_word));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("EBDA Segment:").strong());
+                        ui.label(format!("0x{:04X}", bda_data.ebda_segment));
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Equipment Word Breakdown
+                ui.heading("Equipment Word (0x0410-0x0411)");
+                ui.add_space(5.0);
+                ui.label("Bit flags indicating installed hardware:");
+                ui.add_space(5.0);
+
+                let eq = bda_data.equipment_word;
+                egui::Grid::new("equipment_bits_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("Bit 0: Floppy drives installed");
+                        ui.label(if (eq & 0x0001) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+
+                        ui.label("Bit 1: Math coprocessor");
+                        ui.label(if (eq & 0x0002) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+
+                        ui.label("Bits 2-3: System RAM");
+                        let ram_size = (eq >> 2) & 0x03;
+                        ui.label(match ram_size {
+                            0 => "16 KB",
+                            1 => "32 KB",
+                            2 => "48 KB",
+                            3 => "64 KB or more",
+                            _ => unreachable!(),
+                        });
+                        ui.end_row();
+
+                        ui.label("Bits 4-5: Initial video mode");
+                        let video = (eq >> 4) & 0x03;
+                        ui.label(match video {
+                            0 => "Reserved",
+                            1 => "40x25 CGA color",
+                            2 => "80x25 CGA color",
+                            3 => "80x25 MDA mono",
+                            _ => unreachable!(),
+                        });
+                        ui.end_row();
+
+                        ui.label("Bits 6-7: Floppy drive count");
+                        let floppy_count = ((eq >> 6) & 0x03).wrapping_add(1);
+                        ui.label(if (eq & 0x0001) != 0 {
+                            format!("{}", floppy_count)
+                        } else {
+                            "0".to_string()
+                        });
+                        ui.end_row();
+
+                        ui.label("Bit 8: DMA controller (0 = present)");
+                        ui.label(if (eq & 0x0100) == 0 {
+                            "✓ Present (bit = 0)"
+                        } else {
+                            "✗ Not present (bit = 1)"
+                        });
+                        ui.end_row();
+
+                        ui.label("Bits 9-11: Serial ports");
+                        ui.label(format!("{}", bda_data.num_serial_ports));
+                        ui.end_row();
+
+                        ui.label("Bit 12: Game port");
+                        ui.label(if (eq & 0x1000) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+
+                        ui.label("Bit 13: Serial printer");
+                        ui.label(if (eq & 0x2000) != 0 {
+                            "✓ Yes"
+                        } else {
+                            "✗ No"
+                        });
+                        ui.end_row();
+
+                        ui.label("Bits 14-15: Parallel ports");
+                        ui.label(format!("{}", bda_data.num_parallel_ports));
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // BDA Memory Map
+                ui.heading("BDA Memory Map (0x0400-0x04FF)");
+                ui.add_space(5.0);
+                ui.label("Key locations in the BIOS Data Area:");
+                ui.add_space(5.0);
+
+                egui::Grid::new("bda_map_grid")
+                    .num_columns(3)
+                    .spacing([20.0, 8.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        // Header row
+                        ui.label(egui::RichText::new("Address").strong());
+                        ui.label(egui::RichText::new("Description").strong());
+                        ui.label(egui::RichText::new("Value").strong());
+                        ui.end_row();
+
+                        // Helper function to read word from BDA
+                        let read_word = |offset: usize| -> u16 {
+                            if offset + 1 < bda_data.bda_raw.len() {
+                                bda_data.bda_raw[offset] as u16
+                                    | ((bda_data.bda_raw[offset + 1] as u16) << 8)
+                            } else {
+                                0
+                            }
+                        };
+
+                        // Helper function to read byte from BDA
+                        let read_byte = |offset: usize| -> u8 {
+                            if offset < bda_data.bda_raw.len() {
+                                bda_data.bda_raw[offset]
+                            } else {
+                                0
+                            }
+                        };
+
+                        // COM port addresses
+                        ui.label("0x400-0x407");
+                        ui.label("COM1-COM4 I/O ports");
+                        ui.label(format!(
+                            "COM1: 0x{:04X}, COM2: 0x{:04X}",
+                            read_word(0x00),
+                            read_word(0x02)
+                        ));
+                        ui.end_row();
+
+                        // LPT port addresses
+                        ui.label("0x408-0x40F");
+                        ui.label("LPT1-LPT4 I/O ports");
+                        ui.label(format!("LPT1: 0x{:04X}", read_word(0x08)));
+                        ui.end_row();
+
+                        // Equipment word
+                        ui.label("0x410-0x411");
+                        ui.label("Equipment word");
+                        ui.label(format!("0x{:04X}", bda_data.equipment_word));
+                        ui.end_row();
+
+                        // Memory size
+                        ui.label("0x413-0x414");
+                        ui.label("Memory size (KB)");
+                        ui.label(format!("{} KB", bda_data.memory_size_kb));
+                        ui.end_row();
+
+                        // Keyboard shift flags
+                        ui.label("0x417");
+                        ui.label("Keyboard shift flags");
+                        ui.label(format!("0x{:02X}", read_byte(0x17)));
+                        ui.end_row();
+
+                        // Keyboard buffer
+                        ui.label("0x41A-0x41D");
+                        ui.label("Keyboard buffer head/tail");
+                        ui.label(format!(
+                            "Head: 0x{:04X}, Tail: 0x{:04X}",
+                            read_word(0x1A),
+                            read_word(0x1C)
+                        ));
+                        ui.end_row();
+
+                        // Video mode
+                        ui.label("0x449");
+                        ui.label("Current video mode");
+                        ui.label(format!("0x{:02X}", bda_data.video_mode));
+                        ui.end_row();
+
+                        // Video columns
+                        ui.label("0x44A");
+                        ui.label("Video columns");
+                        ui.label(format!("{}", bda_data.video_columns));
+                        ui.end_row();
+
+                        // Video page buffer size
+                        ui.label("0x44C-0x44D");
+                        ui.label("Video page buffer size");
+                        ui.label(format!("0x{:04X} bytes", read_word(0x4C)));
+                        ui.end_row();
+
+                        // Cursor positions (showing page 0 only)
+                        ui.label("0x450-0x45F");
+                        ui.label("Cursor positions (8 pages)");
+                        ui.label(format!(
+                            "Page 0: Col {}, Row {}",
+                            read_byte(0x50),
+                            read_byte(0x51)
+                        ));
+                        ui.end_row();
+
+                        // Cursor shape
+                        ui.label("0x460-0x461");
+                        ui.label("Cursor shape");
+                        ui.label(format!(
+                            "Start: {}, End: {}",
+                            read_byte(0x60),
+                            read_byte(0x61)
+                        ));
+                        ui.end_row();
+
+                        // Active video page
+                        ui.label("0x462");
+                        ui.label("Active video page");
+                        ui.label(format!("{}", read_byte(0x62)));
+                        ui.end_row();
+
+                        // Video adapter I/O port
+                        ui.label("0x463-0x464");
+                        ui.label("Video adapter I/O port");
+                        ui.label(format!("0x{:04X}", read_word(0x63)));
+                        ui.end_row();
+
+                        // Timer ticks
+                        ui.label("0x46C-0x46F");
+                        ui.label("Timer ticks since midnight");
+                        let ticks = read_byte(0x6C) as u32
+                            | ((read_byte(0x6D) as u32) << 8)
+                            | ((read_byte(0x6E) as u32) << 16)
+                            | ((read_byte(0x6F) as u32) << 24);
+                        ui.label(format!("0x{:08X} ({} ticks)", ticks, ticks));
+                        ui.end_row();
+
+                        // Hard drive count
+                        ui.label("0x475");
+                        ui.label("Hard drive count");
+                        ui.label(format!("{}", bda_data.num_hard_drives));
+                        ui.end_row();
+
+                        // Keyboard buffer start/end
+                        ui.label("0x480-0x483");
+                        ui.label("Keyboard buffer start/end");
+                        ui.label(format!(
+                            "Start: 0x{:04X}, End: 0x{:04X}",
+                            read_word(0x80),
+                            read_word(0x82)
+                        ));
+                        ui.end_row();
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Raw BDA hex dump (collapsible)
+                egui::CollapsingHeader::new("Raw BDA Memory (0x0400-0x04FF)")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.add_space(5.0);
+                        ui.label("256 bytes of BIOS Data Area:");
+                        ui.add_space(5.0);
+
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.monospace("Addr    ");
+                                    for i in 0..16 {
+                                        ui.monospace(format!("{:02X} ", i));
+                                    }
+                                    ui.monospace("  ASCII");
+                                });
+
+                                for row in 0..16 {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+                                        ui.monospace(format!("0x04{:02X}  ", row * 16));
+
+                                        let mut ascii_str = String::new();
+                                        for col in 0..16 {
+                                            let idx = row * 16 + col;
+                                            let byte = bda_data.bda_raw[idx];
+                                            ui.monospace(format!("{:02X} ", byte));
+
+                                            // ASCII representation
+                                            if (0x20..=0x7E).contains(&byte) {
+                                                ascii_str.push(byte as char);
+                                            } else {
+                                                ascii_str.push('.');
+                                            }
+                                        }
+                                        ui.monospace(format!("  {}", ascii_str));
+                                    });
+                                }
+                            });
+                    });
+
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Raw EBDA hex dump (collapsible)
+                egui::CollapsingHeader::new(format!(
+                    "Extended BIOS Data Area (0x{:04X}:0x0000)",
+                    bda_data.ebda_segment
+                ))
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.add_space(5.0);
+                    ui.label("1KB Extended BIOS Data Area:");
+                    ui.add_space(5.0);
+
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.monospace("Offset  ");
+                                for i in 0..16 {
+                                    ui.monospace(format!("{:02X} ", i));
+                                }
+                                ui.monospace("  ASCII");
+                            });
+
+                            for row in 0..64 {
+                                // 1KB = 64 rows of 16 bytes
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.monospace(format!("0x{:04X}  ", row * 16));
+
+                                    let mut ascii_str = String::new();
+                                    for col in 0..16 {
+                                        let idx = row * 16 + col;
+                                        if idx < bda_data.ebda_raw.len() {
+                                            let byte = bda_data.ebda_raw[idx];
+                                            ui.monospace(format!("{:02X} ", byte));
+
+                                            // ASCII representation
+                                            if (0x20..=0x7E).contains(&byte) {
+                                                ascii_str.push(byte as char);
+                                            } else {
+                                                ascii_str.push('.');
+                                            }
+                                        } else {
+                                            ui.monospace("   ");
+                                            ascii_str.push(' ');
+                                        }
+                                    }
+                                    ui.monospace(format!("  {}", ascii_str));
+                                });
+                            }
+                        });
+                });
+
+                ui.add_space(10.0);
+            } else {
+                // No BDA data available
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🖥️").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No BDA Data Available");
+                    ui.add_space(10.0);
+                    ui.label("Load a PC system to see BIOS Data Area information");
+                });
+            }
+        });
 }

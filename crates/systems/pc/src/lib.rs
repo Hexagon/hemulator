@@ -386,6 +386,45 @@ impl PcSystem {
         }
     }
 
+    /// Read full BDA and EBDA data for inspector tab
+    /// Returns raw memory contents for detailed inspection
+    pub fn read_bda_inspector_data(&self) -> BdaInspectorData {
+        let bus = self.cpu.bus();
+
+        // Get basic BDA values
+        let bda = self.read_bda_values();
+
+        // Read EBDA segment from BDA at 0x040E-0x040F
+        let ebda_segment = bus.read(0x040E) as u16 | ((bus.read(0x040F) as u16) << 8);
+
+        // Read raw BDA memory (0x0400-0x04FF, 256 bytes)
+        let mut bda_raw = Vec::with_capacity(256);
+        for addr in 0x0400..0x0500 {
+            bda_raw.push(bus.read(addr));
+        }
+
+        // Read raw EBDA memory (1KB) starting at the EBDA segment from the BDA
+        // Many PCs place the EBDA near 0x9FC00 (segment 0x9FC0), but the actual base is given by `ebda_segment`
+        let ebda_linear_addr = (ebda_segment as u32) << 4;
+        let mut ebda_raw = Vec::with_capacity(1024);
+        for offset in 0..1024 {
+            ebda_raw.push(bus.read(ebda_linear_addr + offset));
+        }
+
+        BdaInspectorData {
+            equipment_word: bda.equipment_word,
+            memory_size_kb: bda.memory_size_kb,
+            video_mode: bda.video_mode,
+            video_columns: bda.video_columns,
+            num_serial_ports: bda.num_serial_ports,
+            num_parallel_ports: bda.num_parallel_ports,
+            num_hard_drives: bda.num_hard_drives,
+            bda_raw,
+            ebda_raw,
+            ebda_segment,
+        }
+    }
+
     /// Enable or disable instruction tracing
     pub fn set_instruction_tracing(&mut self, enabled: bool) {
         self.instruction_tracer.set_enabled(enabled);
@@ -442,6 +481,21 @@ pub struct BdaValues {
     pub num_serial_ports: u8,
     pub num_parallel_ports: u8,
     pub num_hard_drives: u8,
+}
+
+/// Full BDA and EBDA data for inspector tab
+#[derive(Debug, Clone)]
+pub struct BdaInspectorData {
+    pub equipment_word: u16,
+    pub memory_size_kb: u16,
+    pub video_mode: u8,
+    pub video_columns: u8,
+    pub num_serial_ports: u8,
+    pub num_parallel_ports: u8,
+    pub num_hard_drives: u8,
+    pub bda_raw: Vec<u8>,
+    pub ebda_raw: Vec<u8>,
+    pub ebda_segment: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -2681,6 +2735,94 @@ mod boot_output_tests {
         // 0x0497: Last keyboard LED/Shift key state
         let kb_led_state = bus.read(0x497);
         assert_eq!(kb_led_state, 0, "Keyboard LED state should be 0 initially");
+    }
+
+    #[test]
+    fn test_read_bda_inspector_data() {
+        // Test that read_bda_inspector_data returns correctly sized and populated data
+
+        let mut sys = PcSystem::new();
+
+        // Initialize the BDA
+        sys.boot_delay_frames = 1;
+        sys.boot_started = false;
+        let _ = sys.step_frame();
+
+        // Get the inspector data
+        let inspector_data = sys.read_bda_inspector_data();
+
+        // Verify BDA raw memory is the correct size (256 bytes)
+        assert_eq!(
+            inspector_data.bda_raw.len(),
+            256,
+            "BDA raw memory should be 256 bytes"
+        );
+
+        // Verify EBDA raw memory is the correct size (1KB = 1024 bytes)
+        assert_eq!(
+            inspector_data.ebda_raw.len(),
+            1024,
+            "EBDA raw memory should be 1024 bytes"
+        );
+
+        // Verify EBDA segment is set correctly (should be 0x9FC0)
+        assert_eq!(
+            inspector_data.ebda_segment, 0x9FC0,
+            "EBDA segment should be 0x9FC0"
+        );
+
+        // Verify equipment word is non-zero
+        assert_ne!(
+            inspector_data.equipment_word, 0,
+            "Equipment word should be non-zero"
+        );
+
+        // Verify memory size is reasonable
+        assert!(
+            inspector_data.memory_size_kb > 0 && inspector_data.memory_size_kb <= 640,
+            "Memory size should be 1-640 KB, got {}",
+            inspector_data.memory_size_kb
+        );
+
+        // Verify video mode is set to CGA 80x25 (mode 0x03)
+        assert_eq!(inspector_data.video_mode, 0x03, "Video mode should be 0x03");
+
+        // Verify video columns is 80
+        assert_eq!(
+            inspector_data.video_columns, 80,
+            "Video columns should be 80"
+        );
+
+        // Verify raw BDA data contains expected values at known locations
+        // Equipment word at offset 0x10-0x11 (address 0x410-0x411)
+        let bda_equipment_word =
+            (inspector_data.bda_raw[0x10] as u16) | ((inspector_data.bda_raw[0x11] as u16) << 8);
+        assert_eq!(
+            bda_equipment_word, inspector_data.equipment_word,
+            "BDA raw data should contain correct equipment word"
+        );
+
+        // Memory size at offset 0x13-0x14 (address 0x413-0x414)
+        let bda_memory_kb =
+            (inspector_data.bda_raw[0x13] as u16) | ((inspector_data.bda_raw[0x14] as u16) << 8);
+        assert_eq!(
+            bda_memory_kb, inspector_data.memory_size_kb,
+            "BDA raw data should contain correct memory size"
+        );
+
+        // Video mode at offset 0x49 (address 0x449)
+        assert_eq!(
+            inspector_data.bda_raw[0x49], inspector_data.video_mode,
+            "BDA raw data should contain correct video mode"
+        );
+
+        // EBDA should have size marker in first word (0x0001 for 1KB)
+        let ebda_size =
+            (inspector_data.ebda_raw[0] as u16) | ((inspector_data.ebda_raw[1] as u16) << 8);
+        assert_eq!(
+            ebda_size, 0x0001,
+            "EBDA should contain size marker 0x0001 (1KB)"
+        );
     }
 
     #[test]
