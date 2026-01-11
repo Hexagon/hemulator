@@ -73,7 +73,8 @@ upload_loop1:
     
     ; Wait for SPC700 to echo the index
     .a8
-:   cmp $2140
+:   txa                     ; Get index back into A for comparison
+    cmp $2140
     bne :-
     
     inx

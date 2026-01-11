@@ -720,8 +720,6 @@ impl Memory65c816 for SnesBus {
                                 )
                             });
                             spc700_cell.borrow_mut().write_port(port, val);
-                            // Note: SPC700 synchronization happens via tick_cycles() called after each CPU step
-                            // No need to run extra cycles here - it could desync the timing
                         } else {
                             // Use stub protocol
                             let port = port as usize;
