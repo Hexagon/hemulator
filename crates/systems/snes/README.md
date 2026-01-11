@@ -2,7 +2,7 @@
 
 This crate implements Super Nintendo Entertainment System emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
 
 ## References
 

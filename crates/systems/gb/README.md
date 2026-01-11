@@ -2,7 +2,7 @@
 
 This crate implements Game Boy (DMG) and Game Boy Color (CGB) emulation for the Hemulator project.
 
-**For overall architecture**, see [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
+**For overall architecture**, see [ARCHITECTURE.md](../../../ARCHITECTURE.md)
 
 ## Current Status
 
@@ -176,7 +176,7 @@ let frame = gb.step_frame()?;
 
 ## Known Limitations
 
-See [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
 - Frame-based timing (not cycle-accurate)
@@ -213,13 +213,13 @@ When adding Game Boy features:
 
 1. **Mappers**: Add to `src/mappers/`, implement `Mapper` trait
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
+3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
 
 ## References
 
-- **Architecture**: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md)
-- **User Manual**: [MANUAL.md](../../../docs/MANUAL.md#game-boy--game-boy-color)
-- **Contributing**: [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md)
+- **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+- **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color)
+- **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **Pan Docs**: https://gbdev.io/pandocs/
 
 ## License

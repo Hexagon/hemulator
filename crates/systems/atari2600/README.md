@@ -3,7 +3,7 @@
 This crate implements Atari 2600 emulation for the Hemulator project.
 
 **Documentation**:
-- [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) - Overall emulation architecture
+- [ARCHITECTURE.md](../../../ARCHITECTURE.md) - Overall emulation architecture
 - [TIA Hardware Reference](../../../docs/src/references/tia.md) - TIA register specification
 
 ## Current Status
@@ -345,7 +345,7 @@ Addresses $40-$7F write to BOTH TIA and RAM simultaneously on real hardware:
 
 ## Known Limitations
 
-See [MANUAL.md](../../../docs/MANUAL.md#atari-2600) for user-facing limitations.
+See [User Manual](https://hemulator.56k.guru/user/manual.html#atari-2600) for user-facing limitations.
 
 ### Implemented Features
 
@@ -476,14 +476,14 @@ When adding Atari 2600 features:
 
 1. **Banking Schemes**: Add to `src/cartridge.rs`
 2. **Tests**: Add unit tests for new functionality
-3. **Documentation**: Update this README and [MANUAL.md](../../../docs/MANUAL.md)
+3. **Documentation**: Update this README and [User Manual](https://hemulator.56k.guru/user/manual.html)
 
 ## References
 
 ### Project Documentation
-- [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) - Overall emulation architecture
-- [MANUAL.md](../../../docs/MANUAL.md#atari-2600) - User manual
-- [CONTRIBUTING.md](../../../docs/CONTRIBUTING.md) - Contribution guidelines
+- [ARCHITECTURE.md](../../../ARCHITECTURE.md) - Overall emulation architecture
+- [User Manual](https://hemulator.56k.guru/user/manual.html#atari-2600) - User manual
+- [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html) - Contribution guidelines
 - [TIA Hardware Reference](../../../docs/src/references/tia.md) - TIA register specification
 
 ### External References
