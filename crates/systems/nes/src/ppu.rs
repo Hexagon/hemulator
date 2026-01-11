@@ -871,11 +871,10 @@ impl Ppu {
         
         // Handle vertical wrapping: when tile_y >= 30, flip nametable Y and wrap
         // Note: Coarse Y wraps at 30, not 32 (NES quirk)
-        let (tile_y_wrapped, nt_y_adjusted) = if tile_y >= 30 {
-            (tile_y - 30, nt_y ^ 1)
-        } else {
-            (tile_y, nt_y)
-        };
+        // We need to handle multiple wraps (e.g., tile_y could be 60, 90, etc.)
+        let wraps = tile_y / 30;
+        let tile_y_wrapped = (tile_y % 30) as u8;
+        let nt_y_adjusted = if wraps % 2 == 0 { nt_y } else { nt_y ^ 1 };
 
         // Track background priority for this scanline (for sprite priority).
         let mut bg_priority = [false; 256];
