@@ -5,16 +5,25 @@ use emu_core::apu::TimingMode;
 
 /// MMC3 (Mapper 4/TxROM) - Advanced mapper with PRG/CHR banking and scanline IRQ counter
 ///
+/// # Hardware Variants
+/// - **MMC3A** (rare, older): IRQ fires when counter == 0, even after reload
+/// - **MMC3B** (common): IRQ fires only when counter decrements to 0 (implemented here)
+/// - **MMC3C** (common): Same as MMC3B with minor manufacturing differences
+///
 /// # Hardware Behavior (per NESdev wiki)
 /// - **PRG ROM**: Up to 512 KB, four 8KB banks mapped to CPU $8000-$FFFF
 /// - **CHR ROM**: Up to 256 KB, eight 1KB banks mapped to PPU $0000-$1FFF
 /// - **PRG Banking Modes** (controlled by bit 6 of $8000):
-///   * Mode 0: R6 at $8000, (-2) at $A000, R7 at $C000, (-1) at $E000
-///   * Mode 1: (-2) at $8000, R6 at $A000, R7 at $C000, (-1) at $E000
+///   * Mode 0: R6 at $8000, R7 at $A000, (-2) at $C000, (-1) at $E000
+///   * Mode 1: (-2) at $8000, R7 at $A000, R6 at $C000, (-1) at $E000
 ///   * (-2) = second-last bank, (-1) = last bank (fixed)
 /// - **CHR Banking Modes** (controlled by bit 7 of $8000):
 ///   * Mode 0: Two 2KB banks at $0000/$0800, four 1KB banks at $1000-$1FFF
 ///   * Mode 1: Four 1KB banks at $0000-$0FFF, two 2KB banks at $1000/$1800
+/// - **Mirroring Control** ($A000 bit 0):
+///   * 0 = Vertical mirroring, 1 = Horizontal mirroring
+///   * IGNORED if cartridge has 4-screen VRAM (games like Rad Racer 2)
+///   * 4-screen VRAM is indicated by iNES header flag and uses 4KB of on-board RAM
 /// - **IRQ Counter**: Scanline-based counter triggered by PPU A12 rising edges
 ///   * $C000: IRQ latch (reload value)
 ///   * $C001: IRQ reload (clears counter, sets reload flag)
@@ -23,8 +32,10 @@ use emu_core::apu::TimingMode;
 ///   * Uses "new" MMC3B/C behavior: IRQ fires after counter decrements to 0
 ///
 /// # Implementation Notes
-/// This implementation uses the "new/sharp" IRQ behavior where the counter
-/// triggers IRQ only when it decrements to 0, not when it reloads to 0.
+/// - Uses MMC3B/C (Sharp/new) IRQ behavior: IRQ triggers only when counter decrements to 0
+/// - MMC3A behavior (IRQ on counter==0 after reload) is NOT implemented
+/// - Respects 4-screen VRAM from cartridge header, ignoring $A000 when present
+/// - This covers F1 Sensation (mapper-controlled H/V) and Rad Racer 2 (4-screen VRAM)
 #[derive(Debug)]
 pub struct Mmc3 {
     prg_rom: Vec<u8>,
@@ -46,12 +57,17 @@ pub struct Mmc3 {
     /// Bit 6: 0=Allow writes, 1=Deny writes
     /// Default: 0x80 (enabled, writable) to match common emulator behavior
     prg_ram_protect: u8,
+    /// Whether the cartridge has 4-screen VRAM (from iNES header)
+    /// When true, $A000 mirroring control is ignored (hardware has extra VRAM chips)
+    has_four_screen_vram: bool,
 }
 
 impl Mmc3 {
     pub fn new(cart: Cartridge, ppu: &mut Ppu) -> Self {
         // Get initial mirroring before moving cart
         let initial_mirroring = cart.get_initial_mirroring();
+        // Check if cartridge has 4-screen VRAM (extra VRAM chips on board)
+        let has_four_screen = initial_mirroring == Mirroring::FourScreen;
 
         let mut m = Self {
             prg_rom: cart.prg_rom,
@@ -71,6 +87,7 @@ impl Mmc3 {
             // Default to enabled and writable to match common emulator behavior
             // and previous "always on" behavior of NesBus.
             prg_ram_protect: 0x80,
+            has_four_screen_vram: has_four_screen,
         };
         m.apply_banks(ppu);
         // Use safe initial mirroring (respects header for MMC3)
@@ -205,12 +222,17 @@ impl Mmc3 {
             0xA000..=0xBFFF => {
                 if addr & 1 == 0 {
                     // Mirroring control: 0=vertical, 1=horizontal
-                    let mir = if val & 1 == 0 {
-                        Mirroring::Vertical
-                    } else {
-                        Mirroring::Horizontal
-                    };
-                    ppu.set_mirroring(mir);
+                    // CRITICAL: Only apply if cartridge doesn't have 4-screen VRAM
+                    // Games like Rad Racer 2 have extra VRAM chips on the cartridge
+                    // and must keep 4-screen mode regardless of $A000 writes
+                    if !self.has_four_screen_vram {
+                        let mir = if val & 1 == 0 {
+                            Mirroring::Vertical
+                        } else {
+                            Mirroring::Horizontal
+                        };
+                        ppu.set_mirroring(mir);
+                    }
                 } else {
                     // PRG RAM protect ($A001)
                     // Bit 7: 1=Enable chip, 0=Disable chip
@@ -1396,5 +1418,236 @@ mod tests {
             val, 0xAA,
             "MMC3 Horizontal: attribute tables should mirror like nametables"
         );
+    }
+
+    #[test]
+    fn mmc3_four_screen_ignores_mirroring_control() {
+        // CRITICAL: Test that MMC3 with 4-screen VRAM ignores $A000 mirroring control
+        // Games like Rad Racer 2 have extra VRAM chips on the cartridge board
+        // and must keep 4-screen mode regardless of $A000 writes
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::FourScreen, // Hardware 4-screen VRAM
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        ppu.clear_first_frame_lock();
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify initial 4-screen mirroring
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::FourScreen,
+            "MMC3 should start with 4-screen mirroring from header"
+        );
+
+        // Write unique values to all four nametables
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA); // NT0
+
+        ppu.write_register(6, 0x24);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB); // NT1
+
+        ppu.write_register(6, 0x28);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC); // NT2
+
+        ppu.write_register(6, 0x2C);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD); // NT3
+
+        // Try to switch to horizontal mirroring via $A000
+        // This should be IGNORED because cartridge has 4-screen VRAM
+        mmc3.write_prg(0xA000, 0x01, &mut ppu, 0);
+
+        // Verify mirroring is still 4-screen
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::FourScreen,
+            "MMC3 with 4-screen VRAM should IGNORE $A000 mirroring control"
+        );
+
+        // Verify all four nametables are still independent
+        ppu.vram_addr.set(0x2000);
+        let _ = ppu.read_register(7);
+        let val_2000 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_2400 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_2800 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2C00);
+        let _ = ppu.read_register(7);
+        let val_2c00 = ppu.read_register(7);
+
+        assert_eq!(val_2000, 0xAA, "NT0 should be independent");
+        assert_eq!(val_2400, 0xBB, "NT1 should be independent");
+        assert_eq!(val_2800, 0xCC, "NT2 should be independent");
+        assert_eq!(val_2c00, 0xDD, "NT3 should be independent");
+
+        // Try switching to vertical too
+        mmc3.write_prg(0xA000, 0x00, &mut ppu, 0);
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::FourScreen,
+            "MMC3 with 4-screen VRAM should still ignore $A000 writes"
+        );
+    }
+
+    #[test]
+    fn mmc3_four_screen_writes_to_all_nametables() {
+        // Test that writes to all four nametables work correctly with 4-screen VRAM
+        // This is critical for games like Rad Racer 2
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::FourScreen,
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::FourScreen);
+        ppu.clear_first_frame_lock();
+        let _mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify 4KB VRAM was allocated (critical for 4-screen mode)
+        assert_eq!(ppu.vram.len(), 0x1000, "4-screen mode must have 4KB VRAM");
+
+        // Write to all four nametables at the same offset to verify independence
+        // NT0 at $2100
+        ppu.write_register(6, 0x21);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        // NT1 at $2500
+        ppu.write_register(6, 0x25);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        // NT2 at $2900
+        ppu.write_register(6, 0x29);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xCC);
+
+        // NT3 at $2D00
+        ppu.write_register(6, 0x2D);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xDD);
+
+        // Read back and verify all four nametables retained their unique values
+        ppu.vram_addr.set(0x2100);
+        let _ = ppu.read_register(7);
+        let val0 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2500);
+        let _ = ppu.read_register(7);
+        let val1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2900);
+        let _ = ppu.read_register(7);
+        let val2 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2D00);
+        let _ = ppu.read_register(7);
+        let val3 = ppu.read_register(7);
+
+        assert_eq!(
+            val0, 0xAA,
+            "NT0 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val1, 0xBB,
+            "NT1 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val2, 0xCC,
+            "NT2 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val3, 0xDD,
+            "NT3 writes must be independent in 4-screen mode"
+        );
+
+        // Verify VRAM layout: each nametable at correct offset
+        // NT0: 0x000-0x3FF, NT1: 0x400-0x7FF, NT2: 0x800-0xBFF, NT3: 0xC00-0xFFF
+        assert_eq!(ppu.vram[0x100], 0xAA, "NT0 in VRAM at correct offset");
+        assert_eq!(ppu.vram[0x500], 0xBB, "NT1 in VRAM at correct offset");
+        assert_eq!(ppu.vram[0x900], 0xCC, "NT2 in VRAM at correct offset");
+        assert_eq!(ppu.vram[0xD00], 0xDD, "NT3 in VRAM at correct offset");
+    }
+
+    #[test]
+    fn mmc3_non_four_screen_allows_mirroring_control() {
+        // Test that MMC3 WITHOUT 4-screen VRAM can still use $A000 to control mirroring
+        // This is the case for games like F1 Sensation
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal, // No 4-screen VRAM, uses 2KB VRAM
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify initial horizontal mirroring and 2KB VRAM
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+        assert_eq!(ppu.vram.len(), 0x800, "Non-4-screen mode uses 2KB VRAM");
+
+        // Write to NT0 and verify it mirrors to NT1 (horizontal mirroring)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0xAA, "Horizontal: NT0 and NT1 should mirror");
+
+        // Switch to vertical mirroring via $A000
+        mmc3.write_prg(0xA000, 0x00, &mut ppu, 0);
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::Vertical,
+            "MMC3 without 4-screen VRAM MUST allow $A000 mirroring control"
+        );
+
+        // Clear nametables
+        for addr in 0x2000..0x3000 {
+            ppu.vram_addr.set(addr);
+            ppu.write_register(7, 0x00);
+        }
+
+        // Write to NT0 again
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        // Now NT0 should mirror to NT2 (vertical mirroring), not NT1
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_nt1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_nt2 = ppu.read_register(7);
+
+        assert_eq!(val_nt1, 0x00, "Vertical: NT0 and NT1 should NOT mirror");
+        assert_eq!(val_nt2, 0xBB, "Vertical: NT0 and NT2 SHOULD mirror");
+
+        // Switch back to horizontal
+        mmc3.write_prg(0xA000, 0x01, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
     }
 }
