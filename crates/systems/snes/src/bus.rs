@@ -116,6 +116,9 @@ pub struct SnesBus {
     /// Track pending SPC700 cycles for synchronization
     /// This ensures the SPC700 gets enough time to process writes before reads
     spc700_pending_cycles: Cell<u32>,
+    /// Fractional accumulator for SPC700 cycle conversion to prevent rounding error drift
+    /// Stores the remainder from integer division (in units of 1/3580)
+    spc700_cycle_accumulator: Cell<u64>,
 }
 
 impl SnesBus {
@@ -145,6 +148,7 @@ impl SnesBus {
             apu_session_id: 0,
             spc700: Some(RefCell::new(Spc700::new())), // Enable real SPC700 APU by default
             spc700_pending_cycles: Cell::new(0),
+            spc700_cycle_accumulator: Cell::new(0),
         }
     }
 
@@ -211,14 +215,26 @@ impl SnesBus {
         // Main CPU: ~3.58 MHz (NTSC)
         // SPC700: ~1.024 MHz
         // Ratio: 1.024 / 3.58 ≈ 0.286 (SPC700 runs at about 28.6% of main CPU speed)
-        // Using integer math: SPC700 cycles = CPU cycles * 1024 / 3580
-        let spc700_cycles = (cycles as u64 * 1024) / 3580;
+        // Using integer math with fractional accumulator to prevent rounding error drift:
+        // SPC700 cycles = CPU cycles * 1024 / 3580
+
+        // Calculate SPC700 cycles with fractional tracking
+        let numerator = cycles as u64 * 1024;
+        let accumulator = self.spc700_cycle_accumulator.get();
+        let total = numerator + accumulator;
+        let spc700_cycles = total / 3580;
+        let remainder = total % 3580;
+
+        // Store remainder for next calculation to prevent drift
+        self.spc700_cycle_accumulator.set(remainder);
 
         // Accumulate cycles for SPC700 instead of running immediately
         // This allows us to synchronize before port access
-        let current = self.spc700_pending_cycles.get();
-        self.spc700_pending_cycles
-            .set(current + spc700_cycles as u32);
+        // Use saturating_add to prevent overflow
+        let current = self.spc700_pending_cycles.get() as u64;
+        let total_pending = current.saturating_add(spc700_cycles);
+        let clamped = u32::try_from(total_pending).unwrap_or(u32::MAX);
+        self.spc700_pending_cycles.set(clamped);
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
