@@ -105,7 +105,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         InspectorTab::Debug => {
             tab_manager.render_debug_tab(ui);
         }
-        InspectorTab::Memory => render_memory_tab(ui),
+        InspectorTab::Memory => {
+            tab_manager.render_memory_tab(ui);
+        }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
         | InspectorTab::SmsTiles
@@ -303,19 +305,6 @@ fn render_log_tab(ui: &mut Ui) {
             ui.label("Category-specific levels override the global level.");
             ui.label("Set a category to 'Off' to use the global level.");
         });
-}
-
-/// Render the Memory Inspector tab (generic, works for all systems)
-fn render_memory_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("💾").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("Memory Inspector");
-        ui.add_space(10.0);
-        ui.label("Generic memory inspector");
-        ui.label(egui::RichText::new("(To be implemented)").weak());
-    });
 }
 
 /// Render the Palettes tab (for systems with palette support)
