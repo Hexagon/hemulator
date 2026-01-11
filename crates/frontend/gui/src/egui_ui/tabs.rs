@@ -87,6 +87,31 @@ pub struct SnesTileData {
     pub screen_enabled: bool,
 }
 
+/// PC BIOS Data Area (BDA) and Extended BIOS Data Area (EBDA) viewer data
+#[derive(Clone)]
+pub struct PcBdaData {
+    /// Equipment word at 0x0410-0x0411
+    pub equipment_word: u16,
+    /// Memory size in KB at 0x0413-0x0414
+    pub memory_size_kb: u16,
+    /// Video mode at 0x0449
+    pub video_mode: u8,
+    /// Video columns at 0x044A
+    pub video_columns: u8,
+    /// Number of serial ports (derived from equipment word bits 9-11)
+    pub num_serial_ports: u8,
+    /// Number of parallel ports (derived from equipment word bits 14-15)
+    pub num_parallel_ports: u8,
+    /// Number of hard drives at 0x0475
+    pub num_hard_drives: u8,
+    /// Raw BDA memory (0x0400-0x04FF, 256 bytes)
+    pub bda_raw: Vec<u8>,
+    /// Raw EBDA memory (1KB from segment stored in BDA via `ebda_segment`)
+    pub ebda_raw: Vec<u8>,
+    /// EBDA segment address from BDA at 0x040E-0x040F
+    pub ebda_segment: u16,
+}
+
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -109,6 +134,7 @@ pub struct TabManager {
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
+    pub pc_bda_data: Option<PcBdaData>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -131,6 +157,7 @@ impl TabManager {
             debug_info: None,
             enhanced_debug_state: None,
             system_tile_data: None,
+            pc_bda_data: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -152,6 +179,10 @@ impl TabManager {
 
     pub fn update_system_tile_data(&mut self, data: SystemTileData) {
         self.system_tile_data = Some(data);
+    }
+
+    pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
+        self.pc_bda_data = Some(data);
     }
 
     pub fn show_help_tab(&mut self) {
