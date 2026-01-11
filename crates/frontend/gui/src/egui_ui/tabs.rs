@@ -1027,12 +1027,12 @@ impl TabManager {
             ui.separator();
             ui.add_space(5.0);
 
-            // 3-column layout: Disassembly | Memory | CPU State
-            // Use horizontal layout with equal-width columns that fill available height
+            // 2-column layout: Disassembly | CPU State
+            // Memory explorer is only available via the Inspector Memory tab
             let header_height = 120.0; // Approximate height used by header elements above (including toolbar)
             ui.horizontal_top(|ui| {
                 let available_width = ui.available_width();
-                let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
+                let column_width = available_width / 2.0 - 10.0; // 2 columns with spacing
                 let content_height = total_available_height - header_height;
 
                 // Left panel: Disassembly
@@ -1045,21 +1045,6 @@ impl TabManager {
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             self.render_disassembly_panel(ui, state);
-                        });
-                });
-
-                ui.add_space(10.0);
-
-                // Middle panel: Memory Explorer
-                ui.vertical(|ui| {
-                    ui.set_width(column_width);
-                    ui.set_height(content_height);
-                    ui.heading("💾 Memory");
-                    ui.separator();
-                    ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            self.render_memory_panel(ui, state);
                         });
                 });
 
@@ -1145,99 +1130,6 @@ impl TabManager {
                     ui.end_row();
                 }
             });
-    }
-
-    fn render_memory_panel(&mut self, ui: &mut Ui, state: &EnhancedDebugState) {
-        if state.memory_regions.is_empty() {
-            ui.label(egui::RichText::new("No memory regions defined").weak());
-            return;
-        }
-
-        // Dropdown for memory region selection
-        ui.horizontal(|ui| {
-            ui.label("Region:");
-            egui::ComboBox::from_id_salt("memory_region_selector")
-                .selected_text(
-                    state
-                        .memory_regions
-                        .get(self.selected_memory_region_index)
-                        .map(|r| r.name.as_str())
-                        .unwrap_or("Select region"),
-                )
-                .show_ui(ui, |ui| {
-                    for (idx, region) in state.memory_regions.iter().enumerate() {
-                        if ui
-                            .selectable_value(
-                                &mut self.selected_memory_region_index,
-                                idx,
-                                &region.name,
-                            )
-                            .clicked()
-                        {
-                            // Reset view address to region start when changing regions
-                            self.memory_view_address = region.start;
-                        }
-                    }
-                });
-        });
-
-        ui.separator();
-
-        // Show selected region info and hex viewer
-        if let Some(region) = state.memory_regions.get(self.selected_memory_region_index) {
-            // Region info
-            ui.horizontal(|ui| {
-                ui.label("Range:");
-                ui.label(
-                    egui::RichText::new(format!("${:04X} - ${:04X}", region.start, region.end))
-                        .monospace(),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label("Size:");
-                ui.label(egui::RichText::new(format!("{} bytes", region.size())).monospace());
-            });
-            ui.horizontal(|ui| {
-                ui.label("Access:");
-                let access = match (region.readable, region.writable) {
-                    (true, true) => "Read/Write",
-                    (true, false) => "Read-only",
-                    (false, true) => "Write-only",
-                    (false, false) => "No access",
-                };
-                ui.label(egui::RichText::new(access).monospace());
-            });
-
-            ui.add_space(5.0);
-            ui.separator();
-
-            // Address navigation
-            ui.horizontal(|ui| {
-                ui.label("Address:");
-                let mut addr_input = format!("{:04X}", self.memory_view_address);
-                if ui.text_edit_singleline(&mut addr_input).changed() {
-                    if let Ok(addr) = u32::from_str_radix(&addr_input, 16) {
-                        self.memory_view_address = addr.clamp(region.start, region.end);
-                    }
-                }
-                if ui.button("⬆").clicked() && self.memory_view_address >= region.start + 16 {
-                    self.memory_view_address -= 16;
-                }
-                if ui.button("⬇").clicked() && self.memory_view_address + 16 <= region.end {
-                    self.memory_view_address += 16;
-                }
-            });
-
-            ui.add_space(5.0);
-
-            // Hex viewer placeholder (to be filled with actual memory data)
-            ui.label(egui::RichText::new("Memory Viewer:").strong());
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    self.render_hex_dump(ui, region);
-                });
-        }
     }
 
     fn render_hex_dump(&self, ui: &mut Ui, region: &MemoryRegion) {
