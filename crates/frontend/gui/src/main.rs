@@ -27,7 +27,6 @@ use std::time::{Duration, Instant};
 use window_backend::{string_to_key, Key, Sdl2EguiBackend, WindowBackend};
 
 /// Runtime state for tracking currently loaded project and mounts
-/// This replaces the mount_points field in Settings which has been deprecated
 struct RuntimeState {
     /// Currently loaded .hemu project file path (if any)
     current_project_path: Option<PathBuf>,
@@ -2027,11 +2026,7 @@ fn main() {
     let mut runtime_state = RuntimeState::new();
 
     // Determine what to load based on CLI args
-    let rom_path = cli_args
-        .rom_path
-        .as_ref()
-        .cloned()
-        .or_else(|| settings.last_rom_path.clone());
+    let rom_path = cli_args.rom_path.as_ref().cloned();
 
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
@@ -2061,7 +2056,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2097,7 +2091,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2133,7 +2126,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2167,7 +2159,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("FloppyB".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2203,7 +2194,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2242,7 +2232,6 @@ fn main() {
                                     } else {
                                         rom_loaded = true;
                                         runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                        settings.last_rom_path = Some(p.clone());
                                         if let Err(e) = settings.save() {
                                             eprintln!("Warning: Failed to save settings: {}", e);
                                         }
@@ -2444,7 +2433,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::NES(Box::new(nes_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone()); // Keep for backward compat
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2463,7 +2451,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::Atari2600(Box::new(a2600_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2480,7 +2467,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::GameBoy(Box::new(gb_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2511,7 +2497,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::SNES(Box::new(snes_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2530,7 +2515,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::N64(Box::new(n64_sys));
                                 runtime_state.set_mount("Cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2549,7 +2533,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::SMS(Box::new(sms_sys));
                                 runtime_state.set_mount("cartridge".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -2568,7 +2551,6 @@ fn main() {
                                 rom_loaded = true;
                                 sys = EmulatorSystem::Chip8(Box::new(chip8_sys));
                                 runtime_state.set_mount("Program".to_string(), p.clone());
-                                settings.last_rom_path = Some(p.clone());
                                 if let Err(e) = settings.save() {
                                     eprintln!("Warning: Failed to save settings: {}", e);
                                 }
@@ -3093,46 +3075,7 @@ fn main() {
 
             // Update PC config tab if PC is loaded (deprecated, but keep for backward compat)
             if rom_loaded {
-                if let EmulatorSystem::PC(pc_sys) = &sys {
-                    use egui_ui::PcConfigInfo;
-                    // Don't show the tab anymore - deprecated
-                    // egui_app.tab_manager.show_pc_config_tab();
-
-                    let boot_priority_str = match pc_sys.boot_priority() {
-                        emu_pc::BootPriority::FloppyFirst => "Floppy First",
-                        emu_pc::BootPriority::HardDriveFirst => "Hard Drive First",
-                        emu_pc::BootPriority::FloppyOnly => "Floppy Only",
-                        emu_pc::BootPriority::HardDriveOnly => "Hard Drive Only",
-                    };
-
-                    let cpu_model_str = match pc_sys.cpu_model() {
-                        emu_core::cpu_8086::CpuModel::Intel8086 => "Intel 8086",
-                        emu_core::cpu_8086::CpuModel::Intel8088 => "Intel 8088",
-                        emu_core::cpu_8086::CpuModel::Intel80186 => "Intel 80186",
-                        emu_core::cpu_8086::CpuModel::Intel80188 => "Intel 80188",
-                        emu_core::cpu_8086::CpuModel::Intel80286 => "Intel 80286",
-                        emu_core::cpu_8086::CpuModel::Intel80386 => "Intel 80386",
-                        emu_core::cpu_8086::CpuModel::Intel80486 => "Intel 80486",
-                        emu_core::cpu_8086::CpuModel::Intel80486SX => "Intel 80486SX",
-                        emu_core::cpu_8086::CpuModel::Intel80486DX2 => "Intel 80486DX2",
-                        emu_core::cpu_8086::CpuModel::Intel80486SX2 => "Intel 80486SX2",
-                        emu_core::cpu_8086::CpuModel::Intel80486DX4 => "Intel 80486DX4",
-                        emu_core::cpu_8086::CpuModel::IntelPentium => "Intel Pentium",
-                        emu_core::cpu_8086::CpuModel::IntelPentiumMMX => "Intel Pentium MMX",
-                    };
-
-                    let config = PcConfigInfo {
-                        cpu_model: cpu_model_str.to_string(),
-                        memory_kb: pc_sys.memory_kb(),
-                        video_adapter: pc_sys.video_adapter_name().to_string(),
-                        boot_priority: boot_priority_str.to_string(),
-                        bios_mounted: runtime_state.get_mount("BIOS").is_some(),
-                        floppy_a_mounted: runtime_state.get_mount("FloppyA").is_some(),
-                        floppy_b_mounted: runtime_state.get_mount("FloppyB").is_some(),
-                        hdd_mounted: runtime_state.get_mount("HardDrive").is_some(),
-                    };
-                    egui_app.tab_manager.update_pc_config_info(config);
-                }
+                // PC Config tab is deprecated - removed
             }
         }
 
@@ -3189,7 +3132,7 @@ fn main() {
             match &sys {
                 EmulatorSystem::NES(s) => {
                     let nes_data = s.get_tile_viewer_data();
-                    let tile_data = egui_ui::TileViewerData {
+                    let tile_data = egui_ui::SystemTileData::NES(egui_ui::NesTileData {
                         chr_data: nes_data.chr_data,
                         palette: nes_data.palette,
                         master_palette: nes_data.master_palette,
@@ -3201,8 +3144,8 @@ fn main() {
                         scroll_x: nes_data.scroll_x,
                         scroll_y: nes_data.scroll_y,
                         mirroring: nes_data.mirroring,
-                    };
-                    egui_app.tab_manager.update_tile_viewer_data(tile_data);
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
                 EmulatorSystem::GameBoy(s) => {
                     let gb_data = s.get_tile_viewer_data();
@@ -3313,7 +3256,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 path_str.clone(),
                                             );
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3357,7 +3299,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 path_str.clone(),
                                             );
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3400,7 +3341,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 path_str.clone(),
                                             );
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3440,7 +3380,6 @@ fn main() {
                                                 sys.get_available_renderers();
                                             runtime_state
                                                 .set_mount("Disk".to_string(), path_str.clone());
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3482,7 +3421,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 path_str.clone(),
                                             );
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3547,7 +3485,6 @@ fn main() {
                                                         "Cartridge".to_string(),
                                                         path_str.clone(),
                                                     );
-                                                    settings.last_rom_path = Some(path_str.clone());
                                                     // Add to recent files
                                                     settings.add_recent_file(path_str.clone());
                                                     if let Err(e) = settings.save() {
@@ -3594,7 +3531,6 @@ fn main() {
                                                 "cartridge".to_string(),
                                                 path_str.clone(),
                                             );
-                                            settings.last_rom_path = Some(path_str.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
                                                     "Warning: Failed to save settings: {}",
@@ -3626,7 +3562,6 @@ fn main() {
                                                 "CHIP-8".to_string();
                                             runtime_state
                                                 .set_mount("Program".to_string(), path_str.clone());
-                                            settings.last_rom_path = Some(path_str.clone());
                                             // Add to recent files
                                             settings.add_recent_file(path_str.clone());
                                             if let Err(e) = settings.save() {
@@ -3885,7 +3820,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             // Add to recent files (already in list since it was clicked from recent files)
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
@@ -3927,7 +3861,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -3968,7 +3901,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -4006,7 +3938,6 @@ fn main() {
                                                 sys.get_available_renderers();
                                             runtime_state
                                                 .set_mount("Disk".to_string(), file_path.clone());
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -4046,7 +3977,6 @@ fn main() {
                                                 "Cartridge".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -4090,8 +4020,6 @@ fn main() {
                                                         "Cartridge".to_string(),
                                                         file_path.clone(),
                                                     );
-                                                    settings.last_rom_path =
-                                                        Some(file_path.clone());
                                                     settings.add_recent_file(file_path.clone());
                                                     if let Err(e) = settings.save() {
                                                         eprintln!(
@@ -4139,7 +4067,6 @@ fn main() {
                                                 "cartridge".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(
@@ -4180,7 +4107,6 @@ fn main() {
                                                 "Program".to_string(),
                                                 file_path.clone(),
                                             );
-                                            settings.last_rom_path = Some(file_path.clone());
                                             settings.add_recent_file(file_path.clone());
                                             if let Err(e) = settings.save() {
                                                 eprintln!(

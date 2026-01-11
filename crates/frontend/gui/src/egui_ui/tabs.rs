@@ -13,7 +13,6 @@ pub enum Tab {
     Emulator,
     NewProject,
     Help,
-    PcConfig, // PC-specific configuration tab (DBA: Disk/BIOS/Adapter) - deprecated
     About,
 }
 
@@ -88,32 +87,6 @@ pub struct SnesTileData {
     pub screen_enabled: bool,
 }
 
-/// Data for the tile viewer tab (legacy - kept for backward compatibility)
-#[derive(Clone)]
-pub struct TileViewerData {
-    /// CHR data (pattern tables) - 8KB for NES
-    pub chr_data: Vec<u8>,
-    /// Palette data - 32 bytes for NES (4 colors x 8 palettes)
-    pub palette: Vec<u8>,
-    /// NES master palette for color lookup
-    pub master_palette: Vec<u32>,
-    /// OAM data - 256 bytes (64 sprites x 4 bytes each)
-    pub oam: Vec<u8>,
-    /// VRAM data - 2KB nametables
-    pub vram: Vec<u8>,
-    /// Whether this is CHR-RAM (true) or CHR-ROM (false)
-    pub chr_is_ram: bool,
-    /// Current PPUCTRL value (for pattern table selection info)
-    pub ppuctrl: u8,
-    /// Current PPUMASK value
-    pub ppumask: u8,
-    /// Current scroll values
-    pub scroll_x: u8,
-    pub scroll_y: u8,
-    /// Current mirroring mode
-    pub mirroring: String,
-}
-
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -128,19 +101,6 @@ pub enum DebugAction {
     Resume, // Resume emulation
 }
 
-/// PC-specific configuration information for the DBA tab
-#[derive(Clone)]
-pub struct PcConfigInfo {
-    pub cpu_model: String,
-    pub memory_kb: u32,
-    pub video_adapter: String,
-    pub boot_priority: String,
-    pub bios_mounted: bool,
-    pub floppy_a_mounted: bool,
-    pub floppy_b_mounted: bool,
-    pub hdd_mounted: bool,
-}
-
 pub struct TabManager {
     pub active_tab: Tab,
     pub log_messages: Vec<String>,
@@ -148,13 +108,11 @@ pub struct TabManager {
     pub about_visible: bool,
     pub debug_info: Option<SystemDebugInfo>,
     pub enhanced_debug_state: Option<EnhancedDebugState>,
-    pub tile_viewer_data: Option<TileViewerData>,
     pub system_tile_data: Option<SystemTileData>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
     pub pending_debug_action: Option<DebugAction>,
-    pub pc_config_info: Option<PcConfigInfo>,
     pub selected_memory_region_index: usize,
     pub memory_view_address: u32,
 }
@@ -168,13 +126,11 @@ impl TabManager {
             about_visible: false,
             debug_info: None,
             enhanced_debug_state: None,
-            tile_viewer_data: None,
             system_tile_data: None,
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
             pending_debug_action: None,
-            pc_config_info: None,
             selected_memory_region_index: 0,
             memory_view_address: 0,
         }
@@ -188,16 +144,8 @@ impl TabManager {
         }
     }
 
-    pub fn update_tile_viewer_data(&mut self, data: TileViewerData) {
-        self.tile_viewer_data = Some(data);
-    }
-
     pub fn update_system_tile_data(&mut self, data: SystemTileData) {
         self.system_tile_data = Some(data);
-    }
-
-    pub fn update_pc_config_info(&mut self, info: PcConfigInfo) {
-        self.pc_config_info = Some(info);
     }
 
     pub fn show_help_tab(&mut self) {
@@ -299,13 +247,6 @@ impl TabManager {
                     }
                 }
             }
-
-            // PC Config tab is deprecated - all info now shown in property pane
-            // Keep the data structure for backward compatibility but don't show the tab
-            // if self.pc_config_visible {
-            //     ui.selectable_value(&mut self.active_tab, Tab::PcConfig, "PC Config");
-            //     ...
-            // }
         });
 
         ui.separator();
@@ -316,8 +257,6 @@ impl TabManager {
             Tab::NewProject => self.render_new_project_tab(ui),
             Tab::Help => self.render_help_tab(ui),
             Tab::About => self.render_about_tab(ui),
-            // Keep PcConfig render for backward compat, but it won't be accessible
-            Tab::PcConfig => self.render_pc_config_tab(ui),
         }
     }
 
@@ -572,7 +511,7 @@ impl TabManager {
 
                 ui.add_space(10.0);
 
-                // Legacy log messages section (kept for backward compatibility)
+                // Application log messages
                 if !self.log_messages.is_empty() {
                     ui.add_space(15.0);
                     ui.separator();
@@ -1272,262 +1211,194 @@ impl TabManager {
             });
     }
 
-    fn render_pc_config_tab(&self, ui: &mut Ui) {
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                if let Some(ref config) = self.pc_config_info {
-                    ui.heading("PC System Configuration");
-                    ui.separator();
-
-                    egui::Grid::new("pc_config_grid")
-                        .num_columns(2)
-                        .spacing([40.0, 8.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label("CPU Model:");
-                            ui.label(&config.cpu_model);
-                            ui.end_row();
-
-                            ui.label("Memory:");
-                            ui.label(format!("{} KB", config.memory_kb));
-                            ui.end_row();
-
-                            ui.label("Video Adapter:");
-                            ui.label(&config.video_adapter);
-                            ui.end_row();
-
-                            ui.label("Boot Priority:");
-                            ui.label(&config.boot_priority);
-                            ui.end_row();
-                        });
-
-                    ui.add_space(10.0);
-                    ui.heading("Mounted Devices");
-                    ui.separator();
-
-                    egui::Grid::new("pc_mounts_grid")
-                        .num_columns(2)
-                        .spacing([40.0, 8.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label("BIOS:");
-                            ui.label(if config.bios_mounted {
-                                "✓ Mounted"
-                            } else {
-                                "✗ Not mounted"
-                            });
-                            ui.end_row();
-
-                            ui.label("Floppy A:");
-                            ui.label(if config.floppy_a_mounted {
-                                "✓ Mounted"
-                            } else {
-                                "✗ Not mounted"
-                            });
-                            ui.end_row();
-
-                            ui.label("Floppy B:");
-                            ui.label(if config.floppy_b_mounted {
-                                "✓ Mounted"
-                            } else {
-                                "✗ Not mounted"
-                            });
-                            ui.end_row();
-
-                            ui.label("Hard Drive:");
-                            ui.label(if config.hdd_mounted {
-                                "✓ Mounted"
-                            } else {
-                                "✗ Not mounted"
-                            });
-                            ui.end_row();
-                        });
-
-                    ui.add_space(10.0);
-                    ui.label("This tab shows PC-specific configuration and mounted devices.");
-                    ui.label("Use the Mount Points panel to manage disk images.");
-                } else {
-                    ui.label("No PC configuration available");
-                    ui.label("This tab is only available when a PC system is loaded");
-                }
-            });
-    }
-
     pub fn render_tiles_tab(&self, ui: &mut Ui) {
         let available_height = ui.available_height();
         ScrollArea::vertical()
             .auto_shrink([false; 2])
             .max_height(available_height)
             .show(ui, |ui| {
-                if let Some(ref data) = self.tile_viewer_data {
-                    // Header with PPU state info
-                    ui.heading("🎨 NES Tile Viewer");
-                    ui.separator();
-
-                    // PPU state summary
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("PPUCTRL: ${:02X}", data.ppuctrl))
-                                .monospace(),
-                        );
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!("PPUMASK: ${:02X}", data.ppumask))
-                                .monospace(),
-                        );
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Scroll: ({}, {})",
-                                data.scroll_x, data.scroll_y
-                            ))
-                            .monospace(),
-                        );
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!("Mirror: {}", data.mirroring)).monospace(),
-                        );
-                    });
-
-                    ui.add_space(5.0);
-
-                    // CHR type indicator
-                    let chr_type = if data.chr_is_ram {
-                        "CHR-RAM"
-                    } else {
-                        "CHR-ROM"
-                    };
-                    let chr_size = data.chr_data.len();
-                    ui.label(format!(
-                        "{} ({} bytes / {} KB)",
-                        chr_type,
-                        chr_size,
-                        chr_size / 1024
-                    ));
-
-                    ui.add_space(10.0);
-
-                    // Pattern Tables section
-                    ui.heading("Pattern Tables");
-                    ui.separator();
-
-                    // Render both pattern tables side by side
-                    ui.horizontal(|ui| {
-                        // Pattern Table 0 ($0000-$0FFF)
-                        ui.vertical(|ui| {
-                            let bg_table = (data.ppuctrl & 0x10) != 0;
-                            let label = if !bg_table { "◄ BG" } else { "" };
-                            ui.label(format!("Pattern Table 0 (CHR $0000-$0FFF) {}", label));
-                            self.render_pattern_table(ui, data, 0);
-                        });
-
-                        ui.add_space(20.0);
-
-                        // Pattern Table 1 ($1000-$1FFF)
-                        ui.vertical(|ui| {
-                            let bg_table = (data.ppuctrl & 0x10) != 0;
-                            let label = if bg_table { "◄ BG" } else { "" };
-                            ui.label(format!("Pattern Table 1 (CHR $1000-$1FFF) {}", label));
-                            self.render_pattern_table(ui, data, 1);
-                        });
-                    });
-
-                    ui.add_space(15.0);
-
-                    // Palette section
-                    ui.heading("Palettes");
-                    ui.separator();
-
-                    // Background palettes
-                    ui.label("Background Palettes ($3F00-$3F0F):");
-                    self.render_palettes(ui, data, 0);
-
-                    ui.add_space(5.0);
-
-                    // Sprite palettes
-                    ui.label("Sprite Palettes ($3F10-$3F1F):");
-                    self.render_palettes(ui, data, 4);
-
-                    ui.add_space(15.0);
-
-                    // Sprites (OAM) section
-                    ui.heading("Sprites (OAM)");
-                    ui.separator();
-
-                    // Sprite info
-                    let sprite_size = if (data.ppuctrl & 0x20) != 0 {
-                        "8x16"
-                    } else {
-                        "8x8"
-                    };
-                    let sprite_table = if (data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
-
-                    // Count visible sprites
-                    let visible_count = if data.oam.len() >= 256 {
-                        (0..64)
-                            .filter(|&i| {
-                                let y = data.oam[i * 4];
-                                if sprite_size == "8x16" {
-                                    y < 0xE7
-                                } else {
-                                    y < 0xEF
-                                }
-                            })
-                            .count()
-                    } else {
-                        0
-                    };
-
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Sprite Size: {}", sprite_size));
-                        ui.separator();
-                        if sprite_size == "8x8" {
-                            ui.label(format!(
-                                "Pattern Table: {} (CHR ${:04X})",
-                                sprite_table,
-                                sprite_table * 0x1000
-                            ));
-                        } else {
-                            ui.label("Pattern Table: Per-sprite (tile bit 0)");
-                        }
-                        ui.separator();
-                        ui.label(format!("Visible: {}/64", visible_count));
-                        ui.separator();
-                        ui.label(format!("OAM: {} bytes", data.oam.len()));
-                    });
-
-                    ui.add_space(5.0);
-
-                    // Render sprite grid
-                    self.render_sprites(ui, data);
-
-                    ui.add_space(15.0);
-
-                    // Nametable (Background) section
-                    ui.heading("Nametables (Background)");
-                    ui.separator();
-
-                    let bg_table = if (data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "BG Pattern Table: {} (CHR ${:04X})",
-                            bg_table,
-                            bg_table * 0x1000
-                        ));
-                        ui.separator();
-                        ui.label(format!("Mirroring: {}", data.mirroring));
-                        ui.separator();
-                        ui.label(format!("VRAM: {} bytes", data.vram.len()));
-                    });
-
-                    ui.add_space(5.0);
-
-                    // Render nametable preview
-                    self.render_nametables(ui, data);
-                } else if let Some(ref sys_data) = self.system_tile_data {
+                if let Some(ref sys_data) = self.system_tile_data {
                     // Render system-specific tile viewers
                     match sys_data {
+                        SystemTileData::NES(nes_data) => {
+                            // Header with PPU state info
+                            ui.heading("🎨 NES Tile Viewer");
+                            ui.separator();
+
+                            // PPU state summary
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "PPUCTRL: ${:02X}",
+                                        nes_data.ppuctrl
+                                    ))
+                                    .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "PPUMASK: ${:02X}",
+                                        nes_data.ppumask
+                                    ))
+                                    .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Scroll: ({}, {})",
+                                        nes_data.scroll_x, nes_data.scroll_y
+                                    ))
+                                    .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!("Mirror: {}", nes_data.mirroring))
+                                        .monospace(),
+                                );
+                            });
+
+                            ui.add_space(5.0);
+
+                            // CHR type indicator
+                            let chr_type = if nes_data.chr_is_ram {
+                                "CHR-RAM"
+                            } else {
+                                "CHR-ROM"
+                            };
+                            let chr_size = nes_data.chr_data.len();
+                            ui.label(format!(
+                                "{} ({} bytes / {} KB)",
+                                chr_type,
+                                chr_size,
+                                chr_size / 1024
+                            ));
+
+                            ui.add_space(10.0);
+
+                            // Pattern Tables section
+                            ui.heading("Pattern Tables");
+                            ui.separator();
+
+                            // Render both pattern tables side by side
+                            ui.horizontal(|ui| {
+                                // Pattern Table 0 ($0000-$0FFF)
+                                ui.vertical(|ui| {
+                                    let bg_table = (nes_data.ppuctrl & 0x10) != 0;
+                                    let label = if !bg_table { "◄ BG" } else { "" };
+                                    ui.label(format!(
+                                        "Pattern Table 0 (CHR $0000-$0FFF) {}",
+                                        label
+                                    ));
+                                    self.render_pattern_table(ui, nes_data, 0);
+                                });
+
+                                ui.add_space(20.0);
+
+                                // Pattern Table 1 ($1000-$1FFF)
+                                ui.vertical(|ui| {
+                                    let bg_table = (nes_data.ppuctrl & 0x10) != 0;
+                                    let label = if bg_table { "◄ BG" } else { "" };
+                                    ui.label(format!(
+                                        "Pattern Table 1 (CHR $1000-$1FFF) {}",
+                                        label
+                                    ));
+                                    self.render_pattern_table(ui, nes_data, 1);
+                                });
+                            });
+
+                            ui.add_space(15.0);
+
+                            // Palette section
+                            ui.heading("Palettes");
+                            ui.separator();
+
+                            // Background palettes
+                            ui.label("Background Palettes ($3F00-$3F0F):");
+                            self.render_palettes(ui, nes_data, 0);
+
+                            ui.add_space(5.0);
+
+                            // Sprite palettes
+                            ui.label("Sprite Palettes ($3F10-$3F1F):");
+                            self.render_palettes(ui, nes_data, 4);
+
+                            ui.add_space(15.0);
+
+                            // Sprites (OAM) section
+                            ui.heading("Sprites (OAM)");
+                            ui.separator();
+
+                            // Sprite info
+                            let sprite_size = if (nes_data.ppuctrl & 0x20) != 0 {
+                                "8x16"
+                            } else {
+                                "8x8"
+                            };
+                            let sprite_table = if (nes_data.ppuctrl & 0x08) != 0 { 1 } else { 0 };
+
+                            // Count visible sprites
+                            let visible_count = if nes_data.oam.len() >= 256 {
+                                (0..64)
+                                    .filter(|&i| {
+                                        let y = nes_data.oam[i * 4];
+                                        if sprite_size == "8x16" {
+                                            y < 0xE7
+                                        } else {
+                                            y < 0xEF
+                                        }
+                                    })
+                                    .count()
+                            } else {
+                                0
+                            };
+
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Sprite Size: {}", sprite_size));
+                                ui.separator();
+                                if sprite_size == "8x8" {
+                                    ui.label(format!(
+                                        "Pattern Table: {} (CHR ${:04X})",
+                                        sprite_table,
+                                        sprite_table * 0x1000
+                                    ));
+                                } else {
+                                    ui.label("Pattern Table: Per-sprite (tile bit 0)");
+                                }
+                                ui.separator();
+                                ui.label(format!("Visible: {}/64", visible_count));
+                                ui.separator();
+                                ui.label(format!("OAM: {} bytes", nes_data.oam.len()));
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Render sprite grid
+                            self.render_sprites(ui, nes_data);
+
+                            ui.add_space(15.0);
+
+                            // Nametable (Background) section
+                            ui.heading("Nametables (Background)");
+                            ui.separator();
+
+                            let bg_table = if (nes_data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "BG Pattern Table: {} (CHR ${:04X})",
+                                    bg_table,
+                                    bg_table * 0x1000
+                                ));
+                                ui.separator();
+                                ui.label(format!("Mirroring: {}", nes_data.mirroring));
+                                ui.separator();
+                                ui.label(format!("VRAM: {} bytes", nes_data.vram.len()));
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Render nametable preview
+                            self.render_nametables(ui, nes_data);
+                        }
                         SystemTileData::GameBoy(gb_data) => {
                             ui.heading(format!(
                                 "🎮 Game Boy Tile Viewer ({})",
@@ -1572,10 +1443,6 @@ impl TabManager {
                             ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
                             ui.label(format!("Palette: {} colors", snes_data.palette.len()));
                         }
-                        SystemTileData::NES(_) => {
-                            // Shouldn't happen - NES uses legacy TileViewerData
-                            ui.label("NES tile data - please use NES-specific viewer");
-                        }
                     }
                 } else {
                     // No tile data available
@@ -1591,7 +1458,7 @@ impl TabManager {
             });
     }
 
-    fn render_pattern_table(&self, ui: &mut Ui, data: &TileViewerData, table_num: usize) {
+    fn render_pattern_table(&self, ui: &mut Ui, data: &NesTileData, table_num: usize) {
         // Pattern table is 16x16 tiles = 256 tiles
         // Each tile is 8x8 pixels
         // Render as a grid with hover tooltips
@@ -1706,7 +1573,7 @@ impl TabManager {
         }
     }
 
-    fn render_palettes(&self, ui: &mut Ui, data: &TileViewerData, start_palette: usize) {
+    fn render_palettes(&self, ui: &mut Ui, data: &NesTileData, start_palette: usize) {
         let color_size = 24.0;
         let palette_spacing = 8.0;
 
@@ -1774,7 +1641,7 @@ impl TabManager {
         });
     }
 
-    fn render_sprites(&self, ui: &mut Ui, data: &TileViewerData) {
+    fn render_sprites(&self, ui: &mut Ui, data: &NesTileData) {
         if data.oam.len() < 256 {
             ui.label(egui::RichText::new("OAM data not available").weak());
             return;
@@ -2067,7 +1934,7 @@ impl TabManager {
         addr & (vram_size - 1)
     }
 
-    fn render_nametables(&self, ui: &mut Ui, data: &TileViewerData) {
+    fn render_nametables(&self, ui: &mut Ui, data: &NesTileData) {
         // Nametable layout: render all four nametables in a 2x2 grid
         // Each nametable is 32x30 tiles = 256x240 pixels
         let scale = 1.2; // Scale down to fit four nametables

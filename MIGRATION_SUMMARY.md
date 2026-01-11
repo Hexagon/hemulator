@@ -151,13 +151,13 @@ Developers can:
 ### What We Kept
 
 - **System READMEs**: Implementation details stay in `crates/systems/*/README.md`
-- **Root docs**: `docs/*.md` maintained for backward compatibility
 - **References section**: All technical references tracked in system READMEs
 
 ### What We Changed
 
 - **Organization**: Moved from flat structure to organized sections
 - **Presentation**: Static site instead of raw markdown
+- **Eliminated redirects**: All documentation now served from documentation site
 - **Navigation**: Automatic navigation from frontmatter
 - **Cross-references**: Updated to use proper site paths
 - **Duplication Removal**: Root docs now redirect to site instead of duplicating content

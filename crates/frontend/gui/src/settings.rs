@@ -189,11 +189,7 @@ impl Default for InputConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    // Backward compatibility: keep old keyboard field for migration
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keyboard: Option<KeyMapping>,
-
-    // New input configuration supporting multiple players
+    // Input configuration supporting multiple players
     #[serde(default)]
     pub input: InputConfig,
 
@@ -201,8 +197,6 @@ pub struct Settings {
     pub window_width: usize,
     #[serde(default = "default_window_height")]
     pub window_height: usize,
-    #[serde(default, skip_serializing)]
-    pub last_rom_path: Option<String>, // Kept for backward compatibility reading only, not saved
     #[serde(default)]
     pub recent_files: Vec<String>, // List of recently opened ROM files (max 10)
     #[serde(default)]
@@ -246,11 +240,9 @@ fn default_video_backend() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            keyboard: None, // Old field for backward compatibility
             input: InputConfig::default(),
             window_width: 512,  // 256 * 2 (default 2x scale)
             window_height: 480, // 240 * 2 (default 2x scale)
-            last_rom_path: None,
             recent_files: Vec::new(),
             display_filter: DisplayFilter::default(),
             emulation_speed: 1.0,
@@ -277,13 +269,7 @@ impl Settings {
         let path = Self::config_path();
         match fs::read_to_string(&path) {
             Ok(contents) => match serde_json::from_str::<Settings>(&contents) {
-                Ok(mut settings) => {
-                    // Migrate old keyboard field to new input.player1
-                    if let Some(old_keyboard) = settings.keyboard.take() {
-                        settings.input.player1 = old_keyboard;
-                    }
-                    settings
-                }
+                Ok(settings) => settings,
                 Err(e) => {
                     eprintln!(
                         "Warning: Failed to parse config.json: {}. Using defaults.",
@@ -347,7 +333,6 @@ mod tests {
         assert_eq!(settings.input.host_modifier, "RightCtrl");
         assert_eq!(settings.window_width, 512);
         assert_eq!(settings.window_height, 480);
-        assert_eq!(settings.last_rom_path, None);
     }
 
     #[test]
@@ -371,7 +356,6 @@ mod tests {
         let test_config = test_dir.join("test_config.json");
 
         let settings = Settings {
-            last_rom_path: Some("/test/path/game.nes".to_string()),
             window_width: 1024,
             window_height: 960,
             ..Default::default()
@@ -385,36 +369,11 @@ mod tests {
         let loaded_contents = fs::read_to_string(&test_config).unwrap();
         let loaded: Settings = serde_json::from_str(&loaded_contents).unwrap();
 
-        // last_rom_path is skip_serializing, so it won't be saved
-        assert_eq!(loaded.last_rom_path, None);
         assert_eq!(loaded.window_width, 1024);
         assert_eq!(loaded.window_height, 960);
 
         // Clean up
         fs::remove_dir_all(&test_dir).unwrap();
-    }
-
-    #[test]
-    fn test_backward_compatibility_migration() {
-        // Test that old keyboard field migrates to input.player1
-        let old_format = r#"{
-            "keyboard": {
-                "a": "Z",
-                "b": "X",
-                "select": "LeftShift",
-                "start": "Enter",
-                "up": "Up",
-                "down": "Down",
-                "left": "Left",
-                "right": "Right"
-            },
-            "window_width": 512,
-            "window_height": 480
-        }"#;
-
-        let settings: Settings = serde_json::from_str(old_format).unwrap();
-        assert_eq!(settings.input.player1.a, "Z");
-        assert_eq!(settings.input.player1.b, "X");
     }
 
     #[test]
