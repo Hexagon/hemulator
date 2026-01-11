@@ -2784,8 +2784,6 @@ impl TabManager {
             tile_size,
             bg_tilemap_base,
             tile_data_select,
-            data.scx,
-            data.scy,
         );
 
         // Render Window tilemap
@@ -2806,8 +2804,6 @@ impl TabManager {
             tile_size,
             win_tilemap_base,
             tile_data_select,
-            data.wx.saturating_sub(7),
-            data.wy,
         );
 
         // Draw scroll overlay on background tilemap
@@ -2843,8 +2839,6 @@ impl TabManager {
         tile_size: f32,
         tilemap_base: usize,
         tile_data_select: bool,
-        _scroll_x: u8,
-        _scroll_y: u8,
     ) {
         // Render a 32x32 tilemap
         for tile_y in 0..32 {
