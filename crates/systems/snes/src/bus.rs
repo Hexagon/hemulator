@@ -6,7 +6,7 @@ use crate::SnesError;
 use emu_core::apu::Spc700;
 use emu_core::cpu_65c816::Memory65c816;
 use emu_core::logging::{log, LogCategory, LogLevel};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// DMA channel configuration (one per channel, 8 total)
 #[derive(Clone, Copy)]
@@ -112,7 +112,10 @@ pub struct SnesBus {
     /// Session identifier to track different upload sequences
     apu_session_id: u8,
     /// Optional real SPC700 APU (if None, uses stub)
-    spc700: Option<Spc700>,
+    spc700: Option<RefCell<Spc700>>,
+    /// Track pending SPC700 cycles for synchronization
+    /// This ensures the SPC700 gets enough time to process writes before reads
+    spc700_pending_cycles: Cell<u32>,
 }
 
 impl SnesBus {
@@ -140,7 +143,8 @@ impl SnesBus {
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: Some(Spc700::new()), // Enable real SPC700 APU by default
+            spc700: Some(RefCell::new(Spc700::new())), // Enable real SPC700 APU by default
+            spc700_pending_cycles: Cell::new(0),
         }
     }
 
@@ -150,7 +154,7 @@ impl SnesBus {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Enabling SPC700 APU".to_string()
         });
-        self.spc700 = Some(Spc700::new());
+        self.spc700 = Some(RefCell::new(Spc700::new()));
     }
 
     /// Disable the real SPC700 APU (use stub)
@@ -190,8 +194,8 @@ impl SnesBus {
     }
 
     /// Get mutable reference to SPC700 APU if enabled
-    pub fn spc700_mut(&mut self) -> Option<&mut Spc700> {
-        self.spc700.as_mut()
+    pub fn spc700_mut(&mut self) -> Option<std::cell::RefMut<'_, Spc700>> {
+        self.spc700.as_ref().map(|rc| rc.borrow_mut())
     }
 
     pub fn tick_frame(&mut self) {
@@ -203,14 +207,26 @@ impl SnesBus {
     pub fn tick_cycles(&mut self, cycles: u32) {
         self.frame_cycle += cycles;
 
-        // Run SPC700 for the same number of cycles
-        if let Some(ref mut spc700) = self.spc700 {
-            spc700.run_cycles(cycles);
-        }
+        // Accumulate cycles for SPC700 instead of running immediately
+        // This allows us to synchronize before port access
+        let current = self.spc700_pending_cycles.get();
+        self.spc700_pending_cycles.set(current + cycles);
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {
             self.apu_response_delay = self.apu_response_delay.saturating_sub(cycles);
+        }
+    }
+
+    /// Synchronize SPC700 to current cycle count
+    /// Called before APU port reads/writes to ensure proper timing
+    fn sync_spc700(&self) {
+        if let Some(ref spc700_cell) = self.spc700 {
+            let pending = self.spc700_pending_cycles.get();
+            if pending > 0 {
+                spc700_cell.borrow_mut().run_cycles(pending);
+                self.spc700_pending_cycles.set(0);
+            }
         }
     }
 
@@ -490,10 +506,14 @@ impl Memory65c816 for SnesBus {
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
 
+                        // Synchronize SPC700 before reading to ensure it has processed any pending writes
+                        // This matches Mesen2's approach of calling Run() before port access
+                        self.sync_spc700();
+
                         // Simply read the current port value - no latching needed
                         // Real SNES hardware has no latching for APU port reads
-                        let val = if let Some(ref spc700) = self.spc700 {
-                            spc700.read_port(port)
+                        let val = if let Some(ref spc700_cell) = self.spc700 {
+                            spc700_cell.borrow().read_port(port)
                         } else {
                             self.apu_ports[port as usize]
                         };
@@ -688,15 +708,18 @@ impl Memory65c816 for SnesBus {
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
 
+                        // Synchronize SPC700 before writing to ensure proper timing
+                        self.sync_spc700();
+
                         // Use real SPC700 if available
-                        if let Some(ref mut spc700) = self.spc700 {
+                        if let Some(ref spc700_cell) = self.spc700 {
                             log(LogCategory::Bus, LogLevel::Trace, || {
                                 format!(
                                     "SNES Bus: Write APU port ${:04X} (APUIO{}) to SPC700: 0x{:02X}",
                                     offset, port, val
                                 )
                             });
-                            spc700.write_port(port, val);
+                            spc700_cell.borrow_mut().write_port(port, val);
                             // Note: SPC700 synchronization happens via tick_cycles() called after each CPU step
                             // No need to run extra cycles here - it could desync the timing
                         } else {
