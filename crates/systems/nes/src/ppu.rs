@@ -147,8 +147,8 @@ pub struct Ppu {
     #[allow(clippy::type_complexity)]
     chr_read_callback: RefCell<Option<Box<dyn FnMut(u16)>>>,
     suppress_a12: Cell<bool>,
-    // Legacy scroll variables kept for backward compatibility with tests
-    // These are now derived from loopy registers when accessed
+    // Legacy scroll variables - written directly by $2005 writes and returned
+    // by scroll_x()/scroll_y(); they are not derived from the loopy registers.
     scroll_x: u8,
     scroll_y: u8,
     oam_addr: Cell<u8>,
@@ -281,13 +281,15 @@ impl Ppu {
 
     /// Extract scroll values from loopy registers for potential future use.
     /// 
-    /// This method computes the effective scroll position from the temp register.
+    /// This method computes the effective scroll position from the temp VRAM
+    /// address register (`t` / `temp_vram_addr`).
     /// It's currently unused but kept for potential future cycle-accurate rendering.
     ///
-    /// Note: In a cycle-accurate PPU, v is updated during rendering. In our frame-based
-    /// renderer, we use t (temp_vram_addr) as the source since it represents the scroll
-    /// position set by $2005 writes. The legacy scroll_x/scroll_y are updated directly
-    /// during $2005 writes for performance.
+    /// Note: The active frame-based renderer currently derives scroll from the
+    /// `v` register (`vram_addr`) during rendering. This helper instead decodes
+    /// the scroll encoded in `t` as set by `$2005` writes. The legacy
+    /// `scroll_x`/`scroll_y` fields are still updated directly during `$2005`
+    /// writes for performance.
     #[allow(dead_code)]
     fn update_legacy_scroll(&mut self) {
         let t = self.temp_vram_addr.get();
@@ -525,6 +527,7 @@ impl Ppu {
                 // PPUCTRL
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2000 write blocked (first frame)".to_string()
@@ -535,6 +538,13 @@ impl Ppu {
                 let old_nmi = (self.ctrl & 0x80) != 0;
                 self.ctrl = val;
                 let new_nmi = (self.ctrl & 0x80) != 0;
+                
+                // PPUCTRL bits 0-1 select the base nametable, which updates t register bits 10-11
+                // t: ....BA.. ........ = d: ......BA
+                let t = self.temp_vram_addr.get();
+                let nt_select = (val & 0x03) as u16;
+                self.temp_vram_addr.set((t & !0x0C00) | (nt_select << 10));
+                
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!(
                         "PPUCTRL write: 0x{:02X} (NMI: {})",
@@ -644,16 +654,17 @@ impl Ppu {
                 if !self.addr_latch.get() {
                     // First write (w=0): set high byte of address
                     // Update both t register (for scrolling) and vram_addr (for $2007 access)
-                    let hi = (val & 0x3F) as u16; // Only bits 0-5 are used
-
+                    let hi_masked = (val & 0x3F) as u16;  // Only bits 0-5 are used for t register
+                    
                     // Update temp register (t) for proper loopy behavior
                     let t = self.temp_vram_addr.get();
-                    self.temp_vram_addr.set((t & 0x00FF) | (hi << 8));
-
+                    self.temp_vram_addr.set((t & 0x00FF) | (hi_masked << 8));
+                    
                     // Also update vram_addr for frame-based rendering compatibility
+                    // Note: vram_addr can hold full 16-bit value (not masked here)
                     let lo = self.vram_addr.get() & 0x00FF;
                     self.vram_addr.set(((val as u16) << 8) | lo);
-
+                    
                     self.addr_latch.set(true);
                 } else {
                     // Second write (w=1): set low byte of address
@@ -835,21 +846,22 @@ impl Ppu {
         // take effect at scanline boundaries, not immediately.
         let rendering_enabled = bg_enabled || sprites_enabled;
         if rendering_enabled {
-            // At scanline 0: copy vertical bits from t to v
-            // (simulates pre-render scanline dot 280-304 behavior)
-            // Bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
-            if y == 0 {
-                let v = self.vram_addr.get();
-                let t = self.temp_vram_addr.get();
-                self.vram_addr.set((v & !0x7BE0) | (t & 0x7BE0));
-            }
-            
-            // Copy horizontal scroll bits from t to v at start of every scanline
-            // (simulates dot 257 behavior)
-            // Bits: 0-4 (coarse X), 10 (nametable X)
-            let v = self.vram_addr.get();
             let t = self.temp_vram_addr.get();
-            self.vram_addr.set((v & !0x041F) | (t & 0x041F));
+            let v = self.vram_addr.get();
+            
+            // At scanline 0: copy both vertical and horizontal bits from t to v
+            // (simulates pre-render scanline dot 280-304 + dot 257 behavior)
+            if y == 0 {
+                // Vertical bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
+                let mut new_v = (v & !0x7BE0) | (t & 0x7BE0);
+                // Horizontal bits: 0-4 (coarse X), 10 (nametable X)
+                new_v = (new_v & !0x041F) | (t & 0x041F);
+                self.vram_addr.set(new_v);
+            } else {
+                // Copy horizontal scroll bits from t to v at start of every other scanline
+                // (simulates dot 257 behavior)
+                self.vram_addr.set((v & !0x041F) | (t & 0x041F));
+            }
         }
 
         // Perform sprite evaluation for this scanline to determine sprite overflow
@@ -862,10 +874,6 @@ impl Ppu {
         } else {
             0x0000
         };
-        // Base nametable from PPUCTRL bits 0-1
-        // In hardware, this is the initial value copied to v register bits 10-11
-        // For frame-based rendering, we use PPUCTRL directly and apply scroll offsets
-        let base_nt = (self.ctrl & 0x03) as u8;
 
         let mut universal_bg_idx = self.palette[palette_mirror_index(0)];
         if (self.mask & 0x01) != 0 {
@@ -881,48 +889,63 @@ impl Ppu {
         // When the IRQ handler writes to $2005, it updates t (temp_vram_addr).
         // Those changes are copied to v (vram_addr) at the start of the NEXT scanline,
         // matching real hardware behavior.
+        
+        // Extract scroll components from v register
+        // In hardware-accurate rendering, we don't compute "pixel scroll" values.
+        // Instead, we use the v register directly to determine which tile to render.
         let v = self.vram_addr.get();
         let fine_x_val = self.fine_x.get();
         
-        // Extract scroll components from v register
         let coarse_x = (v & 0x001F) as u8;           // Bits 0-4: tile column (0-31)
         let coarse_y = ((v >> 5) & 0x001F) as u8;    // Bits 5-9: tile row (0-31)
+        let nt_x = ((v >> 10) & 0x0001) as u8;       // Bit 10: nametable X
+        let nt_y = ((v >> 11) & 0x0001) as u8;       // Bit 11: nametable Y
         let fine_y = ((v >> 12) & 0x0007) as u8;     // Bits 12-14: fine Y scroll (0-7)
         
-        // Compute pixel scroll values
-        let sx = (coarse_x as u32 * 8) + fine_x_val as u32;  // Horizontal scroll in pixels
-        let sy = (coarse_y as u32 * 8) + fine_y as u32;      // Vertical scroll in pixels
+        // Calculate which tile row and fine row to render for this scanline.
+        // In cycle-accurate rendering, coarse_y increments during rendering.
+        // In frame-based rendering, we compute the effective tile row for scanline Y.
+        let pixel_y = y + fine_y as u32;
+        let tile_y = (coarse_y as u32 + (pixel_y / 8)) as u8;
+        let fine_y_in_tile = (pixel_y % 8) as usize;
+        
+        // Handle vertical wrapping: when tile_y >= 30, flip nametable Y and wrap
+        // Note: Coarse Y wraps at 30, not 32 (NES quirk)
+        let (tile_y_wrapped, nt_y_adjusted) = if tile_y >= 30 {
+            (tile_y - 30, nt_y ^ 1)
+        } else {
+            (tile_y, nt_y)
+        };
 
         // Track background priority for this scanline (for sprite priority).
         let mut bg_priority = [false; 256];
 
         // Background pixels for this scanline.
         if bg_enabled {
-            for x in 0..width {
+            for screen_x in 0..width {
                 // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
-                let should_render_bg = show_bg_left || x >= 8;
+                let should_render_bg = show_bg_left || screen_x >= 8;
 
-                // Calculate scroll position - let it overflow naturally
-                // The overflow bits will be used for nametable selection
-                let wx = x + sx;
-                let wy = y + sy;
-
-                // NES PPU nametable selection: base_nt XOR scroll overflow bits
-                // nt_x = 1 when scrolled past 256 pixels horizontally
-                // nt_y = 1 when scrolled past 240 pixels vertically
-                // This formula matches hardware behavior and GUI visualization
-                let nt_x = ((wx / 256) & 1) as u8;
-                let nt_y = ((wy / 240) & 1) as u8;
-                let nt = base_nt ^ nt_x ^ (nt_y << 1);
-
-                // Now wrap the position within the nametable (256x240)
-                let world_x = wx % 256;
-                let world_y = wy % 240;
-
-                let tx = (world_x / 8) as usize;
-                let ty = (world_y / 8) as usize;
-                let fine_x = (world_x % 8) as usize;
-                let fine_y = (world_y % 8) as usize;
+                // Calculate which pixel within the scrolling world to render.
+                // The fine_x offset determines which pixel we start at within the first tile.
+                let pixel_x = screen_x + fine_x_val as u32;
+                
+                // Determine which tile we're in (relative to current nametable)
+                let tile_x = (coarse_x as u32 + (pixel_x / 8)) as u8;
+                let fine_x_in_tile = (pixel_x % 8) as usize;
+                
+                // Handle horizontal wrapping: when tile_x >= 32, flip nametable X and wrap
+                let (tile_x_wrapped, nt_x_adjusted) = if tile_x >= 32 {
+                    (tile_x - 32, nt_x ^ 1)
+                } else {
+                    (tile_x, nt_x)
+                };
+                
+                // Nametable selection from v register bits
+                let nt = nt_x_adjusted | (nt_y_adjusted << 1);
+                
+                let tx = tile_x_wrapped as usize;
+                let ty = tile_y_wrapped as usize;
 
                 let nt_addr = 0x2000u16 + (nt as u16) * 0x0400;
                 let tile_addr = nt_addr + (ty as u16) * 32 + (tx as u16);
@@ -937,24 +960,24 @@ impl Ppu {
                 let palette_idx = (attr_byte >> shift) & 0x03;
 
                 let tile_addr = bg_pattern_base + (tile_index as usize) * 16;
-                let lo = self.chr_fetch(tile_addr + fine_y);
-                let hi = self.chr_fetch(tile_addr + fine_y + 8);
-                let bit = 7 - fine_x;
+                let lo = self.chr_fetch(tile_addr + fine_y_in_tile);
+                let hi = self.chr_fetch(tile_addr + fine_y_in_tile + 8);
+                let bit = 7 - fine_x_in_tile;
                 let lo_bit = (lo >> bit) & 1;
                 let hi_bit = (hi >> bit) & 1;
                 let color_in_tile = (hi_bit << 1) | lo_bit;
 
-                let idx = (y * width + x) as usize;
+                let idx = (y * width + screen_x) as usize;
                 let out = if !should_render_bg {
                     // Leftmost 8 pixels are clipped - use black
-                    bg_priority[x as usize] = false;
+                    bg_priority[screen_x as usize] = false;
                     0x00000000 // Black
                 } else if color_in_tile == 0 {
                     // Tile color is 0 (backdrop)
-                    bg_priority[x as usize] = false;
+                    bg_priority[screen_x as usize] = false;
                     universal_bg
                 } else {
-                    bg_priority[x as usize] = true;
+                    bg_priority[screen_x as usize] = true;
                     let pal_base = (palette_idx as usize) * 4;
                     let mut pal_entry =
                         self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
@@ -2533,7 +2556,7 @@ mod tests {
 
         // Test 1: Base nametable 0, no scroll
         // Should read from nametable 0
-        ppu.ctrl = 0x00; // Base nametable = 0
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
         ppu.write_register(5, 0); // X scroll
         ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
@@ -2545,7 +2568,7 @@ mod tests {
         );
 
         // Test 2: Base nametable 1, no scroll - should use NT1
-        ppu.ctrl = 0x01; // Base nametable = 1
+        ppu.write_register(0, 0x01); // PPUCTRL: nametable 1
         ppu.write_register(5, 0); // X scroll
         ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
@@ -2611,7 +2634,7 @@ mod tests {
 
         // Test 1: Base nametable 0 (PPUCTRL bits 0-1 = 00), no scroll
         // Should read from nametable 0
-        ppu.ctrl = 0x00;
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
         ppu.write_register(5, 0); // X scroll
         ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
@@ -2624,7 +2647,7 @@ mod tests {
 
         // Test 2: Base nametable 2 (PPUCTRL bits 0-1 = 10), no scroll
         // Should read from nametable 2 due to base nametable Y bit being set
-        ppu.ctrl = 0x02; // Base nametable = 2 (bit 1 set = Y offset)
+        ppu.write_register(0, 0x02); // PPUCTRL: nametable 2 (bit 1 set = Y offset)
         ppu.write_register(5, 0); // X scroll
         ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
@@ -2637,7 +2660,7 @@ mod tests {
 
         // Test 3: Base nametable 0, with Y scroll = 240 (cross to next nametable vertically)
         // Should read from nametable 2 (same as base NT2, no scroll)
-        ppu.ctrl = 0x00; // Base nametable = 0
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
         ppu.write_register(5, 0);   // X scroll = 0
         ppu.write_register(5, 240); // Y scroll = 240
         let frame = ppu.render_frame();
@@ -2650,7 +2673,7 @@ mod tests {
 
         // Test 4: Base nametable 2, with Y scroll = 240
         // Should wrap around to nametable 0 (Y offset cancels out)
-        ppu.ctrl = 0x02; // Base nametable = 2
+        ppu.write_register(0, 0x02); // PPUCTRL: nametable 2
         ppu.write_register(5, 0);   // X scroll = 0
         ppu.write_register(5, 240); // Y scroll = 240
         let frame = ppu.render_frame();

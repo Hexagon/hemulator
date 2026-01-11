@@ -72,7 +72,8 @@ The 2C02 PPU implements:
   - Accurate PPUSCROLL ($2005) behavior with separate coarse/fine components
   - Correct PPUADDR ($2006) interaction with scroll registers
   - Shared write latch between $2005 and $2006
-  - Nametable selection via XOR with scroll overflow
+  - Nametable selection via v register bits 10-11 (hardware-accurate loopy registers)
+  - v→t synchronization at scanline boundaries for mid-frame scroll changes
   
 - **Rendering**:
   - 256x240 resolution (NTSC) / 256x240 (PAL)
