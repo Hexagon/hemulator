@@ -279,12 +279,15 @@ impl Ppu {
         self.mask
     }
 
-    /// Extract scroll values from loopy registers for backward compatibility.
-    /// These methods compute the effective scroll position from the v register.
+    /// Extract scroll values from loopy registers for potential future use.
+    /// 
+    /// This method computes the effective scroll position from the temp register.
+    /// It's currently unused but kept for potential future cycle-accurate rendering.
     ///
     /// Note: In a cycle-accurate PPU, v is updated during rendering. In our frame-based
     /// renderer, we use t (temp_vram_addr) as the source since it represents the scroll
-    /// position set by $2005 writes.
+    /// position set by $2005 writes. The legacy scroll_x/scroll_y are updated directly
+    /// during $2005 writes for performance.
     #[allow(dead_code)]
     fn update_legacy_scroll(&mut self) {
         let t = self.temp_vram_addr.get();
@@ -649,7 +652,7 @@ impl Ppu {
 
                     // Also update vram_addr for frame-based rendering compatibility
                     let lo = self.vram_addr.get() & 0x00FF;
-                    self.vram_addr.set((val as u16) << 8 | lo);
+                    self.vram_addr.set(((val as u16) << 8) | lo);
 
                     self.addr_latch.set(true);
                 } else {
@@ -3584,8 +3587,9 @@ mod tests {
             "Sprite overflow should NOT be set with exactly 8 sprites"
         );
 
-        // Add 9th sprite
-        ppu.oam[8 * 4] = 99;
+        // Add 9th sprite (sprite index 8, OAM offset = 8 * 4 bytes per sprite entry)
+        const SPRITE_8_OAM_OFFSET: usize = 8 * 4;
+        ppu.oam[SPRITE_8_OAM_OFFSET] = 99;
         ppu.evaluate_sprites_for_scanline(100);
 
         assert!(
