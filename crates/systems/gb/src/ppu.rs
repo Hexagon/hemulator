@@ -720,23 +720,25 @@ impl Ppu {
                 }
             }
 
-            // Hardware-accurate sprite priority sorting:
-            // - DMG: Sort by X coordinate first (lower X = higher priority), then by OAM index
-            // - CGB: Sort by OAM index only (lower OAM index = higher priority)
-            // This determines which sprites are selected when there are >10 on a scanline
-            if self.cgb_mode {
-                // CGB: Only OAM order matters
-                sprites_on_line.sort_by_key(|&(_x, oam_idx)| oam_idx);
-            } else {
-                // DMG: X coordinate first, then OAM order
-                sprites_on_line.sort_by_key(|&(x, oam_idx)| (x, oam_idx));
-            }
+            // Hardware-accurate sprite selection:
+            // Both DMG and CGB select the first 10 sprites in OAM order that intersect the scanline
+            // Sort by OAM index only for selection
+            sprites_on_line.sort_by_key(|&(_x, oam_idx)| oam_idx);
 
             // Take only first 10 sprites (hardware limit)
             sprites_on_line.truncate(10);
 
-            // Render sprites in reverse order for correct overlap priority
-            // (sprites with higher OAM index appear behind sprites with lower OAM index)
+            // Hardware-accurate sprite rendering priority:
+            // - DMG: Lower X coordinate has higher priority, OAM order as tiebreaker
+            // - CGB: Lower OAM index has higher priority (X coordinate irrelevant)
+            if !self.cgb_mode {
+                // DMG: Re-sort selected sprites by X coordinate, then OAM order for rendering priority
+                sprites_on_line.sort_by_key(|&(x, oam_idx)| (x, oam_idx));
+            }
+            // CGB: Already sorted by OAM order, which is the rendering priority
+
+            // Render sprites in reverse order so lower priority sprites are drawn first
+            // (higher priority sprites will overwrite their pixels)
             for &(x_pos, sprite_idx) in sprites_on_line.iter().rev() {
                 let oam_addr = (sprite_idx as usize) * 4;
                 let oam_y = self.oam[oam_addr];
@@ -1240,7 +1242,8 @@ mod tests {
 
     #[test]
     fn test_sprite_priority_dmg_x_coordinate() {
-        // DMG: Sprites with lower X coordinate have higher priority
+        // DMG: Sprite selection is OAM order, but rendering priority uses X coordinate
+        // Lower X coordinate sprites render on top (higher priority)
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
         ppu.cgb_mode = false; // Explicitly DMG mode
@@ -1253,7 +1256,7 @@ mod tests {
         ppu.write_oam(3, 0); // Flags
 
         // Sprite 1 (OAM index 1): X=12, visible pixels at screen X = 4-11
-        // Lower X coordinate should give it higher priority in DMG mode
+        // In DMG mode, lower X gives higher RENDERING priority (will appear on top)
         ppu.write_oam(4, 16); // Y (same as sprite 0)
         ppu.write_oam(5, 12); // X (lower than sprite 0)
         ppu.write_oam(6, 1); // Tile 1 (different tile)
@@ -1268,27 +1271,28 @@ mod tests {
         ppu.write_vram(0x0011, 0x00);
 
         let _frame = ppu.render_frame();
-        // Test passes if no panic occurs - the sorting logic handles DMG priority correctly
+        // Test passes if no panic occurs - validates DMG rendering priority logic
     }
 
     #[test]
     fn test_sprite_priority_cgb_oam_order() {
-        // CGB: Only OAM order matters, X coordinate is irrelevant
+        // CGB: Both selection and rendering priority use OAM order only
+        // X coordinate is irrelevant for priority
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
         ppu.enable_cgb_mode(false); // CGB-only mode (compatibility_mode=false means flag 0xC0)
 
-        // Create two overlapping sprites at the same Y and X positions
-        // In CGB mode, OAM order determines priority (lower index = higher priority)
-        // Sprite 0 (OAM index 0): should have higher priority
+        // Create two overlapping sprites at the same Y position
+        // In CGB mode, OAM order determines both selection AND rendering priority
+        // Sprite 0 (OAM index 0): should have higher priority and render on top
         ppu.write_oam(0, 16); // Y
         ppu.write_oam(1, 16); // X
         ppu.write_oam(2, 0); // Tile 0
         ppu.write_oam(3, 0); // Flags
 
-        // Sprite 1 (OAM index 1): should have lower priority even though it has lower X
+        // Sprite 1 (OAM index 1): lower priority even with lower X coordinate
         ppu.write_oam(4, 16); // Y (same as sprite 0)
-        ppu.write_oam(5, 12); // X (lower than sprite 0, but shouldn't matter in CGB)
+        ppu.write_oam(5, 12); // X (lower than sprite 0, but doesn't matter in CGB)
         ppu.write_oam(6, 1); // Tile 1
         ppu.write_oam(7, 0); // Flags
 
@@ -1299,7 +1303,56 @@ mod tests {
         ppu.write_vram(0x0011, 0x00);
 
         let _frame = ppu.render_frame();
-        // Test passes if no panic occurs - the sorting logic handles CGB priority correctly
+        // Test passes if no panic occurs - validates CGB OAM-only priority logic
+    }
+
+    #[test]
+    fn test_sprite_selection_oam_order() {
+        // Test that sprite SELECTION (which 10 to display) uses OAM order for both DMG and CGB
+        // This is critical for games like Grand Theft Auto where HUD sprites need to be selected
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x93; // Enable LCD, sprites, and background
+
+        // Create 15 sprites on the same scanline but at different X positions
+        // Place HUD sprite (important) at OAM index 0 with high X coordinate (far right)
+        // Place world sprites at higher OAM indices with low X coordinates (far left)
+        for i in 0u16..15 {
+            let oam_addr = i * 4;
+            ppu.write_oam(oam_addr, 16); // Y position (all on same scanline)
+
+            if i == 0 {
+                // HUD sprite at OAM 0 with high X (far right)
+                ppu.write_oam(oam_addr + 1, 150); // X = 150
+            } else {
+                // World sprites with low X (far left)
+                ppu.write_oam(oam_addr + 1, (8 + i - 1) as u8); // X = 8-21
+            }
+            ppu.write_oam(oam_addr + 2, 0); // Tile index
+            ppu.write_oam(oam_addr + 3, 0); // Flags
+        }
+
+        // Set up tile
+        ppu.write_vram(0x0000, 0xFF);
+        ppu.write_vram(0x0001, 0xFF);
+
+        let frame = ppu.render_frame();
+
+        // The HUD sprite at OAM 0 MUST be selected and rendered even though its X is highest
+        // Because sprite selection uses OAM order, not X coordinate
+        // With old (incorrect) X-based selection, the HUD would be dropped in favor of world sprites
+        // Verify the HUD sprite at X=150 (screen X = 142-149) is rendered
+        let screen_y = 0;
+        let mut found_hud = false;
+        for screen_x in 142..150 {
+            if frame.pixels[screen_y * 160 + screen_x] != 0xFFFFFFFF {
+                found_hud = true;
+                break;
+            }
+        }
+        assert!(
+            found_hud,
+            "HUD sprite at OAM 0 with X=150 should be selected and rendered"
+        );
     }
 
     #[test]
