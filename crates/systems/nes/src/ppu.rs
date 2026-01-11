@@ -2696,6 +2696,98 @@ mod tests {
     }
 
     #[test]
+    fn test_vertical_scrolling_with_base_nametable() {
+        // Test that vertical scrolling works correctly with PPUCTRL base nametable Y bit
+        // This is critical for games like Rad Racer 2 and F1 Sensation that use Y scrolling
+        // Regression test for bug where Y scrolling showed wrong nametable region
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up different tiles in nametables 0 and 2
+        // With Horizontal mirroring: NT0/NT1 share physical 0, NT2/NT3 share physical 1
+        // So NT0 and NT2 are different
+        // Nametable 0 (0x2000): tile 0x01
+        let addr_nt0 = ppu.map_nametable_addr(0x2000);
+        ppu.vram[addr_nt0] = 0x01;
+        // Nametable 2 (0x2800): tile 0x02
+        let addr_nt2 = ppu.map_nametable_addr(0x2800);
+        ppu.vram[addr_nt2] = 0x02;
+
+        // Create distinct tile patterns in CHR-RAM
+        // Tile 0x01: all color 1
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x10 + 8 + i] = 0x00;
+        }
+        // Tile 0x02: all color 2
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0x00;
+            ppu.chr[0x20 + 8 + i] = 0xFF;
+        }
+
+        // Set up palettes
+        ppu.palette[0] = 0x0F; // Universal background
+        ppu.palette[1] = 0x30; // Color 1 (white)
+        ppu.palette[2] = 0x16; // Color 2 (red)
+
+        // Enable background
+        ppu.mask = 0x08;
+
+        // Test 1: Base nametable 0 (PPUCTRL bits 0-1 = 00), no scroll
+        // Should read from nametable 0
+        ppu.ctrl = 0x00;
+        ppu.scroll_x = 0;
+        ppu.scroll_y = 0;
+        let frame = ppu.render_frame();
+        let pixel = frame.pixels[0];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x30),
+            "Base NT0, no scroll: should show NT0 (color 1)"
+        );
+
+        // Test 2: Base nametable 2 (PPUCTRL bits 0-1 = 10), no scroll
+        // Should read from nametable 2 due to base nametable Y bit being set
+        ppu.ctrl = 0x02; // Base nametable = 2 (bit 1 set = Y offset)
+        ppu.scroll_x = 0;
+        ppu.scroll_y = 0;
+        let frame = ppu.render_frame();
+        let pixel = frame.pixels[0];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x16),
+            "Base NT2, no scroll: should show NT2 (color 2) due to base Y offset"
+        );
+
+        // Test 3: Base nametable 0, with Y scroll = 240 (cross to next nametable vertically)
+        // Should read from nametable 2 (same as base NT2, no scroll)
+        ppu.ctrl = 0x00; // Base nametable = 0
+        ppu.scroll_x = 0;
+        ppu.scroll_y = 240;
+        let frame = ppu.render_frame();
+        let pixel = frame.pixels[0];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x16),
+            "Base NT0, scroll_y=240: should show NT2 (color 2) after crossing Y boundary"
+        );
+
+        // Test 4: Base nametable 2, with Y scroll = 240
+        // Should wrap around to nametable 0 (Y offset cancels out)
+        ppu.ctrl = 0x02; // Base nametable = 2
+        ppu.scroll_x = 0;
+        ppu.scroll_y = 240;
+        let frame = ppu.render_frame();
+        let pixel = frame.pixels[0];
+        assert_eq!(
+            pixel,
+            nes_palette_rgb(0x30),
+            "Base NT2, scroll_y=240: should wrap to NT0 (color 1)"
+        );
+    }
+
+    #[test]
     fn test_eight_sprite_per_scanline_limit() {
         // Test that the NES hardware limitation of 8 sprites per scanline is enforced
         let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
