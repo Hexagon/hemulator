@@ -583,6 +583,11 @@ impl Ppu {
             let tile_y = (win_y / 8) as u16;
             let pixel_y = (win_y % 8) as u16;
 
+            // Ensure tile_y is within bounds (0-31) to prevent out-of-bounds tilemap access
+            if tile_y >= 32 {
+                continue;
+            }
+
             let start_x = self.wx.saturating_sub(7);
 
             for screen_x in start_x..160 {
