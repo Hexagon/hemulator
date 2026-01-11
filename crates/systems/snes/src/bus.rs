@@ -213,11 +213,12 @@ impl SnesBus {
         // Ratio: 1.024 / 3.58 ≈ 0.286 (SPC700 runs at about 28.6% of main CPU speed)
         // Using integer math: SPC700 cycles = CPU cycles * 1024 / 3580
         let spc700_cycles = (cycles as u64 * 1024) / 3580;
-        
+
         // Accumulate cycles for SPC700 instead of running immediately
         // This allows us to synchronize before port access
         let current = self.spc700_pending_cycles.get();
-        self.spc700_pending_cycles.set(current + spc700_cycles as u32);
+        self.spc700_pending_cycles
+            .set(current + spc700_cycles as u32);
 
         // Decrement APU response delay for simulating processing time
         if self.apu_response_delay > 0 {

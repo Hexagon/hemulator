@@ -698,51 +698,57 @@ mod tests {
         // 4. End upload with $00 $00
         // 5. Clear ports and wait for ready AGAIN
         // This is what real games like Super Mario World do.
-        
+
         let test_rom = include_bytes!("../../../../test_roms/snes/test_apu_upload.sfc");
 
         let mut sys = SnesSystem::default();
         assert!(sys.mount("Cartridge", test_rom).is_ok());
 
         use emu_core::debug::Debugger;
-        
+
         for i in 0..100 {
             let _ = sys.step_frame().unwrap();
-            
+
             // Check progress markers:
             // $0100 = $01: passed first ready wait
             // $0101 = $02: completed first upload
             // $0102 = $03: got end-of-upload echo
             // $0103 = $04: passed second ready wait (CRITICAL!)
             // $0110 = $FF: timeout occurred
-            
+
             let markers = sys.read_memory(0x0100, 0x14).unwrap();
-            
+
             // Also check APU ports to see what's happening
             let apu_ports = sys.read_memory(0x2140, 4).unwrap();
-            
+
             if i > 5 && i % 5 == 0 {
                 println!("Frame {}: Markers={:02X} {:02X} {:02X} {:02X}, APU ports={:02X} {:02X} {:02X} {:02X}, PC={:04X}", 
                     i, markers[0], markers[1], markers[2], markers[3],
                     apu_ports[0], apu_ports[1], apu_ports[2], apu_ports[3],
                     sys.get_cpu_state().pc);
             }
-            
+
             if markers[0x10] == 0xFF {
                 panic!(
                     "APU upload test TIMEOUT waiting for ready signal after {} frames.\n\
                      Progress: $0100-$0103 = {:02X} {:02X} {:02X} {:02X}",
-                    i + 1, markers[0], markers[1], markers[2], markers[3]
+                    i + 1,
+                    markers[0],
+                    markers[1],
+                    markers[2],
+                    markers[3]
                 );
             }
-            
+
             if markers[3] == 0x04 {
                 println!("APU upload protocol test PASSED after {} frames", i + 1);
-                println!("All markers: $0100=${:02X}, $0101=${:02X}, $0102=${:02X}, $0103=${:02X}",
-                         markers[0], markers[1], markers[2], markers[3]);
+                println!(
+                    "All markers: $0100=${:02X}, $0101=${:02X}, $0102=${:02X}, $0103=${:02X}",
+                    markers[0], markers[1], markers[2], markers[3]
+                );
                 return;
             }
-            
+
             if i > 20 && markers[0] == 0x01 && markers[3] == 0x00 {
                 // We're stuck waiting for second ready
                 panic!(
@@ -770,7 +776,7 @@ mod tests {
         // This test simulates commercial game behavior where the main CPU
         // waits for the APU ready signature ($BBAA) twice during initialization.
         // This is critical for testing the timing-sensitive APU port synchronization.
-        
+
         let test_rom = include_bytes!("../../../../test_roms/snes/test_apu_double_upload.sfc");
 
         let mut sys = SnesSystem::default();
@@ -783,22 +789,22 @@ mod tests {
         // The ROM writes $01 to $0100 after first APU ready check
         // and $02 to $0101 after second APU ready check
         use emu_core::debug::Debugger;
-        
+
         for i in 0..100 {
             let _ = sys.step_frame().unwrap();
-            
+
             // Check WRAM for progress markers
             let marker1_bytes = sys.read_memory(0x0100, 1).unwrap();
             let marker2_bytes = sys.read_memory(0x0101, 1).unwrap();
             let marker1 = marker1_bytes[0];
             let marker2 = marker2_bytes[0];
-            
+
             if marker1 == 0x01 && marker2 == 0x02 {
                 // Both APU ready checks succeeded!
                 println!("APU double upload test PASSED after {} frames", i + 1);
                 return;
             }
-            
+
             if marker1 == 0x01 && marker2 == 0x00 && i > 20 {
                 // First check passed but second check is stuck
                 panic!(
@@ -813,7 +819,7 @@ mod tests {
         let marker2_bytes = sys.read_memory(0x0101, 1).unwrap();
         let marker1 = marker1_bytes[0];
         let marker2 = marker2_bytes[0];
-        
+
         panic!(
             "APU double upload test TIMEOUT after 100 frames. Markers: $0100=${:02X}, $0101=${:02X}",
             marker1, marker2
