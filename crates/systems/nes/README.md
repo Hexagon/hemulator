@@ -67,26 +67,37 @@ NesSystem
 
 The 2C02 PPU implements:
 
+- **Scrolling**:
+  - Proper loopy register system (v, t, fine_x)
+  - Accurate PPUSCROLL ($2005) behavior with separate coarse/fine components
+  - Correct PPUADDR ($2006) interaction with scroll registers
+  - Shared write latch between $2005 and $2006
+  - Nametable selection via XOR with scroll overflow
+  
 - **Rendering**:
   - 256x240 resolution (NTSC) / 256x240 (PAL)
   - Background rendering with attribute tables
   - 64 sprites (8x8 or 8x16 modes)
-  - Sprite 0 hit detection
-  - Sprite overflow detection
-  - Horizontal and vertical scrolling
+  - Accurate sprite 0 hit detection with all edge cases:
+    - Checks for opaque pixel overlap
+    - Respects x=255 boundary (no hit)
+    - Respects left 8-pixel clipping
+  - Sprite overflow detection (>8 sprites per scanline)
+  - 8-sprite-per-scanline hardware limit
+  - Correct sprite priority (front-to-back buffer fill)
   - **Software Renderer**: CPU-based tile/sprite rendering (default)
   - **OpenGL Renderer**: GPU-accelerated rendering (optional, via `opengl` feature)
   
 - **Memory**:
-  - 2KB internal VRAM for nametables
+  - 2KB internal VRAM for nametables (4KB for four-screen)
   - 32-byte palette RAM (8 background + 8 sprite palettes)
   - 8KB CHR memory (ROM or RAM)
   - 256-byte OAM (Object Attribute Memory)
   
-- **Timing Model**: Frame-based rendering
+- **Timing Model**: Frame-based rendering with scanline support
   - Renders complete 256x240 frames on-demand
-  - Scanline rendering for mapper CHR switching
-  - Suitable for most games
+  - Scanline rendering for mid-frame register changes
+  - Suitable for ~90%+ of games
 
 ### APU Implementation
 
@@ -147,7 +158,13 @@ cargo run --release -p emu_gui -- path/to/game.nes
 
 The NES crate includes comprehensive tests:
 
-- **130 total tests**:
+- **215+ total tests**:
+  - PPU tests (scrolling, loopy registers, sprite handling, rendering)
+    - Loopy register behavior (5 tests)
+    - Sprite 0 hit edge cases (2 tests)
+    - Sprite overflow detection (3 tests)
+    - Sprite priority and rendering (8 tests)
+    - Nametable scrolling (5 tests)
   - APU tests (pulse, triangle, noise, sweep, frame counter)
   - Mapper tests (all 14 mappers)
   - PPU tests (rendering, registers, scrolling)

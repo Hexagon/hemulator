@@ -3516,7 +3516,7 @@ mod tests {
 
         // Background tile at position (0, 1) which covers screen (0-7, 8-15)
         let nt_addr = ppu.map_nametable_addr(0x2000);
-        ppu.vram[nt_addr + 1 * 32 + 0] = 2;
+        ppu.vram[nt_addr + 32] = 2; // Row 1, column 0
         for i in 0..8 {
             ppu.chr[0x20 + i] = 0xFF;
             ppu.chr[0x28 + i] = 0x00;
