@@ -748,12 +748,12 @@ impl Ppu {
                 let wx = x + sx;
                 let wy = y + sy;
 
+                // NES PPU nametable selection: base_nt XOR scroll overflow bits
+                // nt_x = 1 when scrolled past 256 pixels horizontally
+                // nt_y = 1 when scrolled past 240 pixels vertically
+                // This formula matches hardware behavior and GUI visualization
                 let nt_x = ((wx / 256) & 1) as u8;
                 let nt_y = ((wy / 240) & 1) as u8;
-                // Choose nametable based on base XOR scroll crossing.
-                // This matches real NES PPU behavior: the nametable bits are XORed
-                // with the coarse scroll overflow to select the correct nametable.
-                // Bit 0 of nametable = horizontal offset, Bit 1 = vertical offset
                 let nt = base_nt ^ nt_x ^ (nt_y << 1);
 
                 let world_x = wx % 256;

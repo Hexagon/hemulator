@@ -1981,9 +1981,11 @@ impl TabManager {
         let viewport_height = 240.0;
 
         // Calculate which nametable the scroll starts in
+        // NES PPU nametable selection: base_nt XOR scroll overflow bits
+        // This formula matches the rendering logic in ppu.rs
         let nt_x = ((scroll_x / 256.0) as usize) & 1;
         let nt_y = ((scroll_y / 240.0) as usize) & 1;
-        let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
+        let scroll_nt = base_nt ^ nt_x ^ (nt_y << 1);
 
         // Calculate scroll window position in logical pixel space (512x480 for 2x2 grid)
         // Map scroll position to the 2x2 nametable grid
@@ -2183,11 +2185,11 @@ impl TabManager {
         let viewport_height = 240.0;
 
         // Calculate nametable selection based on scroll position
-        // NES hardware uses non-intuitive bit mapping: X affects bit 1, Y affects bit 0
-        // Scrolling crosses nametable boundaries at 256 pixels (X) and 240 pixels (Y)
+        // NES PPU nametable selection: base_nt XOR scroll overflow bits
+        // This formula matches the rendering logic in ppu.rs
         let nt_x = ((scroll_x / 256.0) as usize) & 1;
         let nt_y = ((scroll_y / 240.0) as usize) & 1;
-        let scroll_nt = base_nt ^ (nt_x << 1) ^ nt_y;
+        let scroll_nt = base_nt ^ nt_x ^ (nt_y << 1);
 
         // Calculate the position of the scroll window in the grid
         let grid_x = scroll_nt % 2;
