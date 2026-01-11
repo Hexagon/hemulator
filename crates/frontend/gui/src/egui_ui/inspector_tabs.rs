@@ -105,7 +105,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         InspectorTab::Debug => {
             tab_manager.render_debug_tab(ui);
         }
-        InspectorTab::Memory => render_memory_tab(ui),
+        InspectorTab::Memory => {
+            tab_manager.render_memory_tab(ui);
+        }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
         | InspectorTab::SmsTiles
@@ -119,7 +121,7 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
             render_palettes_tab(ui);
         }
         InspectorTab::NesNametables => {
-            render_nametables_tab(ui);
+            tab_manager.render_nametables_tab(ui);
         }
         InspectorTab::SnesLayers => {
             render_snes_layers_tab(ui);
@@ -305,19 +307,6 @@ fn render_log_tab(ui: &mut Ui) {
         });
 }
 
-/// Render the Memory Inspector tab (generic, works for all systems)
-fn render_memory_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("💾").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("Memory Inspector");
-        ui.add_space(10.0);
-        ui.label("Generic memory inspector");
-        ui.label(egui::RichText::new("(To be implemented)").weak());
-    });
-}
-
 /// Render the Palettes tab (for systems with palette support)
 fn render_palettes_tab(ui: &mut Ui) {
     ui.vertical_centered(|ui| {
@@ -327,19 +316,6 @@ fn render_palettes_tab(ui: &mut Ui) {
         ui.heading("Palettes");
         ui.add_space(10.0);
         ui.label("System palette viewer");
-        ui.label(egui::RichText::new("(To be implemented)").weak());
-    });
-}
-
-/// Render the NES Nametables tab
-fn render_nametables_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("🗺️").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("Nametables");
-        ui.add_space(10.0);
-        ui.label("NES nametable viewer");
         ui.label(egui::RichText::new("(To be implemented)").weak());
     });
 }

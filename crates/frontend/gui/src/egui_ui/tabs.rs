@@ -115,6 +115,10 @@ pub struct TabManager {
     pub pending_debug_action: Option<DebugAction>,
     pub selected_memory_region_index: usize,
     pub memory_view_address: u32,
+    /// Cached memory data for the current view (address -> bytes)
+    pub cached_memory: Vec<u8>,
+    /// Address range of cached memory
+    pub cached_memory_start: u32,
 }
 
 impl TabManager {
@@ -133,6 +137,8 @@ impl TabManager {
             pending_debug_action: None,
             selected_memory_region_index: 0,
             memory_view_address: 0,
+            cached_memory: Vec::new(),
+            cached_memory_start: 0,
         }
     }
 
@@ -169,6 +175,12 @@ impl TabManager {
 
     pub fn update_enhanced_debug_state(&mut self, state: EnhancedDebugState) {
         self.enhanced_debug_state = Some(state);
+    }
+
+    /// Update cached memory data for the memory viewer
+    pub fn update_cached_memory(&mut self, data: Vec<u8>, start_address: u32) {
+        self.cached_memory = data;
+        self.cached_memory_start = start_address;
     }
 
     /// Get and clear any pending action
@@ -526,6 +538,142 @@ impl TabManager {
             });
     }
 
+    pub fn render_memory_tab(&mut self, ui: &mut Ui) {
+        // If we have enhanced debug state, show memory explorer
+        if let Some(state) = self.enhanced_debug_state.clone() {
+            if state.memory_regions.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("💾").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("Memory Inspector");
+                    ui.add_space(10.0);
+                    ui.label("No memory regions defined for this system");
+                });
+                return;
+            }
+
+            ui.vertical(|ui| {
+                ui.heading("💾 Memory Inspector");
+                ui.separator();
+                ui.add_space(5.0);
+
+                // Dropdown for memory region selection
+                ui.horizontal(|ui| {
+                    ui.label("Region:");
+                    egui::ComboBox::from_id_salt("memory_inspector_region_selector")
+                        .selected_text(
+                            state
+                                .memory_regions
+                                .get(self.selected_memory_region_index)
+                                .map(|r| r.name.as_str())
+                                .unwrap_or("Select region"),
+                        )
+                        .show_ui(ui, |ui| {
+                            for (idx, region) in state.memory_regions.iter().enumerate() {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.selected_memory_region_index,
+                                        idx,
+                                        &region.name,
+                                    )
+                                    .clicked()
+                                {
+                                    // Reset view address to region start when changing regions
+                                    self.memory_view_address = region.start;
+                                }
+                            }
+                        });
+                });
+
+                ui.separator();
+                ui.add_space(5.0);
+
+                // Show selected region info and hex viewer
+                if let Some(region) = state.memory_regions.get(self.selected_memory_region_index) {
+                    // Region info
+                    ui.horizontal(|ui| {
+                        ui.label("Range:");
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "${:04X} - ${:04X}",
+                                region.start, region.end
+                            ))
+                            .monospace(),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Size:");
+                        ui.label(
+                            egui::RichText::new(format!("{} bytes", region.size())).monospace(),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Access:");
+                        let access = match (region.readable, region.writable) {
+                            (true, true) => "Read/Write",
+                            (true, false) => "Read-only",
+                            (false, true) => "Write-only",
+                            (false, false) => "No access",
+                        };
+                        ui.label(egui::RichText::new(access).monospace());
+                    });
+
+                    ui.add_space(5.0);
+                    ui.separator();
+
+                    // Address navigation
+                    ui.horizontal(|ui| {
+                        ui.label("Address:");
+                        let mut addr_input = format!("{:04X}", self.memory_view_address);
+                        if ui.text_edit_singleline(&mut addr_input).changed() {
+                            if let Ok(addr) = u32::from_str_radix(&addr_input, 16) {
+                                self.memory_view_address = addr.clamp(region.start, region.end);
+                            }
+                        }
+                        if ui.button("⬆").clicked() && self.memory_view_address >= region.start + 16
+                        {
+                            self.memory_view_address -= 16;
+                        }
+                        if ui.button("⬇").clicked() && self.memory_view_address + 16 <= region.end
+                        {
+                            self.memory_view_address += 16;
+                        }
+                        if ui.button("Page ⬆").clicked()
+                            && self.memory_view_address >= region.start + 256
+                        {
+                            self.memory_view_address -= 256;
+                        }
+                        if ui.button("Page ⬇").clicked()
+                            && self.memory_view_address + 256 <= region.end
+                        {
+                            self.memory_view_address += 256;
+                        }
+                    });
+
+                    ui.add_space(5.0);
+
+                    // Hex viewer
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            self.render_hex_dump(ui, region);
+                        });
+                }
+            });
+        } else {
+            // No debug state available
+            ui.vertical_centered(|ui| {
+                ui.add_space(40.0);
+                ui.label(egui::RichText::new("💾").size(48.0));
+                ui.add_space(10.0);
+                ui.heading("Memory Inspector");
+                ui.add_space(10.0);
+                ui.label("Load a ROM to see memory contents");
+            });
+        }
+    }
+
     fn render_new_project_tab(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
@@ -879,12 +1027,12 @@ impl TabManager {
             ui.separator();
             ui.add_space(5.0);
 
-            // 3-column layout: Disassembly | Memory | CPU State
-            // Use horizontal layout with equal-width columns that fill available height
+            // 2-column layout: Disassembly | CPU State
+            // Memory explorer is only available via the Inspector Memory tab
             let header_height = 120.0; // Approximate height used by header elements above (including toolbar)
             ui.horizontal_top(|ui| {
                 let available_width = ui.available_width();
-                let column_width = available_width / 3.0 - 10.0; // 3 columns with spacing
+                let column_width = available_width / 2.0 - 10.0; // 2 columns with spacing
                 let content_height = total_available_height - header_height;
 
                 // Left panel: Disassembly
@@ -897,21 +1045,6 @@ impl TabManager {
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             self.render_disassembly_panel(ui, state);
-                        });
-                });
-
-                ui.add_space(10.0);
-
-                // Middle panel: Memory Explorer
-                ui.vertical(|ui| {
-                    ui.set_width(column_width);
-                    ui.set_height(content_height);
-                    ui.heading("💾 Memory");
-                    ui.separator();
-                    ScrollArea::vertical()
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            self.render_memory_panel(ui, state);
                         });
                 });
 
@@ -999,121 +1132,106 @@ impl TabManager {
             });
     }
 
-    fn render_memory_panel(&mut self, ui: &mut Ui, state: &EnhancedDebugState) {
-        if state.memory_regions.is_empty() {
-            ui.label(egui::RichText::new("No memory regions defined").weak());
+    fn render_hex_dump(&self, ui: &mut Ui, region: &MemoryRegion) {
+        // Check if we have cached memory data
+        if self.cached_memory.is_empty() {
+            ui.label(
+                egui::RichText::new("No memory data available")
+                    .weak()
+                    .italics(),
+            );
+            ui.label(
+                egui::RichText::new("Memory will be loaded when available")
+                    .weak()
+                    .italics(),
+            );
             return;
         }
 
-        // Dropdown for memory region selection
+        // Calculate how many rows to display (16 bytes per row)
+        let bytes_per_row = 16;
+        let rows_to_display = 32; // Display ~512 bytes at a time
+
+        // Calculate starting address aligned to 16-byte boundary
+        let aligned_address = (self.memory_view_address / bytes_per_row) * bytes_per_row;
+
+        // Display header
         ui.horizontal(|ui| {
-            ui.label("Region:");
-            egui::ComboBox::from_id_salt("memory_region_selector")
-                .selected_text(
-                    state
-                        .memory_regions
-                        .get(self.selected_memory_region_index)
-                        .map(|r| r.name.as_str())
-                        .unwrap_or("Select region"),
-                )
-                .show_ui(ui, |ui| {
-                    for (idx, region) in state.memory_regions.iter().enumerate() {
-                        if ui
-                            .selectable_value(
-                                &mut self.selected_memory_region_index,
-                                idx,
-                                &region.name,
-                            )
-                            .clicked()
-                        {
-                            // Reset view address to region start when changing regions
-                            self.memory_view_address = region.start;
-                        }
-                    }
-                });
+            ui.label(egui::RichText::new("Offset").monospace().strong());
+            ui.add_space(10.0);
+            for i in 0..16 {
+                ui.label(egui::RichText::new(format!("{:X}", i)).monospace().weak());
+            }
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new("ASCII").monospace().strong());
         });
 
         ui.separator();
 
-        // Show selected region info and hex viewer
-        if let Some(region) = state.memory_regions.get(self.selected_memory_region_index) {
-            // Region info
-            ui.horizontal(|ui| {
-                ui.label("Range:");
-                ui.label(
-                    egui::RichText::new(format!("${:04X} - ${:04X}", region.start, region.end))
-                        .monospace(),
-                );
-            });
-            ui.horizontal(|ui| {
-                ui.label("Size:");
-                ui.label(egui::RichText::new(format!("{} bytes", region.size())).monospace());
-            });
-            ui.horizontal(|ui| {
-                ui.label("Access:");
-                let access = match (region.readable, region.writable) {
-                    (true, true) => "Read/Write",
-                    (true, false) => "Read-only",
-                    (false, true) => "Write-only",
-                    (false, false) => "No access",
-                };
-                ui.label(egui::RichText::new(access).monospace());
-            });
+        // Display hex dump rows
+        egui::Grid::new("hex_dump_grid")
+            .num_columns(18) // Address + 16 bytes + ASCII
+            .spacing([8.0, 2.0])
+            .striped(false)
+            .show(ui, |ui| {
+                for row in 0..rows_to_display {
+                    let row_addr = aligned_address + (row * bytes_per_row);
 
-            ui.add_space(5.0);
-            ui.separator();
-
-            // Address navigation
-            ui.horizontal(|ui| {
-                ui.label("Address:");
-                let mut addr_input = format!("{:04X}", self.memory_view_address);
-                if ui.text_edit_singleline(&mut addr_input).changed() {
-                    if let Ok(addr) = u32::from_str_radix(&addr_input, 16) {
-                        self.memory_view_address = addr.clamp(region.start, region.end);
+                    // Check if this row is within the region
+                    if row_addr > region.end {
+                        break;
                     }
-                }
-                if ui.button("⬆").clicked() && self.memory_view_address >= region.start + 16 {
-                    self.memory_view_address -= 16;
-                }
-                if ui.button("⬇").clicked() && self.memory_view_address + 16 <= region.end {
-                    self.memory_view_address += 16;
+
+                    // Display address
+                    ui.label(
+                        egui::RichText::new(format!("{:04X}:", row_addr))
+                            .monospace()
+                            .color(egui::Color32::from_rgb(150, 150, 200)),
+                    );
+
+                    // Display hex bytes
+                    let mut ascii_text = String::new();
+                    for byte_offset in 0..bytes_per_row {
+                        let addr = row_addr + byte_offset;
+
+                        if addr < region.start || addr > region.end {
+                            // Out of region bounds
+                            ui.label(egui::RichText::new("  ").monospace());
+                            ascii_text.push(' ');
+                        } else {
+                            // Calculate offset in cached memory
+                            let cache_offset = addr.saturating_sub(self.cached_memory_start);
+
+                            if (cache_offset as usize) < self.cached_memory.len() {
+                                let byte = self.cached_memory[cache_offset as usize];
+
+                                // Display hex byte
+                                ui.label(egui::RichText::new(format!("{:02X}", byte)).monospace());
+
+                                // Build ASCII representation
+                                if (0x20..=0x7E).contains(&byte) {
+                                    ascii_text.push(byte as char);
+                                } else {
+                                    ascii_text.push('.');
+                                }
+                            } else {
+                                // Not in cache
+                                ui.label(egui::RichText::new("??").monospace().weak());
+                                ascii_text.push('?');
+                            }
+                        }
+                    }
+
+                    // Display ASCII column
+                    ui.label(
+                        egui::RichText::new(ascii_text)
+                            .monospace()
+                            .color(egui::Color32::from_rgb(180, 180, 180)),
+                    );
+
+                    ui.end_row();
                 }
             });
-
-            ui.add_space(5.0);
-
-            // Hex viewer placeholder (to be filled with actual memory data)
-            ui.label(egui::RichText::new("Memory Viewer:").strong());
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    self.render_hex_dump(ui, region);
-                });
-        }
-    }
-
-    fn render_hex_dump(&self, ui: &mut Ui, _region: &MemoryRegion) {
-        // Display hex dump - note: actual memory reading would be done in main.rs
-        // For now, show placeholder
-        ui.label(
-            egui::RichText::new(format!("Memory view at ${:04X}", self.memory_view_address))
-                .monospace()
-                .weak(),
-        );
-        ui.label(
-            egui::RichText::new("(Memory content to be populated from debugger)")
-                .weak()
-                .italics(),
-        );
-
-        // Show sample hex dump format
-        ui.add_space(5.0);
-        ui.label(egui::RichText::new("Format:").weak());
-        ui.label(
-            egui::RichText::new("ADDR: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  ASCII")
-                .monospace()
-                .weak(),
-        );
     }
 
     fn render_cpu_state_panel(&self, ui: &mut Ui, state: &EnhancedDebugState) {
@@ -1374,30 +1492,6 @@ impl TabManager {
 
                             // Render sprite grid
                             self.render_sprites(ui, nes_data);
-
-                            ui.add_space(15.0);
-
-                            // Nametable (Background) section
-                            ui.heading("Nametables (Background)");
-                            ui.separator();
-
-                            let bg_table = if (nes_data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
-                            ui.horizontal(|ui| {
-                                ui.label(format!(
-                                    "BG Pattern Table: {} (CHR ${:04X})",
-                                    bg_table,
-                                    bg_table * 0x1000
-                                ));
-                                ui.separator();
-                                ui.label(format!("Mirroring: {}", nes_data.mirroring));
-                                ui.separator();
-                                ui.label(format!("VRAM: {} bytes", nes_data.vram.len()));
-                            });
-
-                            ui.add_space(5.0);
-
-                            // Render nametable preview
-                            self.render_nametables(ui, nes_data);
                         }
                         SystemTileData::GameBoy(gb_data) => {
                             ui.heading(format!(
@@ -1453,6 +1547,66 @@ impl TabManager {
                         ui.heading("No Tile Data Available");
                         ui.add_space(10.0);
                         ui.label("Load a ROM to see tile and palette data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_nametables_tab(&self, ui: &mut Ui) {
+        let available_height = ui.available_height();
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .max_height(available_height)
+            .show(ui, |ui| {
+                if let Some(ref sys_data) = self.system_tile_data {
+                    // Only render for NES system
+                    match sys_data {
+                        SystemTileData::NES(nes_data) => {
+                            // Header
+                            ui.heading("🗺️ NES Nametable Viewer");
+                            ui.separator();
+
+                            // PPU state summary
+                            let bg_table = if (nes_data.ppuctrl & 0x10) != 0 { 1 } else { 0 };
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "BG Pattern Table: {} (CHR ${:04X})",
+                                    bg_table,
+                                    bg_table * 0x1000
+                                ));
+                                ui.separator();
+                                ui.label(format!("Mirroring: {}", nes_data.mirroring));
+                                ui.separator();
+                                ui.label(format!("VRAM: {} bytes", nes_data.vram.len()));
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Render nametable preview
+                            self.render_nametables(ui, nes_data);
+                        }
+                        _ => {
+                            // Not a NES system - show message
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(40.0);
+                                ui.label(egui::RichText::new("🗺️").size(48.0));
+                                ui.add_space(10.0);
+                                ui.heading("Nametables");
+                                ui.add_space(10.0);
+                                ui.label("Only available for NES");
+                            });
+                        }
+                    }
+                } else {
+                    // No tile data available
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🗺️").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Nametables");
+                        ui.add_space(10.0);
+                        ui.label("NES nametable viewer");
+                        ui.label("Load a NES ROM to see nametable data");
                     });
                 }
             });
