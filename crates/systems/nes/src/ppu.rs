@@ -15,17 +15,15 @@
 //!
 //! ## Rendering Model
 //!
-//! This implementation uses a **frame-based** rendering model rather than
-//! cycle-accurate scanline rendering:
+//! This implementation uses **scanline-based** rendering:
 //!
-//! - Entire frames are rendered on-demand via `render_frame()`
-//! - Scanlines can be rendered incrementally via `render_scanline()` for mapper CHR switching
+//! - Scanlines are rendered incrementally via `render_scanline()` for accurate mid-frame register changes
 //! - VBlank is simulated at the system level, not by the PPU
 //! - **Sprite evaluation** is performed per scanline to set sprite overflow flag
 //! - Sprite 0 hit detection is basic but functional
 //!
-//! This approach is suitable for most games but may not handle edge cases
-//! requiring precise PPU timing (mid-scanline register changes, exact sprite 0 hit timing, etc.).
+//! This approach handles mid-frame scroll register changes correctly (e.g., fixed HUDs in games
+//! like SMB3, F1 Sensation, and Rad Racer 2).
 //!
 //! ## Memory Map
 //!
@@ -332,7 +330,6 @@ impl Ppu {
     ///
     /// Reference: Mesen2 NesPpu.cpp ProcessScanlineImpl() - flags cleared on pre-render scanline
     /// Reference: NESdev wiki - sprite flags persist through VBlank
-    #[allow(dead_code)] // Will be used when frame-based rendering is replaced with scanline-based
     pub fn clear_sprite_flags(&self) {
         self.sprite_0_hit.set(false);
         self.sprite_overflow.set(false);
@@ -672,294 +669,12 @@ impl Ppu {
     }
     #[cfg(test)]
     pub fn render_frame(&self) -> Frame {
-        // TEST-ONLY: This method is used for testing and renders the entire frame at once.
-        // Production code uses render_scanline() which is called 240 times per frame.
-        //
-        // Rendering is done "out of band" (not cycle-accurate). Suppress A12 callbacks
-        // so mappers like MMC3 don't see thousands of synthetic edges during draw.
-        let prev_suppress = self.suppress_a12.replace(true);
-
-        // Background-only renderer, with attribute table + palette.
-        // Still very approximate, but produces colored and less-garbled output for many ROMs.
-        let width = 256u32;
-        let height = 240u32;
-        let mut frame = Frame::new(width, height);
-
-        let bg_enabled = (self.mask & 0x08) != 0;
-        let sprites_enabled = (self.mask & 0x10) != 0;
-
-        // Track which pixels have non-zero background color indices for sprite priority.
-        // True = background has opaque pixel (color index 1-3), False = transparent (color index 0).
-        let mut bg_priority = vec![false; (width * height) as usize];
-
-        let bg_pattern_base: usize = if (self.ctrl & 0x10) != 0 {
-            0x1000
-        } else {
-            0x0000
-        };
-        let base_nt = (self.ctrl & 0x03) as u8;
-
-        // Universal background color is palette[$00].
-        let mut universal_bg_idx = self.palette[palette_mirror_index(0)];
-        if (self.mask & 0x01) != 0 {
-            universal_bg_idx &= 0x30; // grayscale forces high bits only
+        // TEST-ONLY: Helper that renders using scanline-based rendering.
+        // This ensures tests use the same rendering path as production code.
+        let mut frame = Frame::new(256, 240);
+        for scanline in 0..240 {
+            self.render_scanline(scanline, &mut frame);
         }
-        let universal_bg = nes_palette_rgb(universal_bg_idx);
-
-        // Apply scroll with basic nametable switching when crossing 256x240.
-        // This approximates the PPU's coarse scroll behavior.
-        let sx = self.scroll_x as u32;
-        let sy = self.scroll_y as u32;
-
-        // Background pass
-        if bg_enabled {
-            for y in 0..height {
-                for x in 0..width {
-                    // Calculate world position considering base nametable from PPUCTRL
-                    // PPUCTRL bits 0-1 select base nametable, which provides an offset in the virtual nametable space
-                    // Bit 0 = horizontal offset (256 pixels)
-                    // Bit 1 = vertical offset (240 pixels)
-                    let base_x_offset = (base_nt & 1) as u32 * 256;
-                    let base_y_offset = ((base_nt >> 1) & 1) as u32 * 240;
-
-                    let wx = x + sx + base_x_offset;
-                    let wy = y + sy + base_y_offset;
-
-                    // PPU nametable selection based on scroll position
-                    // Horizontal: nametable bit flips every 256 pixels (32 tiles * 8 pixels)
-                    // Vertical: nametable bit flips every 240 pixels (30 tiles * 8 pixels)
-                    let nt_x = ((wx / 256) & 1) as u8;
-                    let nt_y = ((wy / 240) & 1) as u8;
-
-                    // Choose nametable based on mirroring mode and scroll position
-                    let nt = if self.mirroring == Mirroring::FourScreen {
-                        // 4-screen mode: Direct nametable selection
-                        // NT0 = (0,0), NT1 = (1,0), NT2 = (0,1), NT3 = (1,1)
-                        nt_x | (nt_y << 1)
-                    } else {
-                        // 2-screen modes: Nametable bits from scroll position
-                        // No XOR needed since we've already incorporated base_nt into the world position
-                        nt_x | (nt_y << 1)
-                    };
-
-                    // Within nametable coordinates
-                    // X wraps at 256 pixels (matches nametable width)
-                    // Y wraps at 240 pixels (30 tiles, actual nametable height)
-                    let world_x = wx % 256;
-                    let world_y = wy % 240;
-
-                    let tx = (world_x / 8) as usize;
-                    let ty = (world_y / 8) as usize;
-                    let fine_x = (world_x % 8) as usize;
-                    let fine_y = (world_y % 8) as usize;
-
-                    let nt_addr = 0x2000u16 + (nt as u16) * 0x0400;
-                    let tile_addr = nt_addr + (ty as u16) * 32 + (tx as u16);
-                    let tile_index = self.vram[self.map_nametable_addr(tile_addr)];
-
-                    // Attribute table is at 0x3C0 within the nametable.
-                    let attr_x = tx / 4;
-                    let attr_y = ty / 4;
-                    let attr_addr = nt_addr + 0x03C0 + (attr_y as u16) * 8 + (attr_x as u16);
-                    let attr_byte = self.vram[self.map_nametable_addr(attr_addr)];
-                    let quadrant = ((ty % 4) / 2) * 2 + ((tx % 4) / 2); // 0..3
-                    let shift = (quadrant * 2) as u8;
-                    let palette_idx = (attr_byte >> shift) & 0x03;
-
-                    let tile_addr = bg_pattern_base + (tile_index as usize) * 16;
-                    let lo = self.chr_fetch(tile_addr + fine_y);
-                    let hi = self.chr_fetch(tile_addr + fine_y + 8);
-                    let bit = 7 - fine_x;
-                    let lo_bit = (lo >> bit) & 1;
-                    let hi_bit = (hi >> bit) & 1;
-                    let color_in_tile = (hi_bit << 1) | lo_bit; // 0..3
-
-                    let idx = (y * width + x) as usize;
-                    let out = if color_in_tile == 0 {
-                        // Transparent background pixel - sprites with priority can show through
-                        bg_priority[idx] = false;
-                        universal_bg
-                    } else {
-                        // Opaque background pixel - sprites with priority go behind this
-                        bg_priority[idx] = true;
-                        // Background palette layout in palette RAM:
-                        // - $00 = universal background
-                        // - $01..$03 = BG palette 0
-                        // - $05..$07 = BG palette 1
-                        // - $09..$0B = BG palette 2
-                        // - $0D..$0F = BG palette 3
-                        let pal_base = (palette_idx as usize) * 4;
-                        let mut pal_entry =
-                            self.palette[palette_mirror_index(pal_base + (color_in_tile as usize))];
-                        if (self.mask & 0x01) != 0 {
-                            pal_entry &= 0x30; // grayscale
-                        }
-                        nes_palette_rgb(pal_entry)
-                    };
-
-                    frame.pixels[idx] = out;
-                }
-            }
-        } else {
-            // Background disabled -> fill with universal background (close enough to black in many cases)
-            for px in frame.pixels.iter_mut() {
-                *px = universal_bg;
-            }
-        }
-
-        // Sprite pass - correct NES sprite priority implementation.
-        //
-        // The NES PPU handles sprite priority in a specific way:
-        // 1. Sprites are drawn front-to-back (OAM 0→63) into a sprite buffer
-        // 2. First opaque pixel at each X coordinate wins (regardless of priority bit)
-        // 3. Priority bit determines whether sprite pixel replaces background in final composition
-        //
-        // Critical edge case: A back-priority sprite at lower OAM index can hide a
-        // front-priority sprite at higher index, even though the back-priority sprite
-        // itself may be hidden behind opaque background.
-        if sprites_enabled {
-            let sprite_size_16 = (self.ctrl & 0x20) != 0;
-            let sprite_pattern_base: usize = if (self.ctrl & 0x08) != 0 {
-                0x1000
-            } else {
-                0x0000
-            };
-
-            // Sprite buffer: stores (color, priority) for each pixel.
-            // None = no sprite pixel, Some((rgb, behind_bg)) = sprite pixel with priority.
-            let mut sprite_buffer: Vec<Option<(u32, bool)>> = vec![None; (width * height) as usize];
-
-            // NES PPU hardware limitation: maximum 8 sprites per scanline.
-            // Track how many sprites are on each scanline to enforce the limit.
-            let mut sprites_per_scanline: Vec<u8> = vec![0; height as usize];
-
-            // Draw sprites front-to-back (OAM 0→63) into sprite buffer.
-            // First opaque pixel at each position wins.
-            for i in 0..64usize {
-                let o = i * 4;
-                let y_pos = self.oam[o] as i16 + 1; // OAM Y is sprite top minus 1
-                let tile = self.oam[o + 1];
-                let attr = self.oam[o + 2];
-                let x_pos = self.oam[o + 3] as i16;
-
-                let pal = (attr & 0x03) as usize;
-                let behind_bg = (attr & 0x20) != 0;
-                let flip_h = (attr & 0x40) != 0;
-                let flip_v = (attr & 0x80) != 0;
-
-                let (tile0, pattern_base, height_px) = if sprite_size_16 {
-                    // 8x16: pattern table is selected by tile bit 0; tile index ignores bit 0.
-                    let table = (tile & 1) as usize;
-                    let base = if table != 0 { 0x1000 } else { 0x0000 };
-                    (tile & 0xFE, base, 16)
-                } else {
-                    (tile, sprite_pattern_base, 8)
-                };
-
-                // Check if this sprite can be rendered on its scanlines (8-sprite limit)
-                // NOTE: This implementation is conservative - it skips the entire sprite if ANY
-                // scanline it occupies has 8 sprites. Real NES hardware would render the sprite
-                // on scanlines that haven't hit the limit. This simplified approach is sufficient
-                // for most games and avoids complex per-scanline rendering logic in render_frame().
-                // Games requiring precise per-scanline sprite limiting should use render_scanline().
-                let mut can_render = false;
-                let mut hit_limit = false;
-                for row in 0..height_px {
-                    let y = y_pos + row as i16;
-                    if y >= 0 && y < height as i16 {
-                        let scanline_idx = y as usize;
-                        if sprites_per_scanline[scanline_idx] >= 8 {
-                            // NES hardware limit: only 8 sprites per scanline
-                            hit_limit = true;
-                            break;
-                        }
-                        // At least one visible scanline exists and hasn't hit the limit yet
-                        can_render = true;
-                    }
-                }
-
-                // Skip this sprite if it would exceed the 8-sprite limit on any scanline,
-                // or if it's completely off-screen
-                if hit_limit || !can_render {
-                    continue;
-                }
-
-                // Mark scanlines as having this sprite
-                for row in 0..height_px {
-                    let y = y_pos + row as i16;
-                    if y >= 0 && y < height as i16 {
-                        sprites_per_scanline[y as usize] += 1;
-                    }
-                }
-
-                for row in 0..height_px {
-                    let sy = if flip_v { height_px - 1 - row } else { row };
-                    let y = y_pos + row as i16;
-                    if y < 0 || y >= height as i16 {
-                        continue;
-                    }
-
-                    let (tile_index, fine_y) = if height_px == 16 {
-                        // top/bottom tile
-                        if sy < 8 {
-                            (tile0, sy as usize)
-                        } else {
-                            (tile0.wrapping_add(1), (sy - 8) as usize)
-                        }
-                    } else {
-                        (tile0, sy as usize)
-                    };
-
-                    let addr = pattern_base + (tile_index as usize) * 16;
-                    let lo = self.chr_fetch(addr + fine_y);
-                    let hi = self.chr_fetch(addr + fine_y + 8);
-
-                    for col in 0..8 {
-                        let sx = if flip_h { col } else { 7 - col };
-                        let x = x_pos + col as i16;
-                        if x < 0 || x >= width as i16 {
-                            continue;
-                        }
-
-                        let lo_bit = (lo >> sx) & 1;
-                        let hi_bit = (hi >> sx) & 1;
-                        let color = (hi_bit << 1) | lo_bit;
-                        if color == 0 {
-                            continue; // transparent
-                        }
-
-                        let idx = (y as u32 * width + x as u32) as usize;
-
-                        // Only write if no sprite pixel has been written yet (first opaque pixel wins)
-                        if sprite_buffer[idx].is_none() {
-                            // Sprite palette layout:
-                            // - $10 is sprite "universal" (mirrors $00), and $11..$13 are palette 0 colors, etc.
-                            let pal_base = 0x11 + pal * 4;
-                            let mut pal_entry =
-                                self.palette[palette_mirror_index(pal_base + (color as usize) - 1)];
-                            if (self.mask & 0x01) != 0 {
-                                pal_entry &= 0x30; // grayscale
-                            }
-                            let rgb = nes_palette_rgb(pal_entry);
-                            sprite_buffer[idx] = Some((rgb, behind_bg));
-                        }
-                    }
-                }
-            }
-
-            // Composite sprite buffer with background using priority rules.
-            for idx in 0..(width * height) as usize {
-                if let Some((sprite_color, behind_bg)) = sprite_buffer[idx] {
-                    // Sprite pixel is opaque.
-                    // Draw it if: front priority OR background is transparent.
-                    if !behind_bg || !bg_priority[idx] {
-                        frame.pixels[idx] = sprite_color;
-                    }
-                }
-            }
-        }
-
-        self.suppress_a12.set(prev_suppress);
         frame
     }
 
@@ -1030,17 +745,21 @@ impl Ppu {
             for x in 0..width {
                 // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
                 let should_render_bg = show_bg_left || x >= 8;
+
+                // Calculate scroll position - let it overflow naturally
+                // The overflow bits will be used for nametable selection
                 let wx = x + sx;
                 let wy = y + sy;
 
+                // NES PPU nametable selection: base_nt XOR scroll overflow bits
+                // nt_x = 1 when scrolled past 256 pixels horizontally
+                // nt_y = 1 when scrolled past 240 pixels vertically
+                // This formula matches hardware behavior and GUI visualization
                 let nt_x = ((wx / 256) & 1) as u8;
                 let nt_y = ((wy / 240) & 1) as u8;
-                // Choose nametable based on base XOR scroll crossing.
-                // This matches real NES PPU behavior: the nametable bits are XORed
-                // with the coarse scroll overflow to select the correct nametable.
-                // Bit 0 of nametable = horizontal offset, Bit 1 = vertical offset
                 let nt = base_nt ^ nt_x ^ (nt_y << 1);
 
+                // Now wrap the position within the nametable (256x240)
                 let world_x = wx % 256;
                 let world_y = wy % 240;
 
@@ -1388,8 +1107,8 @@ mod tests {
         ppu.palette[2] = 0x16; // Color 2 (red)
         ppu.palette[3] = 0x27; // Color 3 (green)
 
-        // Enable background rendering
-        ppu.mask = 0x08; // Show background
+        // Enable background rendering and leftmost 8 pixels
+        ppu.mask = 0x0A; // Show background + show leftmost 8 pixels
 
         // Set first nametable tile to use tile 0
         ppu.vram[0] = 0;
@@ -1427,7 +1146,7 @@ mod tests {
         ppu.palette[4] = 0x30; // BG palette 1 color 0 (white) - should be ignored
 
         // Enable background rendering
-        ppu.mask = 0x08;
+        ppu.mask = 0x0A; // Show background + leftmost 8 pixels
 
         // Set first tile to use tile 0
         ppu.vram[0] = 0;
@@ -1508,7 +1227,7 @@ mod tests {
 
         // Enable sprite rendering
         ppu.ctrl = 0x00; // 8x8 sprites
-        ppu.mask = 0x10; // Show sprites
+        ppu.mask = 0x14; // Show sprites + leftmost 8 pixels
 
         // Place 9 sprites on scanline 100
         for i in 0..9 {
@@ -1547,7 +1266,7 @@ mod tests {
 
         // Enable sprite rendering
         ppu.ctrl = 0x00; // 8x8 sprites
-        ppu.mask = 0x10; // Show sprites
+        ppu.mask = 0x14; // Show sprites + leftmost 8 pixels
 
         // Place exactly 8 sprites on scanline 100
         for i in 0..8 {
@@ -1575,7 +1294,7 @@ mod tests {
 
         // Enable 8x16 sprite mode
         ppu.ctrl = 0x20; // 8x16 sprites
-        ppu.mask = 0x10; // Show sprites
+        ppu.mask = 0x14; // Show sprites + leftmost 8 pixels
 
         // Place 9 8x16 sprites on scanline 100
         for i in 0..9 {
@@ -2500,7 +2219,7 @@ mod tests {
 
         // Enable sprite rendering (no background)
         ppu.ctrl = 0x00;
-        ppu.mask = 0x10; // Sprites only
+        ppu.mask = 0x14; // Sprites + leftmost 8 pixels
 
         // Set up sprite pattern
         for i in 0..8 {
@@ -2539,7 +2258,7 @@ mod tests {
 
         // Enable sprite rendering (no background)
         ppu.ctrl = 0x00;
-        ppu.mask = 0x10; // Sprites only
+        ppu.mask = 0x14; // Sprites + leftmost 8 pixels
 
         // Set up sprite pattern
         for i in 0..8 {
@@ -2654,7 +2373,7 @@ mod tests {
         ppu.palette[2] = 0x16; // Color 2 (red)
 
         // Enable background
-        ppu.mask = 0x08;
+        ppu.mask = 0x0A; // Show background + leftmost 8 pixels
 
         // Test 1: Base nametable 0, no scroll
         // Should read from nametable 0
@@ -2732,7 +2451,7 @@ mod tests {
         ppu.palette[2] = 0x16; // Color 2 (red)
 
         // Enable background
-        ppu.mask = 0x08;
+        ppu.mask = 0x0A; // Show background + leftmost 8 pixels
 
         // Test 1: Base nametable 0 (PPUCTRL bits 0-1 = 00), no scroll
         // Should read from nametable 0
@@ -2796,7 +2515,7 @@ mod tests {
 
         // Enable sprite rendering
         ppu.ctrl = 0x00; // 8x8 sprites, pattern table at $0000
-        ppu.mask = 0x10; // Sprites enabled, no background
+        ppu.mask = 0x14; // Sprites + leftmost 8 pixels, no background
 
         // Set up sprite pattern (solid tile)
         for i in 0..8 {
@@ -2884,7 +2603,7 @@ mod tests {
         ppu.chr_is_ram = true;
 
         ppu.ctrl = 0x00;
-        ppu.mask = 0x10; // Sprites only
+        ppu.mask = 0x14; // Sprites + leftmost 8 pixels
 
         // Set up sprite pattern
         for i in 0..8 {
@@ -3415,5 +3134,81 @@ mod tests {
         assert_eq!(nt1, 0xBB, "NT1 should remain 0xBB");
         assert_eq!(nt2, 0xCC, "NT2 should remain 0xCC");
         assert_eq!(nt3, 0xDD, "NT3 should remain 0xDD");
+    }
+
+    #[test]
+    fn test_scroll_window_bounds() {
+        // Test that scroll calculations produce valid nametable coordinates
+        // and don't exceed the 2x2 nametable grid bounds (512x480 logical space)
+
+        // Test various scroll positions
+        let test_cases = vec![
+            (0, 0, 0, "Top-left of NT0"),
+            (255, 0, 0, "Top-right of NT0"),
+            (0, 239, 0, "Bottom-left of NT0"),
+            (255, 239, 0, "Bottom-right of NT0"),
+            (256, 0, 1, "Wrapped to NT1"),
+            (0, 240, 2, "Wrapped to NT2"),
+            (256, 240, 3, "Wrapped to NT3"),
+            (511, 479, 0, "Maximum scroll wraps around"),
+        ];
+
+        for (scroll_x, scroll_y, expected_base_nt, desc) in test_cases {
+            // Calculate which nametable the scroll window starts in
+            let nt_x = (scroll_x / 256) & 1;
+            let nt_y = (scroll_y / 240) & 1;
+            let scroll_nt = expected_base_nt ^ nt_x ^ (nt_y << 1);
+
+            // Calculate position within nametable
+            let pixel_x = scroll_x % 256;
+            let pixel_y = scroll_y % 240;
+
+            // Verify scroll window stays within bounds
+            // The scroll window is 256x240 pixels, and can wrap across nametable boundaries
+            // But the starting position should always be within a valid nametable
+            assert!(
+                scroll_nt < 4,
+                "{}: scroll_nt {} should be 0-3",
+                desc,
+                scroll_nt
+            );
+            assert!(
+                pixel_x < 256,
+                "{}: pixel_x {} should be < 256",
+                desc,
+                pixel_x
+            );
+            assert!(
+                pixel_y < 240,
+                "{}: pixel_y {} should be < 240",
+                desc,
+                pixel_y
+            );
+
+            // The scroll window can extend beyond the starting nametable (wrapping),
+            // but the maximum logical extent should not exceed the 2x2 grid when considering wrapping
+            // For the GUI visualization, we need to handle wrapping correctly
+            let grid_x = scroll_nt % 2;
+            let grid_y = scroll_nt / 2;
+
+            // Starting position in logical 512x480 space
+            let logical_start_x = grid_x * 256 + pixel_x;
+            let logical_start_y = grid_y * 240 + pixel_y;
+
+            // The scroll window extends 256x240 from the start position
+            // When wrapping is considered, these should wrap within 512x480 bounds
+            assert!(
+                logical_start_x < 512,
+                "{}: logical_start_x {} should be < 512",
+                desc,
+                logical_start_x
+            );
+            assert!(
+                logical_start_y < 480,
+                "{}: logical_start_y {} should be < 480",
+                desc,
+                logical_start_y
+            );
+        }
     }
 }

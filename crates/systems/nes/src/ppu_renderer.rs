@@ -55,13 +55,6 @@ pub trait NesPpuRenderer: Renderer + std::fmt::Debug {
     /// * `ppu` - PPU chip state (registers, VRAM, OAM)
     /// * `scanline` - Scanline number (0-239)
     fn render_scanline(&mut self, ppu: &mut Ppu, scanline: u32);
-
-    /// Render a complete frame using PPU state
-    ///
-    /// # Arguments
-    /// * `ppu` - PPU chip state
-    #[allow(dead_code)]
-    fn render_frame(&mut self, ppu: &Ppu);
 }
 
 /// Software NES PPU renderer (CPU-based tile/sprite rendering)
@@ -123,19 +116,6 @@ impl NesPpuRenderer for SoftwareNesPpuRenderer {
     fn render_scanline(&mut self, ppu: &mut Ppu, scanline: u32) {
         // Delegate to the PPU's existing scanline render logic
         ppu.render_scanline(scanline, &mut self.framebuffer);
-    }
-
-    fn render_frame(&mut self, ppu: &Ppu) {
-        // For NES, we use scanline-based rendering during step_frame,
-        // so this method renders all scanlines at once.
-        // Note: This bypasses incremental rendering and may not handle
-        // mapper CHR switching correctly. Use scanline rendering instead.
-        for scanline in 0..240 {
-            // We need &mut Ppu to render scanlines
-            // Since we only have &Ppu here, we can't actually render
-            // This method is primarily for testing or future use
-            let _ = (ppu, scanline); // Silence unused warnings
-        }
     }
 }
 
