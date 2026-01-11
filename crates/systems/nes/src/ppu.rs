@@ -2647,23 +2647,30 @@ mod tests {
             "Base NT2, no scroll: should show NT2 (color 2) due to base Y offset"
         );
 
-        // Test 3: Base nametable 0, with X scroll = 8
-        // Should still read from nametable 0 (same tile, offset by fine_x)
-        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
-        ppu.write_register(5, 8);   // X scroll = 8 (shift by one tile)
-        ppu.write_register(5, 0);   // Y scroll = 0
-        let _frame = ppu.render_frame();
-        // Note: This test verifies scrolling works without crashing.
-        // Actual pixel verification would require more complex test setup.
+        // Test 3: Mid-frame PPUCTRL write updates t register bits 10-11
+        ppu.write_register(0, 0x00); // PPUCTRL: nametable 0 (bits 10-11 = 00)
+        ppu.write_register(5, 0);    // X scroll = 0
+        ppu.write_register(5, 0);    // Y scroll = 0
+        let t1 = ppu.temp_vram_addr.get();
+        assert_eq!(t1 & 0x0C00, 0x0000, "PPUCTRL nametable 0 should set t bits 10-11 to 00");
+        
+        ppu.write_register(0, 0x03); // PPUCTRL: nametable 3 (bits 10-11 = 11)
+        let t2 = ppu.temp_vram_addr.get();
+        assert_eq!(t2 & 0x0C00, 0x0C00, "PPUCTRL nametable 3 should set t bits 10-11 to 11");
 
-        // Test 4: Base nametable 0, with Y scroll = 8
-        // Should still read from nametable 0 (next row)
+        // Test 4: Scroll combination (X=16, Y=16) updates loopy registers correctly
         ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
-        ppu.write_register(5, 0);   // X scroll = 0
-        ppu.write_register(5, 8);   // Y scroll = 8 (shift down by one tile)
-        let _frame = ppu.render_frame();
-        // Note: This test verifies scrolling works without crashing.
-        // Actual pixel verification would require more complex test setup.
+        ppu.write_register(5, 16);   // X scroll = 16 (coarse_x=2, fine_x=0)
+        ppu.write_register(5, 16);   // Y scroll = 16 (coarse_y=2, fine_y=0)
+        let t = ppu.temp_vram_addr.get();
+        let coarse_x = t & 0x001F;
+        let coarse_y = (t >> 5) & 0x001F;
+        let fine_y = (t >> 12) & 0x0007;
+        let fine_x = ppu.fine_x.get();
+        assert_eq!(coarse_x, 2, "X scroll 16 should set coarse_x to 2");
+        assert_eq!(fine_x, 0, "X scroll 16 should set fine_x to 0");
+        assert_eq!(coarse_y, 2, "Y scroll 16 should set coarse_y to 2");
+        assert_eq!(fine_y, 0, "Y scroll 16 should set fine_y to 0");
     }
 
     #[test]
