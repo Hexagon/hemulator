@@ -23,6 +23,7 @@ pub enum SystemTileData {
     GameBoy(GbTileData),
     SMS(SmsTileData),
     SNES(SnesTileData),
+    Atari2600(Atari2600TileData),
 }
 
 /// NES tile viewer data
@@ -85,6 +86,60 @@ pub struct SnesTileData {
     pub palette: Vec<u32>,
     pub bg_mode: u8,
     pub screen_enabled: bool,
+}
+
+/// Atari 2600 inspector data
+#[derive(Clone)]
+pub struct Atari2600TileData {
+    /// Playfield registers (PF0, PF1, PF2)
+    pub pf0: u8,
+    pub pf1: u8,
+    pub pf2: u8,
+    /// Playfield control flags
+    pub playfield_reflect: bool,
+    pub playfield_score_mode: bool,
+    pub playfield_priority: bool,
+    /// Player 0 and 1 graphics
+    pub grp0: u8,
+    pub grp1: u8,
+    /// Player positions
+    pub player0_x: u8,
+    pub player1_x: u8,
+    /// Player reflection flags
+    pub player0_reflect: bool,
+    pub player1_reflect: bool,
+    /// Player number and size (NUSIZ)
+    pub nusiz0: u8,
+    pub nusiz1: u8,
+    /// Missile enable flags
+    pub enam0: bool,
+    pub enam1: bool,
+    /// Missile positions
+    pub missile0_x: u8,
+    pub missile1_x: u8,
+    /// Ball enable and position
+    pub enabl: bool,
+    pub ball_x: u8,
+    pub ball_size: u8,
+    /// Color registers
+    pub colubk: u8,  // Background
+    pub colupf: u8,  // Playfield
+    pub colup0: u8,  // Player 0
+    pub colup1: u8,  // Player 1
+    /// NTSC palette (128 colors)
+    pub master_palette: Vec<u32>,
+    /// Collision detection registers
+    pub cxm0p: u8,  // Missile 0 to Player
+    pub cxm1p: u8,  // Missile 1 to Player
+    pub cxp0fb: u8, // Player 0 to Playfield/Ball
+    pub cxp1fb: u8, // Player 1 to Playfield/Ball
+    pub cxm0fb: u8, // Missile 0 to Playfield/Ball
+    pub cxm1fb: u8, // Missile 1 to Playfield/Ball
+    pub cxblpf: u8, // Ball to Playfield
+    pub cxppmm: u8, // Player/Missile collisions
+    /// Video blanking state
+    pub vblank: bool,
+    pub vsync: bool,
 }
 
 /// Actions that can be triggered from tabs
@@ -1537,6 +1592,20 @@ impl TabManager {
                             ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
                             ui.label(format!("Palette: {} colors", snes_data.palette.len()));
                         }
+                        SystemTileData::Atari2600(a2600_data) => {
+                            ui.heading("🕹️ Atari 2600 Inspector");
+                            ui.separator();
+                            
+                            // Show basic status
+                            ui.horizontal(|ui| {
+                                ui.label(format!("VSYNC: {}", if a2600_data.vsync { "ON" } else { "OFF" }));
+                                ui.separator();
+                                ui.label(format!("VBLANK: {}", if a2600_data.vblank { "ON" } else { "OFF" }));
+                            });
+                            
+                            ui.add_space(5.0);
+                            ui.label("See Playfield, Sprites, Palette, and Collision tabs for detailed views");
+                        }
                     }
                 } else {
                     // No tile data available
@@ -2691,6 +2760,541 @@ impl TabManager {
                         "https://github.com/Hexagon/hemulator/blob/main/LICENSE",
                     );
                 });
+            });
+    }
+
+    /// Render Atari 2600 Playfield inspector tab
+    pub fn render_atari2600_playfield_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Atari2600(ref data)) = self.system_tile_data {
+                    ui.heading("🎨 Atari 2600 Playfield");
+                    ui.separator();
+
+                    // Playfield registers
+                    ui.label(egui::RichText::new("Playfield Registers").strong());
+                    egui::Grid::new("pf_registers")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("PF0:");
+                            ui.label(egui::RichText::new(format!("${:02X} (bits 7-4)", data.pf0)).monospace());
+                            ui.end_row();
+
+                            ui.label("PF1:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.pf1)).monospace());
+                            ui.end_row();
+
+                            ui.label("PF2:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.pf2)).monospace());
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Playfield control flags
+                    ui.label(egui::RichText::new("Playfield Control (CTRLPF)").strong());
+                    egui::Grid::new("pf_control")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Reflection:");
+                            ui.label(if data.playfield_reflect { "ON (mirrored)" } else { "OFF (repeated)" });
+                            ui.end_row();
+
+                            ui.label("Score Mode:");
+                            ui.label(if data.playfield_score_mode { "ON (left=P0, right=P1 color)" } else { "OFF" });
+                            ui.end_row();
+
+                            ui.label("Priority:");
+                            ui.label(if data.playfield_priority { "IN FRONT of players" } else { "BEHIND players" });
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Visual playfield representation
+                    ui.label(egui::RichText::new("Visual Playfield (40 bits)").strong());
+                    ui.label("Each bit represents 4 pixels horizontally");
+                    
+                    let (response, painter) = ui.allocate_painter(
+                        egui::Vec2::new(ui.available_width().min(640.0), 100.0),
+                        egui::Sense::hover(),
+                    );
+                    
+                    let rect = response.rect;
+                    let cell_width = rect.width() / 40.0;
+                    let cell_height = rect.height();
+                    
+                    // Get playfield color
+                    let pf_color_idx = (data.colupf >> 1) as usize & 0x7F;
+                    let pf_rgb = data.master_palette.get(pf_color_idx).copied().unwrap_or(0xFFFFFF);
+                    let pf_color = egui::Color32::from_rgb(
+                        ((pf_rgb >> 16) & 0xFF) as u8,
+                        ((pf_rgb >> 8) & 0xFF) as u8,
+                        (pf_rgb & 0xFF) as u8,
+                    );
+                    
+                    // Draw playfield bits (left half)
+                    // PF0 bits 7-4 (reversed), PF1 bits 7-0, PF2 bits 0-7
+                    for i in 0..20 {
+                        let bit = if i < 4 {
+                            // PF0 bits 7-4 (reversed: bit 4 first, bit 7 last)
+                            (data.pf0 >> (4 + i)) & 1
+                        } else if i < 12 {
+                            // PF1 bits 7-0
+                            (data.pf1 >> (7 - (i - 4))) & 1
+                        } else {
+                            // PF2 bits 0-7
+                            (data.pf2 >> (i - 12)) & 1
+                        };
+                        
+                        let x = rect.min.x + i as f32 * cell_width;
+                        let cell_rect = egui::Rect::from_min_size(
+                            egui::pos2(x, rect.min.y),
+                            egui::vec2(cell_width, cell_height),
+                        );
+                        
+                        let color = if bit != 0 { pf_color } else { egui::Color32::from_rgb(32, 32, 32) };
+                        painter.rect_filled(cell_rect, 0.0, color);
+                        painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                    }
+                    
+                    // Draw playfield bits (right half - reflection or repeat)
+                    for i in 0..20 {
+                        let source_i = if data.playfield_reflect { 19 - i } else { i };
+                        
+                        let bit = if source_i < 4 {
+                            (data.pf0 >> (4 + source_i)) & 1
+                        } else if source_i < 12 {
+                            (data.pf1 >> (7 - (source_i - 4))) & 1
+                        } else {
+                            (data.pf2 >> (source_i - 12)) & 1
+                        };
+                        
+                        let x = rect.min.x + (20 + i) as f32 * cell_width;
+                        let cell_rect = egui::Rect::from_min_size(
+                            egui::pos2(x, rect.min.y),
+                            egui::vec2(cell_width, cell_height),
+                        );
+                        
+                        let color = if bit != 0 { pf_color } else { egui::Color32::from_rgb(32, 32, 32) };
+                        painter.rect_filled(cell_rect, 0.0, color);
+                        painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                    }
+
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("Left Half").weak());
+                    ui.label("PF0[4-7] (4 bits) → PF1[7-0] (8 bits) → PF2[0-7] (8 bits)");
+                    
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🎨").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Playfield");
+                        ui.add_space(10.0);
+                        ui.label("Load an Atari 2600 ROM to inspect the playfield");
+                    });
+                }
+            });
+    }
+
+    /// Render Atari 2600 Sprites inspector tab
+    pub fn render_atari2600_sprites_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Atari2600(ref data)) = self.system_tile_data {
+                    ui.heading("👾 Atari 2600 Sprites");
+                    ui.separator();
+
+                    // Player 0
+                    ui.label(egui::RichText::new("Player 0 (GRP0)").strong());
+                    egui::Grid::new("player0_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Graphics:");
+                            ui.label(egui::RichText::new(format!("${:02X} = %{:08b}", data.grp0, data.grp0)).monospace());
+                            ui.end_row();
+
+                            ui.label("Position:");
+                            ui.label(format!("X = {}", data.player0_x));
+                            ui.end_row();
+
+                            ui.label("Reflect:");
+                            ui.label(if data.player0_reflect { "Yes (mirrored)" } else { "No" });
+                            ui.end_row();
+
+                            ui.label("NUSIZ:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.nusiz0)).monospace());
+                            ui.end_row();
+                        });
+
+                    // Visual representation of Player 0
+                    if data.grp0 != 0 {
+                        ui.label("Visual:");
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(ui.available_width().min(200.0), 30.0),
+                            egui::Sense::hover(),
+                        );
+                        
+                        let rect = response.rect;
+                        let pixel_width = rect.width() / 8.0;
+                        
+                        let p0_color_idx = (data.colup0 >> 1) as usize & 0x7F;
+                        let p0_rgb = data.master_palette.get(p0_color_idx).copied().unwrap_or(0xFFFFFF);
+                        let p0_color = egui::Color32::from_rgb(
+                            ((p0_rgb >> 16) & 0xFF) as u8,
+                            ((p0_rgb >> 8) & 0xFF) as u8,
+                            (p0_rgb & 0xFF) as u8,
+                        );
+                        
+                        for i in 0..8 {
+                            let bit_pos = if data.player0_reflect { i } else { 7 - i };
+                            let bit = (data.grp0 >> bit_pos) & 1;
+                            
+                            let x = rect.min.x + i as f32 * pixel_width;
+                            let pixel_rect = egui::Rect::from_min_size(
+                                egui::pos2(x, rect.min.y),
+                                egui::vec2(pixel_width, rect.height()),
+                            );
+                            
+                            let color = if bit != 0 { p0_color } else { egui::Color32::from_rgb(32, 32, 32) };
+                            painter.rect_filled(pixel_rect, 0.0, color);
+                            painter.rect_stroke(pixel_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                        }
+                    }
+
+                    ui.add_space(15.0);
+
+                    // Player 1
+                    ui.label(egui::RichText::new("Player 1 (GRP1)").strong());
+                    egui::Grid::new("player1_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Graphics:");
+                            ui.label(egui::RichText::new(format!("${:02X} = %{:08b}", data.grp1, data.grp1)).monospace());
+                            ui.end_row();
+
+                            ui.label("Position:");
+                            ui.label(format!("X = {}", data.player1_x));
+                            ui.end_row();
+
+                            ui.label("Reflect:");
+                            ui.label(if data.player1_reflect { "Yes (mirrored)" } else { "No" });
+                            ui.end_row();
+
+                            ui.label("NUSIZ:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.nusiz1)).monospace());
+                            ui.end_row();
+                        });
+
+                    // Visual representation of Player 1
+                    if data.grp1 != 0 {
+                        ui.label("Visual:");
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(ui.available_width().min(200.0), 30.0),
+                            egui::Sense::hover(),
+                        );
+                        
+                        let rect = response.rect;
+                        let pixel_width = rect.width() / 8.0;
+                        
+                        let p1_color_idx = (data.colup1 >> 1) as usize & 0x7F;
+                        let p1_rgb = data.master_palette.get(p1_color_idx).copied().unwrap_or(0xFFFFFF);
+                        let p1_color = egui::Color32::from_rgb(
+                            ((p1_rgb >> 16) & 0xFF) as u8,
+                            ((p1_rgb >> 8) & 0xFF) as u8,
+                            (p1_rgb & 0xFF) as u8,
+                        );
+                        
+                        for i in 0..8 {
+                            let bit_pos = if data.player1_reflect { i } else { 7 - i };
+                            let bit = (data.grp1 >> bit_pos) & 1;
+                            
+                            let x = rect.min.x + i as f32 * pixel_width;
+                            let pixel_rect = egui::Rect::from_min_size(
+                                egui::pos2(x, rect.min.y),
+                                egui::vec2(pixel_width, rect.height()),
+                            );
+                            
+                            let color = if bit != 0 { p1_color } else { egui::Color32::from_rgb(32, 32, 32) };
+                            painter.rect_filled(pixel_rect, 0.0, color);
+                            painter.rect_stroke(pixel_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                        }
+                    }
+
+                    ui.add_space(15.0);
+
+                    // Missiles and Ball
+                    ui.label(egui::RichText::new("Missiles & Ball").strong());
+                    egui::Grid::new("missiles_ball_grid")
+                        .num_columns(3)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("");
+                            ui.label("Enabled");
+                            ui.label("Position");
+                            ui.end_row();
+
+                            ui.label("Missile 0:");
+                            ui.label(if data.enam0 { "Yes" } else { "No" });
+                            ui.label(format!("X = {}", data.missile0_x));
+                            ui.end_row();
+
+                            ui.label("Missile 1:");
+                            ui.label(if data.enam1 { "Yes" } else { "No" });
+                            ui.label(format!("X = {}", data.missile1_x));
+                            ui.end_row();
+
+                            ui.label("Ball:");
+                            ui.label(if data.enabl { "Yes" } else { "No" });
+                            ui.label(format!("X = {}, Size = {}", data.ball_x, data.ball_size));
+                            ui.end_row();
+                        });
+
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("👾").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Sprites");
+                        ui.add_space(10.0);
+                        ui.label("Load an Atari 2600 ROM to inspect sprites");
+                    });
+                }
+            });
+    }
+
+    /// Render Atari 2600 Palette inspector tab
+    pub fn render_atari2600_palette_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Atari2600(ref data)) = self.system_tile_data {
+                    ui.heading("🎨 Atari 2600 Palette");
+                    ui.separator();
+
+                    // Current colors
+                    ui.label(egui::RichText::new("Current Colors").strong());
+                    egui::Grid::new("current_colors")
+                        .num_columns(3)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            // Background
+                            ui.label("Background:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.colubk)).monospace());
+                            let bg_idx = (data.colubk >> 1) as usize & 0x7F;
+                            let bg_rgb = data.master_palette.get(bg_idx).copied().unwrap_or(0);
+                            let mut bg_color = egui::Color32::from_rgb(
+                                ((bg_rgb >> 16) & 0xFF) as u8,
+                                ((bg_rgb >> 8) & 0xFF) as u8,
+                                (bg_rgb & 0xFF) as u8,
+                            );
+                            ui.color_edit_button_srgba(&mut bg_color);
+                            ui.end_row();
+
+                            // Playfield
+                            ui.label("Playfield:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.colupf)).monospace());
+                            let pf_idx = (data.colupf >> 1) as usize & 0x7F;
+                            let pf_rgb = data.master_palette.get(pf_idx).copied().unwrap_or(0);
+                            let mut pf_color = egui::Color32::from_rgb(
+                                ((pf_rgb >> 16) & 0xFF) as u8,
+                                ((pf_rgb >> 8) & 0xFF) as u8,
+                                (pf_rgb & 0xFF) as u8,
+                            );
+                            ui.color_edit_button_srgba(&mut pf_color);
+                            ui.end_row();
+
+                            // Player 0
+                            ui.label("Player 0:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.colup0)).monospace());
+                            let p0_idx = (data.colup0 >> 1) as usize & 0x7F;
+                            let p0_rgb = data.master_palette.get(p0_idx).copied().unwrap_or(0);
+                            let mut p0_color = egui::Color32::from_rgb(
+                                ((p0_rgb >> 16) & 0xFF) as u8,
+                                ((p0_rgb >> 8) & 0xFF) as u8,
+                                (p0_rgb & 0xFF) as u8,
+                            );
+                            ui.color_edit_button_srgba(&mut p0_color);
+                            ui.end_row();
+
+                            // Player 1
+                            ui.label("Player 1:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.colup1)).monospace());
+                            let p1_idx = (data.colup1 >> 1) as usize & 0x7F;
+                            let p1_rgb = data.master_palette.get(p1_idx).copied().unwrap_or(0);
+                            let mut p1_color = egui::Color32::from_rgb(
+                                ((p1_rgb >> 16) & 0xFF) as u8,
+                                ((p1_rgb >> 8) & 0xFF) as u8,
+                                (p1_rgb & 0xFF) as u8,
+                            );
+                            ui.color_edit_button_srgba(&mut p1_color);
+                            ui.end_row();
+                        });
+
+                    ui.add_space(15.0);
+
+                    // NTSC Master Palette (128 colors)
+                    ui.label(egui::RichText::new("NTSC Master Palette (128 colors)").strong());
+                    ui.label("Upper 4 bits = Hue (0-15), Lower 3 bits = Luminance (0-7)");
+                    ui.add_space(5.0);
+
+                    // Display palette in a 16x8 grid
+                    let cell_size = 24.0;
+                    let (response, painter) = ui.allocate_painter(
+                        egui::Vec2::new(16.0 * cell_size, 8.0 * cell_size),
+                        egui::Sense::hover(),
+                    );
+
+                    let rect = response.rect;
+                    for lum in 0..8 {
+                        for hue in 0..16 {
+                            let idx = (hue << 4) | (lum << 1);
+                            let rgb = data.master_palette.get(idx).copied().unwrap_or(0);
+                            let color = egui::Color32::from_rgb(
+                                ((rgb >> 16) & 0xFF) as u8,
+                                ((rgb >> 8) & 0xFF) as u8,
+                                (rgb & 0xFF) as u8,
+                            );
+
+                            let x = rect.min.x + hue as f32 * cell_size;
+                            let y = rect.min.y + lum as f32 * cell_size;
+                            let cell_rect = egui::Rect::from_min_size(
+                                egui::pos2(x, y),
+                                egui::vec2(cell_size, cell_size),
+                            );
+
+                            painter.rect_filled(cell_rect, 0.0, color);
+                            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(0.5, egui::Color32::DARK_GRAY), egui::StrokeKind::Inside);
+                        }
+                    }
+
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("🎨").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Palette");
+                        ui.add_space(10.0);
+                        ui.label("Load an Atari 2600 ROM to view the palette");
+                    });
+                }
+            });
+    }
+
+    /// Render Atari 2600 Collision inspector tab
+    pub fn render_atari2600_collision_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Atari2600(ref data)) = self.system_tile_data {
+                    ui.heading("💥 Atari 2600 Collision Detection");
+                    ui.separator();
+
+                    ui.label("Collision detection registers track when graphics objects overlap.");
+                    ui.label("Bit 7 and 6 indicate collisions for each object pair.");
+                    ui.add_space(10.0);
+
+                    // Collision registers
+                    egui::Grid::new("collision_grid")
+                        .num_columns(3)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Register").strong());
+                            ui.label(egui::RichText::new("Value").strong());
+                            ui.label(egui::RichText::new("Collision").strong());
+                            ui.end_row();
+
+                            // CXM0P - Missile 0 to Players
+                            ui.label("CXM0P:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm0p)).monospace());
+                            let m0p0 = (data.cxm0p & 0x80) != 0;
+                            let m0p1 = (data.cxm0p & 0x40) != 0;
+                            ui.label(format!("M0-P0: {} | M0-P1: {}", if m0p0 { "✓" } else { "✗" }, if m0p1 { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXM1P - Missile 1 to Players
+                            ui.label("CXM1P:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm1p)).monospace());
+                            let m1p0 = (data.cxm1p & 0x80) != 0;
+                            let m1p1 = (data.cxm1p & 0x40) != 0;
+                            ui.label(format!("M1-P0: {} | M1-P1: {}", if m1p0 { "✓" } else { "✗" }, if m1p1 { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXP0FB - Player 0 to Playfield/Ball
+                            ui.label("CXP0FB:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxp0fb)).monospace());
+                            let p0pf = (data.cxp0fb & 0x80) != 0;
+                            let p0bl = (data.cxp0fb & 0x40) != 0;
+                            ui.label(format!("P0-PF: {} | P0-BL: {}", if p0pf { "✓" } else { "✗" }, if p0bl { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXP1FB - Player 1 to Playfield/Ball
+                            ui.label("CXP1FB:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxp1fb)).monospace());
+                            let p1pf = (data.cxp1fb & 0x80) != 0;
+                            let p1bl = (data.cxp1fb & 0x40) != 0;
+                            ui.label(format!("P1-PF: {} | P1-BL: {}", if p1pf { "✓" } else { "✗" }, if p1bl { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXM0FB - Missile 0 to Playfield/Ball
+                            ui.label("CXM0FB:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm0fb)).monospace());
+                            let m0pf = (data.cxm0fb & 0x80) != 0;
+                            let m0bl = (data.cxm0fb & 0x40) != 0;
+                            ui.label(format!("M0-PF: {} | M0-BL: {}", if m0pf { "✓" } else { "✗" }, if m0bl { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXM1FB - Missile 1 to Playfield/Ball
+                            ui.label("CXM1FB:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxm1fb)).monospace());
+                            let m1pf = (data.cxm1fb & 0x80) != 0;
+                            let m1bl = (data.cxm1fb & 0x40) != 0;
+                            ui.label(format!("M1-PF: {} | M1-BL: {}", if m1pf { "✓" } else { "✗" }, if m1bl { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXBLPF - Ball to Playfield
+                            ui.label("CXBLPF:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxblpf)).monospace());
+                            let blpf = (data.cxblpf & 0x80) != 0;
+                            ui.label(format!("BL-PF: {}", if blpf { "✓" } else { "✗" }));
+                            ui.end_row();
+
+                            // CXPPMM - Player/Missile collisions
+                            ui.label("CXPPMM:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.cxppmm)).monospace());
+                            let m0m1 = (data.cxppmm & 0x80) != 0;
+                            let p0p1 = (data.cxppmm & 0x40) != 0;
+                            ui.label(format!("M0-M1: {} | P0-P1: {}", if m0m1 { "✓" } else { "✗" }, if p0p1 { "✓" } else { "✗" }));
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("✓ = Collision detected | ✗ = No collision").weak());
+
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("💥").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("Collision Detection");
+                        ui.add_space(10.0);
+                        ui.label("Load an Atari 2600 ROM to view collision data");
+                    });
+                }
             });
     }
 }

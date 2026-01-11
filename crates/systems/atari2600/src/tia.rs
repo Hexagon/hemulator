@@ -1077,6 +1077,189 @@ impl Tia {
         self.vsync
     }
 
+    /// Get VBLANK state
+    pub fn vblank(&self) -> bool {
+        self.vblank
+    }
+
+    // Playfield register getters
+    pub fn pf0(&self) -> u8 {
+        self.pf0
+    }
+
+    pub fn pf1(&self) -> u8 {
+        self.pf1
+    }
+
+    pub fn pf2(&self) -> u8 {
+        self.pf2
+    }
+
+    pub fn playfield_reflect(&self) -> bool {
+        self.playfield_reflect
+    }
+
+    pub fn playfield_score_mode(&self) -> bool {
+        self.playfield_score_mode
+    }
+
+    pub fn playfield_priority(&self) -> bool {
+        self.playfield_priority
+    }
+
+    // Player/sprite getters
+    pub fn grp0(&self) -> u8 {
+        self.grp0
+    }
+
+    pub fn grp1(&self) -> u8 {
+        self.grp1
+    }
+
+    pub fn player0_x(&self) -> u8 {
+        self.player0_x
+    }
+
+    pub fn player1_x(&self) -> u8 {
+        self.player1_x
+    }
+
+    pub fn player0_reflect(&self) -> bool {
+        self.player0_reflect
+    }
+
+    pub fn player1_reflect(&self) -> bool {
+        self.player1_reflect
+    }
+
+    pub fn nusiz0(&self) -> u8 {
+        self.nusiz0
+    }
+
+    pub fn nusiz1(&self) -> u8 {
+        self.nusiz1
+    }
+
+    // Missile getters
+    pub fn enam0(&self) -> bool {
+        self.enam0
+    }
+
+    pub fn enam1(&self) -> bool {
+        self.enam1
+    }
+
+    pub fn missile0_x(&self) -> u8 {
+        self.missile0_x
+    }
+
+    pub fn missile1_x(&self) -> u8 {
+        self.missile1_x
+    }
+
+    // Ball getters
+    pub fn enabl(&self) -> bool {
+        self.enabl
+    }
+
+    pub fn ball_x(&self) -> u8 {
+        self.ball_x
+    }
+
+    pub fn ball_size(&self) -> u8 {
+        self.ball_size
+    }
+
+    // Color register getters
+    pub fn colubk(&self) -> u8 {
+        self.colubk
+    }
+
+    pub fn colupf(&self) -> u8 {
+        self.colupf
+    }
+
+    pub fn colup0(&self) -> u8 {
+        self.colup0
+    }
+
+    pub fn colup1(&self) -> u8 {
+        self.colup1
+    }
+
+    // Collision register getters
+    pub fn cxm0p(&self) -> u8 {
+        self.cxm0p
+    }
+
+    pub fn cxm1p(&self) -> u8 {
+        self.cxm1p
+    }
+
+    pub fn cxp0fb(&self) -> u8 {
+        self.cxp0fb
+    }
+
+    pub fn cxp1fb(&self) -> u8 {
+        self.cxp1fb
+    }
+
+    pub fn cxm0fb(&self) -> u8 {
+        self.cxm0fb
+    }
+
+    pub fn cxm1fb(&self) -> u8 {
+        self.cxm1fb
+    }
+
+    pub fn cxblpf(&self) -> u8 {
+        self.cxblpf
+    }
+
+    pub fn cxppmm(&self) -> u8 {
+        self.cxppmm
+    }
+
+    /// Get the NTSC master palette (128 colors)
+    pub fn get_ntsc_palette() -> Vec<u32> {
+        const NTSC_PALETTE: [u32; 128] = [
+            // Hue 0 (Gray) - Luminance 0-7 (darkest to brightest)
+            0xFF000000, 0xFF404040, 0xFF6C6C6C, 0xFF909090, 0xFFB0B0B0, 0xFFC8C8C8, 0xFFDCDCDC,
+            0xFFECECEC, // Hue 1 (Gold/Yellow) - Luminance 0-7
+            0xFF444400, 0xFF646410, 0xFF848424, 0xFFA0A034, 0xFFB8B840, 0xFFD0D050, 0xFFE8E85C,
+            0xFFFCFC68, // Hue 2 (Orange) - Luminance 0-7
+            0xFF702800, 0xFF844414, 0xFF985C28, 0xFFAC783C, 0xFFBC8C4C, 0xFFCCA05C, 0xFFDCB468,
+            0xFFECC878, // Luminance 3
+            0xFF841800, 0xFF983418, 0xFFAC5030, 0xFFC06848, 0xFFD0805C, 0xFFE09470, 0xFFECA880,
+            0xFFFCBC94, // Luminance 4
+            0xFF880000, 0xFF9C2020, 0xFFB03C3C, 0xFFC05858, 0xFFD07070, 0xFFE08888, 0xFFECA0A0,
+            0xFFFCB4B4, // Luminance 5
+            0xFF78005C, 0xFF8C2074, 0xFFA03C88, 0xFFB0589C, 0xFFC070B0, 0xFFD084C0, 0xFFDC9CD0,
+            0xFFECB0E0, // Luminance 6
+            0xFF480078, 0xFF602090, 0xFF783CA4, 0xFF8C58B8, 0xFFA070CC, 0xFFB484DC, 0xFFC49CEC,
+            0xFFD4B0FC, // Luminance 7
+            0xFF140084, 0xFF302098, 0xFF4C3CAC, 0xFF6858C0, 0xFF7C70D0, 0xFF9488E0, 0xFFA8A0EC,
+            0xFFBCB4FC, // Luminance 8
+            0xFF000088, 0xFF1C209C, 0xFF3840B0, 0xFF505CC0, 0xFF6874D0, 0xFF7C8CE0, 0xFF90A4EC,
+            0xFFA4B8FC, // Luminance 9
+            0xFF00187C, 0xFF1C3890, 0xFF3854A8, 0xFF5070BC, 0xFF6888CC, 0xFF7C9CDC, 0xFF90B4EC,
+            0xFFA4C8FC, // Luminance 10
+            0xFF002C5C, 0xFF1C4C78, 0xFF386890, 0xFF5084AC, 0xFF689CC0, 0xFF7CB4D4, 0xFF90CCE8,
+            0xFFA4E0FC, // Luminance 11
+            0xFF003C2C, 0xFF1C5C48, 0xFF387C64, 0xFF509C80, 0xFF68B494, 0xFF7CD0AC, 0xFF90E4C0,
+            0xFFA4FCD4, // Luminance 12
+            0xFF003C00, 0xFF205C20, 0xFF407C40, 0xFF5C9C5C, 0xFF74B474, 0xFF8CD08C, 0xFFA4E4A4,
+            0xFFB8FCB8, // Luminance 13
+            0xFF143800, 0xFF345C1C, 0xFF507C38, 0xFF6C9850, 0xFF84B468, 0xFF9CCC7C, 0xFFB4E490,
+            0xFFC8FCA4, // Luminance 14
+            0xFF2C3000, 0xFF4C501C, 0xFF687034, 0xFF848C4C, 0xFF9CA864, 0xFFB4C078, 0xFFCCD488,
+            0xFFE0EC9C, // Hue 15 (brightest)
+            0xFF442800, 0xFF644818, 0xFF846830, 0xFFA08444, 0xFFB89C58, 0xFFD0B46C, 0xFFE8CC7C,
+            0xFFFCE08C,
+        ];
+        NTSC_PALETTE.to_vec()
+    }
+
     /// Prepare for a new frame capture.
     ///
     /// The Atari 2600 can generate frames with slightly varying scanline counts;

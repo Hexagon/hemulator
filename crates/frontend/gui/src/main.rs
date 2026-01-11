@@ -3209,6 +3209,49 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::Atari2600(s) => {
+                    if let Some(inspector_data) = s.get_inspector_data() {
+                        let tile_data = egui_ui::SystemTileData::Atari2600(egui_ui::Atari2600TileData {
+                            pf0: inspector_data.pf0,
+                            pf1: inspector_data.pf1,
+                            pf2: inspector_data.pf2,
+                            playfield_reflect: inspector_data.playfield_reflect,
+                            playfield_score_mode: inspector_data.playfield_score_mode,
+                            playfield_priority: inspector_data.playfield_priority,
+                            grp0: inspector_data.grp0,
+                            grp1: inspector_data.grp1,
+                            player0_x: inspector_data.player0_x,
+                            player1_x: inspector_data.player1_x,
+                            player0_reflect: inspector_data.player0_reflect,
+                            player1_reflect: inspector_data.player1_reflect,
+                            nusiz0: inspector_data.nusiz0,
+                            nusiz1: inspector_data.nusiz1,
+                            enam0: inspector_data.enam0,
+                            enam1: inspector_data.enam1,
+                            missile0_x: inspector_data.missile0_x,
+                            missile1_x: inspector_data.missile1_x,
+                            enabl: inspector_data.enabl,
+                            ball_x: inspector_data.ball_x,
+                            ball_size: inspector_data.ball_size,
+                            colubk: inspector_data.colubk,
+                            colupf: inspector_data.colupf,
+                            colup0: inspector_data.colup0,
+                            colup1: inspector_data.colup1,
+                            master_palette: emu_atari2600::tia::Tia::get_ntsc_palette(),
+                            cxm0p: inspector_data.cxm0p,
+                            cxm1p: inspector_data.cxm1p,
+                            cxp0fb: inspector_data.cxp0fb,
+                            cxp1fb: inspector_data.cxp1fb,
+                            cxm0fb: inspector_data.cxm0fb,
+                            cxm1fb: inspector_data.cxm1fb,
+                            cxblpf: inspector_data.cxblpf,
+                            cxppmm: inspector_data.cxppmm,
+                            vblank: inspector_data.vblank,
+                            vsync: inspector_data.vsync,
+                        });
+                        egui_app.tab_manager.update_system_tile_data(tile_data);
+                    }
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }
