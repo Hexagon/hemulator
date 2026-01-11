@@ -3123,7 +3123,30 @@ fn main() {
             if let Some(enhanced_state) = enhanced_state_opt {
                 egui_app
                     .tab_manager
-                    .update_enhanced_debug_state(enhanced_state);
+                    .update_enhanced_debug_state(enhanced_state.clone());
+
+                // Update cached memory for the current view
+                let debugger: Option<&dyn Debugger> = match &sys {
+                    EmulatorSystem::NES(s) => Some(s.as_ref()),
+                    EmulatorSystem::SMS(s) => Some(s.as_ref()),
+                    _ => None,
+                };
+
+                if let Some(debugger) = debugger {
+                    // Read memory for the current view (512 bytes centered around current address)
+                    let memory_address = egui_app.tab_manager.memory_view_address;
+                    let bytes_to_read = 512;
+
+                    // Align to 16-byte boundary
+                    let aligned_address = (memory_address / 16) * 16;
+
+                    if let Some(memory_data) = debugger.read_memory(aligned_address, bytes_to_read)
+                    {
+                        egui_app
+                            .tab_manager
+                            .update_cached_memory(memory_data, aligned_address);
+                    }
+                }
             }
         }
 
