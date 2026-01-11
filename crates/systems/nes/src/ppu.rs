@@ -332,7 +332,6 @@ impl Ppu {
     ///
     /// Reference: Mesen2 NesPpu.cpp ProcessScanlineImpl() - flags cleared on pre-render scanline
     /// Reference: NESdev wiki - sprite flags persist through VBlank
-    #[allow(dead_code)] // Will be used when frame-based rendering is replaced with scanline-based
     pub fn clear_sprite_flags(&self) {
         self.sprite_0_hit.set(false);
         self.sprite_overflow.set(false);
