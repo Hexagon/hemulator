@@ -7,6 +7,7 @@ pub mod display_filter;
 pub mod egui_ui;
 pub mod input;
 pub mod input_mapper;
+pub mod rom_detect;
 pub mod settings;
 pub mod system_adapter;
 pub mod video_processor;

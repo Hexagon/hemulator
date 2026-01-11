@@ -3,7 +3,7 @@ pub mod egui_ui;
 mod hemu_project;
 pub mod input;
 pub mod input_mapper;
-mod rom_detect;
+pub mod rom_detect; // Made public so egui_ui can use rom_detect::SystemType (ROM type metadata for the UI)
 mod save_state;
 mod settings;
 mod system_adapter;
@@ -2956,8 +2956,26 @@ fn main() {
         out
     }
 
+    // Track ROM loaded state to run certain updates only on transitions
+    let mut prev_rom_loaded = rom_loaded;
+
     // Main event loop with egui
     loop {
+        // Detect transition: ROM has just been loaded or unloaded this frame
+        let rom_state_changed = rom_loaded != prev_rom_loaded;
+
+        // Update inspector tabs based on current system (only when ROM state changes)
+        if rom_state_changed {
+            if rom_loaded {
+                egui_app.dock_layout.update_system(sys.system_type());
+                // Enable GUI message capture for the log tab
+                emu_core::logging::LogConfig::global().enable_gui_capture();
+            } else {
+                egui_app.dock_layout.clear_system();
+            }
+            prev_rom_loaded = rom_loaded;
+        }
+
         // Only increment frame counter when emulation is active
         if rom_loaded && settings.emulation_speed > 0.0 {
             frame_counter = frame_counter.wrapping_add(1);
@@ -3118,8 +3136,8 @@ fn main() {
             }
         }
 
-        // Update debug info only if debug tab is actually active (not just visible)
-        if egui_app.tab_manager.active_tab == egui_ui::Tab::Debug {
+        // Update debug info if inspector is visible (contains Debug tab)
+        if egui_app.dock_layout.inspector_visible {
             use system_adapter::SystemDebugInfo;
             let debug_info = match &sys {
                 EmulatorSystem::NES(s) => SystemDebugInfo::from_nes(&s.get_debug_info()),
@@ -3166,8 +3184,8 @@ fn main() {
             }
         }
 
-        // Update tile viewer data only if tiles tab is active
-        if egui_app.tab_manager.active_tab == egui_ui::Tab::Tiles {
+        // Update tile viewer data if inspector is visible (contains Tiles tab)
+        if egui_app.dock_layout.inspector_visible {
             match &sys {
                 EmulatorSystem::NES(s) => {
                     let nes_data = s.get_tile_viewer_data();
@@ -4327,14 +4345,15 @@ fn main() {
                         egui_app.status_bar.set_message(msg.to_string());
                     }
                 }
-                MenuAction::ShowLog => {
-                    egui_app.tab_manager.active_tab = egui_ui::Tab::Log;
-                }
-                MenuAction::ShowDebug => {
-                    egui_app.tab_manager.show_debug_tab();
-                }
-                MenuAction::ShowTiles => {
-                    egui_app.tab_manager.show_tiles_tab();
+                MenuAction::ShowInspector => {
+                    // Toggle inspector dock visibility
+                    egui_app.dock_layout.toggle_inspector();
+                    let msg = if egui_app.dock_layout.inspector_visible {
+                        "Inspector panel shown"
+                    } else {
+                        "Inspector panel hidden"
+                    };
+                    egui_app.status_bar.set_message(msg.to_string());
                 }
                 MenuAction::OpenProject => {
                     // Open .hemu project file dialog

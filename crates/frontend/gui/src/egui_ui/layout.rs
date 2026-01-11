@@ -1,11 +1,13 @@
-//! Main egui application layout
+//! Main egui application layout with docking support
 
+use super::dock_layout::{DockLayout, InspectorTabViewer, PropertyTabViewer};
 use super::menu_bar::MenuBar;
 use super::property_pane::PropertyPane;
 use super::status_bar::StatusBarWidget;
 use super::tabs::TabManager;
 use crate::settings::ScalingMode;
-use egui::{CentralPanel, Context, SidePanel, TopBottomPanel};
+use egui::{CentralPanel, Context, TopBottomPanel};
+use egui_dock::{DockArea, Style};
 
 /// Convert linear color component (0-255) to sRGB color space (0-255)
 /// This compensates for GL_FRAMEBUFFER_SRGB incorrectly treating texture colors as linear
@@ -32,6 +34,7 @@ pub struct EguiApp {
     pub tab_manager: TabManager,
     pub property_pane: PropertyPane,
     pub status_bar: StatusBarWidget,
+    pub dock_layout: DockLayout,
 
     /// Frame texture for emulator display
     pub emulator_texture: Option<egui::TextureHandle>,
@@ -44,6 +47,7 @@ impl EguiApp {
             tab_manager: TabManager::new(),
             property_pane: PropertyPane::new(),
             status_bar: StatusBarWidget::new(),
+            dock_layout: DockLayout::new(),
             emulator_texture: None,
         }
     }
@@ -123,18 +127,42 @@ impl EguiApp {
                 self.status_bar.ui(ui);
             });
 
-        // Right property pane - RGB(12,12,12)
-        SidePanel::right("property_pane")
+        // Inspector dock at bottom (if visible)
+        if self.dock_layout.inspector_visible {
+            TopBottomPanel::bottom("inspector_dock")
+                .default_height(250.0)
+                .min_height(100.0)
+                .resizable(true)
+                .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
+                .show(ctx, |ui| {
+                    let mut inspector_viewer = InspectorTabViewer {
+                        tab_manager: &mut self.tab_manager,
+                    };
+
+                    DockArea::new(&mut self.dock_layout.inspector_state)
+                        .style(Style::from_egui(ui.style().as_ref()))
+                        .show_inside(ui, &mut inspector_viewer);
+                });
+        }
+
+        // Property pane as a dockable right panel
+        egui::SidePanel::right("property_dock")
             .default_width(300.0)
             .min_width(200.0)
             .max_width(500.0)
             .resizable(true)
             .frame(egui::Frame::new().fill(color_from_rgb(12, 12, 12)))
             .show(ctx, |ui| {
-                self.property_pane.ui(ui);
+                let mut property_viewer = PropertyTabViewer {
+                    property_pane: &mut self.property_pane,
+                };
+
+                DockArea::new(&mut self.dock_layout.property_state)
+                    .style(Style::from_egui(ui.style().as_ref()))
+                    .show_inside(ui, &mut property_viewer);
             });
 
-        // Central tabbed interface - pitch black for emulator display
+        // Central panel with main tabs (Emulator, NewProject, Help, About)
         CentralPanel::default()
             .frame(egui::Frame::new().fill(color_from_rgb(0, 0, 0)))
             .show(ctx, |ui| {
