@@ -126,8 +126,8 @@ pub struct Atari2600TileData {
     pub colupf: u8,  // Playfield
     pub colup0: u8,  // Player 0
     pub colup1: u8,  // Player 1
-    /// NTSC palette (128 colors)
-    pub master_palette: Vec<u32>,
+    /// NTSC palette (128 colors) - static reference to avoid allocations
+    pub master_palette: &'static [u32; 128],
     /// Collision detection registers
     pub cxm0p: u8,  // Missile 0 to Player
     pub cxm1p: u8,  // Missile 1 to Player
@@ -2920,6 +2920,10 @@ impl TabManager {
                     ui.add_space(10.0);
                     ui.label(egui::RichText::new("Left Half").weak());
                     ui.label("PF0[4-7] (4 bits) → PF1[7-0] (8 bits) → PF2[0-7] (8 bits)");
+                    ui.label(egui::RichText::new(format!(
+                        "Right Half: {}",
+                        if data.playfield_reflect { "Mirrored from left half (REFL=1)" } else { "Repeated from left half (REFL=0)" }
+                    )).weak());
                     
                 } else {
                     ui.vertical_centered(|ui| {
@@ -3179,7 +3183,7 @@ impl TabManager {
 
                     // NTSC Master Palette (128 colors)
                     ui.label(egui::RichText::new("NTSC Master Palette (128 colors)").strong());
-                    ui.label("Upper 4 bits = Hue (0-15), Lower 3 bits = Luminance (0-7)");
+                    ui.label("Bits 7-4 = Hue (0-15), Bits 3-1 = Luminance (0-7), Bit 0 = unused");
                     ui.add_space(5.0);
 
                     // Display palette in a 16x8 grid
@@ -3192,7 +3196,7 @@ impl TabManager {
                     let rect = response.rect;
                     for lum in 0..8 {
                         for hue in 0..16 {
-                            let idx = (hue << 4) | (lum << 1);
+                            let idx = hue * 8 + lum;
                             let rgb = data.master_palette.get(idx).copied().unwrap_or(0);
                             let color = egui::Color32::from_rgb(
                                 ((rgb >> 16) & 0xFF) as u8,
