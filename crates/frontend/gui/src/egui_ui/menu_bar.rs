@@ -27,9 +27,7 @@ pub enum MenuAction {
     ScalingStretch,
     Fullscreen,
     FullscreenWithGui,
-    ShowLog,
-    ShowDebug,
-    ShowTiles,
+    ShowInspector, // Toggle Inspector dock visibility
 
     // Help menu
     ShowHelp,
@@ -221,27 +219,11 @@ impl MenuBar {
                 ui.separator();
 
                 if ui
-                    .button("📋 Log")
-                    .on_hover_text("Show emulation log messages")
+                    .button("🔍 Inspector")
+                    .on_hover_text("Toggle Inspector panel (Debug, Log, Tiles)")
                     .clicked()
                 {
-                    self.pending_action = Some(MenuAction::ShowLog);
-                    ui.close();
-                }
-                if ui
-                    .button("🔧 Debug")
-                    .on_hover_text("Show system debug information")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::ShowDebug);
-                    ui.close();
-                }
-                if ui
-                    .button("🎨 Tiles")
-                    .on_hover_text("Show tile and palette viewer (NES)")
-                    .clicked()
-                {
-                    self.pending_action = Some(MenuAction::ShowTiles);
+                    self.pending_action = Some(MenuAction::ShowInspector);
                     ui.close();
                 }
 
