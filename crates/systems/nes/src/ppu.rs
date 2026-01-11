@@ -884,7 +884,8 @@ impl Ppu {
         // Extract scroll values from v register for this scanline.
         // The v register contains the current scroll position and is updated incrementally:
         // - At scanline 0: v is loaded from t (both vertical and horizontal bits)
-        // - At each scanline boundary: horizontal bits are refreshed from t, fine_y is incremented
+        // - At each scanline boundary: horizontal bits are refreshed from t
+        // - After rendering each scanline: fine_y / vertical bits are incremented
         // - Mid-frame $2006 writes directly set v, allowing scroll splits (e.g., SMB3 HUD)
         //
         // We use v's coarse_y/fine_y DIRECTLY without adding the screen scanline number.
