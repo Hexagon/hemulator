@@ -138,9 +138,9 @@ pub struct Ppu {
     //       |  Fine Y   |     Coarse Y          Coarse X
     //       |           Nametable select
     //       Unused (bit 14 is unused, bit 15 doesn't exist)
-    pub vram_addr: Cell<u16>,     // v register (current VRAM address)
-    temp_vram_addr: Cell<u16>,    // t register (temporary VRAM address)
-    fine_x: Cell<u8>,             // x register (fine X scroll, 3 bits)
+    pub vram_addr: Cell<u16>,  // v register (current VRAM address)
+    temp_vram_addr: Cell<u16>, // t register (temporary VRAM address)
+    fine_x: Cell<u8>,          // x register (fine X scroll, 3 bits)
     read_buffer: Cell<u8>,
     #[allow(clippy::type_complexity)]
     a12_callback: RefCell<Option<Box<dyn FnMut(bool)>>>,
@@ -196,9 +196,9 @@ impl Ppu {
             sprite_overflow: Cell::new(false),
             nmi_pending: Cell::new(false),
             addr_latch: Cell::new(false),
-            vram_addr: Cell::new(0),        // v register
-            temp_vram_addr: Cell::new(0),   // t register
-            fine_x: Cell::new(0),           // x register (3 bits)
+            vram_addr: Cell::new(0),      // v register
+            temp_vram_addr: Cell::new(0), // t register
+            fine_x: Cell::new(0),         // x register (3 bits)
             read_buffer: Cell::new(0),
             a12_callback: RefCell::new(None),
             chr_read_callback: RefCell::new(None),
@@ -289,17 +289,17 @@ impl Ppu {
     fn update_legacy_scroll(&mut self) {
         let t = self.temp_vram_addr.get();
         let fine_x_val = self.fine_x.get();
-        
+
         // Extract components from t register:
         // Bits 0-4: coarse X (5 bits, 0-31 tiles)
         // Bit 10: nametable X (0 or 1)
         let coarse_x = (t & 0x001F) as u8;
         let _nt_x = ((t >> 10) & 1) as u8;
-        
+
         // Compute effective scroll_x: (nametable_x * 256) + (coarse_x * 8) + fine_x
         // For compatibility with existing tests that expect 0-255 range:
         self.scroll_x = (coarse_x * 8) + fine_x_val;
-        
+
         // Extract vertical scroll components:
         // Bits 5-9: coarse Y (5 bits, 0-31 tiles, but wraps at 30)
         // Bit 11: nametable Y (0 or 1)
@@ -307,7 +307,7 @@ impl Ppu {
         let coarse_y = ((t >> 5) & 0x001F) as u8;
         let _nt_y = ((t >> 11) & 1) as u8;
         let fine_y = ((t >> 12) & 0x0007) as u8;
-        
+
         // Compute effective scroll_y: (coarse_y * 8) + fine_y
         // For compatibility with existing tests that expect 0-255 range:
         self.scroll_y = (coarse_y * 8) + fine_y;
@@ -591,14 +591,14 @@ impl Ppu {
                     // x:               CBA = d: .....CBA
                     // w:                   = 1
                     let t = self.temp_vram_addr.get();
-                    let coarse_x = (val >> 3) as u16;  // Bits 3-7 become coarse X (bits 0-4 of t)
-                    let fine_x_val = val & 0x07;       // Bits 0-2 become fine X
-                    
+                    let coarse_x = (val >> 3) as u16; // Bits 3-7 become coarse X (bits 0-4 of t)
+                    let fine_x_val = val & 0x07; // Bits 0-2 become fine X
+
                     // Update t: clear bits 0-4, set new coarse X
                     self.temp_vram_addr.set((t & 0xFFE0) | coarse_x);
                     self.fine_x.set(fine_x_val);
                     self.addr_latch.set(true);
-                    
+
                     // Update legacy scroll_x for backward compatibility
                     self.scroll_x = val;
                 } else {
@@ -606,16 +606,17 @@ impl Ppu {
                     // t: .CBA..HG FED..... = d: HGFEDCBA
                     // w:                   = 0
                     let t = self.temp_vram_addr.get();
-                    let coarse_y = ((val >> 3) & 0x1F) as u16;  // Bits 3-7 become coarse Y (bits 5-9 of t)
-                    let fine_y = (val & 0x07) as u16;            // Bits 0-2 become fine Y (bits 12-14 of t)
-                    
+                    let coarse_y = ((val >> 3) & 0x1F) as u16; // Bits 3-7 become coarse Y (bits 5-9 of t)
+                    let fine_y = (val & 0x07) as u16; // Bits 0-2 become fine Y (bits 12-14 of t)
+
                     // Update t: clear bits 5-9 and 12-14, set new coarse Y and fine Y
-                    self.temp_vram_addr.set((t & 0x8C1F) | (coarse_y << 5) | (fine_y << 12));
+                    self.temp_vram_addr
+                        .set((t & 0x8C1F) | (coarse_y << 5) | (fine_y << 12));
                     self.addr_latch.set(false);
-                    
+
                     // Update legacy scroll_y for backward compatibility
                     self.scroll_y = val;
-                    
+
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         format!("PPUSCROLL set: X={}, Y={}", self.scroll_x, self.scroll_y)
                     });
@@ -640,29 +641,29 @@ impl Ppu {
                 if !self.addr_latch.get() {
                     // First write (w=0): set high byte of address
                     // Update both t register (for scrolling) and vram_addr (for $2007 access)
-                    let hi = (val & 0x3F) as u16;  // Only bits 0-5 are used
-                    
+                    let hi = (val & 0x3F) as u16; // Only bits 0-5 are used
+
                     // Update temp register (t) for proper loopy behavior
                     let t = self.temp_vram_addr.get();
                     self.temp_vram_addr.set((t & 0x00FF) | (hi << 8));
-                    
+
                     // Also update vram_addr for frame-based rendering compatibility
                     let lo = self.vram_addr.get() & 0x00FF;
                     self.vram_addr.set((val as u16) << 8 | lo);
-                    
+
                     self.addr_latch.set(true);
                 } else {
                     // Second write (w=1): set low byte of address
                     let t = self.temp_vram_addr.get();
                     let lo = val as u16;
-                    
+
                     // Update temp register (t)
                     self.temp_vram_addr.set((t & 0xFF00) | lo);
-                    
+
                     // Update vram_addr for $2007 access
                     let hi = self.vram_addr.get() & 0xFF00;
                     self.vram_addr.set(hi | lo);
-                    
+
                     self.addr_latch.set(false);
                 }
             }
@@ -829,6 +830,9 @@ impl Ppu {
         } else {
             0x0000
         };
+        // Base nametable from PPUCTRL bits 0-1
+        // In hardware, this is the initial value copied to v register bits 10-11
+        // For frame-based rendering, we use PPUCTRL directly and apply scroll offsets
         let base_nt = (self.ctrl & 0x03) as u8;
 
         let mut universal_bg_idx = self.palette[palette_mirror_index(0)];
@@ -837,6 +841,8 @@ impl Ppu {
         }
         let universal_bg = nes_palette_rgb(universal_bg_idx);
 
+        // Use scroll values that were set by $2005 (PPUSCROLL) writes
+        // These are kept in sync with the loopy temp register in write_register
         let sx = self.scroll_x as u32;
         let sy = self.scroll_y as u32;
 
@@ -3313,5 +3319,278 @@ mod tests {
                 logical_start_y
             );
         }
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_first_write() {
+        // Test that first $2005 write updates temp register and fine_x correctly
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write scroll X = 123 ($7B)
+        // Expected: coarse X = 123 / 8 = 15 ($0F)
+        //           fine X = 123 % 8 = 3
+        ppu.write_register(5, 123);
+
+        let t = ppu.temp_vram_addr.get();
+        let coarse_x = t & 0x001F;
+        let fine_x = ppu.fine_x.get();
+
+        assert_eq!(coarse_x, 15, "Coarse X should be 15");
+        assert_eq!(fine_x, 3, "Fine X should be 3");
+        assert_eq!(ppu.scroll_x, 123, "Legacy scroll_x should be 123");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_second_write() {
+        // Test that second $2005 write updates coarse Y and fine Y correctly
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // First write (X scroll)
+        ppu.write_register(5, 0);
+
+        // Second write: Y scroll = 195 ($C3)
+        // Expected: coarse Y = 195 / 8 = 24 ($18)
+        //           fine Y = 195 % 8 = 3
+        ppu.write_register(5, 195);
+
+        let t = ppu.temp_vram_addr.get();
+        let coarse_y = (t >> 5) & 0x001F;
+        let fine_y = (t >> 12) & 0x0007;
+
+        assert_eq!(coarse_y, 24, "Coarse Y should be 24");
+        assert_eq!(fine_y, 3, "Fine Y should be 3");
+        assert_eq!(ppu.scroll_y, 195, "Legacy scroll_y should be 195");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuaddr_first_write() {
+        // Test that first $2006 write updates temp register high byte
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write high byte = $23
+        ppu.write_register(6, 0x23);
+
+        let t = ppu.temp_vram_addr.get();
+        assert_eq!(
+            (t >> 8) & 0xFF,
+            0x23,
+            "Temp register high byte should be $23"
+        );
+    }
+
+    #[test]
+    fn test_loopy_register_ppuaddr_second_write() {
+        // Test that second $2006 write updates temp register low byte
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Write address $2345
+        ppu.write_register(6, 0x23);
+        ppu.write_register(6, 0x45);
+
+        let t = ppu.temp_vram_addr.get();
+        assert_eq!(t, 0x2345, "Temp register should be $2345");
+        assert_eq!(ppu.vram_addr.get(), 0x2345, "VRAM addr should be $2345");
+    }
+
+    #[test]
+    fn test_loopy_register_ppuscroll_ppuaddr_interaction() {
+        // Test that $2005 and $2006 properly share the temp register
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Set scroll to (8, 16)
+        ppu.write_register(5, 8); // X scroll
+        ppu.write_register(5, 16); // Y scroll
+
+        let t_after_scroll = ppu.temp_vram_addr.get();
+
+        // Coarse X = 8/8 = 1, Fine X = 0
+        // Coarse Y = 16/8 = 2, Fine Y = 0
+        // Expected t bits: coarse_x=1, coarse_y=2, fine_y=0
+        let coarse_x = t_after_scroll & 0x001F;
+        let coarse_y = (t_after_scroll >> 5) & 0x001F;
+
+        assert_eq!(coarse_x, 1, "Coarse X should be 1");
+        assert_eq!(coarse_y, 2, "Coarse Y should be 2");
+
+        // Now write to PPUADDR - this should update temp register
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+
+        let t_after_addr = ppu.temp_vram_addr.get();
+        assert_eq!(
+            t_after_addr, 0x2000,
+            "PPUADDR should update temp register to $2000"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_edge_cases() {
+        // Test sprite 0 hit detection edge cases
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at position (16, 16) - aligned with tile boundary
+        ppu.oam[0] = 16 - 1; // Y position (subtract 1 as per OAM format)
+        ppu.oam[1] = 1; // Tile index
+        ppu.oam[2] = 0; // Attributes (front priority, palette 0)
+        ppu.oam[3] = 16; // X position
+
+        // Create sprite tile pattern with opaque pixels (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF; // Low bit plane - all 1s
+            ppu.chr[0x18 + i] = 0x00; // High bit plane - all 0s = color 1
+        }
+
+        // Set up background tile at position (2, 2) which covers screen (16-23, 16-23)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 2 * 32 + 2] = 2; // Tile at (2,2) = tile index 2
+
+        // Background tile pattern with opaque pixels (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        // Set up palettes so pixels are visible
+        ppu.palette[0] = 0x0F; // Backdrop
+        ppu.palette[1] = 0x30; // BG color 1
+        ppu.palette[0x11] = 0x16; // Sprite color 1
+
+        // Enable rendering
+        ppu.mask = 0x1E; // Show bg + sprites, show in leftmost 8 pixels
+
+        // Render scanline 16 where sprite 0 should overlap background
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(16, &mut frame);
+
+        // Sprite 0 hit should be set
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should be set when opaque pixels overlap"
+        );
+
+        // Test that sprite 0 hit doesn't occur at x=255
+        ppu.sprite_0_hit.set(false);
+        ppu.oam[3] = 255; // Move sprite 0 to x=255
+        ppu.render_scanline(16, &mut frame);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur at x=255"
+        );
+
+        // Test that sprite 0 hit doesn't occur if background is disabled
+        ppu.sprite_0_hit.set(false);
+        ppu.oam[3] = 16; // Move back to x=16
+        ppu.mask = 0x10; // Only sprites enabled
+        ppu.render_scanline(16, &mut frame);
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur when background is disabled"
+        );
+    }
+
+    #[test]
+    fn test_sprite_0_hit_with_clipping() {
+        // Test that sprite 0 hit respects left clipping
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        ppu.chr_is_ram = true;
+
+        // Set up sprite 0 at position (4, 8) - partially in the clipped region
+        ppu.oam[0] = 8 - 1;
+        ppu.oam[1] = 1;
+        ppu.oam[2] = 0;
+        ppu.oam[3] = 4;
+
+        // Create opaque sprite tile pattern (pattern value 1)
+        for i in 0..8 {
+            ppu.chr[0x10 + i] = 0xFF;
+            ppu.chr[0x18 + i] = 0x00;
+        }
+
+        // Background tile at position (0, 1) which covers screen (0-7, 8-15)
+        let nt_addr = ppu.map_nametable_addr(0x2000);
+        ppu.vram[nt_addr + 1 * 32 + 0] = 2;
+        for i in 0..8 {
+            ppu.chr[0x20 + i] = 0xFF;
+            ppu.chr[0x28 + i] = 0x00;
+        }
+
+        // Set up palettes
+        ppu.palette[0] = 0x0F;
+        ppu.palette[1] = 0x30;
+        ppu.palette[0x11] = 0x16;
+
+        // Enable rendering but disable leftmost 8 pixels
+        ppu.mask = 0x18; // Show bg + sprites, hide leftmost 8 pixels
+
+        let mut frame = Frame::new(256, 240);
+        ppu.render_scanline(8, &mut frame);
+
+        // Sprite 0 hit should NOT occur because all overlapping pixels are in clipped region
+        // The sprite spans x=4-11, but leftmost 8 pixels (x=0-7) are clipped
+        // So only x=8-11 are visible, and at x=8-11 the background tile at (0,1) is also visible
+        // But according to NES hardware, sprite 0 hit doesn't trigger if either the sprite
+        // or background pixel is in a clipped region. Since x=4-7 would be clipped and
+        // x=8-11 are not clipped, we should get a hit at x=8.
+        // Actually, wait - the background tile is at (0,1) which covers x=0-7, y=8-15
+        // So at x=8-11, there's no background tile (it would be the next tile)
+
+        // Let me reconsider: sprite at x=4 covers x=4-11
+        // Background at tile (0,1) covers x=0-7
+        // Overlap is at x=4-7, which is in the clipped region when leftmost 8 pixels are hidden
+        assert!(
+            !ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should NOT occur in clipped region"
+        );
+
+        // Now enable leftmost 8 pixels
+        ppu.mask = 0x1E; // Show bg + sprites, show leftmost 8 pixels
+        ppu.sprite_0_hit.set(false);
+        ppu.render_scanline(8, &mut frame);
+
+        // Now sprite 0 hit should occur because overlap at x=4-7 is visible
+        assert!(
+            ppu.sprite_0_hit.get(),
+            "Sprite 0 hit should occur when leftmost pixels are shown"
+        );
+    }
+
+    #[test]
+    fn test_sprite_evaluation_exactly_8_sprites() {
+        // Test that sprite overflow is NOT set when exactly 8 sprites are on scanline
+        let mut ppu = Ppu::new(vec![0; 0x2000], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+
+        // Place exactly 8 sprites on scanline 100
+        for i in 0..8 {
+            ppu.oam[i * 4] = 99; // Y position (100 - 1)
+            ppu.oam[i * 4 + 1] = 0;
+            ppu.oam[i * 4 + 2] = 0;
+            ppu.oam[i * 4 + 3] = (i * 16) as u8;
+        }
+
+        // Evaluate sprites for scanline 100
+        ppu.evaluate_sprites_for_scanline(100);
+
+        assert!(
+            !ppu.sprite_overflow.get(),
+            "Sprite overflow should NOT be set with exactly 8 sprites"
+        );
+
+        // Add 9th sprite
+        ppu.oam[8 * 4] = 99;
+        ppu.evaluate_sprites_for_scanline(100);
+
+        assert!(
+            ppu.sprite_overflow.get(),
+            "Sprite overflow should be set with 9 sprites"
+        );
     }
 }
