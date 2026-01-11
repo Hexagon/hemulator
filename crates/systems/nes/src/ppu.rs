@@ -504,13 +504,13 @@ impl Ppu {
                 let old_nmi = (self.ctrl & 0x80) != 0;
                 self.ctrl = val;
                 let new_nmi = (self.ctrl & 0x80) != 0;
-                
+
                 // PPUCTRL bits 0-1 select the base nametable, which updates t register bits 10-11
                 // t: ....BA.. ........ = d: ......BA
                 let t = self.temp_vram_addr.get();
                 let nt_select = (val & 0x03) as u16;
                 self.temp_vram_addr.set((t & !0x0C00) | (nt_select << 10));
-                
+
                 log(LogCategory::PPU, LogLevel::Trace, || {
                     format!(
                         "PPUCTRL write: 0x{:02X} (NMI: {})",
@@ -591,7 +591,11 @@ impl Ppu {
                     self.addr_latch.set(false);
 
                     log(LogCategory::PPU, LogLevel::Trace, || {
-                        format!("PPUSCROLL set: X={}, Y={}", self.scroll_x(), self.scroll_y())
+                        format!(
+                            "PPUSCROLL set: X={}, Y={}",
+                            self.scroll_x(),
+                            self.scroll_y()
+                        )
                     });
                 }
             }
@@ -622,10 +626,10 @@ impl Ppu {
                     let t = self.temp_vram_addr.get();
                     // Clear bit 14, set bits 8-13 from val
                     self.temp_vram_addr.set((t & 0x00FF) | (hi_masked << 8));
-                    
+
                     // NOTE: v (vram_addr) is NOT updated on first write!
                     // This is crucial for mid-frame scroll splits to work correctly.
-                    
+
                     self.addr_latch.set(true);
                 } else {
                     // Second write (w=1): set low byte of t, then copy t to v
@@ -634,7 +638,7 @@ impl Ppu {
                     let t = self.temp_vram_addr.get();
                     let new_t = (t & 0xFF00) | (val as u16);
                     self.temp_vram_addr.set(new_t);
-                    
+
                     // Copy complete t register to v (this is when scroll takes effect)
                     self.vram_addr.set(new_t);
 
@@ -774,7 +778,11 @@ impl Ppu {
             log(LogCategory::PPU, LogLevel::Info, || {
                 format!(
                     "Scanline {}: scroll=({},{}), ctrl=0x{:02X}, mirroring={:?}",
-                    y, self.scroll_x(), self.scroll_y(), self.ctrl, self.mirroring
+                    y,
+                    self.scroll_x(),
+                    self.scroll_y(),
+                    self.ctrl,
+                    self.mirroring
                 )
             });
         }
@@ -808,7 +816,7 @@ impl Ppu {
         if rendering_enabled {
             let t = self.temp_vram_addr.get();
             let v = self.vram_addr.get();
-            
+
             // At scanline 0: copy both vertical and horizontal bits from t to v
             // (simulates pre-render scanline dot 280-304 + dot 257 behavior)
             if y == 0 {
@@ -852,13 +860,13 @@ impl Ppu {
         // The v register is incremented after each scanline to "walk through" the nametable.
         let v = self.vram_addr.get();
         let fine_x_val = self.fine_x.get();
-        
-        let coarse_x = (v & 0x001F) as u8;           // Bits 0-4: tile column (0-31)
-        let coarse_y = ((v >> 5) & 0x001F) as u8;    // Bits 5-9: tile row (0-31)
-        let nt_x = ((v >> 10) & 0x0001) as u8;       // Bit 10: nametable X
-        let nt_y = ((v >> 11) & 0x0001) as u8;       // Bit 11: nametable Y
-        let fine_y = ((v >> 12) & 0x0007) as u8;     // Bits 12-14: fine Y scroll (0-7)
-        
+
+        let coarse_x = (v & 0x001F) as u8; // Bits 0-4: tile column (0-31)
+        let coarse_y = ((v >> 5) & 0x001F) as u8; // Bits 5-9: tile row (0-31)
+        let nt_x = ((v >> 10) & 0x0001) as u8; // Bit 10: nametable X
+        let nt_y = ((v >> 11) & 0x0001) as u8; // Bit 11: nametable Y
+        let fine_y = ((v >> 12) & 0x0007) as u8; // Bits 12-14: fine Y scroll (0-7)
+
         // Use v register values directly - no screen scanline offset!
         // The v register already points to the correct nametable position for this scanline.
         let tile_y_wrapped = coarse_y;
@@ -877,21 +885,21 @@ impl Ppu {
                 // Calculate which pixel within the scrolling world to render.
                 // The fine_x offset determines which pixel we start at within the first tile.
                 let pixel_x = screen_x + fine_x_val as u32;
-                
+
                 // Determine which tile we're in (relative to current nametable)
                 let tile_x = (coarse_x as u32 + (pixel_x / 8)) as u8;
                 let fine_x_in_tile = (pixel_x % 8) as usize;
-                
+
                 // Handle horizontal wrapping: when tile_x >= 32, flip nametable X and wrap
                 let (tile_x_wrapped, nt_x_adjusted) = if tile_x >= 32 {
                     (tile_x - 32, nt_x ^ 1)
                 } else {
                     (tile_x, nt_x)
                 };
-                
+
                 // Nametable selection from v register bits
                 let nt = nt_x_adjusted | (nt_y_adjusted << 1);
-                
+
                 let tx = tile_x_wrapped as usize;
                 let ty = tile_y_wrapped as usize;
 
@@ -1085,14 +1093,14 @@ impl Ppu {
         if rendering_enabled {
             let mut v = self.vram_addr.get();
             let fine_y = (v >> 12) & 0x0007;
-            
+
             if fine_y < 7 {
                 // Simple case: just increment fine_y
                 v = (v & !0x7000) | ((fine_y + 1) << 12);
             } else {
                 // fine_y was 7, now wraps to 0
                 v &= !0x7000; // Clear fine_y bits
-                
+
                 let coarse_y = (v >> 5) & 0x001F;
                 let new_coarse_y = if coarse_y == 29 {
                     // Wrap at row 30 (NES quirk: attribute table is at rows 30-31)
@@ -1106,7 +1114,7 @@ impl Ppu {
                 };
                 v = (v & !0x03E0) | (new_coarse_y << 5);
             }
-            
+
             self.vram_addr.set(v);
         }
 
@@ -1801,23 +1809,39 @@ mod tests {
 
         // Hardware-accurate behavior: first write ONLY affects t register, not v
         // v is only updated on the second write when t is copied to v
-        
+
         // First write sets high byte of t only - v unchanged
         ppu.write_register(6, 0x20);
-        assert_eq!(ppu.vram_addr.get(), 0x0000, "v should not change on first write");
-        assert_eq!(ppu.temp_vram_addr.get() & 0x3F00, 0x2000, "t high byte should be set");
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x0000,
+            "v should not change on first write"
+        );
+        assert_eq!(
+            ppu.temp_vram_addr.get() & 0x3F00,
+            0x2000,
+            "t high byte should be set"
+        );
         assert!(ppu.addr_latch.get(), "First write should set latch");
 
         // Second write sets low byte and copies t to v
         ppu.write_register(6, 0x50);
-        assert_eq!(ppu.vram_addr.get(), 0x2050, "v should now have full address");
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2050,
+            "v should now have full address"
+        );
         assert!(!ppu.addr_latch.get(), "Second write should clear latch");
 
         // Third write should start over (high byte) - only affects t
         ppu.write_register(6, 0x3F);
-        assert_eq!(ppu.vram_addr.get(), 0x2050, "v should not change on first write of new sequence");
+        assert_eq!(
+            ppu.vram_addr.get(),
+            0x2050,
+            "v should not change on first write of new sequence"
+        );
         assert!(ppu.addr_latch.get(), "Third write should set latch again");
-        
+
         // Fourth write completes the sequence and updates v
         ppu.write_register(6, 0x00);
         assert_eq!(ppu.vram_addr.get(), 0x3F00, "v should now have new address");
@@ -2649,19 +2673,27 @@ mod tests {
 
         // Test 3: Mid-frame PPUCTRL write updates t register bits 10-11
         ppu.write_register(0, 0x00); // PPUCTRL: nametable 0 (bits 10-11 = 00)
-        ppu.write_register(5, 0);    // X scroll = 0
-        ppu.write_register(5, 0);    // Y scroll = 0
+        ppu.write_register(5, 0); // X scroll = 0
+        ppu.write_register(5, 0); // Y scroll = 0
         let t1 = ppu.temp_vram_addr.get();
-        assert_eq!(t1 & 0x0C00, 0x0000, "PPUCTRL nametable 0 should set t bits 10-11 to 00");
-        
+        assert_eq!(
+            t1 & 0x0C00,
+            0x0000,
+            "PPUCTRL nametable 0 should set t bits 10-11 to 00"
+        );
+
         ppu.write_register(0, 0x03); // PPUCTRL: nametable 3 (bits 10-11 = 11)
         let t2 = ppu.temp_vram_addr.get();
-        assert_eq!(t2 & 0x0C00, 0x0C00, "PPUCTRL nametable 3 should set t bits 10-11 to 11");
+        assert_eq!(
+            t2 & 0x0C00,
+            0x0C00,
+            "PPUCTRL nametable 3 should set t bits 10-11 to 11"
+        );
 
         // Test 4: Scroll combination (X=16, Y=16) updates loopy registers correctly
         ppu.write_register(0, 0x00); // PPUCTRL: nametable 0
-        ppu.write_register(5, 16);   // X scroll = 16 (coarse_x=2, fine_x=0)
-        ppu.write_register(5, 16);   // Y scroll = 16 (coarse_y=2, fine_y=0)
+        ppu.write_register(5, 16); // X scroll = 16 (coarse_x=2, fine_x=0)
+        ppu.write_register(5, 16); // Y scroll = 16 (coarse_y=2, fine_y=0)
         let t = ppu.temp_vram_addr.get();
         let coarse_x = t & 0x001F;
         let coarse_y = (t >> 5) & 0x001F;
