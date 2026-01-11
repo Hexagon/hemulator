@@ -715,25 +715,36 @@ impl Ppu {
         if bg_enabled {
             for y in 0..height {
                 for x in 0..width {
-                    let wx = x + sx;
-                    let wy = y + sy;
+                    // Calculate world position considering base nametable from PPUCTRL
+                    // PPUCTRL bits 0-1 select base nametable, which provides an offset in the virtual nametable space
+                    // Bit 0 = horizontal offset (256 pixels)
+                    // Bit 1 = vertical offset (240 pixels)
+                    let base_x_offset = (base_nt & 1) as u32 * 256;
+                    let base_y_offset = ((base_nt >> 1) & 1) as u32 * 240;
 
+                    let wx = x + sx + base_x_offset;
+                    let wy = y + sy + base_y_offset;
+
+                    // PPU nametable selection based on scroll position
+                    // Horizontal: nametable bit flips every 256 pixels (32 tiles * 8 pixels)
+                    // Vertical: nametable bit flips every 240 pixels (30 tiles * 8 pixels)
                     let nt_x = ((wx / 256) & 1) as u8;
                     let nt_y = ((wy / 240) & 1) as u8;
 
                     // Choose nametable based on mirroring mode and scroll position
                     let nt = if self.mirroring == Mirroring::FourScreen {
-                        // 4-screen mode: Direct nametable selection without XOR
+                        // 4-screen mode: Direct nametable selection
                         // NT0 = (0,0), NT1 = (1,0), NT2 = (0,1), NT3 = (1,1)
                         nt_x | (nt_y << 1)
                     } else {
-                        // 2-screen modes: XOR with base nametable for proper scrolling
-                        // This matches real NES PPU behavior where nametable bits are XORed
-                        // with the coarse scroll overflow to select the correct nametable.
-                        // Bit 0 of nametable = horizontal offset, Bit 1 = vertical offset
-                        base_nt ^ nt_x ^ (nt_y << 1)
+                        // 2-screen modes: Nametable bits from scroll position
+                        // No XOR needed since we've already incorporated base_nt into the world position
+                        nt_x | (nt_y << 1)
                     };
 
+                    // Within nametable coordinates
+                    // X wraps at 256 pixels (matches nametable width)
+                    // Y wraps at 240 pixels (30 tiles, actual nametable height)
                     let world_x = wx % 256;
                     let world_y = wy % 240;
 
