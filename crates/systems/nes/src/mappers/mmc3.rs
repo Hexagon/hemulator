@@ -1520,11 +1520,7 @@ mod tests {
         let _mmc3 = Mmc3::new(cart, &mut ppu);
 
         // Verify 4KB VRAM was allocated (critical for 4-screen mode)
-        assert_eq!(
-            ppu.vram.len(),
-            0x1000,
-            "4-screen mode must have 4KB VRAM"
-        );
+        assert_eq!(ppu.vram.len(), 0x1000, "4-screen mode must have 4KB VRAM");
 
         // Write to all four nametables at the same offset to verify independence
         // NT0 at $2100
@@ -1564,10 +1560,22 @@ mod tests {
         let _ = ppu.read_register(7);
         let val3 = ppu.read_register(7);
 
-        assert_eq!(val0, 0xAA, "NT0 writes must be independent in 4-screen mode");
-        assert_eq!(val1, 0xBB, "NT1 writes must be independent in 4-screen mode");
-        assert_eq!(val2, 0xCC, "NT2 writes must be independent in 4-screen mode");
-        assert_eq!(val3, 0xDD, "NT3 writes must be independent in 4-screen mode");
+        assert_eq!(
+            val0, 0xAA,
+            "NT0 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val1, 0xBB,
+            "NT1 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val2, 0xCC,
+            "NT2 writes must be independent in 4-screen mode"
+        );
+        assert_eq!(
+            val3, 0xDD,
+            "NT3 writes must be independent in 4-screen mode"
+        );
 
         // Verify VRAM layout: each nametable at correct offset
         // NT0: 0x000-0x3FF, NT1: 0x400-0x7FF, NT2: 0x800-0xBFF, NT3: 0xC00-0xFFF
