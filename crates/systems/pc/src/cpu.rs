@@ -2076,11 +2076,54 @@ impl PcCpu {
         // Call INT 1Ch (user timer tick handler)
         // This is the standard PC/AT BIOS behavior - INT 08h chains to INT 1Ch
         // Programs can hook INT 1Ch to execute code on every timer tick
-        // Since we can't directly trigger an interrupt from here (trigger_interrupt is private),
-        // we'll note that programs expecting INT 1Ch will need to hook INT 08h instead
-        // The BIOS default INT 1Ch handler is just an IRET at F000:0040
+        self.chain_to_int1ch();
 
         51
+    }
+
+    /// Chain to INT 1Ch (user timer tick handler)
+    /// This is called by INT 08h to allow programs to hook timer ticks
+    fn chain_to_int1ch(&mut self) {
+        // Read INT 1Ch vector from IVT at 0x0070 (0x1C * 4)
+        let vector_addr = 0x1C * 4;
+        let offset = self.cpu.memory.read(vector_addr) as u16
+            | ((self.cpu.memory.read(vector_addr + 1) as u16) << 8);
+        let segment = self.cpu.memory.read(vector_addr + 2) as u16
+            | ((self.cpu.memory.read(vector_addr + 3) as u16) << 8);
+
+        // Only call if vector is not pointing to default BIOS stub (F000:0040)
+        // This avoids calling the default IRET handler which does nothing
+        if segment != 0xF000 || offset != 0x0040 {
+            // Simulate FAR CALL to INT 1Ch handler
+            // Push return address (CS:IP) onto stack
+            let ss = self.cpu.ss;
+
+            // Push CS
+            let sp = self.cpu.sp.wrapping_sub(2);
+            let cs_addr = ((ss as u32) << 4) + sp;
+            self.cpu.memory.write(cs_addr, (self.cpu.cs & 0xFF) as u8);
+            self.cpu
+                .memory
+                .write(cs_addr + 1, ((self.cpu.cs >> 8) & 0xFF) as u8);
+            self.cpu.sp = sp;
+
+            // Push IP
+            let sp = self.cpu.sp.wrapping_sub(2);
+            let ip_addr = ((ss as u32) << 4) + sp;
+            self.cpu.memory.write(ip_addr, (self.cpu.ip & 0xFF) as u8);
+            self.cpu
+                .memory
+                .write(ip_addr + 1, ((self.cpu.ip >> 8) & 0xFF) as u8);
+            self.cpu.sp = sp;
+
+            // Jump to INT 1Ch handler
+            self.cpu.cs = segment;
+            self.cpu.ip = offset as u32;
+
+            // Note: The handler will execute and IRET back to the return address we pushed
+            // which is the instruction after INT 08h
+        }
+        // If it's the default stub, we skip calling it (no-op)
     }
 
     /// Handle hardware timer interrupt from PIT
@@ -2091,6 +2134,10 @@ impl PcCpu {
 
         // Perform timer tick logic
         self.do_timer_tick();
+
+        // Chain to INT 1Ch (user timer tick handler)
+        // This is standard BIOS behavior for both software and hardware timer interrupts
+        self.chain_to_int1ch();
 
         // Hardware interrupts don't return cycle counts
     }
@@ -7965,5 +8012,102 @@ mod tests {
         // Extended BIOS (78h-FFh) - BiosFirst
         assert_eq!(get_interrupt_priority(0x78), InterruptPriority::Bios);
         assert_eq!(get_interrupt_priority(0xFF), InterruptPriority::Bios);
+    }
+
+    #[test]
+    fn test_int08h_chains_to_int1ch() {
+        // Test that INT 08h chains to INT 1Ch when a user hook is installed
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Install custom handler for INT 1Ch (timer tick user hook)
+        let handler_segment = 0x2000u16;
+        let handler_offset = 0x0100u16;
+        let handler_addr = ((handler_segment as u32) << 4) + (handler_offset as u32);
+
+        // Write custom handler: INC BX, IRET
+        cpu.cpu.memory.write(handler_addr, 0x43); // INC BX
+        cpu.cpu.memory.write(handler_addr + 1, 0xCF); // IRET
+
+        // Install handler for INT 1Ch
+        let vector_addr = 0x1C * 4;
+        cpu.cpu
+            .memory
+            .write(vector_addr, (handler_offset & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 1, ((handler_offset >> 8) & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 2, (handler_segment & 0xFF) as u8);
+        cpu.cpu
+            .memory
+            .write(vector_addr + 3, ((handler_segment >> 8) & 0xFF) as u8);
+
+        // Set up code to call INT 08h
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x08); // 08h
+
+        // Initialize BX to 0 to test if handler runs
+        cpu.cpu.bx = 0x0000;
+
+        // Execute INT 08h - should update tick counter AND call INT 1Ch handler
+        cpu.step(); // Execute INT 08h (which chains to INT 1Ch)
+        cpu.step(); // Execute INC BX in INT 1Ch handler
+        cpu.step(); // Execute IRET to return from INT 1Ch
+
+        // BX should be incremented by the INT 1Ch handler
+        assert_eq!(
+            cpu.cpu.bx, 0x0001,
+            "INT 08h should chain to INT 1Ch handler, which should increment BX"
+        );
+
+        // CPU should have returned to instruction after INT 08h
+        assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(
+            cpu.cpu.ip, 0x1002,
+            "Should return to instruction after INT 08h"
+        );
+    }
+
+    #[test]
+    fn test_int08h_does_not_chain_to_default_int1ch() {
+        // Test that INT 08h does NOT chain to INT 1Ch if it's the default BIOS stub
+        let bus = PcBus::new();
+        let mut cpu = PcCpu::new(bus);
+
+        // Set INT 1Ch vector to default BIOS stub (F000:0040)
+        let vector_addr = 0x1C * 4;
+        cpu.cpu.memory.write(vector_addr, 0x40); // Offset low
+        cpu.cpu.memory.write(vector_addr + 1, 0x00); // Offset high (0x0040)
+        cpu.cpu.memory.write(vector_addr + 2, 0x00); // Segment low
+        cpu.cpu.memory.write(vector_addr + 3, 0xF0); // Segment high (0xF000)
+
+        // Set up code to call INT 08h
+        cpu.cpu.cs = 0x0000;
+        cpu.cpu.ip = 0x1000;
+        cpu.cpu.ss = 0x0000;
+        cpu.cpu.sp = 0xFFFE;
+        let call_addr = ((cpu.cpu.cs as u32) << 4) + cpu.cpu.ip;
+        cpu.cpu.memory.write(call_addr, 0xCD); // INT
+        cpu.cpu.memory.write(call_addr + 1, 0x08); // 08h
+
+        // Execute INT 08h - should NOT call default stub (optimization)
+        cpu.step(); // Execute INT 08h
+
+        // CPU should return directly without calling the stub
+        assert_eq!(cpu.cpu.cs, 0x0000, "Should return to original CS");
+        assert_eq!(
+            cpu.cpu.ip, 0x1002,
+            "Should return to instruction after INT 08h"
+        );
+
+        // Stack should not have been modified (no FAR CALL was made)
+        assert_eq!(cpu.cpu.sp, 0xFFFE, "Stack pointer should be unchanged");
     }
 }
