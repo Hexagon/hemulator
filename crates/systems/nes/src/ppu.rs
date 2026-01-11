@@ -844,10 +844,30 @@ impl Ppu {
         }
         let universal_bg = nes_palette_rgb(universal_bg_idx);
 
-        // Use scroll values that were set by $2005 (PPUSCROLL) writes
-        // These are kept in sync with the loopy temp register in write_register
-        let sx = self.scroll_x as u32;
-        let sy = self.scroll_y as u32;
+        // Extract scroll values from loopy registers for this scanline.
+        // This is critical for games like SMB3 that change scroll mid-frame via IRQ handlers.
+        // We capture the scroll state from temp_vram_addr at scanline start, simulating
+        // how real hardware loads v from t at specific points during rendering.
+        //
+        // In real hardware:
+        // - v (vram_addr) is used for rendering
+        // - t (temp_vram_addr) is updated by $2005/$2006 writes
+        // - v horizontal bits are reloaded from t at dot 257 of each scanline
+        // - v vertical bits are reloaded from t during pre-render scanline
+        //
+        // For frame-based rendering, we simulate this by reading from t at scanline start,
+        // which means mid-frame $2005 writes (like SMB3's HUD split) affect the next scanline.
+        let t = self.temp_vram_addr.get();
+        let fine_x_val = self.fine_x.get();
+        
+        // Extract scroll components from temp register
+        let coarse_x = (t & 0x001F) as u8;           // Bits 0-4: tile column (0-31)
+        let coarse_y = ((t >> 5) & 0x001F) as u8;    // Bits 5-9: tile row (0-31)
+        let fine_y = ((t >> 12) & 0x0007) as u8;     // Bits 12-14: fine Y scroll (0-7)
+        
+        // Compute pixel scroll values
+        let sx = (coarse_x as u32 * 8) + fine_x_val as u32;  // Horizontal scroll in pixels
+        let sy = (coarse_y as u32 * 8) + fine_y as u32;      // Vertical scroll in pixels
 
         // Track background priority for this scanline (for sprite priority).
         let mut bg_priority = [false; 256];
@@ -2490,8 +2510,8 @@ mod tests {
         // Test 1: Base nametable 0, no scroll
         // Should read from nametable 0
         ppu.ctrl = 0x00; // Base nametable = 0
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2502,8 +2522,8 @@ mod tests {
 
         // Test 2: Base nametable 1, no scroll - should use NT1
         ppu.ctrl = 0x01; // Base nametable = 1
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2568,8 +2588,8 @@ mod tests {
         // Test 1: Base nametable 0 (PPUCTRL bits 0-1 = 00), no scroll
         // Should read from nametable 0
         ppu.ctrl = 0x00;
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2581,8 +2601,8 @@ mod tests {
         // Test 2: Base nametable 2 (PPUCTRL bits 0-1 = 10), no scroll
         // Should read from nametable 2 due to base nametable Y bit being set
         ppu.ctrl = 0x02; // Base nametable = 2 (bit 1 set = Y offset)
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
+        ppu.write_register(5, 0); // X scroll
+        ppu.write_register(5, 0); // Y scroll
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2594,8 +2614,8 @@ mod tests {
         // Test 3: Base nametable 0, with Y scroll = 240 (cross to next nametable vertically)
         // Should read from nametable 2 (same as base NT2, no scroll)
         ppu.ctrl = 0x00; // Base nametable = 0
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
+        ppu.write_register(5, 0);   // X scroll = 0
+        ppu.write_register(5, 240); // Y scroll = 240
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -2607,8 +2627,8 @@ mod tests {
         // Test 4: Base nametable 2, with Y scroll = 240
         // Should wrap around to nametable 0 (Y offset cancels out)
         ppu.ctrl = 0x02; // Base nametable = 2
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
+        ppu.write_register(5, 0);   // X scroll = 0
+        ppu.write_register(5, 240); // Y scroll = 240
         let frame = ppu.render_frame();
         let pixel = frame.pixels[0];
         assert_eq!(
@@ -3201,21 +3221,6 @@ mod tests {
         let _frame = ppu.render_frame();
         // Top-left pixel should come from NT0 (0xAA pattern)
         // We can't easily verify the pixel color, but we can check the frame rendered
-
-        // Scroll to (256, 0) - should use NT1
-        ppu.write_register(5, 0);
-        ppu.write_register(5, 0);
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 0;
-        // After scrolling 256 pixels horizontally, we should see NT1
-
-        // Scroll to (0, 240) - should use NT2
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
-
-        // Scroll to (256, 240) - should use NT3
-        ppu.scroll_x = 0;
-        ppu.scroll_y = 240;
 
         // The key is that with 4-screen mode, the nametable selection should be:
         // - Position (x < 256, y < 240): NT0
