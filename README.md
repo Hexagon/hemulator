@@ -45,22 +45,20 @@ Download the latest release from the [Releases](https://github.com/Hexagon/hemul
 
 **Documentation**:
 - 📚 **[Complete Documentation Site](https://hemulator.56k.guru)** - Full documentation with user guides and developer references
-- 📖 **[User Manual](docs/MANUAL.md)** - Complete usage instructions, controls, and system-specific information
+- 📖 **[User Manual](https://hemulator.56k.guru/user/manual.html)** - Complete usage instructions, controls, and system-specific information
 - 🎮 **[System Documentation](https://hemulator.56k.guru/systems/)** - Detailed information about each emulated system
 
 ## For Developers
 
 **Core Documentation**:
-- 🏗️ **[Architecture Guide](docs/ARCHITECTURE.md)** - Overall emulation system architecture and design patterns
-- 🤝 **[Contributing Guide](docs/CONTRIBUTING.md)** - Development workflow and contribution guidelines
+- 🏗️ **[Architecture Guide](ARCHITECTURE.md)** - Overall emulation system architecture and design patterns
+- 🤝 **[Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)** - Development workflow and contribution guidelines
 - 🤖 **[Agent Guidelines](AGENTS.md)** - Implementation guidelines and CI requirements
 - 🌐 **[Full Documentation Site](https://hemulator.56k.guru)** - Complete developer and API documentation
 
 **Planning and Reference Documents**:
-- [N64_STATUS.md](docs/N64_STATUS.md) - Active development status for Nintendo 64 emulation
-- [NEXT_EMULATOR_RECOMMENDATION.md](docs/NEXT_EMULATOR_RECOMMENDATION.md) - Recommendation for next emulator to implement
-- [SMS_IMPLEMENTATION_GUIDE.md](docs/SMS_IMPLEMENTATION_GUIDE.md) - Practical guide for implementing Sega Master System
-- [references/](docs/references/) - CPU and hardware technical references
+- [N64 Development Status](https://hemulator.56k.guru/developer/n64-status.html) - Active development status for Nintendo 64 emulation
+- [CPU & Hardware References](https://hemulator.56k.guru/references/) - CPU and hardware technical references
 
 **System-Specific Documentation**:
 - [NES](crates/systems/nes/README.md) - PPU, APU, mappers
@@ -107,7 +105,7 @@ cargo run --release -p emu_gui
 
 ## Architecture
 
-Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+Hemulator uses a modular architecture that separates reusable emulation components from system-specific implementations. For detailed architecture documentation, see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 **Core Components** (`crates/core/`):
 - CPUs: 6502, 65C816, LR35902, Z80, 8080, MIPS R4300i, 8086/80186/80286/80386
@@ -121,7 +119,7 @@ Hemulator uses a modular architecture that separates reusable emulation componen
 
 ### Renderer Architecture
 
-The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](docs/ARCHITECTURE.md#renderer-architecture) for implementation details.
+The project uses a modular renderer architecture across multiple systems for consistency and future GPU acceleration support. See [ARCHITECTURE.md](ARCHITECTURE.md#renderer-architecture) for implementation details.
 
 ## NES Mapper Support
 
@@ -156,7 +154,7 @@ The NES emulator supports 14 mappers covering approximately **90%+ of all NES ga
 - CHR-RAM support for games without CHR-ROM
 - Comprehensive unit tests (61 tests total)
 
-See [MANUAL.md](docs/MANUAL.md) for user-facing mapper information and game compatibility.
+See the [User Manual](https://hemulator.56k.guru/user/manual.html) for user-facing mapper information and game compatibility.
 
 ## Supported ROM Formats
 
@@ -304,7 +302,7 @@ cargo bench -- --save-baseline my-baseline
 cargo bench -- --baseline my-baseline
 ```
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md#benchmarking) for detailed benchmarking guidelines.
+See the [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html#benchmarking) for detailed benchmarking guidelines.
 
 ### Architecture
 
@@ -350,7 +348,7 @@ See existing mapper implementations for examples.
 
 ## Contributing
 
-Contributions are welcome! Please see **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for:
+Contributions are welcome! Please see the **[Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)** for:
 - Pre-commit check requirements (formatting, linting, building, testing)
 - Development workflow and coding standards
 - Debug environment variables
@@ -382,7 +380,7 @@ This is a free and open source community project. Contributions from the communi
 
 ### Debug Logging
 
-The emulator supports comprehensive debug logging via command-line flags. See [CONTRIBUTING.md](docs/CONTRIBUTING.md#debug-logging) for detailed usage.
+The emulator supports comprehensive debug logging via command-line flags. See the [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html#debug-logging) for detailed usage.
 
 Quick reference:
 ```bash
