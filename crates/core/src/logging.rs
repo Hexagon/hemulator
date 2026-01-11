@@ -259,6 +259,12 @@ impl RateLimiter {
 }
 
 /// A single log message with metadata
+///
+/// Note: Uses `Instant` for timestamp which is suitable for the transient in-memory
+/// buffer use case (relative ordering and recent history), but is not serializable
+/// and cannot be compared across program runs. If log messages need to be saved to
+/// disk or displayed with actual wall-clock times in the future, consider adding
+/// a `SystemTime` field or formatted timestamp string.
 #[derive(Debug, Clone)]
 pub struct LogMessage {
     pub category: LogCategory,

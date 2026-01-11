@@ -58,26 +58,6 @@ impl InspectorTab {
             InspectorTab::Log | InspectorTab::Memory | InspectorTab::Debug
         )
     }
-
-    /// Check if this tab is applicable to the given system type
-    pub fn is_applicable(&self, system_type: &SystemType) -> bool {
-        if self.is_generic() {
-            return true;
-        }
-
-        match self {
-            InspectorTab::NesTiles | InspectorTab::NesPalettes | InspectorTab::NesNametables => {
-                *system_type == SystemType::NES
-            }
-            InspectorTab::GbTiles | InspectorTab::GbPalettes => *system_type == SystemType::GameBoy,
-            InspectorTab::SmsTiles | InspectorTab::SmsPalettes => *system_type == SystemType::SMS,
-            InspectorTab::SnesTiles | InspectorTab::SnesPalettes | InspectorTab::SnesLayers => {
-                *system_type == SystemType::SNES
-            }
-            InspectorTab::PcBda => *system_type == SystemType::PC,
-            _ => false,
-        }
-    }
 }
 
 /// Get the list of tabs that should be shown for a given system
@@ -233,6 +213,37 @@ fn render_log_tab(ui: &mut Ui) {
                         ui.end_row();
                     }
                 });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(10.0);
+
+            // Rate limit configuration
+            ui.heading("Rate Limiting");
+            ui.add_space(5.0);
+            ui.label("Control the maximum number of logs per second per category:");
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
+                ui.label("Max logs/second:");
+                ui.add_space(10.0);
+
+                let mut rate_limit = log_config.get_rate_limit() as i32;
+                let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
+                    .text("logs/sec")
+                    .logarithmic(true);
+
+                if ui.add(slider).changed() {
+                    log_config.set_rate_limit(rate_limit as usize);
+                }
+            });
+
+            ui.add_space(5.0);
+            ui.label(format!(
+                "Current limit: {} logs per second per category",
+                log_config.get_rate_limit()
+            ));
+            ui.label("When exceeded, logs are dropped and a warning is emitted.");
 
             ui.add_space(10.0);
             ui.separator();

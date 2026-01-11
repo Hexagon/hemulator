@@ -3,7 +3,7 @@ pub mod egui_ui;
 mod hemu_project;
 pub mod input;
 pub mod input_mapper;
-pub mod rom_detect; // Made public for egui_ui to access SystemType
+pub mod rom_detect; // Made public so egui_ui can use rom_detect::SystemType (ROM type metadata for the UI)
 mod save_state;
 mod settings;
 mod system_adapter;
@@ -2956,15 +2956,24 @@ fn main() {
         out
     }
 
+    // Track ROM loaded state to run certain updates only on transitions
+    let mut prev_rom_loaded = rom_loaded;
+
     // Main event loop with egui
     loop {
-        // Update inspector tabs based on current system (if ROM is loaded)
-        if rom_loaded {
-            egui_app.dock_layout.update_system(sys.system_type());
-            // Enable GUI message capture for the log tab
-            emu_core::logging::LogConfig::global().enable_gui_capture();
-        } else {
-            egui_app.dock_layout.clear_system();
+        // Detect transition: ROM has just been loaded or unloaded this frame
+        let rom_state_changed = rom_loaded != prev_rom_loaded;
+
+        // Update inspector tabs based on current system (only when ROM state changes)
+        if rom_state_changed {
+            if rom_loaded {
+                egui_app.dock_layout.update_system(sys.system_type());
+                // Enable GUI message capture for the log tab
+                emu_core::logging::LogConfig::global().enable_gui_capture();
+            } else {
+                egui_app.dock_layout.clear_system();
+            }
+            prev_rom_loaded = rom_loaded;
         }
 
         // Only increment frame counter when emulation is active

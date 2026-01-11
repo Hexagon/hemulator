@@ -36,7 +36,7 @@ pub struct DockLayout {
 
 impl DockLayout {
     pub fn new() -> Self {
-        // Start with just generic tabs (Log, Memory)
+        // Start with just generic tabs (Log, Debug, Memory)
         let inspector_state = DockState::new(get_tabs_for_system(None));
 
         // Create property pane dock with a single Properties tab
@@ -50,20 +50,31 @@ impl DockLayout {
         }
     }
 
-    /// Update the inspector tabs based on the current system
+    /// Update the inspector tabs based on the current system.
+    ///
+    /// Note: This method rebuilds the `inspector_state` `DockState` whenever the
+    /// system type changes. As a result, any user customizations to the inspector
+    /// dock layout (such as tab reordering, split arrangements, or panel sizes)
+    /// are reset when switching to a different system type.
     pub fn update_system(&mut self, system_type: SystemType) {
         if self.current_system.as_ref() != Some(&system_type) {
-            self.current_system = Some(system_type.clone());
-            // Rebuild the inspector with tabs for this system
+            // Rebuild the inspector with tabs for this system. This also resets
+            // any existing inspector dock layout customizations.
             self.inspector_state = DockState::new(get_tabs_for_system(Some(&system_type)));
+            self.current_system = Some(system_type);
         }
     }
 
-    /// Clear the current system (show only generic tabs)
+    /// Clear the current system (show only generic tabs).
+    ///
+    /// Note: This method also rebuilds the `inspector_state` `DockState`, which
+    /// resets any user customizations to the inspector dock layout and restores
+    /// the default generic inspector tabs.
     pub fn clear_system(&mut self) {
         if self.current_system.is_some() {
             self.current_system = None;
-            // Rebuild with only generic tabs
+            // Rebuild with only generic tabs. This also resets any existing
+            // inspector dock layout customizations.
             self.inspector_state = DockState::new(get_tabs_for_system(None));
         }
     }
