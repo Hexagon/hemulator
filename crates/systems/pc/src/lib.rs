@@ -386,6 +386,45 @@ impl PcSystem {
         }
     }
 
+    /// Read full BDA and EBDA data for inspector tab
+    /// Returns raw memory contents for detailed inspection
+    pub fn read_bda_inspector_data(&self) -> BdaInspectorData {
+        let bus = self.cpu.bus();
+
+        // Get basic BDA values
+        let bda = self.read_bda_values();
+
+        // Read EBDA segment from BDA at 0x040E-0x040F
+        let ebda_segment = bus.read(0x040E) as u16 | ((bus.read(0x040F) as u16) << 8);
+
+        // Read raw BDA memory (0x0400-0x04FF, 256 bytes)
+        let mut bda_raw = Vec::with_capacity(256);
+        for addr in 0x0400..0x0500 {
+            bda_raw.push(bus.read(addr));
+        }
+
+        // Read raw EBDA memory (0x9FC00-0x9FFFF, 1KB)
+        // EBDA is typically at 0x9FC00 (segment 0x9FC0)
+        let ebda_linear_addr = (ebda_segment as u32) << 4;
+        let mut ebda_raw = Vec::with_capacity(1024);
+        for offset in 0..1024 {
+            ebda_raw.push(bus.read(ebda_linear_addr + offset));
+        }
+
+        BdaInspectorData {
+            equipment_word: bda.equipment_word,
+            memory_size_kb: bda.memory_size_kb,
+            video_mode: bda.video_mode,
+            video_columns: bda.video_columns,
+            num_serial_ports: bda.num_serial_ports,
+            num_parallel_ports: bda.num_parallel_ports,
+            num_hard_drives: bda.num_hard_drives,
+            bda_raw,
+            ebda_raw,
+            ebda_segment,
+        }
+    }
+
     /// Enable or disable instruction tracing
     pub fn set_instruction_tracing(&mut self, enabled: bool) {
         self.instruction_tracer.set_enabled(enabled);
@@ -442,6 +481,21 @@ pub struct BdaValues {
     pub num_serial_ports: u8,
     pub num_parallel_ports: u8,
     pub num_hard_drives: u8,
+}
+
+/// Full BDA and EBDA data for inspector tab
+#[derive(Debug, Clone)]
+pub struct BdaInspectorData {
+    pub equipment_word: u16,
+    pub memory_size_kb: u16,
+    pub video_mode: u8,
+    pub video_columns: u8,
+    pub num_serial_ports: u8,
+    pub num_parallel_ports: u8,
+    pub num_hard_drives: u8,
+    pub bda_raw: Vec<u8>,
+    pub ebda_raw: Vec<u8>,
+    pub ebda_segment: u16,
 }
 
 #[derive(Debug, Clone)]

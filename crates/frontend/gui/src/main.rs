@@ -3209,6 +3209,23 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::PC(s) => {
+                    // Update PC BDA data for inspector
+                    let bda_data = s.read_bda_inspector_data();
+                    let pc_bda = egui_ui::PcBdaData {
+                        equipment_word: bda_data.equipment_word,
+                        memory_size_kb: bda_data.memory_size_kb,
+                        video_mode: bda_data.video_mode,
+                        video_columns: bda_data.video_columns,
+                        num_serial_ports: bda_data.num_serial_ports,
+                        num_parallel_ports: bda_data.num_parallel_ports,
+                        num_hard_drives: bda_data.num_hard_drives,
+                        bda_raw: bda_data.bda_raw,
+                        ebda_raw: bda_data.ebda_raw,
+                        ebda_segment: bda_data.ebda_segment,
+                    };
+                    egui_app.tab_manager.update_pc_bda_data(pc_bda);
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }
