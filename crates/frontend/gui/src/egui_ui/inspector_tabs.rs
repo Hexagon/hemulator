@@ -453,11 +453,11 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         });
                         ui.end_row();
 
-                        ui.label("Bit 8: DMA installed");
+                        ui.label("Bit 8: DMA controller (0 = present)");
                         ui.label(if (eq & 0x0100) == 0 {
-                            "✓ Yes"
+                            "✓ Present (bit = 0)"
                         } else {
-                            "✗ No (bit = 0)"
+                            "✗ Not present (bit = 1)"
                         });
                         ui.end_row();
 

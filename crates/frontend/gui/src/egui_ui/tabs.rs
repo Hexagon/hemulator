@@ -106,7 +106,7 @@ pub struct PcBdaData {
     pub num_hard_drives: u8,
     /// Raw BDA memory (0x0400-0x04FF, 256 bytes)
     pub bda_raw: Vec<u8>,
-    /// Raw EBDA memory (0x9FC00-0x9FFFF, 1KB)
+    /// Raw EBDA memory (1KB from segment stored in BDA via `ebda_segment`)
     pub ebda_raw: Vec<u8>,
     /// EBDA segment address from BDA at 0x040E-0x040F
     pub ebda_segment: u16,
