@@ -1311,7 +1311,7 @@ mod tests {
         // Set up a tilemap with different tiles at different positions
         // Tile at tilemap position (0, 0)
         ppu.write_vram(0x1800, 1); // Tile index 1
-        // Tile at tilemap position (31, 31) - bottom-right corner
+                                   // Tile at tilemap position (31, 31) - bottom-right corner
         ppu.write_vram(0x1800 + (31 * 32) + 31, 2); // Tile index 2
 
         // Set up tiles with distinct patterns
