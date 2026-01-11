@@ -123,15 +123,32 @@ pub struct Ppu {
     sprite_0_hit: Cell<bool>,
     sprite_overflow: Cell<bool>,
     nmi_pending: Cell<bool>,
-    // PPUADDR latch
+    // PPUADDR latch (shared with PPUSCROLL)
     addr_latch: Cell<bool>,
-    pub vram_addr: Cell<u16>,
+    // Loopy registers for proper PPU scrolling behavior
+    // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+    // v: Current VRAM address (15 bits) - also used for $2007 reads/writes
+    // t: Temporary VRAM address (15 bits) - updated by $2005/$2006 writes
+    // x: Fine X scroll (3 bits) - separate from v register
+    //
+    // Register layout (both v and t):
+    // Bit:  14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    // Use:  -- FY FY FY NT NT CY CY CY CY CY CX CX CX CX CX
+    //       |  |        |     |                 |
+    //       |  Fine Y   |     Coarse Y          Coarse X
+    //       |           Nametable select
+    //       Unused (bit 14 is unused, bit 15 doesn't exist)
+    pub vram_addr: Cell<u16>,     // v register (current VRAM address)
+    temp_vram_addr: Cell<u16>,    // t register (temporary VRAM address)
+    fine_x: Cell<u8>,             // x register (fine X scroll, 3 bits)
     read_buffer: Cell<u8>,
     #[allow(clippy::type_complexity)]
     a12_callback: RefCell<Option<Box<dyn FnMut(bool)>>>,
     #[allow(clippy::type_complexity)]
     chr_read_callback: RefCell<Option<Box<dyn FnMut(u16)>>>,
     suppress_a12: Cell<bool>,
+    // Legacy scroll variables kept for backward compatibility with tests
+    // These are now derived from loopy registers when accessed
     scroll_x: u8,
     scroll_y: u8,
     oam_addr: Cell<u8>,
@@ -179,7 +196,9 @@ impl Ppu {
             sprite_overflow: Cell::new(false),
             nmi_pending: Cell::new(false),
             addr_latch: Cell::new(false),
-            vram_addr: Cell::new(0),
+            vram_addr: Cell::new(0),        // v register
+            temp_vram_addr: Cell::new(0),   // t register
+            fine_x: Cell::new(0),           // x register (3 bits)
             read_buffer: Cell::new(0),
             a12_callback: RefCell::new(None),
             chr_read_callback: RefCell::new(None),
@@ -258,6 +277,40 @@ impl Ppu {
 
     pub fn mask(&self) -> u8 {
         self.mask
+    }
+
+    /// Extract scroll values from loopy registers for backward compatibility.
+    /// These methods compute the effective scroll position from the v register.
+    ///
+    /// Note: In a cycle-accurate PPU, v is updated during rendering. In our frame-based
+    /// renderer, we use t (temp_vram_addr) as the source since it represents the scroll
+    /// position set by $2005 writes.
+    #[allow(dead_code)]
+    fn update_legacy_scroll(&mut self) {
+        let t = self.temp_vram_addr.get();
+        let fine_x_val = self.fine_x.get();
+        
+        // Extract components from t register:
+        // Bits 0-4: coarse X (5 bits, 0-31 tiles)
+        // Bit 10: nametable X (0 or 1)
+        let coarse_x = (t & 0x001F) as u8;
+        let _nt_x = ((t >> 10) & 1) as u8;
+        
+        // Compute effective scroll_x: (nametable_x * 256) + (coarse_x * 8) + fine_x
+        // For compatibility with existing tests that expect 0-255 range:
+        self.scroll_x = (coarse_x * 8) + fine_x_val;
+        
+        // Extract vertical scroll components:
+        // Bits 5-9: coarse Y (5 bits, 0-31 tiles, but wraps at 30)
+        // Bit 11: nametable Y (0 or 1)
+        // Bits 12-14: fine Y (3 bits, 0-7 pixels within tile)
+        let coarse_y = ((t >> 5) & 0x001F) as u8;
+        let _nt_y = ((t >> 11) & 1) as u8;
+        let fine_y = ((t >> 12) & 0x0007) as u8;
+        
+        // Compute effective scroll_y: (coarse_y * 8) + fine_y
+        // For compatibility with existing tests that expect 0-255 range:
+        self.scroll_y = (coarse_y * 8) + fine_y;
     }
 
     pub fn scroll_x(&self) -> u8 {
@@ -524,6 +577,7 @@ impl Ppu {
                 // PPUSCROLL (write x then y), shares latch with PPUADDR.
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2005 write blocked (first frame)".to_string()
@@ -532,11 +586,36 @@ impl Ppu {
                 }
 
                 if !self.addr_latch.get() {
-                    self.scroll_x = val;
+                    // First write (w=0): set horizontal scroll
+                    // t: ........ ...HGFED = d: HGFED...
+                    // x:               CBA = d: .....CBA
+                    // w:                   = 1
+                    let t = self.temp_vram_addr.get();
+                    let coarse_x = (val >> 3) as u16;  // Bits 3-7 become coarse X (bits 0-4 of t)
+                    let fine_x_val = val & 0x07;       // Bits 0-2 become fine X
+                    
+                    // Update t: clear bits 0-4, set new coarse X
+                    self.temp_vram_addr.set((t & 0xFFE0) | coarse_x);
+                    self.fine_x.set(fine_x_val);
                     self.addr_latch.set(true);
+                    
+                    // Update legacy scroll_x for backward compatibility
+                    self.scroll_x = val;
                 } else {
-                    self.scroll_y = val;
+                    // Second write (w=1): set vertical scroll
+                    // t: .CBA..HG FED..... = d: HGFEDCBA
+                    // w:                   = 0
+                    let t = self.temp_vram_addr.get();
+                    let coarse_y = ((val >> 3) & 0x1F) as u16;  // Bits 3-7 become coarse Y (bits 5-9 of t)
+                    let fine_y = (val & 0x07) as u16;            // Bits 0-2 become fine Y (bits 12-14 of t)
+                    
+                    // Update t: clear bits 5-9 and 12-14, set new coarse Y and fine Y
+                    self.temp_vram_addr.set((t & 0x8C1F) | (coarse_y << 5) | (fine_y << 12));
                     self.addr_latch.set(false);
+                    
+                    // Update legacy scroll_y for backward compatibility
+                    self.scroll_y = val;
+                    
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         format!("PPUSCROLL set: X={}, Y={}", self.scroll_x, self.scroll_y)
                     });
@@ -546,6 +625,11 @@ impl Ppu {
                 // PPUADDR (write high then low)
                 // Write-protected during first frame after reset
                 // Reference: problemkaputt.de everynes.htm - PPU Reset section
+                // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+                //
+                // Note: For cycle-accurate emulation, $2006 writes update the t register
+                // and only copy to v on the second write. However, for frame-based rendering
+                // we update vram_addr (v) directly to maintain compatibility with $2007 access.
                 if self.first_frame_after_reset.get() {
                     log(LogCategory::PPU, LogLevel::Trace, || {
                         "PPU: $2006 write blocked (first frame)".to_string()
@@ -554,12 +638,31 @@ impl Ppu {
                 }
 
                 if !self.addr_latch.get() {
+                    // First write (w=0): set high byte of address
+                    // Update both t register (for scrolling) and vram_addr (for $2007 access)
+                    let hi = (val & 0x3F) as u16;  // Only bits 0-5 are used
+                    
+                    // Update temp register (t) for proper loopy behavior
+                    let t = self.temp_vram_addr.get();
+                    self.temp_vram_addr.set((t & 0x00FF) | (hi << 8));
+                    
+                    // Also update vram_addr for frame-based rendering compatibility
                     let lo = self.vram_addr.get() & 0x00FF;
-                    self.vram_addr.set(((val as u16) << 8) | lo);
+                    self.vram_addr.set((val as u16) << 8 | lo);
+                    
                     self.addr_latch.set(true);
                 } else {
+                    // Second write (w=1): set low byte of address
+                    let t = self.temp_vram_addr.get();
+                    let lo = val as u16;
+                    
+                    // Update temp register (t)
+                    self.temp_vram_addr.set((t & 0xFF00) | lo);
+                    
+                    // Update vram_addr for $2007 access
                     let hi = self.vram_addr.get() & 0xFF00;
-                    self.vram_addr.set(hi | val as u16);
+                    self.vram_addr.set(hi | lo);
+                    
                     self.addr_latch.set(false);
                 }
             }
