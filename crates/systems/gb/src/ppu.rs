@@ -1242,68 +1242,120 @@ mod tests {
 
     #[test]
     fn test_sprite_priority_dmg_x_coordinate() {
-        // DMG: Sprite selection is OAM order, but rendering priority uses X coordinate
-        // Lower X coordinate sprites render on top (higher priority)
+        // DMG: Sprite SELECTION is OAM order, RENDERING priority uses X coordinate
+        // Test with >10 sprites to verify selection is OAM-based, not X-based
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
         ppu.cgb_mode = false; // Explicitly DMG mode
 
-        // Create two overlapping sprites at the same Y position but different X and OAM positions
-        // Sprite 0 (OAM index 0): X=16, visible pixels at screen X = 8-15
-        ppu.write_oam(0, 16); // Y
-        ppu.write_oam(1, 16); // X
-        ppu.write_oam(2, 0); // Tile 0
-        ppu.write_oam(3, 0); // Flags
+        // Create 12 sprites on the same scanline
+        // Give lower OAM indices HIGHER X coordinates to prove selection isn't X-based
+        for i in 0u16..12 {
+            let oam_addr = i * 4;
+            ppu.write_oam(oam_addr, 16); // Y position (all on same scanline)
 
-        // Sprite 1 (OAM index 1): X=12, visible pixels at screen X = 4-11
-        // In DMG mode, lower X gives higher RENDERING priority (will appear on top)
-        ppu.write_oam(4, 16); // Y (same as sprite 0)
-        ppu.write_oam(5, 12); // X (lower than sprite 0)
-        ppu.write_oam(6, 1); // Tile 1 (different tile)
-        ppu.write_oam(7, 0); // Flags
+            // Lower OAM index = higher X (opposite of what X-based selection would pick)
+            let x_pos = (140 - i * 10) as u8;
+            ppu.write_oam(oam_addr + 1, x_pos);
+            ppu.write_oam(oam_addr + 2, 0); // Tile index
+            ppu.write_oam(oam_addr + 3, 0); // Flags
+        }
 
-        // Set up tiles with different patterns
-        // Tile 0: Color 3 (black)
+        // Set up tile (color 3 = black)
         ppu.write_vram(0x0000, 0xFF);
         ppu.write_vram(0x0001, 0xFF);
-        // Tile 1: Color 1 (light gray)
-        ppu.write_vram(0x0010, 0xFF);
-        ppu.write_vram(0x0011, 0x00);
 
-        let _frame = ppu.render_frame();
-        // Test passes if no panic occurs - validates DMG rendering priority logic
+        let frame = ppu.render_frame();
+
+        // Sprite 0 has highest X (140), sprite 9 has X=50
+        // If selection were X-based, sprites 11-9 (lowest X) would be selected
+        // But with OAM-based selection, sprites 0-9 are selected
+
+        // Verify sprite 0 (OAM 0, X=140, screen X=132-139) is rendered
+        let mut found = false;
+        for x in 132..140 {
+            if frame.pixels[x] != 0xFFFFFFFF {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Sprite at OAM 0 (highest X) should be selected with OAM-based selection"
+        );
+
+        // Verify sprite 9 (OAM 9, X=50, screen X=42-49) is rendered
+        found = false;
+        for x in 42..50 {
+            if frame.pixels[x] != 0xFFFFFFFF {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Sprite at OAM 9 should be selected (last of first 10 in OAM)"
+        );
     }
 
     #[test]
     fn test_sprite_priority_cgb_oam_order() {
-        // CGB: Both selection and rendering priority use OAM order only
-        // X coordinate is irrelevant for priority
+        // CGB: Both SELECTION and RENDERING priority use OAM order only
+        // Test with >10 sprites to verify X coordinate doesn't affect selection
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x93; // Enable LCD, sprites, and background
         ppu.enable_cgb_mode(false); // CGB-only mode (compatibility_mode=false means flag 0xC0)
 
-        // Create two overlapping sprites at the same Y position
-        // In CGB mode, OAM order determines both selection AND rendering priority
-        // Sprite 0 (OAM index 0): should have higher priority and render on top
-        ppu.write_oam(0, 16); // Y
-        ppu.write_oam(1, 16); // X
-        ppu.write_oam(2, 0); // Tile 0
-        ppu.write_oam(3, 0); // Flags
+        // Set up CGB object palette 0 with visible colors (not all white)
+        // Palette 0, Color 3: Black (0x0000 in RGB555)
+        ppu.write_obpi(0x86); // Auto-increment, palette 0, color 3, byte 0
+        ppu.write_obpd(0x00); // Low byte: 0x00
+        ppu.write_obpd(0x00); // High byte: 0x00 (color = 0x0000 = black)
 
-        // Sprite 1 (OAM index 1): lower priority even with lower X coordinate
-        ppu.write_oam(4, 16); // Y (same as sprite 0)
-        ppu.write_oam(5, 12); // X (lower than sprite 0, but doesn't matter in CGB)
-        ppu.write_oam(6, 1); // Tile 1
-        ppu.write_oam(7, 0); // Flags
+        // Create 12 sprites on the same scanline
+        // Give lower OAM indices HIGHER X to prove X doesn't matter
+        for i in 0u16..12 {
+            let oam_addr = i * 4;
+            ppu.write_oam(oam_addr, 16); // Y position (all on same scanline)
 
-        // Set up tiles
+            // Lower OAM index = higher X
+            let x_pos = (140 - i * 10) as u8;
+            ppu.write_oam(oam_addr + 1, x_pos);
+            ppu.write_oam(oam_addr + 2, 0); // Tile index
+            ppu.write_oam(oam_addr + 3, 0); // Flags (palette 0)
+        }
+
+        // Set up tile (color 3 = black)
         ppu.write_vram(0x0000, 0xFF);
         ppu.write_vram(0x0001, 0xFF);
-        ppu.write_vram(0x0010, 0xFF);
-        ppu.write_vram(0x0011, 0x00);
 
-        let _frame = ppu.render_frame();
-        // Test passes if no panic occurs - validates CGB OAM-only priority logic
+        let frame = ppu.render_frame();
+
+        // Sprite 0 has highest X (140), sprites 10-11 have lowest X (30, 20)
+        // With OAM-based selection, sprites 0-9 are selected regardless of X
+
+        // Verify sprite 0 (OAM 0, X=140, screen X=132-139) is rendered
+        let mut found = false;
+        for x in 132..140 {
+            if frame.pixels[x] != 0xFFFFFFFF {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "Sprite at OAM 0 (highest X=140) should be selected");
+
+        // Verify sprite 9 (OAM 9, X=50, screen X=42-49) is rendered
+        found = false;
+        for x in 42..50 {
+            if frame.pixels[x] != 0xFFFFFFFF {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Sprite at OAM 9 (X=50) should be selected (last of first 10)"
+        );
     }
 
     #[test]
@@ -1357,49 +1409,90 @@ mod tests {
 
     #[test]
     fn test_scrolling_wrapping() {
-        // Test that scrolling wraps correctly at boundaries
+        // Test that scrolling wraps correctly at boundaries with actual pixel validation
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x91; // Enable LCD and background
+        ppu.bgp = 0xE4; // BGP palette: 11 10 01 00 (colors 3,2,1,0 map to shades)
 
-        // Set up a tilemap with different tiles at different positions
-        // Tile at tilemap position (0, 0)
-        ppu.write_vram(0x1800, 1); // Tile index 1
-                                   // Tile at tilemap position (31, 31) - bottom-right corner
-        ppu.write_vram(0x1800 + (31 * 32) + 31, 2); // Tile index 2
+        // Set up a tilemap with distinct tiles at specific positions
+        // Tile at tilemap position (0, 0) - use tile index 1
+        ppu.write_vram(0x1800, 1);
+        // Tile at tilemap position (31, 0) - use tile index 2 (right edge)
+        ppu.write_vram(0x1800 + 31, 2);
+        // Tile at tilemap position (0, 31) - use tile index 3 (bottom edge)
+        ppu.write_vram(0x1800 + (31 * 32), 3);
 
-        // Set up tiles with distinct patterns
-        // Tile 0: Default (all zeros)
-        // Tile 1: Color 1
-        ppu.write_vram(0x0010, 0xFF);
+        // Set up tiles with distinct patterns (all solid colors for easy validation)
+        // Tile 0: Color 0 (default, mapped to white via BGP)
+        // Tile 1: Color 1 (light gray via BGP: 0xE4 >> 2 & 0x03 = 1)
+        ppu.write_vram(0x0010, 0xFF); // All pixels = color 1
         ppu.write_vram(0x0011, 0x00);
-        // Tile 2: Color 2
-        ppu.write_vram(0x0020, 0x00);
+        // Tile 2: Color 2 (dark gray via BGP: 0xE4 >> 4 & 0x03 = 2)
+        ppu.write_vram(0x0020, 0x00); // All pixels = color 2
         ppu.write_vram(0x0021, 0xFF);
+        // Tile 3: Color 3 (black via BGP: 0xE4 >> 6 & 0x03 = 3)
+        ppu.write_vram(0x0030, 0xFF); // All pixels = color 3
+        ppu.write_vram(0x0031, 0xFF);
 
-        // Test 1: Normal scroll (no wrapping)
+        // Test 1: No scroll - should show tile 1 at top-left
         ppu.scx = 0;
         ppu.scy = 0;
         let frame1 = ppu.render_frame();
-        assert_eq!(frame1.width, 160);
+        let color_tile1 = 0xFFAAAAAA; // Color 1 maps to light gray
+        assert_eq!(
+            frame1.pixels[0], color_tile1,
+            "At SCX=0, SCY=0, pixel (0,0) should show tile 1 (color 1)"
+        );
 
-        // Test 2: Scroll near wrap boundary (SCX = 250)
+        // Test 2: Horizontal wrapping - SCX=250
+        // Screen pixel (0,0) should show tilemap pixel (250,0)
+        // Tilemap pixel 250 = tile X 31, pixel X 2 -> shows tile 2 (at position 31,0)
         ppu.scx = 250;
+        ppu.scy = 0;
         let frame2 = ppu.render_frame();
-        // Should wrap around: screen pixels 0-5 should show from tilemap X=250-255,
-        // and pixels 6-159 should show from tilemap X=0-153 (wrapped)
-        assert_eq!(frame2.width, 160);
+        let color_tile2 = 0xFF555555; // Color 2 maps to dark gray
+        assert_eq!(
+            frame2.pixels[0], color_tile2,
+            "At SCX=250, pixel (0,0) should show tilemap position (250,0) = tile 2 (color 2)"
+        );
 
-        // Test 3: SCY wrapping
+        // Screen pixel (6,0) should show tilemap pixel (256%256=0, 0) after wrapping
+        // Should show tile 1 again
+        assert_eq!(
+            frame2.pixels[6], color_tile1,
+            "At SCX=250, pixel (6,0) should wrap to tilemap (0,0) = tile 1 (color 1)"
+        );
+
+        // Test 3: Vertical wrapping - SCY=248
+        // Screen pixel (0,0) should show tilemap pixel (0, 248)
+        // Tilemap pixel 248 = tile Y 31, pixel Y 0 -> shows tile 3 (at position 0,31)
         ppu.scx = 0;
-        ppu.scy = 250;
+        ppu.scy = 248;
         let frame3 = ppu.render_frame();
-        assert_eq!(frame3.width, 160);
+        let color_tile3 = 0xFF000000; // Color 3 maps to black
+        assert_eq!(
+            frame3.pixels[0], color_tile3,
+            "At SCY=248, pixel (0,0) should show tilemap position (0,248) = tile 3 (color 3)"
+        );
 
-        // Test 4: Both SCX and SCY wrapping
+        // Test 4: Both wrapping - SCX=255, SCY=255
+        // Screen pixel (0,0) should show tilemap pixel (255, 255)
+        // This is tile (31, 31) at pixel (7, 7) -> shows tile 0 (default)
         ppu.scx = 255;
         ppu.scy = 255;
         let frame4 = ppu.render_frame();
-        assert_eq!(frame4.width, 160);
+        let color_tile0 = 0xFFFFFFFF; // Color 0 maps to white
+        assert_eq!(
+            frame4.pixels[0], color_tile0,
+            "At SCX=255, SCY=255, pixel (0,0) should show tilemap (31,31) = tile 0 (color 0)"
+        );
+
+        // Verify wrapping: screen pixel (1,1) should show tilemap (0,0) = tile 1
+        assert_eq!(
+            frame4.pixels[160 + 1],
+            color_tile1,
+            "At SCX=255, SCY=255, pixel (1,1) should wrap to tilemap (0,0) = tile 1"
+        );
     }
 
     #[test]
