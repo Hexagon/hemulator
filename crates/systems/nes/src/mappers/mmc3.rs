@@ -1576,4 +1576,70 @@ mod tests {
         assert_eq!(ppu.vram[0x900], 0xCC, "NT2 in VRAM at correct offset");
         assert_eq!(ppu.vram[0xD00], 0xDD, "NT3 in VRAM at correct offset");
     }
+
+    #[test]
+    fn mmc3_non_four_screen_allows_mirroring_control() {
+        // Test that MMC3 WITHOUT 4-screen VRAM can still use $A000 to control mirroring
+        // This is the case for games like F1 Sensation
+        let cart = Cartridge {
+            prg_rom: vec![0; 0x8000],
+            chr_rom: vec![],
+            mapper: 4,
+            timing: TimingMode::Ntsc,
+            mirroring: Mirroring::Horizontal, // No 4-screen VRAM, uses 2KB VRAM
+        };
+
+        let mut ppu = Ppu::new(vec![], Mirroring::Horizontal);
+        ppu.clear_first_frame_lock();
+        let mut mmc3 = Mmc3::new(cart, &mut ppu);
+
+        // Verify initial horizontal mirroring and 2KB VRAM
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+        assert_eq!(ppu.vram.len(), 0x800, "Non-4-screen mode uses 2KB VRAM");
+
+        // Write to NT0 and verify it mirrors to NT1 (horizontal mirroring)
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xAA);
+
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val = ppu.read_register(7);
+        assert_eq!(val, 0xAA, "Horizontal: NT0 and NT1 should mirror");
+
+        // Switch to vertical mirroring via $A000
+        mmc3.write_prg(0xA000, 0x00, &mut ppu, 0);
+        assert_eq!(
+            ppu.get_mirroring(),
+            Mirroring::Vertical,
+            "MMC3 without 4-screen VRAM MUST allow $A000 mirroring control"
+        );
+
+        // Clear nametables
+        for addr in 0x2000..0x3000 {
+            ppu.vram_addr.set(addr);
+            ppu.write_register(7, 0x00);
+        }
+
+        // Write to NT0 again
+        ppu.write_register(6, 0x20);
+        ppu.write_register(6, 0x00);
+        ppu.write_register(7, 0xBB);
+
+        // Now NT0 should mirror to NT2 (vertical mirroring), not NT1
+        ppu.vram_addr.set(0x2400);
+        let _ = ppu.read_register(7);
+        let val_nt1 = ppu.read_register(7);
+
+        ppu.vram_addr.set(0x2800);
+        let _ = ppu.read_register(7);
+        let val_nt2 = ppu.read_register(7);
+
+        assert_eq!(val_nt1, 0x00, "Vertical: NT0 and NT1 should NOT mirror");
+        assert_eq!(val_nt2, 0xBB, "Vertical: NT0 and NT2 SHOULD mirror");
+
+        // Switch back to horizontal
+        mmc3.write_prg(0xA000, 0x01, &mut ppu, 0);
+        assert_eq!(ppu.get_mirroring(), Mirroring::Horizontal);
+    }
 }
