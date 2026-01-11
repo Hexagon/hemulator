@@ -746,10 +746,10 @@ impl Ppu {
                 // Clip leftmost 8 pixels if PPUMASK bit 1 is clear
                 let should_render_bg = show_bg_left || x >= 8;
 
-                // NES PPU scrolling wraps within the 2x2 nametable grid (512x480 pixels)
-                // NOT infinite linear wrapping - see https://www.nesdev.org/wiki/PPU_scrolling#Wrapping_around
-                let wx = (x + sx) % 512;
-                let wy = (y + sy) % 480;
+                // Calculate scroll position - let it overflow naturally
+                // The overflow bits will be used for nametable selection
+                let wx = x + sx;
+                let wy = y + sy;
 
                 // NES PPU nametable selection: base_nt XOR scroll overflow bits
                 // nt_x = 1 when scrolled past 256 pixels horizontally
@@ -759,6 +759,7 @@ impl Ppu {
                 let nt_y = ((wy / 240) & 1) as u8;
                 let nt = base_nt ^ nt_x ^ (nt_y << 1);
 
+                // Now wrap the position within the nametable (256x240)
                 let world_x = wx % 256;
                 let world_y = wy % 240;
 
