@@ -2026,11 +2026,7 @@ fn main() {
     let mut runtime_state = RuntimeState::new();
 
     // Determine what to load based on CLI args
-    let rom_path = cli_args
-        .rom_path
-        .as_ref()
-        .cloned()
-        .or_else(|| settings.last_rom_path.clone());
+    let rom_path = cli_args.rom_path.as_ref().cloned();
 
     let mut sys: EmulatorSystem;
     let mut rom_hash: Option<String> = None;
@@ -4024,8 +4020,6 @@ fn main() {
                                                         "Cartridge".to_string(),
                                                         file_path.clone(),
                                                     );
-                                                    settings.last_rom_path =
-                                                        Some(file_path.clone());
                                                     settings.add_recent_file(file_path.clone());
                                                     if let Err(e) = settings.save() {
                                                         eprintln!(

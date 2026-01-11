@@ -376,8 +376,6 @@ mod tests {
         fs::remove_dir_all(&test_dir).unwrap();
     }
 
-
-
     #[test]
     fn test_multi_player_defaults() {
         let settings = Settings::default();

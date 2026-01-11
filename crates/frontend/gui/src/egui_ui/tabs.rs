@@ -87,8 +87,6 @@ pub struct SnesTileData {
     pub screen_enabled: bool,
 }
 
-
-
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -1230,13 +1228,19 @@ impl TabManager {
                             // PPU state summary
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new(format!("PPUCTRL: ${:02X}", nes_data.ppuctrl))
-                                        .monospace(),
+                                    egui::RichText::new(format!(
+                                        "PPUCTRL: ${:02X}",
+                                        nes_data.ppuctrl
+                                    ))
+                                    .monospace(),
                                 );
                                 ui.separator();
                                 ui.label(
-                                    egui::RichText::new(format!("PPUMASK: ${:02X}", nes_data.ppumask))
-                                        .monospace(),
+                                    egui::RichText::new(format!(
+                                        "PPUMASK: ${:02X}",
+                                        nes_data.ppumask
+                                    ))
+                                    .monospace(),
                                 );
                                 ui.separator();
                                 ui.label(
@@ -1248,7 +1252,8 @@ impl TabManager {
                                 );
                                 ui.separator();
                                 ui.label(
-                                    egui::RichText::new(format!("Mirror: {}", nes_data.mirroring)).monospace(),
+                                    egui::RichText::new(format!("Mirror: {}", nes_data.mirroring))
+                                        .monospace(),
                                 );
                             });
 
@@ -1280,7 +1285,10 @@ impl TabManager {
                                 ui.vertical(|ui| {
                                     let bg_table = (nes_data.ppuctrl & 0x10) != 0;
                                     let label = if !bg_table { "◄ BG" } else { "" };
-                                    ui.label(format!("Pattern Table 0 (CHR $0000-$0FFF) {}", label));
+                                    ui.label(format!(
+                                        "Pattern Table 0 (CHR $0000-$0FFF) {}",
+                                        label
+                                    ));
                                     self.render_pattern_table(ui, nes_data, 0);
                                 });
 
@@ -1290,7 +1298,10 @@ impl TabManager {
                                 ui.vertical(|ui| {
                                     let bg_table = (nes_data.ppuctrl & 0x10) != 0;
                                     let label = if bg_table { "◄ BG" } else { "" };
-                                    ui.label(format!("Pattern Table 1 (CHR $1000-$1FFF) {}", label));
+                                    ui.label(format!(
+                                        "Pattern Table 1 (CHR $1000-$1FFF) {}",
+                                        label
+                                    ));
                                     self.render_pattern_table(ui, nes_data, 1);
                                 });
                             });
