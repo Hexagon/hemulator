@@ -495,15 +495,15 @@ impl Sdl2EguiBackend {
 
     /// Load an SDL surface from PNG data
     ///
-    /// Decodes PNG data and creates an SDL surface with the correct pixel format.
-    /// The PNG crate outputs RGBA data which is converted to ABGR8888 for SDL.
+    /// Decodes PNG data and creates an SDL surface with RGBA8888 pixel format.
+    /// The PNG crate outputs RGBA data which is copied directly to the surface.
     ///
     /// # Arguments
     /// * `png_data` - Raw PNG file data as bytes
     ///
     /// # Returns
     /// * `Ok(Surface)` - SDL surface with decoded image data
-    /// * `Err(String)` - Error message if decoding or conversion fails
+    /// * `Err(String)` - Error message if decoding or copying fails
     fn load_icon_from_png(png_data: &[u8]) -> Result<sdl2::surface::Surface<'static>, String> {
         use std::io::Cursor;
 
