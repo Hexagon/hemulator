@@ -186,6 +186,17 @@ impl SnesSystem {
         &self.breakpoint_manager
     }
 
+    /// Check if the current PC is at a breakpoint
+    /// Returns Some(pc) if a breakpoint is hit, None otherwise
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
+
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         self.cpu.bus().ppu().get_tile_viewer_data()
@@ -239,6 +250,9 @@ impl System for SnesSystem {
         for scanline in 0..SNES_VISIBLE_SCANLINES {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
+            // Active display starts at the beginning of each scanline
+            self.cpu.bus_mut().ppu_mut().set_hblank(false);
+
             // Log CPU state on first scanline of first few frames for debugging
             if scanline == 0 && self.current_cycles < 10000 {
                 log(LogCategory::CPU, LogLevel::Debug, || {
@@ -253,6 +267,7 @@ impl System for SnesSystem {
             // Execute CPU until end of active display portion of scanline
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+                self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.total_cycles += cycles as u64;
@@ -267,12 +282,17 @@ impl System for SnesSystem {
                 }
             }
 
+            // Enter HBlank for the remainder of the scanline.
+            // Many games (including SMW) rely on VRAM/CGRAM writes being possible during HBlank.
+            self.cpu.bus_mut().ppu_mut().set_hblank(true);
+
             // Execute HDMA during H-blank (approximately 40 cycles)
             let _hdma_cycles = self.cpu.bus_mut().do_hdma();
 
             // Complete the scanline
             while self.current_cycles < scanline_target {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+                self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.total_cycles += cycles as u64;
@@ -311,6 +331,8 @@ impl System for SnesSystem {
 
         // Execute remaining VBlank cycles
         while self.current_cycles < self.frame_cycles {
+            let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+            self.cpu.bus_mut().set_last_cpu_pc(pc_before);
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
             self.total_cycles += cycles as u64;
@@ -875,6 +897,68 @@ mod tests {
             non_black_pixels > 10,
             "Sprite overflow ROM should produce visible output, got {} non-black pixels",
             non_black_pixels
+        );
+    }
+
+    #[test]
+    fn test_simple_sprite_rom() {
+        // Load the simple sprite test ROM
+        // This ROM displays a single 8x8 red sprite at position (100, 100)
+        // with only OBJ layer enabled (TM=0x10), replicating SMW's config
+        let test_rom = include_bytes!("../../../../test_roms/snes/test_simple_sprite.sfc");
+
+        let mut sys = SnesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run multiple frames to allow the ROM to initialize
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+        assert_eq!(frame.pixels.len(), 256 * 224);
+
+        // This ROM places a single 8x8 sprite at (100, 100)
+        // The sprite should be visible (solid red color index 1)
+        // Note: SNES sprites appear 1 scanline later than their Y value,
+        // so a sprite with Y=100 will render at Y=101-108
+
+        // Count non-black pixels in the actual sprite area (101-108, 100-107)
+        // The sprite appears at Y=101 (Y+1 offset) and is 8x8 pixels
+        let mut sprite_pixels = 0;
+        for y in 101..109 {
+            for x in 100..108 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    sprite_pixels += 1;
+                }
+            }
+        }
+
+        // Count total non-black pixels
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+
+        // We should see the full 8x8=64 pixel sprite
+        // The sprite is solid (all pixels color index 1)
+        const EXPECTED_SPRITE_PIXELS: usize = 64;
+        assert!(
+            sprite_pixels == EXPECTED_SPRITE_PIXELS,
+            "Should see full 8x8 sprite at (100,100), got {} non-black pixels (expected {})",
+            sprite_pixels,
+            EXPECTED_SPRITE_PIXELS
+        );
+
+        // Verify the frame has the expected non-black pixels (should match sprite pixels exactly)
+        assert!(
+            non_black_pixels == EXPECTED_SPRITE_PIXELS,
+            "Simple sprite ROM should produce full sprite output, got {} non-black pixels (expected {})",
+            non_black_pixels,
+            EXPECTED_SPRITE_PIXELS
         );
     }
 }

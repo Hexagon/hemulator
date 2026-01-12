@@ -1799,7 +1799,8 @@ mod tests {
 
         // Check bottom half (scanline 72) - should show tile 2
         assert_eq!(
-            frame.pixels[72 * 160], color_tile2,
+            frame.pixels[72 * 160],
+            color_tile2,
             "Bottom half (scanline 72) should show tile 2 with SCX=128"
         );
     }
@@ -1857,13 +1858,15 @@ mod tests {
 
         // Check above window (scanline 50) - should show background
         assert_eq!(
-            frame.pixels[50 * 160], color_tile1,
+            frame.pixels[50 * 160],
+            color_tile1,
             "Above window (scanline 50) should show background"
         );
 
         // Check in window (scanline 100) - should show window
         assert_eq!(
-            frame.pixels[100 * 160], color_tile2,
+            frame.pixels[100 * 160],
+            color_tile2,
             "In window (scanline 100) should show window"
         );
     }

@@ -658,6 +658,35 @@ impl EmulatorSystem {
             EmulatorSystem::Chip8(_) => vec!["Software".to_string()],
         }
     }
+
+    /// Check if the current PC is at a breakpoint
+    /// Returns Some(pc) if a breakpoint is hit, None otherwise
+    fn check_breakpoint(&self) -> Option<u32> {
+        match self {
+            EmulatorSystem::NES(_) => None,     // TODO: Implement for NES
+            EmulatorSystem::GameBoy(_) => None, // TODO: Implement for other systems
+            EmulatorSystem::Atari2600(_) => None,
+            EmulatorSystem::PC(_) => None,
+            EmulatorSystem::SNES(sys) => sys.check_breakpoint(),
+            EmulatorSystem::N64(_) => None,
+            EmulatorSystem::SMS(_) => None,
+            EmulatorSystem::Chip8(_) => None,
+        }
+    }
+
+    /// Get the instruction tracer for dumping trace to file
+    fn get_instruction_tracer(&self) -> Option<&emu_core::instruction_tracer::InstructionTracer> {
+        match self {
+            EmulatorSystem::NES(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::GameBoy(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::Atari2600(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::PC(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::SNES(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::N64(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::SMS(sys) => Some(sys.get_instruction_tracer()),
+            EmulatorSystem::Chip8(sys) => Some(sys.get_instruction_tracer()),
+        }
+    }
 }
 
 fn key_mapping_to_button(key: Key, mapping: &settings::KeyMapping) -> Option<u8> {
@@ -1446,11 +1475,11 @@ impl CliArgs {
         );
         eprintln!("                           Note: Limit is set at tracer creation and cannot be changed at runtime.");
         eprintln!("  --trace-dump-file <PATH> File to dump trace (default: trace_dump.txt)");
-        eprintln!("                           Note: Automatic dumping on breakpoint hit not yet implemented.");
+        eprintln!("                           Automatically dumps when breakpoint is hit or debug dump is triggered.");
         eprintln!(
             "  -b, --breakpoint <ADDR>  Set breakpoint at address (can be used multiple times)"
         );
-        eprintln!("                           Note: Breakpoints can be set, but hit checking/triggering is not yet implemented.");
+        eprintln!("                           Breakpoint checking is implemented for SNES. Stops execution and dumps trace when hit.");
         eprintln!();
         eprintln!("Disk formats:");
         eprintln!("  360k, 720k, 1.2m, 1.44m  Floppy disk formats");
@@ -1481,13 +1510,13 @@ impl CliArgs {
         eprintln!(
             "  hemu --debug-dump-cycles 10000 game.nes        # Dump debug info after 10000 cycles"
         );
-        eprintln!("  hemu --trace-instructions --breakpoint 0x8100 game.nes");
+        eprintln!("  hemu --trace-instructions --breakpoint 0x8100 game.sfc");
         eprintln!(
-            "                                                 # Trace execution until breakpoint (experimental)"
+            "                                                 # Trace SNES execution until breakpoint (auto-dumps trace)"
         );
         eprintln!("  hemu --trace-instructions --trace-limit 5000 game.nes");
         eprintln!(
-            "                                                 # Keep last 5000 instructions in trace (experimental)"
+            "                                                 # Keep last 5000 instructions in trace"
         );
         eprintln!(
             "  hemu --slot2 disk.img                          # Load PC with floppy in drive A"
@@ -2680,8 +2709,11 @@ fn main() {
     let window_height = settings.window_height.max(height);
 
     // ===== HEADLESS MODE FOR DEBUG DUMP =====
-    // If debug dump is requested, run without GUI for faster execution
-    if cli_args.debug_dump_pc.is_some() || cli_args.debug_dump_cycles.is_some() {
+    // If debug dump is requested or breakpoints are set, run without GUI for faster execution
+    if cli_args.debug_dump_pc.is_some()
+        || cli_args.debug_dump_cycles.is_some()
+        || !cli_args.breakpoints.is_empty()
+    {
         eprintln!("Running in headless mode for debug dump...");
 
         if !rom_loaded {
@@ -2706,6 +2738,12 @@ fn main() {
         if let Some(cycles) = trigger_cycles {
             eprintln!("  - After {} cycles", cycles);
         }
+        if !cli_args.breakpoints.is_empty() {
+            eprintln!("  - When any breakpoint is hit:");
+            for &bp in &cli_args.breakpoints {
+                eprintln!("    - ${:06X}", bp);
+            }
+        }
         eprintln!("  - Output file: {}", dump_file);
         eprintln!();
 
@@ -2728,6 +2766,7 @@ fn main() {
                     total_cycles = sys.get_total_cycles();
 
                     // Check for trigger conditions
+                    let breakpoint_hit = sys.check_breakpoint();
                     let should_dump =
                         if let (Some(pc_trigger), Some(debugger)) = (trigger_pc, sys.debugger()) {
                             let cpu_state = debugger.get_cpu_state();
@@ -2738,11 +2777,37 @@ fn main() {
                             total_cycles >= cycle_trigger
                         } else {
                             false
-                        };
+                        } || breakpoint_hit.is_some();
 
                     if should_dump {
-                        eprintln!("Trigger condition met at {} cycles", total_cycles);
+                        if let Some(bp_pc) = breakpoint_hit {
+                            eprintln!(
+                                "Breakpoint hit at PC=${:06X} after {} cycles",
+                                bp_pc, total_cycles
+                            );
+                        } else {
+                            eprintln!("Trigger condition met at {} cycles", total_cycles);
+                        }
                         eprintln!("Generating debug dump...");
+
+                        // Dump instruction trace if tracing was enabled
+                        if let Some(tracer) = sys.get_instruction_tracer() {
+                            if tracer.is_enabled() {
+                                let trace_file = cli_args
+                                    .trace_dump_file
+                                    .as_deref()
+                                    .unwrap_or("trace_dump.txt");
+                                eprintln!("Dumping instruction trace to {}...", trace_file);
+                                match tracer.dump_to_file(trace_file) {
+                                    Ok(()) => {
+                                        eprintln!("✓ Instruction trace written to {}", trace_file);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("✗ Failed to write trace dump: {}", e);
+                                    }
+                                }
+                            }
+                        }
 
                         match generate_debug_dump(
                             &sys,

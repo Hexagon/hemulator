@@ -82,6 +82,31 @@ impl Cartridge {
         // Try HiROM header at $FFC0 (offset in ROM)
         let hirom_header_offset = 0xFFC0;
 
+        // Prefer the header's map mode byte when it contains a known value.
+        // This avoids false positives where the alternate header location happens
+        // to look valid and makes LoROM games map as HiROM (causing ROM reads to
+        // go out-of-bounds and return 0).
+        let lorom_map_mode = rom
+            .get(lorom_header_offset + 0x15)
+            .copied()
+            .and_then(Self::map_mode_byte_to_mapping);
+        let hirom_map_mode = rom
+            .get(hirom_header_offset + 0x15)
+            .copied()
+            .and_then(Self::map_mode_byte_to_mapping);
+
+        match (lorom_map_mode, hirom_map_mode) {
+            (Some(MappingMode::LoROM), Some(MappingMode::HiROM)) => {
+                // Ambiguous: both locations claim different mappings. Fall back to scoring.
+            }
+            (Some(mode), None) => return mode,
+            (None, Some(mode)) => return mode,
+            (Some(mode), Some(_same_mode)) => return mode,
+            (None, None) => {
+                // Fall back to heuristic scoring.
+            }
+        }
+
         let lorom_score = if lorom_header_offset < rom.len() {
             Self::score_header(rom, lorom_header_offset)
         } else {
@@ -99,6 +124,19 @@ impl Cartridge {
             MappingMode::HiROM
         } else {
             MappingMode::LoROM
+        }
+    }
+
+    fn map_mode_byte_to_mapping(map_mode: u8) -> Option<MappingMode> {
+        // Common values:
+        // - 0x20 = LoROM
+        // - 0x21 = HiROM
+        // - 0x30 = LoROM + FastROM
+        // - 0x31 = HiROM + FastROM
+        match map_mode {
+            0x20 | 0x30 => Some(MappingMode::LoROM),
+            0x21 | 0x31 => Some(MappingMode::HiROM),
+            _ => None,
         }
     }
 
@@ -155,7 +193,7 @@ impl Cartridge {
                 if offset >= 0x8000 {
                     let rom_offset =
                         ((bank as usize) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
-                    *self.rom.get(rom_offset).unwrap_or(&0)
+                    self.read_rom_mirrored(rom_offset)
                 } else if matches!(bank, 0x70..=0x7D) && offset < 0x8000 {
                     // SRAM in banks $70-$7D at $0000-$7FFF
                     *self.ram.get(offset as usize).unwrap_or(&0)
@@ -167,7 +205,7 @@ impl Cartridge {
                 if offset >= 0x8000 {
                     let rom_offset =
                         (((bank as usize) - 0x80) << 15) | ((offset as usize - 0x8000) & 0x7FFF);
-                    *self.rom.get(rom_offset).unwrap_or(&0)
+                    self.read_rom_mirrored(rom_offset)
                 } else if matches!(bank, 0xF0..=0xFF) && offset < 0x8000 {
                     // SRAM in banks $F0-$FF at $0000-$7FFF (mirror)
                     *self.ram.get(offset as usize).unwrap_or(&0)
@@ -194,7 +232,7 @@ impl Cartridge {
                 } else if offset >= 0x8000 {
                     // ROM mirror
                     let rom_offset = ((bank as usize) << 16) | (offset as usize);
-                    *self.rom.get(rom_offset).unwrap_or(&0)
+                    self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
@@ -202,7 +240,7 @@ impl Cartridge {
             // Banks $40-$7D: Full ROM access
             0x40..=0x7D => {
                 let rom_offset = ((bank as usize) << 16) | (offset as usize);
-                *self.rom.get(rom_offset).unwrap_or(&0)
+                self.read_rom_mirrored(rom_offset)
             }
             // Banks $80-$BF: Mirror of $00-$3F
             0x80..=0xBF => {
@@ -213,7 +251,7 @@ impl Cartridge {
                 } else if offset >= 0x8000 {
                     // ROM mirror
                     let rom_offset = (((bank - 0x80) as usize) << 16) | (offset as usize);
-                    *self.rom.get(rom_offset).unwrap_or(&0)
+                    self.read_rom_mirrored(rom_offset)
                 } else {
                     0
                 }
@@ -221,10 +259,18 @@ impl Cartridge {
             // Banks $C0-$FF: Full ROM access (primary area)
             0xC0..=0xFF => {
                 let rom_offset = (((bank - 0xC0) as usize) << 16) | (offset as usize);
-                *self.rom.get(rom_offset).unwrap_or(&0)
+                self.read_rom_mirrored(rom_offset)
             }
             _ => 0,
         }
+    }
+
+    fn read_rom_mirrored(&self, rom_offset: usize) -> u8 {
+        if self.rom.is_empty() {
+            return 0;
+        }
+        let mirrored = rom_offset % self.rom.len();
+        self.rom[mirrored]
     }
 
     pub fn write(&mut self, addr: u32, val: u8) {

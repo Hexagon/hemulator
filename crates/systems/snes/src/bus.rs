@@ -81,6 +81,10 @@ pub struct SnesBus {
     /// Cycle counter within current frame for VBlank timing
     /// NTSC SNES: ~89,342 cycles/frame, VBlank starts around cycle 75,000
     frame_cycle: u32,
+
+    /// Last main CPU PC (PBR:PC as u32) observed at an instruction boundary.
+    /// Used for targeted debug logging inside the bus.
+    last_cpu_pc: u32,
     /// Controller state (16 bits per controller)
     /// Button mapping: B Y Select Start Up Down Left Right A X L R 0 0 0 0
     pub controller_state: [u16; 2],
@@ -97,11 +101,16 @@ pub struct SnesBus {
     /// HDMA State for each channel
     hdma_state: [HdmaState; 8],
     /// APU communication ports ($2140-$2143)
-    /// These ports are used for bidirectional communication with the SPC700 audio processor
-    /// Without a full APU implementation, we implement a comprehensive stub
-    /// to allow games to proceed past APU initialization handshakes
-    apu_ports: [u8; 4],
-    /// APU communication state tracker
+    ///
+    /// On real SNES hardware, reads and writes go to separate latches:
+    /// - Writes: S-CPU -> SPC700 (input ports)
+    /// - Reads:  SPC700 -> S-CPU (output ports)
+    ///
+    /// The stub needs to model this separation. If writes update the readback values,
+    /// games can fail early APU handshake checks (notably the $BBAA signature).
+    apu_in_ports: [u8; 4],
+    apu_out_ports: [u8; 4],
+    /// APU communication state tracker (tracks S-CPU writes into input ports)
     apu_last_written: [u8; 4],
     /// Cycle counter for simulating APU response delay
     apu_response_delay: u32,
@@ -119,12 +128,44 @@ pub struct SnesBus {
     /// Fractional accumulator for SPC700 cycle conversion to prevent rounding error drift
     /// Stores the remainder from integer division (in units of 1/3580)
     spc700_cycle_accumulator: Cell<u64>,
+
+    /// Main CPU data bus open-bus value (best-effort).
+    /// Used for undefined hardware register reads.
+    open_bus: Cell<u8>,
+
+    /// $4201/$4213 - WRIO/RDIO (I/O port) latch
+    wrio: u8,
+
+    /// $4202/$4203 -> $4216/$4217 multiplication registers/result
+    wrmpya: u8,
+    wrmpyb: u8,
+    math_4216: u16,
+
+    /// $4204-$4206 -> $4214-$4217 division registers/results
+    wrdiv: u16,
+    wrdivb: u8,
+    div_quotient: u16,
+
+    /// $4207-$420A - H/V timer registers (IRQ not implemented, but values are readable)
+    htime: u16,
+    vtime: u16,
+
+    /// $420D - MEMSEL (FastROM)
+    memsel: u8,
+
+    /// $2180-$2183 - WRAM access port (WMDATA/WMADD)
+    ///
+    /// Allows reading/writing the full 128KB WRAM via a 17-bit address register.
+    /// Writes/reads to $2180 auto-increment the address.
+    wram_port_addr: Cell<u32>,
 }
 
 impl SnesBus {
+    const SCANLINE_CYCLES: u32 = 341;
+    const HBLANK_CYCLES: u32 = 40;
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
-            "SNES Bus: Initializing with real SPC700 APU".to_string()
+            "SNES Bus: Initializing with stub SPC700 (real SPC700 disabled by default)".to_string()
         });
 
         Self {
@@ -133,6 +174,7 @@ impl SnesBus {
             ppu: Ppu::new(),
             frame_counter: 0,
             frame_cycle: 0,
+            last_cpu_pc: 0,
             controller_state: [0; 2],
             controller_shift: [Cell::new(0), Cell::new(0)],
             controller_strobe: false,
@@ -140,16 +182,35 @@ impl SnesBus {
             dma_channels: [DmaChannel::default(); 8],
             hdma_enable: 0,
             hdma_state: [HdmaState::default(); 8],
-            apu_ports: [0xAA, 0xBB, 0x00, 0x00], // Initial values for APU ready state (SPC700 IPL sets ports to $BBAA when read as 16-bit)
+            apu_in_ports: [0x00, 0x00, 0x00, 0x00],
+            apu_out_ports: [0xAA, 0xBB, 0x00, 0x00], // Initial values for APU ready state (SPC700 IPL sets ports to $BBAA when read as 16-bit)
             apu_last_written: [0; 4],
             apu_response_delay: 0,
             apu_transfer_counter: 0,
             apu_state: ApuState::BootReady, // Start in BootReady state with $BBAA signature
             apu_session_id: 0,
-            spc700: Some(RefCell::new(Spc700::new())), // Enable real SPC700 APU by default
+            spc700: None, // Default to stub protocol; real SPC700 can be enabled explicitly
             spc700_pending_cycles: Cell::new(0),
             spc700_cycle_accumulator: Cell::new(0),
+
+            open_bus: Cell::new(0),
+            wrio: 0,
+            wrmpya: 0,
+            wrmpyb: 0,
+            math_4216: 0,
+            wrdiv: 0,
+            wrdivb: 0,
+            div_quotient: 0,
+            htime: 0,
+            vtime: 0,
+            memsel: 0,
+
+            wram_port_addr: Cell::new(0),
         }
+    }
+
+    pub fn set_last_cpu_pc(&mut self, pc: u32) {
+        self.last_cpu_pc = pc;
     }
 
     /// Enable the real SPC700 APU (replaces stub)
@@ -262,6 +323,13 @@ impl SnesBus {
         // Roughly 224/262 scanlines = ~85.5% of frame
         // So VBlank starts at cycle ~76,400 out of 89,342
         self.frame_cycle >= 76400
+    }
+
+    /// Check if currently in HBlank period (approximate).
+    ///
+    /// We model HBlank as the last ~40 cycles of each scanline.
+    fn is_in_hblank(&self) -> bool {
+        (self.frame_cycle % Self::SCANLINE_CYCLES) >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES)
     }
 
     /// Set controller state (16 buttons) for controller `idx` (0 or 1).
@@ -525,6 +593,34 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize],
+
+                    // $2180-$2183 - WRAM access port
+                    0x2180 => {
+                        let cur = self.wram_port_addr.get();
+                        let a = (cur as usize) & 0x1FFFF;
+                        let v = self.wram[a];
+                        self.open_bus.set(v);
+                        // Auto-increment (wrap at 128KB)
+                        let next = (cur + 1) & 0x1FFFF;
+                        self.wram_port_addr.set(next);
+                        v
+                    }
+                    0x2181 => {
+                        let v = (self.wram_port_addr.get() & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x2182 => {
+                        let v = ((self.wram_port_addr.get() >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x2183 => {
+                        let v = ((self.wram_port_addr.get() >> 16) & 0x01) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
                     // Main CPU reads what SPC700 has written (apu_out ports)
                     0x2140..=0x2143 => {
@@ -539,13 +635,21 @@ impl Memory65c816 for SnesBus {
                         let val = if let Some(ref spc700_cell) = self.spc700 {
                             spc700_cell.borrow().read_port(port)
                         } else {
-                            self.apu_ports[port as usize]
+                            let port_idx = port as usize;
+                            // Defensive bounds check: the match range 0x2140..=0x2143 guarantees port is 0-3,
+                            // but we verify explicitly before array indexing for clarity and safety
+                            debug_assert!(
+                                port_idx < 4,
+                                "APU port index must be 0-3, got {}",
+                                port_idx
+                            );
+                            self.apu_out_ports[port_idx]
                         };
 
                         log(LogCategory::Bus, LogLevel::Debug, || {
                             format!(
-                                "SNES Bus: Main CPU reads APU port ${:04X} = ${:02X}",
-                                offset, val
+                                "SNES Bus: [PC=${:06X}] reads APU port ${:04X} = ${:02X}",
+                                self.last_cpu_pc, offset, val
                             )
                         });
                         val
@@ -557,11 +661,70 @@ impl Memory65c816 for SnesBus {
                     0x4200 => {
                         // Bit 7: NMI enable
                         // Other bits: H/V timer interrupt enable, auto-joypad read enable
-                        if self.ppu.nmi_enable {
-                            0x80
-                        } else {
-                            0x00
-                        }
+                        let v = (if self.ppu.nmi_enable { 0x80 } else { 0x00 })
+                            | (if self.auto_joypad_enable { 0x01 } else { 0x00 });
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4201 - WRIO (readback)
+                    0x4201 => {
+                        let v = self.wrio;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4202/$4203 - WRMPYA/WRMPYB (readback)
+                    0x4202 => {
+                        let v = self.wrmpya;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4203 => {
+                        let v = self.wrmpyb;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4204-$4206 - WRDIVL/WRDIVH/WRDIVB (readback)
+                    0x4204 => {
+                        let v = (self.wrdiv & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4205 => {
+                        let v = ((self.wrdiv >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4206 => {
+                        let v = self.wrdivb;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4207-$420A - HTIMEL/HTIMEH/VTIMEL/VTIMEH
+                    0x4207 => {
+                        let v = (self.htime & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4208 => {
+                        let v = ((self.htime >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4209 => {
+                        let v = (self.vtime & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x420A => {
+                        let v = ((self.vtime >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $420D - MEMSEL
+                    0x420D => {
+                        let v = self.memsel;
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4210 - RDNMI - NMI Flag (read and clear)
                     0x4210 => {
@@ -572,7 +735,8 @@ impl Memory65c816 for SnesBus {
                         self.ppu.clear_nmi_flag();
                         log(LogCategory::Interrupts, LogLevel::Trace, || {
                             format!(
-                                "SNES Bus: Read $4210 (RDNMI): 0x{:02X} (NMI flag {})",
+                                "SNES Bus: [PC=${:06X}] read $4210 (RDNMI): 0x{:02X} (NMI flag {})",
+                                self.last_cpu_pc,
                                 nmi_flag | 0x02,
                                 if nmi_flag != 0 {
                                     "set, now cleared"
@@ -592,13 +756,52 @@ impl Memory65c816 for SnesBus {
                     // $4212 - HVBJOY - H/V Blank and Joypad Status
                     0x4212 => {
                         // Bit 7: VBlank flag (set during VBlank period)
-                        // Bit 6: HBlank flag (not implemented)
+                        // Bit 6: HBlank flag
                         // Bit 0: Auto-joypad read in progress (0 = finished)
+                        let mut val = 0u8;
                         if self.is_in_vblank() {
-                            0x80 // VBlank
-                        } else {
-                            0x00 // Not in VBlank
+                            val |= 0x80;
                         }
+                        if self.is_in_hblank() {
+                            val |= 0x40;
+                        }
+
+                        log(LogCategory::Interrupts, LogLevel::Trace, || {
+                            format!(
+                                "SNES Bus: [PC=${:06X}] read $4212 (HVBJOY): 0x{:02X} (frame_cycle={})",
+                                self.last_cpu_pc, val, self.frame_cycle
+                            )
+                        });
+
+                        val
+                    }
+                    // $4213 - RDIO - Programmable I/O port (read)
+                    0x4213 => {
+                        let v = self.wrio;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4214-$4215 - RDDIVL/RDDIVH - Division quotient (read)
+                    0x4214 => {
+                        let v = (self.div_quotient & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4215 => {
+                        let v = ((self.div_quotient >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    // $4216-$4217 - RDMPYL/RDMPYH (product) / RDMPY (remainder) low/high
+                    0x4216 => {
+                        let v = (self.math_4216 & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x4217 => {
+                        let v = ((self.math_4216 >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
                     }
                     // $4016 - JOYSER0 - Controller 1 Serial Data
                     0x4016 => {
@@ -662,7 +865,11 @@ impl Memory65c816 for SnesBus {
                     0x421E => 0, // JOY4L (not implemented)
                     0x421F => 0, // JOY4H (not implemented)
                     // $420C - HDMAEN - HDMA Enable (read)
-                    0x420C => self.hdma_enable,
+                    0x420C => {
+                        let v = self.hdma_enable;
+                        self.open_bus.set(v);
+                        v
+                    }
                     // $43x0-$43xA - DMA channel registers (read)
                     0x4300..=0x437F => {
                         let ch = ((offset - 0x4300) >> 4) as usize & 7;
@@ -684,13 +891,20 @@ impl Memory65c816 for SnesBus {
                     }
                     // Other hardware registers
                     0x2000..=0x5FFF => {
-                        log(LogCategory::Bus, LogLevel::Debug, || {
+                        log(LogCategory::Bus, LogLevel::Trace, || {
                             format!("SNES: Read from stubbed hardware register 0x{:04X} (bank 0x{:02X})", addr, bank)
                         });
-                        0 // Stub
+                        // Best-effort open bus behavior: return last data bus value.
+                        self.open_bus.get()
                     }
-                    // WRAM (full at $6000-$7FFF in banks $00-$3F)
-                    0x6000..=0x7FFF if bank < 0x40 => self.wram[(offset - 0x6000) as usize],
+                    // $6000-$7FFF: Expansion / cartridge-mapped region (SRAM on HiROM)
+                    0x6000..=0x7FFF => {
+                        if let Some(ref cart) = self.cartridge {
+                            cart.read(addr)
+                        } else {
+                            self.open_bus.get()
+                        }
+                    }
                     // Cartridge ROM
                     0x8000..=0xFFFF => {
                         if let Some(ref cart) = self.cartridge {
@@ -699,7 +913,6 @@ impl Memory65c816 for SnesBus {
                             0
                         }
                     }
-                    _ => 0,
                 }
             }
             // Banks $7E-$7F: Full WRAM mirror
@@ -728,6 +941,33 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
+
+                    // $2180-$2183 - WRAM access port
+                    0x2180 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        let a = (cur as usize) & 0x1FFFF;
+                        self.wram[a] = val;
+                        self.wram_port_addr.set((cur + 1) & 0x1FFFF);
+                    }
+                    0x2181 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr.set((cur & !0xFF) | (val as u32));
+                    }
+                    0x2182 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr
+                            .set((cur & !(0xFF << 8)) | ((val as u32) << 8));
+                    }
+                    0x2183 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr
+                            .set((cur & !(1 << 16)) | (((val as u32) & 1) << 16));
+                    }
+
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
@@ -747,6 +987,11 @@ impl Memory65c816 for SnesBus {
                         } else {
                             // Use stub protocol
                             let port = port as usize;
+
+                            // Defensive bounds check: the match range 0x2140..=0x2143 guarantees port is 0-3,
+                            // but we verify explicitly before array indexing for clarity and safety
+                            debug_assert!(port < 4, "APU port index must be 0-3, got {}", port);
+
                             log(LogCategory::Bus, LogLevel::Trace, || {
                                 format!(
                                     "SNES Bus: Write APU port ${:04X} (APUIO{}) to stub: 0x{:02X} (state: {:?})",
@@ -757,6 +1002,9 @@ impl Memory65c816 for SnesBus {
                             // Enhanced APU communication protocol stub with state machine
                             // The SPC700 boot ROM implements a multi-round handshake protocol
                             // We simulate this with a proper state machine to handle multiple upload sessions
+
+                            // Record S-CPU write into input port latch
+                            self.apu_in_ports[port] = val;
 
                             // Check for boot handshake pattern (all ports cleared to $00)
                             // Must check BEFORE updating apu_last_written
@@ -776,10 +1024,10 @@ impl Memory65c816 for SnesBus {
                                         .to_string()
                                 });
                                 // SPC700 IPL ready signature
-                                self.apu_ports[0] = 0xAA; // Low byte of $BBAA
-                                self.apu_ports[1] = 0xBB; // High byte of $BBAA
-                                self.apu_ports[2] = 0x00;
-                                self.apu_ports[3] = 0x00;
+                                self.apu_out_ports[0] = 0xAA; // Low byte of $BBAA
+                                self.apu_out_ports[1] = 0xBB; // High byte of $BBAA
+                                self.apu_out_ports[2] = 0x00;
+                                self.apu_out_ports[3] = 0x00;
                                 self.apu_response_delay = 10;
                                 self.apu_transfer_counter = 0;
                                 self.apu_state = ApuState::BootReady;
@@ -797,14 +1045,15 @@ impl Memory65c816 for SnesBus {
                                 });
                                 self.apu_session_id = self.apu_session_id.wrapping_add(1);
                                 self.apu_state = ApuState::Idle;
-                                self.apu_ports[port] = val;
+                                // Some games read back ports 2/3; mirror them on the output side.
+                                self.apu_out_ports[port] = val;
                                 return;
                             }
 
                             log(LogCategory::Bus, LogLevel::Debug, || {
                                 format!(
                                     "SNES Bus: APU write handler - state: {:?}, port: {}, val: 0x{:02X}, current port 0: 0x{:02X}",
-                                    self.apu_state, port, val, self.apu_ports[0]
+                                    self.apu_state, port, val, self.apu_out_ports[0]
                                 )
                             });
 
@@ -820,56 +1069,57 @@ impl Memory65c816 for SnesBus {
                                         )
                                         });
                                         // Echo the command byte to acknowledge
-                                        self.apu_ports[0] = val;
+                                        self.apu_out_ports[0] = val;
                                         self.apu_transfer_counter = 1;
                                         self.apu_state = ApuState::Uploading;
                                         self.apu_response_delay = 5;
                                     }
-                                    // Port 0 write with 0x00 or 0xAA - echo it back
+                                    // Port 0 write with 0x00 or 0xAA - acknowledge directly (helps early boot code)
                                     else if port == 0 {
-                                        self.apu_ports[0] = val;
-                                    }
-                                    // General write to other ports - just store value
-                                    else {
-                                        self.apu_ports[port] = val;
+                                        self.apu_out_ports[0] = val;
+                                    } else {
+                                        // Ports 2/3 are often treated as address/control; mirror them to output.
+                                        // Do not mirror port 1 (data) to avoid corrupting 16-bit reads.
+                                        if port == 2 || port == 3 {
+                                            self.apu_out_ports[port] = val;
+                                        }
                                     }
                                 }
 
                                 ApuState::Uploading => {
-                                    // In uploading state, handle data bytes on port 0
+                                    // In upload mode, games typically:
+                                    // - write an index/counter to port 0
+                                    // - write a data byte to port 1
+                                    // - poll port 0 until it matches the index
+                                    //
+                                    // Model that by acknowledging the last port-0 value *after* a port-1 write.
                                     if port == 0 {
+                                        // Many commercial boot loaders poll $2140 immediately after writing it.
+                                        // Acknowledge port-0 writes right away to avoid deadlocks.
+                                        self.apu_out_ports[0] = val;
+                                        self.apu_response_delay = 1;
+                                    } else if port == 1 {
                                         self.apu_transfer_counter =
                                             self.apu_transfer_counter.wrapping_add(1);
 
                                         log(LogCategory::Bus, LogLevel::Trace, || {
                                             format!(
-                                            "SNES Bus: APU uploading byte {} of session {}: 0x{:02X}",
-                                            self.apu_transfer_counter, self.apu_session_id, val
-                                        )
+                                                "SNES Bus: APU uploading byte {} of session {}: idx=0x{:02X} data=0x{:02X}",
+                                                self.apu_transfer_counter,
+                                                self.apu_session_id,
+                                                self.apu_in_ports[0],
+                                                val
+                                            )
                                         });
 
-                                        // After ~25 bytes, assume upload complete and transition to Ready
-                                        if self.apu_transfer_counter >= 25 {
-                                            log(LogCategory::Bus, LogLevel::Debug, || {
-                                                format!(
-                                                "SNES Bus: APU session {} upload complete ({} bytes) - transitioning to Ready",
-                                                self.apu_session_id, self.apu_transfer_counter
-                                            )
-                                            });
-                                            // Echo the byte but transition to Ready state
-                                            // Do NOT overwrite port 0 with $AA - keep the echoed byte!
-                                            self.apu_ports[0] = val;
-                                            self.apu_state = ApuState::Ready;
-                                            self.apu_transfer_counter = 0;
-                                            self.apu_response_delay = 5;
-                                        } else {
-                                            // Continue echoing data bytes
-                                            self.apu_ports[0] = val;
-                                            self.apu_response_delay = 5;
-                                        }
+                                        // Acknowledge index/counter
+                                        self.apu_out_ports[0] = self.apu_in_ports[0];
+                                        self.apu_response_delay = 5;
                                     } else {
-                                        // Writes to other ports during upload (address, control bytes)
-                                        self.apu_ports[port] = val;
+                                        // Mirror ports 2/3 on output side for robustness.
+                                        if port == 2 || port == 3 {
+                                            self.apu_out_ports[port] = val;
+                                        }
                                     }
                                 }
                             }
@@ -877,9 +1127,25 @@ impl Memory65c816 for SnesBus {
                     }
                     // $2100-$213F - PPU registers (excluding APU ports above)
                     // Note: $2140-$2143 are handled by the APU case above
-                    0x2100..=0x213F => self.ppu.write_register(offset, val),
+                    0x2100 => {
+                        log(LogCategory::PPU, LogLevel::Info, || {
+                            format!(
+                                "SNES Bus: [PC=${:06X}] write $2100 (INIDISP) = 0x{:02X}",
+                                self.last_cpu_pc, val
+                            )
+                        });
+                        self.ppu.write_register(offset, val)
+                    }
+                    0x2101..=0x213F => self.ppu.write_register(offset, val),
                     // $4200 - NMITIMEN - Interrupt Enable and Joypad Request
                     0x4200 => {
+                        self.open_bus.set(val);
+                        log(LogCategory::Interrupts, LogLevel::Trace, || {
+                            format!(
+                                "SNES Bus: [PC=${:06X}] write $4200 (NMITIMEN) = 0x{:02X}",
+                                self.last_cpu_pc, val
+                            )
+                        });
                         // Bit 7: NMI enable
                         // Bit 0: Joypad auto-read enable
                         // Other bits: H/V timer interrupt enable (not implemented)
@@ -914,8 +1180,70 @@ impl Memory65c816 for SnesBus {
                             });
                         }
                     }
+                    // $4201 - WRIO - Programmable I/O port
+                    0x4201 => {
+                        self.open_bus.set(val);
+                        self.wrio = val;
+                    }
+                    // $4202 - WRMPYA - Multiplicand A
+                    0x4202 => {
+                        self.open_bus.set(val);
+                        self.wrmpya = val;
+                    }
+                    // $4203 - WRMPYB - Multiplicand B (write triggers multiplication)
+                    0x4203 => {
+                        self.open_bus.set(val);
+                        self.wrmpyb = val;
+                        self.math_4216 = (self.wrmpya as u16).wrapping_mul(self.wrmpyb as u16);
+                    }
+                    // $4204-$4205 - WRDIVL/WRDIVH - Dividend
+                    0x4204 => {
+                        self.open_bus.set(val);
+                        self.wrdiv = (self.wrdiv & 0xFF00) | (val as u16);
+                    }
+                    0x4205 => {
+                        self.open_bus.set(val);
+                        self.wrdiv = (self.wrdiv & 0x00FF) | ((val as u16) << 8);
+                    }
+                    // $4206 - WRDIVB - Divisor (write triggers division)
+                    0x4206 => {
+                        self.open_bus.set(val);
+                        self.wrdivb = val;
+
+                        if self.wrdivb == 0 {
+                            self.div_quotient = 0xFFFF;
+                            self.math_4216 = self.wrdiv;
+                        } else {
+                            let divisor = self.wrdivb as u16;
+                            self.div_quotient = self.wrdiv / divisor;
+                            self.math_4216 = self.wrdiv % divisor;
+                        }
+                    }
+                    // $4207-$420A - H/V timer registers
+                    0x4207 => {
+                        self.open_bus.set(val);
+                        self.htime = (self.htime & 0xFF00) | (val as u16);
+                    }
+                    0x4208 => {
+                        self.open_bus.set(val);
+                        self.htime = (self.htime & 0x00FF) | ((val as u16) << 8);
+                    }
+                    0x4209 => {
+                        self.open_bus.set(val);
+                        self.vtime = (self.vtime & 0xFF00) | (val as u16);
+                    }
+                    0x420A => {
+                        self.open_bus.set(val);
+                        self.vtime = (self.vtime & 0x00FF) | ((val as u16) << 8);
+                    }
+                    // $420D - MEMSEL
+                    0x420D => {
+                        self.open_bus.set(val);
+                        self.memsel = val;
+                    }
                     // $4016 - JOYWR - Controller Strobe
                     0x4016 => {
+                        self.open_bus.set(val);
                         // Bit 0: Controller strobe (1 = latch, 0 = shift)
                         let old_strobe = self.controller_strobe;
                         self.controller_strobe = (val & 1) != 0;
@@ -934,6 +1262,7 @@ impl Memory65c816 for SnesBus {
                     }
                     // $420B - MDMAEN - DMA Enable
                     0x420B => {
+                        self.open_bus.set(val);
                         // Each bit enables a DMA channel
                         if val != 0 {
                             log(LogCategory::Bus, LogLevel::Info, || {
@@ -947,6 +1276,7 @@ impl Memory65c816 for SnesBus {
                     }
                     // $420C - HDMAEN - HDMA Enable
                     0x420C => {
+                        self.open_bus.set(val);
                         self.hdma_enable = val;
                         if val != 0 {
                             log(LogCategory::Bus, LogLevel::Info, || {
@@ -998,9 +1328,11 @@ impl Memory65c816 for SnesBus {
                     }
                     // Other hardware registers
                     0x2000..=0x5FFF => {} // Stub - ignore writes
-                    // WRAM (full at $6000-$7FFF in banks $00-$3F)
-                    0x6000..=0x7FFF if bank < 0x40 => {
-                        self.wram[(offset - 0x6000) as usize] = val;
+                    // $6000-$7FFF: Expansion / cartridge-mapped region (SRAM on HiROM)
+                    0x6000..=0x7FFF => {
+                        if let Some(ref mut cart) = self.cartridge {
+                            cart.write(addr, val);
+                        }
                     }
                     // Cartridge ROM/RAM
                     0x8000..=0xFFFF => {
@@ -1008,7 +1340,6 @@ impl Memory65c816 for SnesBus {
                             cart.write(addr, val);
                         }
                     }
-                    _ => {}
                 }
             }
             // Banks $7E-$7F: Full WRAM mirror
@@ -1139,6 +1470,9 @@ mod tests {
     fn test_apu_ports_echo() {
         let mut bus = SnesBus::new();
 
+        // This test targets the real SPC700 + IPL ROM behavior.
+        bus.enable_spc700();
+
         // With real SPC700, we need to wait for it to boot and write $BBAA signature
         // With proper clock ratio (SPC700 ~28.6% of main CPU), we need more cycles
         bus.tick_cycles(15000);
@@ -1180,6 +1514,9 @@ mod tests {
     #[test]
     fn test_apu_ports_initial_values() {
         let mut bus = SnesBus::new();
+
+        // This test verifies the real SPC700 IPL signature behavior.
+        bus.enable_spc700();
 
         // With real SPC700, we need to run it for enough cycles to complete boot
         // and write the $BBAA ready signature
