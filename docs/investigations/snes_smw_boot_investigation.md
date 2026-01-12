@@ -151,3 +151,37 @@ The main blocker is still that SMW never writes $4200 with NMI enabled. Possible
 - Are we in a loop? (repeated PC values)
 - What code comes after the current execution point?
 - Are there any branches that should lead to NMI enable but don't get taken?
+
+---
+
+## Update 2026-01-12: Breakpoint and Trace Dumping Implementation
+
+### Implemented automatic instruction trace dumping on breakpoint hit
+
+**Changes made**:
+- Added `check_breakpoint()` method to `SnesSystem` to check if current PC matches any execution breakpoint
+- Added `check_breakpoint()` and `get_instruction_tracer()` helper methods to `EmulatorSystem` wrapper
+- Updated headless debug loop to check for breakpoint hits after each frame
+- Implemented automatic trace dumping when breakpoint is hit or debug dump is triggered
+- Updated help text to reflect that breakpoint checking and trace dumping is now functional for SNES
+
+**Usage example**:
+```bash
+hemu --trace-instructions --breakpoint 0x00B900 --trace-limit 20000 smw.sfc
+```
+
+This will:
+1. Enable instruction tracing with a buffer of 20,000 instructions
+2. Set a breakpoint at PC=$00B900 (in the area where SMW is known to execute)
+3. Run in headless mode until the breakpoint is hit
+4. Automatically dump the last 20,000 executed instructions to `trace_dump.txt`
+5. Generate a full debug dump to `debug_dump.txt`
+6. Exit
+
+**Next steps**:
+1. Run SMW with breakpoints in the $B8xx/$B9xx area to capture execution trace
+2. Analyze the trace to identify:
+   - Execution patterns (loops, repeated sequences)
+   - What code leads up to the current state
+   - Missing register reads/writes that might gate progression
+3. Compare with known-good SNES emulator behavior if available
