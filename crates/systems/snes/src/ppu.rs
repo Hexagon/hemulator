@@ -1352,7 +1352,7 @@ impl Ppu {
         // In Mode 0, each tile is 16 bytes (8 rows * 2 bytes per row for 2bpp)
         let tile_data_base = chr_base + (tile_index as usize * 16);
 
-        // Apply flip (tile-local coordinates)
+        // Apply tile-local flip: when flip_x is set, mirror pixel positions horizontally (7 - x)
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
         let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
