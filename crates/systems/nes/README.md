@@ -205,9 +205,23 @@ let samples = nes.audio_samples();
 See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system) for user-facing limitations.
 
 **Technical Limitations**:
-- Frame-based timing (not cycle-accurate)
 - MMC2/MMC4 latch switching happens per-frame, not mid-scanline
-- Some games requiring precise PPU timing may not work perfectly
+- Some games requiring dot-level PPU rendering may not work perfectly
+
+**Cycle-Accurate Features** (implemented):
+- ✅ **NMI/VBlank timing**: Cycle-accurate with scanline 241, dot 1 precision
+- ✅ **$2002 race condition**: Proper NMI suppression when reading PPUSTATUS at VBlank start
+- ✅ **Sprite overflow bug**: Hardware-accurate m/n pointer increment bug with false positives/negatives
+- ✅ **Sprite flags**: Cleared at exact cycle (scanline 261, dot 1)
+- ✅ **Odd frame skip**: Scanline 0, dot 0 skipped on odd frames when rendering enabled
+
+**Supported Edge Cases**:
+- ✅ **Illegal/undocumented 6502 opcodes**: Full support for LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA with all addressing modes
+- ✅ **Sprite 0 hit**: Accurate detection with proper left-clip and x=255 boundary handling
+- ✅ **Sprite overflow**: Hardware-accurate with m/n pointer bug emulation
+- ✅ **MMC3 IRQ timing**: Uses MMC3B/C behavior (counter decrements to 0 triggers IRQ)
+- ✅ **DMC DMA**: Full memory read support with automatic sample playback
+- ✅ **Cycle-accurate PPU**: 3:1 PPU-CPU clock ratio, 341 dots per scanline, 262 scanlines per frame
 
 ## Performance
 
