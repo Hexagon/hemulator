@@ -56,15 +56,24 @@
 //!
 //! ## Timing Model
 //!
-//! The emulator uses a frame-based timing model rather than cycle-accurate PPU rendering:
+//! The emulator uses **cycle-accurate PPU execution** for precise NMI/VBlank timing:
 //!
 //! - **NTSC**: ~29,780 CPU cycles per frame (~60.1 Hz)
 //! - **PAL**: ~33,247 CPU cycles per frame (~50.0 Hz)
-//! - **VBlank**: Simulated at end of frame with appropriate cycle count
+//! - **PPU Clock**: 3x CPU clock (3 PPU dots per CPU cycle)
+//! - **VBlank**: Automatically set at scanline 241, dot 1
+//! - **NMI**: Triggered precisely when VBlank flag set (if NMI enabled)
 //! - **Scanline IRQs**: Synthesized for mappers like MMC3
 //!
-//! This model is suitable for most games but may not handle edge cases requiring
-//! precise PPU timing (mid-scanline effects, exact sprite 0 hit timing, etc.).
+//! **Cycle-Accurate Features:**
+//! - VBlank flag set at exact cycle (scanline 241, dot 1)
+//! - $2002 read race condition handling (reading during VBlank transition)
+//! - NMI suppression when reading $2002 at VBlank start
+//! - Sprite flags cleared at scanline 261, dot 1 (pre-render scanline)
+//! - Odd frame cycle skip (scanline 0, dot 0 -> dot 1 when rendering enabled)
+//!
+//! This provides excellent accuracy for games with tight timing requirements
+//! while maintaining good performance.
 
 #![allow(clippy::upper_case_acronyms)]
 #![allow(clippy::unnecessary_cast)]
@@ -528,12 +537,16 @@ impl System for NesSystem {
         // Prepare an output frame and render scanlines incrementally during visible time.
         let mut rendered_scanlines: u32 = 0;
 
-        // Visible portion (VBlank low)
-        if let Some(b) = self.cpu.bus_mut() {
-            b.ppu.set_vblank(false);
-        }
+        // NOTE: VBlank clearing is now handled by PPU.tick() at scanline 261, dot 1
+        // No need to manually call set_vblank(false) here
+
         let mut cycles = 0u32;
+
         while cycles < visible_cycles {
+            // Declare interrupt flags for this iteration
+            let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
+
             if let Some(h) = pc_hist.as_mut() {
                 let pc = self.cpu.pc();
                 let e = h.entry(pc).or_insert(0);
@@ -545,6 +558,21 @@ impl System for NesSystem {
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // CYCLE-ACCURATE PPU EXECUTION
+            // Tick the PPU 3 times for each CPU cycle (PPU runs at 3x CPU clock)
+            // This provides cycle-accurate VBlank/NMI timing
+            if let Some(b) = self.cpu.bus_mut() {
+                for _ in 0..used {
+                    // Tick PPU 3 times (3 PPU cycles per CPU cycle)
+                    for _ in 0..3 {
+                        let nmi_triggered = b.ppu.tick();
+                        if nmi_triggered {
+                            nmi_to_fire = true;
+                        }
+                    }
+                }
+            }
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -576,9 +604,6 @@ impl System for NesSystem {
                     }
                 }
             }
-
-            let mut irq_to_fire = false;
-            let mut nmi_to_fire = false;
 
             // Synthesize scanline edges for mapper IRQs during visible time.
             // Only do this when rendering is enabled (background or sprites).
@@ -650,13 +675,18 @@ impl System for NesSystem {
             b.apply_mapper_chr_update();
         }
 
-        // VBlank start
-        if let Some(b) = self.cpu.bus_mut() {
-            b.ppu.set_vblank(true);
-        }
+        // VBlank start - NOTE: With cycle-accurate PPU, this is now handled by PPU.tick()
+        // Remove the manual set_vblank(true) call as it's done automatically at scanline 241, dot 1
+        // if let Some(b) = self.cpu.bus_mut() {
+        //     b.ppu.set_vblank(true);
+        // }
 
         // Run the rest of the frame (VBlank time).
         while cycles < cycles_per_frame {
+            // Declare interrupt flags for this iteration
+            let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
+
             if let Some(h) = pc_hist.as_mut() {
                 let pc = self.cpu.pc();
                 let e = h.entry(pc).or_insert(0);
@@ -668,6 +698,20 @@ impl System for NesSystem {
             cpu_steps = cpu_steps.wrapping_add(1);
             cpu_cycles_used = cpu_cycles_used.wrapping_add(used);
             cycles = cycles.wrapping_add(used);
+
+            // CYCLE-ACCURATE PPU EXECUTION (VBlank portion)
+            // Tick the PPU 3 times for each CPU cycle
+            if let Some(b) = self.cpu.bus_mut() {
+                for _ in 0..used {
+                    // Tick PPU 3 times (3 PPU cycles per CPU cycle)
+                    for _ in 0..3 {
+                        let nmi_triggered = b.ppu.tick();
+                        if nmi_triggered {
+                            nmi_to_fire = true;
+                        }
+                    }
+                }
+            }
 
             // Record instruction if tracing is enabled
             if self.instruction_tracer.is_enabled() {
@@ -699,8 +743,6 @@ impl System for NesSystem {
             }
 
             // Check for mapper IRQs during VBlank as well.
-            let mut irq_to_fire = false;
-            let mut nmi_to_fire = false;
             if let Some(b) = self.cpu.bus_mut() {
                 if b.take_irq_pending() {
                     irq_to_fire = true;

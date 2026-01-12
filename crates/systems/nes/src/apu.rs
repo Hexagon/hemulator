@@ -204,6 +204,10 @@ pub struct APU {
     irq_frame_counter_cycles: u32,
     irq_inhibit: bool,
     irq_pending: Cell<bool>,
+
+    /// Cycle-accurate $4017 write handling
+    /// When true, clock envelopes/length counters immediately (5-step mode write)
+    pending_immediate_clock: bool,
 }
 
 impl APU {
@@ -230,6 +234,7 @@ impl APU {
             irq_frame_counter_cycles: 0,
             irq_inhibit: true, // Default is inhibited
             irq_pending: Cell::new(false),
+            pending_immediate_clock: false,
         }
     }
 
@@ -465,7 +470,8 @@ impl APU {
             0x4017 => {
                 // Bit 7: Mode (0 = 4-step, 1 = 5-step)
                 // Bit 6: IRQ inhibit flag
-                self.frame_counter_mode = (val & 0x80) != 0;
+                let new_mode = (val & 0x80) != 0;
+                self.frame_counter_mode = new_mode;
                 self.irq_inhibit = (val & 0x40) != 0;
 
                 log(LogCategory::APU, LogLevel::Debug, || {
@@ -488,7 +494,11 @@ impl APU {
                 self.frame_counter_cycles = 0;
                 self.irq_frame_counter_cycles = 0;
 
-                // If 5-step mode, clock immediately (not implemented here for audio, but noted)
+                // CYCLE-ACCURATE: If 5-step mode, clock envelopes and length counters immediately
+                // This happens on the 3rd or 4th CPU cycle after the write (we approximate as immediate)
+                if new_mode {
+                    self.pending_immediate_clock = true;
+                }
             }
 
             _ => {}
@@ -618,6 +628,38 @@ impl APU {
 
         let mut out = Vec::with_capacity(sample_count);
         for _ in 0..sample_count {
+            // CYCLE-ACCURATE: Handle pending immediate clock from $4017 write in 5-step mode
+            if self.pending_immediate_clock {
+                self.pending_immediate_clock = false;
+
+                // Clock envelopes
+                self.envelope1.clock();
+                self.envelope2.clock();
+                self.envelope_noise.clock();
+
+                // Clock length counters (half frame)
+                if self.pulse1.length_counter > 0 && !self.pulse1.length_counter_halt {
+                    self.pulse1.length_counter -= 1;
+                }
+                if self.pulse2.length_counter > 0 && !self.pulse2.length_counter_halt {
+                    self.pulse2.length_counter -= 1;
+                }
+                if self.triangle.length_counter > 0 && !self.triangle.control_flag {
+                    self.triangle.length_counter -= 1;
+                }
+                if self.noise.length_counter > 0 && !self.noise.length_counter_halt {
+                    self.noise.length_counter -= 1;
+                }
+
+                // Clock sweep units
+                if let Some(new_freq) = self.sweep1.clock(self.pulse1.timer_reload) {
+                    self.pulse1.set_timer(new_freq);
+                }
+                if let Some(new_freq) = self.sweep2.clock(self.pulse2.timer_reload) {
+                    self.pulse2.set_timer(new_freq);
+                }
+            }
+
             self.cycle_accum += cycles_per_sample;
             let mut cycles = self.cycle_accum as u32;
             if cycles == 0 {

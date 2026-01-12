@@ -159,13 +159,13 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         | InspectorTab::GbPalettes
         | InspectorTab::SmsPalettes
         | InspectorTab::SnesPalettes => {
-            render_palettes_tab(ui);
+            render_palettes_tab(ui, tab_manager);
         }
         InspectorTab::NesNametables | InspectorTab::GbTilemaps => {
             tab_manager.render_tilemaps_tab(ui);
         }
         InspectorTab::SnesLayers => {
-            render_snes_layers_tab(ui);
+            render_snes_layers_tab(ui, tab_manager);
         }
         InspectorTab::Atari2600Playfield => {
             tab_manager.render_atari2600_playfield_tab(ui);
@@ -379,29 +379,206 @@ fn render_log_tab(ui: &mut Ui) {
 }
 
 /// Render the Palettes tab (for systems with palette support)
-fn render_palettes_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("🎨").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("Palettes");
-        ui.add_space(10.0);
-        ui.label("System palette viewer");
-        ui.label(egui::RichText::new("(To be implemented)").weak());
-    });
+fn render_palettes_tab(ui: &mut Ui, tab_manager: &TabManager) {
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(ref sys_data) = tab_manager.system_tile_data {
+                match sys_data {
+                    crate::egui_ui::SystemTileData::SNES(snes_data) => {
+                        ui.heading("🎨 SNES Palette Viewer");
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        ui.label(format!(
+                            "Total Colors: {} (16 palettes × 16 colors)",
+                            snes_data.palette.len()
+                        ));
+                        ui.label(format!("CGRAM Size: {} bytes", snes_data.cgram.len()));
+                        ui.add_space(10.0);
+
+                        // Render palettes using the TabManager method
+                        tab_manager.render_snes_palettes(ui, snes_data);
+                    }
+                    _ => {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(40.0);
+                            ui.label(egui::RichText::new("🎨").size(48.0));
+                            ui.add_space(10.0);
+                            ui.heading("Palettes");
+                            ui.add_space(10.0);
+                            ui.label("System palette viewer");
+                            ui.label(
+                                egui::RichText::new("Available for NES, Game Boy, SMS, and SNES")
+                                    .weak(),
+                            );
+                        });
+                    }
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("🎨").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("Palettes");
+                    ui.add_space(10.0);
+                    ui.label("System palette viewer");
+                    ui.label(egui::RichText::new("Load a ROM to see palette data").weak());
+                });
+            }
+        });
 }
 
 /// Render the SNES Layers tab
-fn render_snes_layers_tab(ui: &mut Ui) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(40.0);
-        ui.label(egui::RichText::new("📐").size(48.0));
-        ui.add_space(10.0);
-        ui.heading("Layers");
-        ui.add_space(10.0);
-        ui.label("SNES background layer viewer");
-        ui.label(egui::RichText::new("(To be implemented)").weak());
-    });
+fn render_snes_layers_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
+    use egui::ScrollArea;
+
+    let available_height = ui.available_height();
+    ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .max_height(available_height)
+        .show(ui, |ui| {
+            if let Some(ref sys_data) = tab_manager.system_tile_data {
+                if let crate::egui_ui::SystemTileData::SNES(snes_data) = sys_data {
+                    // Header
+                    ui.heading("📐 SNES Background Layers");
+                    ui.separator();
+                    ui.add_space(10.0);
+
+                    // BG Mode information
+                    ui.heading("Background Mode Configuration");
+                    ui.add_space(5.0);
+
+                    let mode_info = match snes_data.bg_mode {
+                        0 => "Mode 0: 4 layers, 2bpp each (4 colors)",
+                        1 => "Mode 1: BG1/BG2 4bpp (16 colors), BG3 2bpp (4 colors)",
+                        2 => "Mode 2: BG1/BG2 4bpp with offset-per-tile",
+                        3 => "Mode 3: BG1 8bpp (256 colors), BG2 4bpp (16 colors)",
+                        4 => "Mode 4: BG1 8bpp, BG2 2bpp, offset-per-tile",
+                        5 => "Mode 5: BG1 4bpp, BG2 2bpp (hi-res 512px)",
+                        6 => "Mode 6: BG1 4bpp, offset-per-tile (hi-res 512px)",
+                        7 => "Mode 7: BG1 8bpp (256 colors), rotation/scaling",
+                        _ => "Unknown mode",
+                    };
+
+                    ui.label(
+                        egui::RichText::new(format!("Current Mode: {}", snes_data.bg_mode))
+                            .strong()
+                            .size(16.0),
+                    );
+                    ui.label(mode_info);
+                    ui.add_space(10.0);
+
+                    // Layer-by-layer details
+                    ui.heading("Layer Configuration");
+                    ui.separator();
+                    ui.add_space(5.0);
+
+                    // Show what layers are active based on mode
+                    let layers_info = match snes_data.bg_mode {
+                        0 => vec![
+                            ("BG1", "2bpp, 4 colors"),
+                            ("BG2", "2bpp, 4 colors"),
+                            ("BG3", "2bpp, 4 colors"),
+                            ("BG4", "2bpp, 4 colors"),
+                        ],
+                        1 => vec![
+                            ("BG1", "4bpp, 16 colors"),
+                            ("BG2", "4bpp, 16 colors"),
+                            ("BG3", "2bpp, 4 colors"),
+                        ],
+                        2 => vec![
+                            ("BG1", "4bpp, offset-per-tile"),
+                            ("BG2", "4bpp, offset-per-tile"),
+                        ],
+                        3 => vec![("BG1", "8bpp, 256 colors"), ("BG2", "4bpp, 16 colors")],
+                        4 => vec![("BG1", "8bpp, 256 colors"), ("BG2", "2bpp, 4 colors")],
+                        5 => vec![("BG1", "4bpp, hi-res"), ("BG2", "2bpp, hi-res")],
+                        6 => vec![("BG1", "4bpp, hi-res, offset-per-tile")],
+                        7 => vec![("BG1", "8bpp, rotation/scaling")],
+                        _ => vec![],
+                    };
+
+                    egui::Grid::new("layers_grid")
+                        .num_columns(2)
+                        .spacing([20.0, 8.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Layer").strong());
+                            ui.label(egui::RichText::new("Configuration").strong());
+                            ui.end_row();
+
+                            for (layer_name, config) in &layers_info {
+                                ui.label(egui::RichText::new(*layer_name).monospace());
+                                ui.label(*config);
+                                ui.end_row();
+                            }
+                        });
+
+                    ui.add_space(15.0);
+
+                    // VRAM usage information
+                    ui.heading("VRAM Organization");
+                    ui.separator();
+                    ui.add_space(5.0);
+
+                    ui.label(format!("Total VRAM: {} KB", snes_data.vram.len() / 1024));
+                    ui.label("VRAM contains:");
+                    ui.label("  • Character (tile) data for background layers");
+                    ui.label("  • Tilemap data for background layers");
+                    ui.label("  • Sprite character data");
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("Note: Use Tiles tab to view character data")
+                            .weak()
+                            .italics(),
+                    );
+
+                    ui.add_space(15.0);
+
+                    // Future enhancements note
+                    ui.heading("Layer Rendering Preview");
+                    ui.separator();
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("Individual layer preview coming soon...")
+                            .weak()
+                            .italics(),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "(Will show each BG layer separately with tilemap visualization)",
+                        )
+                        .weak()
+                        .italics()
+                        .size(12.0),
+                    );
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📐").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("No SNES Data");
+                        ui.add_space(10.0);
+                        ui.label("This tab is only available for SNES");
+                    });
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("📐").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("Layers");
+                    ui.add_space(10.0);
+                    ui.label("SNES background layer viewer");
+                    ui.label("Load a SNES ROM to see layer data");
+                });
+            }
+        });
 }
 
 /// Render the PC BDA/EBDA tab

@@ -1437,6 +1437,874 @@ impl<M: Memory6502> Cpu6502<M> {
                 self.cycles += 7;
                 7
             }
+
+            // ===== ILLEGAL/UNDOCUMENTED OPCODES =====
+            // These are unofficial 6502 opcodes used by some NES games
+            // Reference: https://www.nesdev.org/wiki/CPU_unofficial_opcodes
+
+            // LAX - Load A and X with memory value
+            // Equivalent to: LDA + LDX (load both registers simultaneously)
+            0xA7 => {
+                // LAX Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 3;
+                3
+            }
+            0xB7 => {
+                // LAX Zero Page,Y
+                let addr = self.addr_zero_page_y();
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 4;
+                4
+            }
+            0xAF => {
+                // LAX Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 4;
+                4
+            }
+            0xBF => {
+                // LAX Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 4;
+                4
+            }
+            0xA3 => {
+                // LAX (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 6;
+                6
+            }
+            0xB3 => {
+                // LAX (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                self.a = val;
+                self.x = val;
+                self.set_zero_and_negative(val);
+                self.cycles += 5;
+                5
+            }
+
+            // SAX - Store A AND X
+            // Stores A & X (bitwise AND) into memory
+            0x87 => {
+                // SAX Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.a & self.x;
+                self.write(addr, val);
+                self.cycles += 3;
+                3
+            }
+            0x97 => {
+                // SAX Zero Page,Y
+                let addr = self.addr_zero_page_y();
+                let val = self.a & self.x;
+                self.write(addr, val);
+                self.cycles += 4;
+                4
+            }
+            0x8F => {
+                // SAX Absolute
+                let addr = self.fetch_u16();
+                let val = self.a & self.x;
+                self.write(addr, val);
+                self.cycles += 4;
+                4
+            }
+            0x83 => {
+                // SAX (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.a & self.x;
+                self.write(addr, val);
+                self.cycles += 6;
+                6
+            }
+
+            // DCP - DEC then CMP
+            // Decrements memory then compares with A
+            0xC7 => {
+                // DCP Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                // CMP logic
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01; // C
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 5;
+                5
+            }
+            0xD7 => {
+                // DCP Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 6;
+                6
+            }
+            0xCF => {
+                // DCP Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 6;
+                6
+            }
+            0xDF => {
+                // DCP Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 7;
+                7
+            }
+            0xDB => {
+                // DCP Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 7;
+                7
+            }
+            0xC3 => {
+                // DCP (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 8;
+                8
+            }
+            0xD3 => {
+                // DCP (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr).wrapping_sub(1);
+                self.write(addr, val);
+                let result = self.a.wrapping_sub(val);
+                self.set_zero_and_negative(result);
+                if self.a >= val {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.cycles += 8;
+                8
+            }
+
+            // ISC/ISB - INC then SBC
+            // Increments memory then subtracts from A with carry
+            0xE7 => {
+                // ISC Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                // SBC logic (using one's complement like official SBC)
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF; // one's complement
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                // Carry set if no borrow (sum > 0xFF)
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                // Overflow detection
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 5;
+                5
+            }
+            0xF7 => {
+                // ISC Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0xEF => {
+                // ISC Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0xFF => {
+                // ISC Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0xFB => {
+                // ISC Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0xE3 => {
+                // ISC (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+            0xF3 => {
+                // ISC (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr).wrapping_add(1);
+                self.write(addr, val);
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
+                    self.status |= 0x40;
+                } else {
+                    self.status &= !0x40;
+                }
+                self.a = result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+
+            // SLO - ASL then ORA
+            // Shifts memory left then ORs with A
+            0x07 => {
+                // SLO Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01; // C
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 5;
+                5
+            }
+            0x17 => {
+                // SLO Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x0F => {
+                // SLO Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x1F => {
+                // SLO Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x1B => {
+                // SLO Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x03 => {
+                // SLO (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+            0x13 => {
+                // SLO (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                let result = val << 1;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a |= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+
+            // RLA - ROL then AND
+            // Rotates memory left then ANDs with A
+            0x27 => {
+                // RLA Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 5;
+                5
+            }
+            0x37 => {
+                // RLA Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x2F => {
+                // RLA Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x3F => {
+                // RLA Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x3B => {
+                // RLA Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x23 => {
+                // RLA (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+            0x33 => {
+                // RLA (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                let carry_in = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let result = (val << 1) | carry_in;
+                self.write(addr, result);
+                if (val & 0x80) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a &= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+
+            // SRE - LSR then EOR
+            // Shifts memory right then EORs with A
+            0x47 => {
+                // SRE Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 5;
+                5
+            }
+            0x57 => {
+                // SRE Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x4F => {
+                // SRE Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 6;
+                6
+            }
+            0x5F => {
+                // SRE Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x5B => {
+                // SRE Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 7;
+                7
+            }
+            0x43 => {
+                // SRE (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+            0x53 => {
+                // SRE (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                let result = val >> 1;
+                self.write(addr, result);
+                if (val & 0x01) != 0 {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.a ^= result;
+                self.set_zero_and_negative(self.a);
+                self.cycles += 8;
+                8
+            }
+
+            // RRA - ROR then ADC
+            // Rotates memory right then adds to A with carry
+            0x67 => {
+                // RRA Zero Page
+                let addr = self.fetch_u8() as u16;
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                // Set carry for ADC operation based on ROR result
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 5;
+                5
+            }
+            0x77 => {
+                // RRA Zero Page,X
+                let addr = self.addr_zero_page_x();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 6;
+                6
+            }
+            0x6F => {
+                // RRA Absolute
+                let addr = self.fetch_u16();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 6;
+                6
+            }
+            0x7F => {
+                // RRA Absolute,X
+                let addr = self.addr_absolute_x();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 7;
+                7
+            }
+            0x7B => {
+                // RRA Absolute,Y
+                let addr = self.addr_absolute_y();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 7;
+                7
+            }
+            0x63 => {
+                // RRA (Indirect,X)
+                let addr = self.addr_indirect_x();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 8;
+                8
+            }
+            0x73 => {
+                // RRA (Indirect),Y
+                let addr = self.addr_indirect_y();
+                let val = self.read(addr);
+                let old_carry = (self.status & 0x01) != 0;
+                let new_carry_from_ror = (val & 0x01) != 0;
+                let carry_in = if old_carry { 0x80 } else { 0 };
+                let result = (val >> 1) | carry_in;
+                self.write(addr, result);
+                if new_carry_from_ror {
+                    self.status |= 0x01;
+                } else {
+                    self.status &= !0x01;
+                }
+                self.adc(result);
+                self.cycles += 8;
+                8
+            }
+
             _ => {
                 // Unknown opcode: treat as NOP to keep forward progress
                 log(LogCategory::Stubs, LogLevel::Info, || {
@@ -2496,5 +3364,128 @@ mod tests {
         cpu2.status &= !0x04; // Clear I flag
         cpu2.trigger_irq();
         assert_eq!(cpu2.pc, 0x8000); // Should jump to IRQ vector
+    }
+
+    #[test]
+    fn test_illegal_lax() {
+        // LAX - Load A and X with memory value
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x42);
+        cpu.memory.load_program(0x8000, &[0xA7, 0x10]); // LAX $10
+        cpu.reset();
+        cpu.a = 0x00;
+        cpu.x = 0x00;
+        assert_eq!(cpu.step(), 3);
+        assert_eq!(cpu.a, 0x42);
+        assert_eq!(cpu.x, 0x42);
+        assert_eq!(cpu.status & 0x82, 0x00); // Z=0, N=0
+    }
+
+    #[test]
+    fn test_illegal_sax() {
+        // SAX - Store A AND X
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.load_program(0x8000, &[0x87, 0x20]); // SAX $20
+        cpu.reset();
+        cpu.a = 0xF0;
+        cpu.x = 0x0F;
+        assert_eq!(cpu.step(), 3);
+        assert_eq!(cpu.memory.read(0x0020), 0x00); // 0xF0 & 0x0F = 0x00
+    }
+
+    #[test]
+    fn test_illegal_dcp() {
+        // DCP - DEC then CMP
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x10);
+        cpu.memory.load_program(0x8000, &[0xC7, 0x10]); // DCP $10
+        cpu.reset();
+        cpu.a = 0x0F;
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x0F); // Decremented from 0x10
+        assert_eq!(cpu.status & 0x01, 0x01); // C=1 (A >= mem)
+        assert_eq!(cpu.status & 0x02, 0x02); // Z=1 (A == mem)
+    }
+
+    #[test]
+    fn test_illegal_isc() {
+        // ISC - INC then SBC
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x0F);
+        cpu.memory.load_program(0x8000, &[0xE7, 0x10]); // ISC $10
+        cpu.reset();
+        cpu.a = 0x20;
+        cpu.status |= 0x01; // Set carry for SBC
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x10); // Incremented from 0x0F
+        assert_eq!(cpu.a, 0x10); // 0x20 - 0x10 = 0x10
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry set
+    }
+
+    #[test]
+    fn test_illegal_slo() {
+        // SLO - ASL then ORA
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x81); // 10000001
+        cpu.memory.load_program(0x8000, &[0x07, 0x10]); // SLO $10
+        cpu.reset();
+        cpu.a = 0x01;
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x02); // Shifted left
+        assert_eq!(cpu.a, 0x03); // 0x01 | 0x02 = 0x03
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry set (bit 7 was set)
+    }
+
+    #[test]
+    fn test_illegal_rla() {
+        // RLA - ROL then AND
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x81); // 10000001
+        cpu.memory.load_program(0x8000, &[0x27, 0x10]); // RLA $10
+        cpu.reset();
+        cpu.a = 0xFF;
+        cpu.status &= !0x01; // Clear carry
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x02); // Rotated left with carry=0
+        assert_eq!(cpu.a, 0x02); // 0xFF & 0x02 = 0x02
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry set (bit 7 was set)
+    }
+
+    #[test]
+    fn test_illegal_sre() {
+        // SRE - LSR then EOR
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x83); // 10000011
+        cpu.memory.load_program(0x8000, &[0x47, 0x10]); // SRE $10
+        cpu.reset();
+        cpu.a = 0x40;
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x41); // Shifted right
+        assert_eq!(cpu.a, 0x01); // 0x40 ^ 0x41 = 0x01
+        assert_eq!(cpu.status & 0x01, 0x01); // Carry set (bit 0 was set)
+    }
+
+    #[test]
+    fn test_illegal_rra() {
+        // RRA - ROR then ADC
+        let mem = ArrayMemory::new();
+        let mut cpu = Cpu6502::new(mem);
+        cpu.memory.write(0x0010, 0x83); // 10000011
+        cpu.memory.load_program(0x8000, &[0x67, 0x10]); // RRA $10
+        cpu.reset();
+        cpu.a = 0x10;
+        cpu.status &= !0x01; // Clear carry
+        assert_eq!(cpu.step(), 5);
+        assert_eq!(cpu.memory.read(0x0010), 0x41); // Rotated right with carry=0
+                                                   // ROR sets carry to 1 (bit 0 was set), then ADC: 0x10 + 0x41 + 1 = 0x52
+        assert_eq!(cpu.a, 0x52);
+        assert_eq!(cpu.status & 0x01, 0x00); // Carry clear (no overflow from ADC)
     }
 }
