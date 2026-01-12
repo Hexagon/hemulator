@@ -181,7 +181,6 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy
 **Technical Limitations**:
 - **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
 - **No serial/link cable support**: Serial transfer registers (SB at 0xFF01, SC at 0xFF02) are not implemented. Link cable multiplayer and trading features won't work.
-- **No STAT interrupts or PPU mode transitions**: STAT register (0xFF41) is readable/writable but doesn't trigger interrupts or accurately reflect PPU mode changes (Mode 0-3). Most games don't rely on this.
 
 **Missing CGB Features**:
 - **HDMA - HBlank DMA**: Registers 0xFF51-0xFF55 not implemented. Affects some CGB games that use DMA during HBlank for advanced graphics effects (raster effects, parallax scrolling).
