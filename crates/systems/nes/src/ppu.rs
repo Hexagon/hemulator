@@ -152,6 +152,15 @@ pub struct Ppu {
     /// Registers $2000, $2001, $2005, $2006 are write-protected during first frame
     /// Register $2007 is read-protected (returns $00) during first frame
     first_frame_after_reset: Cell<bool>,
+    /// Cycle-accurate timing: current scanline (0-261, where 261 is pre-render scanline)
+    /// Scanline 241 is when VBlank starts
+    scanline: Cell<u16>,
+    /// Cycle-accurate timing: current dot/pixel within scanline (0-340)
+    /// Each scanline has 341 dots (0-340)
+    dot: Cell<u16>,
+    /// Cycle-accurate timing: odd frame flag for skipping cycle on scanline 0
+    /// On odd frames, dot 0 of scanline 0 is skipped (goes directly from -1,340 to 0,1)
+    odd_frame: Cell<bool>,
 }
 
 impl fmt::Debug for Ppu {
@@ -201,6 +210,10 @@ impl Ppu {
             suppress_a12: Cell::new(false),
             oam_addr: Cell::new(0),
             first_frame_after_reset: Cell::new(true),
+            // Cycle-accurate timing state - start at pre-render scanline
+            scanline: Cell::new(261),
+            dot: Cell::new(0),
+            odd_frame: Cell::new(false),
         }
     }
 
@@ -1119,6 +1132,119 @@ impl Ppu {
         }
 
         self.suppress_a12.set(prev_suppress);
+    }
+
+    /// Execute a single PPU cycle (dot).
+    ///
+    /// This advances the PPU by one dot and handles all cycle-accurate timing:
+    /// - VBlank flag setting at scanline 241, dot 1
+    /// - NMI generation at scanline 241, dot 1 (if enabled)
+    /// - Sprite overflow/sprite 0 hit clearing at scanline 261 (pre-render), dot 1
+    /// - Odd frame cycle skip at scanline 0, dot 0
+    ///
+    /// Returns true if an NMI should be triggered.
+    pub fn tick(&self) -> bool {
+        let scanline = self.scanline.get();
+        let dot = self.dot.get();
+        let mut nmi_triggered = false;
+
+        // Handle cycle-accurate events at specific scanline/dot positions
+        match (scanline, dot) {
+            // Scanline 241, dot 1: VBlank starts
+            (241, 1) => {
+                // Set VBlank flag
+                let was_vblank = self.vblank.replace(true);
+
+                // If VBlank just started and NMI is enabled, trigger NMI
+                if !was_vblank && self.nmi_enabled() {
+                    log(LogCategory::PPU, LogLevel::Trace, || {
+                        "PPU: VBlank started at scanline 241, dot 1, triggering NMI".to_string()
+                    });
+                    self.nmi_pending.set(true);
+                    nmi_triggered = true;
+                }
+            }
+
+            // Pre-render scanline (261), dot 1: Clear VBlank and sprite flags
+            (261, 1) => {
+                // Clear VBlank flag
+                self.vblank.set(false);
+                self.nmi_pending.set(false);
+
+                // Clear sprite flags (this is the ONLY place they're cleared on hardware)
+                self.sprite_0_hit.set(false);
+                self.sprite_overflow.set(false);
+
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    "PPU: Pre-render scanline, dot 1: cleared VBlank and sprite flags".to_string()
+                });
+
+                // Release register lock after first frame
+                if self.first_frame_after_reset.get() {
+                    log(LogCategory::PPU, LogLevel::Debug, || {
+                        "PPU: First frame complete, releasing register lock".to_string()
+                    });
+                    self.first_frame_after_reset.set(false);
+                }
+            }
+
+            _ => {}
+        }
+
+        // Advance to next dot
+        let mut next_dot = dot + 1;
+        let mut next_scanline = scanline;
+
+        // Handle end of scanline (341 dots per scanline, indexed 0-340)
+        if next_dot >= 341 {
+            next_dot = 0;
+            next_scanline += 1;
+
+            // Handle end of frame (262 scanlines: 0-239 visible, 240 post-render, 241-260 vblank, 261 pre-render)
+            if next_scanline >= 262 {
+                next_scanline = 0;
+                // Toggle odd frame flag
+                self.odd_frame.set(!self.odd_frame.get());
+            }
+        }
+
+        // Odd frame cycle skip: on odd frames with rendering enabled,
+        // skip from scanline 261 dot 340 directly to scanline 0 dot 1
+        if next_scanline == 0 && next_dot == 0 && self.odd_frame.get() {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                next_dot = 1;
+                log(LogCategory::PPU, LogLevel::Trace, || {
+                    "PPU: Odd frame cycle skip (0,0 -> 0,1)".to_string()
+                });
+            }
+        }
+
+        self.scanline.set(next_scanline);
+        self.dot.set(next_dot);
+
+        nmi_triggered
+    }
+
+    /// Get current scanline (0-261)
+    pub fn get_scanline(&self) -> u16 {
+        self.scanline.get()
+    }
+
+    /// Get current dot within scanline (0-340)
+    pub fn get_dot(&self) -> u16 {
+        self.dot.get()
+    }
+
+    /// Check if currently in VBlank region (scanlines 241-260)
+    pub fn is_in_vblank_region(&self) -> bool {
+        let scanline = self.scanline.get();
+        scanline >= 241 && scanline <= 260
+    }
+
+    /// Check if currently in visible region (scanlines 0-239)
+    pub fn is_in_visible_region(&self) -> bool {
+        self.scanline.get() < 240
     }
 }
 
