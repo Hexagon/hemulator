@@ -541,15 +541,11 @@ impl System for NesSystem {
         // No need to manually call set_vblank(false) here
 
         let mut cycles = 0u32;
-        #[allow(unused_assignments)]
-        let mut irq_to_fire = false;
-        #[allow(unused_assignments)]
-        let mut nmi_to_fire = false;
 
         while cycles < visible_cycles {
-            // Reset interrupt flags for this iteration
-            irq_to_fire = false;
-            nmi_to_fire = false;
+            // Declare interrupt flags for this iteration
+            let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
 
             if let Some(h) = pc_hist.as_mut() {
                 let pc = self.cpu.pc();
@@ -687,9 +683,9 @@ impl System for NesSystem {
 
         // Run the rest of the frame (VBlank time).
         while cycles < cycles_per_frame {
-            // Reset interrupt flags for this iteration
-            irq_to_fire = false;
-            nmi_to_fire = false;
+            // Declare interrupt flags for this iteration
+            let mut irq_to_fire = false;
+            let mut nmi_to_fire = false;
 
             if let Some(h) = pc_hist.as_mut() {
                 let pc = self.cpu.pc();

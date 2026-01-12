@@ -774,20 +774,9 @@ impl Ppu {
 
                     // HARDWARE BUG: Increment BOTH n and m instead of just n
                     // This causes m to wrap and check wrong bytes
-                    m += 1;
-                    if m >= 4 {
-                        #[allow(unused_assignments)]
-                        {
-                            m = 0;
-                        }
-                        #[allow(unused_assignments)]
-                        {
-                            n += 1;
-                        }
-                    }
-
-                    // On real hardware, evaluation stops after finding overflow
-                    // But the bug means we continue with corrupted m pointer
+                    // However, evaluation stops here so we break immediately
+                    // (The m/n increment would happen on real hardware but has no observable effect
+                    // since we break before checking another sprite)
                     break;
                 } else {
                     // No match - increment n and reset m
