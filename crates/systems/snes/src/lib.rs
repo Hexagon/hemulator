@@ -899,4 +899,62 @@ mod tests {
             non_black_pixels
         );
     }
+
+    #[test]
+    fn test_simple_sprite_rom() {
+        // Load the simple sprite test ROM
+        // This ROM displays a single 8x8 red sprite at position (100, 100)
+        // with only OBJ layer enabled (TM=0x10), replicating SMW's config
+        let test_rom = include_bytes!("../../../../test_roms/snes/test_simple_sprite.sfc");
+
+        let mut sys = SnesSystem::default();
+
+        // Mount the test ROM
+        assert!(sys.mount("Cartridge", test_rom).is_ok());
+        assert!(sys.is_mounted("Cartridge"));
+
+        // Run multiple frames to allow the ROM to initialize
+        let mut frame = sys.step_frame().unwrap();
+        for _ in 0..10 {
+            frame = sys.step_frame().unwrap();
+        }
+
+        // Verify frame dimensions
+        assert_eq!(frame.width, 256);
+        assert_eq!(frame.height, 224);
+        assert_eq!(frame.pixels.len(), 256 * 224);
+
+        // This ROM places a single 8x8 sprite at (100, 100)
+        // The sprite should be visible (solid red color index 1)
+        // Note: SNES sprites appear 1 scanline later than their Y value,
+        // so a sprite with Y=100 will render at Y=101-108
+        
+        // Count non-black pixels in the actual sprite area (101-108, 100-107)
+        // The sprite appears at Y=101 (Y+1 offset) and is 8x8 pixels
+        let mut sprite_pixels = 0;
+        for y in 101..109 {
+            for x in 100..108 {
+                if frame.pixels[y * 256 + x] != 0xFF000000 {
+                    sprite_pixels += 1;
+                }
+            }
+        }
+        
+        // Count total non-black pixels
+        let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
+
+        // We should see the full 8x8=64 pixel sprite
+        assert!(
+            sprite_pixels >= 60,
+            "Should see full 8x8 sprite at (100,100), got {} non-black pixels (expected 64)",
+            sprite_pixels
+        );
+
+        // Verify the frame has the expected non-black pixels
+        assert!(
+            non_black_pixels >= 60,
+            "Simple sprite ROM should produce full sprite output, got {} non-black pixels",
+            non_black_pixels
+        );
+    }
 }
