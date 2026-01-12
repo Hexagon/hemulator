@@ -151,3 +151,90 @@ The main blocker is still that SMW never writes $4200 with NMI enabled. Possible
 - Are we in a loop? (repeated PC values)
 - What code comes after the current execution point?
 - Are there any branches that should lead to NMI enable but don't get taken?
+
+---
+
+## Update 2026-01-12: Breakpoint and Trace Dumping Implementation
+
+### Implemented automatic instruction trace dumping on breakpoint hit
+
+**Changes made**:
+- Added `check_breakpoint()` method to `SnesSystem` to check if current PC matches any execution breakpoint
+- Added `check_breakpoint()` and `get_instruction_tracer()` helper methods to `EmulatorSystem` wrapper
+- Updated headless debug loop to check for breakpoint hits after each frame
+- Implemented automatic trace dumping when breakpoint is hit or debug dump is triggered
+- Updated help text to reflect that breakpoint checking and trace dumping is now functional for SNES
+
+**Usage example**:
+```bash
+hemu --trace-instructions --breakpoint 0x00B900 --trace-limit 20000 smw.sfc
+```
+
+This will:
+1. Enable instruction tracing with a buffer of 20,000 instructions
+2. Set a breakpoint at PC=$00B900 (in the area where SMW is known to execute)
+3. Run in headless mode until the breakpoint is hit
+4. Automatically dump the last 20,000 executed instructions to `trace_dump.txt`
+5. Generate a full debug dump to `debug_dump.txt`
+6. Exit
+
+**Next steps**:
+1. Run SMW with breakpoints in the $B8xx/$B9xx area to capture execution trace
+2. Analyze the trace to identify:
+   - Execution patterns (loops, repeated sequences)
+   - What code leads up to the current state
+   - Missing register reads/writes that might gate progression
+3. Compare with known-good SNES emulator behavior if available
+
+### Testing the Implementation
+
+**Verifying breakpoint functionality with test ROM**:
+```bash
+# Test breakpoint at $8050 (FINAL_LOOP in test ROM)
+hemu --trace-instructions --breakpoint 0x008050 test_roms/snes/test_breakpoint.sfc
+
+# Expected output:
+# - Breakpoint hit at PC=$008050 after ~89342 cycles
+# - Instruction trace dumped to trace_dump.txt
+# - Debug dump written to debug_dump.txt
+```
+
+**Investigating SMW execution (requires commercial ROM)**:
+```bash
+# Example 1: Capture trace when PC reaches $B900
+hemu --trace-instructions --breakpoint 0x00B900 --trace-limit 50000 smw.sfc
+
+# Example 2: Capture trace with multiple breakpoints
+hemu --trace-instructions --breakpoint 0x00B800 --breakpoint 0x00B900 --breakpoint 0x00BA00 smw.sfc
+
+# Example 3: Capture trace after long run (no breakpoint)
+hemu --trace-instructions --debug-dump-cycles 50000000 smw.sfc
+```
+
+The trace will show:
+- Exact instruction execution sequence leading up to the breakpoint
+- CPU state (registers, flags) at each instruction
+- Which registers are being read/written and when
+- Whether code is stuck in a loop or progressing through init
+
+---
+
+## Next Investigation Actions
+
+With the breakpoint and tracing infrastructure now functional, the next step is to:
+
+1. **Identify a strategic breakpoint location** in SMW's init code:
+   - Set breakpoint in the $B8xx/$B9xx area based on previous logs
+   - Or set breakpoint at the first write to $4200 or $2100
+   - Or capture a long trace (50K+ instructions) to analyze post-facto
+
+2. **Analyze the trace** to answer:
+   - Is SMW stuck in a tight loop? (many repeated PC values)
+   - What code precedes the current execution point?
+   - Are there any register accesses we're not handling correctly?
+   - Are there branches that should enable NMI but don't get taken?
+
+3. **Compare behavior** (if possible):
+   - Run same ROM in a known-good SNES emulator with trace/log
+   - Identify where execution diverges
+   - Focus fixes on the point of divergence

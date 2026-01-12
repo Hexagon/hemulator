@@ -186,6 +186,17 @@ impl SnesSystem {
         &self.breakpoint_manager
     }
 
+    /// Check if the current PC is at a breakpoint
+    /// Returns Some(pc) if a breakpoint is hit, None otherwise
+    pub fn check_breakpoint(&self) -> Option<u32> {
+        let pc = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+        if self.breakpoint_manager.should_break_execute(pc) {
+            Some(pc)
+        } else {
+            None
+        }
+    }
+
     /// Get tile viewer data for debugging
     pub fn get_tile_viewer_data(&self) -> TileViewerData {
         self.cpu.bus().ppu().get_tile_viewer_data()
