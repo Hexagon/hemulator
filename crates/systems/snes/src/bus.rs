@@ -638,7 +638,11 @@ impl Memory65c816 for SnesBus {
                             let port_idx = port as usize;
                             // Defensive bounds check: the match range 0x2140..=0x2143 guarantees port is 0-3,
                             // but we verify explicitly before array indexing for clarity and safety
-                            debug_assert!(port_idx < 4, "APU port index must be 0-3, got {}", port_idx);
+                            debug_assert!(
+                                port_idx < 4,
+                                "APU port index must be 0-3, got {}",
+                                port_idx
+                            );
                             self.apu_out_ports[port_idx]
                         };
 
@@ -983,11 +987,11 @@ impl Memory65c816 for SnesBus {
                         } else {
                             // Use stub protocol
                             let port = port as usize;
-                            
+
                             // Defensive bounds check: the match range 0x2140..=0x2143 guarantees port is 0-3,
                             // but we verify explicitly before array indexing for clarity and safety
                             debug_assert!(port < 4, "APU port index must be 0-3, got {}", port);
-                            
+
                             log(LogCategory::Bus, LogLevel::Trace, || {
                                 format!(
                                     "SNES Bus: Write APU port ${:04X} (APUIO{}) to stub: 0x{:02X} (state: {:?})",
