@@ -254,6 +254,9 @@ pub struct TabManager {
     pub cached_memory: Vec<u8>,
     /// Address range of cached memory
     pub cached_memory_start: u32,
+    /// SNES tile viewer state
+    pub snes_bpp_mode: u8,
+    pub snes_selected_palette: usize,
 }
 
 impl TabManager {
@@ -276,6 +279,8 @@ impl TabManager {
             memory_view_address: 0,
             cached_memory: Vec::new(),
             cached_memory_start: 0,
+            snes_bpp_mode: 4, // Default to 4bpp
+            snes_selected_palette: 0,
         }
     }
 
@@ -1697,21 +1702,91 @@ impl TabManager {
                             ui.label(format!("Registers: {:?}", sms_data.registers));
                         }
                         SystemTileData::SNES(snes_data) => {
+                            // Header with PPU state info
                             ui.heading("🎮 SNES Tile Viewer");
                             ui.separator();
-                            ui.label(format!("BG Mode: {}", snes_data.bg_mode));
-                            ui.label(format!(
-                                "Screen: {}",
-                                if snes_data.screen_enabled {
-                                    "Enabled"
-                                } else {
-                                    "Disabled"
+
+                            // PPU state summary
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("BG Mode: {}", snes_data.bg_mode))
+                                        .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Screen: {}",
+                                        if snes_data.screen_enabled {
+                                            "Enabled"
+                                        } else {
+                                            "Disabled"
+                                        }
+                                    ))
+                                    .monospace(),
+                                );
+                                ui.separator();
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "VRAM: {} KB",
+                                        snes_data.vram.len() / 1024
+                                    ))
+                                    .monospace(),
+                                );
+                            });
+
+                            ui.add_space(10.0);
+
+                            // Tile sections
+                            ui.heading("Character Data (VRAM)");
+                            ui.separator();
+
+                            // Add BPP selector
+                            let mut bpp_mode = self.snes_bpp_mode;
+                            ui.horizontal(|ui| {
+                                ui.label("Color Depth:");
+                                if ui.selectable_label(bpp_mode == 2, "2bpp (4 colors)").clicked() {
+                                    bpp_mode = 2;
                                 }
-                            ));
-                            ui.label(format!("VRAM: {} KB", snes_data.vram.len() / 1024));
-                            ui.label(format!("CGRAM: {} bytes", snes_data.cgram.len()));
-                            ui.label(format!("OAM: {} bytes", snes_data.oam.len()));
-                            ui.label(format!("Palette: {} colors", snes_data.palette.len()));
+                                if ui.selectable_label(bpp_mode == 4, "4bpp (16 colors)").clicked() {
+                                    bpp_mode = 4;
+                                }
+                                if ui.selectable_label(bpp_mode == 8, "8bpp (256 colors)").clicked() {
+                                    bpp_mode = 8;
+                                }
+                            });
+
+                            ui.add_space(5.0);
+
+                            // Add palette selector
+                            let mut selected_palette = self.snes_selected_palette;
+                            ui.horizontal(|ui| {
+                                ui.label("Palette:");
+                                for pal in 0..8 {
+                                    if ui.selectable_label(selected_palette == pal, format!("{}", pal)).clicked() {
+                                        selected_palette = pal;
+                                    }
+                                }
+                            });
+
+                            ui.add_space(10.0);
+
+                            // Render tiles with current settings
+                            self.render_snes_tiles_with_settings(ui, snes_data, bpp_mode, selected_palette);
+
+                            ui.add_space(15.0);
+
+                            // Palette section
+                            ui.heading("Palettes (CGRAM)");
+                            ui.separator();
+                            self.render_snes_palettes(ui, snes_data);
+
+                            ui.add_space(15.0);
+
+                            // Sprite section
+                            ui.heading("Sprites (OAM)");
+                            ui.separator();
+                            ui.label(format!("OAM: {} bytes (128 sprites)", snes_data.oam.len()));
+                            ui.label("Sprite viewer coming soon...");
                         }
                         SystemTileData::Atari2600(a2600_data) => {
                             ui.heading("🕹️ Atari 2600 Inspector");
@@ -4126,6 +4201,198 @@ impl TabManager {
                     egui::Stroke::new(0.5, egui::Color32::from_gray(64)),
                     egui::StrokeKind::Inside,
                 );
+            }
+        }
+    }
+
+    /// Render SNES tiles from VRAM
+    fn render_snes_tiles_with_settings(
+        &self,
+        ui: &mut Ui,
+        data: &SnesTileData,
+        bpp_mode: u8,
+        _selected_palette: usize,
+    ) {
+        // SNES VRAM is 64KB organized as character data
+        // Display tiles with selected color depth (2bpp, 4bpp, 8bpp)
+
+        let bytes_per_tile = match bpp_mode {
+            2 => 16, // 2bpp: 16 bytes per 8x8 tile
+            4 => 32, // 4bpp: 32 bytes per 8x8 tile
+            8 => 64, // 8bpp: 64 bytes per 8x8 tile
+            _ => 32, // Default to 4bpp
+        };
+
+        let total_tiles = data.vram.len() / bytes_per_tile;
+        let tiles_per_row = 16;
+        let tile_rows = total_tiles.div_ceil(tiles_per_row);
+
+        let tile_display_size = 12.0; // Display size in UI
+
+        // Create the tile grid
+        let (response, painter) = ui.allocate_painter(
+            egui::Vec2::new(
+                tiles_per_row as f32 * tile_display_size,
+                tile_rows as f32 * tile_display_size,
+            ),
+            egui::Sense::hover(),
+        );
+
+        let rect = response.rect;
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(30, 30, 30));
+
+        // Draw tiles
+        for tile_idx in 0..total_tiles.min(1024) {
+            let tile_col = tile_idx % tiles_per_row;
+            let tile_row = tile_idx / tiles_per_row;
+
+            let tile_x = rect.min.x + tile_col as f32 * tile_display_size;
+            let tile_y = rect.min.y + tile_row as f32 * tile_display_size;
+            let tile_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(tile_x, tile_y),
+                egui::Vec2::new(tile_display_size, tile_display_size),
+            );
+
+            // Calculate average brightness for preview
+            let vram_offset = tile_idx * bytes_per_tile;
+            let mut total_value = 0u32;
+            for i in 0..bytes_per_tile {
+                if vram_offset + i < data.vram.len() {
+                    total_value += data.vram[vram_offset + i].count_ones();
+                }
+            }
+            let max_bits = bytes_per_tile as u32 * 8;
+            let brightness = ((total_value as f32 / max_bits as f32) * 200.0) as u8;
+            let tile_color = egui::Color32::from_rgb(brightness, brightness, brightness);
+
+            painter.rect_filled(tile_rect, 0.0, tile_color);
+            painter.rect_stroke(
+                tile_rect,
+                0.0,
+                egui::Stroke::new(0.3, egui::Color32::from_rgb(60, 60, 60)),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        // Handle hover tooltip
+        if let Some(hover_pos) = response.hover_pos() {
+            let rel_x = hover_pos.x - rect.min.x;
+            let rel_y = hover_pos.y - rect.min.y;
+
+            if rel_x >= 0.0 && rel_y >= 0.0 {
+                let tile_col = (rel_x / tile_display_size) as usize;
+                let tile_row = (rel_y / tile_display_size) as usize;
+
+                if tile_col < tiles_per_row && tile_row < tile_rows {
+                    let tile_idx = tile_row * tiles_per_row + tile_col;
+                    if tile_idx < total_tiles {
+                        let vram_addr = tile_idx * bytes_per_tile;
+
+                        response.clone().on_hover_ui(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Tile ${:03X} ({})",
+                                    tile_idx, tile_idx
+                                ))
+                                .strong(),
+                            );
+                            ui.label(format!(
+                                "VRAM Address: ${:04X}-${:04X}",
+                                vram_addr,
+                                vram_addr + bytes_per_tile - 1
+                            ));
+                            ui.label(format!("Color Depth: {}bpp", bpp_mode));
+                            ui.label(format!("Palette: {}", _selected_palette));
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Render SNES palette viewer
+    pub fn render_snes_palettes(&self, ui: &mut Ui, data: &SnesTileData) {
+        // SNES has 256 colors in CGRAM, organized as 16 sub-palettes of 16 colors each
+        let colors_per_palette = 16;
+        let num_palettes = 16;
+        let color_size = 20.0;
+
+        for pal_num in 0..num_palettes {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("Palette {:X}:", pal_num))
+                        .strong()
+                        .monospace(),
+                );
+
+                for color_num in 0..colors_per_palette {
+                    let color_index = pal_num * colors_per_palette + color_num;
+                    if color_index < data.palette.len() {
+                        let rgb = data.palette[color_index];
+                        let r = ((rgb >> 16) & 0xFF) as u8;
+                        let g = ((rgb >> 8) & 0xFF) as u8;
+                        let b = (rgb & 0xFF) as u8;
+                        let color = egui::Color32::from_rgb(r, g, b);
+
+                        let (response, painter) = ui.allocate_painter(
+                            egui::Vec2::new(color_size, color_size),
+                            egui::Sense::hover(),
+                        );
+                        let color_rect = response.rect;
+
+                        painter.rect_filled(color_rect, 2.0, color);
+                        painter.rect_stroke(
+                            color_rect,
+                            2.0,
+                            egui::Stroke::new(1.0, egui::Color32::WHITE),
+                            egui::StrokeKind::Inside,
+                        );
+
+                        // Tooltip with color info
+                        response.on_hover_ui(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Palette {} Color {}",
+                                    pal_num, color_num
+                                ))
+                                .strong(),
+                            );
+                            ui.label(format!(
+                                "CGRAM Index: ${:02X} ({})",
+                                color_index, color_index
+                            ));
+                            ui.label(format!("CGRAM Address: ${:03X}", color_index * 2));
+
+                            // Show 15-bit BGR value from CGRAM
+                            if color_index * 2 + 1 < data.cgram.len() {
+                                let low = data.cgram[color_index * 2] as u16;
+                                let high = data.cgram[color_index * 2 + 1] as u16;
+                                let bgr15 = low | (high << 8);
+                                ui.label(format!("15-bit BGR: ${:04X}", bgr15));
+                                ui.label(format!(
+                                    "  R: {:02} ({:02X})",
+                                    bgr15 & 0x1F,
+                                    bgr15 & 0x1F
+                                ));
+                                ui.label(format!(
+                                    "  G: {:02} ({:02X})",
+                                    (bgr15 >> 5) & 0x1F,
+                                    (bgr15 >> 5) & 0x1F
+                                ));
+                                ui.label(format!(
+                                    "  B: {:02} ({:02X})",
+                                    (bgr15 >> 10) & 0x1F,
+                                    (bgr15 >> 10) & 0x1F
+                                ));
+                            }
+                            ui.label(format!("24-bit RGB: #{:02X}{:02X}{:02X}", r, g, b));
+                        });
+                    }
+                }
+            });
+
+            if pal_num % 4 == 3 && pal_num < num_palettes - 1 {
+                ui.add_space(5.0);
             }
         }
     }
