@@ -467,10 +467,11 @@ These behaviors are authentic to the original hardware and affect all emulators:
 
 **Status in This Emulator**:
 - ✅ Sprite rendering is cycle-accurate and hardware-correct
-- ⚠️ No frame blending/phosphor simulation currently implemented
-- 💡 **Workaround**: Use display filters (View menu) for CRT simulation effects
-  - Filters apply scanlines and phosphor patterns but not temporal blending
-  - Temporal (inter-frame) blending would require storing previous frame buffers
+- ✅ **Phosphor Persistence filter available** - Select "Phosphor Persistence" from the Display Filter menu (View → Properties → Display Filter)
+- 💡 **Recommended for Atari 2600 games**: The Phosphor Persistence filter significantly reduces sprite flicker
+  - Blends current frame (70%) with previous frame (30%) to simulate CRT phosphor decay
+  - Particularly effective for Pac-Man, Space Invaders, Asteroids, and other flicker-heavy games
+  - Trade-off: May slightly blur very fast-moving objects, but greatly improves visual quality
 
 **Other Affected Games**:
 - **Space Invaders**: Flicker on invader formations
