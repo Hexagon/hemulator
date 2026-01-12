@@ -442,23 +442,24 @@ impl System for GbSystem {
             }
 
             // Step PPU and handle VBlank, STAT interrupts, and HDMA
-            let (vblank_started, stat_interrupt, hblank_entered) = self.cpu.memory.ppu.step(cpu_cycles);
-            
+            let (vblank_started, stat_interrupt, hblank_entered) =
+                self.cpu.memory.ppu.step(cpu_cycles);
+
             if vblank_started {
                 // V-Blank started - request VBlank interrupt (bit 0)
                 self.cpu.memory.request_interrupt(0x01);
             }
-            
+
             if stat_interrupt {
                 // STAT interrupt - request STAT interrupt (bit 1)
                 self.cpu.memory.request_interrupt(0x02);
             }
-            
+
             // Perform HDMA transfer during HBlank if active
             if hblank_entered {
                 self.cpu.memory.step_hdma();
             }
-            
+
             // Step serial transfer and handle serial interrupt
             if self.cpu.memory.step_serial(cpu_cycles) {
                 // Serial transfer complete - request serial interrupt (bit 3)
@@ -1916,7 +1917,7 @@ mod tests {
     #[test]
     fn test_serial_transfer_completion() {
         let mut sys = GbSystem::new();
-        
+
         // Create a minimal ROM that performs a serial transfer
         let mut rom = vec![0; 0x8000];
         // Write assembly to initialize serial transfer
@@ -1931,21 +1932,24 @@ mod tests {
         rom[0x108] = 0x76; // HALT
         rom[0x147] = 0x00; // Cartridge type
         rom[0x149] = 0x00; // RAM size
-        
+
         sys.mount("Cartridge", &rom).unwrap();
 
         // Run several frames to allow transfer to complete
         for _ in 0..10 {
             let _ = sys.step_frame();
         }
-        
+
         // Transfer should be complete (bit 7 cleared)
         let sc = sys.cpu.memory.read(0xFF02);
         assert_eq!(sc & 0x80, 0x00, "Transfer start bit should be cleared");
-        
+
         // SB should have been shifted (with 0xFF shifted in, simulating no device)
         let sb = sys.cpu.memory.read(0xFF01);
-        assert_eq!(sb, 0xFF, "SB should be 0xFF after transfer with no device connected");
+        assert_eq!(
+            sb, 0xFF,
+            "SB should be 0xFF after transfer with no device connected"
+        );
     }
 
     #[test]
@@ -1957,11 +1961,11 @@ mod tests {
         // Test RP register (0xFF56) - infrared port
         // Write value with LED control bits
         sys.cpu.memory.write(0xFF56, 0xC1); // Bits 6, 7 (LED), bit 0 (receive)
-        
+
         // Should read back with only writable bits
         let rp = sys.cpu.memory.read(0xFF56);
         assert_eq!(rp & 0xC1, 0xC1, "RP should preserve LED control bits");
-        
+
         // Try writing to non-writable bits
         sys.cpu.memory.write(0xFF56, 0xFF);
         let rp = sys.cpu.memory.read(0xFF56);

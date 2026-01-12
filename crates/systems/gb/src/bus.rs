@@ -256,15 +256,15 @@ impl GbBus {
 
         if self.serial_cycle_counter >= cycles_per_bit {
             self.serial_cycle_counter -= cycles_per_bit;
-            
+
             if self.serial_bit_counter > 0 {
                 // Shift out one bit from SB, shift in 0xFF (no device connected)
                 // In loopback mode, we just shift in what we shift out
                 let _out_bit = (self.sb >> 7) & 0x01;
                 self.sb = (self.sb << 1) | 0x01; // Shift in 1 (disconnected = all high)
-                
+
                 self.serial_bit_counter -= 1;
-                
+
                 // When all 8 bits are transferred, clear transfer flag and request interrupt
                 if self.serial_bit_counter == 0 {
                     self.sc &= !0x80; // Clear transfer start bit
@@ -280,30 +280,30 @@ impl GbBus {
     fn write_hdma5(&mut self, val: u8) {
         // If bit 7 is 0, this is a General Purpose DMA (immediate transfer)
         // If bit 7 is 1, this is an HBlank DMA (transfer during HBlank)
-        
+
         let is_hblank_mode = (val & 0x80) != 0;
         let length = ((val & 0x7F) + 1) as u16; // Length in 16-byte blocks
-        
+
         // If HDMA is active and we're writing 0 to bit 7, stop the transfer
         if self.hdma_active && !is_hblank_mode {
             self.hdma_active = false;
             self.hdma5 = 0xFF;
             return;
         }
-        
+
         // Calculate source and destination addresses
         // Source: HDMA1:HDMA2, but lower 4 bits of HDMA2 are ignored
         let source = ((self.hdma1 as u16) << 8) | ((self.hdma2 as u16) & 0xF0);
-        
+
         // Destination: HDMA3:HDMA4 + 0x8000, lower 4 bits of HDMA4 are ignored
         // Destination is always in VRAM (0x8000-0x9FFF)
         let dest = 0x8000 | (((self.hdma3 as u16) << 8) | ((self.hdma4 as u16) & 0xF0)) & 0x1FFF;
-        
+
         self.hdma_source = source;
         self.hdma_dest = dest;
         self.hdma_remaining = length as u8;
         self.hdma5 = val & 0x7F; // Store the length part
-        
+
         if is_hblank_mode {
             // HBlank DMA - will be performed during HBlank periods
             self.hdma_active = true;
@@ -313,27 +313,27 @@ impl GbBus {
             self.hdma5 = 0xFF; // Transfer complete
         }
     }
-    
+
     /// Perform General Purpose DMA (immediate transfer)
     fn perform_gdma(&mut self) {
         // Transfer all blocks immediately
         let blocks = self.hdma_remaining;
-        
+
         for _ in 0..blocks {
             // Transfer one 16-byte block
             for i in 0..16 {
                 let byte = self.read(self.hdma_source + i);
                 self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
             }
-            
+
             self.hdma_source += 16;
             self.hdma_dest += 16;
         }
-        
+
         self.hdma_remaining = 0;
         self.hdma_active = false;
     }
-    
+
     /// Perform one block of HBlank DMA
     /// Should be called during HBlank period
     /// Returns true if transfer is complete
@@ -341,26 +341,26 @@ impl GbBus {
         if !self.hdma_active || self.hdma_remaining == 0 {
             return false;
         }
-        
+
         // Transfer one 16-byte block during HBlank
         for i in 0..16 {
             let byte = self.read(self.hdma_source + i);
             self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
         }
-        
+
         self.hdma_source += 16;
         self.hdma_dest += 16;
         self.hdma_remaining -= 1;
-        
+
         // Update HDMA5 register
         if self.hdma_remaining == 0 {
             // Transfer complete
             self.hdma_active = false;
             self.hdma5 = 0xFF;
-            return true;
+            true
         } else {
             self.hdma5 = self.hdma_remaining - 1;
-            return false;
+            false
         }
     }
 
@@ -595,12 +595,12 @@ impl MemoryLr35902 for GbBus {
                         0xFF
                     }
                 }
-                0xFF56 => self.rp,                  // RP - Infrared port (CGB only)
-                0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
-                0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
-                0xFF6A => self.ppu.read_obpi(),     // OCPS/OBPI - OBJ palette index
-                0xFF6B => self.ppu.read_obpd(),     // OCPD/OBPD - OBJ palette data
-                0xFF70 => self.read_svbk(),         // SVBK - WRAM bank (CGB only)
+                0xFF56 => self.rp,              // RP - Infrared port (CGB only)
+                0xFF68 => self.ppu.read_bgpi(), // BCPS/BGPI - BG palette index
+                0xFF69 => self.ppu.read_bgpd(), // BCPD/BGPD - BG palette data
+                0xFF6A => self.ppu.read_obpi(), // OCPS/OBPI - OBJ palette index
+                0xFF6B => self.ppu.read_obpd(), // OCPD/OBPD - OBJ palette data
+                0xFF70 => self.read_svbk(),     // SVBK - WRAM bank (CGB only)
                 _ => 0xFF,
             },
             // High RAM
@@ -662,7 +662,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF01 => self.sb = val,
                     0xFF02 => {
                         self.sc = val & 0x83; // Only bits 0, 1, and 7 are writable
-                        
+
                         // If transfer start bit is set and using internal clock
                         if (val & 0x80) != 0 && (val & 0x01) != 0 {
                             // Start serial transfer
@@ -706,12 +706,12 @@ impl MemoryLr35902 for GbBus {
                     0xFF53 => self.hdma3 = val & 0x1F, // Only bits 0-4 are used (VRAM range 0x8000-0x9FFF)
                     0xFF54 => self.hdma4 = val & 0xF0, // Lower 4 bits are ignored
                     0xFF55 => self.write_hdma5(val),   // HDMA Length/Mode/Start
-                    0xFF56 => self.rp = val & 0xC1,    // RP - Infrared port (CGB only, only bits 0, 6, 7)
-                    0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
-                    0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
-                    0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI
-                    0xFF6B => self.ppu.write_obpd(val),    // OCPD/OBPD
-                    0xFF70 => self.write_svbk(val),        // SVBK - WRAM bank (CGB only)
+                    0xFF56 => self.rp = val & 0xC1, // RP - Infrared port (CGB only, only bits 0, 6, 7)
+                    0xFF68 => self.ppu.write_bgpi(val), // BCPS/BGPI
+                    0xFF69 => self.ppu.write_bgpd(val), // BCPD/BGPD
+                    0xFF6A => self.ppu.write_obpi(val), // OCPS/OBPI
+                    0xFF6B => self.ppu.write_obpd(val), // OCPD/OBPD
+                    0xFF70 => self.write_svbk(val), // SVBK - WRAM bank (CGB only)
                     0xFF50 => self.boot_rom_enabled = false, // Disable boot ROM
                     _ => {}
                 }

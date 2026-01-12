@@ -898,7 +898,9 @@ impl Ppu {
     /// - Mode 3 (Pixel Transfer): Cycles 80-251 (172 cycles typical)
     /// - Mode 0 (HBlank): Cycles 252-455 (204 cycles typical)
     /// - Mode 1 (VBlank): Lines 144-153
+    ///
     /// Step the PPU with the given number of cycles
+    ///
     /// Returns (vblank_started, stat_interrupt, hblank_entered)
     pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
         // Accumulate cycles

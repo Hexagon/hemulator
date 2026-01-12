@@ -153,7 +153,8 @@ impl Mbc3 {
                             self.rtc_h_latched,
                             self.rtc_m_latched,
                             self.rtc_s_latched,
-                            (self.rtc_dl_latched as u16) | (((self.rtc_dh_latched & 0x01) as u16) << 8)
+                            (self.rtc_dl_latched as u16)
+                                | (((self.rtc_dh_latched & 0x01) as u16) << 8)
                         )
                     });
                 }
@@ -404,7 +405,7 @@ mod tests {
         // Write to RTC seconds
         mbc.write_rom(0x4000, 0x08);
         mbc.write_ram(0xA000, 0x2A);
-        
+
         // Latch RTC to read the value
         mbc.write_rom(0x6000, 0x00);
         mbc.write_rom(0x6000, 0x01);
@@ -413,7 +414,7 @@ mod tests {
         // Write to RTC minutes
         mbc.write_rom(0x4000, 0x09);
         mbc.write_ram(0xA000, 0x1F);
-        
+
         // Latch RTC to read the value
         mbc.write_rom(0x6000, 0x00);
         mbc.write_rom(0x6000, 0x01);
@@ -422,7 +423,7 @@ mod tests {
         // Write to RTC hours
         mbc.write_rom(0x4000, 0x0A);
         mbc.write_ram(0xA000, 0x17);
-        
+
         // Latch RTC to read the value
         mbc.write_rom(0x6000, 0x00);
         mbc.write_rom(0x6000, 0x01);
@@ -431,7 +432,7 @@ mod tests {
         // Write to RTC days lower
         mbc.write_rom(0x4000, 0x0B);
         mbc.write_ram(0xA000, 0xFF);
-        
+
         // Latch RTC to read the value
         mbc.write_rom(0x6000, 0x00);
         mbc.write_rom(0x6000, 0x01);
@@ -440,7 +441,7 @@ mod tests {
         // Write to RTC days upper
         mbc.write_rom(0x4000, 0x0C);
         mbc.write_ram(0xA000, 0x01);
-        
+
         // Latch RTC to read the value
         mbc.write_rom(0x6000, 0x00);
         mbc.write_rom(0x6000, 0x01);
@@ -488,13 +489,13 @@ mod tests {
 
         mbc.write_rom(0x4000, 0x08); // Seconds
         assert_eq!(mbc.read_ram(0xA000), 0);
-        
+
         mbc.write_rom(0x4000, 0x09); // Minutes
         assert_eq!(mbc.read_ram(0xA000), 0);
-        
+
         mbc.write_rom(0x4000, 0x0A); // Hours
         assert_eq!(mbc.read_ram(0xA000), 0);
-        
+
         mbc.write_rom(0x4000, 0x0B); // Days
         assert_eq!(mbc.read_ram(0xA000), 1);
     }
