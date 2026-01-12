@@ -1656,19 +1656,20 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.fetch_u8() as u16;
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                // SBC logic
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
-                    self.status |= 0x01; // C
+                // SBC logic (using one's complement like official SBC)
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF; // one's complement
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                // Carry set if no borrow (sum > 0xFF)
+                if sum > 0xFF {
+                    self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
                 }
+                // Overflow detection
                 if (((self.a ^ val) & (self.a ^ result)) & 0x80) != 0 {
-                    self.status |= 0x40; // V
+                    self.status |= 0x40;
                 } else {
                     self.status &= !0x40;
                 }
@@ -1682,12 +1683,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.addr_zero_page_x();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
@@ -1707,12 +1707,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.fetch_u16();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
@@ -1732,12 +1731,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.addr_absolute_x();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
@@ -1757,12 +1755,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.addr_absolute_y();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
@@ -1782,12 +1779,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.addr_indirect_x();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
@@ -1807,12 +1803,11 @@ impl<M: Memory6502> Cpu6502<M> {
                 let addr = self.addr_indirect_y();
                 let val = self.read(addr).wrapping_add(1);
                 self.write(addr, val);
-                let carry_in = if (self.status & 0x01) != 0 { 0 } else { 1 };
-                let diff = (self.a as u16)
-                    .wrapping_sub(val as u16)
-                    .wrapping_sub(carry_in);
-                let result = diff as u8;
-                if diff <= 0xFF {
+                let carry = if (self.status & 0x01) != 0 { 1 } else { 0 };
+                let value = val ^ 0xFF;
+                let sum = (self.a as u16) + (value as u16) + (carry as u16);
+                let result = (sum & 0xFF) as u8;
+                if sum > 0xFF {
                     self.status |= 0x01;
                 } else {
                     self.status &= !0x01;
