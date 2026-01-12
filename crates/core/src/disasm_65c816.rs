@@ -187,6 +187,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0x0D => (format!("ORA ${:04X}", get_u16(1)), 3),
         0x1D => (format!("ORA ${:04X},X", get_u16(1)), 3),
         0x19 => (format!("ORA ${:04X},Y", get_u16(1)), 3),
+        0x0F => (format!("ORA ${:06X}", get_u24(1)), 4),
+        0x1F => (format!("ORA ${:06X},X", get_u24(1)), 4),
         0x01 => (format!("ORA (${:02X},X)", get_u8(1)), 2),
         0x11 => (format!("ORA (${:02X}),Y", get_u8(1)), 2),
         0x07 => (format!("ORA [${:02X}]", get_u8(1)), 2),
@@ -201,6 +203,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0x2D => (format!("AND ${:04X}", get_u16(1)), 3),
         0x3D => (format!("AND ${:04X},X", get_u16(1)), 3),
         0x39 => (format!("AND ${:04X},Y", get_u16(1)), 3),
+        0x2F => (format!("AND ${:06X}", get_u24(1)), 4),
+        0x3F => (format!("AND ${:06X},X", get_u24(1)), 4),
         0x21 => (format!("AND (${:02X},X)", get_u8(1)), 2),
         0x31 => (format!("AND (${:02X}),Y", get_u8(1)), 2),
         0x27 => (format!("AND [${:02X}]", get_u8(1)), 2),
@@ -215,6 +219,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0x4D => (format!("EOR ${:04X}", get_u16(1)), 3),
         0x5D => (format!("EOR ${:04X},X", get_u16(1)), 3),
         0x59 => (format!("EOR ${:04X},Y", get_u16(1)), 3),
+        0x4F => (format!("EOR ${:06X}", get_u24(1)), 4),
+        0x5F => (format!("EOR ${:06X},X", get_u24(1)), 4),
         0x41 => (format!("EOR (${:02X},X)", get_u8(1)), 2),
         0x51 => (format!("EOR (${:02X}),Y", get_u8(1)), 2),
         0x47 => (format!("EOR [${:02X}]", get_u8(1)), 2),
@@ -229,6 +235,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0x6D => (format!("ADC ${:04X}", get_u16(1)), 3),
         0x7D => (format!("ADC ${:04X},X", get_u16(1)), 3),
         0x79 => (format!("ADC ${:04X},Y", get_u16(1)), 3),
+        0x6F => (format!("ADC ${:06X}", get_u24(1)), 4),
+        0x7F => (format!("ADC ${:06X},X", get_u24(1)), 4),
         0x61 => (format!("ADC (${:02X},X)", get_u8(1)), 2),
         0x71 => (format!("ADC (${:02X}),Y", get_u8(1)), 2),
         0x67 => (format!("ADC [${:02X}]", get_u8(1)), 2),
@@ -243,6 +251,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0xED => (format!("SBC ${:04X}", get_u16(1)), 3),
         0xFD => (format!("SBC ${:04X},X", get_u16(1)), 3),
         0xF9 => (format!("SBC ${:04X},Y", get_u16(1)), 3),
+        0xEF => (format!("SBC ${:06X}", get_u24(1)), 4),
+        0xFF => (format!("SBC ${:06X},X", get_u24(1)), 4),
         0xE1 => (format!("SBC (${:02X},X)", get_u8(1)), 2),
         0xF1 => (format!("SBC (${:02X}),Y", get_u8(1)), 2),
         0xE7 => (format!("SBC [${:02X}]", get_u8(1)), 2),
@@ -257,6 +267,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0xCD => (format!("CMP ${:04X}", get_u16(1)), 3),
         0xDD => (format!("CMP ${:04X},X", get_u16(1)), 3),
         0xD9 => (format!("CMP ${:04X},Y", get_u16(1)), 3),
+        0xCF => (format!("CMP ${:06X}", get_u24(1)), 4),
+        0xDF => (format!("CMP ${:06X},X", get_u24(1)), 4),
         0xC1 => (format!("CMP (${:02X},X)", get_u8(1)), 2),
         0xD1 => (format!("CMP (${:02X}),Y", get_u8(1)), 2),
         0xC7 => (format!("CMP [${:02X}]", get_u8(1)), 2),
@@ -279,6 +291,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0xAD => (format!("LDA ${:04X}", get_u16(1)), 3),
         0xBD => (format!("LDA ${:04X},X", get_u16(1)), 3),
         0xB9 => (format!("LDA ${:04X},Y", get_u16(1)), 3),
+        0xAF => (format!("LDA ${:06X}", get_u24(1)), 4),
+        0xBF => (format!("LDA ${:06X},X", get_u24(1)), 4),
         0xA1 => (format!("LDA (${:02X},X)", get_u8(1)), 2),
         0xB1 => (format!("LDA (${:02X}),Y", get_u8(1)), 2),
         0xA7 => (format!("LDA [${:02X}]", get_u8(1)), 2),
@@ -304,6 +318,8 @@ fn decode_instruction(opcode: u8, memory: &[u8], m_flag: bool, x_flag: bool) -> 
         0x8D => (format!("STA ${:04X}", get_u16(1)), 3),
         0x9D => (format!("STA ${:04X},X", get_u16(1)), 3),
         0x99 => (format!("STA ${:04X},Y", get_u16(1)), 3),
+        0x8F => (format!("STA ${:06X}", get_u24(1)), 4),
+        0x9F => (format!("STA ${:06X},X", get_u24(1)), 4),
         0x81 => (format!("STA (${:02X},X)", get_u8(1)), 2),
         0x91 => (format!("STA (${:02X}),Y", get_u8(1)), 2),
         0x87 => (format!("STA [${:02X}]", get_u8(1)), 2),
@@ -450,5 +466,29 @@ mod tests {
     fn test_disassemble_empty() {
         let memory = [];
         assert!(disassemble_65c816(&memory, 0x8000).is_none());
+    }
+
+    #[test]
+    fn test_disassemble_lda_absolute_long() {
+        let memory = [0xAF, 0x00, 0x80, 0x01];
+        let instr = disassemble_65c816(&memory, 0x8000).unwrap();
+        assert_eq!(instr.mnemonic, "LDA $018000");
+        assert_eq!(instr.len(), 4);
+    }
+
+    #[test]
+    fn test_disassemble_sta_absolute_long_x() {
+        let memory = [0x9F, 0x00, 0x90, 0x7E];
+        let instr = disassemble_65c816(&memory, 0x8000).unwrap();
+        assert_eq!(instr.mnemonic, "STA $7E9000,X");
+        assert_eq!(instr.len(), 4);
+    }
+
+    #[test]
+    fn test_disassemble_cmp_absolute_long() {
+        let memory = [0xCF, 0xFF, 0xFF, 0xFF];
+        let instr = disassemble_65c816(&memory, 0x8000).unwrap();
+        assert_eq!(instr.mnemonic, "CMP $FFFFFF");
+        assert_eq!(instr.len(), 4);
     }
 }
