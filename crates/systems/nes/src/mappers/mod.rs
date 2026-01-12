@@ -13,6 +13,7 @@ mod mmc1;
 mod mmc2;
 mod mmc3;
 mod mmc4;
+mod mmc5;
 mod namco118;
 mod nina;
 mod nrom;
@@ -28,6 +29,7 @@ pub use mmc1::Mmc1;
 pub use mmc2::Mmc2;
 pub use mmc3::Mmc3;
 pub use mmc4::Mmc4;
+pub use mmc5::Mmc5;
 pub use namco118::Namco118;
 pub use nina::Nina;
 pub use nrom::Nrom;
@@ -44,6 +46,7 @@ pub enum Mapper {
     Uxrom(Uxrom),
     Cnrom(Cnrom),
     Mmc3(Mmc3),
+    Mmc5(Box<Mmc5>),
     Axrom(Axrom),
     Mmc2(Mmc2),
     Mmc4(Mmc4),
@@ -63,6 +66,7 @@ impl Mapper {
             2 => Mapper::Uxrom(Uxrom::new(cart, ppu)),
             3 => Mapper::Cnrom(Cnrom::new(cart, ppu)),
             4 => Mapper::Mmc3(Mmc3::new(cart, ppu)),
+            5 => Mapper::Mmc5(Box::new(Mmc5::new(cart, ppu))),
             7 => Mapper::Axrom(Axrom::new(cart, ppu)),
             9 => Mapper::Mmc2(Mmc2::new(cart, ppu)),
             10 => Mapper::Mmc4(Mmc4::new(cart, ppu)),
@@ -84,6 +88,7 @@ impl Mapper {
             Mapper::Uxrom(m) => m.read_prg(addr),
             Mapper::Cnrom(m) => m.read_prg(addr),
             Mapper::Mmc3(m) => m.read_prg(addr),
+            Mapper::Mmc5(m) => m.read_prg(addr),
             Mapper::Axrom(m) => m.read_prg(addr),
             Mapper::Mmc2(m) => m.read_prg(addr),
             Mapper::Mmc4(m) => m.read_prg(addr),
@@ -108,6 +113,7 @@ impl Mapper {
             Mapper::Uxrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
             Mapper::Cnrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
             Mapper::Mmc3(m) => m.write_prg(addr, val, ppu, cpu_cycles),
+            Mapper::Mmc5(m) => m.write_prg(addr, val, ppu, cpu_cycles),
             Mapper::Axrom(m) => m.write_prg(addr, val, ppu, cpu_cycles),
             Mapper::Mmc2(m) => m.write_prg(addr, val, ppu, cpu_cycles),
             Mapper::Mmc4(m) => m.write_prg(addr, val, ppu, cpu_cycles),
@@ -128,6 +134,7 @@ impl Mapper {
             Mapper::Uxrom(m) => m.prg_rom(),
             Mapper::Cnrom(m) => m.prg_rom(),
             Mapper::Mmc3(m) => m.prg_rom(),
+            Mapper::Mmc5(m) => m.prg_rom(),
             Mapper::Axrom(m) => m.prg_rom(),
             Mapper::Mmc2(m) => m.prg_rom(),
             Mapper::Mmc4(m) => m.prg_rom(),
@@ -148,6 +155,7 @@ impl Mapper {
             Mapper::Uxrom(_) => false,
             Mapper::Cnrom(_) => false,
             Mapper::Mmc3(m) => m.take_irq_pending(),
+            Mapper::Mmc5(m) => m.take_irq_pending(),
             Mapper::Axrom(_) => false,
             Mapper::Mmc2(_) => false,
             Mapper::Mmc4(_) => false,
@@ -193,6 +201,7 @@ impl Mapper {
             Mapper::Uxrom(_) => 2,
             Mapper::Cnrom(_) => 3,
             Mapper::Mmc3(_) => 4,
+            Mapper::Mmc5(_) => 5,
             Mapper::Axrom(_) => 7,
             Mapper::Mmc2(_) => 9,
             Mapper::Mmc4(_) => 10,
