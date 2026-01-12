@@ -148,6 +148,50 @@ impl InstructionTracer {
                 i, instr.address, bytes_str, instr.mnemonic, state.pc
             )?;
 
+            if !state.registers.is_empty() || !state.flags.flags.is_empty() {
+                // Prefer a consistent register order in output.
+                // This is a debug dump, so stability/readability beats perfect generality.
+                const REG_ORDER: [&str; 9] = ["PC", "C", "A", "X", "Y", "S", "D", "DBR", "PBR"];
+
+                let mut reg_parts: Vec<String> = Vec::new();
+                for name in REG_ORDER {
+                    if let Some(r) = state.registers.iter().find(|r| r.name == name) {
+                        let width_nibbles = (r.width / 4) as usize;
+                        reg_parts.push(format!(
+                            "{}=${:0width$X}",
+                            r.name,
+                            r.value,
+                            width = width_nibbles
+                        ));
+                    }
+                }
+
+                // Append any remaining registers not in the preferred list.
+                for r in &state.registers {
+                    if !REG_ORDER.iter().any(|n| *n == r.name) {
+                        let width_nibbles = (r.width / 4) as usize;
+                        reg_parts.push(format!(
+                            "{}=${:0width$X}",
+                            r.name,
+                            r.value,
+                            width = width_nibbles
+                        ));
+                    }
+                }
+
+                let mut flag_parts: Vec<String> = Vec::new();
+                for (name, value) in &state.flags.flags {
+                    flag_parts.push(format!("{}={}", name, if *value { 1 } else { 0 }));
+                }
+
+                if !reg_parts.is_empty() {
+                    writeln!(file, "        ; {}", reg_parts.join(" "))?;
+                }
+                if !flag_parts.is_empty() {
+                    writeln!(file, "        ; {}", flag_parts.join(" "))?;
+                }
+            }
+
             // Add comment if present
             if let Some(ref comment) = instr.comment {
                 writeln!(file, "        ; {}", comment)?;
