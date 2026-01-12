@@ -2709,8 +2709,11 @@ fn main() {
     let window_height = settings.window_height.max(height);
 
     // ===== HEADLESS MODE FOR DEBUG DUMP =====
-    // If debug dump is requested, run without GUI for faster execution
-    if cli_args.debug_dump_pc.is_some() || cli_args.debug_dump_cycles.is_some() {
+    // If debug dump is requested or breakpoints are set, run without GUI for faster execution
+    if cli_args.debug_dump_pc.is_some()
+        || cli_args.debug_dump_cycles.is_some()
+        || !cli_args.breakpoints.is_empty()
+    {
         eprintln!("Running in headless mode for debug dump...");
 
         if !rom_loaded {
@@ -2734,6 +2737,12 @@ fn main() {
         }
         if let Some(cycles) = trigger_cycles {
             eprintln!("  - After {} cycles", cycles);
+        }
+        if !cli_args.breakpoints.is_empty() {
+            eprintln!("  - When any breakpoint is hit:");
+            for &bp in &cli_args.breakpoints {
+                eprintln!("    - ${:06X}", bp);
+            }
         }
         eprintln!("  - Output file: {}", dump_file);
         eprintln!();
