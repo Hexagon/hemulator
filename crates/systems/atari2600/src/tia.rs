@@ -171,6 +171,13 @@ struct ScanlineState {
     grp0_change_count: u8,
     grp1_changes: [GrpChange; MAX_GRP_CHANGES],
     grp1_change_count: u8,
+    // Mid-scanline playfield changes (for asymmetrical playfields)
+    pf0_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf0_change_count: u8,
+    pf1_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf1_change_count: u8,
+    pf2_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf2_change_count: u8,
 }
 
 /// TIA chip state
@@ -271,6 +278,20 @@ pub struct Tia {
     current_grp1_changes: [GrpChange; MAX_GRP_CHANGES],
     #[serde(skip)]
     current_grp1_change_count: u8,
+
+    // Mid-scanline playfield change tracking for current scanline
+    #[serde(skip)]
+    current_pf0_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf0_change_count: u8,
+    #[serde(skip)]
+    current_pf1_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf1_change_count: u8,
+    #[serde(skip)]
+    current_pf2_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf2_change_count: u8,
 
     // Monotonic scanline counter for debug/telemetry (does not wrap)
     #[serde(skip)]
@@ -441,6 +462,13 @@ impl Tia {
             current_grp0_change_count: 0,
             current_grp1_changes: [GrpChange::default(); MAX_GRP_CHANGES],
             current_grp1_change_count: 0,
+
+            current_pf0_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf0_change_count: 0,
+            current_pf1_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf1_change_count: 0,
+            current_pf2_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf2_change_count: 0,
 
             scanline_counter: 0,
 
@@ -643,11 +671,21 @@ impl Tia {
             grp0_change_count: self.current_grp0_change_count,
             grp1_changes: self.current_grp1_changes,
             grp1_change_count: self.current_grp1_change_count,
+            // Copy mid-scanline playfield changes
+            pf0_changes: self.current_pf0_changes,
+            pf0_change_count: self.current_pf0_change_count,
+            pf1_changes: self.current_pf1_changes,
+            pf1_change_count: self.current_pf1_change_count,
+            pf2_changes: self.current_pf2_changes,
+            pf2_change_count: self.current_pf2_change_count,
         };
 
         // Clear current scanline's changes for the next scanline
         self.current_grp0_change_count = 0;
         self.current_grp1_change_count = 0;
+        self.current_pf0_change_count = 0;
+        self.current_pf1_change_count = 0;
+        self.current_pf2_change_count = 0;
     }
 
     /// Reset TIA to power-on state
@@ -784,6 +822,18 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf0 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                // This is critical for games like Donkey Kong and Space Invaders
+                // that update the playfield mid-scanline
+                if (self.current_pf0_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf0_change_count as usize;
+                    self.current_pf0_change_count += 1;
+                    self.current_pf0_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
             0x0E => {
                 self.writes_pf = self.writes_pf.saturating_add(1);
@@ -791,6 +841,16 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf1 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                if (self.current_pf1_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf1_change_count as usize;
+                    self.current_pf1_change_count += 1;
+                    self.current_pf1_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
             0x0F => {
                 self.writes_pf = self.writes_pf.saturating_add(1);
@@ -798,6 +858,16 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf2 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                if (self.current_pf2_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf2_change_count as usize;
+                    self.current_pf2_change_count += 1;
+                    self.current_pf2_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
 
             // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
@@ -1882,41 +1952,97 @@ impl Tia {
     }
 
     /// Check if a pixel is part of the playfield
+    /// This handles mid-scanline playfield changes for asymmetrical playfields
     fn is_playfield_pixel(state: &ScanlineState, x: usize) -> bool {
         // Playfield is 40 bits wide, each bit controls 4 pixels
         // Playfield is mirrored or repeated for left/right halves
         if x < 80 {
             // Left half: pixels 0-79, bits 0-19
             // Each bit covers 4 pixels
-            Self::get_playfield_bit(state, x / 4)
+            Self::get_playfield_bit(state, x / 4, x)
         } else {
             // Right half: pixels 80-159, bits 0-19 (mirrored or repeated)
             // Each bit covers 4 pixels
             let bit_pos = (x - 80) / 4;
             if state.playfield_reflect {
                 // Mirrored
-                Self::get_playfield_bit(state, 19 - bit_pos)
+                Self::get_playfield_bit(state, 19 - bit_pos, x)
             } else {
                 // Repeated
-                Self::get_playfield_bit(state, bit_pos)
+                Self::get_playfield_bit(state, bit_pos, x)
             }
         }
     }
 
-    /// Get a single bit from the playfield
-    fn get_playfield_bit(state: &ScanlineState, bit: usize) -> bool {
+    /// Get a single bit from the playfield with mid-scanline change support
+    /// This is critical for games like Donkey Kong and Space Invaders that
+    /// update PF registers mid-scanline to create asymmetrical backgrounds
+    fn get_playfield_bit(state: &ScanlineState, bit: usize, x: usize) -> bool {
+        // Get the current values of PF0, PF1, PF2 at position x
+        // accounting for mid-scanline changes
+        let pf0 = Self::get_pf0_at_pixel(state, x);
+        let pf1 = Self::get_pf1_at_pixel(state, x);
+        let pf2 = Self::get_pf2_at_pixel(state, x);
+
         if bit < 4 {
             // PF0 (bits 4-7 map to playfield bits 0-3)
-            (state.pf0 & (0x10 << bit)) != 0
+            (pf0 & (0x10 << bit)) != 0
         } else if bit < 12 {
             // PF1 (bits 7-0 map to playfield bits 4-11)
-            (state.pf1 & (0x80 >> (bit - 4))) != 0
+            (pf1 & (0x80 >> (bit - 4))) != 0
         } else if bit < 20 {
             // PF2 (bits 0-7 map to playfield bits 12-19)
-            (state.pf2 & (0x01 << (bit - 12))) != 0
+            (pf2 & (0x01 << (bit - 12))) != 0
         } else {
             false
         }
+    }
+
+    /// Get PF0 value at a specific pixel position with mid-scanline changes
+    fn get_pf0_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        // If there are no mid-scanline changes, use the latched value
+        if state.pf0_change_count == 0 {
+            return state.pf0;
+        }
+
+        // Find the most recent change before or at this pixel
+        let mut result = state.pf0;
+        for i in 0..(state.pf0_change_count as usize) {
+            if state.pf0_changes[i].pixel as usize <= x {
+                result = state.pf0_changes[i].value;
+            }
+        }
+        result
+    }
+
+    /// Get PF1 value at a specific pixel position with mid-scanline changes
+    fn get_pf1_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        if state.pf1_change_count == 0 {
+            return state.pf1;
+        }
+
+        let mut result = state.pf1;
+        for i in 0..(state.pf1_change_count as usize) {
+            if state.pf1_changes[i].pixel as usize <= x {
+                result = state.pf1_changes[i].value;
+            }
+        }
+        result
+    }
+
+    /// Get PF2 value at a specific pixel position with mid-scanline changes
+    fn get_pf2_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        if state.pf2_change_count == 0 {
+            return state.pf2;
+        }
+
+        let mut result = state.pf2;
+        for i in 0..(state.pf2_change_count as usize) {
+            if state.pf2_changes[i].pixel as usize <= x {
+                result = state.pf2_changes[i].value;
+            }
+        }
+        result
     }
 
     /// Generate audio samples for a given count
@@ -3108,5 +3234,246 @@ mod tests {
         // Light gray should be lighter than mid gray
         // (In the palette, higher luminance = brighter)
         assert!(light_val > mid_val);
+    }
+
+    #[test]
+    fn test_timing_constants_accuracy() {
+        // This test validates the fundamental Atari 2600 timing constants
+        // against official hardware specifications.
+        //
+        // References:
+        // - Atari 2600 TIA Hardware Specification
+        // - "Stella Programmer's Guide" (classic reference)
+        // - problemkaputt.de 2k6specs (comprehensive spec)
+
+        // Verify color clocks per scanline
+        const COLOR_CLOCKS_PER_SCANLINE: u32 = 228;
+        const COLOR_CLOCKS_PER_CPU_CYCLE: u32 = 3;
+        const CPU_CYCLES_PER_SCANLINE: u32 = COLOR_CLOCKS_PER_SCANLINE / COLOR_CLOCKS_PER_CPU_CYCLE;
+
+        assert_eq!(
+            CPU_CYCLES_PER_SCANLINE, 76,
+            "CPU cycles per scanline should be 76 (228 color clocks ÷ 3)"
+        );
+
+        // Verify NTSC frame timing
+        const NTSC_SCANLINES: u32 = 262;
+        const NTSC_CPU_CYCLES_PER_FRAME: u32 = NTSC_SCANLINES * CPU_CYCLES_PER_SCANLINE;
+
+        assert_eq!(
+            NTSC_CPU_CYCLES_PER_FRAME, 19_912,
+            "NTSC frame should be 19,912 CPU cycles (262 scanlines × 76 cycles)"
+        );
+
+        // Verify PAL frame timing
+        const PAL_SCANLINES: u32 = 312;
+        const PAL_CPU_CYCLES_PER_FRAME: u32 = PAL_SCANLINES * CPU_CYCLES_PER_SCANLINE;
+
+        assert_eq!(
+            PAL_CPU_CYCLES_PER_FRAME, 23_712,
+            "PAL frame should be 23,712 CPU cycles (312 scanlines × 76 cycles)"
+        );
+
+        // Verify horizontal timing breakdown
+        const HBLANK_CLOCKS: u32 = 68;
+        const VISIBLE_CLOCKS: u32 = 160;
+
+        assert_eq!(
+            HBLANK_CLOCKS + VISIBLE_CLOCKS,
+            COLOR_CLOCKS_PER_SCANLINE,
+            "HBLANK (68) + Visible (160) should equal total scanline clocks (228)"
+        );
+
+        // Verify implementation matches constants
+        let mut tia = Tia::new();
+
+        // Clock through one complete scanline
+        for _ in 0..76 {
+            tia.clock(); // Each clock = 3 color clocks
+        }
+
+        // Should advance to next scanline (pixel wraps to 0)
+        assert_eq!(
+            tia.pixel, 0,
+            "After 76 CPU cycles (228 color clocks), pixel should wrap to 0"
+        );
+        assert_eq!(
+            tia.scanline, 1,
+            "After one complete scanline, should advance to scanline 1"
+        );
+    }
+
+    #[test]
+    fn test_wsync_timing_accuracy() {
+        // This test validates WSYNC (Wait for Horizontal Sync) timing
+        // WSYNC halts the CPU until the end of the current scanline
+
+        let mut tia = Tia::new();
+
+        // Test WSYNC at various pixel positions
+        let test_cases = [
+            (0, 76),   // Start of scanline: 228÷3 = 76 cycles
+            (3, 75),   // After 1 CPU cycle: (228-3)÷3 = 75 cycles
+            (114, 38), // Middle: (228-114)÷3 = 38 cycles
+            (150, 26), // 2/3 through: (228-150)÷3 = 26 cycles
+            (225, 1),  // Near end: (228-225)÷3 = 1 cycle
+            (227, 1),  // Last pixel: (228-227)÷3 = 1 cycle (rounded up)
+        ];
+
+        for (pixel, expected_cycles) in test_cases {
+            tia.pixel = pixel;
+            let cycles = tia.cpu_cycles_until_scanline_end();
+
+            assert_eq!(
+                cycles, expected_cycles,
+                "WSYNC at pixel {} should wait {} CPU cycles, got {}",
+                pixel, expected_cycles, cycles
+            );
+        }
+
+        // Verify minimum of 1 cycle (safety check)
+        tia.pixel = 228; // Beyond scanline end (shouldn't happen, but test robustness)
+        assert_eq!(
+            tia.cpu_cycles_until_scanline_end(),
+            1,
+            "WSYNC should always wait at least 1 cycle"
+        );
+    }
+
+    #[test]
+    fn test_scanline_advancement_timing() {
+        // This test validates that scanlines advance correctly after
+        // exactly 228 color clocks (76 CPU cycles)
+
+        let mut tia = Tia::new();
+
+        // Start at scanline 0, pixel 0
+        assert_eq!(tia.scanline, 0);
+        assert_eq!(tia.pixel, 0);
+
+        // Clock through one complete scanline (76 CPU cycles = 228 color clocks)
+        for _ in 0..76 {
+            tia.clock(); // Each clock = 3 color clocks
+        }
+
+        // Should now be at scanline 1, pixel 0
+        assert_eq!(
+            tia.scanline, 1,
+            "After 76 CPU cycles, should advance to scanline 1"
+        );
+        assert_eq!(
+            tia.pixel, 0,
+            "After scanline boundary, pixel should reset to 0"
+        );
+
+        // Verify frame wraparound (262 scanlines for NTSC)
+        // Start from scanline 261
+        tia.scanline = 261;
+        tia.pixel = 0;
+
+        // Clock through one scanline
+        for _ in 0..76 {
+            tia.clock();
+        }
+
+        // Should wrap to scanline 0 (start of new frame)
+        assert_eq!(
+            tia.scanline, 0,
+            "After scanline 261, should wrap to scanline 0"
+        );
+        assert_eq!(tia.pixel, 0, "Pixel should be 0 at start of new frame");
+    }
+
+    #[test]
+    fn test_color_clock_to_cpu_cycle_conversion() {
+        // This test validates the 3:1 ratio of color clocks to CPU cycles
+        // Each CPU cycle = 3 color clocks (hardware specification)
+
+        let mut tia = Tia::new();
+
+        // Starting position
+        assert_eq!(tia.pixel, 0);
+
+        // Execute 1 CPU cycle
+        tia.clock();
+
+        // Should advance by 3 color clocks
+        assert_eq!(tia.pixel, 3, "1 CPU cycle should advance 3 color clocks");
+
+        // Execute 25 more CPU cycles (total 26)
+        for _ in 0..25 {
+            tia.clock();
+        }
+
+        // Should be at pixel 78 (26 × 3 = 78 color clocks)
+        assert_eq!(
+            tia.pixel, 78,
+            "26 CPU cycles should advance to pixel 78 (26 × 3)"
+        );
+
+        // Verify exactly at scanline boundary
+        tia.pixel = 225; // 3 color clocks before end
+
+        // 1 CPU cycle should wrap to next scanline
+        tia.clock();
+
+        assert_eq!(tia.pixel, 0, "After reaching 228, pixel should wrap to 0");
+        assert_eq!(tia.scanline, 1, "Should advance to next scanline");
+    }
+
+    #[test]
+    fn test_hblank_offset_calculation() {
+        // This test validates the HBLANK offset used for position calculations
+        // Color clocks 0-67 are HBLANK (68 total)
+        // Color clocks 68-227 are visible (160 total)
+
+        let mut tia = Tia::new();
+
+        // At pixel 0 (in HBLANK), visible x should be 0 (clamped)
+        tia.pixel = 0;
+        assert_eq!(
+            tia.current_visible_x(),
+            0,
+            "Pixel 0 should map to visible x=0 (clamped)"
+        );
+
+        // At pixel 67 (end of HBLANK), visible x should still be 0 (clamped)
+        tia.pixel = 67;
+        assert_eq!(
+            tia.current_visible_x(),
+            0,
+            "Pixel 67 (HBLANK) should map to visible x=0"
+        );
+
+        // At pixel 68 (start of visible area), visible x should be 0
+        tia.pixel = 68;
+        assert_eq!(
+            tia.current_visible_x(),
+            0,
+            "Pixel 68 should map to visible x=0"
+        );
+
+        // At pixel 100, visible x should be 32 (100 - 68)
+        tia.pixel = 100;
+        assert_eq!(
+            tia.current_visible_x(),
+            32,
+            "Pixel 100 should map to visible x=32"
+        );
+
+        // At pixel 227 (last visible pixel), visible x should be 159 (227 - 68)
+        tia.pixel = 227;
+        assert_eq!(
+            tia.current_visible_x(),
+            159,
+            "Pixel 227 should map to visible x=159"
+        );
+
+        // Verify HBLANK constant matches implementation
+        assert_eq!(
+            Tia::HBLANK_COLOR_CLOCKS,
+            68,
+            "HBLANK should be 68 color clocks"
+        );
     }
 }
