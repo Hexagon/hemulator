@@ -198,40 +198,14 @@ impl N64System {
         }
     }
 
-    /// Enable or disable instruction tracing
-    pub fn set_instruction_tracing(&mut self, enabled: bool) {
-        self.instruction_tracer.set_enabled(enabled);
-    }
+    emu_core::impl_instruction_tracer_methods!();
 
     /// Check if instruction tracing is enabled
     pub fn is_instruction_tracing_enabled(&self) -> bool {
         self.instruction_tracer.is_enabled()
     }
 
-    /// Get the instruction tracer (for dumping trace to file)
-    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
-        &self.instruction_tracer
-    }
-
-    /// Add an execution breakpoint
-    pub fn add_breakpoint(&mut self, address: u32) {
-        self.breakpoint_manager.add_execute(address);
-    }
-
-    /// Remove an execution breakpoint
-    pub fn remove_breakpoint(&mut self, address: u32) {
-        self.breakpoint_manager.remove_execute(address);
-    }
-
-    /// Clear all breakpoints
-    pub fn clear_breakpoints(&mut self) {
-        self.breakpoint_manager.clear();
-    }
-
-    /// Get all execution breakpoints
-    pub fn get_breakpoints(&self) -> Vec<u32> {
-        self.breakpoint_manager.get_execute_breakpoints()
-    }
+    emu_core::impl_breakpoint_methods!();
 
     /// Enable or disable breakpoints
     pub fn set_breakpoints_enabled(&mut self, enabled: bool) {

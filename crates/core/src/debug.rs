@@ -242,6 +242,60 @@ pub trait Debugger {
     }
 }
 
+/// Helper macro to implement standard execution history methods for systems with instruction tracers.
+/// This eliminates boilerplate by delegating to the system's `instruction_tracer` field.
+///
+/// # Example
+/// ```ignore
+/// impl Debugger for MySystem {
+///     // ... other methods ...
+///     
+///     impl_debugger_execution_history!();
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_debugger_execution_history {
+    () => {
+        fn get_execution_history(&self) -> Vec<$crate::debug::ExecutionTrace> {
+            self.instruction_tracer.get_history()
+        }
+
+        fn has_execution_history(&self) -> bool {
+            self.instruction_tracer.is_enabled()
+        }
+    };
+}
+
+/// Helper macro to implement standard instruction tracer helper methods.
+/// This eliminates boilerplate for systems that have an `instruction_tracer` field.
+///
+/// Provides:
+/// - `set_instruction_tracing(enabled: bool)` - Enable/disable tracing
+/// - `get_instruction_tracer() -> &InstructionTracer` - Get reference to tracer
+///
+/// # Example
+/// ```ignore
+/// impl MySystem {
+///     impl_instruction_tracer_methods!();
+///     
+///     // ... other methods ...
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_instruction_tracer_methods {
+    () => {
+        /// Enable or disable instruction tracing
+        pub fn set_instruction_tracing(&mut self, enabled: bool) {
+            self.instruction_tracer.set_enabled(enabled);
+        }
+
+        /// Get a reference to the instruction tracer
+        pub fn get_instruction_tracer(&self) -> &$crate::instruction_tracer::InstructionTracer {
+            &self.instruction_tracer
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
