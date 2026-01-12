@@ -45,6 +45,7 @@ pub struct SmsSystem {
 
     // Timing
     cycles: u64,
+    timing_mode: emu_core::apu::TimingMode,
 
     // Debugging
     /// Instruction tracer for debugging
@@ -72,6 +73,7 @@ impl SmsSystem {
             vdp,
             psg,
             cycles: 0,
+            timing_mode: emu_core::apu::TimingMode::Ntsc,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
@@ -87,10 +89,81 @@ impl SmsSystem {
             )
         });
 
+        // Detect timing mode from ROM header
+        self.timing_mode = Self::detect_timing_mode(&rom_data);
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!("SMS: Detected timing mode: {:?}", self.timing_mode)
+        });
+
+        // Update PSG timing
+        self.psg.borrow_mut().set_timing(self.timing_mode);
+
         // Create new memory with ROM
         let memory = SmsMemory::new(rom_data, Rc::clone(&self.vdp), Rc::clone(&self.psg));
         self.cpu = CpuZ80::new(memory);
         self.reset();
+    }
+
+    /// Detect timing mode (PAL/NTSC) from ROM header
+    fn detect_timing_mode(rom_data: &[u8]) -> emu_core::apu::TimingMode {
+        // Check for TMR SEGA header at offset 0x7FF0
+        if rom_data.len() >= 0x7FF0 + 16 {
+            let header_region = &rom_data[0x7FF0..0x7FF0 + 16];
+            
+            // Check for "TMR SEGA" signature
+            if &header_region[0..8] == b"TMR SEGA" {
+                // Byte 0x0F (offset 15) contains region code
+                let region = header_region[15];
+                
+                // Region codes:
+                // 0x30-0x3F: Japan (NTSC)
+                // 0x40-0x4F: Export (PAL/NTSC, check bits)
+                // 0x50-0x5F: Japan (NTSC)
+                // 0x60-0x6F: Export (PAL/NTSC, check bits)
+                //
+                // For export regions, bits indicate:
+                // Bit 4 (0x40): SMS Japan
+                // Bit 5 (0x20): SMS Export  
+                // Bit 6 (0x10): Game Gear Japan
+                // Bit 7 (0x08): Game Gear Export
+                //
+                // PAL/NTSC is determined by lower nibble:
+                // 0x3 = Japan NTSC
+                // 0x4 = Export (could be PAL or NTSC)
+                // 0x5 = Japan NTSC
+                // 0x6 = Export (could be PAL or NTSC)
+                // 0x7 = Export (could be PAL or NTSC)
+                
+                match region >> 4 {
+                    0x3 | 0x5 => {
+                        // Japan region - always NTSC
+                        log(LogCategory::CPU, LogLevel::Info, || {
+                            format!("SMS: Japan region detected (region byte: 0x{:02X}), using NTSC", region)
+                        });
+                        return emu_core::apu::TimingMode::Ntsc;
+                    }
+                    0x4 | 0x6 | 0x7 => {
+                        // Export region - could be PAL or NTSC
+                        // Without additional metadata, assume PAL for European export
+                        log(LogCategory::CPU, LogLevel::Info, || {
+                            format!("SMS: Export region detected (region byte: 0x{:02X}), assuming PAL", region)
+                        });
+                        return emu_core::apu::TimingMode::Pal;
+                    }
+                    _ => {
+                        log(LogCategory::CPU, LogLevel::Warn, || {
+                            format!("SMS: Unknown region code 0x{:02X}, defaulting to NTSC", region)
+                        });
+                    }
+                }
+            }
+        }
+
+        // Default to NTSC if no valid header found
+        log(LogCategory::CPU, LogLevel::Info, || {
+            "SMS: No valid TMR SEGA header found, defaulting to NTSC".to_string()
+        });
+        emu_core::apu::TimingMode::Ntsc
     }
 
     /// Set controller 1 state
@@ -131,7 +204,19 @@ impl System for SmsSystem {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        let target_cycles = 59659; // ~3.58 MHz / 60 Hz
+        // Calculate target cycles and scanlines based on timing mode
+        let (target_cycles, total_scanlines, cycles_per_scanline) = match self.timing_mode {
+            emu_core::apu::TimingMode::Ntsc => {
+                // NTSC: 3.579545 MHz / 60 Hz = 59659 cycles/frame
+                // 262 scanlines total
+                (59659, 262, 228) // ~228 cycles per scanline
+            }
+            emu_core::apu::TimingMode::Pal => {
+                // PAL: 3.546894 MHz / 50 Hz = 70938 cycles/frame
+                // 313 scanlines total
+                (70938, 313, 227) // ~227 cycles per scanline
+            }
+        };
 
         while self.cycles < target_cycles {
             // Log CPU state on first few cycles (using cycles count directly)
@@ -162,8 +247,7 @@ impl System for SmsSystem {
             }
 
             // Update VDP scanline based on cycles
-            // Each scanline takes approximately 228 cycles (~3.58MHz / 262 scanlines / 60Hz)
-            let current_scanline = (self.cycles / 228) % 262;
+            let current_scanline = (self.cycles / cycles_per_scanline) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
@@ -195,6 +279,10 @@ impl System for SmsSystem {
             "system": "sms",
             "version": 1,
             "cycles": self.cycles,
+            "timing_mode": match self.timing_mode {
+                emu_core::apu::TimingMode::Ntsc => "ntsc",
+                emu_core::apu::TimingMode::Pal => "pal",
+            },
             "cpu": {
                 // Main registers
                 "a": self.cpu.a,
@@ -289,6 +377,14 @@ impl System for SmsSystem {
         // Load cycles
         if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
             self.cycles = cycles;
+        }
+
+        // Load timing mode
+        if let Some(timing_str) = state.get("timing_mode").and_then(|v| v.as_str()) {
+            self.timing_mode = match timing_str {
+                "pal" => emu_core::apu::TimingMode::Pal,
+                _ => emu_core::apu::TimingMode::Ntsc,
+            };
         }
 
         // Load CPU state
@@ -396,11 +492,17 @@ impl SmsSystem {
         self.psg.borrow_mut().generate_samples(count)
     }
 
-    /// Set timing mode (NTSC/PAL) for the PSG
+    /// Set timing mode (NTSC/PAL) for the system
     ///
-    /// This updates the PSG's clock rate to match the selected timing mode.
+    /// This updates both the system timing and PSG's clock rate to match the selected mode.
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
+        self.timing_mode = timing;
         self.psg.borrow_mut().set_timing(timing);
+    }
+
+    /// Get current timing mode
+    pub fn get_timing(&self) -> emu_core::apu::TimingMode {
+        self.timing_mode
     }
 
     /// Enable or disable instruction tracing
@@ -973,5 +1075,92 @@ mod tests {
 
         let result = system.load_state(&invalid_state);
         assert!(result.is_err(), "Should reject state from different system");
+    }
+
+    #[test]
+    fn test_pal_timing_detection() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM with PAL region header
+        let mut rom = vec![0; 0x8000];
+        
+        // Add TMR SEGA header at 0x7FF0
+        rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
+        rom[0x7FFF] = 0x40; // Export region (PAL)
+
+        system.load_rom(rom);
+
+        // Should detect as PAL
+        assert_eq!(system.get_timing(), TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_ntsc_timing_detection() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM with Japan (NTSC) region header
+        let mut rom = vec![0; 0x8000];
+        
+        // Add TMR SEGA header at 0x7FF0
+        rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
+        rom[0x7FFF] = 0x30; // Japan region (NTSC)
+
+        system.load_rom(rom);
+
+        // Should detect as NTSC
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+    }
+
+    #[test]
+    fn test_default_timing_no_header() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM without header
+        let rom = vec![0; 0x8000];
+
+        system.load_rom(rom);
+
+        // Should default to NTSC
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+    }
+
+    #[test]
+    fn test_pal_frame_cycles() {
+        // PAL: 3.546894 MHz / 50 Hz ≈ 70938 cycles per frame
+        let target_cycles = 70938;
+        let expected = 3_546_894.0 / 50.0;
+
+        // Allow 1 cycle tolerance due to rounding
+        assert!(
+            (target_cycles as f64 - expected).abs() < 1.0,
+            "PAL target cycles {} should be close to expected {}",
+            target_cycles,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_save_load_state_timing_mode() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Set to PAL mode
+        system.set_timing(TimingMode::Pal);
+        assert_eq!(system.get_timing(), TimingMode::Pal);
+
+        // Save state
+        let state = system.save_state();
+
+        // Change to NTSC
+        system.set_timing(TimingMode::Ntsc);
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+
+        // Load state - should restore PAL
+        system.load_state(&state).unwrap();
+        assert_eq!(system.get_timing(), TimingMode::Pal);
     }
 }
