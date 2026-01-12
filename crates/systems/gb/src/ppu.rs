@@ -217,12 +217,11 @@ pub struct Ppu {
     obj_palette_data: [u8; 64],
     /// CGB mode enabled flag
     cgb_mode: bool,
-
     /// Per-scanline register states (144 scanlines for the visible screen)
     /// Captures register values at the start of each scanline to support scanline split effects
     scanline_states: [ScanlineState; 144],
     /// Flag indicating whether scanline states have been captured this frame
-    /// Used to determine whether to use per-scanline state or current register values
+    /// Used to avoid O(n²) iteration in get_scanline_state()
     scanline_states_captured: bool,
     /// Window internal line counter
     /// Increments only when the window is visible on a scanline, persists across scanlines
