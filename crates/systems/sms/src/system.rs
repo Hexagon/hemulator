@@ -109,12 +109,12 @@ impl SmsSystem {
         // Check for TMR SEGA header at offset 0x7FF0
         if rom_data.len() >= 0x7FF0 + 16 {
             let header_region = &rom_data[0x7FF0..0x7FF0 + 16];
-            
+
             // Check for "TMR SEGA" signature
             if &header_region[0..8] == b"TMR SEGA" {
                 // Byte 0x0F (offset 15) contains region code
                 let region = header_region[15];
-                
+
                 // Region codes:
                 // 0x30-0x3F: Japan (NTSC)
                 // 0x40-0x4F: Export (PAL/NTSC, check bits)
@@ -123,7 +123,7 @@ impl SmsSystem {
                 //
                 // For export regions, bits indicate:
                 // Bit 4 (0x40): SMS Japan
-                // Bit 5 (0x20): SMS Export  
+                // Bit 5 (0x20): SMS Export
                 // Bit 6 (0x10): Game Gear Japan
                 // Bit 7 (0x08): Game Gear Export
                 //
@@ -133,12 +133,15 @@ impl SmsSystem {
                 // 0x5 = Japan NTSC
                 // 0x6 = Export (could be PAL or NTSC)
                 // 0x7 = Export (could be PAL or NTSC)
-                
+
                 match region >> 4 {
                     0x3 | 0x5 => {
                         // Japan region - always NTSC
                         log(LogCategory::CPU, LogLevel::Info, || {
-                            format!("SMS: Japan region detected (region byte: 0x{:02X}), using NTSC", region)
+                            format!(
+                                "SMS: Japan region detected (region byte: 0x{:02X}), using NTSC",
+                                region
+                            )
                         });
                         return emu_core::apu::TimingMode::Ntsc;
                     }
@@ -146,13 +149,19 @@ impl SmsSystem {
                         // Export region - could be PAL or NTSC
                         // Without additional metadata, assume PAL for European export
                         log(LogCategory::CPU, LogLevel::Info, || {
-                            format!("SMS: Export region detected (region byte: 0x{:02X}), assuming PAL", region)
+                            format!(
+                                "SMS: Export region detected (region byte: 0x{:02X}), assuming PAL",
+                                region
+                            )
                         });
                         return emu_core::apu::TimingMode::Pal;
                     }
                     _ => {
                         log(LogCategory::CPU, LogLevel::Warn, || {
-                            format!("SMS: Unknown region code 0x{:02X}, defaulting to NTSC", region)
+                            format!(
+                                "SMS: Unknown region code 0x{:02X}, defaulting to NTSC",
+                                region
+                            )
                         });
                     }
                 }
@@ -1084,7 +1093,7 @@ mod tests {
 
         // Create a ROM with PAL region header
         let mut rom = vec![0; 0x8000];
-        
+
         // Add TMR SEGA header at 0x7FF0
         rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
         rom[0x7FFF] = 0x40; // Export region (PAL)
@@ -1102,7 +1111,7 @@ mod tests {
 
         // Create a ROM with Japan (NTSC) region header
         let mut rom = vec![0; 0x8000];
-        
+
         // Add TMR SEGA header at 0x7FF0
         rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
         rom[0x7FFF] = 0x30; // Japan region (NTSC)

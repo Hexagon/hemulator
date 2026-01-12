@@ -350,7 +350,11 @@ impl Vdp {
         load_u8!(state, "code_register", self.code_register);
         load_u8!(state, "read_buffer", self.read_buffer);
         load_bool!(state, "write_latch", self.write_latch);
-        load_bool!(state, "frame_interrupt_pending", self.frame_interrupt_pending);
+        load_bool!(
+            state,
+            "frame_interrupt_pending",
+            self.frame_interrupt_pending
+        );
         load_bool!(state, "line_interrupt_pending", self.line_interrupt_pending);
         load_u8!(state, "line_counter", self.line_counter);
         load_bool!(state, "sprite_overflow", self.sprite_overflow);
