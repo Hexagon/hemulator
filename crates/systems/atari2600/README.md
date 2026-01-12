@@ -433,6 +433,54 @@ Only standard schemes supported: 2K, 4K, F8, FA, F6, F4. Missing formats:
 - **Impact**: Medium - affects specific commercial games
 - **Games affected**: Pitfall II, Decathlon, Espial, Parker Bros titles
 
+### Hardware-Accurate Behaviors (Not Bugs)
+
+These behaviors are authentic to the original hardware and affect all emulators:
+
+#### Sprite Flicker (e.g., Pac-Man Ghosts)
+
+✅ **Hardware-Accurate** ⚠️ **Appears as Bug on Modern Displays**
+
+**Background**: The Atari 2600 TIA only supports 2 player sprites (Player 0 and Player 1) simultaneously. Games needing more sprites use "sprite multiplexing" - rapidly cycling through sprites on alternate frames.
+
+**Example - Pac-Man**:
+- Game needs 5 sprites: Pac-Man + 4 ghosts
+- Hardware limitation: Only 2 sprite registers available
+- Solution: Pac-Man uses Player 0, ghosts cycle through Player 1 across frames
+- Result: Ghosts appear to flash/flicker
+
+**On Original Hardware (CRT TV)**:
+- CRT phosphor persistence naturally blends flickering sprites
+- Fast phosphor decay creates a "ghosting" effect that makes all sprites appear semi-solid
+- Flicker is less noticeable due to scanline interlacing and analog display characteristics
+
+**On Modern Displays and Emulators**:
+- LCD/LED displays have instant pixel response (no phosphor persistence)
+- Digital rendering shows sharp frame transitions
+- Flicker becomes very pronounced and distracting
+
+**Solution Used by Other Emulators**:
+- **Stella**: Offers "TV Effects" → "Phosphor" mode with adjustable frame blending (0-100%)
+- **z26**: Basic frame blending options via configuration
+- **Effect**: Blends current frame with previous frame(s) to simulate CRT phosphor decay
+- **Trade-off**: Reduces flicker but can blur fast-moving objects
+
+**Status in This Emulator**:
+- ✅ Sprite rendering is cycle-accurate and hardware-correct
+- ⚠️ No frame blending/phosphor simulation currently implemented
+- 💡 **Workaround**: Use display filters (View menu) for CRT simulation effects
+  - Filters apply scanlines and phosphor patterns but not temporal blending
+  - Temporal (inter-frame) blending would require storing previous frame buffers
+
+**Other Affected Games**:
+- **Space Invaders**: Flicker on invader formations
+- **Asteroids**: Flicker on asteroid sprites
+- **Centipede**: Flicker on centipede segments
+- Any game displaying more than 2 moving objects simultaneously
+
+**Technical Details**:
+For those interested, this is a well-documented limitation of the TIA chip. See the "References" section for hardware documentation explaining the 2-sprite limit and common multiplexing techniques.
+
 ### Timing and Rendering
 
 #### Cycle-Accurate Rendering
