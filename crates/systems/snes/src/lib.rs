@@ -253,6 +253,7 @@ impl System for SnesSystem {
             // Execute CPU until end of active display portion of scanline
             while self.current_cycles < scanline_target.saturating_sub(40) {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+                self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.total_cycles += cycles as u64;
@@ -273,6 +274,7 @@ impl System for SnesSystem {
             // Complete the scanline
             while self.current_cycles < scanline_target {
                 let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+                self.cpu.bus_mut().set_last_cpu_pc(pc_before);
                 let cycles = self.cpu.step();
                 self.current_cycles += cycles;
                 self.total_cycles += cycles as u64;
@@ -311,6 +313,8 @@ impl System for SnesSystem {
 
         // Execute remaining VBlank cycles
         while self.current_cycles < self.frame_cycles {
+            let pc_before = ((self.cpu.cpu.pbr as u32) << 16) | (self.cpu.cpu.pc as u32);
+            self.cpu.bus_mut().set_last_cpu_pc(pc_before);
             let cycles = self.cpu.step();
             self.current_cycles += cycles;
             self.total_cycles += cycles as u64;
