@@ -229,6 +229,26 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-enter
 - **Typical**: Runs at full speed on modern CPUs
 - **Single-threaded**: Uses one CPU core
 
+### Performance Characteristics
+
+**Cycle-Accurate Model**:
+- PPU ticks 3 times per CPU cycle (89,340 PPU ticks per NTSC frame)
+- VBlank/NMI timing exact to PPU dot (scanline 241, dot 1)
+- Sprite evaluation at cycle-accurate timing (dot 192)
+- Rendering overhead: ~51% of frame time (optimizable)
+
+**FPS Independence**: 
+- ✅ **Cycle accuracy preserved at any FPS** - Low display framerate does NOT affect emulation accuracy
+- Time-based emulation model maintains perfect timing regardless of display performance
+- Frame catch-up mechanism steps multiple frames while preserving cycle-accurate timing
+- Audio, mappers, and interrupts unaffected by rendering speed
+
+**Detailed Analysis**: See [NES_PERFORMANCE_REVIEW.md](../../../NES_PERFORMANCE_REVIEW.md) for comprehensive performance analysis including:
+- Cycle accuracy validation (100% accurate)
+- Performance bottleneck identification
+- Safe optimization opportunities
+- Impact of low FPS on cycle accuracy (no effect)
+
 ## Future Improvements
 
 - Additional mappers for expansion audio:
@@ -249,6 +269,7 @@ When adding NES features:
 ## References
 
 - **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
+- **Performance Review**: [NES_PERFORMANCE_REVIEW.md](../../../NES_PERFORMANCE_REVIEW.md)
 - **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system)
 - **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **NESDev Wiki**: https://www.nesdev.org/
