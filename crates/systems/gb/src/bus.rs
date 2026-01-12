@@ -92,11 +92,13 @@
 //! - ✅ CGB-specific registers (VBK, BCPS/BCPD, OCPS/OCPD, KEY1, SVBK)
 //! - ✅ Speed switching (KEY1 at 0xFF4D, CGB only)
 //! - ✅ WRAM banking (SVBK at 0xFF70, CGB only)
+//! - ✅ Serial transfer (0xFF01, 0xFF02, with loopback mode)
+//! - ✅ HDMA (0xFF51-0xFF55, CGB only) - General Purpose and HBlank DMA
+//! - ✅ Infrared port (RP at 0xFF56, CGB only, register access only)
 //!
 //! ## Not Implemented
-//! - ❌ Serial transfer (0xFF01, 0xFF02)
-//! - ❌ HDMA (0xFF51-0xFF55, CGB only)
-//! - ❌ Infrared port (RP at 0xFF56, CGB only)
+//! - ❌ External link cable hardware emulation
+//! - ❌ Actual infrared hardware communication
 
 use crate::apu::GbApu;
 use crate::mappers::Mapper;
@@ -156,6 +158,26 @@ pub struct GbBus {
     /// Bits 0-1: Signal receive (read-only, stubbed to 0)
     /// Bits 2-5: Unused
     rp: u8,
+    /// HDMA Source High (0xFF51, CGB only)
+    hdma1: u8,
+    /// HDMA Source Low (0xFF52, CGB only)
+    hdma2: u8,
+    /// HDMA Destination High (0xFF53, CGB only)
+    hdma3: u8,
+    /// HDMA Destination Low (0xFF54, CGB only)
+    hdma4: u8,
+    /// HDMA Length/Mode/Start (0xFF55, CGB only)
+    /// Bit 7: 0=General Purpose DMA, 1=HBlank DMA
+    /// Bits 0-6: Length (in 16-byte blocks - 1)
+    hdma5: u8,
+    /// HDMA active flag
+    hdma_active: bool,
+    /// HDMA remaining length (in 16-byte blocks)
+    hdma_remaining: u8,
+    /// HDMA source address (actual address, updated during transfer)
+    hdma_source: u16,
+    /// HDMA destination address (actual address, updated during transfer)
+    hdma_dest: u16,
 }
 
 impl GbBus {
@@ -180,6 +202,15 @@ impl GbBus {
             serial_bit_counter: 0,
             serial_cycle_counter: 0,
             rp: 0,
+            hdma1: 0,
+            hdma2: 0,
+            hdma3: 0,
+            hdma4: 0,
+            hdma5: 0xFF, // All bits set when inactive
+            hdma_active: false,
+            hdma_remaining: 0,
+            hdma_source: 0,
+            hdma_dest: 0,
         }
     }
 
@@ -243,6 +274,94 @@ impl GbBus {
         }
 
         false
+    }
+
+    /// Write to HDMA5 register - triggers DMA transfer
+    fn write_hdma5(&mut self, val: u8) {
+        // If bit 7 is 0, this is a General Purpose DMA (immediate transfer)
+        // If bit 7 is 1, this is an HBlank DMA (transfer during HBlank)
+        
+        let is_hblank_mode = (val & 0x80) != 0;
+        let length = ((val & 0x7F) + 1) as u16; // Length in 16-byte blocks
+        
+        // If HDMA is active and we're writing 0 to bit 7, stop the transfer
+        if self.hdma_active && !is_hblank_mode {
+            self.hdma_active = false;
+            self.hdma5 = 0xFF;
+            return;
+        }
+        
+        // Calculate source and destination addresses
+        // Source: HDMA1:HDMA2, but lower 4 bits of HDMA2 are ignored
+        let source = ((self.hdma1 as u16) << 8) | ((self.hdma2 as u16) & 0xF0);
+        
+        // Destination: HDMA3:HDMA4 + 0x8000, lower 4 bits of HDMA4 are ignored
+        // Destination is always in VRAM (0x8000-0x9FFF)
+        let dest = 0x8000 | (((self.hdma3 as u16) << 8) | ((self.hdma4 as u16) & 0xF0)) & 0x1FFF;
+        
+        self.hdma_source = source;
+        self.hdma_dest = dest;
+        self.hdma_remaining = length as u8;
+        self.hdma5 = val & 0x7F; // Store the length part
+        
+        if is_hblank_mode {
+            // HBlank DMA - will be performed during HBlank periods
+            self.hdma_active = true;
+        } else {
+            // General Purpose DMA - perform immediately
+            self.perform_gdma();
+            self.hdma5 = 0xFF; // Transfer complete
+        }
+    }
+    
+    /// Perform General Purpose DMA (immediate transfer)
+    fn perform_gdma(&mut self) {
+        // Transfer all blocks immediately
+        let blocks = self.hdma_remaining;
+        
+        for _ in 0..blocks {
+            // Transfer one 16-byte block
+            for i in 0..16 {
+                let byte = self.read(self.hdma_source + i);
+                self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
+            }
+            
+            self.hdma_source += 16;
+            self.hdma_dest += 16;
+        }
+        
+        self.hdma_remaining = 0;
+        self.hdma_active = false;
+    }
+    
+    /// Perform one block of HBlank DMA
+    /// Should be called during HBlank period
+    /// Returns true if transfer is complete
+    pub fn step_hdma(&mut self) -> bool {
+        if !self.hdma_active || self.hdma_remaining == 0 {
+            return false;
+        }
+        
+        // Transfer one 16-byte block during HBlank
+        for i in 0..16 {
+            let byte = self.read(self.hdma_source + i);
+            self.ppu.write_vram(self.hdma_dest - 0x8000 + i, byte);
+        }
+        
+        self.hdma_source += 16;
+        self.hdma_dest += 16;
+        self.hdma_remaining -= 1;
+        
+        // Update HDMA5 register
+        if self.hdma_remaining == 0 {
+            // Transfer complete
+            self.hdma_active = false;
+            self.hdma5 = 0xFF;
+            return true;
+        } else {
+            self.hdma5 = self.hdma_remaining - 1;
+            return false;
+        }
     }
 
     /// Check if CGB mode is enabled
@@ -463,6 +582,19 @@ impl MemoryLr35902 for GbBus {
                 0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
                 0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
+                // HDMA registers (CGB only)
+                0xFF51 => self.hdma1,
+                0xFF52 => self.hdma2,
+                0xFF53 => self.hdma3,
+                0xFF54 => self.hdma4,
+                0xFF55 => {
+                    // Reading HDMA5 returns remaining length or 0xFF if inactive
+                    if self.hdma_active {
+                        (self.hdma_remaining.saturating_sub(1)) & 0x7F // Bit 7 is 0 during HBlank DMA, value is (remaining - 1)
+                    } else {
+                        0xFF
+                    }
+                }
                 0xFF56 => self.rp,                  // RP - Infrared port (CGB only)
                 0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
                 0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
@@ -568,7 +700,13 @@ impl MemoryLr35902 for GbBus {
                     0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
                     0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
-                    0xFF56 => self.rp = val & 0xC1,        // RP - Infrared port (CGB only, only bits 0, 6, 7)
+                    // HDMA registers (CGB only)
+                    0xFF51 => self.hdma1 = val,
+                    0xFF52 => self.hdma2 = val & 0xF0, // Lower 4 bits are ignored
+                    0xFF53 => self.hdma3 = val & 0x1F, // Only bits 0-4 are used (VRAM range 0x8000-0x9FFF)
+                    0xFF54 => self.hdma4 = val & 0xF0, // Lower 4 bits are ignored
+                    0xFF55 => self.write_hdma5(val),   // HDMA Length/Mode/Start
+                    0xFF56 => self.rp = val & 0xC1,    // RP - Infrared port (CGB only, only bits 0, 6, 7)
                     0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
                     0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
                     0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI

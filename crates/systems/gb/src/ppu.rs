@@ -899,8 +899,8 @@ impl Ppu {
     /// - Mode 0 (HBlank): Cycles 252-455 (204 cycles typical)
     /// - Mode 1 (VBlank): Lines 144-153
     /// Step the PPU with the given number of cycles
-    /// Returns (vblank_started, stat_interrupt)
-    pub fn step(&mut self, cycles: u32) -> (bool, bool) {
+    /// Returns (vblank_started, stat_interrupt, hblank_entered)
+    pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
         // Accumulate cycles
         self.cycle_counter += cycles;
 
@@ -924,10 +924,10 @@ impl Ppu {
             }
         }
 
-        // Update STAT mode bits and check for STAT interrupt
-        let stat_interrupt = self.update_stat_mode();
+        // Update STAT mode bits and check for STAT interrupt and HBlank entry
+        let (stat_interrupt, hblank_entered) = self.update_stat_mode();
 
-        (vblank_started, stat_interrupt)
+        (vblank_started, stat_interrupt, hblank_entered)
     }
 
     /// Update the PPU mode bits in STAT register and check for STAT interrupt
@@ -938,8 +938,8 @@ impl Ppu {
     /// - LY < 144 and cycle_counter < 252: Mode 3 (Pixel Transfer)
     /// - LY < 144 and cycle_counter >= 252: Mode 0 (HBlank)
     ///
-    /// Returns true if a STAT interrupt should be triggered
-    fn update_stat_mode(&mut self) -> bool {
+    /// Returns (stat_interrupt, hblank_entered)
+    fn update_stat_mode(&mut self) -> (bool, bool) {
         // Get previous mode before updating
         let prev_mode = self.stat & 0x03;
 
@@ -949,7 +949,7 @@ impl Ppu {
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
             // LCD disabled: mode is always 0
-            return false;
+            return (false, false);
         }
 
         let mode = if self.ly >= 144 {
@@ -969,7 +969,11 @@ impl Ppu {
         // Set mode bits
         self.stat |= mode;
 
+        // Check if we just entered HBlank
+        let hblank_entered = mode == 0 && prev_mode != 0;
+
         // Check if mode changed
+        let mut stat_interrupt = false;
         if mode != prev_mode {
             // Store new mode for next iteration
             self.prev_mode = mode;
@@ -980,24 +984,20 @@ impl Ppu {
             // Bit 4: Mode 1 (VBlank) interrupt enable
             // Bit 5: Mode 2 (OAM) interrupt enable
             // Bit 6: LYC=LY interrupt enable
-            let stat_interrupt = match mode {
+            stat_interrupt = match mode {
                 0 => (self.stat & 0x08) != 0, // HBlank interrupt (bit 3)
                 1 => (self.stat & 0x10) != 0, // VBlank interrupt (bit 4)
                 2 => (self.stat & 0x20) != 0, // OAM interrupt (bit 5)
                 _ => false,                   // Mode 3 doesn't have interrupt
             };
-
-            if stat_interrupt {
-                return true;
-            }
         }
 
         // Also check LYC=LY interrupt (bit 6)
         if (self.stat & 0x04) != 0 && (self.stat & 0x40) != 0 {
-            return true;
+            stat_interrupt = true;
         }
 
-        false
+        (stat_interrupt, hblank_entered)
     }
 
     // Tile viewer helper methods
@@ -1114,7 +1114,7 @@ mod tests {
     fn test_vblank_detection() {
         let mut ppu = Ppu::new();
         ppu.ly = 143;
-        let (vblank, _stat) = ppu.step(456);
+        let (vblank, _stat, _hblank) = ppu.step(456);
         assert!(vblank);
         assert_eq!(ppu.ly, 144);
     }
@@ -1214,17 +1214,17 @@ mod tests {
         ppu.cycle_counter = 0;
 
         // Step to mode 2 (OAM search, cycles 0-79) - no interrupt yet
-        let (_vblank, stat) = ppu.step(40);
+        let (_vblank, stat, _hblank) = ppu.step(40);
         assert!(!stat);
         assert_eq!(ppu.stat & 0x03, 2); // Mode 2
 
         // Step to mode 3 (pixel transfer, cycles 80-251) - no interrupt
-        let (_vblank, stat) = ppu.step(100);
+        let (_vblank, stat, _hblank) = ppu.step(100);
         assert!(!stat);
         assert_eq!(ppu.stat & 0x03, 3); // Mode 3
 
         // Step to mode 0 (HBlank, cycles 252-455) - should trigger STAT interrupt
-        let (_vblank, stat) = ppu.step(120); // Now at cycle 260, which is mode 0
+        let (_vblank, stat, _hblank) = ppu.step(120); // Now at cycle 260, which is mode 0
         assert!(stat); // HBlank STAT interrupt should fire
         assert_eq!(ppu.stat & 0x03, 0); // Mode 0
     }
@@ -1238,7 +1238,7 @@ mod tests {
         ppu.cycle_counter = 400; // Near end of previous scanline
 
         // Step to next scanline - should enter mode 2 and trigger interrupt
-        let (_vblank, stat) = ppu.step(60);
+        let (_vblank, stat, _hblank) = ppu.step(60);
         assert!(stat); // OAM STAT interrupt should fire
         assert_eq!(ppu.stat & 0x03, 2); // Mode 2
         assert_eq!(ppu.ly, 1);
@@ -1253,7 +1253,7 @@ mod tests {
         ppu.lyc = 11;
 
         // Step to line 11 - should trigger LYC=LY interrupt
-        let (_vblank, stat) = ppu.step(456);
+        let (_vblank, stat, _hblank) = ppu.step(456);
         assert!(stat); // LYC=LY STAT interrupt should fire
         assert_eq!(ppu.ly, 11);
         assert!(ppu.stat & 0x04 != 0); // Coincidence flag should be set

@@ -441,8 +441,8 @@ impl System for GbSystem {
                 self.cpu.memory.request_interrupt(0x04);
             }
 
-            // Step PPU and handle VBlank and STAT interrupts
-            let (vblank_started, stat_interrupt) = self.cpu.memory.ppu.step(cpu_cycles);
+            // Step PPU and handle VBlank, STAT interrupts, and HDMA
+            let (vblank_started, stat_interrupt, hblank_entered) = self.cpu.memory.ppu.step(cpu_cycles);
             
             if vblank_started {
                 // V-Blank started - request VBlank interrupt (bit 0)
@@ -452,6 +452,11 @@ impl System for GbSystem {
             if stat_interrupt {
                 // STAT interrupt - request STAT interrupt (bit 1)
                 self.cpu.memory.request_interrupt(0x02);
+            }
+            
+            // Perform HDMA transfer during HBlank if active
+            if hblank_entered {
+                self.cpu.memory.step_hdma();
             }
             
             // Step serial transfer and handle serial interrupt
@@ -1962,5 +1967,90 @@ mod tests {
         let rp = sys.cpu.memory.read(0xFF56);
         assert_eq!(rp & 0xC1, 0xC1, "RP should mask non-writable bits");
         assert_eq!(rp & 0x3E, 0x00, "Bits 1-5 should read as 0");
+    }
+
+    #[test]
+    fn test_hdma_register_access() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test HDMA register writes
+        sys.cpu.memory.write(0xFF51, 0x12); // Source high
+        sys.cpu.memory.write(0xFF52, 0x34); // Source low (lower 4 bits ignored)
+        sys.cpu.memory.write(0xFF53, 0x90); // Dest high (only bits 0-4)
+        sys.cpu.memory.write(0xFF54, 0xAB); // Dest low (lower 4 bits ignored)
+
+        // Verify reads
+        assert_eq!(sys.cpu.memory.read(0xFF51), 0x12);
+        assert_eq!(sys.cpu.memory.read(0xFF52), 0x30); // Lower 4 bits masked
+        assert_eq!(sys.cpu.memory.read(0xFF53), 0x10); // Only bits 0-4 used
+        assert_eq!(sys.cpu.memory.read(0xFF54), 0xA0); // Lower 4 bits masked
+
+        // HDMA5 should read 0xFF when inactive
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF);
+    }
+
+    #[test]
+    fn test_hdma_gdma_transfer() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Set up source data in WRAM
+        for i in 0..32 {
+            sys.cpu.memory.write(0xC000 + i, i as u8);
+        }
+
+        // Configure HDMA for General Purpose DMA (immediate transfer)
+        sys.cpu.memory.write(0xFF51, 0xC0); // Source: 0xC000
+        sys.cpu.memory.write(0xFF52, 0x00);
+        sys.cpu.memory.write(0xFF53, 0x90); // Dest: 0x9000 (VRAM)
+        sys.cpu.memory.write(0xFF54, 0x00);
+        sys.cpu.memory.write(0xFF55, 0x01); // Transfer 2 blocks (32 bytes), GDMA mode (bit 7 = 0)
+
+        // HDMA5 should read 0xFF after GDMA completes immediately
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF);
+
+        // Verify data was transferred to VRAM
+        for i in 0..32 {
+            let vram_data = sys.cpu.memory.ppu.read_vram(0x1000 + i); // VRAM offset 0x1000 = address 0x9000
+            assert_eq!(vram_data, i as u8, "VRAM byte {} mismatch", i);
+        }
+    }
+
+    #[test]
+    fn test_hdma_hblank_dma() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Set up source data in WRAM
+        for i in 0..16 {
+            sys.cpu.memory.write(0xC000 + i, (i + 0x42) as u8);
+        }
+
+        // Configure HDMA for HBlank DMA
+        sys.cpu.memory.write(0xFF51, 0xC0); // Source: 0xC000
+        sys.cpu.memory.write(0xFF52, 0x00);
+        sys.cpu.memory.write(0xFF53, 0x88); // Dest: 0x8800 (VRAM)
+        sys.cpu.memory.write(0xFF54, 0x00);
+        sys.cpu.memory.write(0xFF55, 0x80); // Transfer 1 block (16 bytes), HBlank DMA mode (bit 7 = 1)
+
+        // HDMA should be active, remaining = 0 (1 block - 1)
+        let hdma5 = sys.cpu.memory.read(0xFF55);
+        assert_eq!(hdma5, 0x00, "HDMA5 should show 0 remaining blocks");
+
+        // Step a frame to allow HBlank DMA to occur
+        let _ = sys.step_frame();
+
+        // After HBlank, transfer should be complete
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF, "HDMA should be complete");
+
+        // Verify data was transferred to VRAM
+        for i in 0..16 {
+            let vram_data = sys.cpu.memory.ppu.read_vram(0x0800 + i); // VRAM offset 0x0800 = address 0x8800
+            assert_eq!(vram_data, (i + 0x42) as u8, "VRAM byte {} mismatch", i);
+        }
     }
 }
