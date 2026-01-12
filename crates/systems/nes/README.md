@@ -11,6 +11,8 @@ The NES emulator is **fully working** with ~90%+ game coverage through 14 mapper
 ### What Works
 
 - ✅ **CPU (6502)** - Complete instruction set from `emu_core::cpu_6502`
+  - All official opcodes
+  - 56 illegal/undocumented opcodes (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA)
 - ✅ **PPU (2C02)** - Full PPU emulation with background, sprites, scrolling
 - ✅ **APU (RP2A03)** - Complete audio with all 5 channels
 - ✅ **Mappers** - 14 mappers covering ~90%+ of games
@@ -205,6 +207,18 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-enter
 - Frame-based timing (not cycle-accurate)
 - MMC2/MMC4 latch switching happens per-frame, not mid-scanline
 - Some games requiring precise PPU timing may not work perfectly
+
+**Intentionally Simplified Behaviors** (for compatibility with 90%+ of games):
+- **Sprite overflow detection**: Uses simplified logic that correctly sets the flag when >8 sprites are on a scanline. Real hardware has a complex m/n pointer increment bug that can cause false positives/negatives. The simplified approach works for most games; only a handful of titles rely on the buggy hardware behavior.
+- **NMI/VBlank timing**: Reading $2002 (PPUSTATUS) at the exact cycle VBlank starts can miss or catch the flag on real hardware. Our frame-based approach handles this consistently but may not match hardware for games with extremely tight timing.
+- **APU frame counter**: Writes to $4017 at specific cycle boundaries can have subtle timing differences. The current implementation is accurate enough for all known games.
+
+**Supported Edge Cases**:
+- ✅ **Illegal/undocumented 6502 opcodes**: Full support for LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA with all addressing modes
+- ✅ **Sprite 0 hit**: Accurate detection with proper left-clip and x=255 boundary handling
+- ✅ **Sprite overflow**: Correctly sets flag when >8 sprites per scanline (simplified, not hardware-accurate)
+- ✅ **MMC3 IRQ timing**: Uses MMC3B/C behavior (counter decrements to 0 triggers IRQ)
+- ✅ **DMC DMA**: Full memory read support with automatic sample playback
 
 ## Performance
 
