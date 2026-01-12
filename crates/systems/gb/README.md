@@ -180,6 +180,7 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy
 
 **Technical Limitations**:
 - **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
+- **Mid-scanline effects**: Register changes within a single scanline are not supported. However, scanline split effects (changing registers between scanlines using STAT interrupts) work correctly.
 
 **Link Cable Limitations**:
 - Serial transfer registers (0xFF01, 0xFF02) are implemented with loopback mode
