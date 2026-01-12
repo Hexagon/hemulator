@@ -124,3 +124,30 @@ Some commercial init code probes/uses CPU math/timer registers.
    - If SMW reads specific registers we still return as open-bus, implement minimal correct semantics.
 4. **Consider swapping to real SPC700 path** (after basic sync correctness)
    - Once the stub gets SMW further, compare behavior with the real SPC700 implementation.
+
+---
+
+## Update 2026-01-12: Disassembler Fix
+
+### Fixed "unknown opcode" issue
+
+Added all missing long addressing mode opcodes to the 65C816 disassembler:
+- **Opcodes**: 0x0F, 0x1F, 0x2F, 0x3F, 0x4F, 0x5F, 0x6F, 0x7F, 0x8F, 0x9F, 0xAF, 0xBF, 0xCF, 0xDF, 0xEF, 0xFF
+- **Instructions**: ORA/AND/EOR/ADC/SBC/CMP/LDA/STA with absolute,long and absolute,long,X addressing
+- **Impact**: These use 24-bit addresses and are critical for SNES code accessing ROM across banks
+- **Result**: Should eliminate "??? opcode" noise in disassembly and instruction traces
+
+This fixes step #2 from the "Next Steps" section above.
+
+### Remaining work
+
+The main blocker is still that SMW never writes $4200 with NMI enabled. Possible causes:
+1. **Stuck in decompression loop**: SMW might be decompressing graphics/data and taking longer than expected
+2. **Waiting for hardware state**: Missing or incorrect register behavior could gate progression
+3. **CPU execution issue**: Despite the disassembler fix, there could be CPU opcode implementation bugs
+4. **DMA timing**: Incorrect DMA cycle counting or behavior could affect init timing
+
+**Next diagnostic step**: Use instruction tracing (already integrated in SnesSystem) to capture execution flow around the $B8xx/$B9xx area and identify:
+- Are we in a loop? (repeated PC values)
+- What code comes after the current execution point?
+- Are there any branches that should lead to NMI enable but don't get taken?
