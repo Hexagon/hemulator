@@ -34,17 +34,17 @@ pub struct SmsMemory {
     psg: Rc<RefCell<SmsPsg>>,
 
     // Banking registers (for ROMs > 48KB)
-    rom_bank_0: usize, // Maps to 0x0000-0x3FFF
-    rom_bank_1: usize, // Maps to 0x4000-0x7FFF
-    rom_bank_2: usize, // Maps to 0x8000-0xBFFF
+    pub(crate) rom_bank_0: usize, // Maps to 0x0000-0x3FFF
+    pub(crate) rom_bank_1: usize, // Maps to 0x4000-0x7FFF
+    pub(crate) rom_bank_2: usize, // Maps to 0x8000-0xBFFF
     num_banks: usize,
 
     // Controller state
-    controller_1: u8,
-    controller_2: u8,
+    pub(crate) controller_1: u8,
+    pub(crate) controller_2: u8,
 
     // Memory control register
-    memory_control: u8,
+    pub(crate) memory_control: u8,
 }
 
 impl SmsMemory {
@@ -89,6 +89,48 @@ impl SmsMemory {
     /// Set controller 2 state
     pub fn set_controller_2(&mut self, state: u8) {
         self.controller_2 = state;
+    }
+
+    // Save state support methods
+    /// Get RAM contents for save state
+    pub fn get_ram(&self) -> Vec<u8> {
+        self.ram.to_vec()
+    }
+
+    /// Set RAM contents from save state
+    pub fn set_ram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.ram.len());
+        self.ram[..len].copy_from_slice(&data[..len]);
+    }
+
+    /// Get ROM bank 0 index
+    pub fn get_rom_bank_0(&self) -> usize {
+        self.rom_bank_0
+    }
+
+    /// Get ROM bank 1 index
+    pub fn get_rom_bank_1(&self) -> usize {
+        self.rom_bank_1
+    }
+
+    /// Get ROM bank 2 index
+    pub fn get_rom_bank_2(&self) -> usize {
+        self.rom_bank_2
+    }
+
+    /// Get controller 1 state
+    pub fn get_controller_1(&self) -> u8 {
+        self.controller_1
+    }
+
+    /// Get controller 2 state
+    pub fn get_controller_2(&self) -> u8 {
+        self.controller_2
+    }
+
+    /// Get memory control register
+    pub fn get_memory_control(&self) -> u8 {
+        self.memory_control
     }
 }
 

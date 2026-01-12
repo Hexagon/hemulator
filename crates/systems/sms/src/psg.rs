@@ -155,6 +155,38 @@ impl SmsPsg {
 
         out
     }
+
+    /// Get PSG state for save state
+    pub fn get_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "cycle_accum": self.cycle_accum,
+            "timing": match self.timing {
+                TimingMode::Ntsc => "ntsc",
+                TimingMode::Pal => "pal",
+            },
+            "psg": self.psg.get_state(),
+        })
+    }
+
+    /// Set PSG state from save state
+    pub fn set_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
+        if let Some(cycle_accum) = state.get("cycle_accum").and_then(|v| v.as_f64()) {
+            self.cycle_accum = cycle_accum;
+        }
+
+        if let Some(timing_str) = state.get("timing").and_then(|v| v.as_str()) {
+            self.timing = match timing_str {
+                "pal" => TimingMode::Pal,
+                _ => TimingMode::Ntsc,
+            };
+        }
+
+        if let Some(psg_state) = state.get("psg") {
+            self.psg.set_state(psg_state)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for SmsPsg {

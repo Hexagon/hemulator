@@ -188,14 +188,166 @@ impl System for SmsSystem {
     }
 
     fn save_state(&self) -> Value {
-        // TODO: Implement state serialization
+        let vdp = self.vdp.borrow();
+        let psg = self.psg.borrow();
+
         serde_json::json!({
+            "system": "sms",
+            "version": 1,
             "cycles": self.cycles,
+            "cpu": {
+                // Main registers
+                "a": self.cpu.a,
+                "f": self.cpu.f,
+                "b": self.cpu.b,
+                "c": self.cpu.c,
+                "d": self.cpu.d,
+                "e": self.cpu.e,
+                "h": self.cpu.h,
+                "l": self.cpu.l,
+                // Shadow registers
+                "a_prime": self.cpu.a_prime,
+                "f_prime": self.cpu.f_prime,
+                "b_prime": self.cpu.b_prime,
+                "c_prime": self.cpu.c_prime,
+                "d_prime": self.cpu.d_prime,
+                "e_prime": self.cpu.e_prime,
+                "h_prime": self.cpu.h_prime,
+                "l_prime": self.cpu.l_prime,
+                // Index registers
+                "ix": self.cpu.ix,
+                "iy": self.cpu.iy,
+                // Special registers
+                "i": self.cpu.i,
+                "r": self.cpu.r,
+                "sp": self.cpu.sp,
+                "pc": self.cpu.pc,
+                // Interrupt state
+                "iff1": self.cpu.iff1,
+                "iff2": self.cpu.iff2,
+                "im": self.cpu.im,
+                "halted": self.cpu.halted,
+            },
+            "memory": {
+                "ram": self.cpu.memory.get_ram(),
+                "rom_bank_0": self.cpu.memory.get_rom_bank_0(),
+                "rom_bank_1": self.cpu.memory.get_rom_bank_1(),
+                "rom_bank_2": self.cpu.memory.get_rom_bank_2(),
+                "controller_1": self.cpu.memory.get_controller_1(),
+                "controller_2": self.cpu.memory.get_controller_2(),
+                "memory_control": self.cpu.memory.get_memory_control(),
+            },
+            "vdp": vdp.get_state(),
+            "psg": psg.get_state(),
         })
     }
 
-    fn load_state(&mut self, _state: &Value) -> Result<(), serde_json::Error> {
-        // TODO: Implement state deserialization
+    fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
+        // Validate system type
+        if let Some(system) = state.get("system").and_then(|s| s.as_str()) {
+            if system != "sms" {
+                // Create a proper error by trying to deserialize an incompatible value
+                let _: () = serde_json::from_value(serde_json::json!({
+                    "error": "Invalid system type"
+                }))?;
+            }
+        }
+
+        // Helper macros for loading values
+        macro_rules! load_u8 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u8;
+                }
+            };
+        }
+
+        macro_rules! load_u16 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u16;
+                }
+            };
+        }
+
+        macro_rules! load_bool {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
+                    $target = val;
+                }
+            };
+        }
+
+        macro_rules! load_usize {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as usize;
+                }
+            };
+        }
+
+        // Load cycles
+        if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
+            self.cycles = cycles;
+        }
+
+        // Load CPU state
+        if let Some(cpu_state) = state.get("cpu") {
+            load_u8!(cpu_state, "a", self.cpu.a);
+            load_u8!(cpu_state, "f", self.cpu.f);
+            load_u8!(cpu_state, "b", self.cpu.b);
+            load_u8!(cpu_state, "c", self.cpu.c);
+            load_u8!(cpu_state, "d", self.cpu.d);
+            load_u8!(cpu_state, "e", self.cpu.e);
+            load_u8!(cpu_state, "h", self.cpu.h);
+            load_u8!(cpu_state, "l", self.cpu.l);
+            load_u8!(cpu_state, "a_prime", self.cpu.a_prime);
+            load_u8!(cpu_state, "f_prime", self.cpu.f_prime);
+            load_u8!(cpu_state, "b_prime", self.cpu.b_prime);
+            load_u8!(cpu_state, "c_prime", self.cpu.c_prime);
+            load_u8!(cpu_state, "d_prime", self.cpu.d_prime);
+            load_u8!(cpu_state, "e_prime", self.cpu.e_prime);
+            load_u8!(cpu_state, "h_prime", self.cpu.h_prime);
+            load_u8!(cpu_state, "l_prime", self.cpu.l_prime);
+            load_u16!(cpu_state, "ix", self.cpu.ix);
+            load_u16!(cpu_state, "iy", self.cpu.iy);
+            load_u8!(cpu_state, "i", self.cpu.i);
+            load_u8!(cpu_state, "r", self.cpu.r);
+            load_u16!(cpu_state, "sp", self.cpu.sp);
+            load_u16!(cpu_state, "pc", self.cpu.pc);
+            load_bool!(cpu_state, "iff1", self.cpu.iff1);
+            load_bool!(cpu_state, "iff2", self.cpu.iff2);
+            load_u8!(cpu_state, "im", self.cpu.im);
+            load_bool!(cpu_state, "halted", self.cpu.halted);
+        }
+
+        // Load memory state
+        if let Some(mem_state) = state.get("memory") {
+            if let Some(ram) = mem_state.get("ram").and_then(|v| v.as_array()) {
+                self.cpu.memory.set_ram(
+                    &ram.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u8))
+                        .collect::<Vec<u8>>(),
+                );
+            }
+            load_usize!(mem_state, "rom_bank_0", self.cpu.memory.rom_bank_0);
+            load_usize!(mem_state, "rom_bank_1", self.cpu.memory.rom_bank_1);
+            load_usize!(mem_state, "rom_bank_2", self.cpu.memory.rom_bank_2);
+            load_u8!(mem_state, "controller_1", self.cpu.memory.controller_1);
+            load_u8!(mem_state, "controller_2", self.cpu.memory.controller_2);
+            load_u8!(mem_state, "memory_control", self.cpu.memory.memory_control);
+        }
+
+        // Load VDP state
+        if let Some(vdp_state) = state.get("vdp") {
+            self.vdp.borrow_mut().set_state(vdp_state)?;
+        }
+
+        // Load PSG state
+        if let Some(psg_state) = state.get("psg") {
+            self.psg.borrow_mut().set_state(psg_state)?;
+        }
+
         Ok(())
     }
 
@@ -654,5 +806,172 @@ mod tests {
             target_cycles,
             expected
         );
+    }
+
+    #[test]
+    fn test_save_load_state() {
+        let mut system = SmsSystem::new();
+
+        // Load a ROM and run for a bit
+        let mut rom = vec![0; 0x8000];
+        rom[0] = 0x3E; // LD A, n
+        rom[1] = 0x42;
+        rom[2] = 0x06; // LD B, n
+        rom[3] = 0x12;
+        rom[4] = 0x76; // HALT
+
+        system.load_rom(rom);
+        system.reset();
+
+        // Execute a few instructions
+        system.cpu.step(); // LD A, 0x42
+        system.cpu.step(); // LD B, 0x12
+
+        // Verify CPU state before save
+        assert_eq!(system.cpu.a, 0x42);
+        assert_eq!(system.cpu.b, 0x12);
+
+        // Save state
+        let state = system.save_state();
+
+        // Modify system state
+        system.cpu.a = 0xFF;
+        system.cpu.b = 0xFF;
+        system.cycles = 99999;
+
+        // Verify state was modified
+        assert_eq!(system.cpu.a, 0xFF);
+        assert_eq!(system.cpu.b, 0xFF);
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify state was restored
+        assert_eq!(system.cpu.a, 0x42);
+        assert_eq!(system.cpu.b, 0x12);
+    }
+
+    #[test]
+    fn test_save_load_state_cpu_registers() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Set various CPU registers
+        system.cpu.a = 0xAA;
+        system.cpu.f = 0x55;
+        system.cpu.b = 0x11;
+        system.cpu.c = 0x22;
+        system.cpu.d = 0x33;
+        system.cpu.e = 0x44;
+        system.cpu.h = 0x55;
+        system.cpu.l = 0x66;
+        system.cpu.ix = 0x1234;
+        system.cpu.iy = 0x5678;
+        system.cpu.sp = 0xFFFE;
+        system.cpu.pc = 0x8000;
+        system.cpu.iff1 = true;
+        system.cpu.iff2 = false;
+        system.cpu.im = 2;
+        system.cycles = 12345;
+
+        // Save and restore
+        let state = system.save_state();
+        system.cpu.a = 0;
+        system.cpu.f = 0;
+        system.load_state(&state).unwrap();
+
+        // Verify all registers restored
+        assert_eq!(system.cpu.a, 0xAA);
+        assert_eq!(system.cpu.f, 0x55);
+        assert_eq!(system.cpu.b, 0x11);
+        assert_eq!(system.cpu.c, 0x22);
+        assert_eq!(system.cpu.d, 0x33);
+        assert_eq!(system.cpu.e, 0x44);
+        assert_eq!(system.cpu.h, 0x55);
+        assert_eq!(system.cpu.l, 0x66);
+        assert_eq!(system.cpu.ix, 0x1234);
+        assert_eq!(system.cpu.iy, 0x5678);
+        assert_eq!(system.cpu.sp, 0xFFFE);
+        assert_eq!(system.cpu.pc, 0x8000);
+        assert_eq!(system.cpu.iff1, true);
+        assert_eq!(system.cpu.iff2, false);
+        assert_eq!(system.cpu.im, 2);
+        assert_eq!(system.cycles, 12345);
+    }
+
+    #[test]
+    fn test_save_load_state_memory() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Write some data to RAM
+        system.cpu.memory.write(0xC000, 0xAB);
+        system.cpu.memory.write(0xC100, 0xCD);
+        system.cpu.memory.write(0xDFFF, 0xEF);
+
+        // Save state
+        let state = system.save_state();
+
+        // Clear RAM
+        system.cpu.memory.write(0xC000, 0);
+        system.cpu.memory.write(0xC100, 0);
+        system.cpu.memory.write(0xDFFF, 0);
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify RAM was restored
+        assert_eq!(system.cpu.memory.read(0xC000), 0xAB);
+        assert_eq!(system.cpu.memory.read(0xC100), 0xCD);
+        assert_eq!(system.cpu.memory.read(0xDFFF), 0xEF);
+    }
+
+    #[test]
+    fn test_save_load_state_vdp() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Write to VDP registers and VRAM
+        system.vdp.borrow_mut().write_control(0x20); // Register value
+        system.vdp.borrow_mut().write_control(0x81); // Write to register 1
+
+        // Write to VRAM
+        system.vdp.borrow_mut().write_control(0x00); // Address low
+        system.vdp.borrow_mut().write_control(0x40); // Address high (VRAM write)
+        system.vdp.borrow_mut().write_data(0x42);
+
+        // Get tile viewer data to verify state
+        let data_before = system.get_tile_viewer_data();
+
+        // Save state
+        let state = system.save_state();
+
+        // Modify VDP state
+        system.vdp.borrow_mut().reset();
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify VDP state was restored
+        let data_after = system.get_tile_viewer_data();
+        assert_eq!(data_after.registers[1], data_before.registers[1]);
+        assert_eq!(data_after.vram[0], data_before.vram[0]);
+        assert_eq!(data_after.registers[1], 0x20);
+        assert_eq!(data_after.vram[0], 0x42);
+    }
+
+    #[test]
+    fn test_save_load_state_invalid_system() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Try to load a state from a different system
+        let invalid_state = serde_json::json!({
+            "system": "nes",
+            "version": 1,
+        });
+
+        let result = system.load_state(&invalid_state);
+        assert!(result.is_err(), "Should reject state from different system");
     }
 }
