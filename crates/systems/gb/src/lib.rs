@@ -419,6 +419,9 @@ impl System for GbSystem {
 
         let mut cycles = 0;
         while cycles < CYCLES_PER_FRAME {
+            // Execute any pending GDMA before CPU step
+            self.cpu.memory.execute_pending_gdma();
+
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
@@ -2013,7 +2016,10 @@ mod tests {
         sys.cpu.memory.write(0xFF54, 0x00);
         sys.cpu.memory.write(0xFF55, 0x01); // Transfer 2 blocks (32 bytes), GDMA mode (bit 7 = 0)
 
-        // HDMA5 should read 0xFF after GDMA completes immediately
+        // Execute pending GDMA (now deferred to avoid nested read/write)
+        sys.cpu.memory.execute_pending_gdma();
+
+        // HDMA5 should read 0xFF after GDMA completes
         assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF);
 
         // Verify data was transferred to VRAM

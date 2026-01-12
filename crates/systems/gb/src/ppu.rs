@@ -907,15 +907,21 @@ impl Ppu {
         self.cycle_counter += cycles;
 
         let mut vblank_started = false;
+        let mut lyc_ly_interrupt = false;
 
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
             self.ly = (self.ly + 1) % 154;
 
-            // Check LYC=LY interrupt
+            // Check LYC=LY coincidence flag and detect transition
+            let old_coincidence = (self.stat & 0x04) != 0;
             if self.ly == self.lyc {
                 self.stat |= 0x04; // Set coincidence flag
+                                   // Trigger interrupt only on transition from non-coincidence to coincidence
+                if !old_coincidence && (self.stat & 0x40) != 0 {
+                    lyc_ly_interrupt = true;
+                }
             } else {
                 self.stat &= !0x04;
             }
@@ -927,7 +933,10 @@ impl Ppu {
         }
 
         // Update STAT mode bits and check for STAT interrupt and HBlank entry
-        let (stat_interrupt, hblank_entered) = self.update_stat_mode();
+        let (mut stat_interrupt, hblank_entered) = self.update_stat_mode();
+
+        // Combine mode-based STAT interrupt with LYC=LY interrupt
+        stat_interrupt = stat_interrupt || lyc_ly_interrupt;
 
         (vblank_started, stat_interrupt, hblank_entered)
     }
@@ -992,11 +1001,6 @@ impl Ppu {
                 2 => (self.stat & 0x20) != 0, // OAM interrupt (bit 5)
                 _ => false,                   // Mode 3 doesn't have interrupt
             };
-        }
-
-        // Also check LYC=LY interrupt (bit 6)
-        if (self.stat & 0x04) != 0 && (self.stat & 0x40) != 0 {
-            stat_interrupt = true;
         }
 
         (stat_interrupt, hblank_entered)

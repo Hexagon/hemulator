@@ -178,6 +178,8 @@ pub struct GbBus {
     hdma_source: u16,
     /// HDMA destination address (actual address, updated during transfer)
     hdma_dest: u16,
+    /// GDMA pending flag (deferred execution to avoid nested read/write)
+    gdma_pending: bool,
 }
 
 impl GbBus {
@@ -211,6 +213,7 @@ impl GbBus {
             hdma_remaining: 0,
             hdma_source: 0,
             hdma_dest: 0,
+            gdma_pending: false,
         }
     }
 
@@ -308,9 +311,9 @@ impl GbBus {
             // HBlank DMA - will be performed during HBlank periods
             self.hdma_active = true;
         } else {
-            // General Purpose DMA - perform immediately
-            self.perform_gdma();
-            self.hdma5 = 0xFF; // Transfer complete
+            // General Purpose DMA - defer execution to avoid nested read/write
+            self.gdma_pending = true;
+            self.hdma_active = false;
         }
     }
 
@@ -332,6 +335,16 @@ impl GbBus {
 
         self.hdma_remaining = 0;
         self.hdma_active = false;
+    }
+
+    /// Execute pending GDMA if flagged
+    /// Should be called from the main loop to avoid nested read/write issues
+    pub fn execute_pending_gdma(&mut self) {
+        if self.gdma_pending {
+            self.gdma_pending = false;
+            self.perform_gdma();
+            self.hdma5 = 0xFF; // Transfer complete
+        }
     }
 
     /// Perform one block of HBlank DMA

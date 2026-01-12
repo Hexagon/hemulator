@@ -225,16 +225,16 @@ impl Mbc3 {
                 }
             }
             0x08 => {
-                // RTC Seconds - write to actual register
-                self.rtc_s = val % 60; // Clamp to 0-59
+                // RTC Seconds - write to actual register (store raw value)
+                self.rtc_s = val;
             }
             0x09 => {
-                // RTC Minutes - write to actual register
-                self.rtc_m = val % 60; // Clamp to 0-59
+                // RTC Minutes - write to actual register (store raw value)
+                self.rtc_m = val;
             }
             0x0A => {
-                // RTC Hours - write to actual register
-                self.rtc_h = val % 24; // Clamp to 0-23
+                // RTC Hours - write to actual register (store raw value)
+                self.rtc_h = val;
             }
             0x0B => {
                 // RTC Days lower - write to actual register
