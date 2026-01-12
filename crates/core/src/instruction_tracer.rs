@@ -157,7 +157,12 @@ impl InstructionTracer {
                 for name in REG_ORDER {
                     if let Some(r) = state.registers.iter().find(|r| r.name == name) {
                         let width_nibbles = (r.width / 4) as usize;
-                        reg_parts.push(format!("{}=${:0width$X}", r.name, r.value, width = width_nibbles));
+                        reg_parts.push(format!(
+                            "{}=${:0width$X}",
+                            r.name,
+                            r.value,
+                            width = width_nibbles
+                        ));
                     }
                 }
 
@@ -165,7 +170,12 @@ impl InstructionTracer {
                 for r in &state.registers {
                     if !REG_ORDER.iter().any(|n| *n == r.name) {
                         let width_nibbles = (r.width / 4) as usize;
-                        reg_parts.push(format!("{}=${:0width$X}", r.name, r.value, width = width_nibbles));
+                        reg_parts.push(format!(
+                            "{}=${:0width$X}",
+                            r.name,
+                            r.value,
+                            width = width_nibbles
+                        ));
                     }
                 }
 

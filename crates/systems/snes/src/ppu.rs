@@ -2437,7 +2437,7 @@ impl Ppu {
                 // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
                 let char_x = (tile as usize & 0x0F) + tx;
                 let char_y = ((tile as usize >> 4) + ty) & 0x0F;
-                
+
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
                 let tile_index = (char_y << 4) | (char_x & 0x0F);
@@ -2921,18 +2921,12 @@ mod tests {
         // Name base = 0
         ppu.obsel = 0x00;
         let base = ppu.get_obj_base_address();
-        assert_eq!(
-            base, 0x0000,
-            "OBSEL=0x00: name_base=0 -> 0 << 14 = 0x0000"
-        );
+        assert_eq!(base, 0x0000, "OBSEL=0x00: name_base=0 -> 0 << 14 = 0x0000");
 
         // Name base = 2
         ppu.obsel = 0x02; // Bits 0-2 = 2 (0b010)
         let base = ppu.get_obj_base_address();
-        assert_eq!(
-            base, 0x8000,
-            "OBSEL=0x02: name_base=2 -> 2 << 14 = 0x8000"
-        );
+        assert_eq!(base, 0x8000, "OBSEL=0x02: name_base=2 -> 2 << 14 = 0x8000");
 
         // Name base = 7 (max value)
         ppu.obsel = 0x07;

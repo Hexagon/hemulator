@@ -928,7 +928,7 @@ mod tests {
         // The sprite should be visible (solid red color index 1)
         // Note: SNES sprites appear 1 scanline later than their Y value,
         // so a sprite with Y=100 will render at Y=101-108
-        
+
         // Count non-black pixels in the actual sprite area (101-108, 100-107)
         // The sprite appears at Y=101 (Y+1 offset) and is 8x8 pixels
         let mut sprite_pixels = 0;
@@ -939,7 +939,7 @@ mod tests {
                 }
             }
         }
-        
+
         // Count total non-black pixels
         let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
