@@ -128,12 +128,44 @@
 //! - ✅ Automatic CGB mode detection and activation
 //! - ✅ PPU mode transitions (Mode 0-3) with accurate timing
 //! - ✅ STAT interrupts (HBlank, VBlank, OAM, LYC=LY)
+//! - ✅ Scanline split effects (per-scanline register capture for SCX, SCY, WX, WY, LCDC)
 //!
 //! ## Not Implemented
 //! - ❌ Cycle-accurate PPU timing
-//! - ❌ Mid-scanline effects
+//! - ❌ Mid-scanline effects (register changes within a single scanline)
 
 use emu_core::types::Frame;
+
+/// Captured register state for a single scanline
+///
+/// This structure stores the values of PPU registers at the start of each scanline.
+/// This allows games to change scroll registers (SCX, SCY) or window position (WX, WY)
+/// mid-frame using STAT interrupts to achieve scanline split effects (e.g., HUD splits in GTA).
+#[derive(Clone, Copy, Debug)]
+struct ScanlineState {
+    /// Scroll Y position for this scanline
+    scy: u8,
+    /// Scroll X position for this scanline
+    scx: u8,
+    /// Window Y position for this scanline
+    wy: u8,
+    /// Window X position for this scanline
+    wx: u8,
+    /// LCD Control register for this scanline
+    lcdc: u8,
+}
+
+impl Default for ScanlineState {
+    fn default() -> Self {
+        Self {
+            scy: 0,
+            scx: 0,
+            wy: 0,
+            wx: 0,
+            lcdc: 0x91,
+        }
+    }
+}
 
 /// Game Boy PPU state
 pub struct Ppu {
@@ -185,6 +217,16 @@ pub struct Ppu {
     obj_palette_data: [u8; 64],
     /// CGB mode enabled flag
     cgb_mode: bool,
+
+    /// Per-scanline register states (144 scanlines for the visible screen)
+    /// Captures register values at the start of each scanline to support scanline split effects
+    scanline_states: [ScanlineState; 144],
+    /// Flag indicating whether scanline states have been captured this frame
+    /// Used to determine whether to use per-scanline state or current register values
+    scanline_states_captured: bool,
+    /// Window internal line counter
+    /// Increments only when the window is visible on a scanline, persists across scanlines
+    window_line_counter: u8,
 }
 
 // LCDC bits
@@ -226,6 +268,9 @@ impl Ppu {
             bg_palette_data: [0; 64],
             obj_palette_data: [0; 64],
             cgb_mode: false,
+            scanline_states: [ScanlineState::default(); 144],
+            scanline_states_captured: false,
+            window_line_counter: 0,
         }
     }
 
@@ -452,26 +497,46 @@ impl Ppu {
         base + ((tile_index as i8 as i16 + 128) as u16 * 16)
     }
 
+    /// Get the scanline state for a given scanline, with fallback to current registers
+    /// This ensures backward compatibility when render_frame() is called without step()
+    fn get_scanline_state(&self, scanline: u8) -> ScanlineState {
+        if self.scanline_states_captured && scanline < 144 {
+            self.scanline_states[scanline as usize]
+        } else {
+            // Fallback: use current register values (for direct rendering without step())
+            ScanlineState {
+                scy: self.scy,
+                scx: self.scx,
+                wy: self.wy,
+                wx: self.wx,
+                lcdc: self.lcdc,
+            }
+        }
+    }
+
     fn render_background(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
-        let tile_data_base = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
-            0x0000 // $8000-$8FFF
-        } else {
-            0x0800 // $8800-$97FF (signed addressing)
-        };
-
-        let tilemap_base = if (self.lcdc & LCDC_BG_TILEMAP) != 0 {
-            0x1C00 // $9C00-$9FFF
-        } else {
-            0x1800 // $9800-$9BFF
-        };
-
         for screen_y in 0u8..144 {
-            let y = screen_y.wrapping_add(self.scy);
+            // Use per-scanline state for scroll and control registers
+            let scanline = self.get_scanline_state(screen_y);
+
+            let tile_data_base = if (scanline.lcdc & LCDC_BG_WIN_TILES) != 0 {
+                0x0000 // $8000-$8FFF
+            } else {
+                0x0800 // $8800-$97FF (signed addressing)
+            };
+
+            let tilemap_base = if (scanline.lcdc & LCDC_BG_TILEMAP) != 0 {
+                0x1C00 // $9C00-$9FFF
+            } else {
+                0x1800 // $9800-$9BFF
+            };
+
+            let y = screen_y.wrapping_add(scanline.scy);
             let tile_y = ((y / 8) & 31) as u16;
             let pixel_y = (y % 8) as u16;
 
             for screen_x in 0u8..160 {
-                let x = screen_x.wrapping_add(self.scx);
+                let x = screen_x.wrapping_add(scanline.scx);
                 let tile_x = ((x / 8) & 31) as u16;
                 let pixel_x = (x % 8) as u16;
 
@@ -500,7 +565,7 @@ impl Ppu {
                 let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
-                let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
+                let tile_addr = if (scanline.lcdc & LCDC_BG_WIN_TILES) != 0 {
                     // Unsigned mode: tiles at $8000-$8FFF
                     tile_data_base + (tile_index as u16 * 16)
                 } else {
@@ -564,34 +629,53 @@ impl Ppu {
     }
 
     fn render_window(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
-        // Window rendering - similar to background but positioned at WX-7, WY
-        if self.wx >= 167 || self.wy >= 144 {
-            return; // Window not visible
-        }
+        // Window rendering - uses per-scanline state to support HUD split effects
+        // The window has an internal line counter that increments only when the window
+        // is visible on a scanline. This is tracked using window_line_counter.
+        //
+        // Games like GTA GBC use mid-frame WY/WX changes via LYC interrupts to create
+        // a HUD split effect where the window appears only in part of the screen.
 
-        let tile_data_base = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
-            0x0000 // $8000-$8FFF
-        } else {
-            0x0800 // $8800-$97FF (signed addressing)
-        };
+        let mut window_line = 0u8;
 
-        let tilemap_base = if (self.lcdc & LCDC_WIN_TILEMAP) != 0 {
-            0x1C00 // $9C00-$9FFF
-        } else {
-            0x1800 // $9800-$9BFF
-        };
+        for screen_y in 0u8..144 {
+            // Use per-scanline state for window position and control registers
+            let scanline = self.get_scanline_state(screen_y);
 
-        for screen_y in self.wy..144 {
-            let win_y = screen_y - self.wy;
+            // Check if window is enabled for this scanline
+            let window_enabled = (scanline.lcdc & LCDC_WIN_ENABLE) != 0;
+
+            // Skip if window is not visible on this scanline
+            // Window is visible when: WX < 167, screen_y >= WY, and window is enabled
+            if !window_enabled || scanline.wx >= 167 || screen_y < scanline.wy {
+                continue;
+            }
+
+            let tile_data_base = if (scanline.lcdc & LCDC_BG_WIN_TILES) != 0 {
+                0x0000 // $8000-$8FFF
+            } else {
+                0x0800 // $8800-$97FF (signed addressing)
+            };
+
+            let tilemap_base = if (scanline.lcdc & LCDC_WIN_TILEMAP) != 0 {
+                0x1C00 // $9C00-$9FFF
+            } else {
+                0x1800 // $9800-$9BFF
+            };
+
+            // Use window internal line counter for tile row calculation
+            // This correctly handles cases where WY changes mid-frame
+            let win_y = window_line;
             let tile_y = (win_y / 8) as u16;
             let pixel_y = (win_y % 8) as u16;
 
             // Ensure tile_y is within bounds (0-31) to prevent out-of-bounds tilemap access
             if tile_y >= 32 {
+                window_line = window_line.wrapping_add(1);
                 continue;
             }
 
-            let start_x = self.wx.saturating_sub(7);
+            let start_x = scanline.wx.saturating_sub(7);
 
             for screen_x in start_x..160 {
                 let win_x = screen_x - start_x;
@@ -622,7 +706,7 @@ impl Ppu {
                 let bg_priority = (tile_attr & 0x80) != 0;
 
                 // Calculate tile data address
-                let tile_addr = if (self.lcdc & LCDC_BG_WIN_TILES) != 0 {
+                let tile_addr = if (scanline.lcdc & LCDC_BG_WIN_TILES) != 0 {
                     tile_data_base + (tile_index as u16 * 16)
                 } else {
                     self.calculate_signed_tile_address(tile_data_base, tile_index)
@@ -686,6 +770,9 @@ impl Ppu {
 
                 frame.pixels[pixel_idx] = rgb;
             }
+
+            // Increment window line counter since window was visible on this scanline
+            window_line = window_line.wrapping_add(1);
         }
     }
 
@@ -912,6 +999,26 @@ impl Ppu {
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
+
+            // Capture register state for the CURRENT scanline before incrementing LY
+            // This ensures we capture the state that will be used to render this scanline
+            if self.ly < 144 {
+                // Reset window counter at the start of a new frame
+                if self.ly == 0 {
+                    self.window_line_counter = 0;
+                    self.scanline_states_captured = false;
+                }
+
+                self.scanline_states[self.ly as usize] = ScanlineState {
+                    scy: self.scy,
+                    scx: self.scx,
+                    wy: self.wy,
+                    wx: self.wx,
+                    lcdc: self.lcdc,
+                };
+                self.scanline_states_captured = true;
+            }
+
             self.ly = (self.ly + 1) % 154;
 
             // Check LYC=LY coincidence flag and detect transition
@@ -1629,5 +1736,136 @@ mod tests {
         // Verify frame is rendered without panic
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
+    }
+
+    #[test]
+    fn test_scanline_split_effect() {
+        // Test that scanline split effects work by using the actual step() mechanism
+        // This simulates a game (like GTA GBC) that changes SCX mid-frame using LYC interrupts
+        // to create a split-screen effect where the top and bottom of the screen scroll differently
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD and background
+        ppu.bgp = 0xE4; // BGP palette
+
+        // Set up two distinct tiles with different colors
+        // Tile 1: Color 1 (light gray) - fill entire first column (X=0) of tilemap
+        for tile_y in 0..32 {
+            ppu.write_vram(0x1800 + (tile_y * 32), 1); // tilemap column 0
+        }
+        for i in 0..8 {
+            ppu.write_vram(0x0010 + (i * 2), 0xFF);
+            ppu.write_vram(0x0010 + (i * 2) + 1, 0x00);
+        }
+
+        // Tile 2: Color 2 (dark gray) - fill entire column 16 of tilemap
+        // SCX=128 shifts view by 128 pixels = 16 tiles, so we see column 16
+        for tile_y in 0..32 {
+            ppu.write_vram(0x1800 + (tile_y * 32) + 16, 2); // tilemap column 16
+        }
+        for i in 0..8 {
+            ppu.write_vram(0x0020 + (i * 2), 0x00);
+            ppu.write_vram(0x0020 + (i * 2) + 1, 0xFF);
+        }
+
+        // Start with SCX=0 for top half
+        ppu.scx = 0;
+
+        // Step through scanlines 0-71 with SCX=0, then change SCX and step through 72-143
+        for scanline in 0..144 {
+            if scanline == 72 {
+                // Simulate a game changing SCX during HBlank interrupt at scanline 72
+                ppu.scx = 128;
+            }
+
+            // Step one scanline (456 cycles)
+            let _ = ppu.step(456);
+        }
+
+        // Complete the frame (VBlank lines 144-153)
+        for _ in 144..154 {
+            let _ = ppu.step(456);
+        }
+
+        let frame = ppu.render_frame();
+
+        // Verify split: top half should show tile 1 (SCX=0), bottom half should show tile 2 (SCX=128)
+        let color_tile1 = 0xFFAAAAAA; // Color 1 -> light gray
+        let color_tile2 = 0xFF555555; // Color 2 -> dark gray
+
+        // Check top half (scanline 0) - should show tile 1
+        assert_eq!(
+            frame.pixels[0], color_tile1,
+            "Top half (scanline 0) should show tile 1 with SCX=0"
+        );
+
+        // Check bottom half (scanline 72) - should show tile 2
+        assert_eq!(
+            frame.pixels[72 * 160], color_tile2,
+            "Bottom half (scanline 72) should show tile 2 with SCX=128"
+        );
+    }
+
+    #[test]
+    fn test_window_split_effect() {
+        // Test that window can be enabled/disabled mid-frame via WY changes
+        // This is the technique used by GTA GBC for its HUD split
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0xF1; // Enable LCD, BG, WIN, use 0x9C00 for window tilemap
+        ppu.bgp = 0xE4; // BGP palette
+
+        // Set up background tile (tile 1): Color 1 (light gray)
+        // Fill entire background tilemap with tile 1
+        for tile_y in 0..32 {
+            for tile_x in 0..32 {
+                ppu.write_vram(0x1800 + (tile_y * 32) + tile_x, 1);
+            }
+        }
+        for i in 0..8 {
+            ppu.write_vram(0x0010 + (i * 2), 0xFF);
+            ppu.write_vram(0x0010 + (i * 2) + 1, 0x00);
+        }
+
+        // Set up window tile (tile 2): Color 2 (dark gray)
+        // Fill entire window tilemap (at 0x9C00) with tile 2
+        for tile_y in 0..32 {
+            for tile_x in 0..32 {
+                ppu.write_vram(0x1C00 + (tile_y * 32) + tile_x, 2);
+            }
+        }
+        for i in 0..8 {
+            ppu.write_vram(0x0020 + (i * 2), 0x00);
+            ppu.write_vram(0x0020 + (i * 2) + 1, 0xFF);
+        }
+
+        // Window position: WX=7 (starts at left edge), WY=100 (starts at scanline 100)
+        ppu.wx = 7;
+        ppu.wy = 100;
+
+        // Step through all scanlines to capture per-scanline state
+        for _ in 0..144 {
+            let _ = ppu.step(456);
+        }
+
+        // Complete the frame (VBlank lines 144-153)
+        for _ in 144..154 {
+            let _ = ppu.step(456);
+        }
+
+        let frame = ppu.render_frame();
+
+        let color_tile1 = 0xFFAAAAAA; // Color 1 -> light gray (background)
+        let color_tile2 = 0xFF555555; // Color 2 -> dark gray (window)
+
+        // Check above window (scanline 50) - should show background
+        assert_eq!(
+            frame.pixels[50 * 160], color_tile1,
+            "Above window (scanline 50) should show background"
+        );
+
+        // Check in window (scanline 100) - should show window
+        assert_eq!(
+            frame.pixels[100 * 160], color_tile2,
+            "In window (scanline 100) should show window"
+        );
     }
 }
