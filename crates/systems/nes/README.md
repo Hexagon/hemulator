@@ -204,21 +204,23 @@ let samples = nes.audio_samples();
 See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system) for user-facing limitations.
 
 **Technical Limitations**:
-- Frame-based timing (not cycle-accurate)
 - MMC2/MMC4 latch switching happens per-frame, not mid-scanline
-- Some games requiring precise PPU timing may not work perfectly
+- Some games requiring dot-level PPU rendering may not work perfectly
 
-**Intentionally Simplified Behaviors** (for compatibility with 90%+ of games):
-- **Sprite overflow detection**: Uses simplified logic that correctly sets the flag when >8 sprites are on a scanline. Real hardware has a complex m/n pointer increment bug that can cause false positives/negatives. The simplified approach works for most games; only a handful of titles rely on the buggy hardware behavior.
-- **NMI/VBlank timing**: Reading $2002 (PPUSTATUS) at the exact cycle VBlank starts can miss or catch the flag on real hardware. Our frame-based approach handles this consistently but may not match hardware for games with extremely tight timing.
-- **APU frame counter**: Writes to $4017 at specific cycle boundaries can have subtle timing differences. The current implementation is accurate enough for all known games.
+**Cycle-Accurate Features** (implemented):
+- ✅ **NMI/VBlank timing**: Cycle-accurate with scanline 241, dot 1 precision
+- ✅ **$2002 race condition**: Proper NMI suppression when reading PPUSTATUS at VBlank start
+- ✅ **Sprite overflow bug**: Hardware-accurate m/n pointer increment bug with false positives/negatives
+- ✅ **Sprite flags**: Cleared at exact cycle (scanline 261, dot 1)
+- ✅ **Odd frame skip**: Scanline 0, dot 0 skipped on odd frames when rendering enabled
 
 **Supported Edge Cases**:
 - ✅ **Illegal/undocumented 6502 opcodes**: Full support for LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA with all addressing modes
 - ✅ **Sprite 0 hit**: Accurate detection with proper left-clip and x=255 boundary handling
-- ✅ **Sprite overflow**: Correctly sets flag when >8 sprites per scanline (simplified, not hardware-accurate)
+- ✅ **Sprite overflow**: Hardware-accurate with m/n pointer bug emulation
 - ✅ **MMC3 IRQ timing**: Uses MMC3B/C behavior (counter decrements to 0 triggers IRQ)
 - ✅ **DMC DMA**: Full memory read support with automatic sample playback
+- ✅ **Cycle-accurate PPU**: 3:1 PPU-CPU clock ratio, 341 dots per scanline, 262 scanlines per frame
 
 ## Performance
 

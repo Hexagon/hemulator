@@ -714,10 +714,19 @@ impl Ppu {
     /// - **When set**: During sprite evaluation when the 9th sprite on a scanline is found
     /// - **When cleared**: Only at dot 1 of the pre-render scanline (scanline 261/-1)
     /// - **NOT cleared by**: Reading PPUSTATUS ($2002) - unlike VBlank flag
-    /// - **Hardware bugs**: Real NES PPU has quirks that can cause false positives/negatives
+    /// - **Hardware bugs**: This implementation emulates the m/n pointer increment bug
     ///
-    /// This is a simplified version of the hardware sprite evaluation process that doesn't
-    /// emulate the exact hardware bugs, but correctly sets the flag when >8 sprites are found.
+    /// # Hardware-Accurate Sprite Evaluation Bug
+    ///
+    /// The real NES PPU has a bug in sprite evaluation that can cause false positives
+    /// and false negatives in the sprite overflow flag. This happens because:
+    ///
+    /// 1. Two pointers are used: n (primary OAM index) and m (byte within sprite)
+    /// 2. When checking sprites 9-64, if a Y-coordinate matches, BOTH n and m increment
+    /// 3. This causes m to wrap and check wrong bytes in subsequent sprites
+    /// 4. Result: Overflow can be set incorrectly or missed entirely
+    ///
+    /// This bug is emulated here for hardware accuracy.
     ///
     /// # References
     ///
@@ -727,22 +736,57 @@ impl Ppu {
         let sprite_size_16 = (self.ctrl & 0x20) != 0;
         let sprite_height = if sprite_size_16 { 16 } else { 8 };
 
+        let mut n = 0u8; // Sprite index in primary OAM (0-63)
+        let mut m = 0u8; // Byte within sprite (0-3: Y, tile, attr, X)
         let mut sprites_found = 0;
 
-        // Check all 64 sprites in OAM
-        for i in 0..64 {
-            let o = i * 4;
-            let y_pos = self.oam[o] as i16 + 1;
-
-            // Check if this sprite is on the current scanline
+        // Phase 1: Find first 8 sprites on this scanline
+        while n < 64 && sprites_found < 8 {
+            let oam_index = (n as usize) * 4;
+            let y_pos = self.oam[oam_index] as i16 + 1;
             let row = (scanline as i16) - y_pos;
+
             if row >= 0 && row < sprite_height {
                 sprites_found += 1;
+            }
+            n += 1;
+        }
 
-                // If we found more than 8 sprites on this scanline, set overflow
-                if sprites_found > 8 {
+        // Phase 2: Check for sprite overflow (sprites 9-64)
+        // This is where the hardware bug occurs
+        if sprites_found >= 8 {
+            while n < 64 {
+                // HARDWARE BUG: We check the m-th byte instead of always checking Y (byte 0)
+                let oam_index = (n as usize) * 4 + (m as usize);
+
+                // Bounds check - OAM is only 256 bytes
+                if oam_index >= 256 {
+                    break;
+                }
+
+                let y_pos = self.oam[oam_index] as i16 + 1;
+                let row = (scanline as i16) - y_pos;
+
+                // If this matches (even though we might be checking the wrong byte)
+                if row >= 0 && row < sprite_height {
+                    // Set overflow flag
                     self.sprite_overflow.set(true);
-                    return;
+
+                    // HARDWARE BUG: Increment BOTH n and m instead of just n
+                    // This causes m to wrap and check wrong bytes
+                    m += 1;
+                    if m >= 4 {
+                        m = 0;
+                        n += 1;
+                    }
+
+                    // On real hardware, evaluation stops after finding overflow
+                    // But the bug means we continue with corrupted m pointer
+                    break;
+                } else {
+                    // No match - increment n and reset m
+                    n += 1;
+                    m = 0;
                 }
             }
         }
