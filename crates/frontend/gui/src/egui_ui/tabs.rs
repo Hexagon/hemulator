@@ -24,6 +24,7 @@ pub enum SystemTileData {
     SMS(SmsTileData),
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
+    Chip8(Chip8TileData),
 }
 
 /// NES tile viewer data
@@ -86,6 +87,43 @@ pub struct SnesTileData {
     pub palette: Vec<u32>,
     pub bg_mode: u8,
     pub screen_enabled: bool,
+}
+
+/// CHIP-8 inspector data
+#[derive(Clone)]
+pub struct Chip8TileData {
+    /// V registers (V0-VF)
+    pub v_registers: [u8; 16],
+    /// Index register
+    pub i: u16,
+    /// Program counter
+    pub pc: u16,
+    /// Stack pointer
+    pub sp: u8,
+    /// Stack contents
+    pub stack: [u16; 16],
+    /// Delay timer
+    pub delay_timer: u8,
+    /// Sound timer
+    pub sound_timer: u8,
+    /// Display plane 0 (primary display)
+    pub display_plane0: Vec<bool>,
+    /// Display plane 1 (for XO-CHIP)
+    pub display_plane1: Vec<bool>,
+    /// Display width
+    pub display_width: usize,
+    /// Display height
+    pub display_height: usize,
+    /// Current mode (Chip8, SuperChip, XoChip, etc.)
+    pub mode: String,
+    /// Selected drawing plane (bitmask for XO-CHIP)
+    pub selected_plane: u8,
+    /// High resolution mode enabled
+    pub high_res: bool,
+    /// Waiting for key press
+    pub waiting_for_key: bool,
+    /// Key states (16 keys)
+    pub keys: [bool; 16],
 }
 
 /// Atari 2600 inspector data
@@ -1688,6 +1726,11 @@ impl TabManager {
 
                             ui.add_space(5.0);
                             ui.label("See Playfield, Sprites, Palette, and Collision tabs for detailed views");
+                        }
+                        SystemTileData::Chip8(_) => {
+                            ui.heading("📺 CHIP-8 Inspector");
+                            ui.separator();
+                            ui.label("CHIP-8 doesn't use tiles. See Display and Registers tabs for debugging info.");
                         }
                     }
                 } else {
@@ -3553,6 +3596,315 @@ impl TabManager {
                         ui.heading("Collision Detection");
                         ui.add_space(10.0);
                         ui.label("Load an Atari 2600 ROM to view collision data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_chip8_display_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Chip8(ref data)) = self.system_tile_data {
+                    ui.heading("📺 CHIP-8 Display");
+                    ui.separator();
+
+                    // Display information
+                    ui.label(egui::RichText::new("Display Information").strong());
+                    egui::Grid::new("chip8_display_info")
+                        .num_columns(2)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Mode:");
+                            ui.label(&data.mode);
+                            ui.end_row();
+
+                            ui.label("Resolution:");
+                            ui.label(format!("{}x{}", data.display_width, data.display_height));
+                            ui.end_row();
+
+                            ui.label("High-Res:");
+                            ui.label(if data.high_res { "Yes" } else { "No" });
+                            ui.end_row();
+
+                            ui.label("Selected Plane:");
+                            ui.label(format!(
+                                "{} (0x{:X})",
+                                data.selected_plane, data.selected_plane
+                            ));
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Display planes visualization
+                    ui.label(egui::RichText::new("Display Planes").strong());
+
+                    // Calculate scale factor to fit display nicely
+                    let available_width = ui.available_width().min(640.0);
+                    let scale = (available_width / data.display_width as f32)
+                        .floor()
+                        .max(1.0);
+
+                    ui.horizontal(|ui| {
+                        // Plane 0 (always present)
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Plane 0").strong());
+                            let (response, painter) = ui.allocate_painter(
+                                egui::Vec2::new(
+                                    data.display_width as f32 * scale,
+                                    data.display_height as f32 * scale,
+                                ),
+                                egui::Sense::hover(),
+                            );
+
+                            let rect = response.rect;
+                            let pixel_size = scale;
+
+                            // Draw background
+                            painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
+
+                            // Draw pixels
+                            for y in 0..data.display_height {
+                                for x in 0..data.display_width {
+                                    let idx = y * data.display_width + x;
+                                    if idx < data.display_plane0.len() && data.display_plane0[idx] {
+                                        let pixel_rect = egui::Rect::from_min_size(
+                                            egui::pos2(
+                                                rect.min.x + x as f32 * pixel_size,
+                                                rect.min.y + y as f32 * pixel_size,
+                                            ),
+                                            egui::vec2(pixel_size, pixel_size),
+                                        );
+                                        painter.rect_filled(
+                                            pixel_rect,
+                                            0.0,
+                                            egui::Color32::from_rgb(0, 255, 0), // Green
+                                        );
+                                    }
+                                }
+                            }
+                        });
+
+                        // Plane 1 (for XO-CHIP)
+                        if data.mode.contains("XO-CHIP") {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Plane 1").strong());
+                                let (response, painter) = ui.allocate_painter(
+                                    egui::Vec2::new(
+                                        data.display_width as f32 * scale,
+                                        data.display_height as f32 * scale,
+                                    ),
+                                    egui::Sense::hover(),
+                                );
+
+                                let rect = response.rect;
+                                let pixel_size = scale;
+
+                                // Draw background
+                                painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
+
+                                // Draw pixels
+                                for y in 0..data.display_height {
+                                    for x in 0..data.display_width {
+                                        let idx = y * data.display_width + x;
+                                        if idx < data.display_plane1.len()
+                                            && data.display_plane1[idx]
+                                        {
+                                            let pixel_rect = egui::Rect::from_min_size(
+                                                egui::pos2(
+                                                    rect.min.x + x as f32 * pixel_size,
+                                                    rect.min.y + y as f32 * pixel_size,
+                                                ),
+                                                egui::vec2(pixel_size, pixel_size),
+                                            );
+                                            painter.rect_filled(
+                                                pixel_rect,
+                                                0.0,
+                                                egui::Color32::from_rgb(255, 0, 0), // Red
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    });
+
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new("🟢 Green = Plane 0 | 🔴 Red = Plane 1").weak());
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📺").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("CHIP-8 Display");
+                        ui.add_space(10.0);
+                        ui.label("Load a CHIP-8 program to view display data");
+                    });
+                }
+            });
+    }
+
+    pub fn render_chip8_registers_tab(&self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if let Some(SystemTileData::Chip8(ref data)) = self.system_tile_data {
+                    ui.heading("📝 CHIP-8 Registers");
+                    ui.separator();
+
+                    // Main registers
+                    ui.label(egui::RichText::new("Main Registers").strong());
+                    egui::Grid::new("chip8_main_regs")
+                        .num_columns(4)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("PC:");
+                            ui.label(egui::RichText::new(format!("${:04X}", data.pc)).monospace());
+                            ui.label("I:");
+                            ui.label(egui::RichText::new(format!("${:04X}", data.i)).monospace());
+                            ui.end_row();
+
+                            ui.label("SP:");
+                            ui.label(egui::RichText::new(format!("${:02X}", data.sp)).monospace());
+                            ui.label("Mode:");
+                            ui.label(&data.mode);
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Timers
+                    ui.label(egui::RichText::new("Timers").strong());
+                    egui::Grid::new("chip8_timers")
+                        .num_columns(4)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Delay:");
+                            ui.label(
+                                egui::RichText::new(format!("{}", data.delay_timer)).monospace(),
+                            );
+                            ui.label("Sound:");
+                            ui.label(
+                                egui::RichText::new(format!("{}", data.sound_timer)).monospace(),
+                            );
+                            ui.end_row();
+                        });
+
+                    ui.add_space(10.0);
+
+                    // V Registers (V0-VF)
+                    ui.label(egui::RichText::new("V Registers (V0-VF)").strong());
+                    egui::Grid::new("chip8_v_regs")
+                        .num_columns(8)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (i, &value) in data.v_registers.iter().enumerate() {
+                                ui.label(format!("V{:X}:", i));
+                                let color = if i == 0xF {
+                                    egui::Color32::from_rgb(255, 200, 100) // Highlight VF (flag register)
+                                } else {
+                                    egui::Color32::WHITE
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("${:02X}", value))
+                                        .monospace()
+                                        .color(color),
+                                );
+                                if (i + 1) % 4 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Stack
+                    ui.label(egui::RichText::new("Stack").strong());
+                    ui.label(format!("Stack Pointer: {} / 16", data.sp));
+
+                    egui::Grid::new("chip8_stack")
+                        .num_columns(8)
+                        .spacing([10.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (i, &value) in data.stack.iter().enumerate() {
+                                ui.label(format!("[{}]:", i));
+                                let color = if i < data.sp as usize {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::DARK_GRAY // Dim unused stack entries
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("${:04X}", value))
+                                        .monospace()
+                                        .color(color),
+                                );
+                                if (i + 1) % 4 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+
+                    ui.add_space(10.0);
+
+                    // Input state
+                    ui.label(egui::RichText::new("Input State").strong());
+                    if data.waiting_for_key {
+                        ui.label(
+                            egui::RichText::new("⏸ Waiting for key press...")
+                                .color(egui::Color32::YELLOW),
+                        );
+                    }
+
+                    ui.label("Hexadecimal Keypad (0x0-0xF):");
+                    egui::Grid::new("chip8_keys")
+                        .num_columns(4)
+                        .spacing([5.0, 5.0])
+                        .show(ui, |ui| {
+                            // CHIP-8 keypad layout:
+                            // 1 2 3 C
+                            // 4 5 6 D
+                            // 7 8 9 E
+                            // A 0 B F
+                            let keypad = [
+                                [0x1, 0x2, 0x3, 0xC],
+                                [0x4, 0x5, 0x6, 0xD],
+                                [0x7, 0x8, 0x9, 0xE],
+                                [0xA, 0x0, 0xB, 0xF],
+                            ];
+
+                            for row in &keypad {
+                                for &key in row {
+                                    let pressed = data.keys[key];
+                                    let text = format!("{:X}", key);
+                                    let color = if pressed {
+                                        egui::Color32::from_rgb(100, 255, 100) // Green when pressed
+                                    } else {
+                                        egui::Color32::from_rgb(60, 60, 60) // Gray when not pressed
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(text)
+                                            .monospace()
+                                            .color(color)
+                                            .size(16.0),
+                                    );
+                                }
+                                ui.end_row();
+                            }
+                        });
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(egui::RichText::new("📝").size(48.0));
+                        ui.add_space(10.0);
+                        ui.heading("CHIP-8 Registers");
+                        ui.add_space(10.0);
+                        ui.label("Load a CHIP-8 program to view register data");
                     });
                 }
             });

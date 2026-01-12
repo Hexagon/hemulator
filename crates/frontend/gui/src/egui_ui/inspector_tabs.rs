@@ -34,6 +34,9 @@ pub enum InspectorTab {
     Atari2600Palette,
     Atari2600Collision,
 
+    Chip8Display,
+    Chip8Registers,
+
     PcBda, // BIOS Data Area
 }
 
@@ -60,6 +63,8 @@ impl InspectorTab {
             InspectorTab::Atari2600Sprites => "👾 Sprites",
             InspectorTab::Atari2600Palette => "🎨 Palette",
             InspectorTab::Atari2600Collision => "💥 Collision",
+            InspectorTab::Chip8Display => "📺 Display",
+            InspectorTab::Chip8Registers => "📝 Registers",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
         }
     }
@@ -119,8 +124,11 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
                     InspectorTab::Atari2600Collision,
                 ]);
             }
+            SystemType::Chip8 => {
+                tabs.extend_from_slice(&[InspectorTab::Chip8Display, InspectorTab::Chip8Registers]);
+            }
             _ => {
-                // For other systems (N64, Chip8), just show generic tabs
+                // For other systems (N64), just show generic tabs
             }
         }
     }
@@ -170,6 +178,12 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Atari2600Collision => {
             tab_manager.render_atari2600_collision_tab(ui);
+        }
+        InspectorTab::Chip8Display => {
+            tab_manager.render_chip8_display_tab(ui);
+        }
+        InspectorTab::Chip8Registers => {
+            tab_manager.render_chip8_registers_tab(ui);
         }
         InspectorTab::PcBda => {
             render_pc_bda_tab(ui, tab_manager);
