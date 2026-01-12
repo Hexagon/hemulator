@@ -115,17 +115,19 @@ cargo run --release -p emu_gui -- path/to/game.bin
 
 The Atari 2600 crate includes comprehensive tests:
 
-- **75 total tests** (all passing):
-  - TIA tests (rendering, registers, playfield, ball sizing, delayed graphics, RESMP)
+- **122 total tests** (all passing):
+  - TIA tests (rendering, registers, playfield, ball sizing, delayed graphics, RESMP, **timing validation**)
   - RIOT tests (RAM, timer, I/O)
   - Cartridge tests (banking schemes)
   - System integration tests
   - Bus address mapping tests (including dual-write behavior at 0x40-0x7F)
+  - **Timing tests**: Validates accurate scanline/frame timing against hardware specifications
 
 - **Test ROMs**: Multiple test ROMs in `test_roms/atari2600/`:
   - `test.bin`: Basic playfield pattern
   - `checkerboard.bin`: Alternating playfield validation
   - `test_timer.bin`: RIOT timer and color cycling
+  - `game_test.bin`: Game-like test ROM with sprite movement and color bars
 
 ## Usage Example
 
@@ -444,6 +446,13 @@ The emulator uses **cycle-accurate TIA emulation**:
 - **Performance**: Runs at full speed on modern hardware
 - **Compatibility**: Maximum - handles all timing-sensitive games correctly
 
+**Timing Accuracy:** Hardware-accurate timing validated against official specifications:
+- ✅ 228 color clocks per scanline
+- ✅ 76 CPU cycles per scanline (3 color clocks per CPU cycle)
+- ✅ 262 scanlines per frame (NTSC), 312 scanlines (PAL)
+- ✅ 19,912 CPU cycles per frame (NTSC), 23,712 (PAL)
+- ✅ See [ATARI_2600_TIMING_REVIEW.md](../../../ATARI_2600_TIMING_REVIEW.md) for complete timing analysis
+
 #### Visible Window Detection
 
 The emulator caches the first detected visible window start position to prevent frame-to-frame variation:
@@ -452,7 +461,7 @@ The emulator caches the first detected visible window start position to prevent 
 
 #### Known Timing Limitations
 
-⚠️ **Non-Standard Frame Timing**: Some homebrew games use non-standard scanline counts (e.g., 250 or 280 lines instead of 262). These may not render correctly.
+⚠️ **Non-Standard Frame Timing**: Some homebrew games use non-standard scanline counts (e.g., 250 or 280 lines instead of 262). The emulator handles these gracefully via VSYNC detection, but visual results may vary.
 
 ⚠️ **Input DDR Enforcement**: SWACNT/SWBCNT Data Direction Registers are stored but not used to filter reads. Most games work correctly.
 
