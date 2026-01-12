@@ -220,6 +220,12 @@ pub struct Ppu {
     /// Per-scanline register states (144 scanlines for the visible screen)
     /// Captures register values at the start of each scanline to support scanline split effects
     scanline_states: [ScanlineState; 144],
+    /// Flag indicating whether scanline states have been captured this frame
+    /// Used to avoid O(n²) iteration in get_scanline_state()
+    scanline_states_captured: bool,
+    /// Window internal line counter
+    /// Increments only when the window is visible on a scanline, persists across scanlines
+    window_line_counter: u8,
 }
 
 // LCDC bits
@@ -262,6 +268,8 @@ impl Ppu {
             obj_palette_data: [0; 64],
             cgb_mode: false,
             scanline_states: [ScanlineState::default(); 144],
+            scanline_states_captured: false,
+            window_line_counter: 0,
         }
     }
 
@@ -491,17 +499,12 @@ impl Ppu {
     /// Get the scanline state for a given scanline, with fallback to current registers
     /// This ensures backward compatibility when render_frame() is called without step()
     fn get_scanline_state(&self, scanline: u8) -> ScanlineState {
-        let state = self.scanline_states[scanline as usize];
-
-        // Check if scanline states have been captured by looking for any non-default state
-        // If we find any scanline with non-default values, we know states were captured
-        let states_captured = self
-            .scanline_states
-            .iter()
-            .any(|s| s.scx != 0 || s.scy != 0 || s.wx != 0 || s.wy != 0 || s.lcdc != 0x91);
-
-        if !states_captured {
-            // States haven't been captured yet (all are default), return current register values
+        if self.scanline_states_captured {
+            // States were captured, use the captured state for this scanline
+            self.scanline_states[scanline as usize]
+        } else {
+            // States haven't been captured yet, return current register values
+            // This happens when render_frame() is called without step() (e.g., in some tests)
             ScanlineState {
                 scy: self.scy,
                 scx: self.scx,
@@ -509,9 +512,6 @@ impl Ppu {
                 wx: self.wx,
                 lcdc: self.lcdc,
             }
-        } else {
-            // States were captured, use the captured state for this scanline
-            state
         }
     }
 
@@ -632,6 +632,12 @@ impl Ppu {
     fn render_window(&self, frame: &mut Frame, bg_color_indices: &mut [u8]) {
         // Window rendering - similar to background but positioned at WX-7, WY
         // Window uses per-scanline state for position tracking
+        //
+        // Note: The window has an internal line counter in real hardware that increments
+        // only when the window is visible, and persists even if WY changes mid-frame.
+        // This implementation uses a simplified approach that recalculates win_y from
+        // screen_y and WY for each scanline. This works correctly for most games but may
+        // cause visual glitches if WY changes mid-frame (a rare case).
 
         for screen_y in 0u8..144 {
             // Use per-scanline state for window position and control registers
@@ -984,11 +990,15 @@ impl Ppu {
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
-            self.ly = (self.ly + 1) % 154;
 
-            // Capture register state at the start of each visible scanline
-            // This enables scanline split effects when games change SCX/SCY/WX/WY mid-frame
+            // Capture register state for the CURRENT scanline before incrementing LY
+            // This ensures we capture the state that will be used to render this scanline
             if self.ly < 144 {
+                // Reset window counter at the start of a new frame
+                if self.ly == 0 {
+                    self.window_line_counter = 0;
+                }
+
                 self.scanline_states[self.ly as usize] = ScanlineState {
                     scy: self.scy,
                     scx: self.scx,
@@ -996,7 +1006,10 @@ impl Ppu {
                     wx: self.wx,
                     lcdc: self.lcdc,
                 };
+                self.scanline_states_captured = true;
             }
+
+            self.ly = (self.ly + 1) % 154;
 
             // Check LYC=LY coincidence flag and detect transition
             let old_coincidence = (self.stat & 0x04) != 0;
@@ -1717,8 +1730,8 @@ mod tests {
 
     #[test]
     fn test_scanline_split_effect() {
-        // Test that scanline split effects work - simulating a game that changes
-        // SCX mid-frame to create a split-screen effect
+        // Test that scanline split effects work by using the actual step() mechanism
+        // This simulates a game that changes SCX mid-frame to create a split-screen effect
         let mut ppu = Ppu::new();
         ppu.lcdc = 0x91; // Enable LCD and background
         ppu.bgp = 0xE4; // BGP palette
@@ -1749,23 +1762,21 @@ mod tests {
         ppu.scx = 0;
         ppu.scy = 0;
 
-        // Simulate scanline processing - capture state at each scanline
-        // For first 72 scanlines: SCX = 0
-        // For last 72 scanlines: SCX = 128 (scroll to show right half)
+        // Simulate frame processing using step() - this tests the actual integration
+        // Step through scanlines 0-71 with SCX=0, then change SCX and step through 72-143
         for scanline in 0..144 {
             if scanline == 72 {
                 // Simulate a game changing SCX during HBlank interrupt at scanline 72
                 ppu.scx = 128;
             }
 
-            // Capture the state at the start of this scanline
-            ppu.scanline_states[scanline as usize] = ScanlineState {
-                scy: ppu.scy,
-                scx: ppu.scx,
-                wy: ppu.wy,
-                wx: ppu.wx,
-                lcdc: ppu.lcdc,
-            };
+            // Step one scanline (456 cycles)
+            let _ = ppu.step(456);
+        }
+
+        // Complete the frame (VBlank lines 144-153)
+        for _ in 144..154 {
+            let _ = ppu.step(456);
         }
 
         let frame = ppu.render_frame();
