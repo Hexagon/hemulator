@@ -85,6 +85,12 @@ The emulator supports the following cartridge banking schemes:
 - **Paddle Controllers**: INPT0-INPT3 always return 0 - paddle games (Breakout, Kaboom!, Warlords) are unplayable
 - **Banking**: Standard schemes supported (2K, 4K, F8, FA, F6, F4); exotic formats not implemented (DPC for Pitfall II, FE for Decathlon, 3F, E0)
 
+**Hardware-Accurate Behaviors** (appear as visual issues but are authentic to original hardware):
+- **Sprite Flicker** (e.g., Pac-Man ghosts, Space Invaders): The Atari 2600 only has 2 sprite registers. Games needing more sprites use "sprite multiplexing" - cycling through sprites on alternate frames. On original CRT TVs, phosphor persistence blended the flicker naturally. On modern displays, this appears as pronounced flashing. This affects ALL Atari 2600 emulators.
+  - **Solution**: Use the **Phosphor Persistence** display filter (View → Properties → Display Filter → Phosphor Persistence) to reduce flicker
+  - This filter blends frames to simulate CRT phosphor decay, significantly improving visual quality for flicker-heavy games
+  - See the [Atari 2600 README](../../../crates/systems/atari2600/README.md#hardware-accurate-behaviors-not-bugs) for detailed explanation
+
 **Recent Fixes**:
 - **Vertical Stability**: Fixed vertical jumping issue by caching the visible window start position across frames
 - **Frame Consistency**: Enhanced test ROMs to catch timing-related rendering issues
