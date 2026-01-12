@@ -10,6 +10,7 @@ members = [
   "crates/systems/n64",
   "crates/systems/sms",
   "crates/systems/chip8",
+  "crates/systems/colecovision",
   "crates/frontend/gui",
 ]
 

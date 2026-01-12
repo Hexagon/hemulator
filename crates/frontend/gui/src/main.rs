@@ -95,6 +95,7 @@ enum EmulatorSystem {
     N64(Box<emu_n64::N64System>),
     SMS(Box<emu_sms::SmsSystem>),
     Chip8(Box<emu_chip8::Chip8System>),
+    ColecoVision(Box<emu_colecovision::ColecoVisionSystem>),
 }
 
 #[allow(dead_code)]
@@ -123,6 +124,9 @@ impl EmulatorSystem {
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
             EmulatorSystem::Chip8(sys) => sys
+                .step_frame()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+            EmulatorSystem::ColecoVision(sys) => sys
                 .step_frame()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         }
@@ -550,6 +554,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => "n64",
             EmulatorSystem::SMS(_) => "sms",
             EmulatorSystem::Chip8(_) => "chip8",
+            EmulatorSystem::ColecoVision(_) => "colecovision",
         }
     }
 
@@ -564,6 +569,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(_) => SystemType::N64,
             EmulatorSystem::SMS(_) => SystemType::SMS,
             EmulatorSystem::Chip8(_) => SystemType::Chip8,
+            EmulatorSystem::ColecoVision(_) => SystemType::ColecoVision,
         }
     }
 
@@ -2587,6 +2593,25 @@ fn main() {
                                 println!("Loaded CHIP-8 program: {}", p);
                             }
                         }
+                        Ok(SystemType::ColecoVision) => {
+                            rom_hash = Some(GameSaves::rom_hash(&data));
+                            let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+                            // ColecoVision requires BIOS - for now, just try loading cartridge
+                            if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                eprintln!("Failed to load ColecoVision ROM: {}", e);
+                                status_message = format!("Error: {} (Note: ColecoVision requires BIOS)", e);
+                                rom_hash = None;
+                            } else {
+                                rom_loaded = true;
+                                sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                runtime_state.set_mount("Cartridge".to_string(), p.clone());
+                                if let Err(e) = settings.save() {
+                                    eprintln!("Warning: Failed to save settings: {}", e);
+                                }
+                                status_message = "ColecoVision cartridge loaded (BIOS required)".to_string();
+                                println!("Loaded ColecoVision cartridge: {}", p);
+                            }
+                        }
                         Err(e) => {
                             eprintln!("Unsupported ROM: {}", e);
                             status_message = format!("Unsupported ROM: {}", e);
@@ -3262,6 +3287,16 @@ fn main() {
                     });
                     egui_app.tab_manager.update_system_tile_data(tile_data);
                 }
+                EmulatorSystem::ColecoVision(s) => {
+                    let coleco_data = s.get_tile_viewer_data();
+                    let tile_data =
+                        egui_ui::SystemTileData::ColecoVision(egui_ui::ColecoVisionTileData {
+                            vram: coleco_data.vram,
+                            palette: coleco_data.palette,
+                            registers: coleco_data.registers,
+                        });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
                 EmulatorSystem::SNES(s) => {
                     let snes_data = s.get_tile_viewer_data();
                     let tile_data = egui_ui::SystemTileData::SNES(egui_ui::SnesTileData {
@@ -3766,6 +3801,40 @@ fn main() {
                                                 .set_message("CHIP-8 program loaded".to_string());
                                             let _ = sys.resolution();
                                             // Load save states for this ROM
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::ColecoVision) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+                                        if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {} (Note: ColecoVision requires BIOS)", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            egui_app.property_pane.system_name =
+                                                "ColecoVision".to_string();
+                                            runtime_state
+                                                .set_mount("Cartridge".to_string(), path_str.clone());
+                                            settings.add_recent_file(path_str.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("ColecoVision cartridge loaded (BIOS required)".to_string());
+                                            let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);
                                             }
@@ -4308,6 +4377,46 @@ fn main() {
                                             egui_app
                                                 .status_bar
                                                 .set_message("CHIP-8 program loaded".to_string());
+                                            let _ = sys.resolution();
+                                            if let Some(ref hash) = rom_hash {
+                                                _game_saves = GameSaves::load(hash);
+                                            }
+                                        }
+                                    }
+                                    Ok(SystemType::ColecoVision) => {
+                                        rom_hash = Some(GameSaves::rom_hash(&data));
+                                        let mut coleco_sys = emu_colecovision::ColecoVisionSystem::new();
+                                        if let Err(e) = coleco_sys.mount("Cartridge", &data) {
+                                            egui_app
+                                                .status_bar
+                                                .set_message(format!("Error: {} (Note: ColecoVision requires BIOS)", e));
+                                            rom_hash = None;
+                                        } else {
+                                            rom_loaded = true;
+                                            sys = EmulatorSystem::ColecoVision(Box::new(coleco_sys));
+                                            egui_app.property_pane.system_name =
+                                                "ColecoVision".to_string();
+                                            egui_app.property_pane.rendering_backend =
+                                                sys.get_current_renderer_name();
+                                            egui_app.property_pane.available_renderers =
+                                                sys.get_available_renderers();
+                                            runtime_state.set_mount(
+                                                "Cartridge".to_string(),
+                                                file_path.clone(),
+                                            );
+                                            settings.add_recent_file(file_path.clone());
+                                            if let Err(e) = settings.save() {
+                                                eprintln!(
+                                                    "Warning: Failed to save settings: {}",
+                                                    e
+                                                );
+                                            }
+                                            egui_app.update_recent_files(
+                                                settings.get_recent_files().to_vec(),
+                                            );
+                                            egui_app
+                                                .status_bar
+                                                .set_message("ColecoVision cartridge loaded (BIOS required)".to_string());
                                             let _ = sys.resolution();
                                             if let Some(ref hash) = rom_hash {
                                                 _game_saves = GameSaves::load(hash);

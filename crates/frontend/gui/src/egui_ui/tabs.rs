@@ -22,6 +22,7 @@ pub enum SystemTileData {
     NES(NesTileData),
     GameBoy(GbTileData),
     SMS(SmsTileData),
+    ColecoVision(ColecoVisionTileData),
     SNES(SnesTileData),
     Atari2600(Atari2600TileData),
     Chip8(Chip8TileData),
@@ -74,6 +75,14 @@ pub struct GbTileData {
 pub struct SmsTileData {
     pub vram: Vec<u8>,
     pub cram: Vec<u8>,
+    pub palette: Vec<u32>,
+    pub registers: Vec<u8>,
+}
+
+/// ColecoVision tile viewer data
+#[derive(Clone)]
+pub struct ColecoVisionTileData {
+    pub vram: Vec<u8>,
     pub palette: Vec<u32>,
     pub registers: Vec<u8>,
 }

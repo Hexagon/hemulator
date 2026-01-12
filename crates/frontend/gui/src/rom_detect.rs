@@ -13,6 +13,7 @@ pub enum SystemType {
     N64,
     SMS,
     Chip8,
+    ColecoVision,
 }
 
 #[derive(Debug)]
@@ -63,6 +64,10 @@ pub fn detect_rom_type_with_extension(
             "sms" => {
                 // Prefer SMS for .sms extension even without header
                 return Ok(SystemType::SMS);
+            }
+            "col" => {
+                // ColecoVision cartridge
+                return Ok(SystemType::ColecoVision);
             }
             "a26" => {
                 // For .a26 extension, prefer Atari detection
@@ -287,12 +292,12 @@ pub fn detect_rom_type(data: &[u8]) -> Result<SystemType, UnsupportedRomError> {
     // Check if it might be a raw binary
     if data.len().is_multiple_of(1024) {
         return Err(UnsupportedRomError {
-            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8)".to_string(),
+            reason: "Unrecognized ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col)".to_string(),
         });
     }
 
     Err(UnsupportedRomError {
-        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8)"
+        reason: "Unknown ROM format. Supported formats: iNES (.nes), Game Boy (.gb/.gbc), Atari 2600 (.a26/.bin), DOS (.com/.exe), SNES (.smc/.sfc), N64 (.z64/.n64/.v64), SMS (.sms), CHIP-8 (.ch8/.c8), ColecoVision (.col)"
             .to_string(),
     })
 }
