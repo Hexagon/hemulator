@@ -242,6 +242,30 @@ pub trait Debugger {
     }
 }
 
+/// Helper macro to implement standard execution history methods for systems with instruction tracers.
+/// This eliminates boilerplate by delegating to the system's `instruction_tracer` field.
+///
+/// # Example
+/// ```ignore
+/// impl Debugger for MySystem {
+///     // ... other methods ...
+///     
+///     impl_debugger_execution_history!();
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_debugger_execution_history {
+    () => {
+        fn get_execution_history(&self) -> Vec<$crate::debug::ExecutionTrace> {
+            self.instruction_tracer.get_history()
+        }
+
+        fn has_execution_history(&self) -> bool {
+            self.instruction_tracer.is_enabled()
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
