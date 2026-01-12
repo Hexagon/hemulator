@@ -92,6 +92,25 @@ Full save state support implemented:
 - Supports `set_controller` method for standard integration
 - Individual key control via `set_key` method
 
+### Inspector Integration
+
+The CHIP-8 system integrates with the GUI inspector for real-time debugging:
+
+- **Debugger Trait**: Full implementation with memory regions, CPU state, and disassembly
+- **Display Tab**: Real-time visualization of display planes
+  - Plane 0 shown in green
+  - Plane 1 shown in red (for XO-CHIP dual-plane mode)
+  - Automatic scaling to fit display
+- **Registers Tab**: Comprehensive view of all system state
+  - All V registers (V0-VF) with VF highlighted
+  - Main registers (PC, I, SP)
+  - Timers (delay and sound)
+  - Stack contents with visual indication of used entries
+  - Hexadecimal keypad state with pressed keys highlighted
+  - Waiting-for-key state indication
+- **Generic Debug Tab**: CPU state, memory viewer, and disassembly
+- **Memory Tab**: Memory region viewer with read/write permissions
+
 ## Testing
 
 The implementation includes comprehensive tests:
@@ -225,9 +244,7 @@ This implementation is based on the following specifications and resources:
 
 Potential improvements for future versions:
 
-- **Super-CHIP**: Extended 128x64 display mode
-- **XO-CHIP**: Color support and additional opcodes
-- **Sound synthesis**: Actual beep tone generation
+- **Sound synthesis**: Actual beep tone generation (currently only tracked)
 - **Configurable timing**: Adjustable instructions per second
 - **Keyboard remapping**: Customizable key mappings per program
 
