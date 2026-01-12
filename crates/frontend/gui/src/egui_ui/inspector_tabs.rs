@@ -226,7 +226,7 @@ fn render_log_tab(ui: &mut Ui) {
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ScrollArea::vertical()
-                    .id_salt("log_config_scroll")
+                    .id_salt("inspector_log_config_scroll")
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
                         // Top section: Log level controls
@@ -258,7 +258,7 @@ fn render_log_tab(ui: &mut Ui) {
                         ui.label("Override global level:");
                         ui.add_space(10.0);
 
-                        egui::Grid::new("log_category_grid")
+                        egui::Grid::new("inspector_log_category_grid")
                             .num_columns(7)
                             .spacing([10.0, 8.0])
                             .striped(true)
@@ -348,7 +348,7 @@ fn render_log_tab(ui: &mut Ui) {
                 // Show messages in a scrollable area
                 let available_height = ui.available_height() - 40.0; // Reserve space for button
                 egui::ScrollArea::vertical()
-                    .id_salt("log_messages_scroll")
+                    .id_salt("inspector_log_messages_scroll")
                     .auto_shrink([false; 2])
                     .max_height(available_height)
                     .show(ui, |ui| {
@@ -503,7 +503,7 @@ fn render_snes_layers_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                         _ => vec![],
                     };
 
-                    egui::Grid::new("layers_grid")
+                    egui::Grid::new("inspector_snes_layers_grid")
                         .num_columns(2)
                         .spacing([20.0, 8.0])
                         .striped(true)
@@ -600,7 +600,7 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 ui.heading("System Information");
                 ui.add_space(5.0);
 
-                egui::Grid::new("bda_summary_grid")
+                egui::Grid::new("inspector_pc_bda_summary_grid")
                     .num_columns(2)
                     .spacing([40.0, 8.0])
                     .striped(true)
@@ -649,7 +649,7 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 ui.add_space(5.0);
 
                 let eq = bda_data.equipment_word;
-                egui::Grid::new("equipment_bits_grid")
+                egui::Grid::new("inspector_pc_equipment_bits_grid")
                     .num_columns(2)
                     .spacing([40.0, 8.0])
                     .striped(true)
@@ -744,7 +744,7 @@ fn render_pc_bda_tab(ui: &mut Ui, tab_manager: &mut TabManager) {
                 ui.label("Key locations in the BIOS Data Area:");
                 ui.add_space(5.0);
 
-                egui::Grid::new("bda_map_grid")
+                egui::Grid::new("inspector_pc_bda_map_grid")
                     .num_columns(3)
                     .spacing([20.0, 8.0])
                     .striped(true)
