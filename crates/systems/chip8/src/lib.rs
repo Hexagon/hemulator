@@ -1048,6 +1048,36 @@ impl Chip8System {
         }
     }
 
+    /// Get complete inspector data for GUI debugging tools
+    pub fn get_inspector_data(&self) -> InspectorData {
+        let mode_str = match self.mode {
+            Chip8Mode::Chip8 => "CHIP-8",
+            Chip8Mode::SuperChip => "Super-CHIP",
+            Chip8Mode::XoChip => "XO-CHIP",
+            Chip8Mode::Chip8Hires => "CHIP-8 Hires",
+            Chip8Mode::MegaChip => "Mega-CHIP",
+        };
+
+        InspectorData {
+            v_registers: self.v,
+            i: self.i,
+            pc: self.pc,
+            sp: self.sp,
+            stack: self.stack,
+            delay_timer: self.delay_timer,
+            sound_timer: self.sound_timer,
+            display_plane0: self.display_planes[0].clone(),
+            display_plane1: self.display_planes[1].clone(),
+            display_width: self.display_width,
+            display_height: self.display_height,
+            mode: mode_str.to_string(),
+            selected_plane: self.selected_plane,
+            high_res: self.high_res,
+            waiting_for_key: self.waiting_for_key.is_some(),
+            keys: self.keys,
+        }
+    }
+
     /// Check if sound should be playing
     pub fn is_sound_playing(&self) -> bool {
         self.sound_timer > 0
@@ -1110,6 +1140,26 @@ pub struct DebugInfo {
     pub sound_timer: u8,
     pub mode: String,
     pub resolution: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct InspectorData {
+    pub v_registers: [u8; 16],
+    pub i: u16,
+    pub pc: u16,
+    pub sp: u8,
+    pub stack: [u16; 16],
+    pub delay_timer: u8,
+    pub sound_timer: u8,
+    pub display_plane0: Vec<bool>,
+    pub display_plane1: Vec<bool>,
+    pub display_width: usize,
+    pub display_height: usize,
+    pub mode: String,
+    pub selected_plane: u8,
+    pub high_res: bool,
+    pub waiting_for_key: bool,
+    pub keys: [bool; 16],
 }
 
 impl System for Chip8System {
