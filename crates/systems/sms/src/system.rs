@@ -1001,8 +1001,8 @@ mod tests {
         assert_eq!(system.cpu.iy, 0x5678);
         assert_eq!(system.cpu.sp, 0xFFFE);
         assert_eq!(system.cpu.pc, 0x8000);
-        assert_eq!(system.cpu.iff1, true);
-        assert_eq!(system.cpu.iff2, false);
+        assert!(system.cpu.iff1);
+        assert!(!system.cpu.iff2);
         assert_eq!(system.cpu.im, 2);
         assert_eq!(system.cycles, 12345);
     }
