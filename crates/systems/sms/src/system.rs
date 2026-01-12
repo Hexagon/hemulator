@@ -45,6 +45,7 @@ pub struct SmsSystem {
 
     // Timing
     cycles: u64,
+    timing_mode: emu_core::apu::TimingMode,
 
     // Debugging
     /// Instruction tracer for debugging
@@ -72,6 +73,7 @@ impl SmsSystem {
             vdp,
             psg,
             cycles: 0,
+            timing_mode: emu_core::apu::TimingMode::Ntsc,
             instruction_tracer: emu_core::instruction_tracer::InstructionTracer::new(),
             breakpoint_manager: emu_core::breakpoints::BreakpointManager::new(),
         }
@@ -87,10 +89,81 @@ impl SmsSystem {
             )
         });
 
+        // Detect timing mode from ROM header
+        self.timing_mode = Self::detect_timing_mode(&rom_data);
+        log(LogCategory::CPU, LogLevel::Info, || {
+            format!("SMS: Detected timing mode: {:?}", self.timing_mode)
+        });
+
+        // Update PSG timing
+        self.psg.borrow_mut().set_timing(self.timing_mode);
+
         // Create new memory with ROM
         let memory = SmsMemory::new(rom_data, Rc::clone(&self.vdp), Rc::clone(&self.psg));
         self.cpu = CpuZ80::new(memory);
         self.reset();
+    }
+
+    /// Detect timing mode (PAL/NTSC) from ROM header
+    fn detect_timing_mode(rom_data: &[u8]) -> emu_core::apu::TimingMode {
+        // Check for TMR SEGA header at offset 0x7FF0
+        if rom_data.len() >= 0x7FF0 + 16 {
+            let header_region = &rom_data[0x7FF0..0x7FF0 + 16];
+
+            // Check for "TMR SEGA" signature
+            if &header_region[0..8] == b"TMR SEGA" {
+                // Byte 0x0F (offset 15) contains region code
+                let region = header_region[15];
+
+                // Region code interpretation (upper nibble only):
+                // We look at the upper nibble (region >> 4):
+                //   0x3, 0x5 -> Japan regions (NTSC)
+                //   0x4, 0x6, 0x7 -> Export regions (assumed PAL)
+                //
+                // Note: Export regions could be either PAL (Europe) or NTSC (USA/Brazil).
+                // Without additional metadata, we assume PAL for export regions as a heuristic.
+                // This may cause incorrect timing for USA-region games. Consider manual override
+                // via set_timing() if games run at incorrect speeds.
+
+                match region >> 4 {
+                    0x3 | 0x5 => {
+                        // Japan region - always NTSC
+                        log(LogCategory::CPU, LogLevel::Info, || {
+                            format!(
+                                "SMS: Japan region detected (region byte: 0x{:02X}), using NTSC",
+                                region
+                            )
+                        });
+                        return emu_core::apu::TimingMode::Ntsc;
+                    }
+                    0x4 | 0x6 | 0x7 => {
+                        // Export region - could be PAL or NTSC
+                        // Without additional metadata, assume PAL for European export
+                        log(LogCategory::CPU, LogLevel::Info, || {
+                            format!(
+                                "SMS: Export region detected (region byte: 0x{:02X}), assuming PAL",
+                                region
+                            )
+                        });
+                        return emu_core::apu::TimingMode::Pal;
+                    }
+                    _ => {
+                        log(LogCategory::CPU, LogLevel::Warn, || {
+                            format!(
+                                "SMS: Unknown region code 0x{:02X}, defaulting to NTSC",
+                                region
+                            )
+                        });
+                    }
+                }
+            }
+        }
+
+        // Default to NTSC if no valid header found
+        log(LogCategory::CPU, LogLevel::Info, || {
+            "SMS: No valid TMR SEGA header found, defaulting to NTSC".to_string()
+        });
+        emu_core::apu::TimingMode::Ntsc
     }
 
     /// Set controller 1 state
@@ -131,7 +204,19 @@ impl System for SmsSystem {
     }
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
-        let target_cycles = 59659; // ~3.58 MHz / 60 Hz
+        // Calculate target cycles and scanlines based on timing mode
+        let (target_cycles, total_scanlines) = match self.timing_mode {
+            emu_core::apu::TimingMode::Ntsc => {
+                // NTSC: 3.579545 MHz / 60 Hz = 59659 cycles/frame
+                // 262 scanlines total
+                (59659_u64, 262_u64)
+            }
+            emu_core::apu::TimingMode::Pal => {
+                // PAL: 3.546894 MHz / 50 Hz = 70938 cycles/frame
+                // 313 scanlines total
+                (70938_u64, 313_u64)
+            }
+        };
 
         while self.cycles < target_cycles {
             // Log CPU state on first few cycles (using cycles count directly)
@@ -162,8 +247,9 @@ impl System for SmsSystem {
             }
 
             // Update VDP scanline based on cycles
-            // Each scanline takes approximately 228 cycles (~3.58MHz / 262 scanlines / 60Hz)
-            let current_scanline = (self.cycles / 228) % 262;
+            // Calculate dynamically to avoid cumulative timing drift
+            let current_scanline =
+                (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
@@ -188,14 +274,182 @@ impl System for SmsSystem {
     }
 
     fn save_state(&self) -> Value {
-        // TODO: Implement state serialization
+        let vdp = self.vdp.borrow();
+        let psg = self.psg.borrow();
+
         serde_json::json!({
+            "system": "sms",
+            "version": 1,
             "cycles": self.cycles,
+            "timing_mode": match self.timing_mode {
+                emu_core::apu::TimingMode::Ntsc => "ntsc",
+                emu_core::apu::TimingMode::Pal => "pal",
+            },
+            "cpu": {
+                // Main registers
+                "a": self.cpu.a,
+                "f": self.cpu.f,
+                "b": self.cpu.b,
+                "c": self.cpu.c,
+                "d": self.cpu.d,
+                "e": self.cpu.e,
+                "h": self.cpu.h,
+                "l": self.cpu.l,
+                // Shadow registers
+                "a_prime": self.cpu.a_prime,
+                "f_prime": self.cpu.f_prime,
+                "b_prime": self.cpu.b_prime,
+                "c_prime": self.cpu.c_prime,
+                "d_prime": self.cpu.d_prime,
+                "e_prime": self.cpu.e_prime,
+                "h_prime": self.cpu.h_prime,
+                "l_prime": self.cpu.l_prime,
+                // Index registers
+                "ix": self.cpu.ix,
+                "iy": self.cpu.iy,
+                // Special registers
+                "i": self.cpu.i,
+                "r": self.cpu.r,
+                "sp": self.cpu.sp,
+                "pc": self.cpu.pc,
+                // Interrupt state
+                "iff1": self.cpu.iff1,
+                "iff2": self.cpu.iff2,
+                "im": self.cpu.im,
+                "halted": self.cpu.halted,
+            },
+            "memory": {
+                "ram": self.cpu.memory.get_ram(),
+                "rom_bank_0": self.cpu.memory.get_rom_bank_0(),
+                "rom_bank_1": self.cpu.memory.get_rom_bank_1(),
+                "rom_bank_2": self.cpu.memory.get_rom_bank_2(),
+                "controller_1": self.cpu.memory.get_controller_1(),
+                "controller_2": self.cpu.memory.get_controller_2(),
+                "memory_control": self.cpu.memory.get_memory_control(),
+            },
+            "vdp": vdp.get_state(),
+            "psg": psg.get_state(),
         })
     }
 
-    fn load_state(&mut self, _state: &Value) -> Result<(), serde_json::Error> {
-        // TODO: Implement state deserialization
+    fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
+        // Validate system type
+        if let Some(system) = state.get("system").and_then(|s| s.as_str()) {
+            if system != "sms" {
+                // Create a proper error by trying to deserialize an incompatible value
+                let _: () = serde_json::from_value(serde_json::json!({
+                    "error": "Invalid system type"
+                }))?;
+            }
+        }
+
+        // Helper macros for loading values
+        macro_rules! load_u8 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u8;
+                }
+            };
+        }
+
+        macro_rules! load_u16 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u16;
+                }
+            };
+        }
+
+        macro_rules! load_bool {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
+                    $target = val;
+                }
+            };
+        }
+
+        // Load cycles
+        if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
+            self.cycles = cycles;
+        }
+
+        // Load timing mode
+        if let Some(timing_str) = state.get("timing_mode").and_then(|v| v.as_str()) {
+            self.timing_mode = match timing_str {
+                "pal" => emu_core::apu::TimingMode::Pal,
+                _ => emu_core::apu::TimingMode::Ntsc,
+            };
+        }
+
+        // Load CPU state
+        if let Some(cpu_state) = state.get("cpu") {
+            load_u8!(cpu_state, "a", self.cpu.a);
+            load_u8!(cpu_state, "f", self.cpu.f);
+            load_u8!(cpu_state, "b", self.cpu.b);
+            load_u8!(cpu_state, "c", self.cpu.c);
+            load_u8!(cpu_state, "d", self.cpu.d);
+            load_u8!(cpu_state, "e", self.cpu.e);
+            load_u8!(cpu_state, "h", self.cpu.h);
+            load_u8!(cpu_state, "l", self.cpu.l);
+            load_u8!(cpu_state, "a_prime", self.cpu.a_prime);
+            load_u8!(cpu_state, "f_prime", self.cpu.f_prime);
+            load_u8!(cpu_state, "b_prime", self.cpu.b_prime);
+            load_u8!(cpu_state, "c_prime", self.cpu.c_prime);
+            load_u8!(cpu_state, "d_prime", self.cpu.d_prime);
+            load_u8!(cpu_state, "e_prime", self.cpu.e_prime);
+            load_u8!(cpu_state, "h_prime", self.cpu.h_prime);
+            load_u8!(cpu_state, "l_prime", self.cpu.l_prime);
+            load_u16!(cpu_state, "ix", self.cpu.ix);
+            load_u16!(cpu_state, "iy", self.cpu.iy);
+            load_u8!(cpu_state, "i", self.cpu.i);
+            load_u8!(cpu_state, "r", self.cpu.r);
+            load_u16!(cpu_state, "sp", self.cpu.sp);
+            load_u16!(cpu_state, "pc", self.cpu.pc);
+            load_bool!(cpu_state, "iff1", self.cpu.iff1);
+            load_bool!(cpu_state, "iff2", self.cpu.iff2);
+            load_u8!(cpu_state, "im", self.cpu.im);
+            load_bool!(cpu_state, "halted", self.cpu.halted);
+        }
+
+        // Load memory state
+        if let Some(mem_state) = state.get("memory") {
+            if let Some(ram) = mem_state.get("ram").and_then(|v| v.as_array()) {
+                self.cpu.memory.set_ram(
+                    &ram.iter()
+                        .filter_map(|v| v.as_u64().map(|n| n as u8))
+                        .collect::<Vec<u8>>(),
+                );
+            }
+            if let Some(bank) = mem_state.get("rom_bank_0").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_0(bank as usize);
+            }
+            if let Some(bank) = mem_state.get("rom_bank_1").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_1(bank as usize);
+            }
+            if let Some(bank) = mem_state.get("rom_bank_2").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_2(bank as usize);
+            }
+            if let Some(ctrl1) = mem_state.get("controller_1").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_controller_1(ctrl1 as u8);
+            }
+            if let Some(ctrl2) = mem_state.get("controller_2").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_controller_2(ctrl2 as u8);
+            }
+            if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_memory_control(mem_ctrl as u8);
+            }
+        }
+
+        // Load VDP state
+        if let Some(vdp_state) = state.get("vdp") {
+            self.vdp.borrow_mut().set_state(vdp_state)?;
+        }
+
+        // Load PSG state
+        if let Some(psg_state) = state.get("psg") {
+            self.psg.borrow_mut().set_state(psg_state)?;
+        }
+
         Ok(())
     }
 
@@ -244,11 +498,17 @@ impl SmsSystem {
         self.psg.borrow_mut().generate_samples(count)
     }
 
-    /// Set timing mode (NTSC/PAL) for the PSG
+    /// Set timing mode (NTSC/PAL) for the system
     ///
-    /// This updates the PSG's clock rate to match the selected timing mode.
+    /// This updates both the system timing and PSG's clock rate to match the selected mode.
     pub fn set_timing(&mut self, timing: emu_core::apu::TimingMode) {
+        self.timing_mode = timing;
         self.psg.borrow_mut().set_timing(timing);
+    }
+
+    /// Get current timing mode
+    pub fn get_timing(&self) -> emu_core::apu::TimingMode {
+        self.timing_mode
     }
 
     /// Enable or disable instruction tracing
@@ -654,5 +914,259 @@ mod tests {
             target_cycles,
             expected
         );
+    }
+
+    #[test]
+    fn test_save_load_state() {
+        let mut system = SmsSystem::new();
+
+        // Load a ROM and run for a bit
+        let mut rom = vec![0; 0x8000];
+        rom[0] = 0x3E; // LD A, n
+        rom[1] = 0x42;
+        rom[2] = 0x06; // LD B, n
+        rom[3] = 0x12;
+        rom[4] = 0x76; // HALT
+
+        system.load_rom(rom);
+        system.reset();
+
+        // Execute a few instructions
+        system.cpu.step(); // LD A, 0x42
+        system.cpu.step(); // LD B, 0x12
+
+        // Verify CPU state before save
+        assert_eq!(system.cpu.a, 0x42);
+        assert_eq!(system.cpu.b, 0x12);
+
+        // Save state
+        let state = system.save_state();
+
+        // Modify system state
+        system.cpu.a = 0xFF;
+        system.cpu.b = 0xFF;
+        system.cycles = 99999;
+
+        // Verify state was modified
+        assert_eq!(system.cpu.a, 0xFF);
+        assert_eq!(system.cpu.b, 0xFF);
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify state was restored
+        assert_eq!(system.cpu.a, 0x42);
+        assert_eq!(system.cpu.b, 0x12);
+    }
+
+    #[test]
+    fn test_save_load_state_cpu_registers() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Set various CPU registers
+        system.cpu.a = 0xAA;
+        system.cpu.f = 0x55;
+        system.cpu.b = 0x11;
+        system.cpu.c = 0x22;
+        system.cpu.d = 0x33;
+        system.cpu.e = 0x44;
+        system.cpu.h = 0x55;
+        system.cpu.l = 0x66;
+        system.cpu.ix = 0x1234;
+        system.cpu.iy = 0x5678;
+        system.cpu.sp = 0xFFFE;
+        system.cpu.pc = 0x8000;
+        system.cpu.iff1 = true;
+        system.cpu.iff2 = false;
+        system.cpu.im = 2;
+        system.cycles = 12345;
+
+        // Save and restore
+        let state = system.save_state();
+        system.cpu.a = 0;
+        system.cpu.f = 0;
+        system.load_state(&state).unwrap();
+
+        // Verify all registers restored
+        assert_eq!(system.cpu.a, 0xAA);
+        assert_eq!(system.cpu.f, 0x55);
+        assert_eq!(system.cpu.b, 0x11);
+        assert_eq!(system.cpu.c, 0x22);
+        assert_eq!(system.cpu.d, 0x33);
+        assert_eq!(system.cpu.e, 0x44);
+        assert_eq!(system.cpu.h, 0x55);
+        assert_eq!(system.cpu.l, 0x66);
+        assert_eq!(system.cpu.ix, 0x1234);
+        assert_eq!(system.cpu.iy, 0x5678);
+        assert_eq!(system.cpu.sp, 0xFFFE);
+        assert_eq!(system.cpu.pc, 0x8000);
+        assert!(system.cpu.iff1);
+        assert!(!system.cpu.iff2);
+        assert_eq!(system.cpu.im, 2);
+        assert_eq!(system.cycles, 12345);
+    }
+
+    #[test]
+    fn test_save_load_state_memory() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Write some data to RAM
+        system.cpu.memory.write(0xC000, 0xAB);
+        system.cpu.memory.write(0xC100, 0xCD);
+        system.cpu.memory.write(0xDFFF, 0xEF);
+
+        // Save state
+        let state = system.save_state();
+
+        // Clear RAM
+        system.cpu.memory.write(0xC000, 0);
+        system.cpu.memory.write(0xC100, 0);
+        system.cpu.memory.write(0xDFFF, 0);
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify RAM was restored
+        assert_eq!(system.cpu.memory.read(0xC000), 0xAB);
+        assert_eq!(system.cpu.memory.read(0xC100), 0xCD);
+        assert_eq!(system.cpu.memory.read(0xDFFF), 0xEF);
+    }
+
+    #[test]
+    fn test_save_load_state_vdp() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Write to VDP registers and VRAM
+        system.vdp.borrow_mut().write_control(0x20); // Register value
+        system.vdp.borrow_mut().write_control(0x81); // Write to register 1
+
+        // Write to VRAM
+        system.vdp.borrow_mut().write_control(0x00); // Address low
+        system.vdp.borrow_mut().write_control(0x40); // Address high (VRAM write)
+        system.vdp.borrow_mut().write_data(0x42);
+
+        // Get tile viewer data to verify state
+        let data_before = system.get_tile_viewer_data();
+
+        // Save state
+        let state = system.save_state();
+
+        // Modify VDP state
+        system.vdp.borrow_mut().reset();
+
+        // Load state
+        system.load_state(&state).unwrap();
+
+        // Verify VDP state was restored
+        let data_after = system.get_tile_viewer_data();
+        assert_eq!(data_after.registers[1], data_before.registers[1]);
+        assert_eq!(data_after.vram[0], data_before.vram[0]);
+        assert_eq!(data_after.registers[1], 0x20);
+        assert_eq!(data_after.vram[0], 0x42);
+    }
+
+    #[test]
+    fn test_save_load_state_invalid_system() {
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Try to load a state from a different system
+        let invalid_state = serde_json::json!({
+            "system": "nes",
+            "version": 1,
+        });
+
+        let result = system.load_state(&invalid_state);
+        assert!(result.is_err(), "Should reject state from different system");
+    }
+
+    #[test]
+    fn test_pal_timing_detection() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM with PAL region header
+        let mut rom = vec![0; 0x8000];
+
+        // Add TMR SEGA header at 0x7FF0
+        rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
+        rom[0x7FFF] = 0x40; // Export region (PAL)
+
+        system.load_rom(rom);
+
+        // Should detect as PAL
+        assert_eq!(system.get_timing(), TimingMode::Pal);
+    }
+
+    #[test]
+    fn test_ntsc_timing_detection() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM with Japan (NTSC) region header
+        let mut rom = vec![0; 0x8000];
+
+        // Add TMR SEGA header at 0x7FF0
+        rom[0x7FF0..0x7FF0 + 8].copy_from_slice(b"TMR SEGA");
+        rom[0x7FFF] = 0x30; // Japan region (NTSC)
+
+        system.load_rom(rom);
+
+        // Should detect as NTSC
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+    }
+
+    #[test]
+    fn test_default_timing_no_header() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+
+        // Create a ROM without header
+        let rom = vec![0; 0x8000];
+
+        system.load_rom(rom);
+
+        // Should default to NTSC
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+    }
+
+    #[test]
+    fn test_pal_frame_cycles() {
+        // PAL: 3.546894 MHz / 50 Hz ≈ 70938 cycles per frame
+        let target_cycles = 70938;
+        let expected = 3_546_894.0 / 50.0;
+
+        // Allow 1 cycle tolerance due to rounding
+        assert!(
+            (target_cycles as f64 - expected).abs() < 1.0,
+            "PAL target cycles {} should be close to expected {}",
+            target_cycles,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_save_load_state_timing_mode() {
+        use emu_core::apu::TimingMode;
+        let mut system = SmsSystem::new();
+        system.load_rom(vec![0; 0x8000]);
+
+        // Set to PAL mode
+        system.set_timing(TimingMode::Pal);
+        assert_eq!(system.get_timing(), TimingMode::Pal);
+
+        // Save state
+        let state = system.save_state();
+
+        // Change to NTSC
+        system.set_timing(TimingMode::Ntsc);
+        assert_eq!(system.get_timing(), TimingMode::Ntsc);
+
+        // Load state - should restore PAL
+        system.load_state(&state).unwrap();
+        assert_eq!(system.get_timing(), TimingMode::Pal);
     }
 }

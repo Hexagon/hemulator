@@ -90,6 +90,68 @@ impl SmsMemory {
     pub fn set_controller_2(&mut self, state: u8) {
         self.controller_2 = state;
     }
+
+    // Save state support methods
+    /// Get RAM contents for save state
+    pub fn get_ram(&self) -> Vec<u8> {
+        self.ram.to_vec()
+    }
+
+    /// Set RAM contents from save state
+    pub fn set_ram(&mut self, data: &[u8]) {
+        let len = data.len().min(self.ram.len());
+        self.ram[..len].copy_from_slice(&data[..len]);
+    }
+
+    /// Get ROM bank 0 index
+    pub fn get_rom_bank_0(&self) -> usize {
+        self.rom_bank_0
+    }
+
+    /// Get ROM bank 1 index
+    pub fn get_rom_bank_1(&self) -> usize {
+        self.rom_bank_1
+    }
+
+    /// Get ROM bank 2 index
+    pub fn get_rom_bank_2(&self) -> usize {
+        self.rom_bank_2
+    }
+
+    /// Get controller 1 state
+    pub fn get_controller_1(&self) -> u8 {
+        self.controller_1
+    }
+
+    /// Get controller 2 state
+    pub fn get_controller_2(&self) -> u8 {
+        self.controller_2
+    }
+
+    /// Get memory control register
+    pub fn get_memory_control(&self) -> u8 {
+        self.memory_control
+    }
+
+    /// Set ROM bank 0 index for save state
+    pub fn set_rom_bank_0(&mut self, bank: usize) {
+        self.rom_bank_0 = bank % self.num_banks.max(1);
+    }
+
+    /// Set ROM bank 1 index for save state
+    pub fn set_rom_bank_1(&mut self, bank: usize) {
+        self.rom_bank_1 = bank % self.num_banks.max(1);
+    }
+
+    /// Set ROM bank 2 index for save state
+    pub fn set_rom_bank_2(&mut self, bank: usize) {
+        self.rom_bank_2 = bank % self.num_banks.max(1);
+    }
+
+    /// Set memory control register for save state
+    pub fn set_memory_control(&mut self, value: u8) {
+        self.memory_control = value;
+    }
 }
 
 impl MemoryZ80 for SmsMemory {
