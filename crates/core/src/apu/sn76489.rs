@@ -186,6 +186,116 @@ impl Sn76489Psg {
         self.volume.fill(0x0F);
         self.latched_reg = 0;
     }
+
+    /// Get PSG state for save state
+    pub fn get_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "tone_freq": self.tone_freq.to_vec(),
+            "tone_counter": self.tone_counter.to_vec(),
+            "tone_output": self.tone_output.to_vec(),
+            "noise_control": self.noise_control,
+            "noise_lfsr": self.noise_lfsr,
+            "noise_counter": self.noise_counter,
+            "noise_output": self.noise_output,
+            "volume": self.volume.to_vec(),
+            "latched_reg": self.latched_reg,
+            "timing_mode": match self.timing_mode {
+                TimingMode::Ntsc => "ntsc",
+                TimingMode::Pal => "pal",
+            },
+        })
+    }
+
+    /// Set PSG state from save state
+    pub fn set_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
+        macro_rules! load_u8 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u8;
+                }
+            };
+        }
+
+        macro_rules! load_u16 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u16;
+                }
+            };
+        }
+
+        macro_rules! load_bool {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
+                    $target = val;
+                }
+            };
+        }
+
+        // Load tone frequencies
+        if let Some(tone_freq) = state.get("tone_freq").and_then(|v| v.as_array()) {
+            for (i, val) in tone_freq.iter().enumerate() {
+                if i >= self.tone_freq.len() {
+                    break;
+                }
+                if let Some(freq) = val.as_u64() {
+                    self.tone_freq[i] = freq as u16;
+                }
+            }
+        }
+
+        // Load tone counters
+        if let Some(tone_counter) = state.get("tone_counter").and_then(|v| v.as_array()) {
+            for (i, val) in tone_counter.iter().enumerate() {
+                if i >= self.tone_counter.len() {
+                    break;
+                }
+                if let Some(counter) = val.as_u64() {
+                    self.tone_counter[i] = counter as u16;
+                }
+            }
+        }
+
+        // Load tone outputs
+        if let Some(tone_output) = state.get("tone_output").and_then(|v| v.as_array()) {
+            for (i, val) in tone_output.iter().enumerate() {
+                if i >= self.tone_output.len() {
+                    break;
+                }
+                if let Some(output) = val.as_bool() {
+                    self.tone_output[i] = output;
+                }
+            }
+        }
+
+        load_u8!(state, "noise_control", self.noise_control);
+        load_u16!(state, "noise_lfsr", self.noise_lfsr);
+        load_u16!(state, "noise_counter", self.noise_counter);
+        load_bool!(state, "noise_output", self.noise_output);
+
+        // Load volumes
+        if let Some(volume) = state.get("volume").and_then(|v| v.as_array()) {
+            for (i, val) in volume.iter().enumerate() {
+                if i >= self.volume.len() {
+                    break;
+                }
+                if let Some(vol) = val.as_u64() {
+                    self.volume[i] = vol as u8;
+                }
+            }
+        }
+
+        load_u8!(state, "latched_reg", self.latched_reg);
+
+        if let Some(timing_str) = state.get("timing_mode").and_then(|v| v.as_str()) {
+            self.timing_mode = match timing_str {
+                "pal" => TimingMode::Pal,
+                _ => TimingMode::Ntsc,
+            };
+        }
+
+        Ok(())
+    }
 }
 
 impl AudioChip for Sn76489Psg {
