@@ -453,6 +453,12 @@ impl System for GbSystem {
                 // STAT interrupt - request STAT interrupt (bit 1)
                 self.cpu.memory.request_interrupt(0x02);
             }
+            
+            // Step serial transfer and handle serial interrupt
+            if self.cpu.memory.step_serial(cpu_cycles) {
+                // Serial transfer complete - request serial interrupt (bit 3)
+                self.cpu.memory.request_interrupt(0x08);
+            }
         }
 
         // Tick mapper (e.g., for MBC3 RTC) once per frame
@@ -1885,5 +1891,55 @@ mod tests {
             0xCC,
             "Last byte of switchable area should be accessible"
         );
+    }
+
+    #[test]
+    fn test_serial_transfer_basic() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Write data to SB register
+        sys.cpu.memory.write(0xFF01, 0xAB);
+        assert_eq!(sys.cpu.memory.read(0xFF01), 0xAB);
+
+        // Write to SC register to start transfer (internal clock)
+        sys.cpu.memory.write(0xFF02, 0x81); // Bit 7=1 (start), bit 0=1 (internal)
+        assert_eq!(sys.cpu.memory.read(0xFF02) & 0x81, 0x81);
+    }
+
+    #[test]
+    fn test_serial_transfer_completion() {
+        let mut sys = GbSystem::new();
+        
+        // Create a minimal ROM that performs a serial transfer
+        let mut rom = vec![0; 0x8000];
+        // Write assembly to initialize serial transfer
+        rom[0x100] = 0x3E; // LD A, 0x42
+        rom[0x101] = 0x42;
+        rom[0x102] = 0xE0; // LDH (0xFF01), A  (write to SB)
+        rom[0x103] = 0x01;
+        rom[0x104] = 0x3E; // LD A, 0x81
+        rom[0x105] = 0x81;
+        rom[0x106] = 0xE0; // LDH (0xFF02), A  (write to SC, start transfer)
+        rom[0x107] = 0x02;
+        rom[0x108] = 0x76; // HALT
+        rom[0x147] = 0x00; // Cartridge type
+        rom[0x149] = 0x00; // RAM size
+        
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Run several frames to allow transfer to complete
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+        
+        // Transfer should be complete (bit 7 cleared)
+        let sc = sys.cpu.memory.read(0xFF02);
+        assert_eq!(sc & 0x80, 0x00, "Transfer start bit should be cleared");
+        
+        // SB should have been shifted (with 0xFF shifted in, simulating no device)
+        let sb = sys.cpu.memory.read(0xFF01);
+        assert_eq!(sb, 0xFF, "SB should be 0xFF after transfer with no device connected");
     }
 }

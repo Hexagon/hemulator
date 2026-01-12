@@ -140,6 +140,17 @@ pub struct GbBus {
     /// Bit 7 (read): Current speed (0=normal 4.19 MHz, 1=double 8.39 MHz)
     /// Bit 0 (write): Speed switch prepare flag
     key1: u8,
+    /// Serial transfer data (0xFF01)
+    sb: u8,
+    /// Serial control (0xFF02)
+    /// Bit 7: Transfer start (1=start, 0=no transfer in progress)
+    /// Bit 1: Clock speed (CGB only, 0=normal, 1=fast)
+    /// Bit 0: Clock source (0=external, 1=internal)
+    sc: u8,
+    /// Serial transfer bit counter (for internal clock mode)
+    serial_bit_counter: u8,
+    /// Serial transfer cycle counter
+    serial_cycle_counter: u32,
 }
 
 impl GbBus {
@@ -159,6 +170,10 @@ impl GbBus {
             button_state: 0xFF,
             cgb_mode: false,
             key1: 0, // Start in normal speed mode
+            sb: 0,
+            sc: 0,
+            serial_bit_counter: 0,
+            serial_cycle_counter: 0,
         }
     }
 
@@ -184,6 +199,44 @@ impl GbBus {
         if let Some(mapper) = &mut self.mapper {
             mapper.tick();
         }
+    }
+
+    /// Step the serial transfer
+    /// Returns true if a serial interrupt should be generated
+    /// Should be called with CPU cycles
+    pub fn step_serial(&mut self, cycles: u32) -> bool {
+        // Only process if transfer is active and using internal clock
+        if (self.sc & 0x80) == 0 || (self.sc & 0x01) == 0 {
+            return false;
+        }
+
+        self.serial_cycle_counter += cycles;
+
+        // Serial transfer takes 512 cycles per bit in normal speed
+        // (8192 Hz clock rate, which is CPU clock / 512)
+        // In CGB fast mode (bit 1 set), it takes 16 cycles per bit
+        let cycles_per_bit = if (self.sc & 0x02) != 0 { 16 } else { 512 };
+
+        if self.serial_cycle_counter >= cycles_per_bit {
+            self.serial_cycle_counter -= cycles_per_bit;
+            
+            if self.serial_bit_counter > 0 {
+                // Shift out one bit from SB, shift in 0xFF (no device connected)
+                // In loopback mode, we just shift in what we shift out
+                let _out_bit = (self.sb >> 7) & 0x01;
+                self.sb = (self.sb << 1) | 0x01; // Shift in 1 (disconnected = all high)
+                
+                self.serial_bit_counter -= 1;
+                
+                // When all 8 bits are transferred, clear transfer flag and request interrupt
+                if self.serial_bit_counter == 0 {
+                    self.sc &= !0x80; // Clear transfer start bit
+                    return true; // Request serial interrupt
+                }
+            }
+        }
+
+        false
     }
 
     /// Check if CGB mode is enabled
@@ -380,6 +433,9 @@ impl MemoryLr35902 for GbBus {
                     }
                     result
                 }
+                // Serial transfer registers
+                0xFF01 => self.sb,
+                0xFF02 => self.sc | 0x7C, // Bits 2-6 unused, always read as 1
                 // Timer registers
                 0xFF04..=0xFF07 => self.timer.read_register(addr),
                 0xFF0F => self.if_reg | 0xE0, // Bits 5-7 unused, always read as 1
@@ -463,6 +519,18 @@ impl MemoryLr35902 for GbBus {
             0xFF00..=0xFF7F => {
                 match addr {
                     0xFF00 => self.joypad = val & 0x30, // Only bits 4-5 are writable
+                    // Serial transfer registers
+                    0xFF01 => self.sb = val,
+                    0xFF02 => {
+                        self.sc = val & 0x83; // Only bits 0, 1, and 7 are writable
+                        
+                        // If transfer start bit is set and using internal clock
+                        if (val & 0x80) != 0 && (val & 0x01) != 0 {
+                            // Start serial transfer
+                            self.serial_bit_counter = 8;
+                            self.serial_cycle_counter = 0;
+                        }
+                    }
                     // Timer registers
                     0xFF04..=0xFF07 => self.timer.write_register(addr, val),
                     0xFF0F => self.if_reg = val & 0x1F, // Only bits 0-4 are writable
