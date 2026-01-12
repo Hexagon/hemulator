@@ -944,17 +944,21 @@ mod tests {
         let non_black_pixels = frame.pixels.iter().filter(|&&p| p != 0xFF000000).count();
 
         // We should see the full 8x8=64 pixel sprite
+        // The sprite is solid (all pixels color index 1)
+        const EXPECTED_SPRITE_PIXELS: usize = 64;
         assert!(
-            sprite_pixels >= 60,
-            "Should see full 8x8 sprite at (100,100), got {} non-black pixels (expected 64)",
-            sprite_pixels
+            sprite_pixels == EXPECTED_SPRITE_PIXELS,
+            "Should see full 8x8 sprite at (100,100), got {} non-black pixels (expected {})",
+            sprite_pixels,
+            EXPECTED_SPRITE_PIXELS
         );
 
-        // Verify the frame has the expected non-black pixels
+        // Verify the frame has the expected non-black pixels (should match sprite pixels exactly)
         assert!(
-            non_black_pixels >= 60,
-            "Simple sprite ROM should produce full sprite output, got {} non-black pixels",
-            non_black_pixels
+            non_black_pixels == EXPECTED_SPRITE_PIXELS,
+            "Simple sprite ROM should produce full sprite output, got {} non-black pixels (expected {})",
+            non_black_pixels,
+            EXPECTED_SPRITE_PIXELS
         );
     }
 }

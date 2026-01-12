@@ -185,7 +185,7 @@ CLEAR_OAM_HIGH:
     bne CLEAR_OAM_HIGH
     
     ; Set OBSEL register (sprite tile base address and size)
-    ; Bits 0-2: name_base (base address = name_base << 14)
+    ; Bits 0-2: name_base (word address in VRAM, byte address = name_base << 14)
     ;           We want VRAM $0000, so name_base=0
     ; Bits 3-4: name_select (gap between sprite pages)
     ; Bits 5-7: sprite size selection (0 = 8x8 and 16x16)
