@@ -265,6 +265,105 @@ impl Vdp {
         }
     }
 
+    /// Get VDP state for save state
+    pub fn get_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "vram": self.vram.to_vec(),
+            "cram": self.cram.to_vec(),
+            "registers": self.registers.to_vec(),
+            "address_register": self.address_register,
+            "code_register": self.code_register,
+            "read_buffer": self.read_buffer,
+            "write_latch": self.write_latch,
+            "frame_interrupt_pending": self.frame_interrupt_pending,
+            "line_interrupt_pending": self.line_interrupt_pending,
+            "line_counter": self.line_counter,
+            "sprite_overflow": self.sprite_overflow,
+            "sprite_collision": self.sprite_collision,
+            "scanline": self.scanline,
+        })
+    }
+
+    /// Set VDP state from save state
+    pub fn set_state(&mut self, state: &serde_json::Value) -> Result<(), serde_json::Error> {
+        macro_rules! load_u8 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u8;
+                }
+            };
+        }
+
+        macro_rules! load_u16 {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
+                    $target = val as u16;
+                }
+            };
+        }
+
+        macro_rules! load_bool {
+            ($state:expr, $field:literal, $target:expr) => {
+                if let Some(val) = $state.get($field).and_then(|v| v.as_bool()) {
+                    $target = val;
+                }
+            };
+        }
+
+        // Load VRAM
+        if let Some(vram) = state.get("vram").and_then(|v| v.as_array()) {
+            for (i, val) in vram.iter().enumerate() {
+                if i >= self.vram.len() {
+                    break;
+                }
+                if let Some(byte) = val.as_u64() {
+                    self.vram[i] = byte as u8;
+                }
+            }
+        }
+
+        // Load CRAM
+        if let Some(cram) = state.get("cram").and_then(|v| v.as_array()) {
+            for (i, val) in cram.iter().enumerate() {
+                if i >= self.cram.len() {
+                    break;
+                }
+                if let Some(byte) = val.as_u64() {
+                    self.cram[i] = byte as u8;
+                }
+            }
+        }
+
+        // Load registers
+        if let Some(registers) = state.get("registers").and_then(|v| v.as_array()) {
+            for (i, val) in registers.iter().enumerate() {
+                if i >= self.registers.len() {
+                    break;
+                }
+                if let Some(byte) = val.as_u64() {
+                    self.registers[i] = byte as u8;
+                }
+            }
+        }
+
+        load_u16!(state, "address_register", self.address_register);
+        load_u8!(state, "code_register", self.code_register);
+        load_u8!(state, "read_buffer", self.read_buffer);
+        load_bool!(state, "write_latch", self.write_latch);
+        load_bool!(
+            state,
+            "frame_interrupt_pending",
+            self.frame_interrupt_pending
+        );
+        load_bool!(state, "line_interrupt_pending", self.line_interrupt_pending);
+        load_u8!(state, "line_counter", self.line_counter);
+        load_bool!(state, "sprite_overflow", self.sprite_overflow);
+        load_bool!(state, "sprite_collision", self.sprite_collision);
+        load_u16!(state, "scanline", self.scanline);
+
+        Ok(())
+    }
+
     /// Render a single scanline
     fn render_scanline(&mut self, line: u8) {
         // Handle line counter and line interrupts
