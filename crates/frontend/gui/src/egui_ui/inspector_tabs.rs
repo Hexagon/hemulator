@@ -28,6 +28,11 @@ pub enum InspectorTab {
     SnesPalettes,
     SnesLayers,
 
+    Atari2600Playfield,
+    Atari2600Sprites,
+    Atari2600Palette,
+    Atari2600Collision,
+
     PcBda, // BIOS Data Area
 }
 
@@ -49,6 +54,10 @@ impl InspectorTab {
             InspectorTab::SnesTiles => "🎨 Tiles",
             InspectorTab::SnesPalettes => "🎨 Palettes",
             InspectorTab::SnesLayers => "📐 Layers",
+            InspectorTab::Atari2600Playfield => "🎨 Playfield",
+            InspectorTab::Atari2600Sprites => "👾 Sprites",
+            InspectorTab::Atari2600Palette => "🎨 Palette",
+            InspectorTab::Atari2600Collision => "💥 Collision",
             InspectorTab::PcBda => "🖥️ BDA/EBDA",
         }
     }
@@ -95,8 +104,16 @@ pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab
             SystemType::PC => {
                 tabs.push(InspectorTab::PcBda);
             }
+            SystemType::Atari2600 => {
+                tabs.extend_from_slice(&[
+                    InspectorTab::Atari2600Playfield,
+                    InspectorTab::Atari2600Sprites,
+                    InspectorTab::Atari2600Palette,
+                    InspectorTab::Atari2600Collision,
+                ]);
+            }
             _ => {
-                // For other systems (Atari2600, N64, Chip8), just show generic tabs
+                // For other systems (N64, Chip8), just show generic tabs
             }
         }
     }
@@ -131,6 +148,18 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::SnesLayers => {
             render_snes_layers_tab(ui);
+        }
+        InspectorTab::Atari2600Playfield => {
+            tab_manager.render_atari2600_playfield_tab(ui);
+        }
+        InspectorTab::Atari2600Sprites => {
+            tab_manager.render_atari2600_sprites_tab(ui);
+        }
+        InspectorTab::Atari2600Palette => {
+            tab_manager.render_atari2600_palette_tab(ui);
+        }
+        InspectorTab::Atari2600Collision => {
+            tab_manager.render_atari2600_collision_tab(ui);
         }
         InspectorTab::PcBda => {
             render_pc_bda_tab(ui, tab_manager);
