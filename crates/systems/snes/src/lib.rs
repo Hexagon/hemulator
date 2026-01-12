@@ -141,19 +141,11 @@ impl SnesSystem {
         self.cpu.bus_mut().set_controller(idx, state);
     }
 
-    /// Enable or disable instruction tracing
-    pub fn set_instruction_tracing(&mut self, enabled: bool) {
-        self.instruction_tracer.set_enabled(enabled);
-    }
+    emu_core::impl_instruction_tracer_methods!();
 
     /// Check if instruction tracing is enabled
     pub fn is_instruction_tracing_enabled(&self) -> bool {
         self.instruction_tracer.is_enabled()
-    }
-
-    /// Get the instruction tracer (for dumping trace to file)
-    pub fn get_instruction_tracer(&self) -> &emu_core::instruction_tracer::InstructionTracer {
-        &self.instruction_tracer
     }
 
     /// Add an execution breakpoint
