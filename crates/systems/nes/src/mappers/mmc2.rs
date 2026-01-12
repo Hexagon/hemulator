@@ -59,7 +59,8 @@ impl Mmc2 {
     }
 
     fn prg_bank_count(&self) -> usize {
-        std::cmp::max(1, self.prg_rom.len() / 0x4000)
+        // MMC2 uses 8KB PRG banks
+        std::cmp::max(1, self.prg_rom.len() / 0x2000)
     }
 
     fn chr_bank_count(&self) -> usize {
@@ -110,15 +111,20 @@ impl Mmc2 {
 
     pub fn read_prg(&self, addr: u16) -> u8 {
         let prg_count = self.prg_bank_count();
-        let bank = if addr < 0xC000 {
-            // $8000-$BFFF: switchable 16KB bank
-            (self.prg_bank as usize) % prg_count
-        } else {
-            // $C000-$FFFF: fixed to last 16KB bank
-            prg_count.saturating_sub(1)
+        // MMC2 PRG layout (all 8KB banks):
+        // $8000-$9FFF: switchable 8KB bank
+        // $A000-$BFFF: fixed to bank -3 (third-to-last)
+        // $C000-$DFFF: fixed to bank -2 (second-to-last)
+        // $E000-$FFFF: fixed to bank -1 (last)
+        let bank = match addr {
+            0x8000..=0x9FFF => (self.prg_bank as usize) % prg_count,
+            0xA000..=0xBFFF => prg_count.saturating_sub(3),
+            0xC000..=0xDFFF => prg_count.saturating_sub(2),
+            0xE000..=0xFFFF => prg_count.saturating_sub(1),
+            _ => 0,
         };
-        let offset = (addr as usize) & 0x3FFF;
-        let idx = bank * 0x4000 + offset;
+        let offset = (addr as usize) & 0x1FFF;
+        let idx = bank * 0x2000 + offset;
         self.prg_rom.get(idx).copied().unwrap_or(0)
     }
 
@@ -256,10 +262,13 @@ mod tests {
 
     #[test]
     fn mmc2_prg_banking() {
-        let mut prg = vec![0; 0x10000]; // 4 banks of 16KB each
-        prg[0] = 0x11; // Bank 0
-        prg[0x4000] = 0x22; // Bank 1
-        prg[0xC000] = 0x44; // Bank 3 (last bank)
+        // MMC2 uses 8KB banks. Create 8 banks of 8KB each (64KB total)
+        let mut prg = vec![0; 0x10000]; // 8 banks of 8KB each
+        prg[0x0000] = 0x11; // Bank 0 ($8000-$9FFF when bank=0)
+        prg[0x2000] = 0x22; // Bank 1 ($8000-$9FFF when bank=1)
+        prg[0xA000] = 0x55; // Bank 5 ($A000-$BFFF, fixed third-to-last)
+        prg[0xC000] = 0x66; // Bank 6 ($C000-$DFFF, fixed second-to-last)
+        prg[0xE000] = 0x77; // Bank 7 ($E000-$FFFF, fixed last)
 
         let cart = Cartridge {
             prg_rom: prg,
@@ -272,15 +281,21 @@ mod tests {
         let mut ppu = Ppu::new(vec![], Mirroring::Vertical);
         let mut mmc2 = Mmc2::new(cart, &mut ppu);
 
-        // Initially bank 0 at $8000
+        // Initially bank 0 at $8000-$9FFF
         assert_eq!(mmc2.read_prg(0x8000), 0x11);
 
         // Switch to bank 1
         mmc2.write_prg(0xA000, 1, &mut ppu, 0);
         assert_eq!(mmc2.read_prg(0x8000), 0x22);
 
-        // $C000-$FFFF should be fixed to last bank
-        assert_eq!(mmc2.read_prg(0xC000), 0x44);
+        // $A000-$BFFF fixed to bank 5 (third-to-last)
+        assert_eq!(mmc2.read_prg(0xA000), 0x55);
+
+        // $C000-$DFFF fixed to bank 6 (second-to-last)
+        assert_eq!(mmc2.read_prg(0xC000), 0x66);
+
+        // $E000-$FFFF fixed to bank 7 (last)
+        assert_eq!(mmc2.read_prg(0xE000), 0x77);
     }
 
     #[test]
