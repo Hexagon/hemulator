@@ -805,9 +805,9 @@ mod tests {
         for &color in &current {
             let (r, g, b) = unpack_rgb(color);
             // Expected: ~179 (70% of 255)
-            assert!(r >= 175 && r <= 183, "R={}, expected ~179", r);
-            assert!(g >= 175 && g <= 183, "G={}, expected ~179", g);
-            assert!(b >= 175 && b <= 183, "B={}, expected ~179", b);
+            assert!((175..=183).contains(&r), "R={}, expected ~179", r);
+            assert!((175..=183).contains(&g), "G={}, expected ~179", g);
+            assert!((175..=183).contains(&b), "B={}, expected ~179", b);
         }
     }
 
@@ -842,9 +842,9 @@ mod tests {
         // Should blend frames
         for &color in &current {
             let (r, g, b) = unpack_rgb(color);
-            assert!(r >= 175 && r <= 183);
-            assert!(g >= 175 && g <= 183);
-            assert!(b >= 175 && b <= 183);
+            assert!((175..=183).contains(&r));
+            assert!((175..=183).contains(&g));
+            assert!((175..=183).contains(&b));
         }
     }
 
