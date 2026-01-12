@@ -183,12 +183,17 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy
 
 **Missing CGB Features**:
 - **HDMA - HBlank DMA**: Registers 0xFF51-0xFF55 not implemented. Affects some CGB games that use DMA during HBlank for advanced graphics effects (raster effects, parallax scrolling).
-- **Infrared port**: RP register at 0xFF56 not implemented. Used for IR communication in some games (e.g., Pokemon Gold/Silver/Crystal trading via Mystery Gift).
 
 **Link Cable Limitations**:
 - Serial transfer registers (0xFF01, 0xFF02) are implemented with loopback mode
 - External link cable connections not supported
 - Multiplayer and trading features require actual link cable hardware emulation
+
+**Infrared Port Limitations**:
+- RP register (0xFF56) implemented with read/write support
+- LED control bits (6-7) accessible
+- Actual IR communication hardware not emulated
+- IR-based features (Pokemon Mystery Gift, etc.) won't communicate with external devices
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)

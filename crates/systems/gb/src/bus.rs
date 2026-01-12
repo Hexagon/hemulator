@@ -151,6 +151,11 @@ pub struct GbBus {
     serial_bit_counter: u8,
     /// Serial transfer cycle counter
     serial_cycle_counter: u32,
+    /// Infrared port register (0xFF56, CGB only)
+    /// Bits 6-7: LED control (0=off, 1=on for bits 6 and 7)
+    /// Bits 0-1: Signal receive (read-only, stubbed to 0)
+    /// Bits 2-5: Unused
+    rp: u8,
 }
 
 impl GbBus {
@@ -174,6 +179,7 @@ impl GbBus {
             sc: 0,
             serial_bit_counter: 0,
             serial_cycle_counter: 0,
+            rp: 0,
         }
     }
 
@@ -457,6 +463,7 @@ impl MemoryLr35902 for GbBus {
                 0xFF4D => self.read_key1(), // KEY1 - Speed switch (CGB only)
                 // CGB registers
                 0xFF4F => self.ppu.get_vram_bank(), // VBK - VRAM bank
+                0xFF56 => self.rp,                  // RP - Infrared port (CGB only)
                 0xFF68 => self.ppu.read_bgpi(),     // BCPS/BGPI - BG palette index
                 0xFF69 => self.ppu.read_bgpd(),     // BCPD/BGPD - BG palette data
                 0xFF6A => self.ppu.read_obpi(),     // OCPS/OBPI - OBJ palette index
@@ -561,6 +568,7 @@ impl MemoryLr35902 for GbBus {
                     0xFF4D => self.write_key1(val), // KEY1 - Speed switch (CGB only)
                     // CGB registers
                     0xFF4F => self.ppu.set_vram_bank(val), // VBK - VRAM bank
+                    0xFF56 => self.rp = val & 0xC1,        // RP - Infrared port (CGB only, only bits 0, 6, 7)
                     0xFF68 => self.ppu.write_bgpi(val),    // BCPS/BGPI
                     0xFF69 => self.ppu.write_bgpd(val),    // BCPD/BGPD
                     0xFF6A => self.ppu.write_obpi(val),    // OCPS/OBPI

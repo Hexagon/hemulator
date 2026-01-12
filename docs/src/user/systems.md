@@ -226,8 +226,8 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
 - **HDMA**: HBlank DMA not implemented (affects some CGB games with advanced graphics effects)
-- **Infrared Port**: RP register (0xFF56) not implemented - affects games using IR communication (e.g., some Pokemon mini-games)
 - **Link Cable**: Serial transfer implemented with loopback mode, but no external link cable support - multiplayer/trading won't work between instances
+- **Infrared Port**: RP register (0xFF56) accessible but IR hardware not emulated - IR features won't communicate externally
 - **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:

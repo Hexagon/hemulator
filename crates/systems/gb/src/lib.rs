@@ -1942,4 +1942,25 @@ mod tests {
         let sb = sys.cpu.memory.read(0xFF01);
         assert_eq!(sb, 0xFF, "SB should be 0xFF after transfer with no device connected");
     }
+
+    #[test]
+    fn test_infrared_port() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test RP register (0xFF56) - infrared port
+        // Write value with LED control bits
+        sys.cpu.memory.write(0xFF56, 0xC1); // Bits 6, 7 (LED), bit 0 (receive)
+        
+        // Should read back with only writable bits
+        let rp = sys.cpu.memory.read(0xFF56);
+        assert_eq!(rp & 0xC1, 0xC1, "RP should preserve LED control bits");
+        
+        // Try writing to non-writable bits
+        sys.cpu.memory.write(0xFF56, 0xFF);
+        let rp = sys.cpu.memory.read(0xFF56);
+        assert_eq!(rp & 0xC1, 0xC1, "RP should mask non-writable bits");
+        assert_eq!(rp & 0x3E, 0x00, "Bits 1-5 should read as 0");
+    }
 }
