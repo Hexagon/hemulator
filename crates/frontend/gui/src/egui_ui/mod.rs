@@ -18,6 +18,6 @@ mod tabs;
 pub use layout::EguiApp;
 pub use property_pane::{InputConfigSource, PropertyAction};
 pub use tabs::{
-    Atari2600TileData, Chip8TileData, DebugAction, GbTileData, MountInfo, NesTileData, PcBdaData,
-    SmsTileData, SnesTileData, SystemTileData, Tab, TabAction,
+    Atari2600TileData, Chip8TileData, ColecoVisionTileData, DebugAction, GbTileData, MountInfo,
+    NesTileData, PcBdaData, SmsTileData, SnesTileData, SystemTileData, Tab, TabAction,
 };

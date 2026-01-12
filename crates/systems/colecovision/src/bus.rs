@@ -21,13 +21,13 @@ use std::rc::Rc;
 /// ColecoVision memory bus
 pub struct ColecoVisionMemory {
     // BIOS ROM (8KB)
-    bios: Vec<u8>,
+    pub(crate) bios: Vec<u8>,
 
     // RAM (1KB)
     ram: [u8; 0x400],
 
     // Cartridge ROM
-    rom: Vec<u8>,
+    pub(crate) rom: Vec<u8>,
 
     // Shared components
     vdp: Rc<RefCell<Vdp>>,
@@ -92,7 +92,7 @@ impl ColecoVisionMemory {
 }
 
 impl MemoryZ80 for ColecoVisionMemory {
-    fn read(&mut self, addr: u16) -> u8 {
+    fn read(&self, addr: u16) -> u8 {
         match addr {
             // BIOS ROM (8KB)
             0x0000..=0x1FFF => {
@@ -134,7 +134,7 @@ impl MemoryZ80 for ColecoVisionMemory {
         }
     }
 
-    fn read_port(&mut self, port: u8) -> u8 {
+    fn io_read(&mut self, port: u8) -> u8 {
         match port {
             // VDP data port
             0xBE => self.vdp.borrow_mut().read_data(),
@@ -153,7 +153,7 @@ impl MemoryZ80 for ColecoVisionMemory {
         }
     }
 
-    fn write_port(&mut self, port: u8, value: u8) {
+    fn io_write(&mut self, port: u8, value: u8) {
         match port {
             // VDP data port
             0xBE => self.vdp.borrow_mut().write_data(value),

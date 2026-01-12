@@ -848,6 +848,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "emu_colecovision"
+version = "0.1.0"
+dependencies = [
+ "emu_core",
+ "glow 0.13.1",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "emu_core"
 version = "0.1.0"
 dependencies = [
@@ -882,6 +893,7 @@ dependencies = [
  "egui_sdl2_gl",
  "emu_atari2600",
  "emu_chip8",
+ "emu_colecovision",
  "emu_core",
  "emu_gb",
  "emu_n64",

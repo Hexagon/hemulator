@@ -483,7 +483,7 @@ impl Vdp {
 
         // Calculate tile row (each tile is 8x8 but uses 4x4 pixel blocks)
         let tile_row = (line / 8) as usize;
-        let block_row = (line % 8) / 4; // 0 or 1
+        let block_row = ((line % 8) / 4) as usize; // 0 or 1
 
         // Render 32 tiles across
         for tile_col in 0..32 {
@@ -646,12 +646,12 @@ impl Default for Vdp {
 }
 
 impl Renderer for Vdp {
-    fn get_frame(&self) -> Frame {
-        self.frame.clone()
+    fn get_frame(&self) -> &Frame {
+        &self.frame
     }
 
-    fn clear(&mut self) {
-        self.frame.pixels.fill(0);
+    fn clear(&mut self, color: u32) {
+        self.frame.pixels.fill(color);
     }
 
     fn reset(&mut self) {

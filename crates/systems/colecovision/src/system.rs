@@ -3,7 +3,7 @@
 use crate::bus::ColecoVisionMemory;
 use crate::psg::ColecoVisionPsg;
 use crate::vdp::Vdp;
-use emu_core::cpu_z80::{CpuZ80, MemoryZ80};
+use emu_core::cpu_z80::CpuZ80;
 use emu_core::debug::Debugger;
 use emu_core::logging::{log, LogCategory, LogLevel};
 use emu_core::renderer::Renderer;
@@ -195,7 +195,7 @@ impl System for ColecoVisionSystem {
 
             // Check for VDP interrupt
             if self.vdp.borrow().frame_interrupt_pending() {
-                self.cpu.trigger_interrupt();
+                self.cpu.interrupt(0xFF);
                 self.vdp.borrow_mut().clear_frame_interrupt();
             }
 
@@ -204,36 +204,135 @@ impl System for ColecoVisionSystem {
             self.audio_buffer.extend_from_slice(&samples);
         }
 
-        Ok(self.vdp.borrow().get_frame())
+        Ok(self.vdp.borrow().get_frame().clone())
     }
 
     fn save_state(&self) -> Value {
         serde_json::json!({
-            "cpu": self.cpu.get_state(),
+            "system": "colecovision",
+            "version": 1,
+            "cycles": self.cycles,
+            "cpu": {
+                // Main registers
+                "a": self.cpu.a,
+                "f": self.cpu.f,
+                "b": self.cpu.b,
+                "c": self.cpu.c,
+                "d": self.cpu.d,
+                "e": self.cpu.e,
+                "h": self.cpu.h,
+                "l": self.cpu.l,
+                // Shadow registers
+                "a_prime": self.cpu.a_prime,
+                "f_prime": self.cpu.f_prime,
+                "b_prime": self.cpu.b_prime,
+                "c_prime": self.cpu.c_prime,
+                "d_prime": self.cpu.d_prime,
+                "e_prime": self.cpu.e_prime,
+                "h_prime": self.cpu.h_prime,
+                "l_prime": self.cpu.l_prime,
+                // Index registers
+                "ix": self.cpu.ix,
+                "iy": self.cpu.iy,
+                // Special registers
+                "i": self.cpu.i,
+                "r": self.cpu.r,
+                "sp": self.cpu.sp,
+                "pc": self.cpu.pc,
+                // Interrupt state
+                "iff1": self.cpu.iff1,
+                "iff2": self.cpu.iff2,
+                "im": self.cpu.im,
+                "halted": self.cpu.halted,
+            },
             "vdp": self.vdp.borrow().get_state(),
             "psg": self.psg.borrow().get_state(),
             "memory": self.cpu.memory.get_state(),
-            "cycles": self.cycles,
         })
     }
 
     fn load_state(&mut self, state: &Value) -> Result<(), serde_json::Error> {
-        if let Some(cpu_state) = state.get("cpu") {
-            self.cpu.set_state(cpu_state)?;
+        // Validate system type
+        if let Some(system) = state.get("system").and_then(|s| s.as_str()) {
+            if system != "colecovision" {
+                // Return error by trying to deserialize incompatible data
+                let _: () = serde_json::from_value(serde_json::json!({
+                    "error": "Incompatible system type"
+                }))?;
+                return Ok(()); // Will never reach here
+            }
         }
 
+        // Load CPU state
+        if let Some(cpu_state) = state.get("cpu") {
+            macro_rules! load_u8 {
+                ($field:literal, $target:expr) => {
+                    if let Some(val) = cpu_state.get($field).and_then(|v| v.as_u64()) {
+                        $target = val as u8;
+                    }
+                };
+            }
+
+            macro_rules! load_u16 {
+                ($field:literal, $target:expr) => {
+                    if let Some(val) = cpu_state.get($field).and_then(|v| v.as_u64()) {
+                        $target = val as u16;
+                    }
+                };
+            }
+
+            macro_rules! load_bool {
+                ($field:literal, $target:expr) => {
+                    if let Some(val) = cpu_state.get($field).and_then(|v| v.as_bool()) {
+                        $target = val;
+                    }
+                };
+            }
+
+            load_u8!("a", self.cpu.a);
+            load_u8!("f", self.cpu.f);
+            load_u8!("b", self.cpu.b);
+            load_u8!("c", self.cpu.c);
+            load_u8!("d", self.cpu.d);
+            load_u8!("e", self.cpu.e);
+            load_u8!("h", self.cpu.h);
+            load_u8!("l", self.cpu.l);
+            load_u8!("a_prime", self.cpu.a_prime);
+            load_u8!("f_prime", self.cpu.f_prime);
+            load_u8!("b_prime", self.cpu.b_prime);
+            load_u8!("c_prime", self.cpu.c_prime);
+            load_u8!("d_prime", self.cpu.d_prime);
+            load_u8!("e_prime", self.cpu.e_prime);
+            load_u8!("h_prime", self.cpu.h_prime);
+            load_u8!("l_prime", self.cpu.l_prime);
+            load_u16!("ix", self.cpu.ix);
+            load_u16!("iy", self.cpu.iy);
+            load_u8!("i", self.cpu.i);
+            load_u8!("r", self.cpu.r);
+            load_u16!("sp", self.cpu.sp);
+            load_u16!("pc", self.cpu.pc);
+            load_bool!("iff1", self.cpu.iff1);
+            load_bool!("iff2", self.cpu.iff2);
+            load_u8!("im", self.cpu.im);
+            load_bool!("halted", self.cpu.halted);
+        }
+
+        // Load VDP state
         if let Some(vdp_state) = state.get("vdp") {
             self.vdp.borrow_mut().set_state(vdp_state)?;
         }
 
+        // Load PSG state
         if let Some(psg_state) = state.get("psg") {
             self.psg.borrow_mut().set_state(psg_state)?;
         }
 
+        // Load memory state
         if let Some(memory_state) = state.get("memory") {
             self.cpu.memory.set_state(memory_state)?;
         }
 
+        // Load cycles
         if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
             self.cycles = cycles;
         }

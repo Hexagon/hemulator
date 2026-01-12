@@ -1816,6 +1816,15 @@ impl TabManager {
                             ui.separator();
                             ui.label("CHIP-8 doesn't use tiles. See Display and Registers tabs for debugging info.");
                         }
+                        SystemTileData::ColecoVision(coleco_data) => {
+                            ui.heading("🎨 ColecoVision Tile Viewer");
+                            ui.separator();
+                            ui.label(format!("VRAM: {} bytes", coleco_data.vram.len()));
+                            ui.label(format!("Palette: {} colors", coleco_data.palette.len()));
+                            ui.label(format!("VDP Registers: {}", coleco_data.registers.len()));
+                            ui.add_space(5.0);
+                            ui.label("See VDP tab for detailed register information");
+                        }
                     }
                 } else {
                     // No tile data available
