@@ -339,3 +339,88 @@ High-probability suspects:
 2. Verify OBJ tile addressing against a known reference and fix `tile_num` layout logic.
 3. If needed, temporarily force-enable BG1 in TM (debug-only) to validate BG rendering path separately from OBJ.
 
+---
+
+## Update (Jan 12, 2026): OBJ Rendering Fixes Based on bsnes Reference
+
+### Analysis of bsnes source code
+
+Studied bsnes `ppu/object.cpp` and `ppu-fast/object.cpp` to understand correct SNES sprite rendering:
+
+**Key findings from bsnes:**
+
+1. **OBSEL base address calculation**:
+   - `tiledataAddress = (data & 7) << 13` (word address)
+   - In bytes: `name_base << 14` = `name_base * 0x4000`
+   - **Our bug**: We were using `name_base * 0x2000` (half the correct value)
+
+2. **Nameselect (second sprite page)**:
+   - OAM attr byte bit 0 is the "nameselect" bit (high bit of 9-bit tile number)
+   - When set: `tiledataAddress += (1 + io.nameselect) << 12` (word offset)
+   - In bytes: adds `(NN + 1) << 13` = `(NN + 1) * 0x2000`
+   - **Our bug**: We weren't using the nameselect bit from OAM at all
+
+3. **X coordinate handling**:
+   - X is 9-bit where bit 8 acts as -256
+   - bsnes: `objects[n].x = objects[n].x & 0xff | data << 8 & 0x100`
+   - **Our bug**: We were OR-ing the MSB, which gives wrong signed behavior
+
+4. **Y coordinate handling**:
+   - Sprites appear 1 scanline later than Y value
+   - bsnes: `objects[n].y = data + 1`
+   - Values 224-255 wrap to appear at top of screen
+   - **Our bug**: Not adding +1 offset, not handling wraparound
+
+5. **Tile addressing for multi-tile sprites**:
+   - Character X = `tile & 0x0F`
+   - Character Y = `((tile >> 4) + (y >> 3)) & 0x0F` (wrapped to 16-tile grid)
+   - Address = `base + ((charY << 4) | (charX & 0x0F)) * 32`
+
+### Fixes implemented
+
+1. **Fixed `get_obj_base_address()`**:
+   - Now returns `name_base << 14` (correct byte address)
+   
+2. **Added `get_obj_nameselect_gap()`**:
+   - Returns `(name_select + 1) << 13` bytes for second sprite page
+
+3. **Fixed X coordinate as 9-bit signed**:
+   - If MSB set: `x = x_low - 256` (allows sprites partially off left edge)
+
+4. **Fixed Y coordinate**:
+   - Added +1 offset (sprites appear 1 line later)
+   - Values >= 0xE1 wrap as negative (appear at top of screen)
+
+5. **Fixed sprite tile addressing**:
+   - Extract nameselect from OAM attr bit 0
+   - Add nameselect gap when bit is set
+   - Use correct character grid calculation for multi-tile sprites
+
+### Test results
+
+**Checkerboard test ROM (`test_roms/snes/test.sfc`)**:
+- ✅ **WORKING**: 57,344 non-black pixels (100% of frame)
+- 2 colors rendered: blue (0, 0, 248) and red (248, 0, 0)
+- This confirms BG rendering is fully functional
+
+**Super Mario World**:
+- ❌ Still showing black frame after 20M cycles
+- CPU appears to be executing in RAM/zero page area (PC=$00A6)
+- This suggests SMW may have crashed or is in an unexpected state
+- TM register shows only OBJ enabled (TM=0x10), no BG layers
+
+### Current status
+
+- **BG rendering**: ✅ Fully working (confirmed by test ROM)
+- **OBJ rendering**: Fixes applied but untested (SMW not reaching stable rendering state)
+- **SMW boot**: May have regressed or have other issues preventing stable execution
+
+### Remaining investigation needed
+
+1. **SMW execution state**: Why is PC at $00A6 (RAM area) after 20M cycles?
+   - Could be a crash, infinite loop in RAM, or NMI handler running
+   - Need to trace execution to understand what's happening
+
+2. **OBJ rendering validation**: Need a sprite-specific test ROM to verify OBJ fixes work
+
+3. **SMW-specific debugging**: May need to set breakpoints earlier in SMW's boot sequence to catch where things go wrong
