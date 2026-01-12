@@ -167,6 +167,21 @@ pub struct PcBdaData {
     pub ebda_segment: u16,
 }
 
+/// Mount point information for inspector
+#[derive(Clone, Debug)]
+pub struct MountInfo {
+    /// Mount point ID (e.g., "Cartridge", "Floppy0")
+    pub id: String,
+    /// User-friendly name
+    pub name: String,
+    /// File extensions accepted
+    pub extensions: Vec<String>,
+    /// Whether required
+    pub required: bool,
+    /// Currently mounted file path (if any)
+    pub mounted_file: Option<String>,
+}
+
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -190,6 +205,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
+    pub mount_info: Vec<MountInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -213,6 +229,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
+            mount_info: Vec::new(),
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -238,6 +255,10 @@ impl TabManager {
 
     pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
         self.pc_bda_data = Some(data);
+    }
+
+    pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {
+        self.mount_info = mounts;
     }
 
     pub fn show_help_tab(&mut self) {
@@ -482,148 +503,6 @@ impl TabManager {
         });
     }
 
-    pub fn render_log_tab(&self, ui: &mut Ui) {
-        use emu_core::logging::{LogCategory, LogConfig, LogLevel};
-
-        let log_config = LogConfig::global();
-
-        // Define levels array once for reuse
-        let levels = [
-            (LogLevel::Off, "Off"),
-            (LogLevel::Error, "Error"),
-            (LogLevel::Warn, "Warn"),
-            (LogLevel::Info, "Info"),
-            (LogLevel::Debug, "Debug"),
-            (LogLevel::Trace, "Trace"),
-        ];
-
-        let categories = [
-            (LogCategory::CPU, "CPU"),
-            (LogCategory::Bus, "Bus"),
-            (LogCategory::PPU, "PPU"),
-            (LogCategory::APU, "APU"),
-            (LogCategory::Interrupts, "Interrupts"),
-            (LogCategory::Stubs, "Stubs"),
-        ];
-
-        // Top section: Log level controls
-        ui.heading("Logging Configuration");
-        ui.separator();
-        ui.add_space(5.0);
-
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                // Global log level
-                ui.horizontal(|ui| {
-                    ui.label("Global Level:");
-                    ui.add_space(10.0);
-
-                    let global_level = log_config.get_global_level();
-
-                    for (level, name) in &levels {
-                        if ui.selectable_label(global_level == *level, *name).clicked() {
-                            log_config.set_global_level(*level);
-                        }
-                    }
-                });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Category-specific log levels
-                ui.heading("Component-Specific Levels");
-                ui.add_space(5.0);
-                ui.label("Override global level for specific components:");
-                ui.add_space(10.0);
-
-                egui::Grid::new("log_category_grid")
-                    .num_columns(7)
-                    .spacing([10.0, 8.0])
-                    .striped(true)
-                    .show(ui, |ui| {
-                        // Header row
-                        ui.label("");
-                        for (_, name) in &levels {
-                            ui.label(*name);
-                        }
-                        ui.end_row();
-
-                        // Category rows
-                        for (category, name) in &categories {
-                            ui.label(format!("{}:", name));
-                            let current_level = log_config.get_level(*category);
-
-                            for (level, _) in &levels {
-                                if ui.selectable_label(current_level == *level, "•").clicked() {
-                                    log_config.set_level(*category, *level);
-                                }
-                            }
-                            ui.end_row();
-                        }
-                    });
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Rate limit configuration
-                ui.heading("Rate Limiting");
-                ui.add_space(5.0);
-                ui.label("Control the maximum number of logs per second per category:");
-                ui.add_space(10.0);
-
-                ui.horizontal(|ui| {
-                    ui.label("Max logs/second:");
-                    ui.add_space(10.0);
-
-                    let mut rate_limit = log_config.get_rate_limit() as i32;
-                    let slider = egui::Slider::new(&mut rate_limit, 1..=1000)
-                        .text("logs/sec")
-                        .logarithmic(true);
-
-                    if ui.add(slider).changed() {
-                        log_config.set_rate_limit(rate_limit as usize);
-                    }
-                });
-
-                ui.add_space(5.0);
-                ui.label(format!(
-                    "Current limit: {} logs per second per category",
-                    log_config.get_rate_limit()
-                ));
-                ui.label("When exceeded, logs are dropped and a warning is emitted.");
-
-                ui.add_space(10.0);
-                ui.separator();
-                ui.add_space(10.0);
-
-                // Info section
-                ui.heading("About Logging");
-                ui.add_space(5.0);
-                ui.label("Log messages are written to stderr by default.");
-                ui.label("Use --log-file <path> CLI argument to log to a file.");
-                ui.label("Category-specific levels override the global level.");
-                ui.label("Set a category to 'Off' to use the global level.");
-
-                ui.add_space(10.0);
-
-                // Application log messages
-                if !self.log_messages.is_empty() {
-                    ui.add_space(15.0);
-                    ui.separator();
-                    ui.add_space(10.0);
-                    ui.heading("Application Messages");
-                    ui.add_space(5.0);
-
-                    for msg in &self.log_messages {
-                        ui.label(msg);
-                    }
-                }
-            });
-    }
-
     pub fn render_memory_tab(&mut self, ui: &mut Ui) {
         // If we have enhanced debug state, show memory explorer
         if let Some(state) = self.enhanced_debug_state.clone() {
@@ -758,6 +637,179 @@ impl TabManager {
                 ui.label("Load a ROM to see memory contents");
             });
         }
+    }
+
+    pub fn render_mounts_tab(&self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.heading("💿 Mount Points");
+            ui.separator();
+            ui.add_space(10.0);
+
+            if self.mount_info.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("💿").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No Mount Points");
+                    ui.add_space(10.0);
+                    ui.label("Load a ROM or create a system to see mount points");
+                });
+            } else {
+                ui.label("Currently available mount points for this system:");
+                ui.add_space(10.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for mount in &self.mount_info {
+                            egui::Frame::new()
+                                .fill(ui.visuals().faint_bg_color)
+                                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                .corner_radius(4.0)
+                                .inner_margin(12.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Icon based on mount status
+                                        let icon = if mount.mounted_file.is_some() {
+                                            "✅"
+                                        } else if mount.required {
+                                            "⚠️"
+                                        } else {
+                                            "⚪"
+                                        };
+                                        ui.label(egui::RichText::new(icon).size(20.0));
+
+                                        ui.vertical(|ui| {
+                                            // Mount point name and ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&mount.name)
+                                                        .strong()
+                                                        .size(16.0),
+                                                );
+                                                if mount.required {
+                                                    ui.label(
+                                                        egui::RichText::new("(required)")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                }
+                                            });
+
+                                            ui.add_space(5.0);
+
+                                            // Mount point ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new("ID:").weak().size(12.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&mount.id)
+                                                        .monospace()
+                                                        .size(12.0),
+                                                );
+                                            });
+
+                                            // Accepted file types
+                                            if !mount.extensions.is_empty() {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Accepts:")
+                                                            .weak()
+                                                            .size(12.0),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(
+                                                            mount.extensions.join(", "),
+                                                        )
+                                                        .monospace()
+                                                        .size(12.0),
+                                                    );
+                                                });
+                                            }
+
+                                            ui.add_space(5.0);
+
+                                            // Current mount status
+                                            if let Some(ref file_path) = mount.mounted_file {
+                                                // Extract just the filename from the path
+                                                let filename = std::path::Path::new(file_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(file_path);
+
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Mounted:")
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            ))
+                                                            .strong(),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(filename)
+                                                            .monospace()
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            )),
+                                                    );
+                                                });
+
+                                                // Show full path on separate line if different from filename
+                                                if filename != file_path {
+                                                    ui.label(
+                                                        egui::RichText::new(file_path)
+                                                            .weak()
+                                                            .italics()
+                                                            .size(10.0),
+                                                    );
+                                                }
+                                            } else {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(egui::RichText::new("Status:").color(
+                                                        egui::Color32::from_rgb(200, 200, 100),
+                                                    ));
+                                                    ui.label(
+                                                        egui::RichText::new("Empty")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                });
+                                            }
+                                        });
+                                    });
+                                });
+
+                            ui.add_space(8.0);
+                        }
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        // Summary
+                        let mounted_count = self
+                            .mount_info
+                            .iter()
+                            .filter(|m| m.mounted_file.is_some())
+                            .count();
+                        let required_count = self.mount_info.iter().filter(|m| m.required).count();
+
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Total mount points:").strong());
+                            ui.label(self.mount_info.len().to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Mounted:").strong());
+                            ui.label(mounted_count.to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Required:").strong());
+                            ui.label(required_count.to_string());
+                        });
+                    });
+            }
+        });
     }
 
     fn render_new_project_tab(&mut self, ui: &mut Ui) {
