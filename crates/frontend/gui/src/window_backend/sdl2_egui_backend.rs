@@ -495,15 +495,15 @@ impl Sdl2EguiBackend {
 
     /// Load an SDL surface from PNG data
     ///
-    /// Decodes PNG data and creates an SDL surface with the correct pixel format.
-    /// The PNG crate outputs RGBA data which is converted to ABGR8888 for SDL.
+    /// Decodes PNG data and creates an SDL surface with RGBA8888 pixel format.
+    /// The PNG crate outputs RGBA data which is copied directly to the surface.
     ///
     /// # Arguments
     /// * `png_data` - Raw PNG file data as bytes
     ///
     /// # Returns
     /// * `Ok(Surface)` - SDL surface with decoded image data
-    /// * `Err(String)` - Error message if decoding or conversion fails
+    /// * `Err(String)` - Error message if decoding or copying fails
     fn load_icon_from_png(png_data: &[u8]) -> Result<sdl2::surface::Surface<'static>, String> {
         use std::io::Cursor;
 
@@ -525,22 +525,14 @@ impl Sdl2EguiBackend {
         let bytes = &buf[..info.buffer_size()];
 
         // Create SDL surface from the decoded RGBA data
-        // PNG crate outputs RGBA, we need to convert to ABGR8888 for SDL
+        // PNG crate outputs RGBA, so we use RGBA8888 format directly
         let mut surface =
-            sdl2::surface::Surface::new(width, height, sdl2::pixels::PixelFormatEnum::ABGR8888)
+            sdl2::surface::Surface::new(width, height, sdl2::pixels::PixelFormatEnum::RGBA8888)
                 .map_err(|e| format!("Failed to create surface: {}", e))?;
 
-        // Convert RGBA to ABGR and copy pixel data to surface
+        // Copy RGBA data directly to surface (no conversion needed)
         surface.with_lock_mut(|pixels: &mut [u8]| {
-            for i in 0..(bytes.len() / 4) {
-                let src_idx = i * 4;
-                let dst_idx = i * 4;
-                // Convert from RGBA to ABGR
-                pixels[dst_idx] = bytes[src_idx + 3]; // A
-                pixels[dst_idx + 1] = bytes[src_idx + 2]; // B
-                pixels[dst_idx + 2] = bytes[src_idx + 1]; // G
-                pixels[dst_idx + 3] = bytes[src_idx]; // R
-            }
+            pixels.copy_from_slice(bytes);
         });
 
         Ok(surface)
