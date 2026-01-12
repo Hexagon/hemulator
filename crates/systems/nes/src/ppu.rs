@@ -776,8 +776,14 @@ impl Ppu {
                     // This causes m to wrap and check wrong bytes
                     m += 1;
                     if m >= 4 {
-                        m = 0;
-                        n += 1;
+                        #[allow(unused_assignments)]
+                        {
+                            m = 0;
+                        }
+                        #[allow(unused_assignments)]
+                        {
+                            n += 1;
+                        }
                     }
 
                     // On real hardware, evaluation stops after finding overflow

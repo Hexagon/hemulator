@@ -541,7 +541,9 @@ impl System for NesSystem {
         // No need to manually call set_vblank(false) here
 
         let mut cycles = 0u32;
+        #[allow(unused_assignments)]
         let mut irq_to_fire = false;
+        #[allow(unused_assignments)]
         let mut nmi_to_fire = false;
 
         while cycles < visible_cycles {
