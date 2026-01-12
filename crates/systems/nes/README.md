@@ -229,25 +229,23 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-enter
 - **Typical**: Runs at full speed on modern CPUs
 - **Single-threaded**: Uses one CPU core
 
-### Performance Characteristics
+### Performance Optimizations
 
-**Cycle-Accurate Model**:
-- PPU ticks 3 times per CPU cycle (89,340 PPU ticks per NTSC frame)
-- VBlank/NMI timing exact to PPU dot (scanline 241, dot 1)
-- Sprite evaluation at cycle-accurate timing (dot 192)
-- Rendering overhead: ~51% of frame time (optimizable)
+The NES emulator includes cycle-accurate PPU timing with the following rendering optimizations:
 
-**FPS Independence**: 
-- ✅ **Cycle accuracy preserved at any FPS** - Low display framerate does NOT affect emulation accuracy
-- Time-based emulation model maintains perfect timing regardless of display performance
-- Frame catch-up mechanism steps multiple frames while preserving cycle-accurate timing
-- Audio, mappers, and interrupts unaffected by rendering speed
+**Implemented Optimizations**:
+- ✅ **CHR Fetch Optimization**: Fast-path CHR reads during rendering bypass RefCell overhead while maintaining MMC2/MMC4 mapper compatibility
+- ✅ **Background Tile Batching**: Processes background in 8-pixel tile chunks instead of per-pixel, reducing divisions and improving cache locality
 
-**Detailed Analysis**: See [NES_PERFORMANCE_REVIEW.md](../../../NES_PERFORMANCE_REVIEW.md) for comprehensive performance analysis including:
-- Cycle accuracy validation (100% accurate)
-- Performance bottleneck identification
-- Safe optimization opportunities
-- Impact of low FPS on cycle accuracy (no effect)
+**Cycle Accuracy**: All optimizations preserve perfect cycle accuracy. The emulator maintains exact timing regardless of display framerate:
+- VBlank/NMI timing: Scanline 241, dot 1 (hardware-accurate)
+- Sprite evaluation: Dot 192 (hardware-accurate)
+- PPU clock ratio: 3× CPU clock (hardware-accurate)
+- Low FPS does NOT affect emulation accuracy - time-based model preserves timing
+
+**Future Performance Enhancements** (not yet implemented):
+- **Sprite Pre-filtering**: Build per-scanline sprite lists to avoid checking all 64 sprites (5-10% improvement, requires careful timing preservation for sprite overflow flag)
+- **PPU Tick Batching**: Batch multiple PPU ticks when no timing events pending (5-10% improvement, requires careful preservation of exact event timing)
 
 ## Future Improvements
 
@@ -269,7 +267,6 @@ When adding NES features:
 ## References
 
 - **Architecture**: [ARCHITECTURE.md](../../../ARCHITECTURE.md)
-- **Performance Review**: [NES_PERFORMANCE_REVIEW.md](../../../NES_PERFORMANCE_REVIEW.md)
 - **User Manual**: [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-entertainment-system)
 - **Contributing**: [Contributing Guide](https://hemulator.56k.guru/developer/contributing.html)
 - **NESDev Wiki**: https://www.nesdev.org/
