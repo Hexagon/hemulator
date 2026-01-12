@@ -171,6 +171,13 @@ struct ScanlineState {
     grp0_change_count: u8,
     grp1_changes: [GrpChange; MAX_GRP_CHANGES],
     grp1_change_count: u8,
+    // Mid-scanline playfield changes (for asymmetrical playfields)
+    pf0_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf0_change_count: u8,
+    pf1_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf1_change_count: u8,
+    pf2_changes: [GrpChange; MAX_GRP_CHANGES],
+    pf2_change_count: u8,
 }
 
 /// TIA chip state
@@ -271,6 +278,20 @@ pub struct Tia {
     current_grp1_changes: [GrpChange; MAX_GRP_CHANGES],
     #[serde(skip)]
     current_grp1_change_count: u8,
+
+    // Mid-scanline playfield change tracking for current scanline
+    #[serde(skip)]
+    current_pf0_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf0_change_count: u8,
+    #[serde(skip)]
+    current_pf1_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf1_change_count: u8,
+    #[serde(skip)]
+    current_pf2_changes: [GrpChange; MAX_GRP_CHANGES],
+    #[serde(skip)]
+    current_pf2_change_count: u8,
 
     // Monotonic scanline counter for debug/telemetry (does not wrap)
     #[serde(skip)]
@@ -441,6 +462,13 @@ impl Tia {
             current_grp0_change_count: 0,
             current_grp1_changes: [GrpChange::default(); MAX_GRP_CHANGES],
             current_grp1_change_count: 0,
+
+            current_pf0_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf0_change_count: 0,
+            current_pf1_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf1_change_count: 0,
+            current_pf2_changes: [GrpChange::default(); MAX_GRP_CHANGES],
+            current_pf2_change_count: 0,
 
             scanline_counter: 0,
 
@@ -643,11 +671,21 @@ impl Tia {
             grp0_change_count: self.current_grp0_change_count,
             grp1_changes: self.current_grp1_changes,
             grp1_change_count: self.current_grp1_change_count,
+            // Copy mid-scanline playfield changes
+            pf0_changes: self.current_pf0_changes,
+            pf0_change_count: self.current_pf0_change_count,
+            pf1_changes: self.current_pf1_changes,
+            pf1_change_count: self.current_pf1_change_count,
+            pf2_changes: self.current_pf2_changes,
+            pf2_change_count: self.current_pf2_change_count,
         };
 
         // Clear current scanline's changes for the next scanline
         self.current_grp0_change_count = 0;
         self.current_grp1_change_count = 0;
+        self.current_pf0_change_count = 0;
+        self.current_pf1_change_count = 0;
+        self.current_pf2_change_count = 0;
     }
 
     /// Reset TIA to power-on state
@@ -784,6 +822,18 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf0 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                // This is critical for games like Donkey Kong and Space Invaders
+                // that update the playfield mid-scanline
+                if (self.current_pf0_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf0_change_count as usize;
+                    self.current_pf0_change_count += 1;
+                    self.current_pf0_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
             0x0E => {
                 self.writes_pf = self.writes_pf.saturating_add(1);
@@ -791,6 +841,16 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf1 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                if (self.current_pf1_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf1_change_count as usize;
+                    self.current_pf1_change_count += 1;
+                    self.current_pf1_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
             0x0F => {
                 self.writes_pf = self.writes_pf.saturating_add(1);
@@ -798,6 +858,16 @@ impl Tia {
                     self.writes_pf_nonzero = self.writes_pf_nonzero.saturating_add(1);
                 }
                 self.pf2 = val;
+
+                // Record mid-scanline change for asymmetrical playfield rendering
+                if (self.current_pf2_change_count as usize) < MAX_GRP_CHANGES {
+                    let idx = self.current_pf2_change_count as usize;
+                    self.current_pf2_change_count += 1;
+                    self.current_pf2_changes[idx] = GrpChange {
+                        pixel: self.current_visible_x(),
+                        value: val,
+                    };
+                }
             }
 
             // Player position resets (RESP0, RESP1, RESM0, RESM1, RESBL)
@@ -1882,41 +1952,97 @@ impl Tia {
     }
 
     /// Check if a pixel is part of the playfield
+    /// This handles mid-scanline playfield changes for asymmetrical playfields
     fn is_playfield_pixel(state: &ScanlineState, x: usize) -> bool {
         // Playfield is 40 bits wide, each bit controls 4 pixels
         // Playfield is mirrored or repeated for left/right halves
         if x < 80 {
             // Left half: pixels 0-79, bits 0-19
             // Each bit covers 4 pixels
-            Self::get_playfield_bit(state, x / 4)
+            Self::get_playfield_bit(state, x / 4, x)
         } else {
             // Right half: pixels 80-159, bits 0-19 (mirrored or repeated)
             // Each bit covers 4 pixels
             let bit_pos = (x - 80) / 4;
             if state.playfield_reflect {
                 // Mirrored
-                Self::get_playfield_bit(state, 19 - bit_pos)
+                Self::get_playfield_bit(state, 19 - bit_pos, x)
             } else {
                 // Repeated
-                Self::get_playfield_bit(state, bit_pos)
+                Self::get_playfield_bit(state, bit_pos, x)
             }
         }
     }
 
-    /// Get a single bit from the playfield
-    fn get_playfield_bit(state: &ScanlineState, bit: usize) -> bool {
+    /// Get a single bit from the playfield with mid-scanline change support
+    /// This is critical for games like Donkey Kong and Space Invaders that
+    /// update PF registers mid-scanline to create asymmetrical backgrounds
+    fn get_playfield_bit(state: &ScanlineState, bit: usize, x: usize) -> bool {
+        // Get the current values of PF0, PF1, PF2 at position x
+        // accounting for mid-scanline changes
+        let pf0 = Self::get_pf0_at_pixel(state, x);
+        let pf1 = Self::get_pf1_at_pixel(state, x);
+        let pf2 = Self::get_pf2_at_pixel(state, x);
+
         if bit < 4 {
             // PF0 (bits 4-7 map to playfield bits 0-3)
-            (state.pf0 & (0x10 << bit)) != 0
+            (pf0 & (0x10 << bit)) != 0
         } else if bit < 12 {
             // PF1 (bits 7-0 map to playfield bits 4-11)
-            (state.pf1 & (0x80 >> (bit - 4))) != 0
+            (pf1 & (0x80 >> (bit - 4))) != 0
         } else if bit < 20 {
             // PF2 (bits 0-7 map to playfield bits 12-19)
-            (state.pf2 & (0x01 << (bit - 12))) != 0
+            (pf2 & (0x01 << (bit - 12))) != 0
         } else {
             false
         }
+    }
+
+    /// Get PF0 value at a specific pixel position with mid-scanline changes
+    fn get_pf0_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        // If there are no mid-scanline changes, use the latched value
+        if state.pf0_change_count == 0 {
+            return state.pf0;
+        }
+
+        // Find the most recent change before or at this pixel
+        let mut result = state.pf0;
+        for i in 0..(state.pf0_change_count as usize) {
+            if state.pf0_changes[i].pixel as usize <= x {
+                result = state.pf0_changes[i].value;
+            }
+        }
+        result
+    }
+
+    /// Get PF1 value at a specific pixel position with mid-scanline changes
+    fn get_pf1_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        if state.pf1_change_count == 0 {
+            return state.pf1;
+        }
+
+        let mut result = state.pf1;
+        for i in 0..(state.pf1_change_count as usize) {
+            if state.pf1_changes[i].pixel as usize <= x {
+                result = state.pf1_changes[i].value;
+            }
+        }
+        result
+    }
+
+    /// Get PF2 value at a specific pixel position with mid-scanline changes
+    fn get_pf2_at_pixel(state: &ScanlineState, x: usize) -> u8 {
+        if state.pf2_change_count == 0 {
+            return state.pf2;
+        }
+
+        let mut result = state.pf2;
+        for i in 0..(state.pf2_change_count as usize) {
+            if state.pf2_changes[i].pixel as usize <= x {
+                result = state.pf2_changes[i].value;
+            }
+        }
+        result
     }
 
     /// Generate audio samples for a given count
