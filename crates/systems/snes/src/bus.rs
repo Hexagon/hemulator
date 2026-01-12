@@ -152,9 +152,17 @@ pub struct SnesBus {
 
     /// $420D - MEMSEL (FastROM)
     memsel: u8,
+
+    /// $2180-$2183 - WRAM access port (WMDATA/WMADD)
+    ///
+    /// Allows reading/writing the full 128KB WRAM via a 17-bit address register.
+    /// Writes/reads to $2180 auto-increment the address.
+    wram_port_addr: Cell<u32>,
 }
 
 impl SnesBus {
+    const SCANLINE_CYCLES: u32 = 341;
+    const HBLANK_CYCLES: u32 = 40;
     pub fn new() -> Self {
         log(LogCategory::Bus, LogLevel::Info, || {
             "SNES Bus: Initializing with stub SPC700 (real SPC700 disabled by default)".to_string()
@@ -196,6 +204,8 @@ impl SnesBus {
             htime: 0,
             vtime: 0,
             memsel: 0,
+
+            wram_port_addr: Cell::new(0),
         }
     }
 
@@ -313,6 +323,13 @@ impl SnesBus {
         // Roughly 224/262 scanlines = ~85.5% of frame
         // So VBlank starts at cycle ~76,400 out of 89,342
         self.frame_cycle >= 76400
+    }
+
+    /// Check if currently in HBlank period (approximate).
+    ///
+    /// We model HBlank as the last ~40 cycles of each scanline.
+    fn is_in_hblank(&self) -> bool {
+        (self.frame_cycle % Self::SCANLINE_CYCLES) >= (Self::SCANLINE_CYCLES - Self::HBLANK_CYCLES)
     }
 
     /// Set controller state (16 buttons) for controller `idx` (0 or 1).
@@ -576,6 +593,34 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize],
+
+                    // $2180-$2183 - WRAM access port
+                    0x2180 => {
+                        let cur = self.wram_port_addr.get();
+                        let a = (cur as usize) & 0x1FFFF;
+                        let v = self.wram[a];
+                        self.open_bus.set(v);
+                        // Auto-increment (wrap at 128KB)
+                        let next = (cur + 1) & 0x1FFFF;
+                        self.wram_port_addr.set(next);
+                        v
+                    }
+                    0x2181 => {
+                        let v = (self.wram_port_addr.get() & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x2182 => {
+                        let v = ((self.wram_port_addr.get() >> 8) & 0xFF) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+                    0x2183 => {
+                        let v = ((self.wram_port_addr.get() >> 16) & 0x01) as u8;
+                        self.open_bus.set(v);
+                        v
+                    }
+
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
                     // Main CPU reads what SPC700 has written (apu_out ports)
                     0x2140..=0x2143 => {
@@ -703,13 +748,15 @@ impl Memory65c816 for SnesBus {
                     // $4212 - HVBJOY - H/V Blank and Joypad Status
                     0x4212 => {
                         // Bit 7: VBlank flag (set during VBlank period)
-                        // Bit 6: HBlank flag (not implemented)
+                        // Bit 6: HBlank flag
                         // Bit 0: Auto-joypad read in progress (0 = finished)
-                        let val = if self.is_in_vblank() {
-                            0x80 // VBlank
-                        } else {
-                            0x00 // Not in VBlank
-                        };
+                        let mut val = 0u8;
+                        if self.is_in_vblank() {
+                            val |= 0x80;
+                        }
+                        if self.is_in_hblank() {
+                            val |= 0x40;
+                        }
 
                         log(LogCategory::Interrupts, LogLevel::Trace, || {
                             format!(
@@ -842,8 +889,14 @@ impl Memory65c816 for SnesBus {
                         // Best-effort open bus behavior: return last data bus value.
                         self.open_bus.get()
                     }
-                    // WRAM (full at $6000-$7FFF in banks $00-$3F)
-                    0x6000..=0x7FFF if bank < 0x40 => self.wram[(offset - 0x6000) as usize],
+                    // $6000-$7FFF: Expansion / cartridge-mapped region (SRAM on HiROM)
+                    0x6000..=0x7FFF => {
+                        if let Some(ref cart) = self.cartridge {
+                            cart.read(addr)
+                        } else {
+                            self.open_bus.get()
+                        }
+                    }
                     // Cartridge ROM
                     0x8000..=0xFFFF => {
                         if let Some(ref cart) = self.cartridge {
@@ -852,7 +905,6 @@ impl Memory65c816 for SnesBus {
                             0
                         }
                     }
-                    _ => 0,
                 }
             }
             // Banks $7E-$7F: Full WRAM mirror
@@ -881,6 +933,34 @@ impl Memory65c816 for SnesBus {
                 match offset {
                     // WRAM (shadow at $0000-$1FFF)
                     0x0000..=0x1FFF => self.wram[offset as usize] = val,
+
+                    // $2180-$2183 - WRAM access port
+                    0x2180 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        let a = (cur as usize) & 0x1FFFF;
+                        self.wram[a] = val;
+                        self.wram_port_addr.set((cur + 1) & 0x1FFFF);
+                    }
+                    0x2181 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr
+                            .set((cur & !0xFF) | (val as u32));
+                    }
+                    0x2182 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr
+                            .set((cur & !(0xFF << 8)) | ((val as u32) << 8));
+                    }
+                    0x2183 => {
+                        self.open_bus.set(val);
+                        let cur = self.wram_port_addr.get();
+                        self.wram_port_addr
+                            .set((cur & !(1 << 16)) | (((val as u32) & 1) << 16));
+                    }
+
                     // $2140-$2143 - APUIO0-3 - APU Communication Ports
                     0x2140..=0x2143 => {
                         let port = (offset - 0x2140) as u8;
@@ -1236,9 +1316,11 @@ impl Memory65c816 for SnesBus {
                     }
                     // Other hardware registers
                     0x2000..=0x5FFF => {} // Stub - ignore writes
-                    // WRAM (full at $6000-$7FFF in banks $00-$3F)
-                    0x6000..=0x7FFF if bank < 0x40 => {
-                        self.wram[(offset - 0x6000) as usize] = val;
+                    // $6000-$7FFF: Expansion / cartridge-mapped region (SRAM on HiROM)
+                    0x6000..=0x7FFF => {
+                        if let Some(ref mut cart) = self.cartridge {
+                            cart.write(addr, val);
+                        }
                     }
                     // Cartridge ROM/RAM
                     0x8000..=0xFFFF => {
@@ -1246,7 +1328,6 @@ impl Memory65c816 for SnesBus {
                             cart.write(addr, val);
                         }
                     }
-                    _ => {}
                 }
             }
             // Banks $7E-$7F: Full WRAM mirror

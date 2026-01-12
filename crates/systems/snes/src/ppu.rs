@@ -1082,9 +1082,21 @@ impl Ppu {
         }
 
         log(LogCategory::PPU, LogLevel::Debug, || {
+            let vram_any = self.vram.iter().any(|&b| b != 0);
+            let cgram_any = self.cgram.iter().any(|&b| b != 0);
+            let oam_any = self.oam.iter().any(|&b| b != 0);
             format!(
-                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop color=0x{:08X}, brightness={}, first pixel=0x{:08X}",
-                non_backdrop_pixels, backdrop_color, brightness, frame.pixels[0]
+                "SNES PPU: Frame rendered - {} non-backdrop pixels, backdrop=0x{:08X}, brightness={}, TM=0x{:02X}, BGMODE=0x{:02X}, OBSEL=0x{:02X}, VRAM_any={}, CGRAM_any={}, OAM_any={}, first=0x{:08X}",
+                non_backdrop_pixels,
+                backdrop_color,
+                brightness,
+                self.tm,
+                self.bgmode,
+                self.obsel,
+                vram_any,
+                cgram_any,
+                oam_any,
+                frame.pixels[0]
             )
         });
 
@@ -1171,15 +1183,19 @@ impl Ppu {
         }
     }
 
-    /// Check if VRAM is accessible (during VBlank or force blank)
-    /// SNES hardware only allows VRAM access during VBlank or when screen is force blanked
+    /// Check if VRAM is accessible.
+    ///
+    /// On real hardware, VRAM access via $2118/$2119 is available during VBlank,
+    /// during HBlank, or when the screen is force-blanked.
     fn is_vram_accessible(&self) -> bool {
         // Force blank: bit 7 of screen_display register ($2100)
         let force_blank = (self.screen_display & 0x80) != 0;
         // VBlank: bit 7 of HVBJOY register ($4212)
         let in_vblank = (self.hvbjoy & 0x80) != 0;
+        // HBlank: bit 6 of HVBJOY register ($4212)
+        let in_hblank = (self.hvbjoy & 0x40) != 0;
 
-        force_blank || in_vblank
+        force_blank || in_vblank || in_hblank
     }
 
     /// Get tilemap and CHR base addresses for a BG layer
@@ -1336,9 +1352,9 @@ impl Ppu {
         // In Mode 0, each tile is 16 bytes (8 rows * 2 bytes per row for 2bpp)
         let tile_data_base = chr_base + (tile_index as usize * 16);
 
-        // Apply flip
+        // Apply flip (tile-local coordinates)
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
-        let actual_col = if flip_x { pixel_x } else { 7 - pixel_x };
+        let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
         // Read two bitplanes for this row
         let bp0_addr = tile_data_base + actual_row;
@@ -1355,8 +1371,8 @@ impl Ppu {
             0
         };
 
-        // Extract color index from bitplanes
-        let bit = actual_col;
+        // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
+        let bit = 7 - actual_col;
         let bit0 = (bp0 >> bit) & 1;
         let bit1 = (bp1 >> bit) & 1;
         let color_index = (bit1 << 1) | bit0;
@@ -1396,14 +1412,14 @@ impl Ppu {
             };
 
             for col in 0..8 {
-                let actual_col = if params.flip_x { col } else { 7 - col };
+                let actual_col = if params.flip_x { 7 - col } else { col };
                 let pixel_x = params.tile_x * 8 + col;
                 if pixel_x >= 256 {
                     break;
                 }
 
                 // Extract color index from bitplanes
-                let bit = actual_col;
+                let bit = 7 - actual_col;
                 let bit0 = (bp0 >> bit) & 1;
                 let bit1 = (bp1 >> bit) & 1;
                 let color_index = (bit1 << 1) | bit0;
@@ -1440,9 +1456,9 @@ impl Ppu {
         // In 4bpp mode, each tile is 32 bytes (8 rows * 4 bytes per row)
         let tile_data_base = chr_base + (tile_index as usize * 32);
 
-        // Apply flip
+        // Apply flip (tile-local coordinates)
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
-        let actual_col = if flip_x { pixel_x } else { 7 - pixel_x };
+        let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
         // Read four bitplanes for this row
         let bp0_addr = tile_data_base + actual_row;
@@ -1471,8 +1487,8 @@ impl Ppu {
             0
         };
 
-        // Extract color index from bitplanes
-        let bit = actual_col;
+        // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
+        let bit = 7 - actual_col;
         let bit0 = (bp0 >> bit) & 1;
         let bit1 = (bp1 >> bit) & 1;
         let bit2 = (bp2 >> bit) & 1;
@@ -1497,9 +1513,9 @@ impl Ppu {
         // In 8bpp mode, each tile is 64 bytes (8 rows * 8 bytes per row)
         let tile_data_base = chr_base + (tile_index as usize * 64);
 
-        // Apply flip
+        // Apply flip (tile-local coordinates)
         let actual_row = if flip_y { 7 - pixel_y } else { pixel_y };
-        let actual_col = if flip_x { pixel_x } else { 7 - pixel_x };
+        let actual_col = if flip_x { 7 - pixel_x } else { pixel_x };
 
         // Read eight bitplanes for this row
         let bp0_addr = tile_data_base + actual_row;
@@ -1552,8 +1568,8 @@ impl Ppu {
             0
         };
 
-        // Extract color index from bitplanes
-        let bit = actual_col;
+        // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
+        let bit = 7 - actual_col;
         let bit0 = (bp0 >> bit) & 1;
         let bit1 = (bp1 >> bit) & 1;
         let bit2 = (bp2 >> bit) & 1;
@@ -1591,18 +1607,20 @@ impl Ppu {
         }
     }
 
-    /// Get OBJ base address in VRAM
+    /// Get OBJ base address in VRAM (first sprite page)
+    /// OBSEL bits 0-2 (bBB): word address = bBB << 13, so byte address = bBB << 14
     fn get_obj_base_address(&self) -> usize {
-        // Bits 0-2: Name base (in 8KB units, base offset in VRAM)
-        // Bits 3-4: Name select (4KB gap between sprite tables)
         let name_base = (self.obsel & 0x07) as usize;
-        let name_select = ((self.obsel >> 3) & 0x03) as usize;
+        // Word address = name_base << 13, byte address = name_base << 14
+        name_base << 14
+    }
 
-        // SNES sprite tiles can be located at various positions in VRAM
-        // Name base is in 8KB (0x2000 byte) units
-        // Name select adds a 4KB (0x1000 byte) gap
-        // The base calculation should be: name_base * 0x2000 + name_select * 0x1000
-        (name_base * 0x2000) + (name_select * 0x1000)
+    /// Get the offset to the second sprite page when nameselect bit is set
+    /// OBSEL bits 3-4 (NN): offset = (NN + 1) << 12 words = (NN + 1) << 13 bytes
+    fn get_obj_nameselect_gap(&self) -> usize {
+        let name_select = ((self.obsel >> 3) & 0x03) as usize;
+        // Word offset = (NN + 1) << 12, byte offset = (NN + 1) << 13
+        (name_select + 1) << 13
     }
 
     /// Render a single BG layer in 2bpp mode with priority handling
@@ -2252,6 +2270,9 @@ impl Ppu {
         let mut sprites_per_scanline = vec![0u8; 224];
         let mut tiles_per_scanline = vec![0u8; 224];
 
+        // Get the nameselect gap for second sprite page
+        let nameselect_gap = self.get_obj_nameselect_gap();
+
         // SNES has 128 sprites, rendered in reverse order (127 -> 0) for priority
         for sprite_index in (0..128).rev() {
             // Each sprite has 4 bytes in main OAM table
@@ -2261,8 +2282,8 @@ impl Ppu {
             }
 
             // Read sprite attributes from OAM
-            let x = self.oam[oam_offset] as i16;
-            let y = self.oam[oam_offset + 1] as i16;
+            let x_low = self.oam[oam_offset] as u16;
+            let y_raw = self.oam[oam_offset + 1];
             let tile = self.oam[oam_offset + 2];
             let attr = self.oam[oam_offset + 3];
 
@@ -2275,15 +2296,37 @@ impl Ppu {
                 0
             };
 
-            // Bit 0 of high_bits: X MSB (9th bit of X coordinate)
+            // Bit 0 of high_bits: X MSB (9th bit - acts as -256 when set)
             // Bit 1 of high_bits: Size toggle (0=small, 1=large)
-            let x = x | (((high_bits & 0x01) as i16) << 8);
+            let x_msb = (high_bits & 0x01) != 0;
             let is_large = (high_bits & 0x02) != 0;
+
+            // X coordinate: 9-bit where bit 8 acts as -256
+            // If bit 8 is set, X = low_byte - 256 (allows sprites to be partially off left side)
+            let x: i16 = if x_msb {
+                (x_low as i16) - 256
+            } else {
+                x_low as i16
+            };
+
+            // Y coordinate: sprites appear 1 scanline later than their Y value
+            // Values 0xE0-0xFF (224-255) wrap to appear at top of screen (negative)
+            let y: i16 = {
+                let y_plus_one = y_raw.wrapping_add(1);
+                if y_plus_one >= 0xE1 {
+                    // Wrap: treat as negative (y - 256)
+                    (y_plus_one as i16) - 256
+                } else {
+                    y_plus_one as i16
+                }
+            };
 
             // Get sprite size
             let (width, height) = if is_large { large_size } else { small_size };
 
             // Parse attributes
+            // Bit 0: nameselect (high bit of tile number, selects second sprite page)
+            let nameselect = (attr & 0x01) != 0;
             let palette = ((attr >> 1) & 0x07) as usize;
             let sprite_priority = (attr >> 4) & 0x03;
             let flip_x = (attr & 0x40) != 0;
@@ -2295,6 +2338,7 @@ impl Ppu {
             }
 
             // Skip offscreen sprites (basic culling)
+            // X can be -256 to 255, Y can be negative too (wrapping)
             if x >= 256 || y >= 224 || x + width as i16 <= 0 || y + height as i16 <= 0 {
                 continue;
             }
@@ -2338,6 +2382,8 @@ impl Ppu {
                 y,
                 tile,
                 obj_base,
+                nameselect,
+                nameselect_gap,
                 palette,
                 sprite_priority,
                 width,
@@ -2358,6 +2404,8 @@ impl Ppu {
         y: i16,
         tile: u8,
         obj_base: usize,
+        nameselect: bool,
+        nameselect_gap: usize,
         palette: usize,
         sprite_priority: u8,
         width: usize,
@@ -2374,13 +2422,26 @@ impl Ppu {
         // Sprite priority 0-1 = priority level 2, Sprite priority 2-3 = priority level 4
         let render_priority = if sprite_priority < 2 { 2 } else { 4 };
 
+        // Calculate base address for this sprite's tiles
+        // If nameselect is set, add the gap to access second sprite page
+        let sprite_tile_base = if nameselect {
+            obj_base + nameselect_gap
+        } else {
+            obj_base
+        };
+
         for ty in 0..tiles_high {
             for tx in 0..tiles_wide {
-                // Calculate tile number (tiles are arranged in rows)
-                let tile_num = tile as usize + (ty * 16) + tx;
-
-                // Calculate tile data address
-                let tile_addr = obj_base + (tile_num * 32);
+                // SNES sprite tile layout: tiles are arranged in a 16-tile wide grid
+                // Character (tile number) provides the base position in this grid
+                // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
+                let char_x = (tile as usize & 0x0F) + tx;
+                let char_y = ((tile as usize >> 4) + ty) & 0x0F;
+                
+                // Calculate tile address using the grid position
+                // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
+                let tile_index = (char_y << 4) | (char_x & 0x0F);
+                let tile_addr = sprite_tile_base + (tile_index * 32);
 
                 // Render this 8x8 tile
                 for py in 0..8 {
@@ -2425,8 +2486,8 @@ impl Ppu {
                             0
                         };
 
-                        // Extract color index from bitplanes
-                        let bit = actual_px;
+                        // SNES bitplanes are MSB-first (leftmost pixel is bit 7)
+                        let bit = 7 - actual_px;
                         let bit0 = (bp0 >> bit) & 1;
                         let bit1 = (bp1 >> bit) & 1;
                         let bit2 = (bp2 >> bit) & 1;

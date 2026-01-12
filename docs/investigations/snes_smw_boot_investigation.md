@@ -238,3 +238,104 @@ With the breakpoint and tracing infrastructure now functional, the next step is 
    - Run same ROM in a known-good SNES emulator with trace/log
    - Identify where execution diverges
    - Focus fixes on the point of divergence
+
+---
+
+## Update (Jan 12, 2026): SMW reaches NMI + unblanks
+
+### Root cause
+
+SMW was stuck in a long-running data consumption loop because **cartridge ROM reads past the physical ROM size returned 0**. In real hardware, smaller ROMs typically **mirror** because higher address lines are not connected/decoded.
+
+This produced a “fake infinite” decompression/stream parse where the pointer walked into higher banks (e.g., $31:xxxx) and reads degraded to zeros, preventing the init path from finishing (so `$2100` stayed `0x80` and `$4200` never enabled NMI).
+
+### Fix
+
+- Implemented **ROM mirroring** for SNES cartridge reads (LoROM + HiROM) by wrapping computed ROM offsets with `rom_offset % rom.len()`.
+- Improved instruction trace dumps to include **registers + flags per instruction**, which made it obvious that `LDA [$8A]` was loading `0x00` and that the stream bank had advanced far beyond the physical ROM.
+
+### Evidence
+
+- `smw_boot_aftermirror_20m.log` shows:
+   - `$2100 (INIDISP)` written to `0x0F` (unblank, brightness 15)
+   - “SNES Bus: NMI enabled”
+   - Repeated “SNES: NMI triggered” events
+
+---
+
+## Update (Jan 12, 2026): Still no visible output (black framebuffer)
+
+At this point SMW is executing, unblanks, and NMIs are firing, but the rendered frame is still completely black (backdrop-only).
+
+### Confirmed: not a GUI presentation issue
+
+- Headless debug dump screenshots are fully black (0 non-black pixels).
+   - Example screenshot from this phase: `screenshots\snes\20260112205306967.png`
+
+### Fix attempt 1: HBlank timing + VRAM accessibility
+
+**Observation**: earlier logs showed repeated
+`VRAM Write ... attempted during active display (ignored)` immediately after `$2100` was set to `0x0F`.
+
+**Change**:
+- Added per-scanline HBlank tracking in the SNES frame loop.
+   - Enter HBlank for the last ~40 cycles of each scanline.
+- Allowed VRAM writes during **HBlank** in `Ppu::is_vram_accessible()` (in addition to VBlank / force blank).
+- Implemented `$4212 (HVBJOY)` bit 6 (HBlank) in the bus readback.
+
+**Result**:
+- The “VRAM write ignored” spam disappeared, which strongly suggests VRAM writes are now being accepted at the correct times.
+- However, output is still backdrop-only.
+
+### Fix attempt 2: Bitplane extraction (tiles/sprites)
+
+Hypothesis was that rendering might be producing all-transparent pixels due to incorrect bit ordering.
+
+**Change**:
+- Adjusted tile and sprite bitplane extraction to treat SNES tile data as **MSB-first** per row (leftmost pixel is bit 7).
+- Corrected flip handling to apply flip in pixel-coordinate space, then apply MSB-first bit selection.
+
+**Result**:
+- Still backdrop-only output.
+
+### New diagnostics added
+
+Per-frame PPU debug logging now includes whether VRAM/CGRAM/OAM contain any non-zero bytes:
+
+- In the 20M-cycle run, the log shows:
+   - `VRAM_any=true`, `CGRAM_any=true`, `OAM_any=true`
+   - `$2100=0x0F` (brightness 15)
+   - `TM=0x10` (OBJ only enabled)
+   - Yet: `Frame rendered - 0 non-backdrop pixels`
+
+This indicates:
+- Uploads are happening (VRAM/CGRAM/OAM are not empty)
+- But the renderer is still not writing any pixels above the backdrop
+
+### Most likely remaining root causes
+
+This is now primarily an **OBJ/BG rendering correctness** problem rather than an init/timing/memory-map gating problem.
+
+High-probability suspects:
+1. **OBJ tile addressing / numbering is wrong** for anything larger than 8x8.
+    - Current code assumes `tile_num = tile + (ty * 16) + tx`, which is not generally correct for SNES OBJ tile layout.
+2. **OAM coordinate semantics/wrap** are wrong.
+    - SNES uses 8-bit X/Y with special wrap behavior; treating them as straight signed/unsigned with simple culling can discard all sprites.
+3. **OAM high table decoding** may be incorrect (X MSB / size bit extraction), which can push sprites off-screen or choose the wrong size table.
+4. BG layers are off (`TM=0x10`), so if OBJ rendering fails, the frame will remain pure backdrop.
+
+### Artifacts from this phase
+
+- Logs/dumps (headless):
+   - `tmp\smw_hblank_20m.log`, `tmp\smw_hblank_20m_dump.txt`
+   - `tmp\smw_hblank2_20m.log`, `tmp\smw_hblank2_20m_dump.txt`
+   - `tmp\smw_renderfix_20m.log`, `tmp\smw_renderfix_20m_dump.txt`
+
+### Next steps (when resuming)
+
+1. Add targeted OBJ debug instrumentation:
+    - Count sprites considered, culled, and actually drawn.
+    - Log a few sprites (x,y,tile,attr,computed obj_base,tile_addr) once per frame.
+2. Verify OBJ tile addressing against a known reference and fix `tile_num` layout logic.
+3. If needed, temporarily force-enable BG1 in TM (debug-only) to validate BG rendering path separately from OBJ.
+

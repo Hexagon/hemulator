@@ -250,6 +250,9 @@ impl System for SnesSystem {
         for scanline in 0..SNES_VISIBLE_SCANLINES {
             let scanline_target = (scanline + 1) * SNES_SCANLINE_CYCLES;
 
+            // Active display starts at the beginning of each scanline
+            self.cpu.bus_mut().ppu_mut().set_hblank(false);
+
             // Log CPU state on first scanline of first few frames for debugging
             if scanline == 0 && self.current_cycles < 10000 {
                 log(LogCategory::CPU, LogLevel::Debug, || {
@@ -278,6 +281,10 @@ impl System for SnesSystem {
                     }
                 }
             }
+
+            // Enter HBlank for the remainder of the scanline.
+            // Many games (including SMW) rely on VRAM/CGRAM writes being possible during HBlank.
+            self.cpu.bus_mut().ppu_mut().set_hblank(true);
 
             // Execute HDMA during H-blank (approximately 40 cycles)
             let _hdma_cycles = self.cpu.bus_mut().do_hdma();
