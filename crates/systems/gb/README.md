@@ -179,14 +179,14 @@ let frame = gb.step_frame()?;
 See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
-- Frame-based timing (not cycle-accurate)
-- RTC in MBC3 doesn't count time
-- No serial/link cable support
-- No STAT interrupts or PPU mode transitions
+- **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
+- **RTC in MBC3 doesn't count time**: RTC registers (0x08-0x0C) are accessible for read/write but clock doesn't increment. Games can save/load RTC state but time won't progress.
+- **No serial/link cable support**: Serial transfer registers (SB at 0xFF01, SC at 0xFF02) are not implemented. Link cable multiplayer and trading features won't work.
+- **No STAT interrupts or PPU mode transitions**: STAT register (0xFF41) is readable/writable but doesn't trigger interrupts or accurately reflect PPU mode changes (Mode 0-3). Most games don't rely on this.
 
 **Missing CGB Features**:
-- HDMA - HBlank DMA (registers 0xFF51-0xFF55)
-- Infrared port (RP register at 0xFF56)
+- **HDMA - HBlank DMA**: Registers 0xFF51-0xFF55 not implemented. Affects some CGB games that use DMA during HBlank for advanced graphics effects (raster effects, parallax scrolling).
+- **Infrared port**: RP register at 0xFF56 not implemented. Used for IR communication in some games (e.g., Pokemon Gold/Silver/Crystal trading via Mystery Gift).
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)
