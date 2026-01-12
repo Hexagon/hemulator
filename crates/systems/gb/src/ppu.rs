@@ -126,12 +126,12 @@
 //! - ✅ LYC=LY coincidence detection
 //! - ✅ Frame-based timing with scanline counter
 //! - ✅ Automatic CGB mode detection and activation
+//! - ✅ PPU mode transitions (Mode 0-3) with accurate timing
+//! - ✅ STAT interrupts (HBlank, VBlank, OAM, LYC=LY)
 //!
 //! ## Not Implemented
 //! - ❌ Cycle-accurate PPU timing
 //! - ❌ Mid-scanline effects
-//! - ❌ PPU mode transitions (Mode 0-3)
-//! - ❌ STAT interrupts
 
 use emu_core::types::Frame;
 
@@ -170,6 +170,8 @@ pub struct Ppu {
     pub wx: u8,
     /// Cycle accumulator for scanline timing
     cycle_counter: u32,
+    /// Previous PPU mode for detecting mode transitions
+    prev_mode: u8,
 
     // CGB-specific registers and state
     /// Background palette index/specification (0xFF68)
@@ -218,6 +220,7 @@ impl Ppu {
             wy: 0,
             wx: 0,
             cycle_counter: 0,
+            prev_mode: 0,
             bgpi: 0,
             obpi: 0,
             bg_palette_data: [0; 64],
@@ -895,20 +898,30 @@ impl Ppu {
     /// - Mode 3 (Pixel Transfer): Cycles 80-251 (172 cycles typical)
     /// - Mode 0 (HBlank): Cycles 252-455 (204 cycles typical)
     /// - Mode 1 (VBlank): Lines 144-153
-    pub fn step(&mut self, cycles: u32) -> bool {
+    ///
+    /// Step the PPU with the given number of cycles
+    ///
+    /// Returns (vblank_started, stat_interrupt, hblank_entered)
+    pub fn step(&mut self, cycles: u32) -> (bool, bool, bool) {
         // Accumulate cycles
         self.cycle_counter += cycles;
 
         let mut vblank_started = false;
+        let mut lyc_ly_interrupt = false;
 
         // Process complete scanlines (456 cycles each)
         while self.cycle_counter >= 456 {
             self.cycle_counter -= 456;
             self.ly = (self.ly + 1) % 154;
 
-            // Check LYC=LY interrupt
+            // Check LYC=LY coincidence flag and detect transition
+            let old_coincidence = (self.stat & 0x04) != 0;
             if self.ly == self.lyc {
                 self.stat |= 0x04; // Set coincidence flag
+                                   // Trigger interrupt only on transition from non-coincidence to coincidence
+                if !old_coincidence && (self.stat & 0x40) != 0 {
+                    lyc_ly_interrupt = true;
+                }
             } else {
                 self.stat &= !0x04;
             }
@@ -919,28 +932,35 @@ impl Ppu {
             }
         }
 
-        // Update STAT mode bits (bits 0-1) based on current state
-        // Mode bits should reflect the current PPU state
-        self.update_stat_mode();
+        // Update STAT mode bits and check for STAT interrupt and HBlank entry
+        let (mut stat_interrupt, hblank_entered) = self.update_stat_mode();
 
-        vblank_started
+        // Combine mode-based STAT interrupt with LYC=LY interrupt
+        stat_interrupt = stat_interrupt || lyc_ly_interrupt;
+
+        (vblank_started, stat_interrupt, hblank_entered)
     }
 
-    /// Update the PPU mode bits in STAT register
+    /// Update the PPU mode bits in STAT register and check for STAT interrupt
     ///
     /// The mode is determined by:
     /// - LY >= 144: Mode 1 (VBlank)
     /// - LY < 144 and cycle_counter < 80: Mode 2 (OAM Search)
     /// - LY < 144 and cycle_counter < 252: Mode 3 (Pixel Transfer)
     /// - LY < 144 and cycle_counter >= 252: Mode 0 (HBlank)
-    fn update_stat_mode(&mut self) {
+    ///
+    /// Returns (stat_interrupt, hblank_entered)
+    fn update_stat_mode(&mut self) -> (bool, bool) {
+        // Get previous mode before updating
+        let prev_mode = self.stat & 0x03;
+
         // Clear mode bits (bits 0-1)
         self.stat &= !0x03;
 
         // Check if LCD is enabled
         if (self.lcdc & LCDC_ENABLE) == 0 {
             // LCD disabled: mode is always 0
-            return;
+            return (false, false);
         }
 
         let mode = if self.ly >= 144 {
@@ -959,6 +979,31 @@ impl Ppu {
 
         // Set mode bits
         self.stat |= mode;
+
+        // Check if we just entered HBlank
+        let hblank_entered = mode == 0 && prev_mode != 0;
+
+        // Check if mode changed
+        let mut stat_interrupt = false;
+        if mode != prev_mode {
+            // Store new mode for next iteration
+            self.prev_mode = mode;
+
+            // Check if STAT interrupt should be triggered for this mode
+            // STAT interrupts are enabled via bits 3-6:
+            // Bit 3: Mode 0 (HBlank) interrupt enable
+            // Bit 4: Mode 1 (VBlank) interrupt enable
+            // Bit 5: Mode 2 (OAM) interrupt enable
+            // Bit 6: LYC=LY interrupt enable
+            stat_interrupt = match mode {
+                0 => (self.stat & 0x08) != 0, // HBlank interrupt (bit 3)
+                1 => (self.stat & 0x10) != 0, // VBlank interrupt (bit 4)
+                2 => (self.stat & 0x20) != 0, // OAM interrupt (bit 5)
+                _ => false,                   // Mode 3 doesn't have interrupt
+            };
+        }
+
+        (stat_interrupt, hblank_entered)
     }
 
     // Tile viewer helper methods
@@ -1067,7 +1112,7 @@ mod tests {
     fn test_step_ly() {
         let mut ppu = Ppu::new();
         ppu.ly = 0;
-        ppu.step(456); // One scanline
+        let _ = ppu.step(456); // One scanline
         assert_eq!(ppu.ly, 1);
     }
 
@@ -1075,7 +1120,7 @@ mod tests {
     fn test_vblank_detection() {
         let mut ppu = Ppu::new();
         ppu.ly = 143;
-        let vblank = ppu.step(456);
+        let (vblank, _stat, _hblank) = ppu.step(456);
         assert!(vblank);
         assert_eq!(ppu.ly, 144);
     }
@@ -1161,7 +1206,61 @@ mod tests {
         ppu.ly = 10;
         ppu.lyc = 11;
 
-        ppu.step(456);
+        let _ = ppu.step(456);
+        assert_eq!(ppu.ly, 11);
+        assert!(ppu.stat & 0x04 != 0); // Coincidence flag should be set
+    }
+
+    #[test]
+    fn test_stat_interrupt_hblank() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x08; // Enable HBlank STAT interrupt (bit 3)
+        ppu.ly = 0;
+        ppu.cycle_counter = 0;
+
+        // Step to mode 2 (OAM search, cycles 0-79) - no interrupt yet
+        let (_vblank, stat, _hblank) = ppu.step(40);
+        assert!(!stat);
+        assert_eq!(ppu.stat & 0x03, 2); // Mode 2
+
+        // Step to mode 3 (pixel transfer, cycles 80-251) - no interrupt
+        let (_vblank, stat, _hblank) = ppu.step(100);
+        assert!(!stat);
+        assert_eq!(ppu.stat & 0x03, 3); // Mode 3
+
+        // Step to mode 0 (HBlank, cycles 252-455) - should trigger STAT interrupt
+        let (_vblank, stat, _hblank) = ppu.step(120); // Now at cycle 260, which is mode 0
+        assert!(stat); // HBlank STAT interrupt should fire
+        assert_eq!(ppu.stat & 0x03, 0); // Mode 0
+    }
+
+    #[test]
+    fn test_stat_interrupt_oam() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x20; // Enable OAM STAT interrupt (bit 5)
+        ppu.ly = 0;
+        ppu.cycle_counter = 400; // Near end of previous scanline
+
+        // Step to next scanline - should enter mode 2 and trigger interrupt
+        let (_vblank, stat, _hblank) = ppu.step(60);
+        assert!(stat); // OAM STAT interrupt should fire
+        assert_eq!(ppu.stat & 0x03, 2); // Mode 2
+        assert_eq!(ppu.ly, 1);
+    }
+
+    #[test]
+    fn test_stat_interrupt_lyc() {
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD
+        ppu.stat |= 0x40; // Enable LYC=LY STAT interrupt (bit 6)
+        ppu.ly = 10;
+        ppu.lyc = 11;
+
+        // Step to line 11 - should trigger LYC=LY interrupt
+        let (_vblank, stat, _hblank) = ppu.step(456);
+        assert!(stat); // LYC=LY STAT interrupt should fire
         assert_eq!(ppu.ly, 11);
         assert!(ppu.stat & 0x04 != 0); // Coincidence flag should be set
     }

@@ -30,13 +30,21 @@ pub struct Mbc3 {
     ram_rtc_enabled: bool,
     rom_bank: u8,
     ram_bank: u8,
-    // RTC registers (stubbed for now)
-    rtc_s: u8,     // Seconds
-    rtc_m: u8,     // Minutes
-    rtc_h: u8,     // Hours
-    rtc_dl: u8,    // Days lower
-    rtc_dh: u8,    // Days upper + flags
+    // RTC registers
+    rtc_s: u8,     // Seconds (0-59)
+    rtc_m: u8,     // Minutes (0-59)
+    rtc_h: u8,     // Hours (0-23)
+    rtc_dl: u8,    // Days lower (0-255)
+    rtc_dh: u8,    // Days upper + flags (bit 0: day bit 8, bit 6: halt, bit 7: carry)
     rtc_latch: u8, // For latching RTC (0x00 -> 0x01 sequence)
+    // RTC latched values (returned when reading after latch)
+    rtc_s_latched: u8,
+    rtc_m_latched: u8,
+    rtc_h_latched: u8,
+    rtc_dl_latched: u8,
+    rtc_dh_latched: u8,
+    // RTC internal state
+    rtc_ticks: u32, // Sub-second ticks (incremented each frame, ~60 Hz)
 }
 
 impl Mbc3 {
@@ -53,6 +61,12 @@ impl Mbc3 {
             rtc_dl: 0,
             rtc_dh: 0,
             rtc_latch: 0xFF,
+            rtc_s_latched: 0,
+            rtc_m_latched: 0,
+            rtc_h_latched: 0,
+            rtc_dl_latched: 0,
+            rtc_dh_latched: 0,
+            rtc_ticks: 0,
         }
     }
 
@@ -127,10 +141,21 @@ impl Mbc3 {
             0x6000..=0x7FFF => {
                 // Latch Clock Data (0x00 -> 0x01 latches RTC)
                 if self.rtc_latch == 0x00 && val == 0x01 {
-                    // RTC latch operation (stub - clock doesn't actually run)
-                    log(LogCategory::Stubs, LogLevel::Debug, || {
-                        "GB MBC3: RTC latch operation (stub - clock doesn't actually tick)"
-                            .to_string()
+                    // Latch current RTC values
+                    self.rtc_s_latched = self.rtc_s;
+                    self.rtc_m_latched = self.rtc_m;
+                    self.rtc_h_latched = self.rtc_h;
+                    self.rtc_dl_latched = self.rtc_dl;
+                    self.rtc_dh_latched = self.rtc_dh;
+                    log(LogCategory::Bus, LogLevel::Debug, || {
+                        format!(
+                            "GB MBC3: RTC latched - {}:{:02}:{:02} day {}",
+                            self.rtc_h_latched,
+                            self.rtc_m_latched,
+                            self.rtc_s_latched,
+                            (self.rtc_dl_latched as u16)
+                                | (((self.rtc_dh_latched & 0x01) as u16) << 8)
+                        )
                     });
                 }
                 self.rtc_latch = val;
@@ -159,34 +184,24 @@ impl Mbc3 {
                 }
             }
             0x08 => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Seconds read (stub, value={})", self.rtc_s)
-                });
-                self.rtc_s
+                // RTC Seconds - return latched value
+                self.rtc_s_latched
             }
             0x09 => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Minutes read (stub, value={})", self.rtc_m)
-                });
-                self.rtc_m
+                // RTC Minutes - return latched value
+                self.rtc_m_latched
             }
             0x0A => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Hours read (stub, value={})", self.rtc_h)
-                });
-                self.rtc_h
+                // RTC Hours - return latched value
+                self.rtc_h_latched
             }
             0x0B => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Days lower read (stub, value={})", self.rtc_dl)
-                });
-                self.rtc_dl
+                // RTC Days lower - return latched value
+                self.rtc_dl_latched
             }
             0x0C => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Days upper read (stub, value={})", self.rtc_dh)
-                });
-                self.rtc_dh
+                // RTC Days upper - return latched value
+                self.rtc_dh_latched
             }
             _ => 0xFF,
         }
@@ -210,36 +225,78 @@ impl Mbc3 {
                 }
             }
             0x08 => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Seconds write (stub, value={})", val)
-                });
+                // RTC Seconds - write to actual register (store raw value)
                 self.rtc_s = val;
             }
             0x09 => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Minutes write (stub, value={})", val)
-                });
+                // RTC Minutes - write to actual register (store raw value)
                 self.rtc_m = val;
             }
             0x0A => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Hours write (stub, value={})", val)
-                });
+                // RTC Hours - write to actual register (store raw value)
                 self.rtc_h = val;
             }
             0x0B => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Days lower write (stub, value={})", val)
-                });
+                // RTC Days lower - write to actual register
                 self.rtc_dl = val;
             }
             0x0C => {
-                log(LogCategory::Stubs, LogLevel::Debug, || {
-                    format!("GB MBC3: RTC Days upper write (stub, value={})", val)
-                });
+                // RTC Days upper + flags - write to actual register
+                // Bit 0: Day counter bit 8
+                // Bit 6: Halt (0=running, 1=halted)
+                // Bit 7: Day counter carry (1 when day counter overflows 511)
                 self.rtc_dh = val;
             }
             _ => {}
+        }
+    }
+
+    /// Tick the RTC - should be called once per frame (~60 Hz)
+    /// This increments the RTC when not halted
+    pub fn tick(&mut self) {
+        // Check if RTC is halted (bit 6 of rtc_dh)
+        if (self.rtc_dh & 0x40) != 0 {
+            return; // RTC is halted
+        }
+
+        // Increment sub-second ticks
+        // Game Boy runs at ~59.73 Hz, so we need ~60 ticks per second
+        self.rtc_ticks += 1;
+
+        // At 60 Hz, we need 60 ticks to make one second
+        if self.rtc_ticks >= 60 {
+            self.rtc_ticks = 0;
+
+            // Increment seconds
+            self.rtc_s += 1;
+            if self.rtc_s >= 60 {
+                self.rtc_s = 0;
+
+                // Increment minutes
+                self.rtc_m += 1;
+                if self.rtc_m >= 60 {
+                    self.rtc_m = 0;
+
+                    // Increment hours
+                    self.rtc_h += 1;
+                    if self.rtc_h >= 24 {
+                        self.rtc_h = 0;
+
+                        // Increment days (9-bit counter: 0-511)
+                        let mut days = (self.rtc_dl as u16) | (((self.rtc_dh & 0x01) as u16) << 8);
+                        days += 1;
+
+                        if days >= 512 {
+                            // Day counter overflow - set carry flag (bit 7)
+                            days = 0;
+                            self.rtc_dh |= 0x80;
+                        }
+
+                        self.rtc_dl = (days & 0xFF) as u8;
+                        self.rtc_dh = (self.rtc_dh & 0xFE) | ((days >> 8) as u8);
+                    }
+                }
+            }
         }
     }
 }
@@ -348,26 +405,46 @@ mod tests {
         // Write to RTC seconds
         mbc.write_rom(0x4000, 0x08);
         mbc.write_ram(0xA000, 0x2A);
+
+        // Latch RTC to read the value
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.read_ram(0xA000), 0x2A);
 
         // Write to RTC minutes
         mbc.write_rom(0x4000, 0x09);
         mbc.write_ram(0xA000, 0x1F);
+
+        // Latch RTC to read the value
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.read_ram(0xA000), 0x1F);
 
         // Write to RTC hours
         mbc.write_rom(0x4000, 0x0A);
         mbc.write_ram(0xA000, 0x17);
+
+        // Latch RTC to read the value
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.read_ram(0xA000), 0x17);
 
         // Write to RTC days lower
         mbc.write_rom(0x4000, 0x0B);
         mbc.write_ram(0xA000, 0xFF);
+
+        // Latch RTC to read the value
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.read_ram(0xA000), 0xFF);
 
         // Write to RTC days upper
         mbc.write_rom(0x4000, 0x0C);
         mbc.write_ram(0xA000, 0x01);
+
+        // Latch RTC to read the value
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.read_ram(0xA000), 0x01);
     }
 
@@ -382,6 +459,73 @@ mod tests {
         mbc.write_rom(0x6000, 0x01);
         assert_eq!(mbc.rtc_latch, 0x01);
         // RTC values are latched (though our stub doesn't actually update them)
+    }
+
+    #[test]
+    fn test_mbc3_rtc_tick() {
+        let mut mbc = Mbc3::new(vec![0; 0x8000], vec![]);
+
+        // Enable RTC
+        mbc.write_rom(0x0000, 0x0A);
+
+        // Set initial time to 23:59:59
+        mbc.write_rom(0x4000, 0x08); // Seconds register
+        mbc.write_ram(0xA000, 59);
+        mbc.write_rom(0x4000, 0x09); // Minutes register
+        mbc.write_ram(0xA000, 59);
+        mbc.write_rom(0x4000, 0x0A); // Hours register
+        mbc.write_ram(0xA000, 23);
+        mbc.write_rom(0x4000, 0x0B); // Days lower register
+        mbc.write_ram(0xA000, 0);
+
+        // Tick 60 times to advance by 1 second
+        for _ in 0..60 {
+            mbc.tick();
+        }
+
+        // Latch and verify seconds rolled over to 0, minutes to 0, hours to 0, days to 1
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
+
+        mbc.write_rom(0x4000, 0x08); // Seconds
+        assert_eq!(mbc.read_ram(0xA000), 0);
+
+        mbc.write_rom(0x4000, 0x09); // Minutes
+        assert_eq!(mbc.read_ram(0xA000), 0);
+
+        mbc.write_rom(0x4000, 0x0A); // Hours
+        assert_eq!(mbc.read_ram(0xA000), 0);
+
+        mbc.write_rom(0x4000, 0x0B); // Days
+        assert_eq!(mbc.read_ram(0xA000), 1);
+    }
+
+    #[test]
+    fn test_mbc3_rtc_halt() {
+        let mut mbc = Mbc3::new(vec![0; 0x8000], vec![]);
+
+        // Enable RTC
+        mbc.write_rom(0x0000, 0x0A);
+
+        // Set seconds to 30
+        mbc.write_rom(0x4000, 0x08);
+        mbc.write_ram(0xA000, 30);
+
+        // Set halt flag (bit 6 of rtc_dh)
+        mbc.write_rom(0x4000, 0x0C);
+        mbc.write_ram(0xA000, 0x40); // Halt bit set
+
+        // Tick 60 times (should not advance when halted)
+        for _ in 0..60 {
+            mbc.tick();
+        }
+
+        // Latch and verify seconds haven't changed
+        mbc.write_rom(0x6000, 0x00);
+        mbc.write_rom(0x6000, 0x01);
+
+        mbc.write_rom(0x4000, 0x08);
+        assert_eq!(mbc.read_ram(0xA000), 30); // Should still be 30
     }
 
     #[test]

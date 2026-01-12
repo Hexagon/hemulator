@@ -36,7 +36,7 @@ The Game Boy emulator is **fully working** with ~99% game coverage through MBC0/
   - Address bit 8 determines register function
 - **MBC3**: Popular for games with saves (~15% of games)
   - Up to 2MB ROM, 32KB RAM
-  - RTC registers (accessible but clock doesn't tick)
+  - **Working RTC (Real-Time Clock)** - time counting fully functional
 - **MBC5**: Advanced mapper (~10% of games)
   - Up to 8MB ROM, 128KB RAM
   - 9-bit ROM banking
@@ -179,14 +179,18 @@ let frame = gb.step_frame()?;
 See [User Manual](https://hemulator.56k.guru/user/manual.html#game-boy--game-boy-color) for user-facing limitations.
 
 **Technical Limitations**:
-- Frame-based timing (not cycle-accurate)
-- RTC in MBC3 doesn't count time
-- No serial/link cable support
-- No STAT interrupts or PPU mode transitions
+- **Frame-based timing**: Not cycle-accurate - renders full frames at once rather than scanline-by-scanline. Suitable for ~99% of games.
 
-**Missing CGB Features**:
-- HDMA - HBlank DMA (registers 0xFF51-0xFF55)
-- Infrared port (RP register at 0xFF56)
+**Link Cable Limitations**:
+- Serial transfer registers (0xFF01, 0xFF02) are implemented with loopback mode
+- External link cable connections not supported
+- Multiplayer and trading features require actual link cable hardware emulation
+
+**Infrared Port Limitations**:
+- RP register (0xFF56) implemented with read/write support
+- LED control bits (6-7) accessible
+- Actual IR communication hardware not emulated
+- IR-based features (Pokemon Mystery Gift, etc.) won't communicate with external devices
 
 **Unimplemented Mappers** (rare, <3% of games combined):
 - MBC6 (Game Boy Camera only)

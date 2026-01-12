@@ -211,7 +211,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
   - MBC2: Built-in RAM mapper (~1% of games, up to 256KB ROM, 512×4 bits built-in RAM)
-  - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
+  - MBC3: With battery saves and **working RTC** (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
   - HuC1: Hudson Soft mapper (<1% of games, up to 1MB ROM, 32KB RAM, IR sensor support)
 - Joypad input with matrix selection
@@ -223,11 +223,10 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
-- **HDMA**: HBlank DMA not implemented (affects some CGB games with advanced graphics effects)
-- **Other**: No serial transfer (link cable), STAT interrupts, or PPU mode transitions
+- **Link Cable**: Serial transfer implemented with loopback mode, but no external link cable support - multiplayer/trading won't work between instances
+- **Infrared Port**: RP register (0xFF56) accessible but IR hardware not emulated - IR features won't communicate externally
 - **Unimplemented Mappers** (rare, <3% of games): MBC6, MBC7, HuC3, MMM01, TAMA5
 
 **Controls**: Game Boy buttons are mapped to the same keyboard layout as NES:
