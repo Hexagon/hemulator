@@ -3270,6 +3270,28 @@ fn main() {
                     };
                     egui_app.tab_manager.update_pc_bda_data(pc_bda);
                 }
+                EmulatorSystem::Chip8(s) => {
+                    let inspector_data = s.get_inspector_data();
+                    let tile_data = egui_ui::SystemTileData::Chip8(egui_ui::Chip8TileData {
+                        v_registers: inspector_data.v_registers,
+                        i: inspector_data.i,
+                        pc: inspector_data.pc,
+                        sp: inspector_data.sp,
+                        stack: inspector_data.stack,
+                        delay_timer: inspector_data.delay_timer,
+                        sound_timer: inspector_data.sound_timer,
+                        display_plane0: inspector_data.display_plane0,
+                        display_plane1: inspector_data.display_plane1,
+                        display_width: inspector_data.display_width,
+                        display_height: inspector_data.display_height,
+                        mode: inspector_data.mode,
+                        selected_plane: inspector_data.selected_plane,
+                        high_res: inspector_data.high_res,
+                        waiting_for_key: inspector_data.waiting_for_key,
+                        keys: inspector_data.keys,
+                    });
+                    egui_app.tab_manager.update_system_tile_data(tile_data);
+                }
                 _ => {
                     // Other systems don't have tile viewers yet
                 }
