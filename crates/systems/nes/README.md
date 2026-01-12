@@ -15,20 +15,21 @@ The NES emulator is **fully working** with ~90%+ game coverage through 14 mapper
   - 56 illegal/undocumented opcodes (LAX, SAX, DCP, ISC, SLO, RLA, SRE, RRA)
 - ✅ **PPU (2C02)** - Full PPU emulation with background, sprites, scrolling
 - ✅ **APU (RP2A03)** - Complete audio with all 5 channels
-- ✅ **Mappers** - 14 mappers covering ~90%+ of games
+- ✅ **Mappers** - 15 mappers including complex MMC5
 - ✅ **Controllers** - Full input support
 - ✅ **Save States** - Complete state serialization
 - ✅ **PAL/NTSC** - Auto-detection and timing support
 
 ### Supported Mappers
 
-The NES emulator supports 14 mappers covering approximately **90%+ of all NES games**:
+The NES emulator supports 15 mappers covering a wide range of NES games:
 
 - **Mapper 0 (NROM)** - Basic mapper (~10% of games)
 - **Mapper 1 (MMC1/SxROM)** - Tetris, Metroid, Zelda (~28% of games)
 - **Mapper 2 (UxROM)** - Mega Man, Castlevania (~11% of games)
 - **Mapper 3 (CNROM)** - Gradius, Paperboy (~6.4% of games)
 - **Mapper 4 (MMC3/TxROM)** - Super Mario Bros. 3 (~24% of games)
+- **Mapper 5 (MMC5)** - Castlevania 3 (US), Just Breed, Laser Invasion
 - **Mapper 7 (AxROM)** - Battletoads (~3.1% of games)
 - **Mapper 9 (MMC2)** - Punch-Out!!
 - **Mapper 10 (MMC4)** - Fire Emblem (Japan)
@@ -230,9 +231,10 @@ See [User Manual](https://hemulator.56k.guru/user/manual.html#nes-nintendo-enter
 
 ## Future Improvements
 
-- Cycle-accurate PPU rendering
-- Additional mappers (MMC5, VRC6, etc.)
-- Accurate sprite evaluation timing
+- Additional mappers for expansion audio:
+  - VRC6 (Mapper 24) - Konami expansion audio
+  - FME-7 (Mapper 69) - Sunsoft expansion audio
+  - Namcot 106 (Mapper 19) - Namco expansion audio
 - High-pass and low-pass audio filters for even better sound quality
 
 ## Contributing
