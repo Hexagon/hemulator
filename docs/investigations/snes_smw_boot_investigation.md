@@ -185,3 +185,56 @@ This will:
    - What code leads up to the current state
    - Missing register reads/writes that might gate progression
 3. Compare with known-good SNES emulator behavior if available
+
+### Testing the Implementation
+
+**Verifying breakpoint functionality with test ROM**:
+```bash
+# Test breakpoint at $8050 (FINAL_LOOP in test ROM)
+hemu --trace-instructions --breakpoint 0x008050 test_roms/snes/test_breakpoint.sfc
+
+# Expected output:
+# - Breakpoint hit at PC=$008050 after ~89342 cycles
+# - Instruction trace dumped to trace_dump.txt
+# - Debug dump written to debug_dump.txt
+```
+
+**Investigating SMW execution (requires commercial ROM)**:
+```bash
+# Example 1: Capture trace when PC reaches $B900
+hemu --trace-instructions --breakpoint 0x00B900 --trace-limit 50000 smw.sfc
+
+# Example 2: Capture trace with multiple breakpoints
+hemu --trace-instructions --breakpoint 0x00B800 --breakpoint 0x00B900 --breakpoint 0x00BA00 smw.sfc
+
+# Example 3: Capture trace after long run (no breakpoint)
+hemu --trace-instructions --debug-dump-cycles 50000000 smw.sfc
+```
+
+The trace will show:
+- Exact instruction execution sequence leading up to the breakpoint
+- CPU state (registers, flags) at each instruction
+- Which registers are being read/written and when
+- Whether code is stuck in a loop or progressing through init
+
+---
+
+## Next Investigation Actions
+
+With the breakpoint and tracing infrastructure now functional, the next step is to:
+
+1. **Identify a strategic breakpoint location** in SMW's init code:
+   - Set breakpoint in the $B8xx/$B9xx area based on previous logs
+   - Or set breakpoint at the first write to $4200 or $2100
+   - Or capture a long trace (50K+ instructions) to analyze post-facto
+
+2. **Analyze the trace** to answer:
+   - Is SMW stuck in a tight loop? (many repeated PC values)
+   - What code precedes the current execution point?
+   - Are there any register accesses we're not handling correctly?
+   - Are there branches that should enable NMI but don't get taken?
+
+3. **Compare behavior** (if possible):
+   - Run same ROM in a known-good SNES emulator with trace/log
+   - Identify where execution diverges
+   - Focus fixes on the point of divergence
