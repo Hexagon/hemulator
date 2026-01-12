@@ -945,8 +945,7 @@ impl Memory65c816 for SnesBus {
                     0x2181 => {
                         self.open_bus.set(val);
                         let cur = self.wram_port_addr.get();
-                        self.wram_port_addr
-                            .set((cur & !0xFF) | (val as u32));
+                        self.wram_port_addr.set((cur & !0xFF) | (val as u32));
                     }
                     0x2182 => {
                         self.open_bus.set(val);

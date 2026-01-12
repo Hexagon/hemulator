@@ -2437,7 +2437,7 @@ impl Ppu {
                 // For multi-tile sprites, tiles are adjacent horizontally (+1) and vertically (+16)
                 let char_x = (tile as usize & 0x0F) + tx;
                 let char_y = ((tile as usize >> 4) + ty) & 0x0F;
-                
+
                 // Calculate tile address using the grid position
                 // Each tile is 32 bytes (4bpp: 8x8 pixels, 4 bits per pixel = 32 bytes)
                 let tile_index = (char_y << 4) | (char_x & 0x0F);
@@ -2917,28 +2917,48 @@ mod tests {
     fn test_obj_base_address() {
         let mut ppu = Ppu::new();
 
-        // Name base = 0, name select = 0
+        // Test base address calculation (bsnes: tiledataAddress = (data & 7) << 13 words = << 14 bytes)
+        // Name base = 0
         ppu.obsel = 0x00;
         let base = ppu.get_obj_base_address();
-        assert_eq!(
-            base, 0x0000,
-            "OBSEL=0x00: name_base=0, name_select=0 -> 0*0x2000 + 0*0x1000 = 0x0000"
-        );
+        assert_eq!(base, 0x0000, "OBSEL=0x00: name_base=0 -> 0 << 14 = 0x0000");
 
-        // Name base = 2, name select = 1
-        ppu.obsel = 0x0A; // Bits 0-2 = 2 (0b010), Bits 3-4 = 1 (0b01)
+        // Name base = 2
+        ppu.obsel = 0x02; // Bits 0-2 = 2 (0b010)
+        let base = ppu.get_obj_base_address();
+        assert_eq!(base, 0x8000, "OBSEL=0x02: name_base=2 -> 2 << 14 = 0x8000");
+
+        // Name base = 7 (max value)
+        ppu.obsel = 0x07;
         let base = ppu.get_obj_base_address();
         assert_eq!(
-            base, 0x5000,
-            "OBSEL=0x0A: name_base=2, name_select=1 -> 2*0x2000 + 1*0x1000 = 0x5000"
+            base, 0x1C000,
+            "OBSEL=0x07: name_base=7 -> 7 << 14 = 0x1C000"
         );
 
-        // Name base = 0, name select = 1
-        ppu.obsel = 0x08; // Bits 0-2 = 0, Bits 3-4 = 1
-        let base = ppu.get_obj_base_address();
+        // Test nameselect gap calculation (bsnes: += (1 + io.nameselect) << 12 words = << 13 bytes)
+        // Name select = 0
+        ppu.obsel = 0x00; // Bits 3-4 = 0
+        let gap = ppu.get_obj_nameselect_gap();
         assert_eq!(
-            base, 0x1000,
-            "OBSEL=0x08: name_base=0, name_select=1 -> 0x1000"
+            gap, 0x2000,
+            "OBSEL=0x00: name_select=0 -> (0 + 1) << 13 = 0x2000"
+        );
+
+        // Name select = 1
+        ppu.obsel = 0x08; // Bits 3-4 = 1 (0b01)
+        let gap = ppu.get_obj_nameselect_gap();
+        assert_eq!(
+            gap, 0x4000,
+            "OBSEL=0x08: name_select=1 -> (1 + 1) << 13 = 0x4000"
+        );
+
+        // Name select = 3 (max value)
+        ppu.obsel = 0x18; // Bits 3-4 = 3 (0b11)
+        let gap = ppu.get_obj_nameselect_gap();
+        assert_eq!(
+            gap, 0x8000,
+            "OBSEL=0x18: name_select=3 -> (3 + 1) << 13 = 0x8000"
         );
     }
 
