@@ -448,6 +448,9 @@ impl System for GbSystem {
             }
         }
 
+        // Tick mapper (e.g., for MBC3 RTC) once per frame
+        self.cpu.memory.tick_mapper();
+
         // Render the frame using the renderer
         self.renderer.render_frame(&self.cpu.memory.ppu);
         Ok(self.renderer.get_frame().clone())

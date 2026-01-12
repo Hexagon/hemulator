@@ -178,6 +178,14 @@ impl GbBus {
         self.if_reg |= interrupt_bit;
     }
 
+    /// Tick the mapper (e.g., for MBC3 RTC)
+    /// Should be called once per frame
+    pub fn tick_mapper(&mut self) {
+        if let Some(mapper) = &mut self.mapper {
+            mapper.tick();
+        }
+    }
+
     /// Check if CGB mode is enabled
     #[allow(dead_code)] // Will be used when CGB features are fully implemented
     pub fn is_cgb_mode(&self) -> bool {

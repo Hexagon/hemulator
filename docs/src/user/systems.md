@@ -211,7 +211,7 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
   - MBC0: No mapper (32KB ROMs)
   - MBC1: Most common mapper (~70% of games, up to 2MB ROM, 32KB RAM)
   - MBC2: Built-in RAM mapper (~1% of games, up to 256KB ROM, 512×4 bits built-in RAM)
-  - MBC3: With battery saves and RTC registers (~15% of games, up to 2MB ROM, 32KB RAM)
+  - MBC3: With battery saves and **working RTC** (~15% of games, up to 2MB ROM, 32KB RAM)
   - MBC5: Advanced mapper (~10% of games, up to 8MB ROM, 128KB RAM)
   - HuC1: Hudson Soft mapper (<1% of games, up to 1MB ROM, 32KB RAM, IR sensor support)
 - Joypad input with matrix selection
@@ -223,7 +223,6 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - Frame-based timing (~59.73 Hz)
 
 **Known Limitations**:
-- **RTC**: MBC3 RTC registers are accessible but clock doesn't actually count time
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
 - **Speed Switching**: CGB speed switching is supported, but timing is not affected (emulation runs at same speed regardless)
 - **HDMA**: HBlank DMA not implemented (affects some CGB games with advanced graphics effects)

@@ -102,6 +102,14 @@ impl Mapper {
         }
     }
 
+    /// Tick the mapper - called once per frame for features like RTC
+    pub fn tick(&mut self) {
+        match self {
+            Mapper::Mbc3(m) => m.tick(), // MBC3 has RTC that needs ticking
+            _ => {}                      // Other mappers don't need ticking
+        }
+    }
+
     /// Get the cartridge type name
     #[cfg(test)]
     pub fn name(&self) -> &str {
