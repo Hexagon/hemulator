@@ -493,16 +493,15 @@ impl Ppu {
     fn get_scanline_state(&self, scanline: u8) -> ScanlineState {
         let state = self.scanline_states[scanline as usize];
 
-        // Check if this scanline state was captured (not default)
-        // If SCX, SCY, WX, WY match defaults AND current registers differ, use current registers
-        if state.scx == 0
-            && state.scy == 0
-            && state.wx == 0
-            && state.wy == 0
-            && state.lcdc == 0x91
-            && (self.scx != 0 || self.scy != 0 || self.wx != 0 || self.wy != 0 || self.lcdc != 0x91)
-        {
-            // State hasn't been captured yet, return current register values
+        // Check if scanline states have been captured by looking for any non-default state
+        // If we find any scanline with non-default values, we know states were captured
+        let states_captured = self
+            .scanline_states
+            .iter()
+            .any(|s| s.scx != 0 || s.scy != 0 || s.wx != 0 || s.wy != 0 || s.lcdc != 0x91);
+
+        if !states_captured {
+            // States haven't been captured yet (all are default), return current register values
             ScanlineState {
                 scy: self.scy,
                 scx: self.scx,
@@ -511,6 +510,7 @@ impl Ppu {
                 lcdc: self.lcdc,
             }
         } else {
+            // States were captured, use the captured state for this scanline
             state
         }
     }
@@ -1713,5 +1713,88 @@ mod tests {
         // Verify frame is rendered without panic
         assert_eq!(frame.width, 160);
         assert_eq!(frame.height, 144);
+    }
+
+    #[test]
+    fn test_scanline_split_effect() {
+        // Test that scanline split effects work - simulating a game that changes
+        // SCX mid-frame to create a split-screen effect
+        let mut ppu = Ppu::new();
+        ppu.lcdc = 0x91; // Enable LCD and background
+        ppu.bgp = 0xE4; // BGP palette
+
+        // Set up two distinct tiles with different colors
+        // Tile 1: Color 1 (light gray) - all pixels
+        for i in 0..8 {
+            ppu.write_vram(0x0010 + (i * 2), 0xFF);
+            ppu.write_vram(0x0010 + (i * 2) + 1, 0x00);
+        }
+        // Tile 2: Color 2 (dark gray) - all pixels
+        for i in 0..8 {
+            ppu.write_vram(0x0020 + (i * 2), 0x00);
+            ppu.write_vram(0x0020 + (i * 2) + 1, 0xFF);
+        }
+
+        // Fill left half of tilemap with tile 1, right half with tile 2
+        for y in 0..32 {
+            for x in 0..16 {
+                ppu.write_vram(0x1800 + (y * 32) + x, 1);
+            }
+            for x in 16..32 {
+                ppu.write_vram(0x1800 + (y * 32) + x, 2);
+            }
+        }
+
+        // Initial state: no scroll
+        ppu.scx = 0;
+        ppu.scy = 0;
+
+        // Simulate scanline processing - capture state at each scanline
+        // For first 72 scanlines: SCX = 0
+        // For last 72 scanlines: SCX = 128 (scroll to show right half)
+        for scanline in 0..144 {
+            if scanline == 72 {
+                // Simulate a game changing SCX during HBlank interrupt at scanline 72
+                ppu.scx = 128;
+            }
+
+            // Capture the state at the start of this scanline
+            ppu.scanline_states[scanline as usize] = ScanlineState {
+                scy: ppu.scy,
+                scx: ppu.scx,
+                wy: ppu.wy,
+                wx: ppu.wx,
+                lcdc: ppu.lcdc,
+            };
+        }
+
+        let frame = ppu.render_frame();
+
+        // Verify split: top half should show tile 1 (SCX=0), bottom half should show tile 2 (SCX=128)
+        let color_tile1 = 0xFFAAAAAA; // Color 1 -> light gray
+        let color_tile2 = 0xFF555555; // Color 2 -> dark gray
+
+        // Top half (scanlines 0-71) should show left tilemap (tile 1)
+        assert_eq!(
+            frame.pixels[0], color_tile1,
+            "Top half pixel (0,0) should show tile 1 from left tilemap"
+        );
+        assert_eq!(
+            frame.pixels[71 * 160],
+            color_tile1,
+            "Top half pixel (0,71) should show tile 1 from left tilemap"
+        );
+
+        // Bottom half (scanlines 72-143) should show right tilemap (tile 2) due to SCX=128
+        assert_eq!(
+            frame.pixels[72 * 160],
+            color_tile2,
+            "Bottom half pixel (0,72) should show tile 2 from right tilemap"
+        );
+        assert_eq!(
+            frame.pixels[143 * 160],
+            color_tile2,
+            "Bottom half pixel (0,143) should show tile 2 from right tilemap"
+        );
     }
 }
