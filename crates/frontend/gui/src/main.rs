@@ -142,6 +142,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.reset(),
             EmulatorSystem::SMS(sys) => sys.reset(),
             EmulatorSystem::Chip8(sys) => sys.reset(),
+            EmulatorSystem::ColecoVision(sys) => sys.reset(),
         }
     }
 
@@ -155,6 +156,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.debugger(),
             EmulatorSystem::SMS(sys) => sys.debugger(),
             EmulatorSystem::Chip8(sys) => sys.debugger(),
+            EmulatorSystem::ColecoVision(sys) => sys.debugger(),
         }
     }
 
@@ -168,6 +170,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.get_total_cycles(),
             EmulatorSystem::SMS(sys) => sys.get_total_cycles(),
             EmulatorSystem::Chip8(sys) => sys.get_total_cycles(),
+            EmulatorSystem::ColecoVision(sys) => sys.get_total_cycles(),
         }
     }
 
@@ -216,6 +219,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.mount_points(),
             EmulatorSystem::SMS(sys) => sys.mount_points(),
             EmulatorSystem::Chip8(sys) => sys.mount_points(),
+            EmulatorSystem::ColecoVision(sys) => sys.mount_points(),
         }
     }
 
@@ -260,6 +264,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::SMS(sys) => sys.is_mounted(mount_point_id),
             EmulatorSystem::Chip8(sys) => sys.is_mounted(mount_point_id),
+            EmulatorSystem::ColecoVision(sys) => sys.is_mounted(mount_point_id),
         }
     }
 
@@ -273,6 +278,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.supports_save_states(),
             EmulatorSystem::SMS(sys) => sys.supports_save_states(),
             EmulatorSystem::Chip8(sys) => sys.supports_save_states(),
+            EmulatorSystem::ColecoVision(sys) => sys.supports_save_states(),
         }
     }
 
@@ -286,6 +292,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.save_state(),
             EmulatorSystem::SMS(sys) => sys.save_state(),
             EmulatorSystem::Chip8(sys) => sys.save_state(),
+            EmulatorSystem::ColecoVision(sys) => sys.save_state(),
         }
     }
 
@@ -299,6 +306,7 @@ impl EmulatorSystem {
             EmulatorSystem::N64(sys) => sys.load_state(state),
             EmulatorSystem::SMS(sys) => sys.load_state(state),
             EmulatorSystem::Chip8(sys) => sys.load_state(state),
+            EmulatorSystem::ColecoVision(sys) => sys.load_state(state),
         }
     }
 
