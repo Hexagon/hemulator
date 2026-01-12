@@ -862,34 +862,29 @@ impl Ppu {
         let show_bg_left = (self.mask & 0x02) != 0; // PPUMASK bit 1: show background in leftmost 8 pixels
         let show_sprites_left = (self.mask & 0x04) != 0; // PPUMASK bit 2: show sprites in leftmost 8 pixels
 
-        // Simulate hardware v register updates from t register at scanline boundaries.
-        // This is critical for split-screen effects like SMB3's HUD.
-        //
-        // In real hardware (matching Mesen2 implementation):
-        // - At dot 257 of each visible scanline: v horizontal bits ← t horizontal bits
-        // - At dots 280-304 of pre-render scanline: v vertical bits ← t vertical bits
-        //
-        // For our frame-based renderer, we simulate this by updating v from t at the
-        // start of each scanline. This ensures mid-frame $2005 writes (which update t)
-        // take effect at scanline boundaries, not immediately.
+        // Track if rendering is enabled for v register logic
         let rendering_enabled = bg_enabled || sprites_enabled;
-        if rendering_enabled {
+
+        // Note: Horizontal bit copy from t to v happens in tick() at dot 257 of each
+        // visible scanline for cycle-accurate timing. This ensures mid-frame scroll
+        // register changes take effect at the correct point.
+        //
+        // Vertical bit copy from t to v happens in tick() at dots 280-304 of the
+        // pre-render scanline (261) for proper frame initialization.
+        //
+        // These hardware behaviors are critical for split-screen effects like SMB3's HUD.
+        //
+        // For test compatibility (when render_scanline is called without tick()),
+        // we simulate the v register initialization at scanline 0.
+        if rendering_enabled && y == 0 {
             let t = self.temp_vram_addr.get();
             let v = self.vram_addr.get();
-
-            // At scanline 0: copy both vertical and horizontal bits from t to v
-            // (simulates pre-render scanline dot 280-304 + dot 257 behavior)
-            if y == 0 {
-                // Vertical bits: 5-9 (coarse Y), 11 (nametable Y), 12-14 (fine Y)
-                let mut new_v = (v & !0x7BE0) | (t & 0x7BE0);
-                // Horizontal bits: 0-4 (coarse X), 10 (nametable X)
-                new_v = (new_v & !0x041F) | (t & 0x041F);
-                self.vram_addr.set(new_v);
-            } else {
-                // Copy horizontal scroll bits from t to v at start of every other scanline
-                // (simulates dot 257 behavior)
-                self.vram_addr.set((v & !0x041F) | (t & 0x041F));
-            }
+            // Copy both horizontal and vertical bits from t to v at scanline 0
+            // This simulates the pre-render scanline dot 280-304 + dot 257 behavior
+            // that would have occurred before scanline 0 in real hardware
+            let mut new_v = (v & !0x7BE0) | (t & 0x7BE0); // Vertical bits
+            new_v = (new_v & !0x041F) | (t & 0x041F); // Horizontal bits
+            self.vram_addr.set(new_v);
         }
 
         // Note: Sprite evaluation for overflow detection is now done in tick() at dot 192
@@ -1263,7 +1258,38 @@ impl Ppu {
                 }
             }
 
+            // Pre-render scanline (261), dots 280-304: Copy vertical bits from t to v
+            // This is the ONLY time vertical scroll position is reset from t register.
+            // Critical for games with vertical scrolling and split-screen effects.
+            // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+            (261, dot) if dot >= 280 && dot <= 304 => {
+                let rendering_enabled = (self.mask & 0x18) != 0;
+                if rendering_enabled {
+                    let t = self.temp_vram_addr.get();
+                    let v = self.vram_addr.get();
+                    // Copy vertical bits from t to v:
+                    // Bits 5-9 (coarse Y), bit 11 (nametable Y), bits 12-14 (fine Y)
+                    let new_v = (v & !0x7BE0) | (t & 0x7BE0);
+                    self.vram_addr.set(new_v);
+                }
+            }
+
             _ => {}
+        }
+
+        // Visible and pre-render scanlines, dot 257: Copy horizontal bits from t to v
+        // This happens at the end of each scanline's rendering
+        // Reference: https://www.nesdev.org/wiki/PPU_scrolling
+        if (scanline < 240 || scanline == 261) && dot == 257 {
+            let rendering_enabled = (self.mask & 0x18) != 0;
+            if rendering_enabled {
+                let t = self.temp_vram_addr.get();
+                let v = self.vram_addr.get();
+                // Copy horizontal bits from t to v:
+                // Bits 0-4 (coarse X), bit 10 (nametable X)
+                let new_v = (v & !0x041F) | (t & 0x041F);
+                self.vram_addr.set(new_v);
+            }
         }
 
         // Cycle-accurate sprite evaluation during visible scanlines
