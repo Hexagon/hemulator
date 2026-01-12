@@ -271,15 +271,20 @@ For more technical information, see [crates/systems/chip8/README.md](../crates/s
 - **Controller Support**: 2 controller ports
   - I/O ports: 0xDC (port A/B), 0xDD (port B/misc)
   - Full button mapping (Up, Down, Left, Right, Button 1, Button 2)
-- Save states (F5/F6)
-- Frame-based timing (~60 Hz, 59659 cycles/frame)
+- **Save States** (F5/F6): Complete state serialization
+  - CPU state (all Z80 registers and flags)
+  - VDP state (VRAM, CRAM, registers)
+  - PSG audio state (all channels)
+  - Memory state (RAM, ROM banking)
+- **PAL/NTSC Support**: Automatic timing detection
+  - Detects region from ROM header (TMR SEGA)
+  - NTSC: 60 Hz, 3.579545 MHz, 262 scanlines
+  - PAL: 50 Hz, 3.546894 MHz, 313 scanlines
+  - Frame-based timing with proper cycle counts
 
 **Known Limitations**:
 - **Test ROM**: No smoke test ROM yet - testing with commercial ROMs needed
-- **VDP Features**: Sprite overflow and collision flags are TODO items
 - **Timing Model**: Frame-based rendering (not cycle-accurate) - suitable for most games
-- **Save State Serialization**: Not yet implemented (save state framework exists but needs SMS-specific serialization)
-- **PAL Support**: NTSC timing only (no PAL mode detection)
 
 **Controls**: SMS controller mapped to same keyboard layout as NES:
 - Arrow keys = D-pad

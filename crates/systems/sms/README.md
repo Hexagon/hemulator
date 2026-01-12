@@ -20,13 +20,19 @@ This document describes the SMS (Sega Master System) implementation in Hemulator
   - Sprite overflow detection
   - Sprite collision detection
 - Memory bus with ROM banking support
+- PAL/NTSC timing detection from ROM header (TMR SEGA)
+  - Automatic detection based on region code
+  - Proper frame timing (60Hz NTSC, 50Hz PAL)
+  - Correct scanline counts (262 NTSC, 313 PAL)
+- Save state serialization:
+  - Complete CPU state (all registers, flags, interrupt state)
+  - VDP state (VRAM, CRAM, registers, internal state)
+  - PSG state (all audio channels and parameters)
+  - Memory state (RAM, ROM banking)
 - System trait implementation
 - Frontend integration (ROM detection, controller input, audio)
 - Test ROM and smoke tests
-- All unit tests passing (28/28)
-
-**⚠️ Partially Implemented:**
-- Save state serialization (trait implemented, serialization logic pending)
+- All unit tests passing (45/45)
 
 **❌ Not Yet Implemented:**
 - Game Gear support (planned)
@@ -147,7 +153,9 @@ Current test coverage:
 - ✅ VDP: register writes, VRAM access, color decoding, interrupts, sprite flags (8 tests)
 - ✅ Memory bus: RAM/ROM access, banking (3 tests)
 - ✅ System: creation, reset, ROM loading, frame stepping, interrupts (10 tests)
-- ✅ Total: 30 tests passing
+- ✅ Save states: CPU, VDP, PSG, memory serialization (5 tests)
+- ✅ Timing: PAL/NTSC detection, frame cycle calculations (3 tests)
+- ✅ Total: 45 tests passing
 
 Run tests with:
 ```bash
@@ -156,16 +164,12 @@ cargo test --package emu_sms
 
 ## Next Steps
 
-1. **Save State Serialization**
-   - Implement state serialization for CPU, VDP, PSG, and memory
-   - Add tests for save/load functionality
-
-2. **Game Gear Support**
+1. **Game Gear Support**
    - Extended resolution (160×144)
    - LCD palette
    - Link cable support
 
-3. **Enhanced Testing**
+2. **Enhanced Testing**
    - Test with more commercial SMS ROMs
    - Performance profiling
    - Accuracy testing against hardware
@@ -191,6 +195,5 @@ SMS ROMs are typically headerless binary files:
 
 ## Known Limitations
 
-- Save states not fully implemented (serialization logic pending)
 - No Game Gear support yet (planned)
 - No FM sound unit support (Master System only, optional accessory)
