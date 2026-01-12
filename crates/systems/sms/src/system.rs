@@ -115,24 +115,15 @@ impl SmsSystem {
                 // Byte 0x0F (offset 15) contains region code
                 let region = header_region[15];
 
-                // Region codes:
-                // 0x30-0x3F: Japan (NTSC)
-                // 0x40-0x4F: Export (PAL/NTSC, check bits)
-                // 0x50-0x5F: Japan (NTSC)
-                // 0x60-0x6F: Export (PAL/NTSC, check bits)
+                // Region code interpretation (upper nibble only):
+                // We look at the upper nibble (region >> 4):
+                //   0x3, 0x5 -> Japan regions (NTSC)
+                //   0x4, 0x6, 0x7 -> Export regions (assumed PAL)
                 //
-                // For export regions, bits indicate:
-                // Bit 4 (0x40): SMS Japan
-                // Bit 5 (0x20): SMS Export
-                // Bit 6 (0x10): Game Gear Japan
-                // Bit 7 (0x08): Game Gear Export
-                //
-                // PAL/NTSC is determined by lower nibble:
-                // 0x3 = Japan NTSC
-                // 0x4 = Export (could be PAL or NTSC)
-                // 0x5 = Japan NTSC
-                // 0x6 = Export (could be PAL or NTSC)
-                // 0x7 = Export (could be PAL or NTSC)
+                // Note: Export regions could be either PAL (Europe) or NTSC (USA/Brazil).
+                // Without additional metadata, we assume PAL for export regions as a heuristic.
+                // This may cause incorrect timing for USA-region games. Consider manual override
+                // via set_timing() if games run at incorrect speeds.
 
                 match region >> 4 {
                     0x3 | 0x5 => {
@@ -214,16 +205,16 @@ impl System for SmsSystem {
 
     fn step_frame(&mut self) -> Result<Frame, Self::Error> {
         // Calculate target cycles and scanlines based on timing mode
-        let (target_cycles, total_scanlines, cycles_per_scanline) = match self.timing_mode {
+        let (target_cycles, total_scanlines) = match self.timing_mode {
             emu_core::apu::TimingMode::Ntsc => {
                 // NTSC: 3.579545 MHz / 60 Hz = 59659 cycles/frame
                 // 262 scanlines total
-                (59659, 262, 228) // ~228 cycles per scanline
+                (59659_u64, 262_u64)
             }
             emu_core::apu::TimingMode::Pal => {
                 // PAL: 3.546894 MHz / 50 Hz = 70938 cycles/frame
                 // 313 scanlines total
-                (70938, 313, 227) // ~227 cycles per scanline
+                (70938_u64, 313_u64)
             }
         };
 
@@ -256,7 +247,9 @@ impl System for SmsSystem {
             }
 
             // Update VDP scanline based on cycles
-            let current_scanline = (self.cycles / cycles_per_scanline) % total_scanlines;
+            // Calculate dynamically to avoid cumulative timing drift
+            let current_scanline =
+                (self.cycles * total_scanlines / target_cycles) % total_scanlines;
             self.vdp.borrow_mut().set_scanline(current_scanline as u16);
 
             // Check for VDP interrupts (frame interrupt has priority over line interrupt)
@@ -375,14 +368,6 @@ impl System for SmsSystem {
             };
         }
 
-        macro_rules! load_usize {
-            ($state:expr, $field:literal, $target:expr) => {
-                if let Some(val) = $state.get($field).and_then(|v| v.as_u64()) {
-                    $target = val as usize;
-                }
-            };
-        }
-
         // Load cycles
         if let Some(cycles) = state.get("cycles").and_then(|v| v.as_u64()) {
             self.cycles = cycles;
@@ -435,12 +420,24 @@ impl System for SmsSystem {
                         .collect::<Vec<u8>>(),
                 );
             }
-            load_usize!(mem_state, "rom_bank_0", self.cpu.memory.rom_bank_0);
-            load_usize!(mem_state, "rom_bank_1", self.cpu.memory.rom_bank_1);
-            load_usize!(mem_state, "rom_bank_2", self.cpu.memory.rom_bank_2);
-            load_u8!(mem_state, "controller_1", self.cpu.memory.controller_1);
-            load_u8!(mem_state, "controller_2", self.cpu.memory.controller_2);
-            load_u8!(mem_state, "memory_control", self.cpu.memory.memory_control);
+            if let Some(bank) = mem_state.get("rom_bank_0").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_0(bank as usize);
+            }
+            if let Some(bank) = mem_state.get("rom_bank_1").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_1(bank as usize);
+            }
+            if let Some(bank) = mem_state.get("rom_bank_2").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_rom_bank_2(bank as usize);
+            }
+            if let Some(ctrl1) = mem_state.get("controller_1").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_controller_1(ctrl1 as u8);
+            }
+            if let Some(ctrl2) = mem_state.get("controller_2").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_controller_2(ctrl2 as u8);
+            }
+            if let Some(mem_ctrl) = mem_state.get("memory_control").and_then(|v| v.as_u64()) {
+                self.cpu.memory.set_memory_control(mem_ctrl as u8);
+            }
         }
 
         // Load VDP state
