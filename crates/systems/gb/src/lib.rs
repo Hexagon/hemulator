@@ -419,6 +419,9 @@ impl System for GbSystem {
 
         let mut cycles = 0;
         while cycles < CYCLES_PER_FRAME {
+            // Execute any pending GDMA before CPU step
+            self.cpu.memory.execute_pending_gdma();
+
             let pc_before = self.cpu.pc;
             let cpu_cycles = self.cpu.step();
             cycles += cpu_cycles;
@@ -441,12 +444,34 @@ impl System for GbSystem {
                 self.cpu.memory.request_interrupt(0x04);
             }
 
-            // Step PPU and handle VBlank interrupt
-            if self.cpu.memory.ppu.step(cpu_cycles) {
+            // Step PPU and handle VBlank, STAT interrupts, and HDMA
+            let (vblank_started, stat_interrupt, hblank_entered) =
+                self.cpu.memory.ppu.step(cpu_cycles);
+
+            if vblank_started {
                 // V-Blank started - request VBlank interrupt (bit 0)
                 self.cpu.memory.request_interrupt(0x01);
             }
+
+            if stat_interrupt {
+                // STAT interrupt - request STAT interrupt (bit 1)
+                self.cpu.memory.request_interrupt(0x02);
+            }
+
+            // Perform HDMA transfer during HBlank if active
+            if hblank_entered {
+                self.cpu.memory.step_hdma();
+            }
+
+            // Step serial transfer and handle serial interrupt
+            if self.cpu.memory.step_serial(cpu_cycles) {
+                // Serial transfer complete - request serial interrupt (bit 3)
+                self.cpu.memory.request_interrupt(0x08);
+            }
         }
+
+        // Tick mapper (e.g., for MBC3 RTC) once per frame
+        self.cpu.memory.tick_mapper();
 
         // Render the frame using the renderer
         self.renderer.render_frame(&self.cpu.memory.ppu);
@@ -1875,5 +1900,167 @@ mod tests {
             0xCC,
             "Last byte of switchable area should be accessible"
         );
+    }
+
+    #[test]
+    fn test_serial_transfer_basic() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Write data to SB register
+        sys.cpu.memory.write(0xFF01, 0xAB);
+        assert_eq!(sys.cpu.memory.read(0xFF01), 0xAB);
+
+        // Write to SC register to start transfer (internal clock)
+        sys.cpu.memory.write(0xFF02, 0x81); // Bit 7=1 (start), bit 0=1 (internal)
+        assert_eq!(sys.cpu.memory.read(0xFF02) & 0x81, 0x81);
+    }
+
+    #[test]
+    fn test_serial_transfer_completion() {
+        let mut sys = GbSystem::new();
+
+        // Create a minimal ROM that performs a serial transfer
+        let mut rom = vec![0; 0x8000];
+        // Write assembly to initialize serial transfer
+        rom[0x100] = 0x3E; // LD A, 0x42
+        rom[0x101] = 0x42;
+        rom[0x102] = 0xE0; // LDH (0xFF01), A  (write to SB)
+        rom[0x103] = 0x01;
+        rom[0x104] = 0x3E; // LD A, 0x81
+        rom[0x105] = 0x81;
+        rom[0x106] = 0xE0; // LDH (0xFF02), A  (write to SC, start transfer)
+        rom[0x107] = 0x02;
+        rom[0x108] = 0x76; // HALT
+        rom[0x147] = 0x00; // Cartridge type
+        rom[0x149] = 0x00; // RAM size
+
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Run several frames to allow transfer to complete
+        for _ in 0..10 {
+            let _ = sys.step_frame();
+        }
+
+        // Transfer should be complete (bit 7 cleared)
+        let sc = sys.cpu.memory.read(0xFF02);
+        assert_eq!(sc & 0x80, 0x00, "Transfer start bit should be cleared");
+
+        // SB should have been shifted (with 0xFF shifted in, simulating no device)
+        let sb = sys.cpu.memory.read(0xFF01);
+        assert_eq!(
+            sb, 0xFF,
+            "SB should be 0xFF after transfer with no device connected"
+        );
+    }
+
+    #[test]
+    fn test_infrared_port() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test RP register (0xFF56) - infrared port
+        // Write value with LED control bits
+        sys.cpu.memory.write(0xFF56, 0xC1); // Bits 6, 7 (LED), bit 0 (receive)
+
+        // Should read back with only writable bits
+        let rp = sys.cpu.memory.read(0xFF56);
+        assert_eq!(rp & 0xC1, 0xC1, "RP should preserve LED control bits");
+
+        // Try writing to non-writable bits
+        sys.cpu.memory.write(0xFF56, 0xFF);
+        let rp = sys.cpu.memory.read(0xFF56);
+        assert_eq!(rp & 0xC1, 0xC1, "RP should mask non-writable bits");
+        assert_eq!(rp & 0x3E, 0x00, "Bits 1-5 should read as 0");
+    }
+
+    #[test]
+    fn test_hdma_register_access() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Test HDMA register writes
+        sys.cpu.memory.write(0xFF51, 0x12); // Source high
+        sys.cpu.memory.write(0xFF52, 0x34); // Source low (lower 4 bits ignored)
+        sys.cpu.memory.write(0xFF53, 0x90); // Dest high (only bits 0-4)
+        sys.cpu.memory.write(0xFF54, 0xAB); // Dest low (lower 4 bits ignored)
+
+        // Verify reads
+        assert_eq!(sys.cpu.memory.read(0xFF51), 0x12);
+        assert_eq!(sys.cpu.memory.read(0xFF52), 0x30); // Lower 4 bits masked
+        assert_eq!(sys.cpu.memory.read(0xFF53), 0x10); // Only bits 0-4 used
+        assert_eq!(sys.cpu.memory.read(0xFF54), 0xA0); // Lower 4 bits masked
+
+        // HDMA5 should read 0xFF when inactive
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF);
+    }
+
+    #[test]
+    fn test_hdma_gdma_transfer() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Set up source data in WRAM
+        for i in 0..32 {
+            sys.cpu.memory.write(0xC000 + i, i as u8);
+        }
+
+        // Configure HDMA for General Purpose DMA (immediate transfer)
+        sys.cpu.memory.write(0xFF51, 0xC0); // Source: 0xC000
+        sys.cpu.memory.write(0xFF52, 0x00);
+        sys.cpu.memory.write(0xFF53, 0x90); // Dest: 0x9000 (VRAM)
+        sys.cpu.memory.write(0xFF54, 0x00);
+        sys.cpu.memory.write(0xFF55, 0x01); // Transfer 2 blocks (32 bytes), GDMA mode (bit 7 = 0)
+
+        // Execute pending GDMA (now deferred to avoid nested read/write)
+        sys.cpu.memory.execute_pending_gdma();
+
+        // HDMA5 should read 0xFF after GDMA completes
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF);
+
+        // Verify data was transferred to VRAM
+        for i in 0..32 {
+            let vram_data = sys.cpu.memory.ppu.read_vram(0x1000 + i); // VRAM offset 0x1000 = address 0x9000
+            assert_eq!(vram_data, i as u8, "VRAM byte {} mismatch", i);
+        }
+    }
+
+    #[test]
+    fn test_hdma_hblank_dma() {
+        let mut sys = GbSystem::new();
+        let rom = vec![0; 0x8000];
+        sys.mount("Cartridge", &rom).unwrap();
+
+        // Set up source data in WRAM
+        for i in 0..16 {
+            sys.cpu.memory.write(0xC000 + i, (i + 0x42) as u8);
+        }
+
+        // Configure HDMA for HBlank DMA
+        sys.cpu.memory.write(0xFF51, 0xC0); // Source: 0xC000
+        sys.cpu.memory.write(0xFF52, 0x00);
+        sys.cpu.memory.write(0xFF53, 0x88); // Dest: 0x8800 (VRAM)
+        sys.cpu.memory.write(0xFF54, 0x00);
+        sys.cpu.memory.write(0xFF55, 0x80); // Transfer 1 block (16 bytes), HBlank DMA mode (bit 7 = 1)
+
+        // HDMA should be active, remaining = 0 (1 block - 1)
+        let hdma5 = sys.cpu.memory.read(0xFF55);
+        assert_eq!(hdma5, 0x00, "HDMA5 should show 0 remaining blocks");
+
+        // Step a frame to allow HBlank DMA to occur
+        let _ = sys.step_frame();
+
+        // After HBlank, transfer should be complete
+        assert_eq!(sys.cpu.memory.read(0xFF55), 0xFF, "HDMA should be complete");
+
+        // Verify data was transferred to VRAM
+        for i in 0..16 {
+            let vram_data = sys.cpu.memory.ppu.read_vram(0x0800 + i); // VRAM offset 0x0800 = address 0x8800
+            assert_eq!(vram_data, (i + 0x42) as u8, "VRAM byte {} mismatch", i);
+        }
     }
 }
