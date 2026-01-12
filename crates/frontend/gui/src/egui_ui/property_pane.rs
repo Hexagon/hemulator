@@ -446,6 +446,12 @@ impl PropertyPane {
                                 .on_hover_text("No filter, pure pixels");
                                 ui.selectable_value(
                                     &mut self.display_filter,
+                                    DisplayFilter::PhosphorPersistence,
+                                    "Phosphor Persistence",
+                                )
+                                .on_hover_text("Temporal frame blending to reduce sprite flicker (like Atari 2600 Pac-Man ghosts)");
+                                ui.selectable_value(
+                                    &mut self.display_filter,
                                     DisplayFilter::SonyTrinitron,
                                     "Sony Trinitron",
                                 )
