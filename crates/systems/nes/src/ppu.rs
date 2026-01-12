@@ -895,10 +895,8 @@ impl Ppu {
             }
         }
 
-        // Perform sprite evaluation for this scanline to determine sprite overflow
-        if sprites_enabled {
-            self.evaluate_sprites_for_scanline(y);
-        }
+        // Note: Sprite evaluation for overflow detection is now done in tick() at dot 192
+        // for cycle-accurate timing. Games like Bee 52 rely on polling PPUSTATUS bit 5.
 
         let bg_pattern_base: usize = if (self.ctrl & 0x10) != 0 {
             0x1000
@@ -1239,6 +1237,18 @@ impl Ppu {
             }
 
             _ => {}
+        }
+
+        // Cycle-accurate sprite evaluation during visible scanlines
+        // Sprite evaluation happens during dots 65-256 of visible scanlines (0-239)
+        // The overflow flag is set when the 9th sprite is found, around dot 192-256
+        // We check at dot 192 which approximates when the 9th sprite would be detected
+        if scanline < 240 && dot == 192 {
+            // Only evaluate if sprites are enabled
+            let sprites_enabled = (self.mask & 0x10) != 0;
+            if sprites_enabled {
+                self.evaluate_sprites_for_scanline(scanline as u32);
+            }
         }
 
         // Advance to next dot
