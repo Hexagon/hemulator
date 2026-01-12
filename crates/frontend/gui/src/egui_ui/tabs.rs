@@ -167,6 +167,21 @@ pub struct PcBdaData {
     pub ebda_segment: u16,
 }
 
+/// Mount point information for inspector
+#[derive(Clone, Debug)]
+pub struct MountInfo {
+    /// Mount point ID (e.g., "Cartridge", "Floppy0")
+    pub id: String,
+    /// User-friendly name
+    pub name: String,
+    /// File extensions accepted
+    pub extensions: Vec<String>,
+    /// Whether required
+    pub required: bool,
+    /// Currently mounted file path (if any)
+    pub mounted_file: Option<String>,
+}
+
 /// Actions that can be triggered from tabs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabAction {
@@ -190,6 +205,7 @@ pub struct TabManager {
     pub enhanced_debug_state: Option<EnhancedDebugState>,
     pub system_tile_data: Option<SystemTileData>,
     pub pc_bda_data: Option<PcBdaData>,
+    pub mount_info: Vec<MountInfo>,
     pub new_project_visible: bool,
     pub selected_system: String,
     pub pending_action: Option<TabAction>,
@@ -213,6 +229,7 @@ impl TabManager {
             enhanced_debug_state: None,
             system_tile_data: None,
             pc_bda_data: None,
+            mount_info: Vec::new(),
             new_project_visible: false,
             selected_system: "NES".to_string(),
             pending_action: None,
@@ -238,6 +255,10 @@ impl TabManager {
 
     pub fn update_pc_bda_data(&mut self, data: PcBdaData) {
         self.pc_bda_data = Some(data);
+    }
+
+    pub fn update_mount_info(&mut self, mounts: Vec<MountInfo>) {
+        self.mount_info = mounts;
     }
 
     pub fn show_help_tab(&mut self) {
@@ -616,6 +637,179 @@ impl TabManager {
                 ui.label("Load a ROM to see memory contents");
             });
         }
+    }
+
+    pub fn render_mounts_tab(&self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.heading("💿 Mount Points");
+            ui.separator();
+            ui.add_space(10.0);
+
+            if self.mount_info.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(egui::RichText::new("💿").size(48.0));
+                    ui.add_space(10.0);
+                    ui.heading("No Mount Points");
+                    ui.add_space(10.0);
+                    ui.label("Load a ROM or create a system to see mount points");
+                });
+            } else {
+                ui.label("Currently available mount points for this system:");
+                ui.add_space(10.0);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for mount in &self.mount_info {
+                            egui::Frame::new()
+                                .fill(ui.visuals().faint_bg_color)
+                                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                                .corner_radius(4.0)
+                                .inner_margin(12.0)
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Icon based on mount status
+                                        let icon = if mount.mounted_file.is_some() {
+                                            "✅"
+                                        } else if mount.required {
+                                            "⚠️"
+                                        } else {
+                                            "⚪"
+                                        };
+                                        ui.label(egui::RichText::new(icon).size(20.0));
+
+                                        ui.vertical(|ui| {
+                                            // Mount point name and ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&mount.name)
+                                                        .strong()
+                                                        .size(16.0),
+                                                );
+                                                if mount.required {
+                                                    ui.label(
+                                                        egui::RichText::new("(required)")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                }
+                                            });
+
+                                            ui.add_space(5.0);
+
+                                            // Mount point ID
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new("ID:").weak().size(12.0),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&mount.id)
+                                                        .monospace()
+                                                        .size(12.0),
+                                                );
+                                            });
+
+                                            // Accepted file types
+                                            if !mount.extensions.is_empty() {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Accepts:")
+                                                            .weak()
+                                                            .size(12.0),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(
+                                                            mount.extensions.join(", "),
+                                                        )
+                                                        .monospace()
+                                                        .size(12.0),
+                                                    );
+                                                });
+                                            }
+
+                                            ui.add_space(5.0);
+
+                                            // Current mount status
+                                            if let Some(ref file_path) = mount.mounted_file {
+                                                // Extract just the filename from the path
+                                                let filename = std::path::Path::new(file_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(file_path);
+
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("Mounted:")
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            ))
+                                                            .strong(),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(filename)
+                                                            .monospace()
+                                                            .color(egui::Color32::from_rgb(
+                                                                100, 200, 100,
+                                                            )),
+                                                    );
+                                                });
+
+                                                // Show full path on separate line if different from filename
+                                                if filename != file_path {
+                                                    ui.label(
+                                                        egui::RichText::new(file_path)
+                                                            .weak()
+                                                            .italics()
+                                                            .size(10.0),
+                                                    );
+                                                }
+                                            } else {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(egui::RichText::new("Status:").color(
+                                                        egui::Color32::from_rgb(200, 200, 100),
+                                                    ));
+                                                    ui.label(
+                                                        egui::RichText::new("Empty")
+                                                            .weak()
+                                                            .italics(),
+                                                    );
+                                                });
+                                            }
+                                        });
+                                    });
+                                });
+
+                            ui.add_space(8.0);
+                        }
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        // Summary
+                        let mounted_count = self
+                            .mount_info
+                            .iter()
+                            .filter(|m| m.mounted_file.is_some())
+                            .count();
+                        let required_count = self.mount_info.iter().filter(|m| m.required).count();
+
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Total mount points:").strong());
+                            ui.label(self.mount_info.len().to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Mounted:").strong());
+                            ui.label(mounted_count.to_string());
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Required:").strong());
+                            ui.label(required_count.to_string());
+                        });
+                    });
+            }
+        });
     }
 
     fn render_new_project_tab(&mut self, ui: &mut Ui) {

@@ -10,7 +10,8 @@ pub enum InspectorTab {
     // Generic tabs (available for all systems)
     Log,
     Memory,
-    Debug, // Generic debugger with CPU state, memory, disassembly
+    Debug,  // Generic debugger with CPU state, memory, disassembly
+    Mounts, // Mount points and loaded media
 
     // System-specific tabs
     NesTiles,
@@ -43,6 +44,7 @@ impl InspectorTab {
             InspectorTab::Log => "📋 Log",
             InspectorTab::Memory => "💾 Memory",
             InspectorTab::Debug => "🔧 Debug",
+            InspectorTab::Mounts => "💿 Mounts",
             InspectorTab::NesTiles => "🎨 Tiles",
             InspectorTab::NesPalettes => "🎨 Palettes",
             InspectorTab::NesNametables => "🗺️ Nametables",
@@ -66,14 +68,19 @@ impl InspectorTab {
     pub fn is_generic(&self) -> bool {
         matches!(
             self,
-            InspectorTab::Log | InspectorTab::Memory | InspectorTab::Debug
+            InspectorTab::Log | InspectorTab::Memory | InspectorTab::Debug | InspectorTab::Mounts
         )
     }
 }
 
 /// Get the list of tabs that should be shown for a given system
 pub fn get_tabs_for_system(system_type: Option<&SystemType>) -> Vec<InspectorTab> {
-    let mut tabs = vec![InspectorTab::Log, InspectorTab::Debug, InspectorTab::Memory];
+    let mut tabs = vec![
+        InspectorTab::Log,
+        InspectorTab::Debug,
+        InspectorTab::Memory,
+        InspectorTab::Mounts,
+    ];
 
     if let Some(sys_type) = system_type {
         match sys_type {
@@ -130,6 +137,9 @@ pub fn render_inspector_tab(tab: &InspectorTab, ui: &mut Ui, tab_manager: &mut T
         }
         InspectorTab::Memory => {
             tab_manager.render_memory_tab(ui);
+        }
+        InspectorTab::Mounts => {
+            tab_manager.render_mounts_tab(ui);
         }
         InspectorTab::NesTiles
         | InspectorTab::GbTiles
